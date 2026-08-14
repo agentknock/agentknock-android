@@ -2,7 +2,7 @@
   "formatVersion": 1,
   "database": {
     "version": 1,
-    "identityHash": "e24261fca7d6f39ae4e84a2cad0ebfea",
+    "identityHash": "3c40a3e31fdb619991c470a190623dc8",
     "entities": [
       {
         "tableName": "local_encryption_keys",
@@ -263,11 +263,616 @@
             ]
           }
         ]
+      },
+      {
+        "tableName": "vault_identities",
+        "createSql": "CREATE TABLE IF NOT EXISTS `${TABLE_NAME}` (`id` TEXT NOT NULL, `role` TEXT NOT NULL, `address` TEXT NOT NULL, `route_id` TEXT NOT NULL, `route_public_key` BLOB NOT NULL, `created_at` INTEGER NOT NULL, `claimed_at` INTEGER, PRIMARY KEY(`id`))",
+        "fields": [
+          {
+            "fieldPath": "id",
+            "columnName": "id",
+            "affinity": "TEXT",
+            "notNull": true
+          },
+          {
+            "fieldPath": "role",
+            "columnName": "role",
+            "affinity": "TEXT",
+            "notNull": true
+          },
+          {
+            "fieldPath": "address",
+            "columnName": "address",
+            "affinity": "TEXT",
+            "notNull": true
+          },
+          {
+            "fieldPath": "routeId",
+            "columnName": "route_id",
+            "affinity": "TEXT",
+            "notNull": true
+          },
+          {
+            "fieldPath": "routePublicKey",
+            "columnName": "route_public_key",
+            "affinity": "BLOB",
+            "notNull": true
+          },
+          {
+            "fieldPath": "createdAt",
+            "columnName": "created_at",
+            "affinity": "INTEGER",
+            "notNull": true
+          },
+          {
+            "fieldPath": "claimedAt",
+            "columnName": "claimed_at",
+            "affinity": "INTEGER"
+          }
+        ],
+        "primaryKey": {
+          "autoGenerate": false,
+          "columnNames": [
+            "id"
+          ]
+        },
+        "indices": [
+          {
+            "name": "index_vault_identities_role",
+            "unique": true,
+            "columnNames": [
+              "role"
+            ],
+            "orders": [],
+            "createSql": "CREATE UNIQUE INDEX IF NOT EXISTS `index_vault_identities_role` ON `${TABLE_NAME}` (`role`)"
+          },
+          {
+            "name": "index_vault_identities_route_id",
+            "unique": true,
+            "columnNames": [
+              "route_id"
+            ],
+            "orders": [],
+            "createSql": "CREATE UNIQUE INDEX IF NOT EXISTS `index_vault_identities_route_id` ON `${TABLE_NAME}` (`route_id`)"
+          }
+        ]
+      },
+      {
+        "tableName": "vault_secrets",
+        "createSql": "CREATE TABLE IF NOT EXISTS `${TABLE_NAME}` (`id` TEXT NOT NULL, `identity_id` TEXT NOT NULL, `kind` TEXT NOT NULL, `encryption_format` INTEGER NOT NULL, `encryption_key_id` TEXT NOT NULL, `nonce` BLOB NOT NULL, `ciphertext` BLOB NOT NULL, `created_at` INTEGER NOT NULL, `updated_at` INTEGER NOT NULL, PRIMARY KEY(`id`), FOREIGN KEY(`identity_id`) REFERENCES `vault_identities`(`id`) ON UPDATE NO ACTION ON DELETE CASCADE , FOREIGN KEY(`encryption_key_id`) REFERENCES `local_encryption_keys`(`id`) ON UPDATE NO ACTION ON DELETE RESTRICT )",
+        "fields": [
+          {
+            "fieldPath": "id",
+            "columnName": "id",
+            "affinity": "TEXT",
+            "notNull": true
+          },
+          {
+            "fieldPath": "identityId",
+            "columnName": "identity_id",
+            "affinity": "TEXT",
+            "notNull": true
+          },
+          {
+            "fieldPath": "kind",
+            "columnName": "kind",
+            "affinity": "TEXT",
+            "notNull": true
+          },
+          {
+            "fieldPath": "encryptionFormat",
+            "columnName": "encryption_format",
+            "affinity": "INTEGER",
+            "notNull": true
+          },
+          {
+            "fieldPath": "encryptionKeyId",
+            "columnName": "encryption_key_id",
+            "affinity": "TEXT",
+            "notNull": true
+          },
+          {
+            "fieldPath": "nonce",
+            "columnName": "nonce",
+            "affinity": "BLOB",
+            "notNull": true
+          },
+          {
+            "fieldPath": "ciphertext",
+            "columnName": "ciphertext",
+            "affinity": "BLOB",
+            "notNull": true
+          },
+          {
+            "fieldPath": "createdAt",
+            "columnName": "created_at",
+            "affinity": "INTEGER",
+            "notNull": true
+          },
+          {
+            "fieldPath": "updatedAt",
+            "columnName": "updated_at",
+            "affinity": "INTEGER",
+            "notNull": true
+          }
+        ],
+        "primaryKey": {
+          "autoGenerate": false,
+          "columnNames": [
+            "id"
+          ]
+        },
+        "indices": [
+          {
+            "name": "index_vault_secrets_identity_id_kind",
+            "unique": true,
+            "columnNames": [
+              "identity_id",
+              "kind"
+            ],
+            "orders": [],
+            "createSql": "CREATE UNIQUE INDEX IF NOT EXISTS `index_vault_secrets_identity_id_kind` ON `${TABLE_NAME}` (`identity_id`, `kind`)"
+          },
+          {
+            "name": "index_vault_secrets_encryption_key_id",
+            "unique": false,
+            "columnNames": [
+              "encryption_key_id"
+            ],
+            "orders": [],
+            "createSql": "CREATE INDEX IF NOT EXISTS `index_vault_secrets_encryption_key_id` ON `${TABLE_NAME}` (`encryption_key_id`)"
+          }
+        ],
+        "foreignKeys": [
+          {
+            "table": "vault_identities",
+            "onDelete": "CASCADE",
+            "onUpdate": "NO ACTION",
+            "columns": [
+              "identity_id"
+            ],
+            "referencedColumns": [
+              "id"
+            ]
+          },
+          {
+            "table": "local_encryption_keys",
+            "onDelete": "RESTRICT",
+            "onUpdate": "NO ACTION",
+            "columns": [
+              "encryption_key_id"
+            ],
+            "referencedColumns": [
+              "id"
+            ]
+          }
+        ]
+      },
+      {
+        "tableName": "inbox_requests",
+        "createSql": "CREATE TABLE IF NOT EXISTS `${TABLE_NAME}` (`id` INTEGER PRIMARY KEY AUTOINCREMENT NOT NULL, `relay_request_id` TEXT NOT NULL, `parent_request_id` INTEGER, `kind` TEXT NOT NULL, `state` TEXT NOT NULL, `listed` INTEGER NOT NULL, `request_json` TEXT NOT NULL, `response_json` TEXT, `completion_json` TEXT, `received_at` INTEGER NOT NULL, `updated_at` INTEGER NOT NULL, `completed_at` INTEGER, `request_acknowledged_at` INTEGER, `completion_acknowledged_at` INTEGER, FOREIGN KEY(`parent_request_id`) REFERENCES `inbox_requests`(`id`) ON UPDATE NO ACTION ON DELETE CASCADE )",
+        "fields": [
+          {
+            "fieldPath": "id",
+            "columnName": "id",
+            "affinity": "INTEGER",
+            "notNull": true
+          },
+          {
+            "fieldPath": "relayRequestId",
+            "columnName": "relay_request_id",
+            "affinity": "TEXT",
+            "notNull": true
+          },
+          {
+            "fieldPath": "parentRequestId",
+            "columnName": "parent_request_id",
+            "affinity": "INTEGER"
+          },
+          {
+            "fieldPath": "kind",
+            "columnName": "kind",
+            "affinity": "TEXT",
+            "notNull": true
+          },
+          {
+            "fieldPath": "state",
+            "columnName": "state",
+            "affinity": "TEXT",
+            "notNull": true
+          },
+          {
+            "fieldPath": "listed",
+            "columnName": "listed",
+            "affinity": "INTEGER",
+            "notNull": true
+          },
+          {
+            "fieldPath": "requestJson",
+            "columnName": "request_json",
+            "affinity": "TEXT",
+            "notNull": true
+          },
+          {
+            "fieldPath": "responseJson",
+            "columnName": "response_json",
+            "affinity": "TEXT"
+          },
+          {
+            "fieldPath": "completionJson",
+            "columnName": "completion_json",
+            "affinity": "TEXT"
+          },
+          {
+            "fieldPath": "receivedAt",
+            "columnName": "received_at",
+            "affinity": "INTEGER",
+            "notNull": true
+          },
+          {
+            "fieldPath": "updatedAt",
+            "columnName": "updated_at",
+            "affinity": "INTEGER",
+            "notNull": true
+          },
+          {
+            "fieldPath": "completedAt",
+            "columnName": "completed_at",
+            "affinity": "INTEGER"
+          },
+          {
+            "fieldPath": "requestAcknowledgedAt",
+            "columnName": "request_acknowledged_at",
+            "affinity": "INTEGER"
+          },
+          {
+            "fieldPath": "completionAcknowledgedAt",
+            "columnName": "completion_acknowledged_at",
+            "affinity": "INTEGER"
+          }
+        ],
+        "primaryKey": {
+          "autoGenerate": true,
+          "columnNames": [
+            "id"
+          ]
+        },
+        "indices": [
+          {
+            "name": "index_inbox_requests_relay_request_id",
+            "unique": true,
+            "columnNames": [
+              "relay_request_id"
+            ],
+            "orders": [],
+            "createSql": "CREATE UNIQUE INDEX IF NOT EXISTS `index_inbox_requests_relay_request_id` ON `${TABLE_NAME}` (`relay_request_id`)"
+          },
+          {
+            "name": "index_inbox_requests_parent_request_id",
+            "unique": false,
+            "columnNames": [
+              "parent_request_id"
+            ],
+            "orders": [],
+            "createSql": "CREATE INDEX IF NOT EXISTS `index_inbox_requests_parent_request_id` ON `${TABLE_NAME}` (`parent_request_id`)"
+          },
+          {
+            "name": "index_inbox_requests_listed_id",
+            "unique": false,
+            "columnNames": [
+              "listed",
+              "id"
+            ],
+            "orders": [],
+            "createSql": "CREATE INDEX IF NOT EXISTS `index_inbox_requests_listed_id` ON `${TABLE_NAME}` (`listed`, `id`)"
+          }
+        ],
+        "foreignKeys": [
+          {
+            "table": "inbox_requests",
+            "onDelete": "CASCADE",
+            "onUpdate": "NO ACTION",
+            "columns": [
+              "parent_request_id"
+            ],
+            "referencedColumns": [
+              "id"
+            ]
+          }
+        ]
+      },
+      {
+        "tableName": "pairings",
+        "createSql": "CREATE TABLE IF NOT EXISTS `${TABLE_NAME}` (`request_id` INTEGER NOT NULL, `vault_identity_id` TEXT, `vault_address` TEXT NOT NULL, `route_id` TEXT NOT NULL, `pairing_id` TEXT NOT NULL, `state` TEXT NOT NULL, `sas_option_0` INTEGER, `sas_option_1` INTEGER, `sas_option_2` INTEGER, `correct_sas_index` INTEGER, `cli_version` TEXT, `platform` TEXT, `architecture` TEXT, `hostname` TEXT, `machine_id` TEXT, `os_version` TEXT, `error` TEXT, `created_at` INTEGER NOT NULL, `updated_at` INTEGER NOT NULL, `decided_at` INTEGER, `completed_at` INTEGER, PRIMARY KEY(`request_id`), FOREIGN KEY(`request_id`) REFERENCES `inbox_requests`(`id`) ON UPDATE NO ACTION ON DELETE CASCADE , FOREIGN KEY(`vault_identity_id`) REFERENCES `vault_identities`(`id`) ON UPDATE NO ACTION ON DELETE SET NULL )",
+        "fields": [
+          {
+            "fieldPath": "requestId",
+            "columnName": "request_id",
+            "affinity": "INTEGER",
+            "notNull": true
+          },
+          {
+            "fieldPath": "vaultIdentityId",
+            "columnName": "vault_identity_id",
+            "affinity": "TEXT"
+          },
+          {
+            "fieldPath": "vaultAddress",
+            "columnName": "vault_address",
+            "affinity": "TEXT",
+            "notNull": true
+          },
+          {
+            "fieldPath": "routeId",
+            "columnName": "route_id",
+            "affinity": "TEXT",
+            "notNull": true
+          },
+          {
+            "fieldPath": "pairingId",
+            "columnName": "pairing_id",
+            "affinity": "TEXT",
+            "notNull": true
+          },
+          {
+            "fieldPath": "state",
+            "columnName": "state",
+            "affinity": "TEXT",
+            "notNull": true
+          },
+          {
+            "fieldPath": "sasOption0",
+            "columnName": "sas_option_0",
+            "affinity": "INTEGER"
+          },
+          {
+            "fieldPath": "sasOption1",
+            "columnName": "sas_option_1",
+            "affinity": "INTEGER"
+          },
+          {
+            "fieldPath": "sasOption2",
+            "columnName": "sas_option_2",
+            "affinity": "INTEGER"
+          },
+          {
+            "fieldPath": "correctSasIndex",
+            "columnName": "correct_sas_index",
+            "affinity": "INTEGER"
+          },
+          {
+            "fieldPath": "cliVersion",
+            "columnName": "cli_version",
+            "affinity": "TEXT"
+          },
+          {
+            "fieldPath": "platform",
+            "columnName": "platform",
+            "affinity": "TEXT"
+          },
+          {
+            "fieldPath": "architecture",
+            "columnName": "architecture",
+            "affinity": "TEXT"
+          },
+          {
+            "fieldPath": "hostname",
+            "columnName": "hostname",
+            "affinity": "TEXT"
+          },
+          {
+            "fieldPath": "machineId",
+            "columnName": "machine_id",
+            "affinity": "TEXT"
+          },
+          {
+            "fieldPath": "osVersion",
+            "columnName": "os_version",
+            "affinity": "TEXT"
+          },
+          {
+            "fieldPath": "error",
+            "columnName": "error",
+            "affinity": "TEXT"
+          },
+          {
+            "fieldPath": "createdAt",
+            "columnName": "created_at",
+            "affinity": "INTEGER",
+            "notNull": true
+          },
+          {
+            "fieldPath": "updatedAt",
+            "columnName": "updated_at",
+            "affinity": "INTEGER",
+            "notNull": true
+          },
+          {
+            "fieldPath": "decidedAt",
+            "columnName": "decided_at",
+            "affinity": "INTEGER"
+          },
+          {
+            "fieldPath": "completedAt",
+            "columnName": "completed_at",
+            "affinity": "INTEGER"
+          }
+        ],
+        "primaryKey": {
+          "autoGenerate": false,
+          "columnNames": [
+            "request_id"
+          ]
+        },
+        "indices": [
+          {
+            "name": "index_pairings_pairing_id",
+            "unique": true,
+            "columnNames": [
+              "pairing_id"
+            ],
+            "orders": [],
+            "createSql": "CREATE UNIQUE INDEX IF NOT EXISTS `index_pairings_pairing_id` ON `${TABLE_NAME}` (`pairing_id`)"
+          },
+          {
+            "name": "index_pairings_vault_identity_id",
+            "unique": false,
+            "columnNames": [
+              "vault_identity_id"
+            ],
+            "orders": [],
+            "createSql": "CREATE INDEX IF NOT EXISTS `index_pairings_vault_identity_id` ON `${TABLE_NAME}` (`vault_identity_id`)"
+          },
+          {
+            "name": "index_pairings_state",
+            "unique": false,
+            "columnNames": [
+              "state"
+            ],
+            "orders": [],
+            "createSql": "CREATE INDEX IF NOT EXISTS `index_pairings_state` ON `${TABLE_NAME}` (`state`)"
+          }
+        ],
+        "foreignKeys": [
+          {
+            "table": "inbox_requests",
+            "onDelete": "CASCADE",
+            "onUpdate": "NO ACTION",
+            "columns": [
+              "request_id"
+            ],
+            "referencedColumns": [
+              "id"
+            ]
+          },
+          {
+            "table": "vault_identities",
+            "onDelete": "SET NULL",
+            "onUpdate": "NO ACTION",
+            "columns": [
+              "vault_identity_id"
+            ],
+            "referencedColumns": [
+              "id"
+            ]
+          }
+        ]
+      },
+      {
+        "tableName": "pairing_secrets",
+        "createSql": "CREATE TABLE IF NOT EXISTS `${TABLE_NAME}` (`id` TEXT NOT NULL, `pairing_request_id` INTEGER NOT NULL, `kind` TEXT NOT NULL, `encryption_format` INTEGER NOT NULL, `encryption_key_id` TEXT NOT NULL, `nonce` BLOB NOT NULL, `ciphertext` BLOB NOT NULL, `created_at` INTEGER NOT NULL, `updated_at` INTEGER NOT NULL, PRIMARY KEY(`id`), FOREIGN KEY(`pairing_request_id`) REFERENCES `pairings`(`request_id`) ON UPDATE NO ACTION ON DELETE CASCADE , FOREIGN KEY(`encryption_key_id`) REFERENCES `local_encryption_keys`(`id`) ON UPDATE NO ACTION ON DELETE RESTRICT )",
+        "fields": [
+          {
+            "fieldPath": "id",
+            "columnName": "id",
+            "affinity": "TEXT",
+            "notNull": true
+          },
+          {
+            "fieldPath": "pairingRequestId",
+            "columnName": "pairing_request_id",
+            "affinity": "INTEGER",
+            "notNull": true
+          },
+          {
+            "fieldPath": "kind",
+            "columnName": "kind",
+            "affinity": "TEXT",
+            "notNull": true
+          },
+          {
+            "fieldPath": "encryptionFormat",
+            "columnName": "encryption_format",
+            "affinity": "INTEGER",
+            "notNull": true
+          },
+          {
+            "fieldPath": "encryptionKeyId",
+            "columnName": "encryption_key_id",
+            "affinity": "TEXT",
+            "notNull": true
+          },
+          {
+            "fieldPath": "nonce",
+            "columnName": "nonce",
+            "affinity": "BLOB",
+            "notNull": true
+          },
+          {
+            "fieldPath": "ciphertext",
+            "columnName": "ciphertext",
+            "affinity": "BLOB",
+            "notNull": true
+          },
+          {
+            "fieldPath": "createdAt",
+            "columnName": "created_at",
+            "affinity": "INTEGER",
+            "notNull": true
+          },
+          {
+            "fieldPath": "updatedAt",
+            "columnName": "updated_at",
+            "affinity": "INTEGER",
+            "notNull": true
+          }
+        ],
+        "primaryKey": {
+          "autoGenerate": false,
+          "columnNames": [
+            "id"
+          ]
+        },
+        "indices": [
+          {
+            "name": "index_pairing_secrets_pairing_request_id_kind",
+            "unique": true,
+            "columnNames": [
+              "pairing_request_id",
+              "kind"
+            ],
+            "orders": [],
+            "createSql": "CREATE UNIQUE INDEX IF NOT EXISTS `index_pairing_secrets_pairing_request_id_kind` ON `${TABLE_NAME}` (`pairing_request_id`, `kind`)"
+          },
+          {
+            "name": "index_pairing_secrets_encryption_key_id",
+            "unique": false,
+            "columnNames": [
+              "encryption_key_id"
+            ],
+            "orders": [],
+            "createSql": "CREATE INDEX IF NOT EXISTS `index_pairing_secrets_encryption_key_id` ON `${TABLE_NAME}` (`encryption_key_id`)"
+          }
+        ],
+        "foreignKeys": [
+          {
+            "table": "pairings",
+            "onDelete": "CASCADE",
+            "onUpdate": "NO ACTION",
+            "columns": [
+              "pairing_request_id"
+            ],
+            "referencedColumns": [
+              "request_id"
+            ]
+          },
+          {
+            "table": "local_encryption_keys",
+            "onDelete": "RESTRICT",
+            "onUpdate": "NO ACTION",
+            "columns": [
+              "encryption_key_id"
+            ],
+            "referencedColumns": [
+              "id"
+            ]
+          }
+        ]
       }
     ],
     "setupQueries": [
       "CREATE TABLE IF NOT EXISTS room_master_table (id INTEGER PRIMARY KEY,identity_hash TEXT)",
-      "INSERT OR REPLACE INTO room_master_table (id,identity_hash) VALUES(42, 'e24261fca7d6f39ae4e84a2cad0ebfea')"
+      "INSERT OR REPLACE INTO room_master_table (id,identity_hash) VALUES(42, '3c40a3e31fdb619991c470a190623dc8')"
     ]
   }
 }

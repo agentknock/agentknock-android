@@ -14,25 +14,33 @@
         };
       };
       buildToolsVersion = "36.0.0";
-      androidComposition = pkgs.androidenv.composeAndroidPackages {
+      androidComposition = includeEmulator: pkgs.androidenv.composeAndroidPackages {
+        abiVersions = [ "x86_64" ];
         buildToolsVersions = [ buildToolsVersion ];
-        includeEmulator = false;
+        inherit includeEmulator;
         includeNDK = false;
-        platformVersions = [ "37" ];
+        includeSystemImages = includeEmulator;
+        platformVersions = [ "37.0" ];
+        systemImageTypes = [ "google_apis" ];
       };
-      androidSdk = androidComposition.androidsdk;
-    in
-    {
-      devShells.${system}.default = pkgs.mkShell {
+      androidSdk = (androidComposition false).androidsdk;
+      emulatorSdk = (androidComposition true).androidsdk;
+      androidShell = sdk: pkgs.mkShell {
         packages = [
-          androidSdk
+          sdk
           pkgs.jdk17
         ];
 
-        ANDROID_HOME = "${androidSdk}/libexec/android-sdk";
-        ANDROID_SDK_ROOT = "${androidSdk}/libexec/android-sdk";
+        ANDROID_HOME = "${sdk}/libexec/android-sdk";
+        ANDROID_SDK_ROOT = "${sdk}/libexec/android-sdk";
         JAVA_HOME = "${pkgs.jdk17}";
-        GRADLE_OPTS = "-Dorg.gradle.project.android.aapt2FromMavenOverride=${androidSdk}/libexec/android-sdk/build-tools/${buildToolsVersion}/aapt2";
+        GRADLE_OPTS = "-Dorg.gradle.project.android.aapt2FromMavenOverride=${sdk}/libexec/android-sdk/build-tools/${buildToolsVersion}/aapt2";
+      };
+    in
+    {
+      devShells.${system} = {
+        default = androidShell androidSdk;
+        emulator = androidShell emulatorSdk;
       };
     };
 }

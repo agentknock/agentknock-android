@@ -10,6 +10,13 @@ import dev.agentknock.storage.crypto.LocalEncryptionStateEntity
 import dev.agentknock.storage.profile.EnvironmentVariableEntity
 import dev.agentknock.storage.profile.ProfileDao
 import dev.agentknock.storage.profile.ProfileEntity
+import dev.agentknock.storage.request.InboxRequestEntity
+import dev.agentknock.storage.request.PairingEntity
+import dev.agentknock.storage.request.PairingSecretEntity
+import dev.agentknock.storage.request.RequestDao
+import dev.agentknock.storage.vault.VaultDao
+import dev.agentknock.storage.vault.VaultIdentityEntity
+import dev.agentknock.storage.vault.VaultSecretEntity
 
 @Database(
     entities = [
@@ -17,6 +24,11 @@ import dev.agentknock.storage.profile.ProfileEntity
         LocalEncryptionStateEntity::class,
         ProfileEntity::class,
         EnvironmentVariableEntity::class,
+        VaultIdentityEntity::class,
+        VaultSecretEntity::class,
+        InboxRequestEntity::class,
+        PairingEntity::class,
+        PairingSecretEntity::class,
     ],
     version = 1,
     exportSchema = true,
@@ -25,6 +37,10 @@ internal abstract class AgentKnockDatabase : RoomDatabase() {
     abstract fun localEncryptionDao(): LocalEncryptionDao
 
     abstract fun profileDao(): ProfileDao
+
+    abstract fun vaultDao(): VaultDao
+
+    abstract fun requestDao(): RequestDao
 
     companion object {
         const val NAME = "agentknock.db"
