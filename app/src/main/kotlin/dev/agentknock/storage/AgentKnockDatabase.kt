@@ -7,14 +7,16 @@ import androidx.room3.RoomDatabase
 import dev.agentknock.storage.crypto.LocalEncryptionDao
 import dev.agentknock.storage.crypto.LocalEncryptionKeyEntity
 import dev.agentknock.storage.crypto.LocalEncryptionStateEntity
-import dev.agentknock.storage.secret.StoredSecretDao
-import dev.agentknock.storage.secret.StoredSecretEntity
+import dev.agentknock.storage.profile.EnvironmentVariableEntity
+import dev.agentknock.storage.profile.ProfileDao
+import dev.agentknock.storage.profile.ProfileEntity
 
 @Database(
     entities = [
         LocalEncryptionKeyEntity::class,
         LocalEncryptionStateEntity::class,
-        StoredSecretEntity::class,
+        ProfileEntity::class,
+        EnvironmentVariableEntity::class,
     ],
     version = 1,
     exportSchema = true,
@@ -22,7 +24,7 @@ import dev.agentknock.storage.secret.StoredSecretEntity
 internal abstract class AgentKnockDatabase : RoomDatabase() {
     abstract fun localEncryptionDao(): LocalEncryptionDao
 
-    abstract fun storedSecretDao(): StoredSecretDao
+    abstract fun profileDao(): ProfileDao
 
     companion object {
         const val NAME = "agentknock.db"

@@ -12,6 +12,12 @@ internal data class EncryptionLocation(
     val recordType: String,
     val recordId: String,
     val fieldName: String,
+    val bindings: List<EncryptionBinding> = emptyList(),
+)
+
+internal data class EncryptionBinding(
+    val name: String,
+    val value: String,
 )
 
 internal data class EncryptedValue(
@@ -92,6 +98,15 @@ internal class AesGcmEncryption(
             output.writeLengthPrefixed(location.recordType)
             output.writeLengthPrefixed(location.recordId)
             output.writeLengthPrefixed(location.fieldName)
+            val bindings = location.bindings.sortedBy(EncryptionBinding::name)
+            require(bindings.map(EncryptionBinding::name).distinct().size == bindings.size) {
+                "Encryption binding names must be unique"
+            }
+            output.writeInt(bindings.size)
+            bindings.forEach { binding ->
+                output.writeLengthPrefixed(binding.name)
+                output.writeLengthPrefixed(binding.value)
+            }
         }
         bytes.toByteArray()
     }

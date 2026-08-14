@@ -5,7 +5,7 @@ import dev.agentknock.storage.AgentKnockDatabase
 import dev.agentknock.storage.crypto.AesGcmEncryption
 import dev.agentknock.storage.crypto.AndroidEncryptionKeyStore
 import dev.agentknock.storage.crypto.LocalEncryptionKeyManager
-import dev.agentknock.storage.secret.StoredSecretRepository
+import dev.agentknock.storage.profile.ProfileRepository
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.CoroutineStart
 import kotlinx.coroutines.Dispatchers
@@ -30,8 +30,8 @@ internal class ApplicationContainer(application: Application) {
         keyStore = encryptionKeyStore,
     )
 
-    val storedSecrets = StoredSecretRepository(
-        dao = database.storedSecretDao(),
+    val profiles = ProfileRepository(
+        dao = database.profileDao(),
         keyManager = encryptionKeyManager,
         encryption = AesGcmEncryption(encryptionKeyStore),
     )

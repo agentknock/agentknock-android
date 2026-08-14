@@ -52,6 +52,34 @@ class AesGcmEncryptionTest {
     }
 
     @Test
+    fun `rejects changes to authenticated record metadata`() {
+        val boundLocation = location.copy(
+            bindings = listOf(
+                EncryptionBinding("name", "AWS_SECRET_ACCESS_KEY"),
+                EncryptionBinding("profile_id", "aws-read-only"),
+                EncryptionBinding("sensitive", "true"),
+            ),
+        )
+        val encrypted = encryption.encrypt(KEY_ID, boundLocation, byteArrayOf(1, 2, 3))
+
+        assertEquals(
+            DecryptionResult.AuthenticationFailed,
+            encryption.decrypt(
+                encrypted,
+                boundLocation.copy(
+                    bindings = boundLocation.bindings.map { binding ->
+                        if (binding.name == "name") {
+                            binding.copy(value = "AWS_ACCESS_KEY_ID")
+                        } else {
+                            binding
+                        }
+                    },
+                ),
+            ),
+        )
+    }
+
+    @Test
     fun `reports tampered ciphertext`() {
         val encrypted = encryption.encrypt(KEY_ID, location, byteArrayOf(1, 2, 3))
         encrypted.ciphertext[0] = (encrypted.ciphertext[0].toInt() xor 1).toByte()

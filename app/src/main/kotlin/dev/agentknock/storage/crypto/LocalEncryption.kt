@@ -127,6 +127,8 @@ internal class LocalEncryptionKeyManager(
 
     suspend fun activeKey(): ActiveEncryptionKey = initialize().activeKey
 
+    suspend fun keyAvailable(keyId: String): Boolean = keyExists(keyId)
+
     private suspend fun createAndActivateKey(): ActiveEncryptionKey {
         val keyId = newKeyId()
         val generated = withContext(keyStoreDispatcher) { keyStore.generate(keyId) }
