@@ -175,6 +175,21 @@ class ProfileRepositoryTest {
             mapOf("FIRST_REGION" to "eu-west-1", "SHARED_TOKEN" to "same-value"),
             result.environment,
         )
+        assertEquals(
+            listOf(
+                CredentialProfileMetadata(
+                    name = "first",
+                    description = "",
+                    environmentVariableNames = listOf("FIRST_REGION", "SHARED_TOKEN"),
+                ),
+                CredentialProfileMetadata(
+                    name = "second",
+                    description = "",
+                    environmentVariableNames = listOf("SHARED_TOKEN"),
+                ),
+            ),
+            fixture.repository.listCredentialProfiles(),
+        )
     }
 
     @Test
@@ -293,6 +308,15 @@ private class FakeProfileDao : ProfileDao {
 
     override suspend fun getEnvironmentVariable(id: String): EnvironmentVariableEntity? =
         variables.value.find { it.id == id }
+
+    override suspend fun getProfiles(): List<ProfileEntity> = profiles.value
+        .sortedWith(compareBy(String.CASE_INSENSITIVE_ORDER, ProfileEntity::name))
+
+    override suspend fun getEnvironmentVariables(): List<EnvironmentVariableEntity> =
+        variables.value.sortedWith(
+            compareBy<EnvironmentVariableEntity> { it.profileId }
+                .thenBy(String.CASE_INSENSITIVE_ORDER) { it.name },
+        )
 
     override suspend fun getProfilesByName(names: List<String>): List<ProfileEntity> =
         profiles.value.filter { it.name in names }

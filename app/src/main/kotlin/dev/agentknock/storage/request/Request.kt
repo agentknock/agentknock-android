@@ -271,6 +271,65 @@ internal data class CredentialRequestEntity(
     val completedAt: Long?,
 )
 
+@Entity(
+    tableName = "profile_list_requests",
+    foreignKeys = [
+        ForeignKey(
+            entity = InboxRequestEntity::class,
+            parentColumns = ["id"],
+            childColumns = ["request_id"],
+            onDelete = ForeignKey.CASCADE,
+            onUpdate = ForeignKey.NO_ACTION,
+        ),
+        ForeignKey(
+            entity = PairingEntity::class,
+            parentColumns = ["request_id"],
+            childColumns = ["pairing_request_id"],
+            onDelete = ForeignKey.SET_NULL,
+            onUpdate = ForeignKey.NO_ACTION,
+        ),
+    ],
+    indices = [
+        Index(value = ["pairing_request_id"]),
+        Index(value = ["state"]),
+    ],
+)
+internal data class ProfileListRequestEntity(
+    @PrimaryKey
+    @ColumnInfo(name = "request_id")
+    val requestId: Long,
+    @ColumnInfo(name = "pairing_request_id")
+    val pairingRequestId: Long?,
+    @ColumnInfo(name = "pairing_id")
+    val pairingId: String,
+    @ColumnInfo(name = "vault_address")
+    val vaultAddress: String,
+    @ColumnInfo(name = "hostname")
+    val hostname: String?,
+    @ColumnInfo(name = "platform")
+    val platform: String?,
+    @ColumnInfo(name = "architecture")
+    val architecture: String?,
+    @ColumnInfo(name = "machine_id")
+    val machineId: String?,
+    @ColumnInfo(name = "os_version")
+    val osVersion: String?,
+    @ColumnInfo(name = "state")
+    val state: String,
+    @ColumnInfo(name = "cli_version")
+    val cliVersion: String,
+    @ColumnInfo(name = "profiles_json")
+    val profilesJson: String,
+    @ColumnInfo(name = "error")
+    val error: String?,
+    @ColumnInfo(name = "created_at")
+    val createdAt: Long,
+    @ColumnInfo(name = "updated_at")
+    val updatedAt: Long,
+    @ColumnInfo(name = "completed_at")
+    val completedAt: Long?,
+)
+
 @Dao
 internal interface RequestDao {
     @Query("SELECT * FROM inbox_requests WHERE listed = 1 ORDER BY id DESC LIMIT 100")
@@ -282,6 +341,9 @@ internal interface RequestDao {
     @Query("SELECT * FROM credential_requests ORDER BY request_id DESC")
     fun observeCredentialRequests(): Flow<List<CredentialRequestEntity>>
 
+    @Query("SELECT * FROM profile_list_requests ORDER BY request_id DESC")
+    fun observeProfileListRequests(): Flow<List<ProfileListRequestEntity>>
+
     @Query("SELECT * FROM inbox_requests WHERE id = :id")
     fun observeRequest(id: Long): Flow<InboxRequestEntity?>
 
@@ -290,6 +352,9 @@ internal interface RequestDao {
 
     @Query("SELECT * FROM credential_requests WHERE request_id = :requestId")
     fun observeCredentialRequest(requestId: Long): Flow<CredentialRequestEntity?>
+
+    @Query("SELECT * FROM profile_list_requests WHERE request_id = :requestId")
+    fun observeProfileListRequest(requestId: Long): Flow<ProfileListRequestEntity?>
 
     @Query("SELECT * FROM inbox_requests WHERE relay_request_id = :relayRequestId")
     suspend fun getRequestByRelayId(relayRequestId: String): InboxRequestEntity?
@@ -305,6 +370,9 @@ internal interface RequestDao {
 
     @Query("SELECT * FROM credential_requests WHERE request_id = :requestId")
     suspend fun getCredentialRequest(requestId: Long): CredentialRequestEntity?
+
+    @Query("SELECT * FROM profile_list_requests WHERE request_id = :requestId")
+    suspend fun getProfileListRequest(requestId: Long): ProfileListRequestEntity?
 
     @Query("SELECT * FROM pairings ORDER BY request_id")
     suspend fun getPairings(): List<PairingEntity>
@@ -331,6 +399,9 @@ internal interface RequestDao {
     @Insert
     suspend fun insertCredentialRequestRow(request: CredentialRequestEntity)
 
+    @Insert
+    suspend fun insertProfileListRequestRow(request: ProfileListRequestEntity)
+
     @Update
     suspend fun updateRequest(request: InboxRequestEntity): Int
 
@@ -342,6 +413,9 @@ internal interface RequestDao {
 
     @Update
     suspend fun updateCredentialRequestRow(request: CredentialRequestEntity): Int
+
+    @Update
+    suspend fun updateProfileListRequestRow(request: ProfileListRequestEntity): Int
 
     @Query(
         """
@@ -414,6 +488,19 @@ internal interface RequestDao {
     }
 
     @Transaction
+    suspend fun insertProfileListRequest(
+        request: InboxRequestEntity,
+        profileListRequest: ProfileListRequestEntity,
+        rotatedPairingSecret: PairingSecretEntity?,
+    ): Long {
+        val requestId = insertRequest(request)
+        insertProfileListRequestRow(profileListRequest.copy(requestId = requestId))
+        rotatedPairingSecret?.let { check(updatePairingSecret(it) == 1) }
+        trimCompletedHistory()
+        return requestId
+    }
+
+    @Transaction
     suspend fun recordInitialCompletion(
         request: InboxRequestEntity,
         pairing: PairingEntity,
@@ -441,6 +528,16 @@ internal interface RequestDao {
     ) {
         check(updateRequest(request) == 1)
         check(updateCredentialRequestRow(credentialRequest) == 1)
+        trimCompletedHistory()
+    }
+
+    @Transaction
+    suspend fun updateProfileListRequest(
+        request: InboxRequestEntity,
+        profileListRequest: ProfileListRequestEntity,
+    ) {
+        check(updateRequest(request) == 1)
+        check(updateProfileListRequestRow(profileListRequest) == 1)
         trimCompletedHistory()
     }
 

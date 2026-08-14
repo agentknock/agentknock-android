@@ -55,6 +55,8 @@ import dev.agentknock.storage.request.InboxRequestSummary
 import dev.agentknock.storage.request.PairingDecisionResult
 import dev.agentknock.storage.request.PairingState
 import dev.agentknock.storage.request.PollInboxResult
+import dev.agentknock.storage.request.ProfileListRequestDetails
+import dev.agentknock.storage.request.ProfileListRequestState
 import java.text.DateFormat
 import java.util.Date
 import kotlinx.coroutines.launch
@@ -148,6 +150,11 @@ internal fun RequestsScreen(viewModel: RequestsViewModel = viewModel()) {
                 },
                 modifier = detailModifier,
             )
+            request.profileList != null -> ProfileListRequestDetail(
+                request = request,
+                onBack = { viewModel.selectRequest(null) },
+                modifier = detailModifier,
+            )
         }
     }
 }
@@ -232,6 +239,7 @@ private fun RequestRow(request: InboxRequestSummary, onClick: () -> Unit) {
                     when (request.kind) {
                         InboxRequestKind.PAIRING -> R.string.pairing_request
                         InboxRequestKind.CREDENTIAL -> R.string.credential_request
+                        InboxRequestKind.PROFILE_LIST -> R.string.profile_list_request
                     },
                 ),
                 style = MaterialTheme.typography.titleMedium,
@@ -258,10 +266,27 @@ private fun RequestStatus(request: InboxRequestSummary) {
         PairingRequestStatus(it)
         return
     }
+    request.profileListState?.let {
+        ProfileListRequestStatus(it)
+        return
+    }
     CredentialRequestStatus(
         state = checkNotNull(request.credentialState),
         decision = request.credentialDecision,
         result = request.credentialResult,
+    )
+}
+
+@Composable
+private fun ProfileListRequestStatus(state: ProfileListRequestState) {
+    StatusLabel(
+        label = when (state) {
+            ProfileListRequestState.WAITING_FOR_COMPLETION -> R.string.waiting_for_client
+            ProfileListRequestState.COMPLETED -> R.string.delivered
+            ProfileListRequestState.VERIFICATION_FAILED -> R.string.verification_failed
+        },
+        primary = state == ProfileListRequestState.VERIFICATION_FAILED,
+        error = state == ProfileListRequestState.VERIFICATION_FAILED,
     )
 }
 
@@ -434,6 +459,55 @@ private fun CredentialRequestDetail(
 }
 
 @Composable
+private fun ProfileListRequestDetail(
+    request: InboxRequestDetails,
+    onBack: () -> Unit,
+    modifier: Modifier = Modifier,
+) {
+    val profileList = checkNotNull(request.profileList)
+    DetailColumn(modifier, onBack) {
+        Column(verticalArrangement = Arrangement.spacedBy(4.dp)) {
+            Text(
+                stringResource(R.string.profile_list_request),
+                style = MaterialTheme.typography.headlineMedium,
+            )
+            ProfileListRequestStatus(profileList.state)
+        }
+        when (profileList.state) {
+            ProfileListRequestState.WAITING_FOR_COMPLETION -> StatusCard(
+                title = stringResource(R.string.profile_catalog_sent),
+                message = stringResource(R.string.profile_list_waiting_for_completion),
+            )
+            ProfileListRequestState.COMPLETED -> StatusCard(
+                title = stringResource(R.string.profile_catalog_delivered),
+                message = stringResource(R.string.profile_catalog_delivered_explanation),
+            )
+            ProfileListRequestState.VERIFICATION_FAILED -> StatusCard(
+                title = stringResource(R.string.verification_failed),
+                message = profileList.error
+                    ?: stringResource(R.string.profile_list_verification_failed),
+                error = true,
+            )
+        }
+        DetailSection(stringResource(R.string.shared_profiles)) {
+            if (profileList.profiles.isEmpty()) {
+                Text(stringResource(R.string.no_profiles_shared))
+            } else {
+                profileList.profiles.forEach { profile ->
+                    ProfileCard(profile, showStoredSource = true)
+                }
+            }
+            Text(
+                stringResource(R.string.profile_list_values_hidden),
+                style = MaterialTheme.typography.bodySmall,
+                color = MaterialTheme.colorScheme.onSurfaceVariant,
+            )
+        }
+        ProfileListClientInformation(request, profileList)
+    }
+}
+
+@Composable
 private fun CredentialStateCard(credential: CredentialRequestDetails) {
     when (credential.state) {
         CredentialRequestState.APPROVAL_PENDING -> StatusCard(
@@ -493,7 +567,15 @@ private fun CredentialProfiles(credential: CredentialRequestDetails) {
 }
 
 @Composable
-private fun ProfileCard(profile: CredentialProfileMetadata) {
+private fun ProfileCard(
+    profile: CredentialProfileMetadata,
+    showStoredSource: Boolean = false,
+) {
+    val storedSource = if (showStoredSource) {
+        stringResource(R.string.stored_value_source)
+    } else {
+        ""
+    }
     Card {
         Column(
             modifier = Modifier
@@ -506,7 +588,13 @@ private fun ProfileCard(profile: CredentialProfileMetadata) {
                 Text(profile.description, color = MaterialTheme.colorScheme.onSurfaceVariant)
             }
             Text(
-                profile.environmentVariableNames.joinToString(separator = "\n"),
+                profile.environmentVariableNames.joinToString(separator = "\n") { name ->
+                    if (showStoredSource) {
+                        "$name · $storedSource"
+                    } else {
+                        name
+                    }
+                },
                 fontFamily = FontFamily.Monospace,
             )
         }
@@ -573,6 +661,30 @@ private fun CredentialClientInformation(
         InformationRow(stringResource(R.string.cli_version), credential.cliVersion)
         credential.machineId?.let { InformationRow(stringResource(R.string.machine_id), it) }
         InformationRow(stringResource(R.string.pairing_id), credential.pairingId, monospace = true)
+        InformationRow(stringResource(R.string.request_id), request.relayRequestId, monospace = true)
+    }
+}
+
+@Composable
+private fun ProfileListClientInformation(
+    request: InboxRequestDetails,
+    profileList: ProfileListRequestDetails,
+) {
+    DetailSection(stringResource(R.string.reported_client_information)) {
+        Text(
+            stringResource(R.string.reported_information_warning),
+            style = MaterialTheme.typography.bodySmall,
+            color = MaterialTheme.colorScheme.onSurfaceVariant,
+        )
+        InformationRow(stringResource(R.string.received), formatDate(request.receivedAt))
+        InformationRow(stringResource(R.string.vault_address), profileList.vaultAddress)
+        profileList.hostname?.let { InformationRow(stringResource(R.string.hostname), it) }
+        profileList.platform?.let { InformationRow(stringResource(R.string.platform), it) }
+        profileList.architecture?.let { InformationRow(stringResource(R.string.architecture), it) }
+        profileList.osVersion?.let { InformationRow(stringResource(R.string.os_version), it) }
+        InformationRow(stringResource(R.string.cli_version), profileList.cliVersion)
+        profileList.machineId?.let { InformationRow(stringResource(R.string.machine_id), it) }
+        InformationRow(stringResource(R.string.pairing_id), profileList.pairingId, monospace = true)
         InformationRow(stringResource(R.string.request_id), request.relayRequestId, monospace = true)
     }
 }

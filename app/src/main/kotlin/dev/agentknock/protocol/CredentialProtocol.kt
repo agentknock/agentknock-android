@@ -73,9 +73,6 @@ internal class CredentialProtocol(
         )
     }
 
-    fun method(plaintext: ByteArray): String =
-        json.decodeFromString<RequestMethodWire>(plaintext.decodeToString()).method
-
     fun approvedResponse(environment: Map<String, String>): ByteArray = json.encodeToString(
         CredentialResponseWire.serializer(),
         CredentialResponseWire(result = RESULT_APPROVED, environment = environment),
@@ -113,16 +110,12 @@ internal class CredentialProtocol(
 
     companion object {
         const val CREDENTIAL_REQUEST_METHOD = "CredentialRequest"
-        const val FINISH_PAIRING_METHOD = "FinishPairing"
         private const val EXEC_OPERATION_TYPE = "exec"
         private const val RESULT_APPROVED = "APPROVED"
         private const val RESULT_DENIED = "DENIED"
         private const val RESULT_ABORTED = "ABORTED"
     }
 }
-
-@Serializable
-private data class RequestMethodWire(val method: String)
 
 @Serializable
 private data class CredentialRequestWire(

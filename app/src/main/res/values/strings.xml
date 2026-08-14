@@ -110,6 +110,7 @@
     <string name="no_requests_description">Pairing and credential requests will appear here and remain available after they are completed.</string>
     <string name="pairing_request">Pairing request</string>
     <string name="credential_request">Credential request</string>
+    <string name="profile_list_request">Profile list request</string>
     <string name="pairing_receiving">Receiving pairing</string>
     <string name="pairing_receiving_explanation">The secure pairing exchange is not complete yet. You can leave this screen or close the app while it continues.</string>
     <string name="action_required">Action required</string>
@@ -184,4 +185,13 @@
     <string name="credential_value_corrupted">A requested value could not be authenticated</string>
     <string name="credential_value_unsupported">A requested value uses an unsupported encryption format</string>
     <string name="credential_pairing_unavailable">The pairing keys are unavailable on this device</string>
+    <string name="profile_catalog_sent">Profile catalog sent</string>
+    <string name="profile_list_waiting_for_completion">Waiting for the client to confirm that it received the profile metadata.</string>
+    <string name="profile_catalog_delivered">Profile catalog delivered</string>
+    <string name="profile_catalog_delivered_explanation">The client confirmed receipt of the profile names and environment-variable metadata.</string>
+    <string name="profile_list_verification_failed">The client completion could not be verified.</string>
+    <string name="shared_profiles">Shared profiles</string>
+    <string name="no_profiles_shared">No profiles were available.</string>
+    <string name="profile_list_values_hidden">Only profile descriptions, environment-variable names, and value-source types were shared. Stored values were not released.</string>
+    <string name="stored_value_source">stored</string>
 </resources>

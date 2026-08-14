@@ -113,6 +113,8 @@ internal sealed interface CredentialEnvironmentResult {
 }
 
 internal interface CredentialProfileSource {
+    suspend fun listCredentialProfiles(): List<CredentialProfileMetadata>
+
     suspend fun describeCredentialProfiles(names: List<String>): CredentialProfileDescription
 
     suspend fun credentialEnvironment(names: List<String>): CredentialEnvironmentResult
@@ -312,6 +314,20 @@ internal class ProfileRepository(
         val variable = dao.getEnvironmentVariable(id) ?: return false
         dao.deleteEnvironmentVariable(variable, profileUpdatedAt = currentTimeMillis())
         return true
+    }
+
+    override suspend fun listCredentialProfiles(): List<CredentialProfileMetadata> {
+        val variablesByProfile = dao.getEnvironmentVariables()
+            .groupBy(EnvironmentVariableEntity::profileId)
+        return dao.getProfiles().map { profile ->
+            CredentialProfileMetadata(
+                name = profile.name,
+                description = profile.description,
+                environmentVariableNames = variablesByProfile[profile.id]
+                    .orEmpty()
+                    .map(EnvironmentVariableEntity::name),
+            )
+        }
     }
 
     override suspend fun describeCredentialProfiles(

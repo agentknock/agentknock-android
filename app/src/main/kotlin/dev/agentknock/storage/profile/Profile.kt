@@ -166,6 +166,12 @@ internal interface ProfileDao {
     @Query("SELECT * FROM environment_variables WHERE id = :id")
     suspend fun getEnvironmentVariable(id: String): EnvironmentVariableEntity?
 
+    @Query("SELECT * FROM profiles ORDER BY name COLLATE NOCASE, id")
+    suspend fun getProfiles(): List<ProfileEntity>
+
+    @Query("SELECT * FROM environment_variables ORDER BY profile_id, name COLLATE NOCASE, id")
+    suspend fun getEnvironmentVariables(): List<EnvironmentVariableEntity>
+
     @Query("SELECT * FROM profiles WHERE name IN (:names)")
     suspend fun getProfilesByName(names: List<String>): List<ProfileEntity>
 

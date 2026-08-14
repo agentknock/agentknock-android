@@ -5,7 +5,11 @@ import dev.agentknock.protocol.CredentialDenialReason
 import dev.agentknock.protocol.CredentialProtocol
 import dev.agentknock.protocol.CredentialRequestMessage
 import dev.agentknock.protocol.OpenedPairedRequest
+import dev.agentknock.protocol.PairedRequestProtocol
 import dev.agentknock.protocol.PairingProtocol
+import dev.agentknock.protocol.ProfileListProfile
+import dev.agentknock.protocol.ProfileListProtocol
+import dev.agentknock.protocol.ProfileListRequestMessage
 import dev.agentknock.relay.RelayInboxClient
 import dev.agentknock.relay.RelayInboxResult
 import dev.agentknock.relay.RelayMessage
@@ -57,6 +61,7 @@ internal enum class PairingState(val storedName: String) {
 internal enum class InboxRequestKind {
     PAIRING,
     CREDENTIAL,
+    PROFILE_LIST,
 }
 
 internal enum class CredentialRequestState(val storedName: String) {
@@ -77,6 +82,12 @@ internal enum class CredentialCompletionResult(val storedName: String) {
     ABORTED("aborted"),
 }
 
+internal enum class ProfileListRequestState(val storedName: String) {
+    WAITING_FOR_COMPLETION("waiting_for_completion"),
+    COMPLETED("completed"),
+    VERIFICATION_FAILED("verification_failed"),
+}
+
 internal fun pairingAdmissionAllowed(existingStates: Iterable<PairingState>): Boolean =
     existingStates.none { it in INCOMPLETE_PAIRING_STATES }
 
@@ -88,6 +99,7 @@ internal data class InboxRequestSummary(
     val credentialState: CredentialRequestState?,
     val credentialDecision: CredentialDecision?,
     val credentialResult: CredentialCompletionResult?,
+    val profileListState: ProfileListRequestState?,
     val title: String,
     val subtitle: String,
     val receivedAt: Long,
@@ -117,6 +129,21 @@ internal data class InboxRequestDetails(
     val completedAt: Long?,
     val pairing: PairingRequestDetails?,
     val credential: CredentialRequestDetails?,
+    val profileList: ProfileListRequestDetails?,
+)
+
+internal data class ProfileListRequestDetails(
+    val state: ProfileListRequestState,
+    val profiles: List<CredentialProfileMetadata>,
+    val vaultAddress: String,
+    val pairingId: String,
+    val hostname: String?,
+    val platform: String?,
+    val architecture: String?,
+    val machineId: String?,
+    val osVersion: String?,
+    val cliVersion: String,
+    val error: String?,
 )
 
 internal data class CredentialRequestDetails(
@@ -204,7 +231,9 @@ internal class RequestRepository(
     private val keyManager: LocalEncryptionKeyManager,
     private val encryption: AesGcmEncryption,
     private val pairingProtocol: PairingProtocol = PairingProtocol(),
+    private val pairedRequestProtocol: PairedRequestProtocol = PairedRequestProtocol(),
     private val credentialProtocol: CredentialProtocol = CredentialProtocol(),
+    private val profileListProtocol: ProfileListProtocol = ProfileListProtocol(),
     private val json: Json = Json,
     private val newId: () -> String = { UUID.randomUUID().toString() },
     private val currentTimeMillis: () -> Long = System::currentTimeMillis,
@@ -216,9 +245,13 @@ internal class RequestRepository(
         dao.observeListedRequests(),
         dao.observePairings(),
         dao.observeCredentialRequests(),
-    ) { requests, pairings, credentialRequests ->
+        dao.observeProfileListRequests(),
+    ) { requests, pairings, credentialRequests, profileListRequests ->
         val pairingByRequest = pairings.associateBy(PairingEntity::requestId)
         val credentialByRequest = credentialRequests.associateBy(CredentialRequestEntity::requestId)
+        val profileListByRequest = profileListRequests.associateBy(
+            ProfileListRequestEntity::requestId,
+        )
         requests.mapNotNull { request ->
             when (request.kind) {
                 RequestKind.PAIRING.storedName -> {
@@ -231,6 +264,7 @@ internal class RequestRepository(
                         credentialState = null,
                         credentialDecision = null,
                         credentialResult = null,
+                        profileListState = null,
                         title = pairing.hostname
                             ?: pairing.platform?.let { platform ->
                                 pairing.architecture?.let { "$platform · $it" } ?: platform
@@ -253,8 +287,26 @@ internal class RequestRepository(
                         credentialDecision = credential.decision?.toCredentialDecision(),
                         credentialResult = credential.completionResult
                             ?.toCredentialCompletionResult(),
+                        profileListState = null,
                         title = credential.command,
                         subtitle = requestedProfiles.joinToString(),
+                        receivedAt = request.receivedAt,
+                        completedAt = request.completedAt,
+                    )
+                }
+                RequestKind.PROFILE_LIST.storedName -> {
+                    val profileList = profileListByRequest[request.id] ?: return@mapNotNull null
+                    InboxRequestSummary(
+                        id = request.id,
+                        kind = InboxRequestKind.PROFILE_LIST,
+                        state = request.state.toInboxRequestState(),
+                        pairingState = null,
+                        credentialState = null,
+                        credentialDecision = null,
+                        credentialResult = null,
+                        profileListState = profileList.state.toProfileListRequestState(),
+                        title = profileList.hostname ?: "Unknown client",
+                        subtitle = profileList.vaultAddress,
                         receivedAt = request.receivedAt,
                         completedAt = request.completedAt,
                     )
@@ -268,7 +320,8 @@ internal class RequestRepository(
         dao.observeRequest(id),
         dao.observePairing(id),
         dao.observeCredentialRequest(id),
-    ) { request, pairing, credential ->
+        dao.observeProfileListRequest(id),
+    ) { request, pairing, credential, profileList ->
         if (request == null) return@combine null
         InboxRequestDetails(
             id = request.id,
@@ -325,6 +378,21 @@ internal class RequestRepository(
                     cliVersion = it.cliVersion,
                     error = it.error,
                     decidedAt = it.decidedAt,
+                )
+            },
+            profileList = profileList?.let {
+                ProfileListRequestDetails(
+                    state = it.state.toProfileListRequestState(),
+                    profiles = json.decodeFromString(it.profilesJson),
+                    vaultAddress = it.vaultAddress,
+                    pairingId = it.pairingId,
+                    hostname = it.hostname,
+                    platform = it.platform,
+                    architecture = it.architecture,
+                    machineId = it.machineId,
+                    osVersion = it.osVersion,
+                    cliVersion = it.cliVersion,
+                    error = it.error,
                 )
             },
         )
@@ -654,7 +722,7 @@ internal class RequestRepository(
                 request = requestPayload,
             )
         }.getOrNull() ?: return null
-        val method = runCatching { credentialProtocol.method(opened.plaintext) }.getOrNull()
+        val method = runCatching { pairedRequestProtocol.method(opened.plaintext) }.getOrNull()
             ?: return null
         if (method == CredentialProtocol.CREDENTIAL_REQUEST_METHOD) {
             return processCredentialRequest(
@@ -665,7 +733,17 @@ internal class RequestRepository(
                 currentPairingPsk = pairingPsk,
             )
         }
-        if (method != CredentialProtocol.FINISH_PAIRING_METHOD) return null
+        if (method == ProfileListProtocol.LIST_METHOD) {
+            return processProfileListRequest(
+                pairing = pairing,
+                relayRequestId = message.requestId,
+                requestPayload = requestPayload,
+                opened = opened,
+                currentPairingPsk = pairingPsk,
+                credentials = credentials,
+            )
+        }
+        if (method != PairedRequestProtocol.FINISH_PAIRING_METHOD) return null
         return processFinishRequest(
             credentials = credentials,
             relayRequestId = message.requestId,
@@ -722,6 +800,81 @@ internal class RequestRepository(
             rotatedPairingSecret = rotatedSecret,
         )
         return RelayUpdate(requestId = relayRequestId, requestDelivered = true)
+    }
+
+    private suspend fun processProfileListRequest(
+        pairing: PairingEntity,
+        relayRequestId: String,
+        requestPayload: JsonElement,
+        opened: OpenedPairedRequest,
+        currentPairingPsk: ByteArray,
+        credentials: VaultRelayCredentials,
+    ): RelayUpdate? {
+        if (pairing.state != PairingState.ACTIVE.storedName) return null
+        val contents = runCatching {
+            profileListProtocol.decodeRequest(opened.plaintext)
+        }.getOrNull() ?: return null
+        val profileMetadata = profiles.listCredentialProfiles()
+        val responsePlaintext = profileListProtocol.response(
+            profileMetadata.associateTo(sortedMapOf()) { profile ->
+                profile.name to ProfileListProfile(
+                    description = profile.description,
+                    environmentVariableNames = profile.environmentVariableNames,
+                )
+            },
+        )
+        val response = runCatching {
+            pairingProtocol.sealPairedResponse(
+                routeId = pairing.routeId,
+                requestId = relayRequestId,
+                pairingId = pairing.pairingId,
+                pairingPsk = opened.pairingPsk,
+                routePrivateKey = credentials.routePrivateKey,
+                routePublicKey = credentials.routePublicKey,
+                request = requestPayload,
+                plaintext = responsePlaintext,
+            )
+        }.getOrNull() ?: return null
+        val now = currentTimeMillis()
+        val currentSecret = dao.getPairingSecret(
+            pairing.requestId,
+            PairingSecretKind.PSK.storedName,
+        ) ?: return null
+        val rotatedSecret = if (opened.pairingPsk.contentEquals(currentPairingPsk)) {
+            null
+        } else {
+            encryptPairingPsk(currentSecret, pairing, opened.pairingPsk, now)
+        }
+        dao.insertProfileListRequest(
+            request = InboxRequestEntity(
+                relayRequestId = relayRequestId,
+                parentRequestId = null,
+                kind = RequestKind.PROFILE_LIST.storedName,
+                state = InboxRequestState.WAITING.storedName,
+                listed = true,
+                requestJson = requestPayload.toString(),
+                responseJson = response.toString(),
+                completionJson = null,
+                receivedAt = now,
+                updatedAt = now,
+                completedAt = null,
+                requestAcknowledgedAt = null,
+                responseAcknowledgedAt = null,
+                completionAcknowledgedAt = null,
+            ),
+            profileListRequest = profileListRequestEntity(
+                pairing = pairing,
+                contents = contents,
+                profileMetadata = profileMetadata,
+                now = now,
+            ),
+            rotatedPairingSecret = rotatedSecret,
+        )
+        return RelayUpdate(
+            requestId = relayRequestId,
+            requestDelivered = true,
+            response = response,
+        )
     }
 
     private suspend fun startPairing(
@@ -827,6 +980,30 @@ internal class RequestRepository(
         createdAt = now,
         updatedAt = now,
         decidedAt = null,
+        completedAt = null,
+    )
+
+    private fun profileListRequestEntity(
+        pairing: PairingEntity,
+        contents: ProfileListRequestMessage,
+        profileMetadata: List<CredentialProfileMetadata>,
+        now: Long,
+    ) = ProfileListRequestEntity(
+        requestId = 0,
+        pairingRequestId = pairing.requestId,
+        pairingId = pairing.pairingId,
+        vaultAddress = pairing.vaultAddress,
+        hostname = pairing.hostname,
+        platform = pairing.platform,
+        architecture = pairing.architecture,
+        machineId = pairing.machineId,
+        osVersion = pairing.osVersion,
+        state = ProfileListRequestState.WAITING_FOR_COMPLETION.storedName,
+        cliVersion = contents.cliVersion,
+        profilesJson = json.encodeToString(profileMetadata),
+        error = null,
+        createdAt = now,
+        updatedAt = now,
         completedAt = null,
     )
 
@@ -992,8 +1169,69 @@ internal class RequestRepository(
             RequestKind.CREDENTIAL.storedName -> {
                 processCredentialCompletion(activeCredentials, request, completion)
             }
+            RequestKind.PROFILE_LIST.storedName -> {
+                processProfileListCompletion(activeCredentials, request, completion)
+            }
             else -> null
         }
+    }
+
+    private suspend fun processProfileListCompletion(
+        activeCredentials: VaultRelayCredentials,
+        request: InboxRequestEntity,
+        completion: JsonElement,
+    ): RelayUpdate? {
+        val profileListRequest = dao.getProfileListRequest(request.id) ?: return null
+        if (
+            profileListRequest.state == ProfileListRequestState.COMPLETED.storedName ||
+            profileListRequest.state == ProfileListRequestState.VERIFICATION_FAILED.storedName
+        ) {
+            return RelayUpdate(request.relayRequestId, completionDelivered = true)
+        }
+        val pairingRequestId = profileListRequest.pairingRequestId ?: return null
+        val pairing = dao.getPairing(pairingRequestId) ?: return null
+        val credentials = credentialsFor(pairing, activeCredentials) ?: return null
+        val pairingPsk = decryptPairingPsk(pairing) ?: return null
+        val decoded = runCatching {
+            val plaintext = pairingProtocol.openPairedCompletion(
+                routeId = pairing.routeId,
+                requestId = request.relayRequestId,
+                pairingId = pairing.pairingId,
+                pairingPsk = pairingPsk,
+                routePrivateKey = credentials.routePrivateKey,
+                routePublicKey = credentials.routePublicKey,
+                request = json.parseToJsonElement(request.requestJson),
+                completion = completion,
+            )
+            profileListProtocol.decodeCompletion(plaintext)
+        }
+        val valid = decoded.getOrNull() == profileListRequest.cliVersion
+        val now = currentTimeMillis()
+        dao.updateProfileListRequest(
+            request = request.copy(
+                state = InboxRequestState.COMPLETED.storedName,
+                completionJson = completion.toString(),
+                responseAcknowledgedAt = request.responseAcknowledgedAt ?: now,
+                updatedAt = now,
+                completedAt = now,
+            ),
+            profileListRequest = profileListRequest.copy(
+                state = if (valid) {
+                    ProfileListRequestState.COMPLETED.storedName
+                } else {
+                    ProfileListRequestState.VERIFICATION_FAILED.storedName
+                },
+                error = if (valid) {
+                    null
+                } else {
+                    decoded.exceptionOrNull()?.message
+                        ?: "Profile list completion did not match the request."
+                },
+                updatedAt = now,
+                completedAt = now,
+            ),
+        )
+        return RelayUpdate(request.relayRequestId, completionDelivered = true)
     }
 
     private suspend fun processCredentialCompletion(
@@ -1192,6 +1430,9 @@ internal class RequestRepository(
             RequestKind.CREDENTIAL.storedName -> {
                 dao.getCredentialRequest(request.id)?.pairingRequestId?.let { dao.getPairing(it) }
             }
+            RequestKind.PROFILE_LIST.storedName -> {
+                dao.getProfileListRequest(request.id)?.pairingRequestId?.let { dao.getPairing(it) }
+            }
             else -> null
         }
 
@@ -1310,6 +1551,9 @@ internal class RequestRepository(
     private fun String.toCredentialCompletionResult(): CredentialCompletionResult =
         checkNotNull(CredentialCompletionResult.entries.find { it.storedName == this })
 
+    private fun String.toProfileListRequestState(): ProfileListRequestState =
+        checkNotNull(ProfileListRequestState.entries.find { it.storedName == this })
+
     private fun encodeStringList(values: List<String>): String =
         json.encodeToString(STRING_LIST_SERIALIZER, values)
 
@@ -1327,6 +1571,7 @@ private enum class RequestKind(val storedName: String) {
     PAIRING("pairing"),
     PAIRING_FINISH("pairing_finish"),
     CREDENTIAL("credential"),
+    PROFILE_LIST("profile_list"),
 }
 
 private enum class PairingSecretKind(val storedName: String) {
