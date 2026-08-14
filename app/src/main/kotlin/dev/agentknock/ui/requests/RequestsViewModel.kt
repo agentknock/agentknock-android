@@ -4,6 +4,7 @@ import android.app.Application
 import androidx.lifecycle.AndroidViewModel
 import androidx.lifecycle.viewModelScope
 import dev.agentknock.AgentKnockApplication
+import dev.agentknock.storage.request.CredentialDecisionResult
 import dev.agentknock.storage.request.InboxRequestDetails
 import dev.agentknock.storage.request.InboxRequestSummary
 import dev.agentknock.storage.request.PairingDecisionResult
@@ -82,6 +83,18 @@ internal class RequestsViewModel(application: Application) : AndroidViewModel(ap
     suspend fun rejectPairing(requestId: Long): PairingDecisionResult {
         val result = repository.rejectPairing(requestId)
         pollOnce()
+        return result
+    }
+
+    suspend fun approveCredentialRequest(requestId: Long): CredentialDecisionResult {
+        val result = repository.approveCredentialRequest(requestId)
+        if (result == CredentialDecisionResult.Decided) pollOnce()
+        return result
+    }
+
+    suspend fun denyCredentialRequest(requestId: Long): CredentialDecisionResult {
+        val result = repository.denyCredentialRequest(requestId)
+        if (result == CredentialDecisionResult.Decided) pollOnce()
         return result
     }
 

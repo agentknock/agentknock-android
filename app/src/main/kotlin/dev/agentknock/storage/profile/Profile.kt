@@ -166,6 +166,14 @@ internal interface ProfileDao {
     @Query("SELECT * FROM environment_variables WHERE id = :id")
     suspend fun getEnvironmentVariable(id: String): EnvironmentVariableEntity?
 
+    @Query("SELECT * FROM profiles WHERE name IN (:names)")
+    suspend fun getProfilesByName(names: List<String>): List<ProfileEntity>
+
+    @Query("SELECT * FROM environment_variables WHERE profile_id IN (:profileIds)")
+    suspend fun getEnvironmentVariablesForProfiles(
+        profileIds: List<String>,
+    ): List<EnvironmentVariableEntity>
+
     @Query("SELECT EXISTS(SELECT 1 FROM profiles WHERE name = :name AND id != :excludingId)")
     suspend fun profileNameInUse(name: String, excludingId: String): Boolean
 

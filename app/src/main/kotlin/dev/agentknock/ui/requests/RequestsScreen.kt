@@ -1,5 +1,6 @@
 package dev.agentknock.ui.requests
 
+import android.content.res.Resources
 import androidx.activity.compose.BackHandler
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.Arrangement
@@ -30,7 +31,6 @@ import androidx.compose.material3.SnackbarHostState
 import androidx.compose.material3.Text
 import androidx.compose.material3.TextButton
 import androidx.compose.runtime.Composable
-import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.remember
 import androidx.compose.runtime.rememberCoroutineScope
@@ -43,8 +43,14 @@ import androidx.compose.ui.unit.dp
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import androidx.lifecycle.viewmodel.compose.viewModel
 import dev.agentknock.R
+import dev.agentknock.storage.profile.CredentialProfileMetadata
+import dev.agentknock.storage.request.CredentialCompletionResult
+import dev.agentknock.storage.request.CredentialDecision
+import dev.agentknock.storage.request.CredentialDecisionResult
+import dev.agentknock.storage.request.CredentialRequestDetails
+import dev.agentknock.storage.request.CredentialRequestState
 import dev.agentknock.storage.request.InboxRequestDetails
-import dev.agentknock.storage.request.InboxRequestState
+import dev.agentknock.storage.request.InboxRequestKind
 import dev.agentknock.storage.request.InboxRequestSummary
 import dev.agentknock.storage.request.PairingDecisionResult
 import dev.agentknock.storage.request.PairingState
@@ -80,58 +86,68 @@ internal fun RequestsScreen(viewModel: RequestsViewModel = viewModel()) {
                     .fillMaxSize()
                     .padding(padding),
             )
-        } else {
-            BackHandler { viewModel.selectRequest(null) }
-            val request = selectedRequest
-            if (request == null) {
-                Box(
-                    Modifier
-                        .fillMaxSize()
-                        .padding(padding),
-                    contentAlignment = Alignment.Center,
-                ) { CircularProgressIndicator() }
-            } else {
-                PairingRequestDetail(
-                    request = request,
-                    onBack = { viewModel.selectRequest(null) },
-                    onChooseSas = { index ->
-                        scope.launch {
-                            when (viewModel.chooseSas(request.id, index)) {
-                                PairingDecisionResult.VERIFIED -> report(
-                                    resources.getString(R.string.pairing_sas_verified),
-                                )
-                                PairingDecisionResult.REJECTED -> report(
-                                    resources.getString(R.string.pairing_rejected),
-                                )
-                                PairingDecisionResult.NOT_PENDING -> report(
-                                    resources.getString(R.string.pairing_not_pending),
-                                )
-                                PairingDecisionResult.NOT_FOUND -> report(
-                                    resources.getString(R.string.request_not_found),
-                                )
-                            }
+            return@Scaffold
+        }
+
+        BackHandler { viewModel.selectRequest(null) }
+        val request = selectedRequest
+        if (request == null) {
+            Box(
+                Modifier
+                    .fillMaxSize()
+                    .padding(padding),
+                contentAlignment = Alignment.Center,
+            ) { CircularProgressIndicator() }
+            return@Scaffold
+        }
+
+        val detailModifier = Modifier
+            .fillMaxSize()
+            .padding(padding)
+        when {
+            request.pairing != null -> PairingRequestDetail(
+                request = request,
+                onBack = { viewModel.selectRequest(null) },
+                onChooseSas = { index ->
+                    scope.launch {
+                        val message = when (viewModel.chooseSas(request.id, index)) {
+                            PairingDecisionResult.VERIFIED -> R.string.pairing_sas_verified
+                            PairingDecisionResult.REJECTED -> R.string.pairing_rejected
+                            PairingDecisionResult.NOT_PENDING -> R.string.pairing_not_pending
+                            PairingDecisionResult.NOT_FOUND -> R.string.request_not_found
                         }
-                    },
-                    onReject = {
-                        scope.launch {
-                            when (viewModel.rejectPairing(request.id)) {
-                                PairingDecisionResult.REJECTED -> report(
-                                    resources.getString(R.string.pairing_rejected),
-                                )
-                                PairingDecisionResult.NOT_PENDING,
-                                PairingDecisionResult.VERIFIED,
-                                -> report(resources.getString(R.string.pairing_not_pending))
-                                PairingDecisionResult.NOT_FOUND -> report(
-                                    resources.getString(R.string.request_not_found),
-                                )
-                            }
+                        report(resources.getString(message))
+                    }
+                },
+                onReject = {
+                    scope.launch {
+                        val message = when (viewModel.rejectPairing(request.id)) {
+                            PairingDecisionResult.REJECTED -> R.string.pairing_rejected
+                            PairingDecisionResult.NOT_FOUND -> R.string.request_not_found
+                            PairingDecisionResult.NOT_PENDING,
+                            PairingDecisionResult.VERIFIED,
+                            -> R.string.pairing_not_pending
                         }
-                    },
-                    modifier = Modifier
-                        .fillMaxSize()
-                        .padding(padding),
-                )
-            }
+                        report(resources.getString(message))
+                    }
+                },
+                modifier = detailModifier,
+            )
+            request.credential != null -> CredentialRequestDetail(
+                request = request,
+                onBack = { viewModel.selectRequest(null) },
+                onApprove = {
+                    scope.launch {
+                        report(viewModel.approveCredentialRequest(request.id).message(resources))
+                    }
+                },
+                onDeny = {
+                    scope.launch {
+                        report(viewModel.denyCredentialRequest(request.id).message(resources))
+                    }
+                },
+                modifier = detailModifier,
+            )
         }
     }
 }
@@ -212,12 +228,20 @@ private fun RequestRow(request: InboxRequestSummary, onClick: () -> Unit) {
             verticalAlignment = Alignment.CenterVertically,
         ) {
             Text(
-                stringResource(R.string.pairing_request),
+                stringResource(
+                    when (request.kind) {
+                        InboxRequestKind.PAIRING -> R.string.pairing_request
+                        InboxRequestKind.CREDENTIAL -> R.string.credential_request
+                    },
+                ),
                 style = MaterialTheme.typography.titleMedium,
             )
-            RequestStatus(request.pairingState)
+            RequestStatus(request)
         }
         Text(request.title, color = MaterialTheme.colorScheme.onSurfaceVariant)
+        if (request.subtitle.isNotEmpty()) {
+            Text(request.subtitle, color = MaterialTheme.colorScheme.onSurfaceVariant)
+        }
         Text(
             DateFormat.getDateTimeInstance(DateFormat.MEDIUM, DateFormat.SHORT)
                 .format(Date(request.receivedAt)),
@@ -229,7 +253,20 @@ private fun RequestRow(request: InboxRequestSummary, onClick: () -> Unit) {
 }
 
 @Composable
-private fun RequestStatus(state: PairingState) {
+private fun RequestStatus(request: InboxRequestSummary) {
+    request.pairingState?.let {
+        PairingRequestStatus(it)
+        return
+    }
+    CredentialRequestStatus(
+        state = checkNotNull(request.credentialState),
+        decision = request.credentialDecision,
+        result = request.credentialResult,
+    )
+}
+
+@Composable
+private fun PairingRequestStatus(state: PairingState) {
     val label = when (state) {
         PairingState.RECEIVING -> R.string.pairing_receiving
         PairingState.SAS_VERIFICATION_PENDING -> R.string.action_required
@@ -238,14 +275,50 @@ private fun RequestStatus(state: PairingState) {
         PairingState.ACTIVE -> R.string.paired
         PairingState.VERIFICATION_FAILED -> R.string.action_required
     }
+    StatusLabel(
+        label = label,
+        primary = state == PairingState.SAS_VERIFICATION_PENDING ||
+            state == PairingState.VERIFICATION_FAILED,
+        error = state == PairingState.REJECTED,
+    )
+}
+
+@Composable
+private fun CredentialRequestStatus(
+    state: CredentialRequestState,
+    decision: CredentialDecision?,
+    result: CredentialCompletionResult?,
+) {
+    val label = when (state) {
+        CredentialRequestState.APPROVAL_PENDING -> R.string.action_required
+        CredentialRequestState.WAITING_FOR_COMPLETION -> R.string.waiting_for_client
+        CredentialRequestState.VERIFICATION_FAILED -> R.string.verification_failed
+        CredentialRequestState.COMPLETED -> when (result) {
+            CredentialCompletionResult.APPROVED -> R.string.delivered
+            CredentialCompletionResult.DENIED -> R.string.rejected
+            CredentialCompletionResult.ABORTED -> R.string.aborted
+            null -> R.string.completed
+        }
+    }
+    StatusLabel(
+        label = label,
+        primary = state == CredentialRequestState.APPROVAL_PENDING ||
+            state == CredentialRequestState.VERIFICATION_FAILED,
+        error = state == CredentialRequestState.VERIFICATION_FAILED ||
+            result == CredentialCompletionResult.DENIED ||
+            (state == CredentialRequestState.WAITING_FOR_COMPLETION &&
+                decision == CredentialDecision.DENIED),
+    )
+}
+
+@Composable
+private fun StatusLabel(label: Int, primary: Boolean, error: Boolean) {
     Text(
         stringResource(label),
         style = MaterialTheme.typography.labelLarge,
-        color = when (state) {
-            PairingState.SAS_VERIFICATION_PENDING,
-            PairingState.VERIFICATION_FAILED,
-            -> MaterialTheme.colorScheme.primary
-            PairingState.REJECTED -> MaterialTheme.colorScheme.error
+        color = when {
+            error -> MaterialTheme.colorScheme.error
+            primary -> MaterialTheme.colorScheme.primary
             else -> MaterialTheme.colorScheme.onSurfaceVariant
         },
     )
@@ -259,20 +332,14 @@ private fun PairingRequestDetail(
     onReject: () -> Unit,
     modifier: Modifier = Modifier,
 ) {
-    val pairing = request.pairing
-    Column(
-        modifier = modifier
-            .verticalScroll(rememberScrollState())
-            .padding(20.dp),
-        verticalArrangement = Arrangement.spacedBy(20.dp),
-    ) {
-        TextButton(onClick = onBack) { Text(stringResource(R.string.back)) }
+    val pairing = checkNotNull(request.pairing)
+    DetailColumn(modifier, onBack) {
         Column(verticalArrangement = Arrangement.spacedBy(4.dp)) {
             Text(
                 stringResource(R.string.pairing_request),
                 style = MaterialTheme.typography.headlineMedium,
             )
-            RequestStatus(pairing.pairingState)
+            PairingRequestStatus(pairing.pairingState)
         }
 
         when (pairing.pairingState) {
@@ -313,7 +380,225 @@ private fun PairingRequestDetail(
             }
         }
 
-        ClientInformation(request)
+        PairingClientInformation(request)
+    }
+}
+
+@Composable
+private fun CredentialRequestDetail(
+    request: InboxRequestDetails,
+    onBack: () -> Unit,
+    onApprove: () -> Unit,
+    onDeny: () -> Unit,
+    modifier: Modifier = Modifier,
+) {
+    val credential = checkNotNull(request.credential)
+    DetailColumn(modifier, onBack) {
+        Column(verticalArrangement = Arrangement.spacedBy(4.dp)) {
+            Text(
+                stringResource(R.string.credential_request),
+                style = MaterialTheme.typography.headlineMedium,
+            )
+            CredentialRequestStatus(
+                credential.state,
+                credential.decision,
+                credential.completionResult,
+            )
+        }
+
+        CredentialStateCard(credential)
+
+        if (credential.state == CredentialRequestState.APPROVAL_PENDING) {
+            if (credential.missingProfiles.isNotEmpty()) {
+                StatusCard(
+                    title = stringResource(R.string.missing_profiles),
+                    message = credential.missingProfiles.joinToString(),
+                    error = true,
+                )
+            }
+            Button(
+                onClick = onApprove,
+                modifier = Modifier.fillMaxWidth(),
+            ) {
+                Text(stringResource(R.string.release_credentials))
+            }
+            OutlinedButton(onClick = onDeny, modifier = Modifier.fillMaxWidth()) {
+                Text(stringResource(R.string.deny_request))
+            }
+        }
+
+        CredentialProfiles(credential)
+        CredentialOperation(credential)
+        CredentialClientInformation(request, credential)
+    }
+}
+
+@Composable
+private fun CredentialStateCard(credential: CredentialRequestDetails) {
+    when (credential.state) {
+        CredentialRequestState.APPROVAL_PENDING -> StatusCard(
+            title = stringResource(R.string.review_credential_request),
+            message = stringResource(R.string.credential_approval_explanation),
+        )
+        CredentialRequestState.WAITING_FOR_COMPLETION -> StatusCard(
+            title = stringResource(
+                if (credential.decision == CredentialDecision.APPROVED) {
+                    R.string.credentials_released
+                } else {
+                    R.string.request_denied
+                },
+            ),
+            message = stringResource(R.string.credential_waiting_for_completion),
+            error = credential.decision == CredentialDecision.DENIED,
+        )
+        CredentialRequestState.COMPLETED -> when (credential.completionResult) {
+            CredentialCompletionResult.APPROVED -> StatusCard(
+                title = stringResource(R.string.credentials_delivered),
+                message = stringResource(R.string.credentials_delivered_explanation),
+            )
+            CredentialCompletionResult.DENIED -> StatusCard(
+                title = stringResource(R.string.request_denied),
+                message = credential.completionMessage
+                    ?: stringResource(R.string.request_denied_explanation),
+                error = true,
+            )
+            CredentialCompletionResult.ABORTED -> StatusCard(
+                title = stringResource(R.string.request_aborted),
+                message = credential.completionMessage
+                    ?: stringResource(R.string.request_aborted_explanation),
+            )
+            null -> StatusCard(
+                title = stringResource(R.string.completed),
+                message = stringResource(R.string.credential_completed_explanation),
+            )
+        }
+        CredentialRequestState.VERIFICATION_FAILED -> StatusCard(
+            title = stringResource(R.string.verification_failed),
+            message = credential.error ?: stringResource(R.string.credential_verification_failed),
+            error = true,
+        )
+    }
+}
+
+@Composable
+private fun CredentialProfiles(credential: CredentialRequestDetails) {
+    DetailSection(stringResource(R.string.requested_profiles)) {
+        credential.profileDetails.forEach { profile -> ProfileCard(profile) }
+        Text(
+            stringResource(R.string.credential_values_hidden),
+            style = MaterialTheme.typography.bodySmall,
+            color = MaterialTheme.colorScheme.onSurfaceVariant,
+        )
+    }
+}
+
+@Composable
+private fun ProfileCard(profile: CredentialProfileMetadata) {
+    Card {
+        Column(
+            modifier = Modifier
+                .fillMaxWidth()
+                .padding(16.dp),
+            verticalArrangement = Arrangement.spacedBy(6.dp),
+        ) {
+            Text(profile.name, style = MaterialTheme.typography.titleMedium)
+            if (profile.description.isNotEmpty()) {
+                Text(profile.description, color = MaterialTheme.colorScheme.onSurfaceVariant)
+            }
+            Text(
+                profile.environmentVariableNames.joinToString(separator = "\n"),
+                fontFamily = FontFamily.Monospace,
+            )
+        }
+    }
+}
+
+@Composable
+private fun CredentialOperation(credential: CredentialRequestDetails) {
+    DetailSection(stringResource(R.string.requested_operation)) {
+        credential.reason?.let {
+            InformationRow(stringResource(R.string.reported_reason), it)
+            Text(
+                stringResource(R.string.reported_information_warning),
+                style = MaterialTheme.typography.bodySmall,
+                color = MaterialTheme.colorScheme.onSurfaceVariant,
+            )
+        }
+        InformationRow(stringResource(R.string.command), credential.command, monospace = true)
+        credential.arguments.forEachIndexed { index, argument ->
+            InformationRow(
+                stringResource(R.string.argument_number, index + 1),
+                argument,
+                monospace = true,
+            )
+        }
+        InformationRow(
+            stringResource(R.string.working_directory),
+            credential.workingDirectory,
+            monospace = true,
+        )
+        credential.resolvedPath?.let {
+            InformationRow(stringResource(R.string.resolved_path), it, monospace = true)
+        }
+        InformationRow(stringResource(R.string.standard_input), credential.stdinKind)
+        InformationRow(stringResource(R.string.standard_output), credential.stdoutKind)
+        InformationRow(stringResource(R.string.standard_error), credential.stderrKind)
+        if (credential.launcherChain.isNotEmpty()) {
+            InformationRow(
+                stringResource(R.string.launcher_chain),
+                credential.launcherChain.joinToString(separator = "\n"),
+                monospace = true,
+            )
+        }
+    }
+}
+
+@Composable
+private fun CredentialClientInformation(
+    request: InboxRequestDetails,
+    credential: CredentialRequestDetails,
+) {
+    DetailSection(stringResource(R.string.reported_client_information)) {
+        Text(
+            stringResource(R.string.reported_information_warning),
+            style = MaterialTheme.typography.bodySmall,
+            color = MaterialTheme.colorScheme.onSurfaceVariant,
+        )
+        InformationRow(stringResource(R.string.received), formatDate(request.receivedAt))
+        InformationRow(stringResource(R.string.vault_address), credential.vaultAddress)
+        credential.hostname?.let { InformationRow(stringResource(R.string.hostname), it) }
+        credential.platform?.let { InformationRow(stringResource(R.string.platform), it) }
+        credential.architecture?.let { InformationRow(stringResource(R.string.architecture), it) }
+        credential.osVersion?.let { InformationRow(stringResource(R.string.os_version), it) }
+        InformationRow(stringResource(R.string.cli_version), credential.cliVersion)
+        credential.machineId?.let { InformationRow(stringResource(R.string.machine_id), it) }
+        InformationRow(stringResource(R.string.pairing_id), credential.pairingId, monospace = true)
+        InformationRow(stringResource(R.string.request_id), request.relayRequestId, monospace = true)
+    }
+}
+
+@Composable
+private fun DetailColumn(
+    modifier: Modifier,
+    onBack: () -> Unit,
+    content: @Composable () -> Unit,
+) {
+    Column(
+        modifier = modifier
+            .verticalScroll(rememberScrollState())
+            .padding(20.dp),
+        verticalArrangement = Arrangement.spacedBy(20.dp),
+    ) {
+        TextButton(onClick = onBack) { Text(stringResource(R.string.back)) }
+        content()
+    }
+}
+
+@Composable
+private fun DetailSection(title: String, content: @Composable () -> Unit) {
+    Column(verticalArrangement = Arrangement.spacedBy(10.dp)) {
+        Text(title, style = MaterialTheme.typography.titleLarge)
+        content()
     }
 }
 
@@ -363,10 +648,9 @@ private fun StatusCard(title: String, message: String, error: Boolean = false) {
 }
 
 @Composable
-private fun ClientInformation(request: InboxRequestDetails) {
-    val pairing = request.pairing
-    Column(verticalArrangement = Arrangement.spacedBy(10.dp)) {
-        Text(stringResource(R.string.request_information), style = MaterialTheme.typography.titleLarge)
+private fun PairingClientInformation(request: InboxRequestDetails) {
+    val pairing = checkNotNull(request.pairing)
+    DetailSection(stringResource(R.string.request_information)) {
         InformationRow(stringResource(R.string.received), formatDate(request.receivedAt))
         InformationRow(stringResource(R.string.vault_address), pairing.vaultAddress)
         pairing.hostname?.let { InformationRow(stringResource(R.string.hostname), it) }
@@ -391,6 +675,35 @@ private fun InformationRow(label: String, value: String, monospace: Boolean = fa
         SelectionContainer {
             Text(value, fontFamily = if (monospace) FontFamily.Monospace else FontFamily.Default)
         }
+    }
+}
+
+private fun CredentialDecisionResult.message(resources: Resources): String = when (this) {
+    CredentialDecisionResult.Decided -> resources.getString(R.string.decision_sent)
+    CredentialDecisionResult.ProfilesChanged -> {
+        resources.getString(R.string.credential_profiles_changed)
+    }
+    CredentialDecisionResult.NotPending -> resources.getString(R.string.credential_not_pending)
+    CredentialDecisionResult.NotFound -> resources.getString(R.string.request_not_found)
+    is CredentialDecisionResult.MissingProfiles -> resources.getString(
+        R.string.credential_missing_profiles,
+        names.joinToString(),
+    )
+    is CredentialDecisionResult.ConflictingVariable -> resources.getString(
+        R.string.credential_conflicting_variable,
+        name,
+    )
+    CredentialDecisionResult.SecretUnavailable -> {
+        resources.getString(R.string.credential_value_unavailable)
+    }
+    CredentialDecisionResult.SecretCorrupted -> {
+        resources.getString(R.string.credential_value_corrupted)
+    }
+    CredentialDecisionResult.UnsupportedEncryption -> {
+        resources.getString(R.string.credential_value_unsupported)
+    }
+    CredentialDecisionResult.PairingUnavailable -> {
+        resources.getString(R.string.credential_pairing_unavailable)
     }
 }
 

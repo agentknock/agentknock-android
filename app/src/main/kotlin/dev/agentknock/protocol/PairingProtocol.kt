@@ -46,6 +46,11 @@ internal data class PreparedFinishResponse(
     val cliVersion: String,
 )
 
+internal data class OpenedPairedRequest(
+    val plaintext: ByteArray,
+    val pairingPsk: ByteArray,
+)
+
 internal class PairingProtocol(
     private val json: Json = Json { ignoreUnknownKeys = true },
     private val random: SecureRandom = SecureRandom(),
@@ -161,41 +166,35 @@ internal class PairingProtocol(
         request: JsonElement,
         accepted: Boolean,
     ): PreparedFinishResponse {
-        val decoded = json.decodeFromJsonElement(EncryptedRequest.serializer(), request)
-        require(decoded.version == PROTOCOL_VERSION) { "Unsupported protocol version" }
-        require(decoded.pairingId == pairingId) { "Pairing id mismatch" }
-        val encapsulatedKey = BASE64_DECODER.decode(decoded.key)
-        val ciphertext = BASE64_DECODER.decode(decoded.ciphertext)
-        val context = pskReceiver(
+        val opened = openPairedRequest(
             routeId = routeId,
-            pairingId = pairingId,
             requestId = requestId,
+            pairingId = pairingId,
             pairingPsk = pairingPsk,
             routePrivateKey = routePrivateKey,
             routePublicKey = routePublicKey,
-            encapsulatedKey = encapsulatedKey,
+            request = request,
         )
-        val plaintext = context.open(EMPTY, ciphertext)
-        val contents = json.decodeFromString(FinishRequest.serializer(), plaintext.decodeToString())
+        val contents = json.decodeFromString(
+            FinishRequest.serializer(),
+            opened.plaintext.decodeToString(),
+        )
         require(contents.method == FINISH_PAIRING_METHOD) { "Unexpected pairing method" }
         val result = if (accepted) RESULT_ACCEPTED else RESULT_REJECTED
         val responsePlaintext = json.encodeToString(
             FinishResult.serializer(),
             FinishResult(result),
         ).encodeToByteArray()
-        val publicNonce = ByteArray(RESPONSE_NONCE_BYTES).also(random::nextBytes)
-        val salt = encapsulatedKey + publicNonce
-        val exportedSecret = context.export(RESPONSE_EXPORT_CONTEXT, EXPORTED_SECRET_BYTES)
-        val key = derive(exportedSecret, salt, RESPONSE_KEY_INFO, CHACHA_KEY_BYTES)
-        val nonce = derive(exportedSecret, salt, RESPONSE_NONCE_INFO, RESPONSE_NONCE_BYTES)
-        val responseCiphertext = chachaSeal(key, nonce, responsePlaintext)
         return PreparedFinishResponse(
-            response = json.encodeToJsonElement(
-                EncryptedResponse.serializer(),
-                EncryptedResponse(
-                    nonce = BASE64_ENCODER.encodeToString(publicNonce),
-                    ciphertext = BASE64_ENCODER.encodeToString(responseCiphertext),
-                ),
+            response = sealPairedResponse(
+                routeId = routeId,
+                requestId = requestId,
+                pairingId = pairingId,
+                pairingPsk = opened.pairingPsk,
+                routePrivateKey = routePrivateKey,
+                routePublicKey = routePublicKey,
+                request = request,
+                plaintext = responsePlaintext,
             ),
             cliVersion = contents.cliVersion,
         )
@@ -211,26 +210,100 @@ internal class PairingProtocol(
         request: JsonElement,
         completion: JsonElement,
     ) {
-        val decodedRequest = json.decodeFromJsonElement(EncryptedRequest.serializer(), request)
-        require(decodedRequest.version == PROTOCOL_VERSION)
-        require(decodedRequest.pairingId == pairingId)
-        val context = pskReceiver(
+        val plaintext = openPairedCompletion(
             routeId = routeId,
-            pairingId = pairingId,
             requestId = requestId,
+            pairingId = pairingId,
             pairingPsk = pairingPsk,
             routePrivateKey = routePrivateKey,
             routePublicKey = routePublicKey,
-            encapsulatedKey = BASE64_DECODER.decode(decodedRequest.key),
+            request = request,
+            completion = completion,
         )
-        context.open(EMPTY, BASE64_DECODER.decode(decodedRequest.ciphertext))
-        val decodedCompletion = json.decodeFromJsonElement(
-            EncryptedCompletion.serializer(),
-            completion,
-        )
-        val plaintext = context.open(EMPTY, BASE64_DECODER.decode(decodedCompletion.ciphertext))
         val result = json.decodeFromString(FinishCompletion.serializer(), plaintext.decodeToString())
         require(result.result == RESULT_ACCEPTED) { "Client did not accept pairing" }
+    }
+
+    fun openPairedRequest(
+        routeId: String,
+        requestId: String,
+        pairingId: String,
+        pairingPsk: ByteArray,
+        routePrivateKey: ByteArray,
+        routePublicKey: ByteArray,
+        request: JsonElement,
+    ): OpenedPairedRequest {
+        val opened = openPairedContext(
+            routeId = routeId,
+            requestId = requestId,
+            pairingId = pairingId,
+            pairingPsk = pairingPsk,
+            routePrivateKey = routePrivateKey,
+            routePublicKey = routePublicKey,
+            request = request,
+        )
+        return OpenedPairedRequest(opened.plaintext, opened.pairingPsk)
+    }
+
+    fun sealPairedResponse(
+        routeId: String,
+        requestId: String,
+        pairingId: String,
+        pairingPsk: ByteArray,
+        routePrivateKey: ByteArray,
+        routePublicKey: ByteArray,
+        request: JsonElement,
+        plaintext: ByteArray,
+    ): JsonElement {
+        val opened = openPairedContext(
+            routeId = routeId,
+            requestId = requestId,
+            pairingId = pairingId,
+            pairingPsk = pairingPsk,
+            routePrivateKey = routePrivateKey,
+            routePublicKey = routePublicKey,
+            request = request,
+        )
+        val publicNonce = ByteArray(RESPONSE_NONCE_BYTES).also(random::nextBytes)
+        val encapsulatedKey = BASE64_DECODER.decode(opened.request.key)
+        val salt = encapsulatedKey + publicNonce
+        val exportedSecret = opened.context.export(
+            RESPONSE_EXPORT_CONTEXT,
+            EXPORTED_SECRET_BYTES,
+        )
+        val key = derive(exportedSecret, salt, RESPONSE_KEY_INFO, CHACHA_KEY_BYTES)
+        val nonce = derive(exportedSecret, salt, RESPONSE_NONCE_INFO, RESPONSE_NONCE_BYTES)
+        val ciphertext = chachaSeal(key, nonce, plaintext)
+        return json.encodeToJsonElement(
+            EncryptedResponse.serializer(),
+            EncryptedResponse(
+                nonce = BASE64_ENCODER.encodeToString(publicNonce),
+                ciphertext = BASE64_ENCODER.encodeToString(ciphertext),
+            ),
+        )
+    }
+
+    fun openPairedCompletion(
+        routeId: String,
+        requestId: String,
+        pairingId: String,
+        pairingPsk: ByteArray,
+        routePrivateKey: ByteArray,
+        routePublicKey: ByteArray,
+        request: JsonElement,
+        completion: JsonElement,
+    ): ByteArray {
+        val opened = openPairedContext(
+            routeId = routeId,
+            requestId = requestId,
+            pairingId = pairingId,
+            pairingPsk = pairingPsk,
+            routePrivateKey = routePrivateKey,
+            routePublicKey = routePublicKey,
+            request = request,
+        )
+        val decoded = json.decodeFromJsonElement(EncryptedCompletion.serializer(), completion)
+        return opened.context.open(EMPTY, BASE64_DECODER.decode(decoded.ciphertext))
     }
 
     fun formatSas(value: Long): String {
@@ -272,6 +345,24 @@ internal class PairingProtocol(
         routePrivateKey: ByteArray,
         routePublicKey: ByteArray,
         encapsulatedKey: ByteArray,
+    ) = pskReceiver(
+        routeId = routeId,
+        pairingId = pairingId,
+        requestId = requestId.ulidBytes(),
+        pairingPsk = pairingPsk,
+        routePrivateKey = routePrivateKey,
+        routePublicKey = routePublicKey,
+        encapsulatedKey = encapsulatedKey,
+    )
+
+    private fun pskReceiver(
+        routeId: String,
+        pairingId: String,
+        requestId: ByteArray,
+        pairingPsk: ByteArray,
+        routePrivateKey: ByteArray,
+        routePublicKey: ByteArray,
+        encapsulatedKey: ByteArray,
     ) = pskHpke.setupPSKR(
         encapsulatedKey,
         pskHpke.deserializePrivateKey(routePrivateKey, routePublicKey),
@@ -281,10 +372,78 @@ internal class PairingProtocol(
     )
 
     private fun protocolInfo(routeId: String, pairingId: String, requestId: String): ByteArray =
+        protocolInfo(routeId, pairingId, requestId.ulidBytes())
+
+    private fun protocolInfo(routeId: String, pairingId: String, requestId: ByteArray): ByteArray =
         PROTOCOL_VERSION_INFO +
             requireNotNull(routeId.hexBytes()) { "Invalid route id" } +
             requireNotNull(pairingId.hexBytes()) { "Invalid pairing id" } +
-            requestId.ulidBytes()
+            requestId.also { require(it.size == IDENTIFIER_BYTES) { "Invalid request id" } }
+
+    private fun openPairedContext(
+        routeId: String,
+        requestId: String,
+        pairingId: String,
+        pairingPsk: ByteArray,
+        routePrivateKey: ByteArray,
+        routePublicKey: ByteArray,
+        request: JsonElement,
+    ): OpenedPairedContext {
+        require(pairingPsk.size == PAIRING_PSK_BYTES) { "Invalid pairing PSK" }
+        val decoded = json.decodeFromJsonElement(EncryptedRequest.serializer(), request)
+        require(decoded.version == PROTOCOL_VERSION) { "Unsupported protocol version" }
+        require(decoded.pairingId == pairingId) { "Pairing id mismatch" }
+        val encapsulatedKey = BASE64_DECODER.decode(decoded.key)
+        val ciphertext = BASE64_DECODER.decode(decoded.ciphertext)
+
+        fun open(psk: ByteArray): OpenedPairedContext {
+            val context = pskReceiver(
+                routeId = routeId,
+                pairingId = pairingId,
+                requestId = requestId,
+                pairingPsk = psk,
+                routePrivateKey = routePrivateKey,
+                routePublicKey = routePublicKey,
+                encapsulatedKey = encapsulatedKey,
+            )
+            return OpenedPairedContext(
+                request = decoded,
+                context = context,
+                plaintext = context.open(EMPTY, ciphertext),
+                pairingPsk = psk,
+            )
+        }
+
+        val current = runCatching { open(pairingPsk) }
+        current.getOrNull()?.let { return it }
+        val rotationKey = decoded.rotationKey ?: throw checkNotNull(current.exceptionOrNull())
+        val rotatedPsk = rotatePairingPsk(
+            routeId = routeId,
+            pairingId = pairingId,
+            pairingPsk = pairingPsk,
+            routePrivateKey = routePrivateKey,
+            routePublicKey = routePublicKey,
+            rotationKey = BASE64_DECODER.decode(rotationKey),
+        )
+        return open(rotatedPsk)
+    }
+
+    private fun rotatePairingPsk(
+        routeId: String,
+        pairingId: String,
+        pairingPsk: ByteArray,
+        routePrivateKey: ByteArray,
+        routePublicKey: ByteArray,
+        rotationKey: ByteArray,
+    ): ByteArray = pskReceiver(
+        routeId = routeId,
+        pairingId = pairingId,
+        requestId = ByteArray(IDENTIFIER_BYTES),
+        pairingPsk = pairingPsk,
+        routePrivateKey = routePrivateKey,
+        routePublicKey = routePublicKey,
+        encapsulatedKey = rotationKey,
+    ).export(PSK_EXPORT_CONTEXT, PAIRING_PSK_BYTES)
 
     private fun derive(input: ByteArray, salt: ByteArray, info: ByteArray, length: Int): ByteArray {
         val output = ByteArray(length)
@@ -379,6 +538,13 @@ internal class PairingProtocol(
 
 }
 
+private data class OpenedPairedContext(
+    val request: EncryptedRequest,
+    val context: org.bouncycastle.crypto.hpke.HPKEContext,
+    val plaintext: ByteArray,
+    val pairingPsk: ByteArray,
+)
+
 @Serializable
 private data class PairingRequest(
     val version: String,
@@ -414,6 +580,7 @@ private data class EncryptedRequest(
     @SerialName("pairing_id") val pairingId: String,
     val key: String,
     val ciphertext: String,
+    @SerialName("rotation_key") val rotationKey: String? = null,
 )
 
 @Serializable

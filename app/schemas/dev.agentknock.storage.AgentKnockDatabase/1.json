@@ -2,7 +2,7 @@
   "formatVersion": 1,
   "database": {
     "version": 1,
-    "identityHash": "3c40a3e31fdb619991c470a190623dc8",
+    "identityHash": "5717fa809f9e50fce5c59e5c15b56802",
     "entities": [
       {
         "tableName": "local_encryption_keys",
@@ -450,7 +450,7 @@
       },
       {
         "tableName": "inbox_requests",
-        "createSql": "CREATE TABLE IF NOT EXISTS `${TABLE_NAME}` (`id` INTEGER PRIMARY KEY AUTOINCREMENT NOT NULL, `relay_request_id` TEXT NOT NULL, `parent_request_id` INTEGER, `kind` TEXT NOT NULL, `state` TEXT NOT NULL, `listed` INTEGER NOT NULL, `request_json` TEXT NOT NULL, `response_json` TEXT, `completion_json` TEXT, `received_at` INTEGER NOT NULL, `updated_at` INTEGER NOT NULL, `completed_at` INTEGER, `request_acknowledged_at` INTEGER, `completion_acknowledged_at` INTEGER, FOREIGN KEY(`parent_request_id`) REFERENCES `inbox_requests`(`id`) ON UPDATE NO ACTION ON DELETE CASCADE )",
+        "createSql": "CREATE TABLE IF NOT EXISTS `${TABLE_NAME}` (`id` INTEGER PRIMARY KEY AUTOINCREMENT NOT NULL, `relay_request_id` TEXT NOT NULL, `parent_request_id` INTEGER, `kind` TEXT NOT NULL, `state` TEXT NOT NULL, `listed` INTEGER NOT NULL, `request_json` TEXT NOT NULL, `response_json` TEXT, `completion_json` TEXT, `received_at` INTEGER NOT NULL, `updated_at` INTEGER NOT NULL, `completed_at` INTEGER, `request_acknowledged_at` INTEGER, `response_acknowledged_at` INTEGER, `completion_acknowledged_at` INTEGER, FOREIGN KEY(`parent_request_id`) REFERENCES `inbox_requests`(`id`) ON UPDATE NO ACTION ON DELETE CASCADE )",
         "fields": [
           {
             "fieldPath": "id",
@@ -523,6 +523,11 @@
           {
             "fieldPath": "requestAcknowledgedAt",
             "columnName": "request_acknowledged_at",
+            "affinity": "INTEGER"
+          },
+          {
+            "fieldPath": "responseAcknowledgedAt",
+            "columnName": "response_acknowledged_at",
             "affinity": "INTEGER"
           },
           {
@@ -868,11 +873,244 @@
             ]
           }
         ]
+      },
+      {
+        "tableName": "credential_requests",
+        "createSql": "CREATE TABLE IF NOT EXISTS `${TABLE_NAME}` (`request_id` INTEGER NOT NULL, `pairing_request_id` INTEGER, `pairing_id` TEXT NOT NULL, `vault_address` TEXT NOT NULL, `hostname` TEXT, `platform` TEXT, `architecture` TEXT, `machine_id` TEXT, `os_version` TEXT, `state` TEXT NOT NULL, `cli_version` TEXT NOT NULL, `profiles_json` TEXT NOT NULL, `profile_details_json` TEXT NOT NULL, `missing_profiles_json` TEXT NOT NULL, `reason` TEXT, `command` TEXT NOT NULL, `arguments_json` TEXT NOT NULL, `working_directory` TEXT NOT NULL, `resolved_path` TEXT, `stdin_kind` TEXT NOT NULL, `stdout_kind` TEXT NOT NULL, `stderr_kind` TEXT NOT NULL, `launcher_chain_json` TEXT NOT NULL, `decision` TEXT, `completion_result` TEXT, `completion_reason` TEXT, `completion_message` TEXT, `error` TEXT, `created_at` INTEGER NOT NULL, `updated_at` INTEGER NOT NULL, `decided_at` INTEGER, `completed_at` INTEGER, PRIMARY KEY(`request_id`), FOREIGN KEY(`request_id`) REFERENCES `inbox_requests`(`id`) ON UPDATE NO ACTION ON DELETE CASCADE , FOREIGN KEY(`pairing_request_id`) REFERENCES `pairings`(`request_id`) ON UPDATE NO ACTION ON DELETE SET NULL )",
+        "fields": [
+          {
+            "fieldPath": "requestId",
+            "columnName": "request_id",
+            "affinity": "INTEGER",
+            "notNull": true
+          },
+          {
+            "fieldPath": "pairingRequestId",
+            "columnName": "pairing_request_id",
+            "affinity": "INTEGER"
+          },
+          {
+            "fieldPath": "pairingId",
+            "columnName": "pairing_id",
+            "affinity": "TEXT",
+            "notNull": true
+          },
+          {
+            "fieldPath": "vaultAddress",
+            "columnName": "vault_address",
+            "affinity": "TEXT",
+            "notNull": true
+          },
+          {
+            "fieldPath": "hostname",
+            "columnName": "hostname",
+            "affinity": "TEXT"
+          },
+          {
+            "fieldPath": "platform",
+            "columnName": "platform",
+            "affinity": "TEXT"
+          },
+          {
+            "fieldPath": "architecture",
+            "columnName": "architecture",
+            "affinity": "TEXT"
+          },
+          {
+            "fieldPath": "machineId",
+            "columnName": "machine_id",
+            "affinity": "TEXT"
+          },
+          {
+            "fieldPath": "osVersion",
+            "columnName": "os_version",
+            "affinity": "TEXT"
+          },
+          {
+            "fieldPath": "state",
+            "columnName": "state",
+            "affinity": "TEXT",
+            "notNull": true
+          },
+          {
+            "fieldPath": "cliVersion",
+            "columnName": "cli_version",
+            "affinity": "TEXT",
+            "notNull": true
+          },
+          {
+            "fieldPath": "profilesJson",
+            "columnName": "profiles_json",
+            "affinity": "TEXT",
+            "notNull": true
+          },
+          {
+            "fieldPath": "profileDetailsJson",
+            "columnName": "profile_details_json",
+            "affinity": "TEXT",
+            "notNull": true
+          },
+          {
+            "fieldPath": "missingProfilesJson",
+            "columnName": "missing_profiles_json",
+            "affinity": "TEXT",
+            "notNull": true
+          },
+          {
+            "fieldPath": "reason",
+            "columnName": "reason",
+            "affinity": "TEXT"
+          },
+          {
+            "fieldPath": "command",
+            "columnName": "command",
+            "affinity": "TEXT",
+            "notNull": true
+          },
+          {
+            "fieldPath": "argumentsJson",
+            "columnName": "arguments_json",
+            "affinity": "TEXT",
+            "notNull": true
+          },
+          {
+            "fieldPath": "workingDirectory",
+            "columnName": "working_directory",
+            "affinity": "TEXT",
+            "notNull": true
+          },
+          {
+            "fieldPath": "resolvedPath",
+            "columnName": "resolved_path",
+            "affinity": "TEXT"
+          },
+          {
+            "fieldPath": "stdinKind",
+            "columnName": "stdin_kind",
+            "affinity": "TEXT",
+            "notNull": true
+          },
+          {
+            "fieldPath": "stdoutKind",
+            "columnName": "stdout_kind",
+            "affinity": "TEXT",
+            "notNull": true
+          },
+          {
+            "fieldPath": "stderrKind",
+            "columnName": "stderr_kind",
+            "affinity": "TEXT",
+            "notNull": true
+          },
+          {
+            "fieldPath": "launcherChainJson",
+            "columnName": "launcher_chain_json",
+            "affinity": "TEXT",
+            "notNull": true
+          },
+          {
+            "fieldPath": "decision",
+            "columnName": "decision",
+            "affinity": "TEXT"
+          },
+          {
+            "fieldPath": "completionResult",
+            "columnName": "completion_result",
+            "affinity": "TEXT"
+          },
+          {
+            "fieldPath": "completionReason",
+            "columnName": "completion_reason",
+            "affinity": "TEXT"
+          },
+          {
+            "fieldPath": "completionMessage",
+            "columnName": "completion_message",
+            "affinity": "TEXT"
+          },
+          {
+            "fieldPath": "error",
+            "columnName": "error",
+            "affinity": "TEXT"
+          },
+          {
+            "fieldPath": "createdAt",
+            "columnName": "created_at",
+            "affinity": "INTEGER",
+            "notNull": true
+          },
+          {
+            "fieldPath": "updatedAt",
+            "columnName": "updated_at",
+            "affinity": "INTEGER",
+            "notNull": true
+          },
+          {
+            "fieldPath": "decidedAt",
+            "columnName": "decided_at",
+            "affinity": "INTEGER"
+          },
+          {
+            "fieldPath": "completedAt",
+            "columnName": "completed_at",
+            "affinity": "INTEGER"
+          }
+        ],
+        "primaryKey": {
+          "autoGenerate": false,
+          "columnNames": [
+            "request_id"
+          ]
+        },
+        "indices": [
+          {
+            "name": "index_credential_requests_pairing_request_id",
+            "unique": false,
+            "columnNames": [
+              "pairing_request_id"
+            ],
+            "orders": [],
+            "createSql": "CREATE INDEX IF NOT EXISTS `index_credential_requests_pairing_request_id` ON `${TABLE_NAME}` (`pairing_request_id`)"
+          },
+          {
+            "name": "index_credential_requests_state",
+            "unique": false,
+            "columnNames": [
+              "state"
+            ],
+            "orders": [],
+            "createSql": "CREATE INDEX IF NOT EXISTS `index_credential_requests_state` ON `${TABLE_NAME}` (`state`)"
+          }
+        ],
+        "foreignKeys": [
+          {
+            "table": "inbox_requests",
+            "onDelete": "CASCADE",
+            "onUpdate": "NO ACTION",
+            "columns": [
+              "request_id"
+            ],
+            "referencedColumns": [
+              "id"
+            ]
+          },
+          {
+            "table": "pairings",
+            "onDelete": "SET NULL",
+            "onUpdate": "NO ACTION",
+            "columns": [
+              "pairing_request_id"
+            ],
+            "referencedColumns": [
+              "request_id"
+            ]
+          }
+        ]
       }
     ],
     "setupQueries": [
       "CREATE TABLE IF NOT EXISTS room_master_table (id INTEGER PRIMARY KEY,identity_hash TEXT)",
-      "INSERT OR REPLACE INTO room_master_table (id,identity_hash) VALUES(42, '3c40a3e31fdb619991c470a190623dc8')"
+      "INSERT OR REPLACE INTO room_master_table (id,identity_hash) VALUES(42, '5717fa809f9e50fce5c59e5c15b56802')"
     ]
   }
 }

@@ -153,6 +153,48 @@ class ProfileRepositoryTest {
         assertEquals("new-token", (replacementValue as EnvironmentVariableValue.Available).value)
     }
 
+    @Test
+    fun `credential profiles merge equal bindings without exposing metadata values`() = runTest {
+        val fixture = Fixture()
+        val first = fixture.createProfile("first")
+        val second = fixture.createProfile("second")
+        fixture.createVariable(first, "SHARED_TOKEN", "same-value", true)
+        fixture.createVariable(first, "FIRST_REGION", "eu-west-1", false)
+        fixture.createVariable(second, "SHARED_TOKEN", "same-value", true)
+
+        val description = fixture.repository.describeCredentialProfiles(listOf("first", "second"))
+        assertEquals(emptyList<String>(), description.missingProfiles)
+        assertEquals(
+            listOf("FIRST_REGION", "SHARED_TOKEN"),
+            description.profiles.first().environmentVariableNames,
+        )
+
+        val result = fixture.repository.credentialEnvironment(listOf("first", "second"))
+        check(result is CredentialEnvironmentResult.Available)
+        assertEquals(
+            mapOf("FIRST_REGION" to "eu-west-1", "SHARED_TOKEN" to "same-value"),
+            result.environment,
+        )
+    }
+
+    @Test
+    fun `credential profiles reject conflicting bindings atomically`() = runTest {
+        val fixture = Fixture()
+        val first = fixture.createProfile("first")
+        val second = fixture.createProfile("second")
+        fixture.createVariable(first, "TOKEN", "first-value", true)
+        fixture.createVariable(second, "TOKEN", "second-value", true)
+
+        assertEquals(
+            CredentialEnvironmentResult.ConflictingVariable("TOKEN"),
+            fixture.repository.credentialEnvironment(listOf("first", "second")),
+        )
+        assertEquals(
+            CredentialEnvironmentResult.MissingProfiles(listOf("missing")),
+            fixture.repository.credentialEnvironment(listOf("missing")),
+        )
+    }
+
     private class Fixture(keyId: String = "storage-key") {
         val encryptionMetadata = FakeLocalEncryptionDao()
         val keyStore = FakeEncryptionKeyStore()
@@ -251,6 +293,13 @@ private class FakeProfileDao : ProfileDao {
 
     override suspend fun getEnvironmentVariable(id: String): EnvironmentVariableEntity? =
         variables.value.find { it.id == id }
+
+    override suspend fun getProfilesByName(names: List<String>): List<ProfileEntity> =
+        profiles.value.filter { it.name in names }
+
+    override suspend fun getEnvironmentVariablesForProfiles(
+        profileIds: List<String>,
+    ): List<EnvironmentVariableEntity> = variables.value.filter { it.profileId in profileIds }
 
     override suspend fun profileNameInUse(name: String, excludingId: String): Boolean =
         profiles.value.any { it.name == name && it.id != excludingId }

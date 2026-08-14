@@ -13,6 +13,7 @@ import kotlinx.coroutines.flow.Flow
 import kotlinx.coroutines.flow.combine
 import kotlinx.coroutines.flow.map
 import kotlinx.coroutines.withContext
+import kotlinx.serialization.Serializable
 
 internal data class ProfileSummary(
     val id: String,
@@ -85,6 +86,38 @@ internal enum class SaveEnvironmentVariableResult {
     UNSUPPORTED_FORMAT,
 }
 
+@Serializable
+internal data class CredentialProfileMetadata(
+    val name: String,
+    val description: String,
+    val environmentVariableNames: List<String>,
+)
+
+internal data class CredentialProfileDescription(
+    val profiles: List<CredentialProfileMetadata>,
+    val missingProfiles: List<String>,
+)
+
+internal sealed interface CredentialEnvironmentResult {
+    data class Available(val environment: Map<String, String>) : CredentialEnvironmentResult
+
+    data class MissingProfiles(val names: List<String>) : CredentialEnvironmentResult
+
+    data class ConflictingVariable(val name: String) : CredentialEnvironmentResult
+
+    data object SecretUnavailable : CredentialEnvironmentResult
+
+    data object SecretCorrupted : CredentialEnvironmentResult
+
+    data object UnsupportedEncryption : CredentialEnvironmentResult
+}
+
+internal interface CredentialProfileSource {
+    suspend fun describeCredentialProfiles(names: List<String>): CredentialProfileDescription
+
+    suspend fun credentialEnvironment(names: List<String>): CredentialEnvironmentResult
+}
+
 internal class ProfileRepository(
     private val dao: ProfileDao,
     private val keyManager: LocalEncryptionKeyManager,
@@ -92,7 +125,7 @@ internal class ProfileRepository(
     private val newId: () -> String = { UUID.randomUUID().toString() },
     private val currentTimeMillis: () -> Long = System::currentTimeMillis,
     private val cryptographyDispatcher: CoroutineDispatcher = Dispatchers.IO,
-) {
+) : CredentialProfileSource {
     fun observeProfiles(): Flow<List<ProfileSummary>> = dao.observeProfiles().map { rows ->
         rows.map { row ->
             ProfileSummary(
@@ -279,6 +312,76 @@ internal class ProfileRepository(
         val variable = dao.getEnvironmentVariable(id) ?: return false
         dao.deleteEnvironmentVariable(variable, profileUpdatedAt = currentTimeMillis())
         return true
+    }
+
+    override suspend fun describeCredentialProfiles(
+        names: List<String>,
+    ): CredentialProfileDescription {
+        val requestedNames = names.distinct()
+        val profiles = if (requestedNames.isEmpty()) {
+            emptyList()
+        } else {
+            dao.getProfilesByName(requestedNames)
+        }
+        val profileByName = profiles.associateBy(ProfileEntity::name)
+        val variables = if (profiles.isEmpty()) {
+            emptyList()
+        } else {
+            dao.getEnvironmentVariablesForProfiles(profiles.map(ProfileEntity::id))
+        }
+        val variablesByProfile = variables.groupBy(EnvironmentVariableEntity::profileId)
+        return CredentialProfileDescription(
+            profiles = requestedNames.mapNotNull { name ->
+                profileByName[name]?.let { profile ->
+                    CredentialProfileMetadata(
+                        name = profile.name,
+                        description = profile.description,
+                        environmentVariableNames = variablesByProfile[profile.id]
+                            .orEmpty()
+                            .map(EnvironmentVariableEntity::name)
+                            .sorted(),
+                    )
+                }
+            },
+            missingProfiles = requestedNames.filterNot(profileByName::containsKey),
+        )
+    }
+
+    override suspend fun credentialEnvironment(names: List<String>): CredentialEnvironmentResult {
+        val requestedNames = names.distinct()
+        if (requestedNames.isEmpty()) {
+            return CredentialEnvironmentResult.MissingProfiles(emptyList())
+        }
+        val profiles = dao.getProfilesByName(requestedNames)
+        val profileByName = profiles.associateBy(ProfileEntity::name)
+        val missing = requestedNames.filterNot(profileByName::containsKey)
+        if (missing.isNotEmpty()) return CredentialEnvironmentResult.MissingProfiles(missing)
+
+        val variables = dao.getEnvironmentVariablesForProfiles(profiles.map(ProfileEntity::id))
+        val environment = sortedMapOf<String, String>()
+        for (variable in variables) {
+            val value = when (val decrypted = decrypt(variable)) {
+                is DecryptionResult.Plaintext -> try {
+                    decrypted.value.decodeToString(throwOnInvalidSequence = true)
+                } catch (_: IllegalArgumentException) {
+                    return CredentialEnvironmentResult.SecretCorrupted
+                }
+                DecryptionResult.KeyUnavailable -> {
+                    return CredentialEnvironmentResult.SecretUnavailable
+                }
+                DecryptionResult.AuthenticationFailed -> {
+                    return CredentialEnvironmentResult.SecretCorrupted
+                }
+                DecryptionResult.UnsupportedFormat -> {
+                    return CredentialEnvironmentResult.UnsupportedEncryption
+                }
+            }
+            val previous = environment.putIfAbsent(variable.name, value)
+            if (previous != null && previous != value) {
+                return CredentialEnvironmentResult.ConflictingVariable(variable.name)
+            }
+        }
+        return CredentialEnvironmentResult.Available(environment)
     }
 
     private suspend fun encrypt(

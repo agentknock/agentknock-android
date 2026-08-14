@@ -118,6 +118,79 @@ class PairingProtocolTest {
     }
 
     @Test
+    fun `opens a rotated credential request and its response and completion`() {
+        val oldPairingPsk = ByteArray(32) { (it + 1).toByte() }
+        val rotationSender = pskHpke.SetupPSKS(
+            pskHpke.deserializePublicKey(routePublicKey),
+            protocolInfo(ByteArray(16)),
+            oldPairingPsk,
+            PAIRING_ID.hexBytes(),
+        )
+        val rotatedPairingPsk = rotationSender.export(
+            "agentknock-v1 psk".encodeToByteArray(),
+            32,
+        )
+        val requestSender = pskHpke.SetupPSKS(
+            pskHpke.deserializePublicKey(routePublicKey),
+            protocolInfo(CREDENTIAL_REQUEST_ID),
+            rotatedPairingPsk,
+            PAIRING_ID.hexBytes(),
+        )
+        val requestPlaintext =
+            """{"cli_version":"0.1.0","method":"CredentialRequest","profiles":["test"],"operation":{"type":"exec","command":"env","arguments":[],"working_directory":"/tmp","stdin":"NULL_DEVICE","stdout":"TERMINAL","stderr":"TERMINAL"},"launcher_chain":[]}"""
+                .encodeToByteArray()
+        val request = json.parseToJsonElement(
+            """{"version":"agentknock-v1","pairing_id":"$PAIRING_ID","key":"${BASE64.encodeToString(requestSender.encapsulation)}","ciphertext":"${BASE64.encodeToString(requestSender.seal(EMPTY, requestPlaintext))}","rotation_key":"${BASE64.encodeToString(rotationSender.encapsulation)}"}""",
+        )
+
+        val opened = protocol.openPairedRequest(
+            routeId = ROUTE_ID,
+            requestId = CREDENTIAL_REQUEST_ID,
+            pairingId = PAIRING_ID,
+            pairingPsk = oldPairingPsk,
+            routePrivateKey = routePrivateKey,
+            routePublicKey = routePublicKey,
+            request = request,
+        )
+
+        assertArrayEquals(requestPlaintext, opened.plaintext)
+        assertArrayEquals(rotatedPairingPsk, opened.pairingPsk)
+
+        val responsePlaintext =
+            """{"result":"APPROVED","environment":{"TOKEN":"value"}}""".encodeToByteArray()
+        val response = protocol.sealPairedResponse(
+            routeId = ROUTE_ID,
+            requestId = CREDENTIAL_REQUEST_ID,
+            pairingId = PAIRING_ID,
+            pairingPsk = opened.pairingPsk,
+            routePrivateKey = routePrivateKey,
+            routePublicKey = routePublicKey,
+            request = request,
+            plaintext = responsePlaintext,
+        )
+        assertArrayEquals(responsePlaintext, openResponse(requestSender, response))
+
+        val completionPlaintext =
+            """{"cli_version":"0.1.0","result":"APPROVED"}""".encodeToByteArray()
+        val completion = json.parseToJsonElement(
+            """{"ciphertext":"${BASE64.encodeToString(requestSender.seal(EMPTY, completionPlaintext))}"}""",
+        )
+        assertArrayEquals(
+            completionPlaintext,
+            protocol.openPairedCompletion(
+                routeId = ROUTE_ID,
+                requestId = CREDENTIAL_REQUEST_ID,
+                pairingId = PAIRING_ID,
+                pairingPsk = opened.pairingPsk,
+                routePrivateKey = routePrivateKey,
+                routePublicKey = routePublicKey,
+                request = request,
+                completion = completion,
+            ),
+        )
+    }
+
+    @Test
     fun `offers one real and two distinct decoy sas values`() {
         val choices = protocol.sasChoices(123_456_789_012L)
 
@@ -127,8 +200,11 @@ class PairingProtocolTest {
     }
 
     private fun protocolInfo(requestId: String): ByteArray =
+        protocolInfo(requestId.ulidBytes())
+
+    private fun protocolInfo(requestId: ByteArray): ByteArray =
         "agentknock-v1".encodeToByteArray() + ByteArray(3) +
-            ROUTE_ID.hexBytes() + PAIRING_ID.hexBytes() + requestId.ulidBytes()
+            ROUTE_ID.hexBytes() + PAIRING_ID.hexBytes() + requestId
 
     private fun openResponse(
         sender: org.bouncycastle.crypto.hpke.HPKEContext,
@@ -188,6 +264,7 @@ class PairingProtocolTest {
         const val PAIRING_ID = "ffeeddccbbaa99887766554433221100"
         const val START_REQUEST_ID = "01ARZ3NDEKTSV4RRFFQ69G5FAV"
         const val FINISH_REQUEST_ID = "01ARZ3NDEKTSV4RRFFQ69G5FAW"
+        const val CREDENTIAL_REQUEST_ID = "01ARZ3NDEKTSV4RRFFQ69G5FAX"
         val EMPTY = ByteArray(0)
         val BASE64: Base64.Encoder = Base64.getEncoder()
         val BASE64_DECODER: Base64.Decoder = Base64.getDecoder()

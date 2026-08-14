@@ -11,6 +11,7 @@ import dev.agentknock.storage.profile.EnvironmentVariableEntity
 import dev.agentknock.storage.profile.ProfileDao
 import dev.agentknock.storage.profile.ProfileEntity
 import dev.agentknock.storage.request.InboxRequestEntity
+import dev.agentknock.storage.request.CredentialRequestEntity
 import dev.agentknock.storage.request.PairingEntity
 import dev.agentknock.storage.request.PairingSecretEntity
 import dev.agentknock.storage.request.RequestDao
@@ -29,6 +30,7 @@ import dev.agentknock.storage.vault.VaultSecretEntity
         InboxRequestEntity::class,
         PairingEntity::class,
         PairingSecretEntity::class,
+        CredentialRequestEntity::class,
     ],
     version = 1,
     exportSchema = true,

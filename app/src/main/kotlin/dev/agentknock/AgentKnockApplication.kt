@@ -53,6 +53,7 @@ internal class ApplicationContainer(application: Application) {
     val requests = RequestRepository(
         dao = database.requestDao(),
         vault = vault,
+        profiles = profiles,
         relay = HttpRelayInboxClient(httpClient),
         keyManager = encryptionKeyManager,
         encryption = encryption,
