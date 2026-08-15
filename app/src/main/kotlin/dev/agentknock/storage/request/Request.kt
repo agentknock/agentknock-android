@@ -84,7 +84,7 @@ internal data class InboxRequestEntity(
         ),
     ],
     indices = [
-        Index(value = ["pairing_id"], unique = true),
+        Index(value = ["client_id"], unique = true),
         Index(value = ["vault_identity_id"]),
         Index(value = ["state"]),
     ],
@@ -97,10 +97,16 @@ internal data class PairingEntity(
     val vaultIdentityId: String?,
     @ColumnInfo(name = "vault_address")
     val vaultAddress: String,
-    @ColumnInfo(name = "route_id")
-    val routeId: String,
-    @ColumnInfo(name = "pairing_id")
-    val pairingId: String,
+    @ColumnInfo(name = "device_id")
+    val deviceId: String,
+    @ColumnInfo(name = "client_id")
+    val clientId: String,
+    @ColumnInfo(name = "device_random")
+    val deviceRandom: ByteArray,
+    @ColumnInfo(name = "desired_relay_client_state")
+    val desiredRelayClientState: String?,
+    @ColumnInfo(name = "relay_client_state")
+    val relayClientState: String?,
     @ColumnInfo(name = "state")
     val state: String,
     @ColumnInfo(name = "sas_option_0")
@@ -209,8 +215,8 @@ internal data class CredentialRequestEntity(
     val requestId: Long,
     @ColumnInfo(name = "pairing_request_id")
     val pairingRequestId: Long?,
-    @ColumnInfo(name = "pairing_id")
-    val pairingId: String,
+    @ColumnInfo(name = "client_id")
+    val clientId: String,
     @ColumnInfo(name = "vault_address")
     val vaultAddress: String,
     @ColumnInfo(name = "hostname")
@@ -300,8 +306,8 @@ internal data class ProfileListRequestEntity(
     val requestId: Long,
     @ColumnInfo(name = "pairing_request_id")
     val pairingRequestId: Long?,
-    @ColumnInfo(name = "pairing_id")
-    val pairingId: String,
+    @ColumnInfo(name = "client_id")
+    val clientId: String,
     @ColumnInfo(name = "vault_address")
     val vaultAddress: String,
     @ColumnInfo(name = "hostname")
@@ -365,8 +371,8 @@ internal interface RequestDao {
     @Query("SELECT * FROM pairings WHERE request_id = :requestId")
     suspend fun getPairing(requestId: Long): PairingEntity?
 
-    @Query("SELECT * FROM pairings WHERE pairing_id = :pairingId")
-    suspend fun getPairingByPairingId(pairingId: String): PairingEntity?
+    @Query("SELECT * FROM pairings WHERE client_id = :clientId")
+    suspend fun getPairingByClientId(clientId: String): PairingEntity?
 
     @Query("SELECT * FROM credential_requests WHERE request_id = :requestId")
     suspend fun getCredentialRequest(requestId: Long): CredentialRequestEntity?
@@ -386,6 +392,16 @@ internal interface RequestDao {
         "SELECT * FROM inbox_requests WHERE response_json IS NOT NULL AND response_acknowledged_at IS NULL",
     )
     suspend fun getUnacknowledgedResponses(): List<InboxRequestEntity>
+
+    @Query(
+        """
+        SELECT * FROM inbox_requests
+        WHERE completed_at IS NULL
+           OR response_acknowledged_at IS NULL AND response_json IS NOT NULL
+        ORDER BY id
+        """,
+    )
+    suspend fun getUnsettledRequests(): List<InboxRequestEntity>
 
     @Insert
     suspend fun insertRequest(request: InboxRequestEntity): Long

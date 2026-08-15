@@ -11,10 +11,10 @@ import org.junit.Test
 
 class VaultProtocolTest {
     @Test
-    fun `derives the same route id as the cli`() {
+    fun `derives the same address id as the cli`() {
         assertEquals(
-            "0b7d7963604cba911e9c03e727688b89",
-            VaultProtocol.routeId("yup-its-free"),
+            "9e6f33bf47382846903dffa0962ea313",
+            VaultProtocol.addressId("yup-its-free"),
         )
     }
 
@@ -28,8 +28,8 @@ class VaultProtocolTest {
     }
 
     @Test
-    fun `generates an x25519 route key pair`() {
-        val pair = VaultProtocol.generateRouteKeyPair(SecureRandom(byteArrayOf(1, 2, 3)))
+    fun `generates an x25519 device key pair`() {
+        val pair = VaultProtocol.generateDeviceKeyPair(SecureRandom(byteArrayOf(1, 2, 3)))
 
         assertEquals(32, pair.privateKey.size)
         assertEquals(32, pair.publicKey.size)
@@ -40,12 +40,23 @@ class VaultProtocolTest {
     }
 
     @Test
-    fun `encodes a 32 byte relay token as unpadded base64url`() {
-        val token = ByteArray(32) { index -> index.toByte() }
+    fun `generates a canonical device ulid`() {
+        val deviceId = VaultProtocol.generateDeviceId(
+            timestampMillis = 1_700_000_000_000,
+            random = SecureRandom(byteArrayOf(4, 5, 6)),
+        )
 
-        val encoded = VaultProtocol.encodeAuthenticationToken(token)
+        assertTrue(deviceId.matches(Regex("[0-7][0-9A-HJKMNP-TV-Z]{25}")))
+        assertEquals("01HF7YAT00", deviceId.take(10))
+    }
+
+    @Test
+    fun `encodes a 32 byte device token as unpadded base64url`() {
+        val deviceToken = ByteArray(32) { index -> index.toByte() }
+
+        val encoded = VaultProtocol.encodeDeviceToken(deviceToken)
 
         assertTrue(encoded.matches(Regex("[A-Za-z0-9_-]{43}")))
-        assertArrayEquals(token, Base64.getUrlDecoder().decode(encoded))
+        assertArrayEquals(deviceToken, Base64.getUrlDecoder().decode(encoded))
     }
 }

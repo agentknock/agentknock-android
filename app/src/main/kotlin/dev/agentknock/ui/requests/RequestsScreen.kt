@@ -54,7 +54,7 @@ import dev.agentknock.storage.request.InboxRequestKind
 import dev.agentknock.storage.request.InboxRequestSummary
 import dev.agentknock.storage.request.PairingDecisionResult
 import dev.agentknock.storage.request.PairingState
-import dev.agentknock.storage.request.PollInboxResult
+import dev.agentknock.storage.request.RequestSyncResult
 import dev.agentknock.storage.request.ProfileListRequestDetails
 import dev.agentknock.storage.request.ProfileListRequestState
 import java.text.DateFormat
@@ -66,8 +66,8 @@ internal fun RequestsScreen(viewModel: RequestsViewModel = viewModel()) {
     val requests by viewModel.requests.collectAsStateWithLifecycle()
     val selection by viewModel.selection.collectAsStateWithLifecycle()
     val selectedRequest by viewModel.selectedRequest.collectAsStateWithLifecycle()
-    val polling by viewModel.polling.collectAsStateWithLifecycle()
-    val lastPollResult by viewModel.lastPollResult.collectAsStateWithLifecycle()
+    val syncing by viewModel.syncing.collectAsStateWithLifecycle()
+    val lastSyncResult by viewModel.lastSyncResult.collectAsStateWithLifecycle()
     val snackbar = remember { SnackbarHostState() }
     val scope = rememberCoroutineScope()
     val resources = LocalResources.current
@@ -80,8 +80,8 @@ internal fun RequestsScreen(viewModel: RequestsViewModel = viewModel()) {
         if (selection == null) {
             RequestList(
                 requests = requests,
-                polling = polling,
-                pollProblem = lastPollResult.messageResource(),
+                syncing = syncing,
+                syncProblem = lastSyncResult.messageResource(),
                 onRefresh = viewModel::refresh,
                 onOpen = viewModel::selectRequest,
                 modifier = Modifier
@@ -162,8 +162,8 @@ internal fun RequestsScreen(viewModel: RequestsViewModel = viewModel()) {
 @Composable
 private fun RequestList(
     requests: List<InboxRequestSummary>,
-    polling: Boolean,
-    pollProblem: Int?,
+    syncing: Boolean,
+    syncProblem: Int?,
     onRefresh: () -> Unit,
     onOpen: (Long) -> Unit,
     modifier: Modifier = Modifier,
@@ -177,8 +177,8 @@ private fun RequestList(
             verticalAlignment = Alignment.CenterVertically,
         ) {
             Text(stringResource(R.string.requests), style = MaterialTheme.typography.headlineMedium)
-            TextButton(onClick = onRefresh, enabled = !polling) {
-                if (polling) {
+            TextButton(onClick = onRefresh, enabled = !syncing) {
+                if (syncing) {
                     CircularProgressIndicator(Modifier.size(18.dp), strokeWidth = 2.dp)
                     Spacer(Modifier.width(8.dp))
                 }
@@ -186,7 +186,7 @@ private fun RequestList(
             }
         }
         HorizontalDivider()
-        pollProblem?.let { message ->
+        syncProblem?.let { message ->
             Text(
                 text = stringResource(message),
                 color = MaterialTheme.colorScheme.error,
@@ -295,6 +295,7 @@ private fun PairingRequestStatus(state: PairingState) {
     val label = when (state) {
         PairingState.RECEIVING -> R.string.pairing_receiving
         PairingState.SAS_VERIFICATION_PENDING -> R.string.action_required
+        PairingState.RELAY_ACTIVATION_PENDING -> R.string.waiting_for_relay
         PairingState.WAITING_FOR_FINISH -> R.string.waiting_for_client
         PairingState.REJECTED -> R.string.rejected
         PairingState.ACTIVE -> R.string.paired
@@ -375,6 +376,10 @@ private fun PairingRequestDetail(
             PairingState.WAITING_FOR_FINISH -> StatusCard(
                 title = stringResource(R.string.pairing_sas_verified),
                 message = stringResource(R.string.pairing_waiting_for_finish_explanation),
+            )
+            PairingState.RELAY_ACTIVATION_PENDING -> StatusCard(
+                title = stringResource(R.string.waiting_for_relay),
+                message = stringResource(R.string.pairing_waiting_for_relay_explanation),
             )
             PairingState.RECEIVING -> StatusCard(
                 title = stringResource(R.string.pairing_receiving),
@@ -660,7 +665,7 @@ private fun CredentialClientInformation(
         credential.osVersion?.let { InformationRow(stringResource(R.string.os_version), it) }
         InformationRow(stringResource(R.string.cli_version), credential.cliVersion)
         credential.machineId?.let { InformationRow(stringResource(R.string.machine_id), it) }
-        InformationRow(stringResource(R.string.pairing_id), credential.pairingId, monospace = true)
+        InformationRow(stringResource(R.string.client_id), credential.clientId, monospace = true)
         InformationRow(stringResource(R.string.request_id), request.relayRequestId, monospace = true)
     }
 }
@@ -684,7 +689,7 @@ private fun ProfileListClientInformation(
         profileList.osVersion?.let { InformationRow(stringResource(R.string.os_version), it) }
         InformationRow(stringResource(R.string.cli_version), profileList.cliVersion)
         profileList.machineId?.let { InformationRow(stringResource(R.string.machine_id), it) }
-        InformationRow(stringResource(R.string.pairing_id), profileList.pairingId, monospace = true)
+        InformationRow(stringResource(R.string.client_id), profileList.clientId, monospace = true)
         InformationRow(stringResource(R.string.request_id), request.relayRequestId, monospace = true)
     }
 }
@@ -771,7 +776,7 @@ private fun PairingClientInformation(request: InboxRequestDetails) {
         pairing.osVersion?.let { InformationRow(stringResource(R.string.os_version), it) }
         pairing.cliVersion?.let { InformationRow(stringResource(R.string.cli_version), it) }
         pairing.machineId?.let { InformationRow(stringResource(R.string.machine_id), it) }
-        InformationRow(stringResource(R.string.pairing_id), pairing.pairingId, monospace = true)
+        InformationRow(stringResource(R.string.client_id), pairing.clientId, monospace = true)
         InformationRow(stringResource(R.string.request_id), request.relayRequestId, monospace = true)
     }
 }
@@ -822,12 +827,12 @@ private fun CredentialDecisionResult.message(resources: Resources): String = whe
 private fun formatDate(timestamp: Long): String =
     DateFormat.getDateTimeInstance(DateFormat.FULL, DateFormat.MEDIUM).format(Date(timestamp))
 
-private fun PollInboxResult?.messageResource(): Int? = when (this) {
-    null, PollInboxResult.Success, PollInboxResult.NoVault -> null
-    PollInboxResult.VaultSecretsUnavailable -> R.string.vault_keys_unavailable
-    PollInboxResult.VaultSecretsCorrupted -> R.string.vault_keys_corrupted
-    PollInboxResult.UnsupportedVaultEncryption -> R.string.vault_keys_unsupported
-    is PollInboxResult.RelayRejected -> R.string.request_poll_rejected
-    is PollInboxResult.RelayUnavailable -> R.string.request_poll_unavailable
-    PollInboxResult.InvalidRelayResponse -> R.string.vault_relay_invalid_response
+private fun RequestSyncResult?.messageResource(): Int? = when (this) {
+    null, RequestSyncResult.Success, RequestSyncResult.NoVault -> null
+    RequestSyncResult.VaultSecretsUnavailable -> R.string.vault_keys_unavailable
+    RequestSyncResult.VaultSecretsCorrupted -> R.string.vault_keys_corrupted
+    RequestSyncResult.UnsupportedVaultEncryption -> R.string.vault_keys_unsupported
+    is RequestSyncResult.RelayRejected -> R.string.request_sync_rejected
+    is RequestSyncResult.RelayUnavailable -> R.string.request_sync_unavailable
+    RequestSyncResult.InvalidRelayResponse -> R.string.vault_relay_invalid_response
 }

@@ -16,7 +16,7 @@ import kotlinx.coroutines.flow.Flow
     tableName = "vault_identities",
     indices = [
         Index(value = ["role"], unique = true),
-        Index(value = ["route_id"], unique = true),
+        Index(value = ["address_id"], unique = true),
     ],
 )
 internal data class VaultIdentityEntity(
@@ -27,10 +27,12 @@ internal data class VaultIdentityEntity(
     val role: String,
     @ColumnInfo(name = "address")
     val address: String,
-    @ColumnInfo(name = "route_id")
-    val routeId: String,
-    @ColumnInfo(name = "route_public_key")
-    val routePublicKey: ByteArray,
+    @ColumnInfo(name = "address_id")
+    val addressId: String,
+    @ColumnInfo(name = "device_id")
+    val deviceId: String,
+    @ColumnInfo(name = "device_public_key")
+    val devicePublicKey: ByteArray,
     @ColumnInfo(name = "created_at")
     val createdAt: Long,
     @ColumnInfo(name = "claimed_at")
@@ -125,6 +127,23 @@ internal interface VaultDao {
         candidateRole: String,
     ): Int
 
+    @Query(
+        """
+        UPDATE vault_identities
+        SET address = :address,
+            address_id = :addressId,
+            claimed_at = :claimedAt
+        WHERE id = :activeId AND role = :activeRole
+        """,
+    )
+    suspend fun updateActiveAddress(
+        activeId: String,
+        address: String,
+        addressId: String,
+        claimedAt: Long,
+        activeRole: String,
+    ): Int
+
     @Transaction
     suspend fun replaceCandidate(
         identity: VaultIdentityEntity,
@@ -144,6 +163,21 @@ internal interface VaultDao {
         candidateRole: String,
     ): Boolean {
         if (!identityExists(candidateId, candidateRole)) return false
+        val candidate = getIdentityById(candidateId) ?: return false
+        val active = getIdentity(activeRole)
+        if (active != null && active.deviceId == candidate.deviceId) {
+            deleteIdentity(candidateRole)
+            check(
+                updateActiveAddress(
+                    activeId = active.id,
+                    address = candidate.address,
+                    addressId = candidate.addressId,
+                    claimedAt = claimedAt,
+                    activeRole = activeRole,
+                ) == 1,
+            )
+            return true
+        }
         deleteIdentity(activeRole)
         return markCandidateActive(
             candidateId = candidateId,

@@ -8,7 +8,7 @@ import dev.agentknock.storage.request.CredentialDecisionResult
 import dev.agentknock.storage.request.InboxRequestDetails
 import dev.agentknock.storage.request.InboxRequestSummary
 import dev.agentknock.storage.request.PairingDecisionResult
-import dev.agentknock.storage.request.PollInboxResult
+import dev.agentknock.storage.request.RequestSyncResult
 import kotlinx.coroutines.ExperimentalCoroutinesApi
 import kotlinx.coroutines.delay
 import kotlinx.coroutines.flow.MutableStateFlow
@@ -30,9 +30,9 @@ internal class RequestsViewModel(application: Application) : AndroidViewModel(ap
     private val repository = container.requests
     private val refreshMutex = Mutex()
     private val selectedRequestId = MutableStateFlow<Long?>(null)
-    private val _polling = MutableStateFlow(false)
-    private val _lastPollResult = MutableStateFlow<PollInboxResult?>(null)
-    private var pollingJob: Job? = null
+    private val _syncing = MutableStateFlow(false)
+    private val _lastSyncResult = MutableStateFlow<RequestSyncResult?>(null)
+    private var syncingJob: Job? = null
 
     val requests: StateFlow<List<InboxRequestSummary>> = repository.observeRequests().stateIn(
         scope = viewModelScope,
@@ -47,23 +47,23 @@ internal class RequestsViewModel(application: Application) : AndroidViewModel(ap
             started = SharingStarted.Eagerly,
             initialValue = null,
         )
-    val polling: StateFlow<Boolean> = _polling.asStateFlow()
-    val lastPollResult: StateFlow<PollInboxResult?> = _lastPollResult.asStateFlow()
+    val syncing: StateFlow<Boolean> = _syncing.asStateFlow()
+    val lastSyncResult: StateFlow<RequestSyncResult?> = _lastSyncResult.asStateFlow()
 
-    fun startPolling() {
-        if (pollingJob != null) return
-        pollingJob = viewModelScope.launch {
+    fun startSyncing() {
+        if (syncingJob != null) return
+        syncingJob = viewModelScope.launch {
             container.localStorage.await()
             while (isActive) {
-                pollOnce()
-                delay(POLL_INTERVAL_MILLIS)
+                syncOnce()
+                delay(SYNC_INTERVAL_MILLIS)
             }
         }
     }
 
-    fun stopPolling() {
-        pollingJob?.cancel()
-        pollingJob = null
+    fun stopSyncing() {
+        syncingJob?.cancel()
+        syncingJob = null
     }
 
     fun selectRequest(id: Long?) {
@@ -71,43 +71,43 @@ internal class RequestsViewModel(application: Application) : AndroidViewModel(ap
     }
 
     fun refresh() {
-        viewModelScope.launch { pollOnce() }
+        viewModelScope.launch { syncOnce() }
     }
 
     suspend fun chooseSas(requestId: Long, selectedIndex: Int?): PairingDecisionResult {
         val result = repository.chooseSas(requestId, selectedIndex)
-        pollOnce()
+        syncOnce()
         return result
     }
 
     suspend fun rejectPairing(requestId: Long): PairingDecisionResult {
         val result = repository.rejectPairing(requestId)
-        pollOnce()
+        syncOnce()
         return result
     }
 
     suspend fun approveCredentialRequest(requestId: Long): CredentialDecisionResult {
         val result = repository.approveCredentialRequest(requestId)
-        if (result == CredentialDecisionResult.Decided) pollOnce()
+        if (result == CredentialDecisionResult.Decided) syncOnce()
         return result
     }
 
     suspend fun denyCredentialRequest(requestId: Long): CredentialDecisionResult {
         val result = repository.denyCredentialRequest(requestId)
-        if (result == CredentialDecisionResult.Decided) pollOnce()
+        if (result == CredentialDecisionResult.Decided) syncOnce()
         return result
     }
 
-    private suspend fun pollOnce() = refreshMutex.withLock {
-        _polling.value = true
+    private suspend fun syncOnce() = refreshMutex.withLock {
+        _syncing.value = true
         try {
-            _lastPollResult.value = repository.poll()
+            _lastSyncResult.value = repository.sync()
         } finally {
-            _polling.value = false
+            _syncing.value = false
         }
     }
 
     private companion object {
-        const val POLL_INTERVAL_MILLIS = 3_000L
+        const val SYNC_INTERVAL_MILLIS = 3_000L
     }
 }

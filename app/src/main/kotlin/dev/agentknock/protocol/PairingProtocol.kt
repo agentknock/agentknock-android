@@ -20,7 +20,7 @@ import org.bouncycastle.crypto.params.AEADParameters
 import org.bouncycastle.crypto.params.HKDFParameters
 import org.bouncycastle.crypto.params.KeyParameter
 
-internal data class PairingClient(
+internal data class PairingClientMetadata(
     val cliVersion: String,
     val clientRandom: ByteArray,
     val platform: String,
@@ -31,9 +31,9 @@ internal data class PairingClient(
 )
 
 internal data class EstablishedPairing(
-    val pairingPsk: ByteArray,
+    val clientPsk: ByteArray,
     val sas: Long,
-    val client: PairingClient,
+    val clientMetadata: PairingClientMetadata,
 )
 
 internal data class SasChoices(
@@ -48,7 +48,7 @@ internal data class PreparedFinishResponse(
 
 internal data class OpenedPairedRequest(
     val plaintext: ByteArray,
-    val pairingPsk: ByteArray,
+    val clientPsk: ByteArray,
 )
 
 internal class PairingProtocol(
@@ -58,6 +58,8 @@ internal class PairingProtocol(
     fun isInitialRequest(request: JsonElement): Boolean = runCatching {
         json.decodeFromJsonElement(PairingRequest.serializer(), request)
     }.isSuccess
+
+    fun generateDeviceRandom(): ByteArray = ByteArray(DEVICE_RANDOM_BYTES).also(random::nextBytes)
 
     fun validateInitialRequest(request: JsonElement, address: String): Boolean {
         val decoded = runCatching {
@@ -69,56 +71,55 @@ internal class PairingProtocol(
         return MessageDigest.isEqual(commitment, pairingCommitment(address))
     }
 
-    fun generatePairingId(): String = ByteArray(IDENTIFIER_BYTES)
-        .also(random::nextBytes)
-        .toHex()
-
-    fun initialResponse(pairingId: String, routePublicKey: ByteArray): JsonElement {
-        require(pairingId.hexBytes()?.size == IDENTIFIER_BYTES) { "Invalid pairing id" }
-        require(routePublicKey.size == X25519_KEY_BYTES) { "Invalid route public key" }
+    fun initialResponse(
+        deviceId: String,
+        devicePublicKey: ByteArray,
+        deviceRandom: ByteArray,
+    ): JsonElement {
+        deviceId.ulidBytes()
+        require(devicePublicKey.size == X25519_KEY_BYTES) { "Invalid device public key" }
+        require(deviceRandom.size == DEVICE_RANDOM_BYTES) { "Invalid device random" }
         return json.encodeToJsonElement(
             PairingResponse.serializer(),
             PairingResponse(
-                pairingId = pairingId,
-                routeKey = BASE64_ENCODER.encodeToString(routePublicKey),
+                deviceId = deviceId,
+                deviceKey = BASE64_ENCODER.encodeToString(devicePublicKey),
+                deviceRandom = BASE64_ENCODER.encodeToString(deviceRandom),
             ),
         )
     }
 
-    fun encryptedPairingId(request: JsonElement): String? = runCatching {
-        json.decodeFromJsonElement(EncryptedRequest.serializer(), request)
-    }.getOrNull()?.takeIf { it.version == PROTOCOL_VERSION }?.pairingId
-
     fun establish(
-        routeId: String,
-        requestId: String,
-        pairingId: String,
-        routePrivateKey: ByteArray,
-        routePublicKey: ByteArray,
+        deviceId: String,
+        clientId: String,
+        devicePrivateKey: ByteArray,
+        devicePublicKey: ByteArray,
+        deviceRandom: ByteArray,
         completion: JsonElement,
     ): EstablishedPairing {
         val decoded = json.decodeFromJsonElement(PairingCompletion.serializer(), completion)
         val encapsulatedKey = BASE64_DECODER.decode(decoded.key)
         val ciphertext = BASE64_DECODER.decode(decoded.ciphertext)
         val context = baseReceiver(
-            routeId = routeId,
-            pairingId = pairingId,
-            requestId = requestId,
-            routePrivateKey = routePrivateKey,
-            routePublicKey = routePublicKey,
+            deviceId = deviceId,
+            clientId = clientId,
+            devicePrivateKey = devicePrivateKey,
+            devicePublicKey = devicePublicKey,
             encapsulatedKey = encapsulatedKey,
         )
         val plaintext = context.open(EMPTY, ciphertext)
         val contents = json.decodeFromString(PairingContents.serializer(), plaintext.decodeToString())
         val clientRandom = BASE64_DECODER.decode(contents.clientRandom)
         require(clientRandom.size == CLIENT_RANDOM_BYTES) { "Invalid pairing client random" }
-        val pairingIdBytes = requireNotNull(pairingId.hexBytes()) { "Invalid pairing id" }
-        val pairingPsk = context.export(PSK_EXPORT_CONTEXT, PAIRING_PSK_BYTES)
-        val sasInput = clientRandom + routePublicKey
+        require(deviceRandom.size == DEVICE_RANDOM_BYTES) { "Invalid device random" }
+        val clientPsk = context.export(PSK_EXPORT_CONTEXT, CLIENT_PSK_BYTES)
         val sasBytes = derive(
-            input = sasInput,
-            salt = pairingIdBytes,
-            info = SAS_DERIVATION_INFO,
+            input = clientRandom,
+            salt = deviceRandom,
+            info = SAS_DERIVATION_INFO +
+                deviceId.ulidBytes() +
+                clientId.ulidBytes() +
+                devicePublicKey,
             length = Long.SIZE_BYTES,
         )
         val sas = java.lang.Long.remainderUnsigned(
@@ -126,9 +127,9 @@ internal class PairingProtocol(
             SAS_MODULUS,
         )
         return EstablishedPairing(
-            pairingPsk = pairingPsk,
+            clientPsk = clientPsk,
             sas = sas,
-            client = PairingClient(
+            clientMetadata = PairingClientMetadata(
                 cliVersion = contents.cliVersion,
                 clientRandom = clientRandom,
                 platform = contents.platform,
@@ -157,22 +158,22 @@ internal class PairingProtocol(
     }
 
     fun prepareFinishResponse(
-        routeId: String,
+        deviceId: String,
         requestId: String,
-        pairingId: String,
-        pairingPsk: ByteArray,
-        routePrivateKey: ByteArray,
-        routePublicKey: ByteArray,
+        clientId: String,
+        clientPsk: ByteArray,
+        devicePrivateKey: ByteArray,
+        devicePublicKey: ByteArray,
         request: JsonElement,
         accepted: Boolean,
     ): PreparedFinishResponse {
         val opened = openPairedRequest(
-            routeId = routeId,
+            deviceId = deviceId,
             requestId = requestId,
-            pairingId = pairingId,
-            pairingPsk = pairingPsk,
-            routePrivateKey = routePrivateKey,
-            routePublicKey = routePublicKey,
+            clientId = clientId,
+            clientPsk = clientPsk,
+            devicePrivateKey = devicePrivateKey,
+            devicePublicKey = devicePublicKey,
             request = request,
         )
         val contents = json.decodeFromString(
@@ -187,12 +188,12 @@ internal class PairingProtocol(
         ).encodeToByteArray()
         return PreparedFinishResponse(
             response = sealPairedResponse(
-                routeId = routeId,
+                deviceId = deviceId,
                 requestId = requestId,
-                pairingId = pairingId,
-                pairingPsk = opened.pairingPsk,
-                routePrivateKey = routePrivateKey,
-                routePublicKey = routePublicKey,
+                clientId = clientId,
+                clientPsk = opened.clientPsk,
+                devicePrivateKey = devicePrivateKey,
+                devicePublicKey = devicePublicKey,
                 request = request,
                 plaintext = responsePlaintext,
             ),
@@ -201,22 +202,22 @@ internal class PairingProtocol(
     }
 
     fun verifyFinishCompletion(
-        routeId: String,
+        deviceId: String,
         requestId: String,
-        pairingId: String,
-        pairingPsk: ByteArray,
-        routePrivateKey: ByteArray,
-        routePublicKey: ByteArray,
+        clientId: String,
+        clientPsk: ByteArray,
+        devicePrivateKey: ByteArray,
+        devicePublicKey: ByteArray,
         request: JsonElement,
         completion: JsonElement,
     ) {
         val plaintext = openPairedCompletion(
-            routeId = routeId,
+            deviceId = deviceId,
             requestId = requestId,
-            pairingId = pairingId,
-            pairingPsk = pairingPsk,
-            routePrivateKey = routePrivateKey,
-            routePublicKey = routePublicKey,
+            clientId = clientId,
+            clientPsk = clientPsk,
+            devicePrivateKey = devicePrivateKey,
+            devicePublicKey = devicePublicKey,
             request = request,
             completion = completion,
         )
@@ -225,43 +226,43 @@ internal class PairingProtocol(
     }
 
     fun openPairedRequest(
-        routeId: String,
+        deviceId: String,
         requestId: String,
-        pairingId: String,
-        pairingPsk: ByteArray,
-        routePrivateKey: ByteArray,
-        routePublicKey: ByteArray,
+        clientId: String,
+        clientPsk: ByteArray,
+        devicePrivateKey: ByteArray,
+        devicePublicKey: ByteArray,
         request: JsonElement,
     ): OpenedPairedRequest {
         val opened = openPairedContext(
-            routeId = routeId,
+            deviceId = deviceId,
             requestId = requestId,
-            pairingId = pairingId,
-            pairingPsk = pairingPsk,
-            routePrivateKey = routePrivateKey,
-            routePublicKey = routePublicKey,
+            clientId = clientId,
+            clientPsk = clientPsk,
+            devicePrivateKey = devicePrivateKey,
+            devicePublicKey = devicePublicKey,
             request = request,
         )
-        return OpenedPairedRequest(opened.plaintext, opened.pairingPsk)
+        return OpenedPairedRequest(opened.plaintext, opened.clientPsk)
     }
 
     fun sealPairedResponse(
-        routeId: String,
+        deviceId: String,
         requestId: String,
-        pairingId: String,
-        pairingPsk: ByteArray,
-        routePrivateKey: ByteArray,
-        routePublicKey: ByteArray,
+        clientId: String,
+        clientPsk: ByteArray,
+        devicePrivateKey: ByteArray,
+        devicePublicKey: ByteArray,
         request: JsonElement,
         plaintext: ByteArray,
     ): JsonElement {
         val opened = openPairedContext(
-            routeId = routeId,
+            deviceId = deviceId,
             requestId = requestId,
-            pairingId = pairingId,
-            pairingPsk = pairingPsk,
-            routePrivateKey = routePrivateKey,
-            routePublicKey = routePublicKey,
+            clientId = clientId,
+            clientPsk = clientPsk,
+            devicePrivateKey = devicePrivateKey,
+            devicePublicKey = devicePublicKey,
             request = request,
         )
         val publicNonce = ByteArray(RESPONSE_NONCE_BYTES).also(random::nextBytes)
@@ -284,22 +285,22 @@ internal class PairingProtocol(
     }
 
     fun openPairedCompletion(
-        routeId: String,
+        deviceId: String,
         requestId: String,
-        pairingId: String,
-        pairingPsk: ByteArray,
-        routePrivateKey: ByteArray,
-        routePublicKey: ByteArray,
+        clientId: String,
+        clientPsk: ByteArray,
+        devicePrivateKey: ByteArray,
+        devicePublicKey: ByteArray,
         request: JsonElement,
         completion: JsonElement,
     ): ByteArray {
         val opened = openPairedContext(
-            routeId = routeId,
+            deviceId = deviceId,
             requestId = requestId,
-            pairingId = pairingId,
-            pairingPsk = pairingPsk,
-            routePrivateKey = routePrivateKey,
-            routePublicKey = routePublicKey,
+            clientId = clientId,
+            clientPsk = clientPsk,
+            devicePrivateKey = devicePrivateKey,
+            devicePublicKey = devicePublicKey,
             request = request,
         )
         val decoded = json.decodeFromJsonElement(EncryptedCompletion.serializer(), completion)
@@ -321,129 +322,126 @@ internal class PairingProtocol(
         input = address.encodeToByteArray(),
         salt = BASE_DERIVATION_SALT,
         info = COMMITMENT_DERIVATION_INFO,
-        length = PAIRING_PSK_BYTES,
+        length = COMMITMENT_BYTES,
     )
 
     private fun baseReceiver(
-        routeId: String,
-        pairingId: String,
-        requestId: String,
-        routePrivateKey: ByteArray,
-        routePublicKey: ByteArray,
+        deviceId: String,
+        clientId: String,
+        devicePrivateKey: ByteArray,
+        devicePublicKey: ByteArray,
         encapsulatedKey: ByteArray,
     ) = baseHpke.setupBaseR(
         encapsulatedKey,
-        baseHpke.deserializePrivateKey(routePrivateKey, routePublicKey),
-        protocolInfo(routeId, pairingId, requestId),
+        baseHpke.deserializePrivateKey(devicePrivateKey, devicePublicKey),
+        protocolInfo(deviceId, clientId),
     )
 
     private fun pskReceiver(
-        routeId: String,
-        pairingId: String,
+        deviceId: String,
+        clientId: String,
         requestId: String,
-        pairingPsk: ByteArray,
-        routePrivateKey: ByteArray,
-        routePublicKey: ByteArray,
+        clientPsk: ByteArray,
+        devicePrivateKey: ByteArray,
+        devicePublicKey: ByteArray,
         encapsulatedKey: ByteArray,
     ) = pskReceiver(
-        routeId = routeId,
-        pairingId = pairingId,
+        deviceId = deviceId,
+        clientId = clientId,
         requestId = requestId.ulidBytes(),
-        pairingPsk = pairingPsk,
-        routePrivateKey = routePrivateKey,
-        routePublicKey = routePublicKey,
+        clientPsk = clientPsk,
+        devicePrivateKey = devicePrivateKey,
+        devicePublicKey = devicePublicKey,
         encapsulatedKey = encapsulatedKey,
     )
 
     private fun pskReceiver(
-        routeId: String,
-        pairingId: String,
+        deviceId: String,
+        clientId: String,
         requestId: ByteArray,
-        pairingPsk: ByteArray,
-        routePrivateKey: ByteArray,
-        routePublicKey: ByteArray,
+        clientPsk: ByteArray,
+        devicePrivateKey: ByteArray,
+        devicePublicKey: ByteArray,
         encapsulatedKey: ByteArray,
     ) = pskHpke.setupPSKR(
         encapsulatedKey,
-        pskHpke.deserializePrivateKey(routePrivateKey, routePublicKey),
-        protocolInfo(routeId, pairingId, requestId),
-        pairingPsk,
-        requireNotNull(pairingId.hexBytes()) { "Invalid pairing id" },
+        pskHpke.deserializePrivateKey(devicePrivateKey, devicePublicKey),
+        protocolInfo(deviceId, requestId),
+        clientPsk,
+        clientId.ulidBytes(),
     )
 
-    private fun protocolInfo(routeId: String, pairingId: String, requestId: String): ByteArray =
-        protocolInfo(routeId, pairingId, requestId.ulidBytes())
+    private fun protocolInfo(deviceId: String, requestId: String): ByteArray =
+        protocolInfo(deviceId, requestId.ulidBytes())
 
-    private fun protocolInfo(routeId: String, pairingId: String, requestId: ByteArray): ByteArray =
+    private fun protocolInfo(deviceId: String, requestId: ByteArray): ByteArray =
         PROTOCOL_VERSION_INFO +
-            requireNotNull(routeId.hexBytes()) { "Invalid route id" } +
-            requireNotNull(pairingId.hexBytes()) { "Invalid pairing id" } +
+            deviceId.ulidBytes() +
             requestId.also { require(it.size == IDENTIFIER_BYTES) { "Invalid request id" } }
 
     private fun openPairedContext(
-        routeId: String,
+        deviceId: String,
         requestId: String,
-        pairingId: String,
-        pairingPsk: ByteArray,
-        routePrivateKey: ByteArray,
-        routePublicKey: ByteArray,
+        clientId: String,
+        clientPsk: ByteArray,
+        devicePrivateKey: ByteArray,
+        devicePublicKey: ByteArray,
         request: JsonElement,
     ): OpenedPairedContext {
-        require(pairingPsk.size == PAIRING_PSK_BYTES) { "Invalid pairing PSK" }
+        require(clientPsk.size == CLIENT_PSK_BYTES) { "Invalid client PSK" }
         val decoded = json.decodeFromJsonElement(EncryptedRequest.serializer(), request)
         require(decoded.version == PROTOCOL_VERSION) { "Unsupported protocol version" }
-        require(decoded.pairingId == pairingId) { "Pairing id mismatch" }
         val encapsulatedKey = BASE64_DECODER.decode(decoded.key)
         val ciphertext = BASE64_DECODER.decode(decoded.ciphertext)
 
         fun open(psk: ByteArray): OpenedPairedContext {
             val context = pskReceiver(
-                routeId = routeId,
-                pairingId = pairingId,
+                deviceId = deviceId,
+                clientId = clientId,
                 requestId = requestId,
-                pairingPsk = psk,
-                routePrivateKey = routePrivateKey,
-                routePublicKey = routePublicKey,
+                clientPsk = psk,
+                devicePrivateKey = devicePrivateKey,
+                devicePublicKey = devicePublicKey,
                 encapsulatedKey = encapsulatedKey,
             )
             return OpenedPairedContext(
                 request = decoded,
                 context = context,
                 plaintext = context.open(EMPTY, ciphertext),
-                pairingPsk = psk,
+                clientPsk = psk,
             )
         }
 
-        val current = runCatching { open(pairingPsk) }
+        val current = runCatching { open(clientPsk) }
         current.getOrNull()?.let { return it }
         val rotationKey = decoded.rotationKey ?: throw checkNotNull(current.exceptionOrNull())
-        val rotatedPsk = rotatePairingPsk(
-            routeId = routeId,
-            pairingId = pairingId,
-            pairingPsk = pairingPsk,
-            routePrivateKey = routePrivateKey,
-            routePublicKey = routePublicKey,
+        val rotatedClientPsk = rotateClientPsk(
+            deviceId = deviceId,
+            clientId = clientId,
+            clientPsk = clientPsk,
+            devicePrivateKey = devicePrivateKey,
+            devicePublicKey = devicePublicKey,
             rotationKey = BASE64_DECODER.decode(rotationKey),
         )
-        return open(rotatedPsk)
+        return open(rotatedClientPsk)
     }
 
-    private fun rotatePairingPsk(
-        routeId: String,
-        pairingId: String,
-        pairingPsk: ByteArray,
-        routePrivateKey: ByteArray,
-        routePublicKey: ByteArray,
+    private fun rotateClientPsk(
+        deviceId: String,
+        clientId: String,
+        clientPsk: ByteArray,
+        devicePrivateKey: ByteArray,
+        devicePublicKey: ByteArray,
         rotationKey: ByteArray,
     ): ByteArray = pskReceiver(
-        routeId = routeId,
-        pairingId = pairingId,
+        deviceId = deviceId,
+        clientId = clientId,
         requestId = ByteArray(IDENTIFIER_BYTES),
-        pairingPsk = pairingPsk,
-        routePrivateKey = routePrivateKey,
-        routePublicKey = routePublicKey,
+        clientPsk = clientPsk,
+        devicePrivateKey = devicePrivateKey,
+        devicePublicKey = devicePublicKey,
         encapsulatedKey = rotationKey,
-    ).export(PSK_EXPORT_CONTEXT, PAIRING_PSK_BYTES)
+    ).export(PSK_EXPORT_CONTEXT, CLIENT_PSK_BYTES)
 
     private fun derive(input: ByteArray, salt: ByteArray, info: ByteArray, length: Int): ByteArray {
         val output = ByteArray(length)
@@ -461,13 +459,6 @@ internal class PairingProtocol(
         var length = cipher.processBytes(plaintext, 0, plaintext.size, output, 0)
         length += cipher.doFinal(output, length)
         return output.copyOf(length)
-    }
-
-    private fun String.hexBytes(): ByteArray? {
-        if (length % 2 != 0 || any { it !in "0123456789abcdef" }) return null
-        return ByteArray(length / 2) { index ->
-            substring(index * 2, index * 2 + 2).toInt(16).toByte()
-        }
     }
 
     private fun String.ulidBytes(): ByteArray {
@@ -491,10 +482,6 @@ internal class PairingProtocol(
         }
     }
 
-    private fun ByteArray.toHex(): String = joinToString(separator = "") { byte ->
-        "%02x".format(byte.toInt() and 0xff)
-    }
-
     private companion object {
         const val PROTOCOL_VERSION = "agentknock-v1"
         val PROTOCOL_VERSION_INFO = PROTOCOL_VERSION.encodeToByteArray() + ByteArray(3)
@@ -512,7 +499,9 @@ internal class PairingProtocol(
         const val IDENTIFIER_BYTES = 16
         const val X25519_KEY_BYTES = 32
         const val CLIENT_RANDOM_BYTES = 32
-        const val PAIRING_PSK_BYTES = 32
+        const val DEVICE_RANDOM_BYTES = 32
+        const val COMMITMENT_BYTES = 32
+        const val CLIENT_PSK_BYTES = 32
         const val EXPORTED_SECRET_BYTES = 32
         const val CHACHA_KEY_BYTES = 32
         const val RESPONSE_NONCE_BYTES = 12
@@ -542,7 +531,7 @@ private data class OpenedPairedContext(
     val request: EncryptedRequest,
     val context: org.bouncycastle.crypto.hpke.HPKEContext,
     val plaintext: ByteArray,
-    val pairingPsk: ByteArray,
+    val clientPsk: ByteArray,
 )
 
 @Serializable
@@ -553,8 +542,9 @@ private data class PairingRequest(
 
 @Serializable
 private data class PairingResponse(
-    @SerialName("pairing_id") val pairingId: String,
-    @SerialName("route_key") val routeKey: String,
+    @SerialName("device_id") val deviceId: String,
+    @SerialName("device_key") val deviceKey: String,
+    @SerialName("device_random") val deviceRandom: String,
 )
 
 @Serializable
@@ -577,7 +567,6 @@ private data class PairingContents(
 @Serializable
 private data class EncryptedRequest(
     val version: String,
-    @SerialName("pairing_id") val pairingId: String,
     val key: String,
     val ciphertext: String,
     @SerialName("rotation_key") val rotationKey: String? = null,

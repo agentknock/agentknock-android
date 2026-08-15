@@ -21,8 +21,8 @@ import org.junit.Test
 class PairingProtocolTest {
     private val json = Json
     private val protocol = PairingProtocol()
-    private val routePrivateKey = ByteArray(32) { 0x42 }
-    private val routePublicKey = X25519PrivateKeyParameters(routePrivateKey, 0)
+    private val devicePrivateKey = ByteArray(32) { 0x42 }
+    private val devicePublicKey = X25519PrivateKeyParameters(devicePrivateKey, 0)
         .generatePublicKey().encoded
 
     @Test
@@ -39,8 +39,8 @@ class PairingProtocolTest {
     @Test
     fun `opens the initial hpke exchange and derives the cli sas`() {
         val sender = baseHpke.setupBaseS(
-            baseHpke.deserializePublicKey(routePublicKey),
-            protocolInfo(START_REQUEST_ID),
+            baseHpke.deserializePublicKey(devicePublicKey),
+            baseProtocolInfo(),
         )
         val clientRandom = ByteArray(32) { it.toByte() }
         val plaintext = json.parseToJsonElement(
@@ -51,44 +51,44 @@ class PairingProtocolTest {
         )
 
         val established = protocol.establish(
-            routeId = ROUTE_ID,
-            requestId = START_REQUEST_ID,
-            pairingId = PAIRING_ID,
-            routePrivateKey = routePrivateKey,
-            routePublicKey = routePublicKey,
+            deviceId = DEVICE_ID,
+            clientId = CLIENT_ID,
+            devicePrivateKey = devicePrivateKey,
+            devicePublicKey = devicePublicKey,
+            deviceRandom = DEVICE_RANDOM,
             completion = completion,
         )
 
-        assertArrayEquals(sender.export("agentknock-v1 psk".encodeToByteArray(), 32), established.pairingPsk)
-        assertEquals(287_708_420_069L, established.sas)
-        assertEquals("2877 0842 0069", protocol.formatSas(established.sas))
-        assertEquals("survo", established.client.hostname)
-        assertEquals("linux", established.client.platform)
-        assertEquals("x86_64", established.client.architecture)
+        assertArrayEquals(sender.export("agentknock-v1 psk".encodeToByteArray(), 32), established.clientPsk)
+        assertEquals(802_590_831_137L, established.sas)
+        assertEquals("8025 9083 1137", protocol.formatSas(established.sas))
+        assertEquals("survo", established.clientMetadata.hostname)
+        assertEquals("linux", established.clientMetadata.platform)
+        assertEquals("x86_64", established.clientMetadata.architecture)
     }
 
     @Test
     fun `answers and verifies the finish pairing exchange`() {
-        val pairingPsk = ByteArray(32) { (it + 1).toByte() }
+        val clientPsk = ByteArray(32) { (it + 1).toByte() }
         val sender = pskHpke.SetupPSKS(
-            pskHpke.deserializePublicKey(routePublicKey),
-            protocolInfo(FINISH_REQUEST_ID),
-            pairingPsk,
-            PAIRING_ID.hexBytes(),
+            pskHpke.deserializePublicKey(devicePublicKey),
+            pairedProtocolInfo(FINISH_REQUEST_ID),
+            clientPsk,
+            CLIENT_ID.ulidBytes(),
         )
         val requestPlaintext =
             """{"cli_version":"0.1.0","method":"FinishPairing"}""".encodeToByteArray()
         val request = json.parseToJsonElement(
-            """{"version":"agentknock-v1","pairing_id":"$PAIRING_ID","key":"${BASE64.encodeToString(sender.encapsulation)}","ciphertext":"${BASE64.encodeToString(sender.seal(EMPTY, requestPlaintext))}"}""",
+            """{"version":"agentknock-v1","key":"${BASE64.encodeToString(sender.encapsulation)}","ciphertext":"${BASE64.encodeToString(sender.seal(EMPTY, requestPlaintext))}"}""",
         )
 
         val prepared = protocol.prepareFinishResponse(
-            routeId = ROUTE_ID,
+            deviceId = DEVICE_ID,
             requestId = FINISH_REQUEST_ID,
-            pairingId = PAIRING_ID,
-            pairingPsk = pairingPsk,
-            routePrivateKey = routePrivateKey,
-            routePublicKey = routePublicKey,
+            clientId = CLIENT_ID,
+            clientPsk = clientPsk,
+            devicePrivateKey = devicePrivateKey,
+            devicePublicKey = devicePublicKey,
             request = request,
             accepted = true,
         )
@@ -106,12 +106,12 @@ class PairingProtocolTest {
         )
 
         protocol.verifyFinishCompletion(
-            routeId = ROUTE_ID,
+            deviceId = DEVICE_ID,
             requestId = FINISH_REQUEST_ID,
-            pairingId = PAIRING_ID,
-            pairingPsk = pairingPsk,
-            routePrivateKey = routePrivateKey,
-            routePublicKey = routePublicKey,
+            clientId = CLIENT_ID,
+            clientPsk = clientPsk,
+            devicePrivateKey = devicePrivateKey,
+            devicePublicKey = devicePublicKey,
             request = request,
             completion = completion,
         )
@@ -119,52 +119,52 @@ class PairingProtocolTest {
 
     @Test
     fun `opens a rotated credential request and its response and completion`() {
-        val oldPairingPsk = ByteArray(32) { (it + 1).toByte() }
+        val oldClientPsk = ByteArray(32) { (it + 1).toByte() }
         val rotationSender = pskHpke.SetupPSKS(
-            pskHpke.deserializePublicKey(routePublicKey),
-            protocolInfo(ByteArray(16)),
-            oldPairingPsk,
-            PAIRING_ID.hexBytes(),
+            pskHpke.deserializePublicKey(devicePublicKey),
+            pairedProtocolInfo(ByteArray(16)),
+            oldClientPsk,
+            CLIENT_ID.ulidBytes(),
         )
-        val rotatedPairingPsk = rotationSender.export(
+        val rotatedClientPsk = rotationSender.export(
             "agentknock-v1 psk".encodeToByteArray(),
             32,
         )
         val requestSender = pskHpke.SetupPSKS(
-            pskHpke.deserializePublicKey(routePublicKey),
-            protocolInfo(CREDENTIAL_REQUEST_ID),
-            rotatedPairingPsk,
-            PAIRING_ID.hexBytes(),
+            pskHpke.deserializePublicKey(devicePublicKey),
+            pairedProtocolInfo(CREDENTIAL_REQUEST_ID),
+            rotatedClientPsk,
+            CLIENT_ID.ulidBytes(),
         )
         val requestPlaintext =
             """{"cli_version":"0.1.0","method":"CredentialRequest","profiles":["test"],"operation":{"type":"exec","command":"env","arguments":[],"working_directory":"/tmp","stdin":"NULL_DEVICE","stdout":"TERMINAL","stderr":"TERMINAL"},"launcher_chain":[]}"""
                 .encodeToByteArray()
         val request = json.parseToJsonElement(
-            """{"version":"agentknock-v1","pairing_id":"$PAIRING_ID","key":"${BASE64.encodeToString(requestSender.encapsulation)}","ciphertext":"${BASE64.encodeToString(requestSender.seal(EMPTY, requestPlaintext))}","rotation_key":"${BASE64.encodeToString(rotationSender.encapsulation)}"}""",
+            """{"version":"agentknock-v1","key":"${BASE64.encodeToString(requestSender.encapsulation)}","ciphertext":"${BASE64.encodeToString(requestSender.seal(EMPTY, requestPlaintext))}","rotation_key":"${BASE64.encodeToString(rotationSender.encapsulation)}"}""",
         )
 
         val opened = protocol.openPairedRequest(
-            routeId = ROUTE_ID,
+            deviceId = DEVICE_ID,
             requestId = CREDENTIAL_REQUEST_ID,
-            pairingId = PAIRING_ID,
-            pairingPsk = oldPairingPsk,
-            routePrivateKey = routePrivateKey,
-            routePublicKey = routePublicKey,
+            clientId = CLIENT_ID,
+            clientPsk = oldClientPsk,
+            devicePrivateKey = devicePrivateKey,
+            devicePublicKey = devicePublicKey,
             request = request,
         )
 
         assertArrayEquals(requestPlaintext, opened.plaintext)
-        assertArrayEquals(rotatedPairingPsk, opened.pairingPsk)
+        assertArrayEquals(rotatedClientPsk, opened.clientPsk)
 
         val responsePlaintext =
             """{"result":"APPROVED","environment":{"TOKEN":"value"}}""".encodeToByteArray()
         val response = protocol.sealPairedResponse(
-            routeId = ROUTE_ID,
+            deviceId = DEVICE_ID,
             requestId = CREDENTIAL_REQUEST_ID,
-            pairingId = PAIRING_ID,
-            pairingPsk = opened.pairingPsk,
-            routePrivateKey = routePrivateKey,
-            routePublicKey = routePublicKey,
+            clientId = CLIENT_ID,
+            clientPsk = opened.clientPsk,
+            devicePrivateKey = devicePrivateKey,
+            devicePublicKey = devicePublicKey,
             request = request,
             plaintext = responsePlaintext,
         )
@@ -178,12 +178,12 @@ class PairingProtocolTest {
         assertArrayEquals(
             completionPlaintext,
             protocol.openPairedCompletion(
-                routeId = ROUTE_ID,
+                deviceId = DEVICE_ID,
                 requestId = CREDENTIAL_REQUEST_ID,
-                pairingId = PAIRING_ID,
-                pairingPsk = opened.pairingPsk,
-                routePrivateKey = routePrivateKey,
-                routePublicKey = routePublicKey,
+                clientId = CLIENT_ID,
+                clientPsk = opened.clientPsk,
+                devicePrivateKey = devicePrivateKey,
+                devicePublicKey = devicePublicKey,
                 request = request,
                 completion = completion,
             ),
@@ -199,12 +199,17 @@ class PairingProtocolTest {
         assertEquals(123_456_789_012L, choices.values[choices.correctIndex])
     }
 
-    private fun protocolInfo(requestId: String): ByteArray =
-        protocolInfo(requestId.ulidBytes())
+    private fun baseProtocolInfo(): ByteArray =
+        protocolVersionInfo() + DEVICE_ID.ulidBytes() + CLIENT_ID.ulidBytes()
 
-    private fun protocolInfo(requestId: ByteArray): ByteArray =
-        "agentknock-v1".encodeToByteArray() + ByteArray(3) +
-            ROUTE_ID.hexBytes() + PAIRING_ID.hexBytes() + requestId
+    private fun pairedProtocolInfo(requestId: String): ByteArray =
+        pairedProtocolInfo(requestId.ulidBytes())
+
+    private fun pairedProtocolInfo(requestId: ByteArray): ByteArray =
+        protocolVersionInfo() + DEVICE_ID.ulidBytes() + requestId
+
+    private fun protocolVersionInfo(): ByteArray =
+        "agentknock-v1".encodeToByteArray() + ByteArray(3)
 
     private fun openResponse(
         sender: org.bouncycastle.crypto.hpke.HPKEContext,
@@ -241,10 +246,6 @@ class PairingProtocolTest {
         return output
     }
 
-    private fun String.hexBytes(): ByteArray = ByteArray(length / 2) { index ->
-        substring(index * 2, index * 2 + 2).toInt(16).toByte()
-    }
-
     private fun String.ulidBytes(): ByteArray {
         val alphabet = "0123456789ABCDEFGHJKMNPQRSTVWXYZ"
         var value = java.math.BigInteger.ZERO
@@ -260,11 +261,11 @@ class PairingProtocolTest {
     }
 
     private companion object {
-        const val ROUTE_ID = "0b7d7963604cba911e9c03e727688b89"
-        const val PAIRING_ID = "ffeeddccbbaa99887766554433221100"
-        const val START_REQUEST_ID = "01ARZ3NDEKTSV4RRFFQ69G5FAV"
+        const val DEVICE_ID = "01K2ENXDTW1P3XAR4J7V7C9D0H"
+        const val CLIENT_ID = "01K2EP16NWNAGJYF8J1Q2V6P3X"
         const val FINISH_REQUEST_ID = "01ARZ3NDEKTSV4RRFFQ69G5FAW"
         const val CREDENTIAL_REQUEST_ID = "01ARZ3NDEKTSV4RRFFQ69G5FAX"
+        val DEVICE_RANDOM = ByteArray(32) { (0xa0 + it).toByte() }
         val EMPTY = ByteArray(0)
         val BASE64: Base64.Encoder = Base64.getEncoder()
         val BASE64_DECODER: Base64.Decoder = Base64.getDecoder()

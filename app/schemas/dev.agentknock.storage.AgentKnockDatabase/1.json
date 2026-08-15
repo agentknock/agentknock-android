@@ -2,7 +2,7 @@
   "formatVersion": 1,
   "database": {
     "version": 1,
-    "identityHash": "99cd841d71c684f8d4d1460efb3b6d57",
+    "identityHash": "99b41b49b99b53a5a353abeebc043ed6",
     "entities": [
       {
         "tableName": "local_encryption_keys",
@@ -266,7 +266,7 @@
       },
       {
         "tableName": "vault_identities",
-        "createSql": "CREATE TABLE IF NOT EXISTS `${TABLE_NAME}` (`id` TEXT NOT NULL, `role` TEXT NOT NULL, `address` TEXT NOT NULL, `route_id` TEXT NOT NULL, `route_public_key` BLOB NOT NULL, `created_at` INTEGER NOT NULL, `claimed_at` INTEGER, PRIMARY KEY(`id`))",
+        "createSql": "CREATE TABLE IF NOT EXISTS `${TABLE_NAME}` (`id` TEXT NOT NULL, `role` TEXT NOT NULL, `address` TEXT NOT NULL, `address_id` TEXT NOT NULL, `device_id` TEXT NOT NULL, `device_public_key` BLOB NOT NULL, `created_at` INTEGER NOT NULL, `claimed_at` INTEGER, PRIMARY KEY(`id`))",
         "fields": [
           {
             "fieldPath": "id",
@@ -287,14 +287,20 @@
             "notNull": true
           },
           {
-            "fieldPath": "routeId",
-            "columnName": "route_id",
+            "fieldPath": "addressId",
+            "columnName": "address_id",
             "affinity": "TEXT",
             "notNull": true
           },
           {
-            "fieldPath": "routePublicKey",
-            "columnName": "route_public_key",
+            "fieldPath": "deviceId",
+            "columnName": "device_id",
+            "affinity": "TEXT",
+            "notNull": true
+          },
+          {
+            "fieldPath": "devicePublicKey",
+            "columnName": "device_public_key",
             "affinity": "BLOB",
             "notNull": true
           },
@@ -327,13 +333,13 @@
             "createSql": "CREATE UNIQUE INDEX IF NOT EXISTS `index_vault_identities_role` ON `${TABLE_NAME}` (`role`)"
           },
           {
-            "name": "index_vault_identities_route_id",
+            "name": "index_vault_identities_address_id",
             "unique": true,
             "columnNames": [
-              "route_id"
+              "address_id"
             ],
             "orders": [],
-            "createSql": "CREATE UNIQUE INDEX IF NOT EXISTS `index_vault_identities_route_id` ON `${TABLE_NAME}` (`route_id`)"
+            "createSql": "CREATE UNIQUE INDEX IF NOT EXISTS `index_vault_identities_address_id` ON `${TABLE_NAME}` (`address_id`)"
           }
         ]
       },
@@ -588,7 +594,7 @@
       },
       {
         "tableName": "pairings",
-        "createSql": "CREATE TABLE IF NOT EXISTS `${TABLE_NAME}` (`request_id` INTEGER NOT NULL, `vault_identity_id` TEXT, `vault_address` TEXT NOT NULL, `route_id` TEXT NOT NULL, `pairing_id` TEXT NOT NULL, `state` TEXT NOT NULL, `sas_option_0` INTEGER, `sas_option_1` INTEGER, `sas_option_2` INTEGER, `correct_sas_index` INTEGER, `cli_version` TEXT, `platform` TEXT, `architecture` TEXT, `hostname` TEXT, `machine_id` TEXT, `os_version` TEXT, `error` TEXT, `created_at` INTEGER NOT NULL, `updated_at` INTEGER NOT NULL, `decided_at` INTEGER, `completed_at` INTEGER, PRIMARY KEY(`request_id`), FOREIGN KEY(`request_id`) REFERENCES `inbox_requests`(`id`) ON UPDATE NO ACTION ON DELETE CASCADE , FOREIGN KEY(`vault_identity_id`) REFERENCES `vault_identities`(`id`) ON UPDATE NO ACTION ON DELETE SET NULL )",
+        "createSql": "CREATE TABLE IF NOT EXISTS `${TABLE_NAME}` (`request_id` INTEGER NOT NULL, `vault_identity_id` TEXT, `vault_address` TEXT NOT NULL, `device_id` TEXT NOT NULL, `client_id` TEXT NOT NULL, `device_random` BLOB NOT NULL, `desired_relay_client_state` TEXT, `relay_client_state` TEXT, `state` TEXT NOT NULL, `sas_option_0` INTEGER, `sas_option_1` INTEGER, `sas_option_2` INTEGER, `correct_sas_index` INTEGER, `cli_version` TEXT, `platform` TEXT, `architecture` TEXT, `hostname` TEXT, `machine_id` TEXT, `os_version` TEXT, `error` TEXT, `created_at` INTEGER NOT NULL, `updated_at` INTEGER NOT NULL, `decided_at` INTEGER, `completed_at` INTEGER, PRIMARY KEY(`request_id`), FOREIGN KEY(`request_id`) REFERENCES `inbox_requests`(`id`) ON UPDATE NO ACTION ON DELETE CASCADE , FOREIGN KEY(`vault_identity_id`) REFERENCES `vault_identities`(`id`) ON UPDATE NO ACTION ON DELETE SET NULL )",
         "fields": [
           {
             "fieldPath": "requestId",
@@ -608,16 +614,32 @@
             "notNull": true
           },
           {
-            "fieldPath": "routeId",
-            "columnName": "route_id",
+            "fieldPath": "deviceId",
+            "columnName": "device_id",
             "affinity": "TEXT",
             "notNull": true
           },
           {
-            "fieldPath": "pairingId",
-            "columnName": "pairing_id",
+            "fieldPath": "clientId",
+            "columnName": "client_id",
             "affinity": "TEXT",
             "notNull": true
+          },
+          {
+            "fieldPath": "deviceRandom",
+            "columnName": "device_random",
+            "affinity": "BLOB",
+            "notNull": true
+          },
+          {
+            "fieldPath": "desiredRelayClientState",
+            "columnName": "desired_relay_client_state",
+            "affinity": "TEXT"
+          },
+          {
+            "fieldPath": "relayClientState",
+            "columnName": "relay_client_state",
+            "affinity": "TEXT"
           },
           {
             "fieldPath": "state",
@@ -711,13 +733,13 @@
         },
         "indices": [
           {
-            "name": "index_pairings_pairing_id",
+            "name": "index_pairings_client_id",
             "unique": true,
             "columnNames": [
-              "pairing_id"
+              "client_id"
             ],
             "orders": [],
-            "createSql": "CREATE UNIQUE INDEX IF NOT EXISTS `index_pairings_pairing_id` ON `${TABLE_NAME}` (`pairing_id`)"
+            "createSql": "CREATE UNIQUE INDEX IF NOT EXISTS `index_pairings_client_id` ON `${TABLE_NAME}` (`client_id`)"
           },
           {
             "name": "index_pairings_vault_identity_id",
@@ -876,7 +898,7 @@
       },
       {
         "tableName": "credential_requests",
-        "createSql": "CREATE TABLE IF NOT EXISTS `${TABLE_NAME}` (`request_id` INTEGER NOT NULL, `pairing_request_id` INTEGER, `pairing_id` TEXT NOT NULL, `vault_address` TEXT NOT NULL, `hostname` TEXT, `platform` TEXT, `architecture` TEXT, `machine_id` TEXT, `os_version` TEXT, `state` TEXT NOT NULL, `cli_version` TEXT NOT NULL, `profiles_json` TEXT NOT NULL, `profile_details_json` TEXT NOT NULL, `missing_profiles_json` TEXT NOT NULL, `reason` TEXT, `command` TEXT NOT NULL, `arguments_json` TEXT NOT NULL, `working_directory` TEXT NOT NULL, `resolved_path` TEXT, `stdin_kind` TEXT NOT NULL, `stdout_kind` TEXT NOT NULL, `stderr_kind` TEXT NOT NULL, `launcher_chain_json` TEXT NOT NULL, `decision` TEXT, `completion_result` TEXT, `completion_reason` TEXT, `completion_message` TEXT, `error` TEXT, `created_at` INTEGER NOT NULL, `updated_at` INTEGER NOT NULL, `decided_at` INTEGER, `completed_at` INTEGER, PRIMARY KEY(`request_id`), FOREIGN KEY(`request_id`) REFERENCES `inbox_requests`(`id`) ON UPDATE NO ACTION ON DELETE CASCADE , FOREIGN KEY(`pairing_request_id`) REFERENCES `pairings`(`request_id`) ON UPDATE NO ACTION ON DELETE SET NULL )",
+        "createSql": "CREATE TABLE IF NOT EXISTS `${TABLE_NAME}` (`request_id` INTEGER NOT NULL, `pairing_request_id` INTEGER, `client_id` TEXT NOT NULL, `vault_address` TEXT NOT NULL, `hostname` TEXT, `platform` TEXT, `architecture` TEXT, `machine_id` TEXT, `os_version` TEXT, `state` TEXT NOT NULL, `cli_version` TEXT NOT NULL, `profiles_json` TEXT NOT NULL, `profile_details_json` TEXT NOT NULL, `missing_profiles_json` TEXT NOT NULL, `reason` TEXT, `command` TEXT NOT NULL, `arguments_json` TEXT NOT NULL, `working_directory` TEXT NOT NULL, `resolved_path` TEXT, `stdin_kind` TEXT NOT NULL, `stdout_kind` TEXT NOT NULL, `stderr_kind` TEXT NOT NULL, `launcher_chain_json` TEXT NOT NULL, `decision` TEXT, `completion_result` TEXT, `completion_reason` TEXT, `completion_message` TEXT, `error` TEXT, `created_at` INTEGER NOT NULL, `updated_at` INTEGER NOT NULL, `decided_at` INTEGER, `completed_at` INTEGER, PRIMARY KEY(`request_id`), FOREIGN KEY(`request_id`) REFERENCES `inbox_requests`(`id`) ON UPDATE NO ACTION ON DELETE CASCADE , FOREIGN KEY(`pairing_request_id`) REFERENCES `pairings`(`request_id`) ON UPDATE NO ACTION ON DELETE SET NULL )",
         "fields": [
           {
             "fieldPath": "requestId",
@@ -890,8 +912,8 @@
             "affinity": "INTEGER"
           },
           {
-            "fieldPath": "pairingId",
-            "columnName": "pairing_id",
+            "fieldPath": "clientId",
+            "columnName": "client_id",
             "affinity": "TEXT",
             "notNull": true
           },
@@ -1109,7 +1131,7 @@
       },
       {
         "tableName": "profile_list_requests",
-        "createSql": "CREATE TABLE IF NOT EXISTS `${TABLE_NAME}` (`request_id` INTEGER NOT NULL, `pairing_request_id` INTEGER, `pairing_id` TEXT NOT NULL, `vault_address` TEXT NOT NULL, `hostname` TEXT, `platform` TEXT, `architecture` TEXT, `machine_id` TEXT, `os_version` TEXT, `state` TEXT NOT NULL, `cli_version` TEXT NOT NULL, `profiles_json` TEXT NOT NULL, `error` TEXT, `created_at` INTEGER NOT NULL, `updated_at` INTEGER NOT NULL, `completed_at` INTEGER, PRIMARY KEY(`request_id`), FOREIGN KEY(`request_id`) REFERENCES `inbox_requests`(`id`) ON UPDATE NO ACTION ON DELETE CASCADE , FOREIGN KEY(`pairing_request_id`) REFERENCES `pairings`(`request_id`) ON UPDATE NO ACTION ON DELETE SET NULL )",
+        "createSql": "CREATE TABLE IF NOT EXISTS `${TABLE_NAME}` (`request_id` INTEGER NOT NULL, `pairing_request_id` INTEGER, `client_id` TEXT NOT NULL, `vault_address` TEXT NOT NULL, `hostname` TEXT, `platform` TEXT, `architecture` TEXT, `machine_id` TEXT, `os_version` TEXT, `state` TEXT NOT NULL, `cli_version` TEXT NOT NULL, `profiles_json` TEXT NOT NULL, `error` TEXT, `created_at` INTEGER NOT NULL, `updated_at` INTEGER NOT NULL, `completed_at` INTEGER, PRIMARY KEY(`request_id`), FOREIGN KEY(`request_id`) REFERENCES `inbox_requests`(`id`) ON UPDATE NO ACTION ON DELETE CASCADE , FOREIGN KEY(`pairing_request_id`) REFERENCES `pairings`(`request_id`) ON UPDATE NO ACTION ON DELETE SET NULL )",
         "fields": [
           {
             "fieldPath": "requestId",
@@ -1123,8 +1145,8 @@
             "affinity": "INTEGER"
           },
           {
-            "fieldPath": "pairingId",
-            "columnName": "pairing_id",
+            "fieldPath": "clientId",
+            "columnName": "client_id",
             "affinity": "TEXT",
             "notNull": true
           },
@@ -1254,7 +1276,7 @@
     ],
     "setupQueries": [
       "CREATE TABLE IF NOT EXISTS room_master_table (id INTEGER PRIMARY KEY,identity_hash TEXT)",
-      "INSERT OR REPLACE INTO room_master_table (id,identity_hash) VALUES(42, '99cd841d71c684f8d4d1460efb3b6d57')"
+      "INSERT OR REPLACE INTO room_master_table (id,identity_hash) VALUES(42, '99b41b49b99b53a5a353abeebc043ed6')"
     ]
   }
 }

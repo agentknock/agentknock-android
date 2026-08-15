@@ -41,8 +41,8 @@ internal fun AgentKnockScreen(
     val current = configuration
 
     LifecycleStartEffect(requestsViewModel) {
-        requestsViewModel.startPolling()
-        onStopOrDispose { requestsViewModel.stopPolling() }
+        requestsViewModel.startSyncing()
+        onStopOrDispose { requestsViewModel.stopSyncing() }
     }
 
     when {

@@ -7,7 +7,7 @@ import dev.agentknock.storage.crypto.AndroidEncryptionKeyStore
 import dev.agentknock.storage.crypto.LocalEncryptionKeyManager
 import dev.agentknock.storage.profile.ProfileRepository
 import dev.agentknock.relay.HttpRelayClaimClient
-import dev.agentknock.relay.HttpRelayInboxClient
+import dev.agentknock.relay.WebSocketRelayDeviceClient
 import dev.agentknock.storage.request.RequestRepository
 import dev.agentknock.storage.vault.VaultRepository
 import kotlinx.coroutines.CoroutineScope
@@ -16,6 +16,7 @@ import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.SupervisorJob
 import kotlinx.coroutines.async
 import okhttp3.OkHttpClient
+import java.util.concurrent.TimeUnit
 
 class AgentKnockApplication : Application() {
     internal lateinit var container: ApplicationContainer
@@ -35,7 +36,9 @@ internal class ApplicationContainer(application: Application) {
         keyStore = encryptionKeyStore,
     )
     private val encryption = AesGcmEncryption(encryptionKeyStore)
-    private val httpClient = OkHttpClient()
+    private val httpClient = OkHttpClient.Builder()
+        .pingInterval(30, TimeUnit.SECONDS)
+        .build()
 
     val profiles = ProfileRepository(
         dao = database.profileDao(),
@@ -52,9 +55,9 @@ internal class ApplicationContainer(application: Application) {
 
     val requests = RequestRepository(
         dao = database.requestDao(),
-        vault = vault,
+        deviceCredentials = vault,
         profiles = profiles,
-        relay = HttpRelayInboxClient(httpClient),
+        relay = WebSocketRelayDeviceClient(httpClient),
         keyManager = encryptionKeyManager,
         encryption = encryption,
     )
