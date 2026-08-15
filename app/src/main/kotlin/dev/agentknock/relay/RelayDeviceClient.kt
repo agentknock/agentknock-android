@@ -2,8 +2,11 @@ package dev.agentknock.relay
 
 import kotlinx.coroutines.CompletableDeferred
 import kotlinx.coroutines.CancellationException
+import kotlinx.coroutines.NonCancellable
 import kotlinx.coroutines.channels.Channel
 import kotlinx.coroutines.channels.ReceiveChannel
+import kotlinx.coroutines.withContext
+import kotlinx.coroutines.withTimeoutOrNull
 import kotlinx.serialization.json.Json
 import kotlinx.serialization.json.JsonElement
 import kotlinx.serialization.json.JsonObject
@@ -153,10 +156,12 @@ internal sealed interface RelayDeviceConnectionResult {
     data object InvalidResponse : RelayDeviceConnectionResult
 }
 
-internal interface RelayDeviceConnection : AutoCloseable {
+internal interface RelayDeviceConnection {
     val events: ReceiveChannel<RelayDeviceEvent>
 
     fun send(frame: RelayDeviceFrame): Boolean
+
+    suspend fun close()
 }
 
 internal interface RelayDeviceClient {
@@ -176,6 +181,7 @@ internal class WebSocketRelayDeviceClient(
         deviceToken: String,
     ): RelayDeviceConnectionResult {
         val opened = CompletableDeferred<RelayDeviceConnectionResult>()
+        val terminated = CompletableDeferred<Unit>()
         val events = Channel<RelayDeviceEvent>(Channel.UNLIMITED)
         lateinit var connection: OkHttpRelayDeviceConnection
         val request = Request.Builder()
@@ -184,7 +190,12 @@ internal class WebSocketRelayDeviceClient(
             .build()
         val listener = object : WebSocketListener() {
             override fun onOpen(webSocket: WebSocket, response: Response) {
-                connection = OkHttpRelayDeviceConnection(webSocket, events, codec)
+                connection = OkHttpRelayDeviceConnection(
+                    socket = webSocket,
+                    events = events,
+                    codec = codec,
+                    terminated = terminated,
+                )
                 opened.complete(RelayDeviceConnectionResult.Connected(connection))
             }
 
@@ -211,10 +222,12 @@ internal class WebSocketRelayDeviceClient(
             }
 
             override fun onClosed(webSocket: WebSocket, code: Int, reason: String) {
+                terminated.complete(Unit)
                 events.trySend(RelayDeviceEvent.Closed(code, reason))
             }
 
             override fun onFailure(webSocket: WebSocket, t: Throwable, response: Response?) {
+                terminated.complete(Unit)
                 if (!opened.isCompleted) {
                     opened.complete(connectionFailure(t, response))
                 } else {
@@ -226,7 +239,9 @@ internal class WebSocketRelayDeviceClient(
         return try {
             opened.await()
         } catch (cancelled: CancellationException) {
-            socket.cancel()
+            withContext(NonCancellable) {
+                closeWebSocket(socket, terminated)
+            }
             throw cancelled
         }
     }
@@ -254,15 +269,32 @@ private class OkHttpRelayDeviceConnection(
     private val socket: WebSocket,
     override val events: ReceiveChannel<RelayDeviceEvent>,
     private val codec: RelayFrameCodec,
+    private val terminated: CompletableDeferred<Unit>,
 ) : RelayDeviceConnection {
     override fun send(frame: RelayDeviceFrame): Boolean {
         val encoded = codec.encode(frame)
         return encoded.encodeToByteArray().size <= MAXIMUM_FRAME_BYTES && socket.send(encoded)
     }
 
-    override fun close() {
+    override suspend fun close() {
+        withContext(NonCancellable) {
+            closeWebSocket(socket, terminated)
+        }
+    }
+}
+
+private suspend fun closeWebSocket(
+    socket: WebSocket,
+    terminated: CompletableDeferred<Unit>,
+) {
+    if (!terminated.isCompleted) {
         socket.close(1000, "client disconnect")
     }
+    val completed = withTimeoutOrNull(WEBSOCKET_CLOSE_TIMEOUT_MILLIS) {
+        terminated.await()
+        true
+    } == true
+    if (!completed) socket.cancel()
 }
 
 internal class RelayFrameCodec(
@@ -383,3 +415,4 @@ private fun JsonObject.string(name: String): String? =
     this[name]?.jsonPrimitive?.content
 
 private const val MAXIMUM_FRAME_BYTES = 256 * 1024
+private const val WEBSOCKET_CLOSE_TIMEOUT_MILLIS = 5_000L

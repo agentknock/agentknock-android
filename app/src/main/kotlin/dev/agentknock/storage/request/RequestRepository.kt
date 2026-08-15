@@ -473,13 +473,15 @@ internal class RequestRepository(
             }
         }
 
-        connection.use { socket ->
+        try {
             synchronize(
                 credentials = credentials,
-                connection = socket,
+                connection = connection,
                 keepConnected = keepConnected,
                 onCaughtUp = onCaughtUp,
             )
+        } finally {
+            connection.close()
         }
     }
 

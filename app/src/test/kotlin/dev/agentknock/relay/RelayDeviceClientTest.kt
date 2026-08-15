@@ -1,7 +1,9 @@
 package dev.agentknock.relay
 
 import kotlinx.coroutines.CompletableDeferred
+import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.test.runTest
+import kotlinx.coroutines.withContext
 import mockwebserver3.MockResponse
 import mockwebserver3.MockWebServer
 import okhttp3.OkHttpClient
@@ -96,6 +98,46 @@ class RelayDeviceClientTest {
                 RelayDeviceEvent.Closed(1000, "test complete"),
                 connection.events.receive(),
             )
+        }
+    }
+
+    @Test
+    fun `completes a client initiated close handshake`() = runTest {
+        MockWebServer().use { server ->
+            val closeCode = CompletableDeferred<Int>()
+            val closeReason = CompletableDeferred<String>()
+            server.start()
+            server.enqueue(
+                MockResponse.Builder()
+                    .webSocketUpgrade(
+                        object : WebSocketListener() {
+                            override fun onClosing(
+                                webSocket: WebSocket,
+                                code: Int,
+                                reason: String,
+                            ) {
+                                closeCode.complete(code)
+                                closeReason.complete(reason)
+                                webSocket.close(code, reason)
+                            }
+                        },
+                    )
+                    .build(),
+            )
+            val client = WebSocketRelayDeviceClient(
+                client = OkHttpClient(),
+                relayUrl = server.url("/").toString(),
+            )
+
+            val result = client.connect(DEVICE_ID, DEVICE_TOKEN)
+
+            assertTrue(result is RelayDeviceConnectionResult.Connected)
+            val connection = (result as RelayDeviceConnectionResult.Connected).connection
+            withContext(Dispatchers.IO) {
+                connection.close()
+            }
+            assertEquals(1000, closeCode.await())
+            assertEquals("client disconnect", closeReason.await())
         }
     }
 
