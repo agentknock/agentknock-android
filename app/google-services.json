@@ -1,0 +1,29 @@
+{
+  "project_info": {
+    "project_number": "758982632143",
+    "project_id": "agentknock-e6dfc",
+    "storage_bucket": "agentknock-e6dfc.firebasestorage.app"
+  },
+  "client": [
+    {
+      "client_info": {
+        "mobilesdk_app_id": "1:758982632143:android:e18f54d7263a8245854dba",
+        "android_client_info": {
+          "package_name": "dev.agentknock"
+        }
+      },
+      "oauth_client": [],
+      "api_key": [
+        {
+          "current_key": "AIzaSyDZM7ATyBxp3-xF0R0KHukdw4rnoPoiy7I"
+        }
+      ],
+      "services": {
+        "appinvite_service": {
+          "other_platform_oauth_client": []
+        }
+      }
+    }
+  ],
+  "configuration_version": "1"
+}

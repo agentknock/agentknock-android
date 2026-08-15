@@ -1,13 +1,18 @@
 package dev.agentknock
 
 import android.app.Application
+import android.util.Log
 import androidx.lifecycle.ProcessLifecycleOwner
+import com.google.firebase.messaging.FirebaseMessaging
+import dev.agentknock.push.PushRegistrationRepository
+import dev.agentknock.push.RequestNotifications
 import dev.agentknock.storage.AgentKnockDatabase
 import dev.agentknock.storage.crypto.AesGcmEncryption
 import dev.agentknock.storage.crypto.AndroidEncryptionKeyStore
 import dev.agentknock.storage.crypto.LocalEncryptionKeyManager
 import dev.agentknock.storage.profile.ProfileRepository
 import dev.agentknock.relay.HttpRelayClaimClient
+import dev.agentknock.relay.HttpRelayPushRegistrationClient
 import dev.agentknock.relay.WebSocketRelayDeviceClient
 import dev.agentknock.storage.request.RequestRepository
 import dev.agentknock.storage.request.RequestConnectionManager
@@ -27,6 +32,7 @@ class AgentKnockApplication : Application() {
     override fun onCreate() {
         super.onCreate()
         container = ApplicationContainer(this)
+        RequestNotifications.createChannel(this)
         ProcessLifecycleOwner.get().lifecycle.addObserver(container.requestConnection)
     }
 }
@@ -62,6 +68,11 @@ internal class ApplicationContainer(application: Application) {
         relay = HttpRelayClaimClient(httpClient),
     )
 
+    val pushRegistration = PushRegistrationRepository(
+        deviceCredentials = vault,
+        relay = HttpRelayPushRegistrationClient(httpClient),
+    )
+
     val requests = RequestRepository(
         dao = database.requestDao(),
         deviceCredentials = vault,
@@ -69,6 +80,11 @@ internal class ApplicationContainer(application: Application) {
         relay = WebSocketRelayDeviceClient(httpClient),
         keyManager = encryptionKeyManager,
         encryption = encryption,
+        requestPushRegistration = {
+            FirebaseMessaging.getInstance().register().addOnFailureListener { failure ->
+                Log.w("AgentKnock", "FCM registration failed", failure)
+            }
+        },
     )
 
     val requestConnection = RequestConnectionManager(

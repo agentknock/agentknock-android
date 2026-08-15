@@ -1,6 +1,9 @@
 <?xml version="1.0" encoding="utf-8"?>
 <resources xmlns:tools="http://schemas.android.com/tools">
     <string name="app_name">AgentKnock</string>
+    <string name="request_notification_channel">Requests</string>
+    <string name="request_notification_channel_description">Pairing and credential requests waiting for review</string>
+    <string name="request_waiting">Request waiting</string>
     <string name="profiles">Profiles</string>
     <string name="new_profile">New profile</string>
     <string name="no_profiles">No profiles yet</string>

@@ -19,6 +19,7 @@ import dev.agentknock.relay.RelayDeviceFrame
 import dev.agentknock.relay.RelayExchangeState
 import dev.agentknock.relay.RelayMessageKind
 import dev.agentknock.relay.RelayMessageState
+import dev.agentknock.relay.RelayPushRegistrationState
 import dev.agentknock.storage.crypto.AesGcmEncryption
 import dev.agentknock.storage.crypto.DecryptionResult
 import dev.agentknock.storage.crypto.EncryptedValue
@@ -254,6 +255,7 @@ internal class RequestRepository(
     private val relay: RelayDeviceClient,
     private val keyManager: LocalEncryptionKeyManager,
     private val encryption: AesGcmEncryption,
+    private val requestPushRegistration: () -> Unit = {},
     private val pairingProtocol: PairingProtocol = PairingProtocol(),
     private val pairedRequestProtocol: PairedRequestProtocol = PairedRequestProtocol(),
     private val credentialProtocol: CredentialProtocol = CredentialProtocol(),
@@ -619,7 +621,12 @@ internal class RequestRepository(
                         }
                         null
                     }
-                    is RelayDeviceEvent.PushRegistration -> null
+                    is RelayDeviceEvent.PushRegistration -> {
+                        if (event.state != RelayPushRegistrationState.REGISTERED) {
+                            requestPushRegistration()
+                        }
+                        null
+                    }
                     is RelayDeviceEvent.State -> {
                         applyRelayState(event)
                         awaitingStates -= event.requestId

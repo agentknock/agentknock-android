@@ -9,6 +9,7 @@ import androidx.compose.material3.NavigationBarItem
 import androidx.compose.material3.Scaffold
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
+import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.saveable.rememberSaveable
@@ -24,6 +25,7 @@ import dev.agentknock.ui.requests.RequestsScreen
 import dev.agentknock.ui.requests.RequestsViewModel
 import dev.agentknock.ui.vault.VaultScreen
 import dev.agentknock.ui.vault.VaultViewModel
+import kotlinx.coroutines.flow.StateFlow
 
 @Composable
 internal fun AgentKnockScreen(
@@ -32,12 +34,20 @@ internal fun AgentKnockScreen(
         onSuccess: () -> Unit,
         onError: (String) -> Unit,
     ) -> Unit,
+    requestNavigation: StateFlow<Long>,
     vaultViewModel: VaultViewModel = viewModel(),
     requestsViewModel: RequestsViewModel = viewModel(),
 ) {
     val configuration by vaultViewModel.configuration.collectAsStateWithLifecycle()
     var section by rememberSaveable { mutableStateOf(MainSection.REQUESTS) }
+    val requestNavigationGeneration by requestNavigation.collectAsStateWithLifecycle()
     val current = configuration
+
+    LaunchedEffect(requestNavigationGeneration) {
+        if (requestNavigationGeneration > 0) {
+            section = MainSection.REQUESTS
+        }
+    }
 
     when {
         current == null -> Box(Modifier.fillMaxSize(), contentAlignment = Alignment.Center) {
