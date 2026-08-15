@@ -1,7 +1,9 @@
 package dev.agentknock.relay
 
 import kotlinx.coroutines.CompletableDeferred
+import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.channels.Channel
+import kotlinx.coroutines.channels.ReceiveChannel
 import kotlinx.serialization.json.Json
 import kotlinx.serialization.json.JsonElement
 import kotlinx.serialization.json.JsonObject
@@ -43,6 +45,12 @@ internal enum class RelayMessageState(val wireName: String) {
     ACCEPTED("accepted"),
     DELIVERED("delivered"),
     DISCARDED("discarded"),
+}
+
+internal enum class RelayPushRegistrationState(val wireName: String) {
+    MISSING("missing"),
+    REGISTERED("registered"),
+    INVALID("invalid"),
 }
 
 internal sealed interface RelayDeviceFrame {
@@ -110,6 +118,10 @@ internal sealed interface RelayDeviceEvent {
         val state: RelayClientState,
     ) : RelayDeviceEvent
 
+    data class PushRegistration(
+        val state: RelayPushRegistrationState,
+    ) : RelayDeviceEvent
+
     data class Error(
         val code: String,
         val message: String,
@@ -142,9 +154,9 @@ internal sealed interface RelayDeviceConnectionResult {
 }
 
 internal interface RelayDeviceConnection : AutoCloseable {
-    fun send(frame: RelayDeviceFrame): Boolean
+    val events: ReceiveChannel<RelayDeviceEvent>
 
-    suspend fun receive(): RelayDeviceEvent
+    fun send(frame: RelayDeviceFrame): Boolean
 }
 
 internal interface RelayDeviceClient {
@@ -210,8 +222,13 @@ internal class WebSocketRelayDeviceClient(
                 }
             }
         }
-        client.newWebSocket(request, listener)
-        return opened.await()
+        val socket = client.newWebSocket(request, listener)
+        return try {
+            opened.await()
+        } catch (cancelled: CancellationException) {
+            socket.cancel()
+            throw cancelled
+        }
     }
 
     private fun connectionFailure(
@@ -235,7 +252,7 @@ internal class WebSocketRelayDeviceClient(
 
 private class OkHttpRelayDeviceConnection(
     private val socket: WebSocket,
-    private val events: Channel<RelayDeviceEvent>,
+    override val events: ReceiveChannel<RelayDeviceEvent>,
     private val codec: RelayFrameCodec,
 ) : RelayDeviceConnection {
     override fun send(frame: RelayDeviceFrame): Boolean {
@@ -243,10 +260,8 @@ private class OkHttpRelayDeviceConnection(
         return encoded.encodeToByteArray().size <= MAXIMUM_FRAME_BYTES && socket.send(encoded)
     }
 
-    override suspend fun receive(): RelayDeviceEvent = events.receive()
-
     override fun close() {
-        socket.close(1000, "caught up")
+        socket.close(1000, "client disconnect")
     }
 }
 
@@ -319,6 +334,9 @@ internal class RelayFrameCodec(
             "client_state" -> RelayDeviceEvent.ClientState(
                 frame.requiredString("client_id"),
                 frame.requiredEnum("state", RelayClientState.entries) { it.wireName },
+            )
+            "push_registration" -> RelayDeviceEvent.PushRegistration(
+                frame.requiredEnum("state", RelayPushRegistrationState.entries) { it.wireName },
             )
             "error" -> RelayDeviceEvent.Error(
                 code = frame.requiredString("error"),

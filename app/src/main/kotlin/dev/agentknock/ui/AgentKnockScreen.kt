@@ -17,7 +17,6 @@ import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.res.stringResource
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
-import androidx.lifecycle.compose.LifecycleStartEffect
 import androidx.lifecycle.viewmodel.compose.viewModel
 import dev.agentknock.R
 import dev.agentknock.ui.profiles.ProfilesScreen
@@ -39,11 +38,6 @@ internal fun AgentKnockScreen(
     val configuration by vaultViewModel.configuration.collectAsStateWithLifecycle()
     var section by rememberSaveable { mutableStateOf(MainSection.REQUESTS) }
     val current = configuration
-
-    LifecycleStartEffect(requestsViewModel) {
-        requestsViewModel.startSyncing()
-        onStopOrDispose { requestsViewModel.stopSyncing() }
-    }
 
     when {
         current == null -> Box(Modifier.fillMaxSize(), contentAlignment = Alignment.Center) {

@@ -89,10 +89,13 @@ class RelayDeviceClientTest {
             )
             assertEquals(
                 RelayDeviceEvent.ClientState(CLIENT_ID, RelayClientState.ACTIVE),
-                connection.receive(),
+                connection.events.receive(),
             )
             assertTrue(socket.close(1000, "test complete"))
-            assertEquals(RelayDeviceEvent.Closed(1000, "test complete"), connection.receive())
+            assertEquals(
+                RelayDeviceEvent.Closed(1000, "test complete"),
+                connection.events.receive(),
+            )
         }
     }
 

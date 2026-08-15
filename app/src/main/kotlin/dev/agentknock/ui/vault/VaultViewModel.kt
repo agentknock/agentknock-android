@@ -17,7 +17,8 @@ import kotlinx.coroutines.sync.Mutex
 import kotlinx.coroutines.sync.withLock
 
 internal class VaultViewModel(application: Application) : AndroidViewModel(application) {
-    private val repository = (application as AgentKnockApplication).container.vault
+    private val container = (application as AgentKnockApplication).container
+    private val repository = container.vault
     private val addressGenerator = VaultAddressGenerator(
         application.resources.openRawResource(R.raw.vault_address_words)
             .bufferedReader()
@@ -41,7 +42,7 @@ internal class VaultViewModel(application: Application) : AndroidViewModel(appli
     suspend fun stageAndClaim(address: String): ClaimVaultResult = operationMutex.withLock {
         _claiming.value = true
         try {
-            repository.stageAndClaim(address).also { _lastClaimResult.value = it }
+            repository.stageAndClaim(address).also(::handleClaimResult)
         } finally {
             _claiming.value = false
         }
@@ -50,7 +51,7 @@ internal class VaultViewModel(application: Application) : AndroidViewModel(appli
     suspend fun retryClaim(): ClaimVaultResult = operationMutex.withLock {
         _claiming.value = true
         try {
-            repository.claimCandidate().also { _lastClaimResult.value = it }
+            repository.claimCandidate().also(::handleClaimResult)
         } finally {
             _claiming.value = false
         }
@@ -63,5 +64,10 @@ internal class VaultViewModel(application: Application) : AndroidViewModel(appli
 
     fun clearClaimResult() {
         _lastClaimResult.value = null
+    }
+
+    private fun handleClaimResult(result: ClaimVaultResult) {
+        _lastClaimResult.value = result
+        if (result == ClaimVaultResult.Claimed) container.requestConnection.refresh()
     }
 }

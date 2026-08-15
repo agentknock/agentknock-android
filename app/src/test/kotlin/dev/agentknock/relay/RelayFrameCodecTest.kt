@@ -68,6 +68,12 @@ class RelayFrameCodecTest {
     @Test
     fun `decodes relay control and terminal frames`() {
         assertEquals(
+            RelayDeviceEvent.PushRegistration(RelayPushRegistrationState.MISSING),
+            codec.decode(
+                """{"type":"push_registration","state":"missing"}""",
+            ),
+        )
+        assertEquals(
             RelayDeviceEvent.ClientState(CLIENT_ID, RelayClientState.ACTIVE),
             codec.decode(
                 """{"type":"client_state","client_id":"$CLIENT_ID","state":"active"}""",
