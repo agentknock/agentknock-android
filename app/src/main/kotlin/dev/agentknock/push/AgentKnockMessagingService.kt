@@ -1,5 +1,6 @@
 package dev.agentknock.push
 
+import android.annotation.SuppressLint
 import android.app.Notification
 import android.app.NotificationChannel
 import android.app.NotificationManager
@@ -29,6 +30,7 @@ import dev.agentknock.R
 import dev.agentknock.storage.request.RequestSyncResult
 import java.util.concurrent.TimeUnit
 
+@SuppressLint("MissingFirebaseInstanceTokenRefresh")
 class AgentKnockMessagingService : FirebaseMessagingService() {
     override fun onRegistered(installationId: String) {
         PushRegistrationWorker.enqueue(this, installationId)

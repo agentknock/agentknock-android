@@ -101,6 +101,8 @@ internal data class PairingEntity(
     val deviceId: String,
     @ColumnInfo(name = "client_id")
     val clientId: String,
+    @ColumnInfo(name = "friendly_name")
+    val friendlyName: String?,
     @ColumnInfo(name = "device_random")
     val deviceRandom: ByteArray,
     @ColumnInfo(name = "desired_relay_client_state")
@@ -217,6 +219,8 @@ internal data class CredentialRequestEntity(
     val pairingRequestId: Long?,
     @ColumnInfo(name = "client_id")
     val clientId: String,
+    @ColumnInfo(name = "client_name")
+    val clientName: String,
     @ColumnInfo(name = "vault_address")
     val vaultAddress: String,
     @ColumnInfo(name = "hostname")
@@ -247,8 +251,12 @@ internal data class CredentialRequestEntity(
     val argumentsJson: String,
     @ColumnInfo(name = "working_directory")
     val workingDirectory: String,
-    @ColumnInfo(name = "resolved_path")
-    val resolvedPath: String?,
+    @ColumnInfo(name = "executable_path")
+    val executablePath: String,
+    @ColumnInfo(name = "executable_hash")
+    val executableHash: String?,
+    @ColumnInfo(name = "executable_mode")
+    val executableMode: String,
     @ColumnInfo(name = "stdin_kind")
     val stdinKind: String,
     @ColumnInfo(name = "stdout_kind")
@@ -336,10 +344,131 @@ internal data class ProfileListRequestEntity(
     val completedAt: Long?,
 )
 
+@Entity(
+    tableName = "profile_upload_requests",
+    foreignKeys = [
+        ForeignKey(
+            entity = InboxRequestEntity::class,
+            parentColumns = ["id"],
+            childColumns = ["request_id"],
+            onDelete = ForeignKey.CASCADE,
+            onUpdate = ForeignKey.NO_ACTION,
+        ),
+        ForeignKey(
+            entity = PairingEntity::class,
+            parentColumns = ["request_id"],
+            childColumns = ["pairing_request_id"],
+            onDelete = ForeignKey.SET_NULL,
+            onUpdate = ForeignKey.NO_ACTION,
+        ),
+    ],
+    indices = [
+        Index(value = ["pairing_request_id"]),
+        Index(value = ["state"]),
+    ],
+)
+internal data class ProfileUploadRequestEntity(
+    @PrimaryKey
+    @ColumnInfo(name = "request_id")
+    val requestId: Long,
+    @ColumnInfo(name = "pairing_request_id")
+    val pairingRequestId: Long?,
+    @ColumnInfo(name = "client_id")
+    val clientId: String,
+    @ColumnInfo(name = "client_name")
+    val clientName: String,
+    @ColumnInfo(name = "state")
+    val state: String,
+    @ColumnInfo(name = "cli_version")
+    val cliVersion: String,
+    @ColumnInfo(name = "mode")
+    val mode: String,
+    @ColumnInfo(name = "proposed_name")
+    val proposedName: String,
+    @ColumnInfo(name = "accepted_name")
+    val acceptedName: String?,
+    @ColumnInfo(name = "description_provided")
+    val descriptionProvided: Boolean,
+    @ColumnInfo(name = "description")
+    val description: String?,
+    @ColumnInfo(name = "profile_type")
+    val profileType: String,
+    @ColumnInfo(name = "variable_names_json")
+    val variableNamesJson: String,
+    @ColumnInfo(name = "added_variables_json")
+    val addedVariablesJson: String,
+    @ColumnInfo(name = "changed_variables_json")
+    val changedVariablesJson: String,
+    @ColumnInfo(name = "unchanged_variables_json")
+    val unchangedVariablesJson: String,
+    @ColumnInfo(name = "removed_variables_json")
+    val removedVariablesJson: String,
+    @ColumnInfo(name = "error")
+    val error: String?,
+    @ColumnInfo(name = "transport_result")
+    val transportResult: String,
+    @ColumnInfo(name = "transport_message")
+    val transportMessage: String?,
+    @ColumnInfo(name = "created_at")
+    val createdAt: Long,
+    @ColumnInfo(name = "updated_at")
+    val updatedAt: Long,
+    @ColumnInfo(name = "decided_at")
+    val decidedAt: Long?,
+    @ColumnInfo(name = "transport_completed_at")
+    val transportCompletedAt: Long?,
+)
+
+@Entity(
+    tableName = "profile_upload_variables",
+    foreignKeys = [
+        ForeignKey(
+            entity = ProfileUploadRequestEntity::class,
+            parentColumns = ["request_id"],
+            childColumns = ["request_id"],
+            onDelete = ForeignKey.CASCADE,
+            onUpdate = ForeignKey.NO_ACTION,
+        ),
+        ForeignKey(
+            entity = LocalEncryptionKeyEntity::class,
+            parentColumns = ["id"],
+            childColumns = ["encryption_key_id"],
+            onDelete = ForeignKey.RESTRICT,
+            onUpdate = ForeignKey.NO_ACTION,
+        ),
+    ],
+    indices = [
+        Index(value = ["request_id", "name"], unique = true),
+        Index(value = ["encryption_key_id"]),
+    ],
+)
+internal data class ProfileUploadVariableEntity(
+    @PrimaryKey
+    @ColumnInfo(name = "id")
+    val id: String,
+    @ColumnInfo(name = "request_id")
+    val requestId: Long,
+    @ColumnInfo(name = "name")
+    val name: String,
+    @ColumnInfo(name = "encryption_format")
+    val encryptionFormat: Int,
+    @ColumnInfo(name = "encryption_key_id")
+    val encryptionKeyId: String,
+    @ColumnInfo(name = "nonce")
+    val nonce: ByteArray,
+    @ColumnInfo(name = "ciphertext")
+    val ciphertext: ByteArray,
+    @ColumnInfo(name = "created_at")
+    val createdAt: Long,
+)
+
 @Dao
 internal interface RequestDao {
     @Query("SELECT * FROM inbox_requests WHERE listed = 1 ORDER BY id DESC LIMIT 100")
     fun observeListedRequests(): Flow<List<InboxRequestEntity>>
+
+    @Query("SELECT count(*) FROM inbox_requests WHERE listed = 1")
+    fun observeListedRequestCount(): Flow<Int>
 
     @Query("SELECT * FROM pairings ORDER BY request_id DESC")
     fun observePairings(): Flow<List<PairingEntity>>
@@ -349,6 +478,9 @@ internal interface RequestDao {
 
     @Query("SELECT * FROM profile_list_requests ORDER BY request_id DESC")
     fun observeProfileListRequests(): Flow<List<ProfileListRequestEntity>>
+
+    @Query("SELECT * FROM profile_upload_requests ORDER BY request_id DESC")
+    fun observeProfileUploadRequests(): Flow<List<ProfileUploadRequestEntity>>
 
     @Query("SELECT * FROM inbox_requests WHERE id = :id")
     fun observeRequest(id: Long): Flow<InboxRequestEntity?>
@@ -361,6 +493,12 @@ internal interface RequestDao {
 
     @Query("SELECT * FROM profile_list_requests WHERE request_id = :requestId")
     fun observeProfileListRequest(requestId: Long): Flow<ProfileListRequestEntity?>
+
+    @Query("SELECT * FROM profile_upload_requests WHERE request_id = :requestId")
+    fun observeProfileUploadRequest(requestId: Long): Flow<ProfileUploadRequestEntity?>
+
+    @Query("SELECT * FROM pairings WHERE client_id = :clientId")
+    fun observePairingByClientId(clientId: String): Flow<PairingEntity?>
 
     @Query("SELECT * FROM inbox_requests WHERE relay_request_id = :relayRequestId")
     suspend fun getRequestByRelayId(relayRequestId: String): InboxRequestEntity?
@@ -379,6 +517,12 @@ internal interface RequestDao {
 
     @Query("SELECT * FROM profile_list_requests WHERE request_id = :requestId")
     suspend fun getProfileListRequest(requestId: Long): ProfileListRequestEntity?
+
+    @Query("SELECT * FROM profile_upload_requests WHERE request_id = :requestId")
+    suspend fun getProfileUploadRequest(requestId: Long): ProfileUploadRequestEntity?
+
+    @Query("SELECT * FROM profile_upload_variables WHERE request_id = :requestId ORDER BY name")
+    suspend fun getProfileUploadVariables(requestId: Long): List<ProfileUploadVariableEntity>
 
     @Query("SELECT * FROM pairings ORDER BY request_id")
     suspend fun getPairings(): List<PairingEntity>
@@ -418,6 +562,12 @@ internal interface RequestDao {
     @Insert
     suspend fun insertProfileListRequestRow(request: ProfileListRequestEntity)
 
+    @Insert
+    suspend fun insertProfileUploadRequestRow(request: ProfileUploadRequestEntity)
+
+    @Insert
+    suspend fun insertProfileUploadVariables(variables: List<ProfileUploadVariableEntity>)
+
     @Update
     suspend fun updateRequest(request: InboxRequestEntity): Int
 
@@ -432,6 +582,9 @@ internal interface RequestDao {
 
     @Update
     suspend fun updateProfileListRequestRow(request: ProfileListRequestEntity): Int
+
+    @Update
+    suspend fun updateProfileUploadRequestRow(request: ProfileUploadRequestEntity): Int
 
     @Query(
         """
@@ -479,6 +632,31 @@ internal interface RequestDao {
     )
     suspend fun trimCompletedHistory(): Int
 
+    @Query(
+        """
+        DELETE FROM inbox_requests
+        WHERE listed = 1
+          AND completed_at IS NOT NULL
+          AND id NOT IN (
+            SELECT request_id FROM pairings
+            WHERE state = 'active' AND vault_identity_id IS NOT NULL
+          )
+        """,
+    )
+    suspend fun clearCompletedHistory(): Int
+
+    @Query(
+        """
+        DELETE FROM inbox_requests
+        WHERE listed = 0
+          AND completed_at IS NOT NULL
+          AND request_acknowledged_at IS NOT NULL
+          AND (response_json IS NULL OR response_acknowledged_at IS NOT NULL)
+          AND (completion_json IS NULL OR completion_acknowledged_at IS NOT NULL)
+        """,
+    )
+    suspend fun deleteSettledHiddenRequests(): Int
+
     @Transaction
     suspend fun insertPairingRequest(
         request: InboxRequestEntity,
@@ -513,6 +691,33 @@ internal interface RequestDao {
         insertProfileListRequestRow(profileListRequest.copy(requestId = requestId))
         rotatedPairingSecret?.let { check(updatePairingSecret(it) == 1) }
         trimCompletedHistory()
+        return requestId
+    }
+
+    @Transaction
+    suspend fun insertProfileUploadRequest(
+        request: InboxRequestEntity,
+        profileUpload: ProfileUploadRequestEntity,
+        variables: List<ProfileUploadVariableEntity>,
+        rotatedPairingSecret: PairingSecretEntity?,
+    ): Long {
+        val requestId = insertRequest(request)
+        insertProfileUploadRequestRow(profileUpload.copy(requestId = requestId))
+        if (variables.isNotEmpty()) {
+            insertProfileUploadVariables(variables.map { it.copy(requestId = requestId) })
+        }
+        rotatedPairingSecret?.let { check(updatePairingSecret(it) == 1) }
+        trimCompletedHistory()
+        return requestId
+    }
+
+    @Transaction
+    suspend fun insertHiddenPairedRequest(
+        request: InboxRequestEntity,
+        rotatedPairingSecret: PairingSecretEntity?,
+    ): Long {
+        val requestId = insertRequest(request)
+        rotatedPairingSecret?.let { check(updatePairingSecret(it) == 1) }
         return requestId
     }
 
@@ -554,6 +759,16 @@ internal interface RequestDao {
     ) {
         check(updateRequest(request) == 1)
         check(updateProfileListRequestRow(profileListRequest) == 1)
+        trimCompletedHistory()
+    }
+
+    @Transaction
+    suspend fun updateProfileUploadRequest(
+        request: InboxRequestEntity,
+        profileUpload: ProfileUploadRequestEntity,
+    ) {
+        check(updateRequest(request) == 1)
+        check(updateProfileUploadRequestRow(profileUpload) == 1)
         trimCompletedHistory()
     }
 

@@ -26,6 +26,8 @@ internal data class ProfileEntity(
     val name: String,
     @ColumnInfo(name = "description")
     val description: String,
+    @ColumnInfo(name = "type")
+    val type: String = "environment",
     @ColumnInfo(name = "created_at")
     val createdAt: Long,
     @ColumnInfo(name = "updated_at")
@@ -90,6 +92,8 @@ internal data class ProfileSummaryRow(
     val name: String,
     @ColumnInfo(name = "description")
     val description: String,
+    @ColumnInfo(name = "type")
+    val type: String = "environment",
     @ColumnInfo(name = "created_at")
     val createdAt: Long,
     @ColumnInfo(name = "updated_at")
@@ -126,6 +130,7 @@ internal interface ProfileDao {
         SELECT profiles.id,
                profiles.name,
                profiles.description,
+               profiles.type,
                profiles.created_at,
                profiles.updated_at,
                count(environment_variables.id) AS environment_variable_count
@@ -219,6 +224,14 @@ internal interface ProfileDao {
     @Query("UPDATE profiles SET updated_at = :updatedAt WHERE id = :profileId")
     suspend fun touchProfile(profileId: String, updatedAt: Long)
 
+    @Query("DELETE FROM environment_variables WHERE profile_id = :profileId")
+    suspend fun deleteAllEnvironmentVariables(profileId: String): Int
+
+    @Query(
+        "DELETE FROM environment_variables WHERE profile_id = :profileId AND name NOT IN (:names)",
+    )
+    suspend fun deleteEnvironmentVariablesExcept(profileId: String, names: List<String>): Int
+
     @Transaction
     suspend fun insertEnvironmentVariable(variable: EnvironmentVariableEntity) {
         insertEnvironmentVariableRow(variable)
@@ -239,5 +252,32 @@ internal interface ProfileDao {
     ) {
         deleteEnvironmentVariableRow(variable)
         touchProfile(variable.profileId, profileUpdatedAt)
+    }
+
+    @Transaction
+    suspend fun applyEnvironmentProfile(
+        profile: ProfileEntity,
+        variables: List<EnvironmentVariableEntity>,
+        replaceVariables: Boolean,
+    ) {
+        if (getProfile(profile.id) == null) {
+            insertProfile(profile)
+        } else {
+            check(updateProfile(profile) == 1)
+        }
+        if (replaceVariables) {
+            if (variables.isEmpty()) {
+                deleteAllEnvironmentVariables(profile.id)
+            } else {
+                deleteEnvironmentVariablesExcept(profile.id, variables.map { it.name })
+            }
+        }
+        variables.forEach { variable ->
+            if (getEnvironmentVariable(variable.id) == null) {
+                insertEnvironmentVariableRow(variable)
+            } else {
+                check(updateEnvironmentVariableRow(variable) == 1)
+            }
+        }
     }
 }

@@ -6,6 +6,12 @@ import dev.agentknock.storage.crypto.EncryptedValue
 import dev.agentknock.storage.crypto.EncryptionBinding
 import dev.agentknock.storage.crypto.EncryptionLocation
 import dev.agentknock.storage.crypto.LocalEncryptionKeyManager
+import dev.agentknock.storage.audit.AuditCategory
+import dev.agentknock.storage.audit.AuditOutcome
+import dev.agentknock.storage.audit.AuditRecord
+import dev.agentknock.storage.audit.AuditSink
+import dev.agentknock.storage.audit.NoOpAuditSink
+import dev.agentknock.protocol.ProfileUploadMode
 import java.util.UUID
 import kotlinx.coroutines.CoroutineDispatcher
 import kotlinx.coroutines.Dispatchers
@@ -19,6 +25,7 @@ internal data class ProfileSummary(
     val id: String,
     val name: String,
     val description: String,
+    val type: String,
     val environmentVariableCount: Int,
     val createdAt: Long,
     val updatedAt: Long,
@@ -28,6 +35,7 @@ internal data class ProfileDetails(
     val id: String,
     val name: String,
     val description: String,
+    val type: String,
     val environmentVariables: List<EnvironmentVariableMetadata>,
     val createdAt: Long,
     val updatedAt: Long,
@@ -86,6 +94,33 @@ internal enum class SaveEnvironmentVariableResult {
     UNSUPPORTED_FORMAT,
 }
 
+internal data class EnvironmentProfileProposal(
+    val mode: ProfileUploadMode,
+    val name: String,
+    val descriptionProvided: Boolean,
+    val description: String?,
+    val variables: Map<String, String>,
+)
+
+internal data class EnvironmentProfileProposalSummary(
+    val existingProfileId: String?,
+    val addedVariables: List<String>,
+    val changedVariables: List<String>,
+    val unchangedVariables: List<String>,
+    val removedVariables: List<String>,
+)
+
+internal sealed interface EnvironmentProfileProposalResult {
+    data class Valid(val summary: EnvironmentProfileProposalSummary) :
+        EnvironmentProfileProposalResult
+    data class Invalid(val message: String) : EnvironmentProfileProposalResult
+}
+
+internal sealed interface ApplyEnvironmentProfileProposalResult {
+    data class Applied(val profileId: String) : ApplyEnvironmentProfileProposalResult
+    data class Invalid(val message: String) : ApplyEnvironmentProfileProposalResult
+}
+
 @Serializable
 internal data class CredentialProfileMetadata(
     val name: String,
@@ -98,18 +133,23 @@ internal data class CredentialProfileDescription(
     val missingProfiles: List<String>,
 )
 
-internal sealed interface CredentialEnvironmentResult {
-    data class Available(val environment: Map<String, String>) : CredentialEnvironmentResult
+internal data class CredentialProfileValues(
+    val description: String,
+    val environment: Map<String, String>,
+)
 
-    data class MissingProfiles(val names: List<String>) : CredentialEnvironmentResult
+internal sealed interface CredentialProfilesResult {
+    data class Available(val profiles: Map<String, CredentialProfileValues>) : CredentialProfilesResult
 
-    data class ConflictingVariable(val name: String) : CredentialEnvironmentResult
+    data class MissingProfiles(val names: List<String>) : CredentialProfilesResult
 
-    data object SecretUnavailable : CredentialEnvironmentResult
+    data class ConflictingVariable(val name: String) : CredentialProfilesResult
 
-    data object SecretCorrupted : CredentialEnvironmentResult
+    data object SecretUnavailable : CredentialProfilesResult
 
-    data object UnsupportedEncryption : CredentialEnvironmentResult
+    data object SecretCorrupted : CredentialProfilesResult
+
+    data object UnsupportedEncryption : CredentialProfilesResult
 }
 
 internal interface CredentialProfileSource {
@@ -117,13 +157,14 @@ internal interface CredentialProfileSource {
 
     suspend fun describeCredentialProfiles(names: List<String>): CredentialProfileDescription
 
-    suspend fun credentialEnvironment(names: List<String>): CredentialEnvironmentResult
+    suspend fun credentialProfiles(names: List<String>): CredentialProfilesResult
 }
 
 internal class ProfileRepository(
     private val dao: ProfileDao,
     private val keyManager: LocalEncryptionKeyManager,
     private val encryption: AesGcmEncryption,
+    private val audit: AuditSink = NoOpAuditSink,
     private val newId: () -> String = { UUID.randomUUID().toString() },
     private val currentTimeMillis: () -> Long = System::currentTimeMillis,
     private val cryptographyDispatcher: CoroutineDispatcher = Dispatchers.IO,
@@ -134,6 +175,7 @@ internal class ProfileRepository(
                 id = row.id,
                 name = row.name,
                 description = row.description,
+                type = row.type,
                 environmentVariableCount = row.environmentVariableCount,
                 createdAt = row.createdAt,
                 updatedAt = row.updatedAt,
@@ -154,6 +196,7 @@ internal class ProfileRepository(
                 id = profile.id,
                 name = profile.name,
                 description = profile.description,
+                type = profile.type,
                 environmentVariables = variables.map { variable ->
                     EnvironmentVariableMetadata(
                         id = variable.id,
@@ -187,6 +230,14 @@ internal class ProfileRepository(
                 updatedAt = now,
             ),
         )
+        audit.record(
+            AuditRecord(
+                category = AuditCategory.PROFILE,
+                title = "Profile created",
+                detail = name,
+                outcome = AuditOutcome.CHANGED,
+            ),
+        )
         return CreateProfileResult.Created(id)
     }
 
@@ -201,12 +252,28 @@ internal class ProfileRepository(
                 updatedAt = currentTimeMillis(),
             ),
         )
+        audit.record(
+            AuditRecord(
+                category = AuditCategory.PROFILE,
+                title = "Profile updated",
+                detail = name,
+                outcome = AuditOutcome.CHANGED,
+            ),
+        )
         return SaveProfileResult.SAVED
     }
 
     suspend fun deleteProfile(id: String): Boolean {
         val profile = dao.getProfile(id) ?: return false
         dao.deleteProfile(profile)
+        audit.record(
+            AuditRecord(
+                category = AuditCategory.PROFILE,
+                title = "Profile deleted",
+                detail = profile.name,
+                outcome = AuditOutcome.CHANGED,
+            ),
+        )
         return true
     }
 
@@ -243,6 +310,14 @@ internal class ProfileRepository(
                 createdAt = now,
                 updatedAt = now,
                 valueUpdatedAt = now,
+            ),
+        )
+        audit.record(
+            AuditRecord(
+                category = AuditCategory.PROFILE,
+                title = "Variable added",
+                detail = "$name in ${dao.getProfile(profileId)?.name.orEmpty()}",
+                outcome = AuditOutcome.CHANGED,
             ),
         )
         return CreateEnvironmentVariableResult.Created(id)
@@ -307,13 +382,156 @@ internal class ProfileRepository(
                 valueUpdatedAt = if (replacementValue == null) existing.valueUpdatedAt else now,
             ),
         )
+        audit.record(
+            AuditRecord(
+                category = AuditCategory.PROFILE,
+                title = "Variable updated",
+                detail = name,
+                outcome = AuditOutcome.CHANGED,
+            ),
+        )
         return SaveEnvironmentVariableResult.SAVED
     }
 
     suspend fun deleteEnvironmentVariable(id: String): Boolean {
         val variable = dao.getEnvironmentVariable(id) ?: return false
         dao.deleteEnvironmentVariable(variable, profileUpdatedAt = currentTimeMillis())
+        audit.record(
+            AuditRecord(
+                category = AuditCategory.PROFILE,
+                title = "Variable deleted",
+                detail = variable.name,
+                outcome = AuditOutcome.CHANGED,
+            ),
+        )
         return true
+    }
+
+    suspend fun describeEnvironmentProfileProposal(
+        proposal: EnvironmentProfileProposal,
+    ): EnvironmentProfileProposalResult {
+        val invalid = validateProposalInput(proposal)
+        if (invalid != null) return EnvironmentProfileProposalResult.Invalid(invalid)
+        val existing = dao.getProfilesByName(listOf(proposal.name)).singleOrNull()
+        when (proposal.mode) {
+            ProfileUploadMode.CREATE -> if (existing != null) {
+                return EnvironmentProfileProposalResult.Invalid(
+                    "A Profile named ${proposal.name} already exists.",
+                )
+            }
+            ProfileUploadMode.REPLACE,
+            ProfileUploadMode.UPDATE,
+            -> {
+                if (existing == null) {
+                    return EnvironmentProfileProposalResult.Invalid(
+                        "The target Profile ${proposal.name} does not exist.",
+                    )
+                }
+                if (existing.type != ENVIRONMENT_PROFILE_TYPE) {
+                    return EnvironmentProfileProposalResult.Invalid(
+                        "The target Profile has a different type.",
+                    )
+                }
+            }
+        }
+        val existingVariables = existing?.let {
+            dao.getEnvironmentVariablesForProfiles(listOf(it.id)).associateBy { variable ->
+                variable.name
+            }
+        }.orEmpty()
+        val added = mutableListOf<String>()
+        val changed = mutableListOf<String>()
+        val unchanged = mutableListOf<String>()
+        proposal.variables.toSortedMap().forEach { (name, value) ->
+            val current = existingVariables[name]
+            if (current == null) {
+                added += name
+            } else {
+                val same = (decrypt(current) as? DecryptionResult.Plaintext)?.value
+                    ?.decodeToString(throwOnInvalidSequence = false) == value
+                if (same) unchanged += name else changed += name
+            }
+        }
+        val removed = if (proposal.mode == ProfileUploadMode.REPLACE) {
+            existingVariables.keys.minus(proposal.variables.keys).sorted()
+        } else {
+            emptyList()
+        }
+        return EnvironmentProfileProposalResult.Valid(
+            EnvironmentProfileProposalSummary(
+                existingProfileId = existing?.id,
+                addedVariables = added,
+                changedVariables = changed,
+                unchangedVariables = unchanged,
+                removedVariables = removed,
+            ),
+        )
+    }
+
+    suspend fun applyEnvironmentProfileProposal(
+        proposal: EnvironmentProfileProposal,
+        acceptedName: String,
+    ): ApplyEnvironmentProfileProposalResult {
+        val validation = describeEnvironmentProfileProposal(proposal)
+        if (validation is EnvironmentProfileProposalResult.Invalid) {
+            return ApplyEnvironmentProfileProposalResult.Invalid(validation.message)
+        }
+        validateProfileName(acceptedName)
+        val summary = (validation as EnvironmentProfileProposalResult.Valid).summary
+        val existing = summary.existingProfileId?.let { id -> dao.getProfile(id) }
+        if (
+            proposal.mode == ProfileUploadMode.CREATE &&
+            dao.profileNameInUse(acceptedName, excludingId = "")
+        ) {
+            return ApplyEnvironmentProfileProposalResult.Invalid(
+                "A Profile named $acceptedName already exists.",
+            )
+        }
+        val now = currentTimeMillis()
+        val profileId = existing?.id ?: newId()
+        val profile = ProfileEntity(
+            id = profileId,
+            name = if (proposal.mode == ProfileUploadMode.CREATE) acceptedName else proposal.name,
+            description = when {
+                proposal.descriptionProvided -> proposal.description.orEmpty()
+                proposal.mode == ProfileUploadMode.UPDATE -> existing?.description.orEmpty()
+                else -> ""
+            },
+            type = ENVIRONMENT_PROFILE_TYPE,
+            createdAt = existing?.createdAt ?: now,
+            updatedAt = now,
+        )
+        val existingVariables = existing?.let {
+            dao.getEnvironmentVariablesForProfiles(listOf(it.id)).associateBy { variable ->
+                variable.name
+            }
+        }.orEmpty()
+        val variables = proposal.variables.map { (name, value) ->
+            val current = existingVariables[name]
+            val id = current?.id ?: newId()
+            val sensitive = current?.sensitive ?: true
+            val encrypted = encrypt(id, profileId, name, sensitive, value)
+            EnvironmentVariableEntity(
+                id = id,
+                profileId = profileId,
+                name = name,
+                sensitive = sensitive,
+                notes = current?.notes.orEmpty(),
+                encryptionFormat = encrypted.formatVersion,
+                encryptionKeyId = encrypted.keyId,
+                nonce = encrypted.nonce,
+                ciphertext = encrypted.ciphertext,
+                createdAt = current?.createdAt ?: now,
+                updatedAt = now,
+                valueUpdatedAt = now,
+            )
+        }
+        dao.applyEnvironmentProfile(
+            profile = profile,
+            variables = variables,
+            replaceVariables = proposal.mode != ProfileUploadMode.UPDATE,
+        )
+        return ApplyEnvironmentProfileProposalResult.Applied(profileId)
     }
 
     override suspend fun listCredentialProfiles(): List<CredentialProfileMetadata> {
@@ -321,8 +539,8 @@ internal class ProfileRepository(
             .groupBy(EnvironmentVariableEntity::profileId)
         return dao.getProfiles().map { profile ->
             CredentialProfileMetadata(
-                name = profile.name,
-                description = profile.description,
+                    name = profile.name,
+                    description = profile.description,
                 environmentVariableNames = variablesByProfile[profile.id]
                     .orEmpty()
                     .map(EnvironmentVariableEntity::name),
@@ -363,41 +581,53 @@ internal class ProfileRepository(
         )
     }
 
-    override suspend fun credentialEnvironment(names: List<String>): CredentialEnvironmentResult {
+    override suspend fun credentialProfiles(names: List<String>): CredentialProfilesResult {
         val requestedNames = names.distinct()
         if (requestedNames.isEmpty()) {
-            return CredentialEnvironmentResult.MissingProfiles(emptyList())
+            return CredentialProfilesResult.MissingProfiles(emptyList())
         }
         val profiles = dao.getProfilesByName(requestedNames)
         val profileByName = profiles.associateBy(ProfileEntity::name)
         val missing = requestedNames.filterNot(profileByName::containsKey)
-        if (missing.isNotEmpty()) return CredentialEnvironmentResult.MissingProfiles(missing)
+        if (missing.isNotEmpty()) return CredentialProfilesResult.MissingProfiles(missing)
 
         val variables = dao.getEnvironmentVariablesForProfiles(profiles.map(ProfileEntity::id))
-        val environment = sortedMapOf<String, String>()
+        val combinedEnvironment = sortedMapOf<String, String>()
+        val profileEnvironments = profiles.associate { profile ->
+            profile.id to sortedMapOf<String, String>()
+        }
         for (variable in variables) {
             val value = when (val decrypted = decrypt(variable)) {
                 is DecryptionResult.Plaintext -> try {
                     decrypted.value.decodeToString(throwOnInvalidSequence = true)
                 } catch (_: IllegalArgumentException) {
-                    return CredentialEnvironmentResult.SecretCorrupted
+                    return CredentialProfilesResult.SecretCorrupted
                 }
                 DecryptionResult.KeyUnavailable -> {
-                    return CredentialEnvironmentResult.SecretUnavailable
+                    return CredentialProfilesResult.SecretUnavailable
                 }
                 DecryptionResult.AuthenticationFailed -> {
-                    return CredentialEnvironmentResult.SecretCorrupted
+                    return CredentialProfilesResult.SecretCorrupted
                 }
                 DecryptionResult.UnsupportedFormat -> {
-                    return CredentialEnvironmentResult.UnsupportedEncryption
+                    return CredentialProfilesResult.UnsupportedEncryption
                 }
             }
-            val previous = environment.putIfAbsent(variable.name, value)
+            profileEnvironments.getValue(variable.profileId)[variable.name] = value
+            val previous = combinedEnvironment.putIfAbsent(variable.name, value)
             if (previous != null && previous != value) {
-                return CredentialEnvironmentResult.ConflictingVariable(variable.name)
+                return CredentialProfilesResult.ConflictingVariable(variable.name)
             }
         }
-        return CredentialEnvironmentResult.Available(environment)
+        return CredentialProfilesResult.Available(
+            requestedNames.associateWith { name ->
+                val profile = profileByName.getValue(name)
+                CredentialProfileValues(
+                    description = profile.description,
+                    environment = profileEnvironments.getValue(profile.id),
+                )
+            },
+        )
     }
 
     private suspend fun encrypt(
@@ -477,7 +707,17 @@ internal class ProfileRepository(
         require('\u0000' !in value) { "An environment variable value cannot contain a null byte" }
     }
 
+    private fun validateProposalInput(proposal: EnvironmentProfileProposal): String? =
+        runCatching {
+            validateProfileName(proposal.name)
+            proposal.variables.forEach { (name, value) ->
+                validateEnvironmentVariableName(name)
+                validateEnvironmentVariableValue(value)
+            }
+        }.exceptionOrNull()?.message
+
     private companion object {
         val ENVIRONMENT_VARIABLE_NAME = Regex("[A-Za-z_][A-Za-z0-9_]*")
+        const val ENVIRONMENT_PROFILE_TYPE = "environment"
     }
 }

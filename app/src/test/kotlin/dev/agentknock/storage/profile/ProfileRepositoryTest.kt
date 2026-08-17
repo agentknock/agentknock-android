@@ -1,5 +1,6 @@
 package dev.agentknock.storage.profile
 
+import dev.agentknock.protocol.ProfileUploadMode
 import dev.agentknock.storage.crypto.AesGcmEncryption
 import dev.agentknock.storage.crypto.FakeEncryptionKeyStore
 import dev.agentknock.storage.crypto.FakeLocalEncryptionDao
@@ -169,11 +170,17 @@ class ProfileRepositoryTest {
             description.profiles.first().environmentVariableNames,
         )
 
-        val result = fixture.repository.credentialEnvironment(listOf("first", "second"))
-        check(result is CredentialEnvironmentResult.Available)
+        val result = fixture.repository.credentialProfiles(listOf("first", "second"))
+        check(result is CredentialProfilesResult.Available)
         assertEquals(
-            mapOf("FIRST_REGION" to "eu-west-1", "SHARED_TOKEN" to "same-value"),
-            result.environment,
+            mapOf(
+                "first" to CredentialProfileValues(
+                    "",
+                    mapOf("FIRST_REGION" to "eu-west-1", "SHARED_TOKEN" to "same-value"),
+                ),
+                "second" to CredentialProfileValues("", mapOf("SHARED_TOKEN" to "same-value")),
+            ),
+            result.profiles,
         )
         assertEquals(
             listOf(
@@ -201,12 +208,106 @@ class ProfileRepositoryTest {
         fixture.createVariable(second, "TOKEN", "second-value", true)
 
         assertEquals(
-            CredentialEnvironmentResult.ConflictingVariable("TOKEN"),
-            fixture.repository.credentialEnvironment(listOf("first", "second")),
+            CredentialProfilesResult.ConflictingVariable("TOKEN"),
+            fixture.repository.credentialProfiles(listOf("first", "second")),
         )
         assertEquals(
-            CredentialEnvironmentResult.MissingProfiles(listOf("missing")),
-            fixture.repository.credentialEnvironment(listOf("missing")),
+            CredentialProfilesResult.MissingProfiles(listOf("missing")),
+            fixture.repository.credentialProfiles(listOf("missing")),
+        )
+    }
+
+    @Test
+    fun `uploaded profiles make new variables sensitive by default`() = runTest {
+        val fixture = Fixture()
+
+        val result = fixture.repository.applyEnvironmentProfileProposal(
+            EnvironmentProfileProposal(
+                mode = ProfileUploadMode.CREATE,
+                name = "cloudflare-read-only",
+                descriptionProvided = true,
+                description = "Cloudflare production account",
+                variables = mapOf("CF_ACCOUNT_ID" to "account", "CF_TOKEN" to "token"),
+            ),
+            acceptedName = "cloudflare-read-only",
+        )
+
+        check(result is ApplyEnvironmentProfileProposalResult.Applied)
+        val profile = fixture.repository.observeProfile(result.profileId).first()
+        checkNotNull(profile)
+        assertEquals("Cloudflare production account", profile.description)
+        assertTrue(profile.environmentVariables.all(EnvironmentVariableMetadata::sensitive))
+        assertEquals(
+            EnvironmentVariableValue.Available("token"),
+            fixture.repository.readEnvironmentVariableValue(
+                profile.environmentVariables.single { it.name == "CF_TOKEN" }.id,
+            ),
+        )
+    }
+
+    @Test
+    fun `replace proposals preserve variable sensitivity and notes`() = runTest {
+        val fixture = Fixture()
+        val profileId = fixture.createProfile("aws-read-only")
+        val region = fixture.repository.createEnvironmentVariable(
+            profileId = profileId,
+            name = "AWS_REGION",
+            value = "eu-west-1",
+            sensitive = false,
+            notes = "Safe to display",
+        )
+        check(region is CreateEnvironmentVariableResult.Created)
+        fixture.createVariable(profileId, "OLD_VARIABLE", "old", true)
+
+        val result = fixture.repository.applyEnvironmentProfileProposal(
+            EnvironmentProfileProposal(
+                mode = ProfileUploadMode.REPLACE,
+                name = "aws-read-only",
+                descriptionProvided = false,
+                description = null,
+                variables = mapOf(
+                    "AWS_REGION" to "eu-north-1",
+                    "AWS_ACCESS_KEY_ID" to "new-key",
+                ),
+            ),
+            acceptedName = "ignored-for-existing-profile",
+        )
+
+        assertTrue(result is ApplyEnvironmentProfileProposalResult.Applied)
+        val profile = fixture.repository.observeProfile(profileId).first()
+        checkNotNull(profile)
+        assertEquals(listOf("AWS_ACCESS_KEY_ID", "AWS_REGION"), profile.environmentVariables.map { it.name })
+        val updatedRegion = profile.environmentVariables.single { it.name == "AWS_REGION" }
+        assertFalse(updatedRegion.sensitive)
+        assertEquals("Safe to display", updatedRegion.notes)
+        assertTrue(profile.environmentVariables.single { it.name == "AWS_ACCESS_KEY_ID" }.sensitive)
+    }
+
+    @Test
+    fun `update proposals leave omitted variables untouched`() = runTest {
+        val fixture = Fixture()
+        val profileId = fixture.createProfile("aws-read-only")
+        fixture.createVariable(profileId, "AWS_REGION", "eu-west-1", false)
+        val tokenId = fixture.createVariable(profileId, "AWS_TOKEN", "old-token", true)
+
+        val result = fixture.repository.applyEnvironmentProfileProposal(
+            EnvironmentProfileProposal(
+                mode = ProfileUploadMode.UPDATE,
+                name = "aws-read-only",
+                descriptionProvided = false,
+                description = null,
+                variables = mapOf("AWS_TOKEN" to "new-token"),
+            ),
+            acceptedName = "ignored-for-existing-profile",
+        )
+
+        assertTrue(result is ApplyEnvironmentProfileProposalResult.Applied)
+        val profile = fixture.repository.observeProfile(profileId).first()
+        checkNotNull(profile)
+        assertEquals(listOf("AWS_REGION", "AWS_TOKEN"), profile.environmentVariables.map { it.name })
+        assertEquals(
+            EnvironmentVariableValue.Available("new-token"),
+            fixture.repository.readEnvironmentVariableValue(tokenId),
         )
     }
 
@@ -272,6 +373,7 @@ private class FakeProfileDao : ProfileDao {
                     id = profile.id,
                     name = profile.name,
                     description = profile.description,
+                    type = profile.type,
                     createdAt = profile.createdAt,
                     updatedAt = profile.updatedAt,
                     environmentVariableCount = currentVariables.count {
@@ -371,6 +473,23 @@ private class FakeProfileDao : ProfileDao {
         profiles.value = profiles.value.map {
             if (it.id == profileId) it.copy(updatedAt = updatedAt) else it
         }
+    }
+
+    override suspend fun deleteAllEnvironmentVariables(profileId: String): Int {
+        val before = variables.value.size
+        variables.value = variables.value.filterNot { it.profileId == profileId }
+        return before - variables.value.size
+    }
+
+    override suspend fun deleteEnvironmentVariablesExcept(
+        profileId: String,
+        names: List<String>,
+    ): Int {
+        val before = variables.value.size
+        variables.value = variables.value.filterNot {
+            it.profileId == profileId && it.name !in names
+        }
+        return before - variables.value.size
     }
 
     fun directlyReplaceVariable(variable: EnvironmentVariableEntity) {

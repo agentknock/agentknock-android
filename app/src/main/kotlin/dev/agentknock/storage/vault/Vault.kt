@@ -37,6 +37,8 @@ internal data class VaultIdentityEntity(
     val createdAt: Long,
     @ColumnInfo(name = "claimed_at")
     val claimedAt: Long?,
+    @ColumnInfo(name = "pairing_enabled")
+    val pairingEnabled: Boolean = true,
 )
 
 @Entity(
@@ -141,6 +143,19 @@ internal interface VaultDao {
         address: String,
         addressId: String,
         claimedAt: Long,
+        activeRole: String,
+    ): Int
+
+    @Query(
+        """
+        UPDATE vault_identities
+        SET pairing_enabled = :enabled
+        WHERE id = :identityId AND role = :activeRole
+        """,
+    )
+    suspend fun updatePairingEnabled(
+        identityId: String,
+        enabled: Boolean,
         activeRole: String,
     ): Int
 

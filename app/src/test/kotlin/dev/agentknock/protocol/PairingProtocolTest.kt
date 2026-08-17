@@ -2,6 +2,7 @@ package dev.agentknock.protocol
 
 import java.util.Base64
 import kotlinx.serialization.json.Json
+import kotlinx.serialization.json.JsonElement
 import kotlinx.serialization.json.jsonObject
 import kotlinx.serialization.json.jsonPrimitive
 import org.bouncycastle.crypto.digests.SHA256Digest
@@ -26,14 +27,25 @@ class PairingProtocolTest {
         .generatePublicKey().encoded
 
     @Test
-    fun `validates the cli pairing commitment vector`() {
+    fun `validates the initial pairing request envelope`() {
         val request = json.parseToJsonElement(
-            """{"version":"agentknock-v1","commitment":"TSZ1lTkmAPehOPZpnWV5+O6AncZFD5TMKVfG30j6QVY="}""",
+            """{"version":"agentknock-v1","commitment":"${BASE64.encodeToString(ByteArray(32))}"}""",
+        )
+        val wrongVersion = json.parseToJsonElement(
+            """{"version":"agentknock-v2","commitment":"${BASE64.encodeToString(ByteArray(32))}"}""",
+        )
+        val wrongLength = json.parseToJsonElement(
+            """{"version":"agentknock-v1","commitment":"${BASE64.encodeToString(ByteArray(12))}"}""",
+        )
+        val malformed = json.parseToJsonElement(
+            """{"version":"agentknock-v1","commitment":"not base64"}""",
         )
 
         assertTrue(protocol.isInitialRequest(request))
-        assertTrue(protocol.validateInitialRequest(request, "yup-its-free"))
-        assertFalse(protocol.validateInitialRequest(request, "not-the-address"))
+        assertTrue(protocol.validateInitialRequest(request))
+        assertFalse(protocol.validateInitialRequest(wrongVersion))
+        assertFalse(protocol.validateInitialRequest(wrongLength))
+        assertFalse(protocol.validateInitialRequest(malformed))
     }
 
     @Test
@@ -43,12 +55,8 @@ class PairingProtocolTest {
             baseProtocolInfo(),
         )
         val clientRandom = ByteArray(32) { it.toByte() }
-        val plaintext = json.parseToJsonElement(
-            """{"cli_version":"0.1.0","client_random":"${BASE64.encodeToString(clientRandom)}","platform":"linux","architecture":"x86_64","hostname":"survo","machine_id":"machine","os_version":"NixOS"}""",
-        ).toString().encodeToByteArray()
-        val completion = json.parseToJsonElement(
-            """{"key":"${BASE64.encodeToString(sender.encapsulation)}","ciphertext":"${BASE64.encodeToString(sender.seal(EMPTY, plaintext))}"}""",
-        )
+        val initialRequest = pairingRequest(clientRandom)
+        val completion = initialCompletion(sender, clientRandom)
 
         val established = protocol.establish(
             deviceId = DEVICE_ID,
@@ -56,6 +64,7 @@ class PairingProtocolTest {
             devicePrivateKey = devicePrivateKey,
             devicePublicKey = devicePublicKey,
             deviceRandom = DEVICE_RANDOM,
+            initialRequest = initialRequest,
             completion = completion,
         )
 
@@ -68,6 +77,31 @@ class PairingProtocolTest {
     }
 
     @Test
+    fun `rejects a completion whose client random does not match its commitment`() {
+        val sender = baseHpke.setupBaseS(
+            baseHpke.deserializePublicKey(devicePublicKey),
+            baseProtocolInfo(),
+        )
+        val committedRandom = ByteArray(32) { it.toByte() }
+        val revealedRandom = ByteArray(32) { (it + 1).toByte() }
+
+        val failure = runCatching {
+            protocol.establish(
+                deviceId = DEVICE_ID,
+                clientId = CLIENT_ID,
+                devicePrivateKey = devicePrivateKey,
+                devicePublicKey = devicePublicKey,
+                deviceRandom = DEVICE_RANDOM,
+                initialRequest = pairingRequest(committedRandom),
+                completion = initialCompletion(sender, revealedRandom),
+            )
+        }.exceptionOrNull()
+
+        assertTrue(failure is IllegalArgumentException)
+        assertEquals("Pairing commitment mismatch", failure?.message)
+    }
+
+    @Test
     fun `answers and verifies the finish pairing exchange`() {
         val clientPsk = ByteArray(32) { (it + 1).toByte() }
         val sender = pskHpke.SetupPSKS(
@@ -77,7 +111,7 @@ class PairingProtocolTest {
             CLIENT_ID.ulidBytes(),
         )
         val requestPlaintext =
-            """{"cli_version":"0.1.0","method":"FinishPairing"}""".encodeToByteArray()
+            """{"cli_version":"0.1.0","method":"PairingFinish"}""".encodeToByteArray()
         val request = json.parseToJsonElement(
             """{"version":"agentknock-v1","key":"${BASE64.encodeToString(sender.encapsulation)}","ciphertext":"${BASE64.encodeToString(sender.seal(EMPTY, requestPlaintext))}"}""",
         )
@@ -199,6 +233,30 @@ class PairingProtocolTest {
         assertEquals(123_456_789_012L, choices.values[choices.correctIndex])
     }
 
+    private fun pairingRequest(clientRandom: ByteArray): JsonElement {
+        val commitment = derive(
+            input = clientRandom,
+            salt = "agentknock-v1".encodeToByteArray(),
+            info = "agentknock-v1 commitment".encodeToByteArray(),
+            length = 32,
+        )
+        return json.parseToJsonElement(
+            """{"version":"agentknock-v1","commitment":"${BASE64.encodeToString(commitment)}"}""",
+        )
+    }
+
+    private fun initialCompletion(
+        sender: org.bouncycastle.crypto.hpke.HPKEContext,
+        clientRandom: ByteArray,
+    ): JsonElement {
+        val plaintext = json.parseToJsonElement(
+            """{"cli_version":"0.1.0","client_random":"${BASE64.encodeToString(clientRandom)}","platform":"linux","architecture":"x86_64","hostname":"survo","machine_id":"machine","os_version":"NixOS"}""",
+        ).toString().encodeToByteArray()
+        return json.parseToJsonElement(
+            """{"key":"${BASE64.encodeToString(senderEncapsulation(sender))}","ciphertext":"${BASE64.encodeToString(sender.seal(EMPTY, plaintext))}"}""",
+        )
+    }
+
     private fun baseProtocolInfo(): ByteArray =
         protocolVersionInfo() + DEVICE_ID.ulidBytes() + CLIENT_ID.ulidBytes()
 
@@ -216,11 +274,14 @@ class PairingProtocolTest {
         response: kotlinx.serialization.json.JsonElement,
     ): ByteArray {
         val encoded = response.jsonObject
-        val publicNonce = BASE64_DECODER.decode(encoded.getValue("nonce").jsonPrimitive.content)
+        val responseRandom = BASE64_DECODER.decode(
+            encoded.getValue("nonce").jsonPrimitive.content,
+        )
+        assertEquals(32, responseRandom.size)
         val ciphertext = BASE64_DECODER.decode(
             encoded.getValue("ciphertext").jsonPrimitive.content,
         )
-        val salt = senderEncapsulation(sender) + publicNonce
+        val salt = senderEncapsulation(sender) + responseRandom
         val exported = sender.export("agentknock-v1 response".encodeToByteArray(), 32)
         val key = derive(exported, salt, "key".encodeToByteArray(), 32)
         val nonce = derive(exported, salt, "nonce".encodeToByteArray(), 12)

@@ -25,10 +25,9 @@ internal class ProfileListProtocol(
         ProfileListResponseWire(
             profiles = profiles.mapValues { (_, profile) ->
                 ProfileListProfileWire(
-                    description = profile.description,
-                    environment = profile.environmentVariableNames.associateWith {
-                        ProfileValueSource.STORED
-                    },
+                    description = profile.description.ifEmpty { null },
+                    type = "environment",
+                    variables = profile.environmentVariableNames.sorted(),
                 )
             },
         ),
@@ -38,7 +37,7 @@ internal class ProfileListProtocol(
         json.decodeFromString<ProfileListCompletionWire>(plaintext.decodeToString()).cliVersion
 
     companion object {
-        const val LIST_METHOD = "List"
+        const val LIST_METHOD = "ProfileList"
     }
 }
 
@@ -55,15 +54,10 @@ private data class ProfileListResponseWire(
 
 @Serializable
 private data class ProfileListProfileWire(
-    val description: String,
-    val environment: Map<String, ProfileValueSource>,
+    val description: String? = null,
+    val type: String,
+    val variables: List<String>,
 )
-
-@Serializable
-private enum class ProfileValueSource {
-    STORED,
-    ISSUED,
-}
 
 @Serializable
 private data class ProfileListCompletionWire(

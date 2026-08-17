@@ -9,6 +9,11 @@ import dev.agentknock.storage.crypto.EncryptedValue
 import dev.agentknock.storage.crypto.EncryptionBinding
 import dev.agentknock.storage.crypto.EncryptionLocation
 import dev.agentknock.storage.crypto.LocalEncryptionKeyManager
+import dev.agentknock.storage.audit.AuditCategory
+import dev.agentknock.storage.audit.AuditOutcome
+import dev.agentknock.storage.audit.AuditRecord
+import dev.agentknock.storage.audit.AuditSink
+import dev.agentknock.storage.audit.NoOpAuditSink
 import java.util.UUID
 import kotlinx.coroutines.CoroutineDispatcher
 import kotlinx.coroutines.Dispatchers
@@ -27,6 +32,7 @@ internal data class VaultIdentity(
     val addressId: String,
     val deviceId: String,
     val secretsAvailable: Boolean,
+    val pairingEnabled: Boolean,
     val createdAt: Long,
     val claimedAt: Long?,
 )
@@ -90,6 +96,7 @@ internal class VaultRepository(
     private val keyManager: LocalEncryptionKeyManager,
     private val encryption: AesGcmEncryption,
     private val relay: RelayClaimClient,
+    private val audit: AuditSink = NoOpAuditSink,
     private val newId: () -> String = { UUID.randomUUID().toString() },
     private val currentTimeMillis: () -> Long = System::currentTimeMillis,
     private val cryptographyDispatcher: CoroutineDispatcher = Dispatchers.IO,
@@ -152,6 +159,7 @@ internal class VaultRepository(
             devicePublicKey = device.keyPair.publicKey,
             createdAt = now,
             claimedAt = null,
+            pairingEnabled = active?.pairingEnabled ?: true,
         )
         val secrets = listOf(
             newSecret(
@@ -180,6 +188,7 @@ internal class VaultRepository(
     suspend fun claimCandidate(): ClaimVaultResult {
         val candidate = dao.getIdentity(VaultIdentityRole.CANDIDATE.storedName)
             ?: return ClaimVaultResult.NoCandidate
+        val previous = dao.getIdentity(VaultIdentityRole.ACTIVE.storedName)
         val secrets = dao.getSecrets(candidate.id)
         when (val result = decryptSecret(candidate, secrets, VaultSecretKind.DEVICE_PRIVATE_KEY)) {
             is SecretResult.Available -> if (result.value.size != DEVICE_PRIVATE_KEY_BYTES) {
@@ -221,6 +230,18 @@ internal class VaultRepository(
                         candidateRole = VaultIdentityRole.CANDIDATE.storedName,
                     )
                 ) {
+                    audit.record(
+                        AuditRecord(
+                            category = AuditCategory.DEVICE,
+                            title = if (previous == null) {
+                                "Pairing address claimed"
+                            } else {
+                                "Pairing address changed"
+                            },
+                            detail = candidate.address,
+                            outcome = AuditOutcome.CHANGED,
+                        ),
+                    )
                     ClaimVaultResult.Claimed
                 } else {
                     ClaimVaultResult.NoCandidate
@@ -435,6 +456,7 @@ internal class VaultRepository(
         secretsAvailable = secretsAvailable,
         createdAt = createdAt,
         claimedAt = claimedAt,
+        pairingEnabled = pairingEnabled,
     )
 
     private sealed interface SecretResult {

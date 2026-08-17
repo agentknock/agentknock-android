@@ -61,15 +61,8 @@ internal class PairingProtocol(
 
     fun generateDeviceRandom(): ByteArray = ByteArray(DEVICE_RANDOM_BYTES).also(random::nextBytes)
 
-    fun validateInitialRequest(request: JsonElement, address: String): Boolean {
-        val decoded = runCatching {
-            json.decodeFromJsonElement(PairingRequest.serializer(), request)
-        }.getOrNull() ?: return false
-        if (decoded.version != PROTOCOL_VERSION) return false
-        val commitment = runCatching { BASE64_DECODER.decode(decoded.commitment) }.getOrNull()
-            ?: return false
-        return MessageDigest.isEqual(commitment, pairingCommitment(address))
-    }
+    fun validateInitialRequest(request: JsonElement): Boolean =
+        initialCommitment(request) != null
 
     fun initialResponse(
         deviceId: String,
@@ -95,6 +88,7 @@ internal class PairingProtocol(
         devicePrivateKey: ByteArray,
         devicePublicKey: ByteArray,
         deviceRandom: ByteArray,
+        initialRequest: JsonElement,
         completion: JsonElement,
     ): EstablishedPairing {
         val decoded = json.decodeFromJsonElement(PairingCompletion.serializer(), completion)
@@ -112,6 +106,12 @@ internal class PairingProtocol(
         val clientRandom = BASE64_DECODER.decode(contents.clientRandom)
         require(clientRandom.size == CLIENT_RANDOM_BYTES) { "Invalid pairing client random" }
         require(deviceRandom.size == DEVICE_RANDOM_BYTES) { "Invalid device random" }
+        val commitment = requireNotNull(initialCommitment(initialRequest)) {
+            "Invalid initial pairing request"
+        }
+        require(MessageDigest.isEqual(commitment, pairingCommitment(clientRandom))) {
+            "Pairing commitment mismatch"
+        }
         val clientPsk = context.export(PSK_EXPORT_CONTEXT, CLIENT_PSK_BYTES)
         val sasBytes = derive(
             input = clientRandom,
@@ -265,9 +265,9 @@ internal class PairingProtocol(
             devicePublicKey = devicePublicKey,
             request = request,
         )
-        val publicNonce = ByteArray(RESPONSE_NONCE_BYTES).also(random::nextBytes)
+        val responseRandom = ByteArray(RESPONSE_RANDOM_BYTES).also(random::nextBytes)
         val encapsulatedKey = BASE64_DECODER.decode(opened.request.key)
-        val salt = encapsulatedKey + publicNonce
+        val salt = encapsulatedKey + responseRandom
         val exportedSecret = opened.context.export(
             RESPONSE_EXPORT_CONTEXT,
             EXPORTED_SECRET_BYTES,
@@ -278,7 +278,7 @@ internal class PairingProtocol(
         return json.encodeToJsonElement(
             EncryptedResponse.serializer(),
             EncryptedResponse(
-                nonce = BASE64_ENCODER.encodeToString(publicNonce),
+                nonce = BASE64_ENCODER.encodeToString(responseRandom),
                 ciphertext = BASE64_ENCODER.encodeToString(ciphertext),
             ),
         )
@@ -318,8 +318,17 @@ internal class PairingProtocol(
         )
     }
 
-    private fun pairingCommitment(address: String): ByteArray = derive(
-        input = address.encodeToByteArray(),
+    private fun initialCommitment(request: JsonElement): ByteArray? {
+        val decoded = runCatching {
+            json.decodeFromJsonElement(PairingRequest.serializer(), request)
+        }.getOrNull() ?: return null
+        if (decoded.version != PROTOCOL_VERSION) return null
+        return runCatching { BASE64_DECODER.decode(decoded.commitment) }.getOrNull()
+            ?.takeIf { it.size == COMMITMENT_BYTES }
+    }
+
+    private fun pairingCommitment(clientRandom: ByteArray): ByteArray = derive(
+        input = clientRandom,
         salt = BASE_DERIVATION_SALT,
         info = COMMITMENT_DERIVATION_INFO,
         length = COMMITMENT_BYTES,
@@ -493,7 +502,7 @@ internal class PairingProtocol(
         val RESPONSE_KEY_INFO = "key".encodeToByteArray()
         val RESPONSE_NONCE_INFO = "nonce".encodeToByteArray()
         val EMPTY = ByteArray(0)
-        const val FINISH_PAIRING_METHOD = "FinishPairing"
+        const val FINISH_PAIRING_METHOD = "PairingFinish"
         const val RESULT_ACCEPTED = "ACCEPTED"
         const val RESULT_REJECTED = "REJECTED"
         const val IDENTIFIER_BYTES = 16
@@ -504,6 +513,7 @@ internal class PairingProtocol(
         const val CLIENT_PSK_BYTES = 32
         const val EXPORTED_SECRET_BYTES = 32
         const val CHACHA_KEY_BYTES = 32
+        const val RESPONSE_RANDOM_BYTES = 32
         const val RESPONSE_NONCE_BYTES = 12
         const val AUTHENTICATION_TAG_BITS = 128
         const val SAS_MODULUS = 1_000_000_000_000L

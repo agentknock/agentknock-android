@@ -7,16 +7,20 @@ import com.google.firebase.messaging.FirebaseMessaging
 import dev.agentknock.push.PushRegistrationRepository
 import dev.agentknock.push.RequestNotifications
 import dev.agentknock.storage.AgentKnockDatabase
+import dev.agentknock.storage.FactoryResetRepository
+import dev.agentknock.storage.audit.AuditRepository
 import dev.agentknock.storage.crypto.AesGcmEncryption
 import dev.agentknock.storage.crypto.AndroidEncryptionKeyStore
 import dev.agentknock.storage.crypto.LocalEncryptionKeyManager
 import dev.agentknock.storage.profile.ProfileRepository
 import dev.agentknock.relay.HttpRelayClaimClient
 import dev.agentknock.relay.HttpRelayPushRegistrationClient
+import dev.agentknock.relay.HttpRelayDeviceManagementClient
 import dev.agentknock.relay.WebSocketRelayDeviceClient
 import dev.agentknock.storage.request.RequestRepository
 import dev.agentknock.storage.request.RequestConnectionManager
 import dev.agentknock.storage.vault.VaultRepository
+import dev.agentknock.storage.vault.DeviceManagementRepository
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.CoroutineStart
 import kotlinx.coroutines.Dispatchers
@@ -55,10 +59,13 @@ internal class ApplicationContainer(application: Application) {
         encryptionKeyManager.initialize()
     }
 
+    val audit = AuditRepository(database.auditDao())
+
     val profiles = ProfileRepository(
         dao = database.profileDao(),
         keyManager = encryptionKeyManager,
         encryption = encryption,
+        audit = audit,
     )
 
     val vault = VaultRepository(
@@ -66,11 +73,19 @@ internal class ApplicationContainer(application: Application) {
         keyManager = encryptionKeyManager,
         encryption = encryption,
         relay = HttpRelayClaimClient(httpClient),
+        audit = audit,
     )
 
     val pushRegistration = PushRegistrationRepository(
         deviceCredentials = vault,
         relay = HttpRelayPushRegistrationClient(httpClient),
+    )
+
+    val deviceManagement = DeviceManagementRepository(
+        vaultDao = database.vaultDao(),
+        credentials = vault,
+        relay = HttpRelayDeviceManagementClient(httpClient),
+        audit = audit,
     )
 
     val requests = RequestRepository(
@@ -80,6 +95,7 @@ internal class ApplicationContainer(application: Application) {
         relay = WebSocketRelayDeviceClient(httpClient),
         keyManager = encryptionKeyManager,
         encryption = encryption,
+        audit = audit,
         requestPushRegistration = {
             FirebaseMessaging.getInstance().register().addOnFailureListener { failure ->
                 Log.w("AgentKnock", "FCM registration failed", failure)
@@ -93,5 +109,11 @@ internal class ApplicationContainer(application: Application) {
             localStorage.await()
             requests.listen(onCaughtUp)
         },
+    )
+
+    val factoryReset = FactoryResetRepository(
+        database = database,
+        encryptionKeys = encryptionKeyManager,
+        deviceManagement = deviceManagement,
     )
 }

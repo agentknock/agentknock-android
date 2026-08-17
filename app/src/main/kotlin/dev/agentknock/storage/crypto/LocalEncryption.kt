@@ -57,6 +57,9 @@ internal interface LocalEncryptionDao {
     @Query("SELECT count(*) FROM local_encryption_keys")
     suspend fun countKeys(): Int
 
+    @Query("SELECT id FROM local_encryption_keys")
+    suspend fun getKeyIds(): List<String>
+
     @Insert
     suspend fun insertKey(key: LocalEncryptionKeyEntity)
 
@@ -128,6 +131,18 @@ internal class LocalEncryptionKeyManager(
     suspend fun activeKey(): ActiveEncryptionKey = initialize().activeKey
 
     suspend fun keyAvailable(keyId: String): Boolean = keyExists(keyId)
+
+    suspend fun reset(clearData: suspend () -> Unit) {
+        initializationMutex.withLock {
+            val keyIds = dao.getKeyIds()
+            clearData()
+            withContext(keyStoreDispatcher) {
+                keyIds.forEach(keyStore::delete)
+            }
+            initialization = null
+        }
+        initialize()
+    }
 
     private suspend fun createAndActivateKey(): ActiveEncryptionKey {
         val keyId = newKeyId()

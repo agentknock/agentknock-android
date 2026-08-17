@@ -8,7 +8,9 @@ import dev.agentknock.storage.request.CredentialDecisionResult
 import dev.agentknock.storage.request.InboxRequestDetails
 import dev.agentknock.storage.request.InboxRequestSummary
 import dev.agentknock.storage.request.PairingDecisionResult
+import dev.agentknock.storage.request.ProfileUploadDecisionResult
 import dev.agentknock.storage.request.RequestSyncResult
+import dev.agentknock.storage.vault.VaultConfiguration
 import kotlinx.coroutines.ExperimentalCoroutinesApi
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.SharingStarted
@@ -40,6 +42,12 @@ internal class RequestsViewModel(application: Application) : AndroidViewModel(ap
         )
     val syncing: StateFlow<Boolean> = connection.syncing
     val lastSyncResult: StateFlow<RequestSyncResult?> = connection.lastSyncResult
+    val configuration: StateFlow<VaultConfiguration?> = container.vault.observeConfiguration()
+        .stateIn(
+            scope = viewModelScope,
+            started = SharingStarted.Eagerly,
+            initialValue = null,
+        )
 
     fun selectRequest(id: Long?) {
         selectedRequestId.value = id
@@ -67,5 +75,18 @@ internal class RequestsViewModel(application: Application) : AndroidViewModel(ap
     suspend fun denyCredentialRequest(requestId: Long): CredentialDecisionResult {
         container.localStorage.await()
         return repository.denyCredentialRequest(requestId)
+    }
+
+    suspend fun acceptProfileUpload(
+        requestId: Long,
+        acceptedName: String,
+    ): ProfileUploadDecisionResult {
+        container.localStorage.await()
+        return repository.acceptProfileUpload(requestId, acceptedName)
+    }
+
+    suspend fun rejectProfileUpload(requestId: Long): ProfileUploadDecisionResult {
+        container.localStorage.await()
+        return repository.rejectProfileUpload(requestId)
     }
 }

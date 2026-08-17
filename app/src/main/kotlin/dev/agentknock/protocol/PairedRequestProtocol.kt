@@ -10,7 +10,7 @@ internal class PairedRequestProtocol(
         json.decodeFromString<RequestMethodWire>(plaintext.decodeToString()).method
 
     companion object {
-        const val FINISH_PAIRING_METHOD = "FinishPairing"
+        const val FINISH_PAIRING_METHOD = "PairingFinish"
     }
 }
 

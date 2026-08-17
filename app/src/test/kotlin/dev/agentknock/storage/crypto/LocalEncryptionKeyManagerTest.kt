@@ -101,6 +101,8 @@ internal class FakeLocalEncryptionDao : LocalEncryptionDao {
 
     override suspend fun countKeys(): Int = keys.size
 
+    override suspend fun getKeyIds(): List<String> = keys.map { it.id }
+
     override suspend fun insertKey(key: LocalEncryptionKeyEntity) {
         check(keys.none { it.id == key.id })
         keys += key
@@ -127,5 +129,9 @@ internal class FakeEncryptionKeyStore : EncryptionKeyStore {
         }
         generatedKeyIds += keyId
         return GeneratedEncryptionKey(EncryptionKeyBacking.SOFTWARE)
+    }
+
+    override fun delete(keyId: String) {
+        keys.remove(keyId)
     }
 }

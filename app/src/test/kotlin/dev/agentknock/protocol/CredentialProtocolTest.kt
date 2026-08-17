@@ -23,7 +23,9 @@ class CredentialProtocolTest {
                 "command":"aws",
                 "arguments":["logs","tail","service"],
                 "working_directory":"/work",
-                "resolved_path":"/run/current-system/sw/bin/aws",
+                "executable_path":"/run/current-system/sw/bin/aws",
+                "executable_hash":"4f7f5c6a",
+                "executable_mode":"BINARY",
                 "stdin":"TERMINAL",
                 "stdout":"PIPE",
                 "stderr":"TERMINAL"
@@ -39,7 +41,9 @@ class CredentialProtocolTest {
         assertEquals("aws", request.operation.command)
         assertEquals(listOf("logs", "tail", "service"), request.operation.arguments)
         assertEquals("/work", request.operation.workingDirectory)
-        assertEquals("/run/current-system/sw/bin/aws", request.operation.resolvedPath)
+        assertEquals("/run/current-system/sw/bin/aws", request.operation.executablePath)
+        assertEquals("4f7f5c6a", request.operation.executableHash)
+        assertEquals("BINARY", request.operation.executableMode)
         assertEquals("TERMINAL", request.operation.stdin)
         assertEquals("PIPE", request.operation.stdout)
         assertEquals("TERMINAL", request.operation.stderr)
@@ -50,11 +54,19 @@ class CredentialProtocolTest {
     fun `encodes exact approved and denied response variants`() {
         assertEquals(
             json.parseToJsonElement(
-                """{"result":"APPROVED","environment":{"AWS_REGION":"eu-west-1","TOKEN":"secret"}}""",
+                """{"result":"APPROVED","profiles":{"aws-read-only":{"type":"environment","variables":{"AWS_REGION":{"value":"eu-west-1"},"TOKEN":{"value":"secret"}}}}}""",
             ),
             json.parseToJsonElement(
                 protocol.approvedResponse(
-                    linkedMapOf("AWS_REGION" to "eu-west-1", "TOKEN" to "secret"),
+                    mapOf(
+                        "aws-read-only" to CredentialResponseProfile(
+                            description = "",
+                            environment = linkedMapOf(
+                                "AWS_REGION" to "eu-west-1",
+                                "TOKEN" to "secret",
+                            ),
+                        ),
+                    ),
                 ).decodeToString(),
             ),
         )
@@ -95,7 +107,7 @@ class CredentialProtocolTest {
         assertEquals("Cancelled by user.", aborted.message)
         assertNull(
             protocol.decodeRequest(
-                """{"cli_version":"0.1.0","method":"CredentialRequest","profiles":["test"],"operation":{"type":"exec","command":"env","arguments":[],"working_directory":"/tmp","stdin":"TERMINAL","stdout":"TERMINAL","stderr":"TERMINAL"},"launcher_chain":[]}"""
+                """{"cli_version":"0.1.0","method":"CredentialRequest","profiles":["test"],"operation":{"type":"exec","command":"env","arguments":[],"working_directory":"/tmp","executable_path":"/bin/env","executable_mode":"BINARY","stdin":"TERMINAL","stdout":"TERMINAL","stderr":"TERMINAL"},"launcher_chain":[]}"""
                     .encodeToByteArray(),
             ).reason,
         )

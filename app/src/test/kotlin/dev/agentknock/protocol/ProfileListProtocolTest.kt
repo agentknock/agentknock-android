@@ -13,7 +13,7 @@ class ProfileListProtocolTest {
         assertEquals(
             ProfileListRequestMessage("0.1.0"),
             protocol.decodeRequest(
-                """{"cli_version":"0.1.0","method":"List"}""".encodeToByteArray(),
+                """{"cli_version":"0.1.0","method":"ProfileList"}""".encodeToByteArray(),
             ),
         )
         assertEquals(
@@ -49,14 +49,13 @@ class ProfileListProtocolTest {
                   "profiles":{
                     "aws-read-only":{
                       "description":"Read production logs",
-                      "environment":{
-                        "AWS_ACCESS_KEY_ID":"STORED",
-                        "AWS_SECRET_ACCESS_KEY":"STORED"
-                      }
+                      "type":"environment",
+                      "variables":["AWS_ACCESS_KEY_ID","AWS_SECRET_ACCESS_KEY"]
                     },
                     "empty":{
                       "description":"No variables yet",
-                      "environment":{}
+                      "type":"environment",
+                      "variables":[]
                     }
                   }
                 }

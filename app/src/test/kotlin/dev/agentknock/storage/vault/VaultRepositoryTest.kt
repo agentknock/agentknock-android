@@ -317,4 +317,20 @@ private class FakeVaultDao : VaultDao {
         }
         return 1
     }
+
+    override suspend fun updatePairingEnabled(
+        identityId: String,
+        enabled: Boolean,
+        activeRole: String,
+    ): Int {
+        if (identities.value.none { it.id == identityId && it.role == activeRole }) return 0
+        identities.value = identities.value.map { identity ->
+            if (identity.id == identityId && identity.role == activeRole) {
+                identity.copy(pairingEnabled = enabled)
+            } else {
+                identity
+            }
+        }
+        return 1
+    }
 }

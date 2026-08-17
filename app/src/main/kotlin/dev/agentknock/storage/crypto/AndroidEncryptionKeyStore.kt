@@ -27,6 +27,8 @@ internal interface EncryptionKeyStore : EncryptionKeySource {
     fun contains(keyId: String): Boolean
 
     fun generate(keyId: String): GeneratedEncryptionKey
+
+    fun delete(keyId: String)
 }
 
 internal class AndroidEncryptionKeyStore(
@@ -41,6 +43,11 @@ internal class AndroidEncryptionKeyStore(
 
     @Synchronized
     override fun get(keyId: String): SecretKey? = keyStore.getKey(alias(keyId), null) as? SecretKey
+
+    @Synchronized
+    override fun delete(keyId: String) {
+        keyStore.deleteEntry(alias(keyId))
+    }
 
     @Synchronized
     override fun generate(keyId: String): GeneratedEncryptionKey {

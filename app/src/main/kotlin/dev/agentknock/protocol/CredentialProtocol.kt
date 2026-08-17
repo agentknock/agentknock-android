@@ -16,10 +16,17 @@ internal data class CredentialExecOperation(
     val command: String,
     val arguments: List<String>,
     val workingDirectory: String,
-    val resolvedPath: String?,
+    val executablePath: String,
+    val executableHash: String?,
+    val executableMode: String,
     val stdin: String,
     val stdout: String,
     val stderr: String,
+)
+
+internal data class CredentialResponseProfile(
+    val description: String,
+    val environment: Map<String, String>,
 )
 
 internal enum class CredentialDenialReason(val wireName: String) {
@@ -64,7 +71,9 @@ internal class CredentialProtocol(
                 command = request.operation.command,
                 arguments = request.operation.arguments,
                 workingDirectory = request.operation.workingDirectory,
-                resolvedPath = request.operation.resolvedPath,
+                executablePath = request.operation.executablePath,
+                executableHash = request.operation.executableHash,
+                executableMode = request.operation.executableMode,
                 stdin = request.operation.stdin,
                 stdout = request.operation.stdout,
                 stderr = request.operation.stderr,
@@ -73,9 +82,20 @@ internal class CredentialProtocol(
         )
     }
 
-    fun approvedResponse(environment: Map<String, String>): ByteArray = json.encodeToString(
+    fun approvedResponse(profiles: Map<String, CredentialResponseProfile>): ByteArray = json.encodeToString(
         CredentialResponseWire.serializer(),
-        CredentialResponseWire(result = RESULT_APPROVED, environment = environment),
+        CredentialResponseWire(
+            result = RESULT_APPROVED,
+            profiles = profiles.mapValues { (_, profile) ->
+                CredentialResponseProfileWire(
+                    description = profile.description.ifEmpty { null },
+                    type = "environment",
+                    variables = profile.environment.mapValues { (_, value) ->
+                        CredentialResponseVariableWire(value)
+                    },
+                )
+            },
+        ),
     ).encodeToByteArray()
 
     fun deniedResponse(reason: CredentialDenialReason, message: String): ByteArray =
@@ -133,7 +153,9 @@ private data class CredentialOperationWire(
     val command: String,
     val arguments: List<String>,
     @SerialName("working_directory") val workingDirectory: String,
-    @SerialName("resolved_path") val resolvedPath: String? = null,
+    @SerialName("executable_path") val executablePath: String,
+    @SerialName("executable_hash") val executableHash: String? = null,
+    @SerialName("executable_mode") val executableMode: String,
     val stdin: String,
     val stdout: String,
     val stderr: String,
@@ -142,10 +164,20 @@ private data class CredentialOperationWire(
 @Serializable
 private data class CredentialResponseWire(
     val result: String,
-    val environment: Map<String, String>? = null,
+    val profiles: Map<String, CredentialResponseProfileWire>? = null,
     val reason: String? = null,
     val message: String? = null,
 )
+
+@Serializable
+private data class CredentialResponseProfileWire(
+    val description: String? = null,
+    val type: String,
+    val variables: Map<String, CredentialResponseVariableWire>,
+)
+
+@Serializable
+private data class CredentialResponseVariableWire(val value: String)
 
 @Serializable
 private data class CredentialCompletionWire(
