@@ -49,14 +49,24 @@ class PairingProtocolTest {
     }
 
     @Test
+    fun `derives the pairing commitment from the client secret vector`() {
+        val request = pairingRequest(ByteArray(32) { it.toByte() })
+
+        assertEquals(
+            "Go4u3fpbdUdrgELIEo4ugJQDJ/Em1uftiV1/UdafzCw=",
+            request.jsonObject.getValue("commitment").jsonPrimitive.content,
+        )
+    }
+
+    @Test
     fun `opens the initial hpke exchange and derives the cli sas`() {
         val sender = baseHpke.setupBaseS(
             baseHpke.deserializePublicKey(devicePublicKey),
             baseProtocolInfo(),
         )
-        val clientRandom = ByteArray(32) { it.toByte() }
-        val initialRequest = pairingRequest(clientRandom)
-        val completion = initialCompletion(sender, clientRandom)
+        val clientSecret = ByteArray(32) { it.toByte() }
+        val initialRequest = pairingRequest(clientSecret)
+        val completion = initialCompletion(sender, clientSecret)
 
         val established = protocol.establish(
             deviceId = DEVICE_ID,
@@ -77,13 +87,13 @@ class PairingProtocolTest {
     }
 
     @Test
-    fun `rejects a completion whose client random does not match its commitment`() {
+    fun `rejects a completion whose client secret does not match its commitment`() {
         val sender = baseHpke.setupBaseS(
             baseHpke.deserializePublicKey(devicePublicKey),
             baseProtocolInfo(),
         )
-        val committedRandom = ByteArray(32) { it.toByte() }
-        val revealedRandom = ByteArray(32) { (it + 1).toByte() }
+        val committedSecret = ByteArray(32) { it.toByte() }
+        val revealedSecret = ByteArray(32) { (it + 1).toByte() }
 
         val failure = runCatching {
             protocol.establish(
@@ -92,8 +102,12 @@ class PairingProtocolTest {
                 devicePrivateKey = devicePrivateKey,
                 devicePublicKey = devicePublicKey,
                 deviceRandom = DEVICE_RANDOM,
-                initialRequest = pairingRequest(committedRandom),
-                completion = initialCompletion(sender, revealedRandom),
+                initialRequest = pairingRequest(committedSecret),
+                completion = initialCompletion(
+                    sender = sender,
+                    clientSecret = revealedSecret,
+                    applicationPlaintext = "not valid metadata".encodeToByteArray(),
+                ),
             )
         }.exceptionOrNull()
 
@@ -233,9 +247,9 @@ class PairingProtocolTest {
         assertEquals(123_456_789_012L, choices.values[choices.correctIndex])
     }
 
-    private fun pairingRequest(clientRandom: ByteArray): JsonElement {
+    private fun pairingRequest(clientSecret: ByteArray): JsonElement {
         val commitment = derive(
-            input = clientRandom,
+            input = clientSecret,
             salt = "agentknock-v1".encodeToByteArray(),
             info = "agentknock-v1 commitment".encodeToByteArray(),
             length = 32,
@@ -247,15 +261,19 @@ class PairingProtocolTest {
 
     private fun initialCompletion(
         sender: org.bouncycastle.crypto.hpke.HPKEContext,
-        clientRandom: ByteArray,
+        clientSecret: ByteArray,
+        applicationPlaintext: ByteArray = pairingMetadata(),
     ): JsonElement {
-        val plaintext = json.parseToJsonElement(
-            """{"cli_version":"0.1.0","client_random":"${BASE64.encodeToString(clientRandom)}","platform":"linux","architecture":"x86_64","hostname":"survo","machine_id":"machine","os_version":"NixOS"}""",
-        ).toString().encodeToByteArray()
+        val secretCiphertext = sender.seal(EMPTY, clientSecret)
+        val ciphertext = sender.seal(EMPTY, applicationPlaintext)
         return json.parseToJsonElement(
-            """{"key":"${BASE64.encodeToString(senderEncapsulation(sender))}","ciphertext":"${BASE64.encodeToString(sender.seal(EMPTY, plaintext))}"}""",
+            """{"key":"${BASE64.encodeToString(senderEncapsulation(sender))}","secret":"${BASE64.encodeToString(secretCiphertext)}","ciphertext":"${BASE64.encodeToString(ciphertext)}"}""",
         )
     }
+
+    private fun pairingMetadata(): ByteArray = json.parseToJsonElement(
+        """{"cli_version":"0.1.0","platform":"linux","architecture":"x86_64","hostname":"survo","machine_id":"machine","os_version":"NixOS"}""",
+    ).toString().encodeToByteArray()
 
     private fun baseProtocolInfo(): ByteArray =
         protocolVersionInfo() + DEVICE_ID.ulidBytes() + CLIENT_ID.ulidBytes()

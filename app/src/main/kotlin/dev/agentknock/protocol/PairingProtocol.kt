@@ -22,7 +22,6 @@ import org.bouncycastle.crypto.params.KeyParameter
 
 internal data class PairingClientMetadata(
     val cliVersion: String,
-    val clientRandom: ByteArray,
     val platform: String,
     val architecture: String,
     val hostname: String?,
@@ -93,6 +92,7 @@ internal class PairingProtocol(
     ): EstablishedPairing {
         val decoded = json.decodeFromJsonElement(PairingCompletion.serializer(), completion)
         val encapsulatedKey = BASE64_DECODER.decode(decoded.key)
+        val secretCiphertext = BASE64_DECODER.decode(decoded.secret)
         val ciphertext = BASE64_DECODER.decode(decoded.ciphertext)
         val context = baseReceiver(
             deviceId = deviceId,
@@ -101,20 +101,19 @@ internal class PairingProtocol(
             devicePublicKey = devicePublicKey,
             encapsulatedKey = encapsulatedKey,
         )
-        val plaintext = context.open(EMPTY, ciphertext)
-        val contents = json.decodeFromString(PairingContents.serializer(), plaintext.decodeToString())
-        val clientRandom = BASE64_DECODER.decode(contents.clientRandom)
-        require(clientRandom.size == CLIENT_RANDOM_BYTES) { "Invalid pairing client random" }
+        val clientSecret = context.open(EMPTY, secretCiphertext)
+        val applicationPlaintext = context.open(EMPTY, ciphertext)
+        require(clientSecret.size == CLIENT_SECRET_BYTES) { "Invalid pairing client secret" }
         require(deviceRandom.size == DEVICE_RANDOM_BYTES) { "Invalid device random" }
         val commitment = requireNotNull(initialCommitment(initialRequest)) {
             "Invalid initial pairing request"
         }
-        require(MessageDigest.isEqual(commitment, pairingCommitment(clientRandom))) {
+        require(MessageDigest.isEqual(commitment, pairingCommitment(clientSecret))) {
             "Pairing commitment mismatch"
         }
         val clientPsk = context.export(PSK_EXPORT_CONTEXT, CLIENT_PSK_BYTES)
         val sasBytes = derive(
-            input = clientRandom,
+            input = clientSecret,
             salt = deviceRandom,
             info = SAS_DERIVATION_INFO +
                 deviceId.ulidBytes() +
@@ -126,12 +125,15 @@ internal class PairingProtocol(
             ByteBuffer.wrap(sasBytes).long,
             SAS_MODULUS,
         )
+        val contents = json.decodeFromString(
+            PairingMetadata.serializer(),
+            applicationPlaintext.decodeToString(),
+        )
         return EstablishedPairing(
             clientPsk = clientPsk,
             sas = sas,
             clientMetadata = PairingClientMetadata(
                 cliVersion = contents.cliVersion,
-                clientRandom = clientRandom,
                 platform = contents.platform,
                 architecture = contents.architecture,
                 hostname = contents.hostname,
@@ -327,8 +329,8 @@ internal class PairingProtocol(
             ?.takeIf { it.size == COMMITMENT_BYTES }
     }
 
-    private fun pairingCommitment(clientRandom: ByteArray): ByteArray = derive(
-        input = clientRandom,
+    private fun pairingCommitment(clientSecret: ByteArray): ByteArray = derive(
+        input = clientSecret,
         salt = BASE_DERIVATION_SALT,
         info = COMMITMENT_DERIVATION_INFO,
         length = COMMITMENT_BYTES,
@@ -507,7 +509,7 @@ internal class PairingProtocol(
         const val RESULT_REJECTED = "REJECTED"
         const val IDENTIFIER_BYTES = 16
         const val X25519_KEY_BYTES = 32
-        const val CLIENT_RANDOM_BYTES = 32
+        const val CLIENT_SECRET_BYTES = 32
         const val DEVICE_RANDOM_BYTES = 32
         const val COMMITMENT_BYTES = 32
         const val CLIENT_PSK_BYTES = 32
@@ -560,13 +562,13 @@ private data class PairingResponse(
 @Serializable
 private data class PairingCompletion(
     val key: String,
+    val secret: String,
     val ciphertext: String,
 )
 
 @Serializable
-private data class PairingContents(
+private data class PairingMetadata(
     @SerialName("cli_version") val cliVersion: String,
-    @SerialName("client_random") val clientRandom: String,
     val platform: String,
     val architecture: String,
     val hostname: String? = null,
