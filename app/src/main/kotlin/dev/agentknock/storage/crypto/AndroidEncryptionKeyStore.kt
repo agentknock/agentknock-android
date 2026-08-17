@@ -66,7 +66,9 @@ internal class AndroidEncryptionKeyStore(
             generate(alias, useStrongBox = false) to false
         }
 
-        return GeneratedEncryptionKey(backing = determineBacking(key, strongBoxUsed))
+        val backing = runCatching { determineBacking(key, strongBoxUsed) }
+            .getOrDefault(EncryptionKeyBacking.UNKNOWN)
+        return GeneratedEncryptionKey(backing = backing)
     }
 
     private fun generate(alias: String, useStrongBox: Boolean): SecretKey {

@@ -23,8 +23,10 @@ import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.automirrored.outlined.ArrowBack
 import androidx.compose.material.icons.outlined.ExpandLess
 import androidx.compose.material.icons.outlined.ExpandMore
+import androidx.compose.material.icons.outlined.Edit
 import androidx.compose.material.icons.outlined.Refresh
 import androidx.compose.material.icons.outlined.Settings
+import androidx.compose.material3.AlertDialog
 import androidx.compose.material3.Button
 import androidx.compose.material3.Card
 import androidx.compose.material3.CardDefaults
@@ -41,6 +43,7 @@ import androidx.compose.material3.SnackbarHost
 import androidx.compose.material3.SnackbarHostState
 import androidx.compose.material3.Text
 import androidx.compose.material3.TextButton
+import androidx.compose.material3.Switch
 import androidx.compose.material3.TopAppBar
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.getValue
@@ -71,6 +74,7 @@ import dev.agentknock.storage.request.PairingState
 import dev.agentknock.storage.request.ProfileUploadDecisionResult
 import dev.agentknock.storage.request.ProfileUploadRequestDetails
 import dev.agentknock.storage.request.ProfileUploadRequestState
+import dev.agentknock.storage.request.ProfileUploadVariableValue
 import dev.agentknock.storage.request.RequestSyncResult
 import dev.agentknock.storage.vault.VaultIdentity
 import java.text.DateFormat
@@ -171,6 +175,18 @@ internal fun RequestsScreen(
                 onReject = {
                     scope.launch { report(viewModel.rejectProfileUpload(request.id).message()) }
                 },
+                authenticate = authenticate,
+                onReveal = { variableId ->
+                    viewModel.readProfileUploadVariable(request.id, variableId)
+                },
+                onSensitivityChange = { variableId, sensitive ->
+                    viewModel.setProfileUploadVariableSensitivity(
+                        request.id,
+                        variableId,
+                        sensitive,
+                    )
+                },
+                report = ::report,
                 modifier = modifier,
             )
             else -> MissingDetail(onBack = { viewModel.selectRequest(null) }, modifier = modifier)
@@ -295,7 +311,11 @@ private fun PairingDetail(
 ) {
     val pairing = checkNotNull(request.pairing)
     DetailPage("Pairing request", onBack, modifier) {
-        StatusLine(pairing.pairingState.label(), pairing.pairingState.isError())
+        StatusLine(
+            pairing.pairingState.label(),
+            pairing.pairingState.isError() ||
+                (pairing.pairingState == PairingState.RECEIVING && pairing.error != null),
+        )
         Text(
             pairing.hostname ?: pairing.platform ?: "Unknown client",
             style = MaterialTheme.typography.headlineSmall,
@@ -328,14 +348,29 @@ private fun PairingDetail(
             )
             PairingState.ACTIVE -> Notice("Pairing complete", "This client can now make requests.")
             PairingState.REJECTED -> Notice("Pairing rejected", "No access was granted.", true)
-            PairingState.RECEIVING -> Notice("Receiving pairing", "The request is still being verified.")
+            PairingState.RECEIVING -> if (pairing.error == null) {
+                Notice("Receiving pairing", "The request is still being verified.")
+            } else {
+                Notice(
+                    "Pairing message rejected",
+                    "${pairing.error} Waiting for a valid completion, or you can reject this pairing.",
+                    true,
+                )
+            }
             PairingState.VERIFICATION_FAILED -> Notice(
                 "Pairing could not be verified",
                 pairing.error ?: "The cryptographic message was invalid.",
                 true,
             )
         }
-        if (pairing.pairingState in setOf(PairingState.RECEIVING, PairingState.VERIFICATION_FAILED)) {
+        if (
+            pairing.pairingState in setOf(
+                PairingState.RECEIVING,
+                PairingState.VERIFICATION_FAILED,
+                PairingState.RELAY_ACTIVATION_PENDING,
+                PairingState.WAITING_FOR_FINISH,
+            )
+        ) {
             OutlinedButton(onClick = onReject, modifier = Modifier.fillMaxWidth()) {
                 Text("Reject pairing")
             }
@@ -458,55 +493,136 @@ private fun ProfileUploadDetail(
     onBack: () -> Unit,
     onAccept: (String) -> Unit,
     onReject: () -> Unit,
+    authenticate: (String, () -> Unit, (String) -> Unit) -> Unit,
+    onReveal: suspend (String) -> ProfileUploadVariableValue,
+    onSensitivityChange: suspend (String, Boolean) -> Boolean,
+    report: (String) -> Unit,
     modifier: Modifier,
 ) {
     val upload = checkNotNull(request.profileUpload)
     var acceptedName by remember(upload.proposedName) { mutableStateOf(upload.proposedName) }
-    DetailPage("Profile proposal", onBack, modifier) {
+    var editingName by remember { mutableStateOf(false) }
+    var revealedValues by remember(request.id) { mutableStateOf<Map<String, String>>(emptyMap()) }
+    val scope = rememberCoroutineScope()
+    DetailPage(
+        title = acceptedName,
+        onBack = onBack,
+        modifier = modifier,
+        titleContent = {
+            Row(verticalAlignment = Alignment.CenterVertically) {
+                Text(acceptedName, modifier = Modifier.weight(1f))
+                if (
+                    upload.mode == ProfileUploadMode.CREATE &&
+                    upload.state == ProfileUploadRequestState.REVIEW_PENDING
+                ) {
+                    IconButton(onClick = { editingName = true }) {
+                        Icon(Icons.Outlined.Edit, contentDescription = "Rename profile")
+                    }
+                }
+            }
+        },
+    ) {
         StatusLine(upload.state.label(), upload.state == ProfileUploadRequestState.VERIFICATION_FAILED)
-        Text(upload.proposedName, style = MaterialTheme.typography.headlineSmall)
         Text(
-            "${upload.mode.actionLabel()} proposed by ${upload.clientName}",
+            "Environment variables · ${upload.mode.actionLabel()} · ${upload.clientName}",
             color = MaterialTheme.colorScheme.onSurfaceVariant,
         )
         upload.description?.takeIf(String::isNotBlank)?.let {
             DetailValue("Description", it)
         }
 
-        Text("Proposed changes", style = MaterialTheme.typography.titleLarge)
-        ChangeGroup("Add", upload.addedVariables)
-        ChangeGroup("Change", upload.changedVariables)
-        ChangeGroup("Remove", upload.removedVariables)
-        if (upload.unchangedVariables.isNotEmpty()) {
-            ChangeGroup("Keep unchanged", upload.unchangedVariables, subdued = true)
-        }
-        if (
-            upload.addedVariables.isEmpty() && upload.changedVariables.isEmpty() &&
-            upload.removedVariables.isEmpty() && upload.unchangedVariables.isEmpty()
-        ) {
+        Text("Incoming variables", style = MaterialTheme.typography.titleLarge)
+        if (upload.variables.isEmpty()) {
             Text("No variables")
         }
-        Text(
-            "Uploaded values are hidden. New variables are sensitive by default; existing variables keep their sensitivity.",
-            style = MaterialTheme.typography.bodySmall,
-            color = MaterialTheme.colorScheme.onSurfaceVariant,
-        )
+        upload.variables.forEach { variable ->
+            Card {
+                Column(
+                    Modifier.fillMaxWidth().padding(16.dp),
+                    verticalArrangement = Arrangement.spacedBy(10.dp),
+                ) {
+                    Text(variable.name, fontFamily = FontFamily.Monospace)
+                    val value = revealedValues[variable.id]
+                    if (value == null) {
+                        Text("Value hidden", color = MaterialTheme.colorScheme.onSurfaceVariant)
+                        TextButton(
+                            onClick = {
+                                val reveal: () -> Unit = {
+                                    scope.launch {
+                                        when (val result = onReveal(variable.id)) {
+                                            is ProfileUploadVariableValue.Available -> {
+                                                revealedValues = revealedValues +
+                                                    (variable.id to result.value)
+                                            }
+                                            ProfileUploadVariableValue.NotFound ->
+                                                report("This variable is no longer available")
+                                            ProfileUploadVariableValue.Unavailable ->
+                                                report("The encryption key is unavailable")
+                                            ProfileUploadVariableValue.Corrupted ->
+                                                report("The uploaded value could not be authenticated")
+                                            ProfileUploadVariableValue.UnsupportedEncryption ->
+                                                report("The uploaded value uses unsupported encryption")
+                                        }
+                                    }
+                                    Unit
+                                }
+                                if (variable.sensitive) {
+                                    authenticate("Show uploaded value", reveal, report)
+                                } else {
+                                    reveal()
+                                }
+                            },
+                        ) { Text("Show value") }
+                    } else {
+                        SelectionContainer {
+                            Text(value, fontFamily = FontFamily.Monospace)
+                        }
+                    }
+                    Row(
+                        modifier = Modifier.fillMaxWidth(),
+                        horizontalArrangement = Arrangement.SpaceBetween,
+                        verticalAlignment = Alignment.CenterVertically,
+                    ) {
+                        Text("Sensitive")
+                        Switch(
+                            checked = variable.sensitive,
+                            enabled = upload.state == ProfileUploadRequestState.REVIEW_PENDING,
+                            onCheckedChange = { sensitive ->
+                                scope.launch {
+                                    if (!onSensitivityChange(variable.id, sensitive)) {
+                                        report("Sensitivity could not be changed")
+                                    }
+                                }
+                            },
+                        )
+                    }
+                }
+            }
+        }
+
+        if (upload.mode != ProfileUploadMode.CREATE) {
+            Disclosure("Changes to the existing profile") {
+                ChangeGroup("New", upload.addedVariables)
+                ChangeGroup("Updated", upload.changedVariables)
+                ChangeGroup("Removed", upload.removedVariables)
+                ChangeGroup("Unchanged", upload.unchangedVariables, subdued = true)
+            }
+        }
 
         if (upload.state == ProfileUploadRequestState.REVIEW_PENDING) {
-            if (upload.mode == ProfileUploadMode.CREATE) {
-                OutlinedTextField(
-                    value = acceptedName,
-                    onValueChange = { acceptedName = it },
-                    label = { Text("Profile name") },
-                    singleLine = true,
-                    modifier = Modifier.fillMaxWidth(),
-                )
-            }
             Button(
                 onClick = { onAccept(acceptedName.trim()) },
-                enabled = acceptedName.isNotBlank(),
+                enabled = acceptedName.isNotBlank() &&
+                    upload.variables.all { revealedValues.containsKey(it.id) },
                 modifier = Modifier.fillMaxWidth(),
             ) { Text("Accept proposal") }
+            if (upload.variables.any { !revealedValues.containsKey(it.id) }) {
+                Text(
+                    "Review every incoming value before accepting.",
+                    style = MaterialTheme.typography.bodySmall,
+                    color = MaterialTheme.colorScheme.onSurfaceVariant,
+                )
+            }
             OutlinedButton(onClick = onReject, modifier = Modifier.fillMaxWidth()) {
                 Text("Reject proposal")
             }
@@ -523,6 +639,33 @@ private fun ProfileUploadDetail(
             DetailValue("Client ID", upload.clientId, true)
             DetailValue("Request ID", request.relayRequestId, true)
         }
+    }
+    if (editingName) {
+        var editedName by remember(acceptedName) { mutableStateOf(acceptedName) }
+        AlertDialog(
+            onDismissRequest = { editingName = false },
+            title = { Text("Profile name") },
+            text = {
+                OutlinedTextField(
+                    value = editedName,
+                    onValueChange = { editedName = it },
+                    singleLine = true,
+                    modifier = Modifier.fillMaxWidth(),
+                )
+            },
+            confirmButton = {
+                TextButton(
+                    enabled = editedName.isNotBlank(),
+                    onClick = {
+                        acceptedName = editedName.trim()
+                        editingName = false
+                    },
+                ) { Text("Save") }
+            },
+            dismissButton = {
+                TextButton(onClick = { editingName = false }) { Text("Cancel") }
+            },
+        )
     }
 }
 
@@ -581,11 +724,12 @@ private fun DetailPage(
     title: String,
     onBack: () -> Unit,
     modifier: Modifier,
+    titleContent: @Composable () -> Unit = { Text(title) },
     content: @Composable () -> Unit,
 ) {
     Column(modifier) {
         TopAppBar(
-            title = { Text(title) },
+            title = titleContent,
             navigationIcon = {
                 IconButton(onClick = onBack) {
                     Icon(Icons.AutoMirrored.Outlined.ArrowBack, contentDescription = "Back")

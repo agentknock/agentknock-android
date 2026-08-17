@@ -99,7 +99,7 @@
     <string name="confirm_discard_claim">Confirm discarding incomplete claim</string>
     <string name="change_vault_address">Change pairing address</string>
     <string name="change_vault_address_question">Change the pairing address?</string>
-    <string name="change_vault_address_explanation">After the new address is claimed, every existing client is revoked and must pair again. Profiles and history remain. The current address remains active if the claim fails.</string>
+    <string name="change_vault_address_explanation">The new address will be used for future pairings. Existing clients, profiles, and history are unaffected. The current address remains active if the claim fails.</string>
     <string name="continue_action">Continue</string>
     <string name="vault_claim_missing">There is no incomplete claim to retry</string>
     <string name="vault_keys_corrupted">The stored device keys could not be authenticated</string>

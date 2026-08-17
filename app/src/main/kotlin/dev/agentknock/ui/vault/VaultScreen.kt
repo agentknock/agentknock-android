@@ -25,6 +25,7 @@ import androidx.compose.material3.SnackbarHostState
 import androidx.compose.material3.Text
 import androidx.compose.material3.TextButton
 import androidx.compose.runtime.Composable
+import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
@@ -36,6 +37,8 @@ import androidx.compose.ui.Modifier
 import androidx.compose.ui.platform.LocalResources
 import androidx.compose.ui.res.stringResource
 import androidx.compose.ui.text.font.FontFamily
+import androidx.compose.ui.text.TextRange
+import androidx.compose.ui.text.input.TextFieldValue
 import androidx.compose.ui.unit.dp
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import dev.agentknock.R
@@ -304,6 +307,14 @@ private fun AddressEditor(
     onCancel: (() -> Unit)?,
 ) {
     val valid = VaultProtocol.validAddress(address) && address != activeAddress
+    var fieldValue by remember {
+        mutableStateOf(TextFieldValue(address, selection = TextRange(address.length)))
+    }
+    LaunchedEffect(address) {
+        if (fieldValue.text != address) {
+            fieldValue = TextFieldValue(address, selection = TextRange(address.length))
+        }
+    }
     Column(verticalArrangement = Arrangement.spacedBy(12.dp)) {
         Text(
             if (activeAddress == null) {
@@ -315,8 +326,11 @@ private fun AddressEditor(
         )
         Text(stringResource(R.string.vault_address_description))
         OutlinedTextField(
-            value = address,
-            onValueChange = onAddressChange,
+            value = fieldValue,
+            onValueChange = {
+                fieldValue = it
+                onAddressChange(it.text)
+            },
             modifier = Modifier.fillMaxWidth(),
             label = { Text(stringResource(R.string.vault_address)) },
             supportingText = {

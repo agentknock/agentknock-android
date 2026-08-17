@@ -25,6 +25,9 @@ class VaultProtocolTest {
         assertFalse(VaultProtocol.validAddress("Amber-river-maple"))
         assertFalse(VaultProtocol.validAddress("amber_river_maple"))
         assertFalse(VaultProtocol.validAddress("amber-rivér-maple"))
+        assertFalse(VaultProtocol.validAddress("-amber-river-maple"))
+        assertFalse(VaultProtocol.validAddress("amber-river-maple-"))
+        assertFalse(VaultProtocol.validAddress("amber--river-maple"))
     }
 
     @Test

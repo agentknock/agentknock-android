@@ -26,6 +26,7 @@ import kotlinx.coroutines.CoroutineStart
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.SupervisorJob
 import kotlinx.coroutines.async
+import kotlinx.coroutines.launch
 import okhttp3.OkHttpClient
 import java.util.concurrent.TimeUnit
 
@@ -44,7 +45,7 @@ class AgentKnockApplication : Application() {
 internal class ApplicationContainer(application: Application) {
     private val database = AgentKnockDatabase.create(application)
     private val encryptionKeyStore = AndroidEncryptionKeyStore(application.packageManager)
-    private val encryptionKeyManager = LocalEncryptionKeyManager(
+    val encryptionKeyManager = LocalEncryptionKeyManager(
         dao = database.localEncryptionDao(),
         keyStore = encryptionKeyStore,
     )
@@ -107,7 +108,23 @@ internal class ApplicationContainer(application: Application) {
         scope = applicationScope,
         listen = { onCaughtUp ->
             localStorage.await()
-            requests.listen(onCaughtUp)
+            requests.listen(
+                onCaughtUp = {
+                    onCaughtUp()
+                    applicationScope.launch {
+                        RequestNotifications.showRequests(
+                            application,
+                            requests.pendingNotifications(),
+                        )
+                    }
+                },
+                onInboxChanged = {
+                    RequestNotifications.showRequests(
+                        application,
+                        requests.pendingNotifications(),
+                    )
+                },
+            )
         },
     )
 

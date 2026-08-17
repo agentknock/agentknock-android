@@ -20,6 +20,7 @@ import dev.agentknock.storage.request.ProfileListRequestEntity
 import dev.agentknock.storage.request.ProfileUploadRequestEntity
 import dev.agentknock.storage.request.ProfileUploadVariableEntity
 import dev.agentknock.storage.request.RequestDao
+import dev.agentknock.storage.request.RequestSecretEntity
 import dev.agentknock.storage.vault.VaultDao
 import dev.agentknock.storage.vault.VaultIdentityEntity
 import dev.agentknock.storage.vault.VaultSecretEntity
@@ -35,13 +36,14 @@ import dev.agentknock.storage.vault.VaultSecretEntity
         InboxRequestEntity::class,
         PairingEntity::class,
         PairingSecretEntity::class,
+        RequestSecretEntity::class,
         CredentialRequestEntity::class,
         ProfileListRequestEntity::class,
         ProfileUploadRequestEntity::class,
         ProfileUploadVariableEntity::class,
         AuditEventEntity::class,
     ],
-    version = 2,
+    version = 3,
     exportSchema = true,
 )
 internal abstract class AgentKnockDatabase : RoomDatabase() {

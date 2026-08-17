@@ -5,6 +5,7 @@ import androidx.lifecycle.AndroidViewModel
 import androidx.lifecycle.viewModelScope
 import dev.agentknock.AgentKnockApplication
 import dev.agentknock.storage.FactoryResetResult
+import dev.agentknock.storage.crypto.LocalEncryptionProtection
 import dev.agentknock.storage.audit.AuditEvent
 import dev.agentknock.storage.request.RequestSyncResult
 import dev.agentknock.storage.vault.DeviceManagementResult
@@ -18,6 +19,7 @@ import kotlinx.coroutines.flow.combine
 import kotlinx.coroutines.flow.flatMapLatest
 import kotlinx.coroutines.flow.flowOf
 import kotlinx.coroutines.flow.stateIn
+import kotlinx.coroutines.launch
 
 internal data class DataCounts(
     val profiles: Int = 0,
@@ -30,6 +32,7 @@ internal data class DataCounts(
 internal class SettingsViewModel(application: Application) : AndroidViewModel(application) {
     private val container = (application as AgentKnockApplication).container
     private val selectedAuditId = MutableStateFlow<Long?>(null)
+    private val _localEncryptionProtection = MutableStateFlow<LocalEncryptionProtection?>(null)
 
     val configuration: StateFlow<VaultConfiguration?> = container.vault.observeConfiguration()
         .stateIn(viewModelScope, SharingStarted.Eagerly, null)
@@ -53,6 +56,15 @@ internal class SettingsViewModel(application: Application) : AndroidViewModel(ap
     val syncing = container.requestConnection.syncing
     val lastSyncResult: StateFlow<RequestSyncResult?> = container.requestConnection.lastSyncResult
     val pushRegistrationState = container.requests.pushRegistrationState
+    val localEncryptionProtection: StateFlow<LocalEncryptionProtection?> =
+        _localEncryptionProtection.asStateFlow()
+
+    init {
+        viewModelScope.launch {
+            container.localStorage.await()
+            _localEncryptionProtection.value = container.encryptionKeyManager.activeProtection()
+        }
+    }
 
     fun selectAuditEvent(id: Long?) {
         selectedAuditId.value = id

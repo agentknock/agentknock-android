@@ -60,6 +60,9 @@ internal interface LocalEncryptionDao {
     @Query("SELECT id FROM local_encryption_keys")
     suspend fun getKeyIds(): List<String>
 
+    @Query("SELECT * FROM local_encryption_keys WHERE id = :id")
+    suspend fun getKey(id: String): LocalEncryptionKeyEntity?
+
     @Insert
     suspend fun insertKey(key: LocalEncryptionKeyEntity)
 
@@ -76,6 +79,12 @@ internal interface LocalEncryptionDao {
 internal data class ActiveEncryptionKey(
     val id: String,
 )
+
+internal sealed interface LocalEncryptionProtection {
+    data class Available(val backing: EncryptionKeyBacking) : LocalEncryptionProtection
+    data object KeyUnavailable : LocalEncryptionProtection
+    data object Unknown : LocalEncryptionProtection
+}
 
 internal sealed interface LocalStorageInitialization {
     val activeKey: ActiveEncryptionKey
@@ -131,6 +140,15 @@ internal class LocalEncryptionKeyManager(
     suspend fun activeKey(): ActiveEncryptionKey = initialize().activeKey
 
     suspend fun keyAvailable(keyId: String): Boolean = keyExists(keyId)
+
+    suspend fun activeProtection(): LocalEncryptionProtection {
+        val active = initialize().activeKey
+        val metadata = dao.getKey(active.id) ?: return LocalEncryptionProtection.Unknown
+        if (!keyExists(active.id)) return LocalEncryptionProtection.KeyUnavailable
+        val backing = runCatching { EncryptionKeyBacking.valueOf(metadata.backing) }.getOrNull()
+            ?: return LocalEncryptionProtection.Unknown
+        return LocalEncryptionProtection.Available(backing)
+    }
 
     suspend fun reset(clearData: suspend () -> Unit) {
         initializationMutex.withLock {

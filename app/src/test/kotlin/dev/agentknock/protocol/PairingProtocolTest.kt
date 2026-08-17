@@ -1,5 +1,6 @@
 package dev.agentknock.protocol
 
+import java.security.SecureRandom
 import java.util.Base64
 import kotlinx.serialization.json.Json
 import kotlinx.serialization.json.JsonElement
@@ -50,11 +51,21 @@ class PairingProtocolTest {
 
     @Test
     fun `derives the pairing commitment from the client secret vector`() {
-        val request = pairingRequest(ByteArray(32) { it.toByte() })
+        val request = pairingRequest(ByteArray(32) { (0x60 + it).toByte() })
 
         assertEquals(
-            "Go4u3fpbdUdrgELIEo4ugJQDJ/Em1uftiV1/UdafzCw=",
+            "jUVTSBEimLz6OdfXAA4qxemm4hHyzzc5yOj1ZdzHsq4=",
             request.jsonObject.getValue("commitment").jsonPrimitive.content,
+        )
+    }
+
+    @Test
+    fun `matches the pairing response vector`() {
+        assertEquals(
+            json.parseToJsonElement(
+                """{"device_id":"01K2ENXDTW1P3XAR4J7V7C9D0H","device_key":"EyxEK+AQ+9V+cmAzKKp25x/MwVA6riGTJ9FNnJmT9HI=","device_random":"oKGio6SlpqeoqaqrrK2ur7CxsrO0tba3uLm6u7y9vr8="}""",
+            ),
+            protocol.initialResponse(DEVICE_ID, devicePublicKey, DEVICE_RANDOM),
         )
     }
 
@@ -64,7 +75,7 @@ class PairingProtocolTest {
             baseHpke.deserializePublicKey(devicePublicKey),
             baseProtocolInfo(),
         )
-        val clientSecret = ByteArray(32) { it.toByte() }
+        val clientSecret = ByteArray(32) { (0x60 + it).toByte() }
         val initialRequest = pairingRequest(clientSecret)
         val completion = initialCompletion(sender, clientSecret)
 
@@ -79,11 +90,12 @@ class PairingProtocolTest {
         )
 
         assertArrayEquals(sender.export("agentknock-v1 psk".encodeToByteArray(), 32), established.clientPsk)
-        assertEquals(802_590_831_137L, established.sas)
-        assertEquals("8025 9083 1137", protocol.formatSas(established.sas))
-        assertEquals("survo", established.clientMetadata.hostname)
-        assertEquals("linux", established.clientMetadata.platform)
-        assertEquals("x86_64", established.clientMetadata.architecture)
+        assertEquals(1_543_953_892L, established.sas)
+        assertEquals("0015 4395 3892", protocol.formatSas(established.sas))
+        val metadata = protocol.decodeClientMetadata(established.applicationPlaintext)
+        assertEquals("survo", metadata.hostname)
+        assertEquals("linux", metadata.platform)
+        assertEquals("x86_64", metadata.architecture)
     }
 
     @Test
@@ -116,6 +128,28 @@ class PairingProtocolTest {
     }
 
     @Test
+    fun `rejects an initial completion with a wrongly sized encapsulated key`() {
+        val completion = json.parseToJsonElement(
+            """{"key":"${BASE64.encodeToString(ByteArray(31))}","secret":"","ciphertext":""}""",
+        )
+
+        val failure = runCatching {
+            protocol.establish(
+                deviceId = DEVICE_ID,
+                clientId = CLIENT_ID,
+                devicePrivateKey = devicePrivateKey,
+                devicePublicKey = devicePublicKey,
+                deviceRandom = DEVICE_RANDOM,
+                initialRequest = pairingRequest(ByteArray(32)),
+                completion = completion,
+            )
+        }.exceptionOrNull()
+
+        assertTrue(failure is IllegalArgumentException)
+        assertEquals("Invalid pairing key", failure?.message)
+    }
+
+    @Test
     fun `answers and verifies the finish pairing exchange`() {
         val clientPsk = ByteArray(32) { (it + 1).toByte() }
         val sender = pskHpke.SetupPSKS(
@@ -138,7 +172,6 @@ class PairingProtocolTest {
             devicePrivateKey = devicePrivateKey,
             devicePublicKey = devicePublicKey,
             request = request,
-            accepted = true,
         )
 
         assertEquals("0.1.0", prepared.cliVersion)
@@ -203,6 +236,7 @@ class PairingProtocolTest {
 
         assertArrayEquals(requestPlaintext, opened.plaintext)
         assertArrayEquals(rotatedClientPsk, opened.clientPsk)
+        assertEquals(PairedRequestKeySource.ROTATED, opened.keySource)
 
         val responsePlaintext =
             """{"result":"APPROVED","environment":{"TOKEN":"value"}}""".encodeToByteArray()
@@ -239,12 +273,281 @@ class PairingProtocolTest {
     }
 
     @Test
+    fun `matches the complete cryptosystem pairing and exchange vectors`() {
+        val responseRandom = hex(
+            "c0c1c2c3c4c5c6c7c8c9cacbcccdcecf" +
+                "d0d1d2d3d4d5d6d7d8d9dadbdcdddedf",
+        )
+        val vectorProtocol = PairingProtocol(random = FixedSecureRandom(responseRandom))
+        val initialRequest = json.parseToJsonElement(
+            """{"version":"agentknock-v1","commitment":"jUVTSBEimLz6OdfXAA4qxemm4hHyzzc5yOj1ZdzHsq4="}""",
+        )
+        val initialCompletion = json.parseToJsonElement(
+            """{"key":"sfG4QN56MkGwJ0jPmwW3TcjF6EUSmHOIF712qo6+jCs=","secret":"H8SZgAmy8nTjengFzrxzaK+MwdN/OghFgiQHHuuW2oB6l/HJpnpLGK2STwGC0YK3","ciphertext":"DAyKFf1uyVo5ACh4lY5AnOWpx2Xx68d0KQ1F"}""",
+        )
+        val established = vectorProtocol.establish(
+            deviceId = DEVICE_ID,
+            clientId = CLIENT_ID,
+            devicePrivateKey = devicePrivateKey,
+            devicePublicKey = devicePublicKey,
+            deviceRandom = DEVICE_RANDOM,
+            initialRequest = initialRequest,
+            completion = initialCompletion,
+        )
+        assertArrayEquals(
+            hex("b208e67b262c76f1bffb13acdabf34674a1e41deb1bb4fff9dbdb8a31e218bd8"),
+            established.clientPsk,
+        )
+        assertEquals(1_543_953_892L, established.sas)
+        assertEquals("application", established.applicationPlaintext.decodeToString())
+
+        val request = json.parseToJsonElement(
+            """{"version":"agentknock-v1","key":"aTZYJUYw9zrY2nj7Mxv5ds1C+Q4OnJ6D9AxRBypvdBc=","ciphertext":"LqawCio2joj6TnyKmBKHHXYuHKeWkOc="}""",
+        )
+        val opened = vectorProtocol.openPairedRequest(
+            deviceId = DEVICE_ID,
+            requestId = CREDENTIAL_REQUEST_ID,
+            clientId = CLIENT_ID,
+            clientPsk = established.clientPsk,
+            devicePrivateKey = devicePrivateKey,
+            devicePublicKey = devicePublicKey,
+            request = request,
+        )
+        assertEquals("request", opened.plaintext.decodeToString())
+        assertEquals(PairedRequestKeySource.CURRENT, opened.keySource)
+        assertEquals(
+            json.parseToJsonElement(
+                """{"nonce":"wMHCw8TFxsfIycrLzM3Oz9DR0tPU1dbX2Nna29zd3t8=","ciphertext":"46147qHk5pdBCJwOz/qIuKggVHrkayAp"}""",
+            ),
+            vectorProtocol.sealPairedResponse(
+                deviceId = DEVICE_ID,
+                requestId = CREDENTIAL_REQUEST_ID,
+                clientId = CLIENT_ID,
+                clientPsk = established.clientPsk,
+                devicePrivateKey = devicePrivateKey,
+                devicePublicKey = devicePublicKey,
+                request = request,
+                plaintext = "response".encodeToByteArray(),
+            ),
+        )
+        val completion = json.parseToJsonElement(
+            """{"ciphertext":"0EtKHMu2uTMPjGoaOS3bS79LnZL/rg3BsIo="}""",
+        )
+        assertEquals(
+            "completion",
+            vectorProtocol.openPairedCompletion(
+                deviceId = DEVICE_ID,
+                requestId = CREDENTIAL_REQUEST_ID,
+                clientId = CLIENT_ID,
+                clientPsk = established.clientPsk,
+                devicePrivateKey = devicePrivateKey,
+                devicePublicKey = devicePublicKey,
+                request = request,
+                completion = completion,
+            ).decodeToString(),
+        )
+    }
+
+    @Test
+    fun `matches the cryptosystem rotation vector`() {
+        val oldClientPsk = hex(
+            "b208e67b262c76f1bffb13acdabf34674a1e41deb1bb4fff9dbdb8a31e218bd8",
+        )
+        val newClientPsk = hex(
+            "b0ca03f5aea63fe0810516db0bd966c1e5ae73744d3bbfdb3a9139571b1ddb9b",
+        )
+        val sender = pskHpke.SetupPSKS(
+            pskHpke.deserializePublicKey(devicePublicKey),
+            pairedProtocolInfo(CREDENTIAL_REQUEST_ID),
+            newClientPsk,
+            CLIENT_ID.ulidBytes(),
+        )
+        val request = json.parseToJsonElement(
+            """{"version":"agentknock-v1","key":"${BASE64.encodeToString(sender.encapsulation)}","ciphertext":"${BASE64.encodeToString(sender.seal(EMPTY, "request".encodeToByteArray()))}","rotation_key":"sln27pLcugERhQsTs/bczIJ3JvmwgjWrYpIraz8/Khk="}""",
+        )
+        val opened = protocol.openPairedRequest(
+            deviceId = DEVICE_ID,
+            requestId = CREDENTIAL_REQUEST_ID,
+            clientId = CLIENT_ID,
+            clientPsk = oldClientPsk,
+            devicePrivateKey = devicePrivateKey,
+            devicePublicKey = devicePublicKey,
+            request = request,
+        )
+        assertArrayEquals(newClientPsk, opened.clientPsk)
+        assertEquals(PairedRequestKeySource.ROTATED, opened.keySource)
+    }
+
+    @Test
+    fun `pending binding does not accept rotation`() {
+        val oldClientPsk = hex(
+            "b208e67b262c76f1bffb13acdabf34674a1e41deb1bb4fff9dbdb8a31e218bd8",
+        )
+        val newClientPsk = hex(
+            "b0ca03f5aea63fe0810516db0bd966c1e5ae73744d3bbfdb3a9139571b1ddb9b",
+        )
+        val sender = pskHpke.SetupPSKS(
+            pskHpke.deserializePublicKey(devicePublicKey),
+            pairedProtocolInfo(CREDENTIAL_REQUEST_ID),
+            newClientPsk,
+            CLIENT_ID.ulidBytes(),
+        )
+        val request = json.parseToJsonElement(
+            """{"version":"agentknock-v1","key":"${BASE64.encodeToString(sender.encapsulation)}","ciphertext":"${BASE64.encodeToString(sender.seal(EMPTY, "request".encodeToByteArray()))}","rotation_key":"sln27pLcugERhQsTs/bczIJ3JvmwgjWrYpIraz8/Khk="}""",
+        )
+
+        val result = runCatching {
+            protocol.openPairedRequest(
+                deviceId = DEVICE_ID,
+                requestId = CREDENTIAL_REQUEST_ID,
+                clientId = CLIENT_ID,
+                clientPsk = oldClientPsk,
+                allowRotation = false,
+                devicePrivateKey = devicePrivateKey,
+                devicePublicKey = devicePublicKey,
+                request = request,
+            )
+        }
+
+        assertTrue(result.isFailure)
+    }
+
+    @Test
     fun `offers one real and two distinct decoy sas values`() {
         val choices = protocol.sasChoices(123_456_789_012L)
 
         assertEquals(3, choices.values.size)
         assertEquals(3, choices.values.distinct().size)
         assertEquals(123_456_789_012L, choices.values[choices.correctIndex])
+    }
+
+    @Test
+    fun `uses an eligible previous psk without considering rotation metadata`() {
+        val currentClientPsk = ByteArray(32) { 0x11 }
+        val previousClientPsk = ByteArray(32) { 0x22 }
+        val sender = pskHpke.SetupPSKS(
+            pskHpke.deserializePublicKey(devicePublicKey),
+            pairedProtocolInfo(CREDENTIAL_REQUEST_ID),
+            previousClientPsk,
+            CLIENT_ID.ulidBytes(),
+        )
+        val plaintext = "previous request".encodeToByteArray()
+        val request = json.parseToJsonElement(
+            """{"version":"agentknock-v1","key":"${BASE64.encodeToString(sender.encapsulation)}","ciphertext":"${BASE64.encodeToString(sender.seal(EMPTY, plaintext))}","rotation_key":{"not":"a string"}}""",
+        )
+
+        val opened = protocol.openPairedRequest(
+            deviceId = DEVICE_ID,
+            requestId = CREDENTIAL_REQUEST_ID,
+            clientId = CLIENT_ID,
+            clientPsk = currentClientPsk,
+            previousClientPsk = previousClientPsk,
+            devicePrivateKey = devicePrivateKey,
+            devicePublicKey = devicePublicKey,
+            request = request,
+        )
+
+        assertArrayEquals(plaintext, opened.plaintext)
+        assertEquals(PairedRequestKeySource.PREVIOUS, opened.keySource)
+    }
+
+    @Test
+    fun `uses the current psk without considering rotation metadata`() {
+        val currentClientPsk = ByteArray(32) { 0x11 }
+        val sender = pskHpke.SetupPSKS(
+            pskHpke.deserializePublicKey(devicePublicKey),
+            pairedProtocolInfo(CREDENTIAL_REQUEST_ID),
+            currentClientPsk,
+            CLIENT_ID.ulidBytes(),
+        )
+        val plaintext = "current request".encodeToByteArray()
+        val request = json.parseToJsonElement(
+            """{"version":"agentknock-v1","key":"${BASE64.encodeToString(sender.encapsulation)}","ciphertext":"${BASE64.encodeToString(sender.seal(EMPTY, plaintext))}","rotation_key":{"not":"a string"}}""",
+        )
+
+        val opened = protocol.openPairedRequest(
+            deviceId = DEVICE_ID,
+            requestId = CREDENTIAL_REQUEST_ID,
+            clientId = CLIENT_ID,
+            clientPsk = currentClientPsk,
+            devicePrivateKey = devicePrivateKey,
+            devicePublicKey = devicePublicKey,
+            request = request,
+        )
+
+        assertArrayEquals(plaintext, opened.plaintext)
+        assertEquals(PairedRequestKeySource.CURRENT, opened.keySource)
+    }
+
+    @Test
+    fun `validates rotation key type and length only when fallback is needed`() {
+        val currentClientPsk = ByteArray(32) { 0x11 }
+        val unrelatedClientPsk = ByteArray(32) { 0x22 }
+        val sender = pskHpke.SetupPSKS(
+            pskHpke.deserializePublicKey(devicePublicKey),
+            pairedProtocolInfo(CREDENTIAL_REQUEST_ID),
+            unrelatedClientPsk,
+            CLIENT_ID.ulidBytes(),
+        )
+        val ciphertext = BASE64.encodeToString(sender.seal(EMPTY, "request".encodeToByteArray()))
+        val key = BASE64.encodeToString(sender.encapsulation)
+        val wrongType = json.parseToJsonElement(
+            """{"version":"agentknock-v1","key":"$key","ciphertext":"$ciphertext","rotation_key":{"not":"a string"}}""",
+        )
+        val wrongLength = json.parseToJsonElement(
+            """{"version":"agentknock-v1","key":"$key","ciphertext":"$ciphertext","rotation_key":"${BASE64.encodeToString(ByteArray(31))}"}""",
+        )
+
+        for (request in listOf(wrongType, wrongLength)) {
+            val failure = runCatching {
+                protocol.openPairedRequest(
+                    deviceId = DEVICE_ID,
+                    requestId = CREDENTIAL_REQUEST_ID,
+                    clientId = CLIENT_ID,
+                    clientPsk = currentClientPsk,
+                    devicePrivateKey = devicePrivateKey,
+                    devicePublicKey = devicePublicKey,
+                    request = request,
+                )
+            }.exceptionOrNull()
+
+            assertTrue(failure is IllegalArgumentException)
+            assertEquals("Invalid rotation key", failure?.message)
+        }
+    }
+
+    @Test
+    fun `rejects a paired request with a wrongly sized encapsulated key`() {
+        val request = json.parseToJsonElement(
+            """{"version":"agentknock-v1","key":"${BASE64.encodeToString(ByteArray(31))}","ciphertext":"${BASE64.encodeToString(ByteArray(16))}"}""",
+        )
+
+        val failure = runCatching {
+            protocol.openPairedRequest(
+                deviceId = DEVICE_ID,
+                requestId = CREDENTIAL_REQUEST_ID,
+                clientId = CLIENT_ID,
+                clientPsk = ByteArray(32),
+                devicePrivateKey = devicePrivateKey,
+                devicePublicKey = devicePublicKey,
+                request = request,
+            )
+        }.exceptionOrNull()
+
+        assertTrue(failure is IllegalArgumentException)
+        assertEquals("Invalid request key", failure?.message)
+    }
+
+    @Test
+    fun `validates canonical fresh nonzero request ids`() {
+        val bytes = DEVICE_ID.ulidBytes()
+        var timestamp = 0L
+        repeat(6) { timestamp = (timestamp shl 8) or (bytes[it].toLong() and 0xff) }
+
+        assertTrue(protocol.validateFreshRequestId(DEVICE_ID, timestamp))
+        assertFalse(protocol.validateFreshRequestId(DEVICE_ID.lowercase(), timestamp))
+        assertFalse(protocol.validateFreshRequestId("00000000000000000000000000", timestamp))
+        assertFalse(protocol.validateFreshRequestId(DEVICE_ID, timestamp + 24 * 60 * 60 * 1_000L + 1))
     }
 
     private fun pairingRequest(clientSecret: ByteArray): JsonElement {
@@ -325,6 +628,10 @@ class PairingProtocolTest {
         return output
     }
 
+    private fun hex(value: String): ByteArray = value.chunked(2)
+        .map { it.toInt(16).toByte() }
+        .toByteArray()
+
     private fun String.ulidBytes(): ByteArray {
         val alphabet = "0123456789ABCDEFGHJKMNPQRSTVWXYZ"
         var value = java.math.BigInteger.ZERO
@@ -360,5 +667,12 @@ class PairingProtocolTest {
             HPKE.kdf_HKDF_SHA256,
             HPKE.aead_CHACHA20_POLY1305,
         )
+    }
+}
+
+private class FixedSecureRandom(private val bytes: ByteArray) : SecureRandom() {
+    override fun nextBytes(target: ByteArray) {
+        require(target.size == bytes.size)
+        bytes.copyInto(target)
     }
 }

@@ -26,6 +26,7 @@ import androidx.compose.ui.res.stringResource
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import androidx.lifecycle.viewmodel.compose.viewModel
 import dev.agentknock.R
+import dev.agentknock.RequestNavigation
 import dev.agentknock.ui.clients.ClientsScreen
 import dev.agentknock.ui.profiles.ProfilesScreen
 import dev.agentknock.ui.requests.RequestsScreen
@@ -42,7 +43,7 @@ internal fun AgentKnockScreen(
         onSuccess: () -> Unit,
         onError: (String) -> Unit,
     ) -> Unit,
-    requestNavigation: StateFlow<Long>,
+    requestNavigation: StateFlow<RequestNavigation>,
     vaultViewModel: VaultViewModel = viewModel(),
     requestsViewModel: RequestsViewModel = viewModel(),
 ) {
@@ -50,14 +51,15 @@ internal fun AgentKnockScreen(
     var section by rememberSaveable { mutableStateOf(MainSection.REQUESTS) }
     var showSettings by rememberSaveable { mutableStateOf(false) }
     var showAddressEditor by rememberSaveable { mutableStateOf(false) }
-    val requestNavigationGeneration by requestNavigation.collectAsStateWithLifecycle()
+    val requestNavigationTarget by requestNavigation.collectAsStateWithLifecycle()
     val current = configuration
 
-    LaunchedEffect(requestNavigationGeneration) {
-        if (requestNavigationGeneration > 0) {
+    LaunchedEffect(requestNavigationTarget) {
+        if (requestNavigationTarget.generation > 0) {
             section = MainSection.REQUESTS
             showSettings = false
             showAddressEditor = false
+            requestsViewModel.selectRequest(requestNavigationTarget.requestId)
         }
     }
 

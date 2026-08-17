@@ -42,15 +42,7 @@ internal class VaultViewModel(application: Application) : AndroidViewModel(appli
     suspend fun stageAndClaim(address: String): ClaimVaultResult = operationMutex.withLock {
         _claiming.value = true
         try {
-            val previousAddress = configuration.value?.active?.address
             repository.stageAndClaim(address).also { result ->
-                if (
-                    result == ClaimVaultResult.Claimed &&
-                    previousAddress != null &&
-                    previousAddress != address
-                ) {
-                    container.requests.revokeAllClientsAfterAddressChange()
-                }
                 handleClaimResult(result)
             }
         } finally {
@@ -61,17 +53,7 @@ internal class VaultViewModel(application: Application) : AndroidViewModel(appli
     suspend fun retryClaim(): ClaimVaultResult = operationMutex.withLock {
         _claiming.value = true
         try {
-            val activeAddress = configuration.value?.active?.address
-            val candidateAddress = configuration.value?.candidate?.address
             repository.claimCandidate().also { result ->
-                if (
-                    result == ClaimVaultResult.Claimed &&
-                    activeAddress != null &&
-                    candidateAddress != null &&
-                    activeAddress != candidateAddress
-                ) {
-                    container.requests.revokeAllClientsAfterAddressChange()
-                }
                 handleClaimResult(result)
             }
         } finally {

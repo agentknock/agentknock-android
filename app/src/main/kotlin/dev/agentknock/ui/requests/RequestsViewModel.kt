@@ -9,6 +9,7 @@ import dev.agentknock.storage.request.InboxRequestDetails
 import dev.agentknock.storage.request.InboxRequestSummary
 import dev.agentknock.storage.request.PairingDecisionResult
 import dev.agentknock.storage.request.ProfileUploadDecisionResult
+import dev.agentknock.storage.request.ProfileUploadVariableValue
 import dev.agentknock.storage.request.RequestSyncResult
 import dev.agentknock.storage.vault.VaultConfiguration
 import kotlinx.coroutines.ExperimentalCoroutinesApi
@@ -88,5 +89,26 @@ internal class RequestsViewModel(application: Application) : AndroidViewModel(ap
     suspend fun rejectProfileUpload(requestId: Long): ProfileUploadDecisionResult {
         container.localStorage.await()
         return repository.rejectProfileUpload(requestId)
+    }
+
+    suspend fun readProfileUploadVariable(
+        requestId: Long,
+        variableId: String,
+    ): ProfileUploadVariableValue {
+        container.localStorage.await()
+        return repository.readProfileUploadVariable(requestId, variableId)
+    }
+
+    suspend fun setProfileUploadVariableSensitivity(
+        requestId: Long,
+        variableId: String,
+        sensitive: Boolean,
+    ): Boolean {
+        container.localStorage.await()
+        return repository.setProfileUploadVariableSensitivity(
+            requestId,
+            variableId,
+            sensitive,
+        )
     }
 }

@@ -28,4 +28,13 @@ class PairingAdmissionTest {
             assertFalse(pairingAdmissionAllowed(listOf(PairingState.ACTIVE, state)))
         }
     }
+
+    @Test
+    fun `previous psk has a fixed ten minute overlap`() {
+        val createdAt = 1_000_000L
+
+        assertFalse(previousPskEligible(createdAt, createdAt - 1))
+        assertTrue(previousPskEligible(createdAt, createdAt + 10 * 60 * 1_000L))
+        assertFalse(previousPskEligible(createdAt, createdAt + 10 * 60 * 1_000L + 1))
+    }
 }

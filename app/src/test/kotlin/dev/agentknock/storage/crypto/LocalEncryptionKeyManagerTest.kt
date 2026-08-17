@@ -103,6 +103,9 @@ internal class FakeLocalEncryptionDao : LocalEncryptionDao {
 
     override suspend fun getKeyIds(): List<String> = keys.map { it.id }
 
+    override suspend fun getKey(id: String): LocalEncryptionKeyEntity? =
+        keys.find { it.id == id }
+
     override suspend fun insertKey(key: LocalEncryptionKeyEntity) {
         check(keys.none { it.id == key.id })
         keys += key

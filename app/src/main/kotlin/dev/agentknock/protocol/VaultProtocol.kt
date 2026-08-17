@@ -17,10 +17,9 @@ internal object VaultProtocol {
     private val baseDerivationSalt = "agentknock-v1".encodeToByteArray()
     private val addressDerivationInfo = "agentknock-v1 address".encodeToByteArray()
 
-    fun validAddress(address: String): Boolean =
-        address.isNotEmpty() && address.all { character ->
-            character in 'a'..'z' || character == '-'
-        }
+    fun validAddress(address: String): Boolean = address
+        .split('-')
+        .all { word -> word.isNotEmpty() && word.all { it in 'a'..'z' } }
 
     fun addressId(address: String): String = derive(
         input = address.encodeToByteArray(),

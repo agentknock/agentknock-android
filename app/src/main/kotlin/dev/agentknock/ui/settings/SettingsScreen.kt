@@ -72,6 +72,8 @@ import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import androidx.lifecycle.viewmodel.compose.viewModel
 import dev.agentknock.BuildConfig
 import dev.agentknock.storage.FactoryResetResult
+import dev.agentknock.storage.crypto.EncryptionKeyBacking
+import dev.agentknock.storage.crypto.LocalEncryptionProtection
 import dev.agentknock.storage.audit.AuditEvent
 import dev.agentknock.storage.request.RequestSyncResult
 import dev.agentknock.storage.vault.DeviceManagementResult
@@ -107,6 +109,7 @@ internal fun SettingsScreen(
     val syncing by viewModel.syncing.collectAsStateWithLifecycle()
     val syncResult by viewModel.lastSyncResult.collectAsStateWithLifecycle()
     val pushState by viewModel.pushRegistrationState.collectAsStateWithLifecycle()
+    val localEncryptionProtection by viewModel.localEncryptionProtection.collectAsStateWithLifecycle()
     val snackbar = remember { SnackbarHostState() }
     val scope = rememberCoroutineScope()
 
@@ -147,7 +150,11 @@ internal fun SettingsScreen(
                 onBack = ::back,
                 modifier = modifier,
             )
-            SettingsPage.SECURITY -> SecuritySettings(onBack = ::back, modifier = modifier)
+            SettingsPage.SECURITY -> SecuritySettings(
+                protection = localEncryptionProtection,
+                onBack = ::back,
+                modifier = modifier,
+            )
             SettingsPage.DATA -> DataAndHistory(
                 counts = counts,
                 onBack = ::back,
@@ -274,7 +281,7 @@ private fun DeviceAndPairing(
                 Text("Change pairing address")
             }
             Text(
-                "Changing the address revokes every existing client. Profiles and history remain.",
+                "Existing clients keep working after the pairing address changes.",
                 color = MaterialTheme.colorScheme.onSurfaceVariant,
             )
             SelectionContainer {
@@ -331,22 +338,37 @@ private fun NotificationsSettings(pushState: String?, onBack: () -> Unit, modifi
 }
 
 @Composable
-private fun SecuritySettings(onBack: () -> Unit, modifier: Modifier) {
+private fun SecuritySettings(
+    protection: LocalEncryptionProtection?,
+    onBack: () -> Unit,
+    modifier: Modifier,
+) {
     Column(modifier) {
         PageTopBar("Security", onBack)
         Column(Modifier.padding(20.dp), verticalArrangement = Arrangement.spacedBy(16.dp)) {
             Icon(Icons.Outlined.Lock, contentDescription = null, tint = MaterialTheme.colorScheme.primary)
             Text("Stored values are encrypted", style = MaterialTheme.typography.titleLarge)
-            Text(
-                "AgentKnock uses a phone-local AES-128-GCM key. Android hardware backing is used where the device provides it.",
-                color = MaterialTheme.colorScheme.onSurfaceVariant,
-            )
+            LabeledValue("Encryption", "AES-128-GCM")
+            LabeledValue("Key protection", protection.description())
             Text(
                 "Sensitive values require device authentication before they are revealed or copied.",
                 color = MaterialTheme.colorScheme.onSurfaceVariant,
             )
         }
     }
+}
+
+private fun LocalEncryptionProtection?.description(): String = when (this) {
+    null -> "Checking this device…"
+    is LocalEncryptionProtection.Available -> when (backing) {
+        EncryptionKeyBacking.STRONGBOX -> "StrongBox hardware"
+        EncryptionKeyBacking.TRUSTED_ENVIRONMENT -> "Trusted execution environment"
+        EncryptionKeyBacking.SOFTWARE -> "Android Keystore (software-backed)"
+        EncryptionKeyBacking.UNKNOWN_SECURE -> "Secure hardware (type unavailable)"
+        EncryptionKeyBacking.UNKNOWN -> "Android Keystore (backing unknown)"
+    }
+    LocalEncryptionProtection.KeyUnavailable -> "Key unavailable on this device"
+    LocalEncryptionProtection.Unknown -> "Protection could not be determined"
 }
 
 @Composable

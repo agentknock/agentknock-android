@@ -6,6 +6,7 @@ import android.app.NotificationChannel
 import android.app.NotificationManager
 import android.app.PendingIntent
 import android.content.Context
+import android.content.BroadcastReceiver
 import android.content.Intent
 import android.content.pm.PackageManager
 import android.os.Build
@@ -28,6 +29,11 @@ import dev.agentknock.AgentKnockApplication
 import dev.agentknock.MainActivity
 import dev.agentknock.R
 import dev.agentknock.storage.request.RequestSyncResult
+import dev.agentknock.storage.request.RequestNotification
+import kotlinx.coroutines.CoroutineScope
+import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.SupervisorJob
+import kotlinx.coroutines.launch
 import java.util.concurrent.TimeUnit
 
 @SuppressLint("MissingFirebaseInstanceTokenRefresh")
@@ -124,7 +130,13 @@ class PushSynchronizationWorker(
             RequestSyncResult.VaultSecretsUnavailable,
             RequestSyncResult.VaultSecretsCorrupted,
             RequestSyncResult.UnsupportedVaultEncryption,
-            -> Result.success()
+            -> {
+                RequestNotifications.showRequests(
+                    applicationContext,
+                    container.requests.pendingNotifications(),
+                )
+                Result.success()
+            }
             is RequestSyncResult.RelayUnavailable,
             RequestSyncResult.InvalidRelayResponse,
             -> Result.retry()
@@ -152,9 +164,16 @@ class PushSynchronizationWorker(
 
 internal object RequestNotifications {
     const val OPEN_REQUESTS_ACTION = "dev.agentknock.action.OPEN_REQUESTS"
+    const val OPEN_REQUEST_ACTION = "dev.agentknock.action.OPEN_REQUEST"
+    const val DECIDE_REQUEST_ACTION = "dev.agentknock.action.DECIDE_REQUEST"
+    const val REQUEST_ID_EXTRA = "request_id"
+    const val DECISION_EXTRA = "decision"
+    const val APPROVE_DECISION = "approve"
+    const val DENY_DECISION = "deny"
 
     private const val CHANNEL_ID = "requests"
-    private const val NOTIFICATION_ID = 1
+    private const val WAKE_NOTIFICATION_ID = 1
+    private const val REQUEST_NOTIFICATION_ID_BASE = 10_000
 
     fun createChannel(context: Context) {
         val channel = NotificationChannel(
@@ -163,7 +182,7 @@ internal object RequestNotifications {
             NotificationManager.IMPORTANCE_HIGH,
         ).apply {
             description = context.getString(R.string.request_notification_channel_description)
-            lockscreenVisibility = Notification.VISIBILITY_PRIVATE
+            lockscreenVisibility = Notification.VISIBILITY_PUBLIC
         }
         context.getSystemService(NotificationManager::class.java)
             .createNotificationChannel(channel)
@@ -193,10 +212,110 @@ internal object RequestNotifications {
             .setContentIntent(openApp)
             .setAutoCancel(true)
             .setCategory(Notification.CATEGORY_MESSAGE)
-            .setVisibility(Notification.VISIBILITY_PRIVATE)
+            .setVisibility(Notification.VISIBILITY_PUBLIC)
             .build()
         context.getSystemService(NotificationManager::class.java)
-            .notify(NOTIFICATION_ID, notification)
+            .notify(WAKE_NOTIFICATION_ID, notification)
+    }
+
+    fun showRequests(context: Context, requests: List<RequestNotification>) {
+        if (!canNotify(context)) return
+        val manager = context.getSystemService(NotificationManager::class.java)
+        manager.cancel(WAKE_NOTIFICATION_ID)
+        val activeIds = requests.mapTo(mutableSetOf()) { notificationId(it.requestId) }
+        manager.activeNotifications
+            .filter { it.id >= REQUEST_NOTIFICATION_ID_BASE && it.id !in activeIds }
+            .forEach { manager.cancel(it.id) }
+        requests.forEach { request ->
+            val openRequest = PendingIntent.getActivity(
+                context,
+                request.requestId.hashCode(),
+                Intent(context, MainActivity::class.java).apply {
+                    action = OPEN_REQUEST_ACTION
+                    putExtra(REQUEST_ID_EXTRA, request.requestId)
+                    flags = Intent.FLAG_ACTIVITY_CLEAR_TOP or Intent.FLAG_ACTIVITY_SINGLE_TOP
+                },
+                PendingIntent.FLAG_UPDATE_CURRENT or PendingIntent.FLAG_IMMUTABLE,
+            )
+            val builder = Notification.Builder(context, CHANNEL_ID)
+                .setSmallIcon(R.drawable.ic_launcher_foreground)
+                .setContentTitle(request.title)
+                .setContentText(request.summary)
+                .setStyle(Notification.BigTextStyle().bigText(request.details))
+                .setContentIntent(openRequest)
+                .setAutoCancel(true)
+                .setOnlyAlertOnce(true)
+                .setCategory(Notification.CATEGORY_MESSAGE)
+                .setVisibility(Notification.VISIBILITY_PUBLIC)
+            if (request.credentialDecisionAvailable) {
+                builder.addAction(decisionAction(context, request.requestId, DENY_DECISION, "Deny once"))
+                builder.addAction(
+                    decisionAction(context, request.requestId, APPROVE_DECISION, "Approve once"),
+                )
+            }
+            manager.notify(notificationId(request.requestId), builder.build())
+        }
+    }
+
+    private fun decisionAction(
+        context: Context,
+        requestId: Long,
+        decision: String,
+        title: String,
+    ): Notification.Action {
+        val intent = PendingIntent.getBroadcast(
+            context,
+            (requestId.hashCode() * 31) + decision.hashCode(),
+            Intent(context, RequestNotificationActionReceiver::class.java).apply {
+                action = DECIDE_REQUEST_ACTION
+                putExtra(REQUEST_ID_EXTRA, requestId)
+                putExtra(DECISION_EXTRA, decision)
+            },
+            PendingIntent.FLAG_UPDATE_CURRENT or PendingIntent.FLAG_IMMUTABLE,
+        )
+        return Notification.Action.Builder(null, title, intent).apply {
+            if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.S) {
+                setAuthenticationRequired(true)
+            }
+        }.build()
+    }
+
+    private fun notificationId(requestId: Long): Int =
+        REQUEST_NOTIFICATION_ID_BASE + (requestId.hashCode() and 0x1fffffff)
+
+    private fun canNotify(context: Context): Boolean =
+        Build.VERSION.SDK_INT < Build.VERSION_CODES.TIRAMISU ||
+            context.checkSelfPermission(android.Manifest.permission.POST_NOTIFICATIONS) ==
+            PackageManager.PERMISSION_GRANTED
+}
+
+class RequestNotificationActionReceiver : BroadcastReceiver() {
+    override fun onReceive(context: Context, intent: Intent) {
+        if (intent.action != RequestNotifications.DECIDE_REQUEST_ACTION) return
+        val requestId = intent.getLongExtra(RequestNotifications.REQUEST_ID_EXTRA, -1L)
+        if (requestId < 0) return
+        val decision = intent.getStringExtra(RequestNotifications.DECISION_EXTRA) ?: return
+        val pendingResult = goAsync()
+        val application = context.applicationContext as AgentKnockApplication
+        CoroutineScope(SupervisorJob() + Dispatchers.IO).launch {
+            try {
+                application.container.localStorage.await()
+                when (decision) {
+                    RequestNotifications.APPROVE_DECISION ->
+                        application.container.requests.approveCredentialRequest(requestId)
+                    RequestNotifications.DENY_DECISION ->
+                        application.container.requests.denyCredentialRequest(requestId)
+                    else -> return@launch
+                }
+                RequestNotifications.showRequests(
+                    context,
+                    application.container.requests.pendingNotifications(),
+                )
+                PushSynchronizationWorker.enqueue(context)
+            } finally {
+                pendingResult.finish()
+            }
+        }
     }
 }
 

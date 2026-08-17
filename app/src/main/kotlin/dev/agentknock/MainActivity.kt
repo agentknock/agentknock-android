@@ -14,10 +14,14 @@ import dev.agentknock.ui.AgentKnockScreen
 import dev.agentknock.ui.auth.DeviceAuthenticator
 import dev.agentknock.ui.theme.AgentKnockTheme
 import kotlinx.coroutines.flow.MutableStateFlow
-import kotlinx.coroutines.flow.update
+
+internal data class RequestNavigation(
+    val generation: Long = 0,
+    val requestId: Long? = null,
+)
 
 class MainActivity : FragmentActivity() {
-    private val requestNavigation = MutableStateFlow(0L)
+    private val requestNavigation = MutableStateFlow(RequestNavigation())
     private val requestNotificationPermission = registerForActivityResult(
         ActivityResultContracts.RequestPermission(),
     ) {}
@@ -51,8 +55,15 @@ class MainActivity : FragmentActivity() {
     }
 
     private fun handleIntent(intent: Intent) {
-        if (intent.action == RequestNotifications.OPEN_REQUESTS_ACTION) {
-            requestNavigation.update { it + 1 }
+        if (
+            intent.action == RequestNotifications.OPEN_REQUESTS_ACTION ||
+            intent.action == RequestNotifications.OPEN_REQUEST_ACTION
+        ) {
+            requestNavigation.value = RequestNavigation(
+                generation = requestNavigation.value.generation + 1,
+                requestId = intent.getLongExtra(RequestNotifications.REQUEST_ID_EXTRA, -1L)
+                    .takeIf { it >= 0 },
+            )
             intent.action = null
         }
     }

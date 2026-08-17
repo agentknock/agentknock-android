@@ -10,6 +10,7 @@ import androidx.room3.PrimaryKey
 import androidx.room3.Query
 import androidx.room3.Transaction
 import androidx.room3.Update
+import androidx.room3.Upsert
 import dev.agentknock.storage.crypto.LocalEncryptionKeyEntity
 import dev.agentknock.storage.vault.VaultIdentityEntity
 import kotlinx.coroutines.flow.Flow
@@ -186,6 +187,47 @@ internal data class PairingSecretEntity(
     val createdAt: Long,
     @ColumnInfo(name = "updated_at")
     val updatedAt: Long,
+)
+
+@Entity(
+    tableName = "request_secrets",
+    foreignKeys = [
+        ForeignKey(
+            entity = InboxRequestEntity::class,
+            parentColumns = ["id"],
+            childColumns = ["request_id"],
+            onDelete = ForeignKey.CASCADE,
+            onUpdate = ForeignKey.NO_ACTION,
+        ),
+        ForeignKey(
+            entity = LocalEncryptionKeyEntity::class,
+            parentColumns = ["id"],
+            childColumns = ["encryption_key_id"],
+            onDelete = ForeignKey.RESTRICT,
+            onUpdate = ForeignKey.NO_ACTION,
+        ),
+    ],
+    indices = [
+        Index(value = ["request_id"], unique = true),
+        Index(value = ["encryption_key_id"]),
+    ],
+)
+internal data class RequestSecretEntity(
+    @PrimaryKey
+    @ColumnInfo(name = "id")
+    val id: String,
+    @ColumnInfo(name = "request_id")
+    val requestId: Long,
+    @ColumnInfo(name = "encryption_format")
+    val encryptionFormat: Int,
+    @ColumnInfo(name = "encryption_key_id")
+    val encryptionKeyId: String,
+    @ColumnInfo(name = "nonce")
+    val nonce: ByteArray,
+    @ColumnInfo(name = "ciphertext")
+    val ciphertext: ByteArray,
+    @ColumnInfo(name = "created_at")
+    val createdAt: Long,
 )
 
 @Entity(
@@ -450,6 +492,8 @@ internal data class ProfileUploadVariableEntity(
     val requestId: Long,
     @ColumnInfo(name = "name")
     val name: String,
+    @ColumnInfo(name = "sensitive")
+    val sensitive: Boolean,
     @ColumnInfo(name = "encryption_format")
     val encryptionFormat: Int,
     @ColumnInfo(name = "encryption_key_id")
@@ -497,6 +541,9 @@ internal interface RequestDao {
     @Query("SELECT * FROM profile_upload_requests WHERE request_id = :requestId")
     fun observeProfileUploadRequest(requestId: Long): Flow<ProfileUploadRequestEntity?>
 
+    @Query("SELECT * FROM profile_upload_variables WHERE request_id = :requestId ORDER BY name")
+    fun observeProfileUploadVariables(requestId: Long): Flow<List<ProfileUploadVariableEntity>>
+
     @Query("SELECT * FROM pairings WHERE client_id = :clientId")
     fun observePairingByClientId(clientId: String): Flow<PairingEntity?>
 
@@ -532,6 +579,9 @@ internal interface RequestDao {
     )
     suspend fun getPairingSecret(pairingRequestId: Long, kind: String): PairingSecretEntity?
 
+    @Query("SELECT * FROM request_secrets WHERE request_id = :requestId")
+    suspend fun getRequestSecret(requestId: Long): RequestSecretEntity?
+
     @Query(
         "SELECT * FROM inbox_requests WHERE response_json IS NOT NULL AND response_acknowledged_at IS NULL",
     )
@@ -557,6 +607,9 @@ internal interface RequestDao {
     suspend fun insertPairingSecret(secret: PairingSecretEntity)
 
     @Insert
+    suspend fun insertRequestSecret(secret: RequestSecretEntity)
+
+    @Insert
     suspend fun insertCredentialRequestRow(request: CredentialRequestEntity)
 
     @Insert
@@ -567,6 +620,9 @@ internal interface RequestDao {
 
     @Insert
     suspend fun insertProfileUploadVariables(variables: List<ProfileUploadVariableEntity>)
+
+    @Upsert
+    suspend fun upsertPairingSecret(secret: PairingSecretEntity)
 
     @Update
     suspend fun updateRequest(request: InboxRequestEntity): Int
@@ -585,6 +641,29 @@ internal interface RequestDao {
 
     @Update
     suspend fun updateProfileUploadRequestRow(request: ProfileUploadRequestEntity): Int
+
+    @Update
+    suspend fun updateProfileUploadVariable(variable: ProfileUploadVariableEntity): Int
+
+    @Query("DELETE FROM pairing_secrets WHERE pairing_request_id = :pairingRequestId AND kind = :kind")
+    suspend fun deletePairingSecret(pairingRequestId: Long, kind: String): Int
+
+    @Query("DELETE FROM pairing_secrets WHERE pairing_request_id = :pairingRequestId")
+    suspend fun deletePairingSecrets(pairingRequestId: Long): Int
+
+    @Transaction
+    suspend fun revokePairing(pairing: PairingEntity) {
+        check(updatePairing(pairing) == 1)
+        deletePairingSecrets(pairing.requestId)
+    }
+
+    @Transaction
+    suspend fun rejectPairing(request: InboxRequestEntity, pairing: PairingEntity) {
+        check(updateRequest(request) == 1)
+        check(updatePairing(pairing) == 1)
+        deletePairingSecrets(pairing.requestId)
+        trimCompletedHistory()
+    }
 
     @Query(
         """
@@ -618,7 +697,7 @@ internal interface RequestDao {
 
     @Query(
         """
-        DELETE FROM inbox_requests
+        UPDATE inbox_requests SET listed = 0
         WHERE listed = 1
           AND completed_at IS NOT NULL
           AND id NOT IN (
@@ -634,7 +713,7 @@ internal interface RequestDao {
 
     @Query(
         """
-        DELETE FROM inbox_requests
+        UPDATE inbox_requests SET listed = 0
         WHERE listed = 1
           AND completed_at IS NOT NULL
           AND id NOT IN (
@@ -650,12 +729,18 @@ internal interface RequestDao {
         DELETE FROM inbox_requests
         WHERE listed = 0
           AND completed_at IS NOT NULL
+          AND received_at <= :receivedBefore
           AND request_acknowledged_at IS NOT NULL
           AND (response_json IS NULL OR response_acknowledged_at IS NOT NULL)
           AND (completion_json IS NULL OR completion_acknowledged_at IS NOT NULL)
         """,
     )
-    suspend fun deleteSettledHiddenRequests(): Int
+    suspend fun deleteSettledHiddenRequests(receivedBefore: Long): Int
+
+    @Query(
+        "SELECT * FROM inbox_requests WHERE listed = 1 AND state = 'action_required' ORDER BY id DESC",
+    )
+    suspend fun getActionRequiredRequests(): List<InboxRequestEntity>
 
     @Transaction
     suspend fun insertPairingRequest(
@@ -672,11 +757,13 @@ internal interface RequestDao {
     suspend fun insertCredentialRequest(
         request: InboxRequestEntity,
         credentialRequest: CredentialRequestEntity,
-        rotatedPairingSecret: PairingSecretEntity?,
+        requestSecret: RequestSecretEntity,
+        currentPairingSecret: PairingSecretEntity?,
+        previousPairingSecret: PairingSecretEntity?,
     ): Long {
         val requestId = insertRequest(request)
         insertCredentialRequestRow(credentialRequest.copy(requestId = requestId))
-        rotatedPairingSecret?.let { check(updatePairingSecret(it) == 1) }
+        storeAcceptedSecrets(requestId, requestSecret, currentPairingSecret, previousPairingSecret)
         trimCompletedHistory()
         return requestId
     }
@@ -685,11 +772,13 @@ internal interface RequestDao {
     suspend fun insertProfileListRequest(
         request: InboxRequestEntity,
         profileListRequest: ProfileListRequestEntity,
-        rotatedPairingSecret: PairingSecretEntity?,
+        requestSecret: RequestSecretEntity,
+        currentPairingSecret: PairingSecretEntity?,
+        previousPairingSecret: PairingSecretEntity?,
     ): Long {
         val requestId = insertRequest(request)
         insertProfileListRequestRow(profileListRequest.copy(requestId = requestId))
-        rotatedPairingSecret?.let { check(updatePairingSecret(it) == 1) }
+        storeAcceptedSecrets(requestId, requestSecret, currentPairingSecret, previousPairingSecret)
         trimCompletedHistory()
         return requestId
     }
@@ -699,14 +788,16 @@ internal interface RequestDao {
         request: InboxRequestEntity,
         profileUpload: ProfileUploadRequestEntity,
         variables: List<ProfileUploadVariableEntity>,
-        rotatedPairingSecret: PairingSecretEntity?,
+        requestSecret: RequestSecretEntity,
+        currentPairingSecret: PairingSecretEntity?,
+        previousPairingSecret: PairingSecretEntity?,
     ): Long {
         val requestId = insertRequest(request)
         insertProfileUploadRequestRow(profileUpload.copy(requestId = requestId))
         if (variables.isNotEmpty()) {
             insertProfileUploadVariables(variables.map { it.copy(requestId = requestId) })
         }
-        rotatedPairingSecret?.let { check(updatePairingSecret(it) == 1) }
+        storeAcceptedSecrets(requestId, requestSecret, currentPairingSecret, previousPairingSecret)
         trimCompletedHistory()
         return requestId
     }
@@ -714,11 +805,44 @@ internal interface RequestDao {
     @Transaction
     suspend fun insertHiddenPairedRequest(
         request: InboxRequestEntity,
-        rotatedPairingSecret: PairingSecretEntity?,
+        requestSecret: RequestSecretEntity,
+        currentPairingSecret: PairingSecretEntity?,
+        previousPairingSecret: PairingSecretEntity?,
     ): Long {
         val requestId = insertRequest(request)
-        rotatedPairingSecret?.let { check(updatePairingSecret(it) == 1) }
+        storeAcceptedSecrets(requestId, requestSecret, currentPairingSecret, previousPairingSecret)
         return requestId
+    }
+
+    @Transaction
+    suspend fun insertPairingRemoval(
+        request: InboxRequestEntity,
+        requestSecret: RequestSecretEntity,
+        pairing: PairingEntity,
+    ): Long {
+        val requestId = insertRequest(request)
+        insertRequestSecret(requestSecret.copy(requestId = requestId))
+        check(updatePairing(pairing) == 1)
+        deletePairingSecrets(pairing.requestId)
+        trimCompletedHistory()
+        return requestId
+    }
+
+    @Transaction
+    suspend fun storeAcceptedSecrets(
+        requestId: Long,
+        requestSecret: RequestSecretEntity,
+        currentPairingSecret: PairingSecretEntity?,
+        previousPairingSecret: PairingSecretEntity?,
+    ) {
+        insertRequestSecret(requestSecret.copy(requestId = requestId))
+        if (currentPairingSecret != null || previousPairingSecret != null) {
+            checkNotNull(currentPairingSecret)
+            checkNotNull(previousPairingSecret)
+            deletePairingSecret(previousPairingSecret.pairingRequestId, previousPairingSecret.kind)
+            upsertPairingSecret(previousPairingSecret)
+            upsertPairingSecret(currentPairingSecret)
+        }
     }
 
     @Transaction
@@ -777,10 +901,19 @@ internal interface RequestDao {
         rootRequest: InboxRequestEntity,
         pairing: PairingEntity,
         finishRequest: InboxRequestEntity,
+        requestSecret: RequestSecretEntity,
+        currentPairingSecret: PairingSecretEntity?,
+        previousPairingSecret: PairingSecretEntity?,
     ) {
         check(updateRequest(rootRequest) == 1)
         check(updatePairing(pairing) == 1)
-        check(updateRequest(finishRequest) == 1)
+        val finishRequestId = insertRequest(finishRequest)
+        storeAcceptedSecrets(
+            finishRequestId,
+            requestSecret,
+            currentPairingSecret,
+            previousPairingSecret,
+        )
         trimCompletedHistory()
     }
 }

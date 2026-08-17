@@ -100,6 +100,7 @@ internal data class EnvironmentProfileProposal(
     val descriptionProvided: Boolean,
     val description: String?,
     val variables: Map<String, String>,
+    val variableSensitivity: Map<String, Boolean> = emptyMap(),
 )
 
 internal data class EnvironmentProfileProposalSummary(
@@ -108,6 +109,7 @@ internal data class EnvironmentProfileProposalSummary(
     val changedVariables: List<String>,
     val unchangedVariables: List<String>,
     val removedVariables: List<String>,
+    val variableSensitivity: Map<String, Boolean>,
 )
 
 internal sealed interface EnvironmentProfileProposalResult {
@@ -464,6 +466,9 @@ internal class ProfileRepository(
                 changedVariables = changed,
                 unchangedVariables = unchanged,
                 removedVariables = removed,
+                variableSensitivity = proposal.variables.keys.associateWith { name ->
+                    existingVariables[name]?.sensitive ?: true
+                },
             ),
         )
     }
@@ -509,7 +514,7 @@ internal class ProfileRepository(
         val variables = proposal.variables.map { (name, value) ->
             val current = existingVariables[name]
             val id = current?.id ?: newId()
-            val sensitive = current?.sensitive ?: true
+            val sensitive = proposal.variableSensitivity[name] ?: current?.sensitive ?: true
             val encrypted = encrypt(id, profileId, name, sensitive, value)
             EnvironmentVariableEntity(
                 id = id,
