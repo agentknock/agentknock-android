@@ -3,7 +3,7 @@ package dev.agentknock.ui.requests
 import android.app.Application
 import androidx.lifecycle.AndroidViewModel
 import androidx.lifecycle.viewModelScope
-import dev.agentknock.AgentKnockApplication
+import dev.agentknock.AgentknockApplication
 import dev.agentknock.storage.request.CredentialDecisionResult
 import dev.agentknock.storage.request.InboxRequestDetails
 import dev.agentknock.storage.request.InboxRequestSummary
@@ -23,7 +23,7 @@ import kotlinx.coroutines.flow.stateIn
 
 @OptIn(ExperimentalCoroutinesApi::class)
 internal class RequestsViewModel(application: Application) : AndroidViewModel(application) {
-    private val container = (application as AgentKnockApplication).container
+    private val container = (application as AgentknockApplication).container
     private val repository = container.requests
     private val connection = container.requestConnection
     private val selectedRequestId = MutableStateFlow<Long?>(null)

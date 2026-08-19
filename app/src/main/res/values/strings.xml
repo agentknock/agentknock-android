@@ -1,6 +1,6 @@
 <?xml version="1.0" encoding="utf-8"?>
 <resources>
-    <string name="app_name">AgentKnock</string>
+    <string name="app_name">Agentknock</string>
     <string name="request_notification_channel">Requests</string>
     <string name="request_notification_channel_description">Pairing and profile access requests waiting for review</string>
     <string name="request_waiting">Request waiting</string>

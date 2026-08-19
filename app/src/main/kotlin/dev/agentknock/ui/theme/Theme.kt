@@ -35,7 +35,7 @@ private val DarkColors = darkColorScheme(
 )
 
 @Composable
-fun AgentKnockTheme(
+fun AgentknockTheme(
     darkTheme: Boolean = isSystemInDarkTheme(),
     content: @Composable () -> Unit,
 ) {

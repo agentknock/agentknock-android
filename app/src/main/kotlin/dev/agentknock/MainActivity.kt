@@ -10,9 +10,9 @@ import androidx.activity.compose.setContent
 import androidx.activity.enableEdgeToEdge
 import androidx.fragment.app.FragmentActivity
 import dev.agentknock.push.RequestNotifications
-import dev.agentknock.ui.AgentKnockScreen
+import dev.agentknock.ui.AgentknockScreen
 import dev.agentknock.ui.auth.DeviceAuthenticator
-import dev.agentknock.ui.theme.AgentKnockTheme
+import dev.agentknock.ui.theme.AgentknockTheme
 import kotlinx.coroutines.flow.MutableStateFlow
 
 internal data class RequestNavigation(
@@ -39,8 +39,8 @@ class MainActivity : FragmentActivity() {
         handleIntent(intent)
         val authenticator = DeviceAuthenticator(this)
         setContent {
-            AgentKnockTheme {
-                AgentKnockScreen(
+            AgentknockTheme {
+                AgentknockScreen(
                     authenticate = authenticator::authenticate,
                     requestNavigation = requestNavigation,
                 )

@@ -320,7 +320,7 @@ private fun NotificationsSettings(pushState: String?, onBack: () -> Unit, modifi
                 if (notificationsEnabled) "Notifications enabled" else "Notifications disabled",
                 style = MaterialTheme.typography.titleLarge,
             )
-            Text("Request notifications open AgentKnock so the complete request can be reviewed.")
+            Text("Request notifications open Agentknock so the complete request can be reviewed.")
             Button(
                 onClick = {
                     val intent = Intent(Settings.ACTION_APP_NOTIFICATION_SETTINGS).apply {
@@ -401,7 +401,7 @@ private fun DataAndHistory(
             TextButton(onClick = onFactoryReset, modifier = Modifier.padding(horizontal = 8.dp)) {
                 Icon(Icons.Outlined.DeleteForever, contentDescription = null, tint = MaterialTheme.colorScheme.error)
                 Spacer(Modifier.width(8.dp))
-                Text("Factory reset AgentKnock", color = MaterialTheme.colorScheme.error)
+                Text("Factory reset Agentknock", color = MaterialTheme.colorScheme.error)
             }
         }
     }
@@ -471,7 +471,7 @@ private fun FactoryReset(
 
     fun start(localOnly: Boolean) {
         authenticate(
-            "Factory reset AgentKnock",
+            "Factory reset Agentknock",
             {
                 scope.launch {
                     working = true
@@ -506,14 +506,14 @@ private fun FactoryReset(
     }
 
     Column(modifier) {
-        PageTopBar("Factory reset AgentKnock", onBack)
+        PageTopBar("Factory reset Agentknock", onBack)
         Column(
             Modifier.verticalScroll(rememberScrollState()).padding(20.dp),
             verticalArrangement = Arrangement.spacedBy(18.dp),
         ) {
             Text("This cannot be undone", style = MaterialTheme.typography.headlineSmall, color = MaterialTheme.colorScheme.error)
             Text("Profiles and values, clients, requests, the audit log, settings, and this device identity will be erased.")
-            Text("AgentKnock first asks the relay to delete this device and its live state. Every client must pair again.")
+            Text("Agentknock first asks the relay to delete this device and its live state. Every client must pair again.")
             OutlinedTextField(
                 value = phrase,
                 onValueChange = { phrase = it },
@@ -526,7 +526,7 @@ private fun FactoryReset(
                 enabled = phrase == "RESET AGENTKNOCK" && !working,
                 modifier = Modifier.fillMaxWidth(),
             ) {
-                if (working) CircularProgressIndicator(Modifier.width(20.dp)) else Text("Factory reset AgentKnock")
+                if (working) CircularProgressIndicator(Modifier.width(20.dp)) else Text("Factory reset Agentknock")
             }
             if (allowLocalOnly) {
                 Text("Remote deletion was not confirmed. Resetting only this app may leave inaccessible relay state until automatic cleanup.", color = MaterialTheme.colorScheme.error)
@@ -572,7 +572,7 @@ private fun About(onBack: () -> Unit, modifier: Modifier) {
     Column(modifier) {
         PageTopBar("About", onBack)
         Column(Modifier.padding(20.dp), verticalArrangement = Arrangement.spacedBy(12.dp)) {
-            Text("AgentKnock", style = MaterialTheme.typography.headlineMedium)
+            Text("Agentknock", style = MaterialTheme.typography.headlineMedium)
             Text("${BuildConfig.VERSION_NAME} (${BuildConfig.VERSION_CODE})")
             Text("Profiles are protected on this phone. The relay routes encrypted messages and sends generic wake signals.")
             Text("Made by Full Disclosure", color = MaterialTheme.colorScheme.onSurfaceVariant)

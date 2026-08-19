@@ -1,5 +1,5 @@
 {
-  description = "AgentKnock Android development environment";
+  description = "Agentknock Android development environment";
 
   inputs.nixpkgs.url = "github:NixOS/nixpkgs/nixos-unstable";
 

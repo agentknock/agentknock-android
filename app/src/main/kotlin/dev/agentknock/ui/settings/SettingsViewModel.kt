@@ -3,7 +3,7 @@ package dev.agentknock.ui.settings
 import android.app.Application
 import androidx.lifecycle.AndroidViewModel
 import androidx.lifecycle.viewModelScope
-import dev.agentknock.AgentKnockApplication
+import dev.agentknock.AgentknockApplication
 import dev.agentknock.storage.FactoryResetResult
 import dev.agentknock.storage.crypto.LocalEncryptionProtection
 import dev.agentknock.storage.audit.AuditEvent
@@ -30,7 +30,7 @@ internal data class DataCounts(
 
 @OptIn(ExperimentalCoroutinesApi::class)
 internal class SettingsViewModel(application: Application) : AndroidViewModel(application) {
-    private val container = (application as AgentKnockApplication).container
+    private val container = (application as AgentknockApplication).container
     private val selectedAuditId = MutableStateFlow<Long?>(null)
     private val _localEncryptionProtection = MutableStateFlow<LocalEncryptionProtection?>(null)
 

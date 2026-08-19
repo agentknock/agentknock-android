@@ -3,7 +3,7 @@ package dev.agentknock.ui.vault
 import android.app.Application
 import androidx.lifecycle.AndroidViewModel
 import androidx.lifecycle.viewModelScope
-import dev.agentknock.AgentKnockApplication
+import dev.agentknock.AgentknockApplication
 import dev.agentknock.R
 import dev.agentknock.protocol.VaultAddressGenerator
 import dev.agentknock.storage.vault.ClaimVaultResult
@@ -17,7 +17,7 @@ import kotlinx.coroutines.sync.Mutex
 import kotlinx.coroutines.sync.withLock
 
 internal class VaultViewModel(application: Application) : AndroidViewModel(application) {
-    private val container = (application as AgentKnockApplication).container
+    private val container = (application as AgentknockApplication).container
     private val repository = container.vault
     private val addressGenerator = VaultAddressGenerator(
         application.resources.openRawResource(R.raw.vault_address_words)

@@ -3,7 +3,7 @@ package dev.agentknock.ui.profiles
 import android.app.Application
 import androidx.lifecycle.AndroidViewModel
 import androidx.lifecycle.viewModelScope
-import dev.agentknock.AgentKnockApplication
+import dev.agentknock.AgentknockApplication
 import dev.agentknock.storage.profile.CreateEnvironmentVariableResult
 import dev.agentknock.storage.profile.CreateProfileResult
 import dev.agentknock.storage.profile.EnvironmentVariableValue
@@ -22,7 +22,7 @@ import kotlinx.coroutines.ExperimentalCoroutinesApi
 
 @OptIn(ExperimentalCoroutinesApi::class)
 internal class ProfilesViewModel(application: Application) : AndroidViewModel(application) {
-    private val repository = (application as AgentKnockApplication).container.profiles
+    private val repository = (application as AgentknockApplication).container.profiles
     private val selectedProfileId = MutableStateFlow<String?>(null)
 
     val selection: StateFlow<String?> = selectedProfileId.asStateFlow()

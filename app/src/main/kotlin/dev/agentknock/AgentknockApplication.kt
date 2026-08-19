@@ -6,7 +6,7 @@ import androidx.lifecycle.ProcessLifecycleOwner
 import com.google.firebase.messaging.FirebaseMessaging
 import dev.agentknock.push.PushRegistrationRepository
 import dev.agentknock.push.RequestNotifications
-import dev.agentknock.storage.AgentKnockDatabase
+import dev.agentknock.storage.AgentknockDatabase
 import dev.agentknock.storage.FactoryResetRepository
 import dev.agentknock.storage.audit.AuditRepository
 import dev.agentknock.storage.crypto.AesGcmEncryption
@@ -30,7 +30,7 @@ import kotlinx.coroutines.launch
 import okhttp3.OkHttpClient
 import java.util.concurrent.TimeUnit
 
-class AgentKnockApplication : Application() {
+class AgentknockApplication : Application() {
     internal lateinit var container: ApplicationContainer
         private set
 
@@ -43,7 +43,7 @@ class AgentKnockApplication : Application() {
 }
 
 internal class ApplicationContainer(application: Application) {
-    private val database = AgentKnockDatabase.create(application)
+    private val database = AgentknockDatabase.create(application)
     private val encryptionKeyStore = AndroidEncryptionKeyStore(application.packageManager)
     val encryptionKeyManager = LocalEncryptionKeyManager(
         dao = database.localEncryptionDao(),
@@ -99,7 +99,7 @@ internal class ApplicationContainer(application: Application) {
         audit = audit,
         requestPushRegistration = {
             FirebaseMessaging.getInstance().register().addOnFailureListener { failure ->
-                Log.w("AgentKnock", "FCM registration failed", failure)
+                Log.w("Agentknock", "FCM registration failed", failure)
             }
         },
     )

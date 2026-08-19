@@ -25,7 +25,7 @@ import androidx.work.WorkerParameters
 import androidx.work.workDataOf
 import com.google.firebase.messaging.FirebaseMessagingService
 import com.google.firebase.messaging.RemoteMessage
-import dev.agentknock.AgentKnockApplication
+import dev.agentknock.AgentknockApplication
 import dev.agentknock.MainActivity
 import dev.agentknock.R
 import dev.agentknock.storage.request.RequestSyncResult
@@ -37,7 +37,7 @@ import kotlinx.coroutines.launch
 import java.util.concurrent.TimeUnit
 
 @SuppressLint("MissingFirebaseInstanceTokenRefresh")
-class AgentKnockMessagingService : FirebaseMessagingService() {
+class AgentknockMessagingService : FirebaseMessagingService() {
     override fun onRegistered(installationId: String) {
         PushRegistrationWorker.enqueue(this, installationId)
     }
@@ -46,7 +46,7 @@ class AgentKnockMessagingService : FirebaseMessagingService() {
         if (message.data["type"] != WAKE_MESSAGE_TYPE) return
 
         RequestNotifications.showWake(this)
-        val application = application as AgentKnockApplication
+        val application = application as AgentknockApplication
         if (
             ProcessLifecycleOwner.get().lifecycle.currentState.isAtLeast(
                 Lifecycle.State.STARTED,
@@ -67,7 +67,7 @@ class PushRegistrationWorker(
         val firebaseInstallationId = inputData.getString(FIREBASE_INSTALLATION_ID_KEY)
             ?.takeIf(String::isNotEmpty)
             ?: return Result.failure()
-        val container = (applicationContext as AgentKnockApplication).container
+        val container = (applicationContext as AgentknockApplication).container
         container.localStorage.await()
         return when (val result = container.pushRegistration.register(firebaseInstallationId)) {
             PushRegistrationResult.Registered,
@@ -98,7 +98,7 @@ class PushRegistrationWorker(
     companion object {
         private const val WORK_NAME = "push-registration"
         private const val FIREBASE_INSTALLATION_ID_KEY = "firebase-installation-id"
-        private const val TAG = "AgentKnockPush"
+        private const val TAG = "AgentknockPush"
 
         fun enqueue(context: Context, firebaseInstallationId: String) {
             val request = OneTimeWorkRequestBuilder<PushRegistrationWorker>()
@@ -122,7 +122,7 @@ class PushSynchronizationWorker(
     parameters: WorkerParameters,
 ) : CoroutineWorker(applicationContext, parameters) {
     override suspend fun doWork(): Result {
-        val container = (applicationContext as AgentKnockApplication).container
+        val container = (applicationContext as AgentknockApplication).container
         container.localStorage.await()
         return when (container.requests.sync()) {
             RequestSyncResult.Success,
@@ -296,7 +296,7 @@ class RequestNotificationActionReceiver : BroadcastReceiver() {
         if (requestId < 0) return
         val decision = intent.getStringExtra(RequestNotifications.DECISION_EXTRA) ?: return
         val pendingResult = goAsync()
-        val application = context.applicationContext as AgentKnockApplication
+        val application = context.applicationContext as AgentknockApplication
         CoroutineScope(SupervisorJob() + Dispatchers.IO).launch {
             try {
                 application.container.localStorage.await()

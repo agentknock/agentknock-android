@@ -3,7 +3,7 @@ package dev.agentknock.ui.clients
 import android.app.Application
 import androidx.lifecycle.AndroidViewModel
 import androidx.lifecycle.viewModelScope
-import dev.agentknock.AgentKnockApplication
+import dev.agentknock.AgentknockApplication
 import dev.agentknock.relay.RelayClientState
 import dev.agentknock.storage.request.ClientChangeResult
 import dev.agentknock.storage.request.ClientDetails
@@ -20,7 +20,7 @@ import kotlinx.coroutines.flow.stateIn
 
 @OptIn(ExperimentalCoroutinesApi::class)
 internal class ClientsViewModel(application: Application) : AndroidViewModel(application) {
-    private val container = (application as AgentKnockApplication).container
+    private val container = (application as AgentknockApplication).container
     private val repository = container.requests
     private val selectedClientId = MutableStateFlow<String?>(null)
 

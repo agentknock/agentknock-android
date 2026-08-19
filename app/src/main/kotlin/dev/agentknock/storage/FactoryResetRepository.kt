@@ -15,7 +15,7 @@ internal sealed interface FactoryResetResult {
 }
 
 internal class FactoryResetRepository(
-    private val database: AgentKnockDatabase,
+    private val database: AgentknockDatabase,
     private val encryptionKeys: LocalEncryptionKeyManager,
     private val deviceManagement: DeviceManagementRepository,
 ) {

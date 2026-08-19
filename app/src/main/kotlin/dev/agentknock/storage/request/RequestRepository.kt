@@ -685,13 +685,13 @@ internal class RequestRepository(
                         details = when (pairing.state.toPairingState()) {
                             PairingState.RECEIVING -> pairing.error ?:
                                 "Waiting for the client to complete the secure exchange."
-                            PairingState.SAS_VERIFICATION_PENDING -> "Open AgentKnock and compare the security code."
+                            PairingState.SAS_VERIFICATION_PENDING -> "Open Agentknock and compare the security code."
                             PairingState.RELAY_ACTIVATION_PENDING,
                             PairingState.WAITING_FOR_FINISH,
                             -> "The pairing is still waiting for the client and can be rejected."
                             PairingState.VERIFICATION_FAILED -> pairing.error ?:
                                 "The pairing message could not be verified."
-                            else -> "Open AgentKnock to review this pairing."
+                            else -> "Open Agentknock to review this pairing."
                         },
                         credentialDecisionAvailable = false,
                     )

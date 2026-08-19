@@ -37,7 +37,7 @@ import dev.agentknock.ui.vault.VaultViewModel
 import kotlinx.coroutines.flow.StateFlow
 
 @Composable
-internal fun AgentKnockScreen(
+internal fun AgentknockScreen(
     authenticate: (
         title: String,
         onSuccess: () -> Unit,

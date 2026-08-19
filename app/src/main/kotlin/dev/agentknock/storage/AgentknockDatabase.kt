@@ -46,7 +46,7 @@ import dev.agentknock.storage.vault.VaultSecretEntity
     version = 3,
     exportSchema = true,
 )
-internal abstract class AgentKnockDatabase : RoomDatabase() {
+internal abstract class AgentknockDatabase : RoomDatabase() {
     abstract fun localEncryptionDao(): LocalEncryptionDao
 
     abstract fun profileDao(): ProfileDao
@@ -60,8 +60,8 @@ internal abstract class AgentKnockDatabase : RoomDatabase() {
     companion object {
         const val NAME = "agentknock.db"
 
-        fun create(context: Context): AgentKnockDatabase =
-            Room.databaseBuilder(context, AgentKnockDatabase::class.java, NAME)
+        fun create(context: Context): AgentknockDatabase =
+            Room.databaseBuilder(context, AgentknockDatabase::class.java, NAME)
                 .setJournalMode(JournalMode.WRITE_AHEAD_LOGGING)
                 .fallbackToDestructiveMigration(dropAllTables = true)
                 .build()

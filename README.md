@@ -1,10 +1,10 @@
-# AgentKnock for Android
+# Agentknock for Android
 
-AgentKnock is a phone-held credential broker for command-running agents. This
+Agentknock is a phone-held credential broker for command-running agents. This
 repository contains the Android app.
 
 The app is currently a minimal Kotlin and Jetpack Compose placeholder. Product
-behavior will be implemented incrementally against the AgentKnock protocol.
+behavior will be implemented incrementally against the Agentknock protocol.
 
 ## Development
 

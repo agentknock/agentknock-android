@@ -12,7 +12,7 @@ import dev.agentknock.relay.RelayDeviceFrame
 import dev.agentknock.relay.RelayExchangeState
 import dev.agentknock.relay.RelayMessageKind
 import dev.agentknock.relay.RelayMessageState
-import dev.agentknock.storage.AgentKnockDatabase
+import dev.agentknock.storage.AgentknockDatabase
 import dev.agentknock.storage.crypto.AesGcmEncryption
 import dev.agentknock.storage.crypto.EncryptionKeyBacking
 import dev.agentknock.storage.crypto.EncryptionKeyStore
@@ -51,7 +51,7 @@ import org.junit.runner.RunWith
 
 @RunWith(AndroidJUnit4::class)
 class RequestRepositorySlotTest {
-    private lateinit var database: AgentKnockDatabase
+    private lateinit var database: AgentknockDatabase
     private lateinit var relay: QueuedRelayDeviceClient
     private lateinit var repository: RequestRepository
     private lateinit var credentials: RelayDeviceCredentials
@@ -61,7 +61,7 @@ class RequestRepositorySlotTest {
     fun setUp() = runTest {
         database = Room.inMemoryDatabaseBuilder(
             InstrumentationRegistry.getInstrumentation().targetContext,
-            AgentKnockDatabase::class.java,
+            AgentknockDatabase::class.java,
         ).build()
         val keyStore = MemoryEncryptionKeyStore()
         val keyManager = LocalEncryptionKeyManager(

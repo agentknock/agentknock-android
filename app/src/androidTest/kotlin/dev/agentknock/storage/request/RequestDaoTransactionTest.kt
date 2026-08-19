@@ -3,7 +3,7 @@ package dev.agentknock.storage.request
 import androidx.room3.Room
 import androidx.test.ext.junit.runners.AndroidJUnit4
 import androidx.test.platform.app.InstrumentationRegistry
-import dev.agentknock.storage.AgentKnockDatabase
+import dev.agentknock.storage.AgentknockDatabase
 import dev.agentknock.storage.crypto.LocalEncryptionKeyEntity
 import kotlinx.coroutines.runBlocking
 import kotlinx.coroutines.test.runTest
@@ -19,14 +19,14 @@ import org.junit.runner.RunWith
 
 @RunWith(AndroidJUnit4::class)
 class RequestDaoTransactionTest {
-    private lateinit var database: AgentKnockDatabase
+    private lateinit var database: AgentknockDatabase
     private lateinit var dao: RequestDao
 
     @Before
     fun setUp() {
         database = Room.inMemoryDatabaseBuilder(
             InstrumentationRegistry.getInstrumentation().targetContext,
-            AgentKnockDatabase::class.java,
+            AgentknockDatabase::class.java,
         ).build()
         dao = database.requestDao()
         runBlocking {
