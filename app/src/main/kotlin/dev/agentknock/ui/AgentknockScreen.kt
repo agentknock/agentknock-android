@@ -12,8 +12,10 @@ import androidx.compose.material3.Icon
 import androidx.compose.material3.CircularProgressIndicator
 import androidx.compose.material3.NavigationBar
 import androidx.compose.material3.NavigationBarItem
+import androidx.compose.material3.AlertDialog
 import androidx.compose.material3.Scaffold
 import androidx.compose.material3.Text
+import androidx.compose.material3.TextButton
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.getValue
@@ -44,6 +46,7 @@ internal fun AgentknockScreen(
         onError: (String) -> Unit,
     ) -> Unit,
     requestNavigation: StateFlow<RequestNavigation>,
+    requestNotificationPermission: () -> Unit,
     vaultViewModel: VaultViewModel = viewModel(),
     requestsViewModel: RequestsViewModel = viewModel(),
 ) {
@@ -51,6 +54,8 @@ internal fun AgentknockScreen(
     var section by rememberSaveable { mutableStateOf(MainSection.REQUESTS) }
     var showSettings by rememberSaveable { mutableStateOf(false) }
     var showAddressEditor by rememberSaveable { mutableStateOf(false) }
+    var showBottomNavigation by rememberSaveable { mutableStateOf(true) }
+    var offerNotifications by rememberSaveable { mutableStateOf(false) }
     val requestNavigationTarget by requestNavigation.collectAsStateWithLifecycle()
     val current = configuration
 
@@ -73,6 +78,7 @@ internal fun AgentknockScreen(
             onDone = current.active?.takeIf { it.secretsAvailable }?.let {
                 { section = MainSection.REQUESTS }
             },
+            onDeviceClaimed = { offerNotifications = true },
             viewModel = vaultViewModel,
         )
         showAddressEditor -> VaultScreen(
@@ -82,6 +88,8 @@ internal fun AgentknockScreen(
                 showAddressEditor = false
                 showSettings = true
             },
+            changeAddressInitially = true,
+            onDeviceClaimed = {},
             viewModel = vaultViewModel,
         )
         showSettings -> SettingsScreen(
@@ -91,11 +99,12 @@ internal fun AgentknockScreen(
                 showAddressEditor = true
             },
             authenticate = authenticate,
+            requestNotificationPermission = requestNotificationPermission,
         )
         else -> Scaffold(
             contentWindowInsets = WindowInsets(0, 0, 0, 0),
             bottomBar = {
-                NavigationBar {
+                if (showBottomNavigation) NavigationBar {
                     NavigationBarItem(
                         selected = section == MainSection.REQUESTS,
                         onClick = { section = MainSection.REQUESTS },
@@ -123,15 +132,44 @@ internal fun AgentknockScreen(
                         authenticate = authenticate,
                         onOpenSettings = { showSettings = true },
                         viewModel = requestsViewModel,
+                        onTopLevelChanged = { showBottomNavigation = it },
                     )
                     MainSection.PROFILES -> ProfilesScreen(
                         authenticate = authenticate,
                         onOpenSettings = { showSettings = true },
+                        onTopLevelChanged = { showBottomNavigation = it },
                     )
-                    MainSection.CLIENTS -> ClientsScreen(onOpenSettings = { showSettings = true })
+                    MainSection.CLIENTS -> ClientsScreen(
+                        onOpenSettings = { showSettings = true },
+                        onTopLevelChanged = { showBottomNavigation = it },
+                        authenticate = authenticate,
+                    )
                 }
             }
         }
+    }
+
+    if (offerNotifications) {
+        AlertDialog(
+            onDismissRequest = { offerNotifications = false },
+            title = { Text("Stay informed about requests?") },
+            text = {
+                Text(
+                    "Agentknock can notify you when a pairing, profile proposal, or profile access request needs attention. You control notification privacy in Android settings.",
+                )
+            },
+            confirmButton = {
+                TextButton(
+                    onClick = {
+                        offerNotifications = false
+                        requestNotificationPermission()
+                    },
+                ) { Text("Allow notifications") }
+            },
+            dismissButton = {
+                TextButton(onClick = { offerNotifications = false }) { Text("Not now") }
+            },
+        )
     }
 }
 

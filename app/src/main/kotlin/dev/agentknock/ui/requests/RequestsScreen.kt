@@ -46,6 +46,8 @@ import androidx.compose.material3.TextButton
 import androidx.compose.material3.Switch
 import androidx.compose.material3.TopAppBar
 import androidx.compose.runtime.Composable
+import androidx.compose.runtime.DisposableEffect
+import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
@@ -55,8 +57,12 @@ import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.text.font.FontFamily
+import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
+import androidx.lifecycle.compose.LocalLifecycleOwner
+import androidx.lifecycle.Lifecycle
+import androidx.lifecycle.LifecycleEventObserver
 import androidx.lifecycle.viewmodel.compose.viewModel
 import dev.agentknock.protocol.ProfileUploadMode
 import dev.agentknock.storage.profile.CredentialProfileMetadata
@@ -85,6 +91,7 @@ import kotlinx.coroutines.launch
 internal fun RequestsScreen(
     authenticate: (String, () -> Unit, (String) -> Unit) -> Unit,
     onOpenSettings: () -> Unit,
+    onTopLevelChanged: (Boolean) -> Unit,
     viewModel: RequestsViewModel = viewModel(),
 ) {
     val requests by viewModel.requests.collectAsStateWithLifecycle()
@@ -95,6 +102,10 @@ internal fun RequestsScreen(
     val configuration by viewModel.configuration.collectAsStateWithLifecycle()
     val snackbar = remember { SnackbarHostState() }
     val scope = rememberCoroutineScope()
+
+    LaunchedEffect(selection) {
+        onTopLevelChanged(selection == null)
+    }
 
     fun report(message: String) {
         scope.launch { snackbar.showSnackbar(message) }
@@ -280,7 +291,16 @@ private fun RequestList(
 @Composable
 private fun RequestRow(request: InboxRequestSummary, onClick: () -> Unit) {
     ListItem(
-        headlineContent = { Text(request.title) },
+        headlineContent = {
+            Column(verticalArrangement = Arrangement.spacedBy(2.dp)) {
+                Text(
+                    request.statusLabel(),
+                    color = request.statusColor(),
+                    style = MaterialTheme.typography.labelLarge,
+                )
+                Text(request.title, style = MaterialTheme.typography.titleMedium)
+            }
+        },
         supportingContent = {
             Column {
                 Text(
@@ -292,10 +312,6 @@ private fun RequestRow(request: InboxRequestSummary, onClick: () -> Unit) {
                     style = MaterialTheme.typography.labelMedium,
                 )
             }
-        },
-        trailingContent = {
-            val label = request.statusLabel()
-            Text(label, color = request.statusColor(), style = MaterialTheme.typography.labelLarge)
         },
         modifier = Modifier.clickable(onClick = onClick),
     )
@@ -500,17 +516,33 @@ private fun ProfileUploadDetail(
     modifier: Modifier,
 ) {
     val upload = checkNotNull(request.profileUpload)
-    var acceptedName by remember(upload.proposedName) { mutableStateOf(upload.proposedName) }
+    var acceptedName by remember(upload.proposedName, upload.acceptedName) {
+        mutableStateOf(upload.acceptedName ?: upload.proposedName)
+    }
     var editingName by remember { mutableStateOf(false) }
     var revealedValues by remember(request.id) { mutableStateOf<Map<String, String>>(emptyMap()) }
     val scope = rememberCoroutineScope()
+    val lifecycle = LocalLifecycleOwner.current.lifecycle
+
+    DisposableEffect(lifecycle, request.id) {
+        val observer = LifecycleEventObserver { _, event ->
+            if (event == Lifecycle.Event.ON_STOP) revealedValues = emptyMap()
+        }
+        lifecycle.addObserver(observer)
+        onDispose { lifecycle.removeObserver(observer) }
+    }
     DetailPage(
-        title = acceptedName,
+        title = "${upload.mode.titleLabel()} $acceptedName",
         onBack = onBack,
         modifier = modifier,
         titleContent = {
             Row(verticalAlignment = Alignment.CenterVertically) {
-                Text(acceptedName, modifier = Modifier.weight(1f))
+                Text(
+                    "${upload.mode.titleLabel()} $acceptedName",
+                    modifier = Modifier.weight(1f),
+                    maxLines = 1,
+                    overflow = TextOverflow.Ellipsis,
+                )
                 if (
                     upload.mode == ProfileUploadMode.CREATE &&
                     upload.state == ProfileUploadRequestState.REVIEW_PENDING
@@ -523,19 +555,51 @@ private fun ProfileUploadDetail(
         },
     ) {
         StatusLine(upload.state.label(), upload.state == ProfileUploadRequestState.VERIFICATION_FAILED)
-        Text(
-            "Environment variables · ${upload.mode.actionLabel()} · ${upload.clientName}",
-            color = MaterialTheme.colorScheme.onSurfaceVariant,
-        )
+        DetailValue("Profile type", "Environment variables")
+        DetailValue("Proposed by client", upload.clientName)
         upload.description?.takeIf(String::isNotBlank)?.let {
-            DetailValue("Description", it)
+            DetailValue("Proposed description", it)
         }
 
-        Text("Incoming variables", style = MaterialTheme.typography.titleLarge)
-        if (upload.variables.isEmpty()) {
-            Text("No variables")
+        if (upload.mode != ProfileUploadMode.CREATE) {
+            Card(
+                colors = CardDefaults.cardColors(
+                    containerColor = MaterialTheme.colorScheme.secondaryContainer,
+                ),
+            ) {
+                Column(
+                    Modifier.fillMaxWidth().padding(16.dp),
+                    verticalArrangement = Arrangement.spacedBy(10.dp),
+                ) {
+                    Text("Changes to the existing profile", style = MaterialTheme.typography.titleMedium)
+                    ChangeGroup("New", upload.addedVariables)
+                    ChangeGroup("Updated", upload.changedVariables)
+                    ChangeGroup("Removed", upload.removedVariables)
+                    ChangeGroup("Unchanged", upload.unchangedVariables, subdued = true)
+                }
+            }
         }
-        upload.variables.forEach { variable ->
+
+        Text(
+            if (upload.state == ProfileUploadRequestState.REVIEW_PENDING) {
+                "Incoming variables"
+            } else {
+                "Incoming variable names"
+            },
+            style = MaterialTheme.typography.titleLarge,
+        )
+        if (upload.variableNames.isEmpty()) Text("No variables")
+        if (upload.state != ProfileUploadRequestState.REVIEW_PENDING) {
+            SelectionContainer {
+                Text(upload.variableNames.joinToString("\n"), fontFamily = FontFamily.Monospace)
+            }
+            Text(
+                "Uploaded values were discarded after this proposal was decided.",
+                style = MaterialTheme.typography.bodySmall,
+                color = MaterialTheme.colorScheme.onSurfaceVariant,
+            )
+        }
+        if (upload.state == ProfileUploadRequestState.REVIEW_PENDING) upload.variables.forEach { variable ->
             Card {
                 Column(
                     Modifier.fillMaxWidth().padding(16.dp),
@@ -564,7 +628,6 @@ private fun ProfileUploadDetail(
                                                 report("The uploaded value uses unsupported encryption")
                                         }
                                     }
-                                    Unit
                                 }
                                 if (variable.sensitive) {
                                     authenticate("Show uploaded value", reveal, report)
@@ -600,15 +663,6 @@ private fun ProfileUploadDetail(
             }
         }
 
-        if (upload.mode != ProfileUploadMode.CREATE) {
-            Disclosure("Changes to the existing profile") {
-                ChangeGroup("New", upload.addedVariables)
-                ChangeGroup("Updated", upload.changedVariables)
-                ChangeGroup("Removed", upload.removedVariables)
-                ChangeGroup("Unchanged", upload.unchangedVariables, subdued = true)
-            }
-        }
-
         if (upload.state == ProfileUploadRequestState.REVIEW_PENDING) {
             Button(
                 onClick = { onAccept(acceptedName.trim()) },
@@ -628,7 +682,7 @@ private fun ProfileUploadDetail(
             }
         } else {
             upload.acceptedName?.takeIf { it != upload.proposedName }?.let {
-                DetailValue("Saved as", it)
+                DetailValue("Proposed name", upload.proposedName)
             }
             upload.error?.let { Notice("Proposal could not be verified", it, true) }
         }
@@ -679,7 +733,7 @@ private fun CredentialOutcome(credential: CredentialRequestDetails) {
         )
         CredentialRequestState.COMPLETED -> when (credential.completionResult) {
             CredentialCompletionResult.APPROVED -> Triple("Delivered", "The client received the profile values.", false)
-            CredentialCompletionResult.DENIED -> Triple("Denied", credential.completionMessage ?: "No values were released.", true)
+            CredentialCompletionResult.DENIED -> Triple("Denied", credential.completionMessage ?: "No values were released.", false)
             CredentialCompletionResult.ABORTED -> Triple("Aborted", credential.completionMessage ?: "The client stopped this request.", false)
             null -> Triple("Completed", "The request is complete.", false)
         }
@@ -724,7 +778,9 @@ private fun DetailPage(
     title: String,
     onBack: () -> Unit,
     modifier: Modifier,
-    titleContent: @Composable () -> Unit = { Text(title) },
+    titleContent: @Composable () -> Unit = {
+        Text(title, maxLines = 1, overflow = TextOverflow.Ellipsis)
+    },
     content: @Composable () -> Unit,
 ) {
     Column(modifier) {
@@ -837,7 +893,7 @@ private fun PairingState.label(): String = when (this) {
     PairingState.VERIFICATION_FAILED -> "Verification failed"
 }
 
-private fun PairingState.isError(): Boolean = this in setOf(PairingState.REJECTED, PairingState.VERIFICATION_FAILED)
+private fun PairingState.isError(): Boolean = this == PairingState.VERIFICATION_FAILED
 
 private fun CredentialRequestDetails.statusLabel(): String = credentialStatusLabel(state, completionResult)
 
@@ -857,7 +913,7 @@ private fun credentialStatusLabel(
 }
 
 private fun CredentialRequestDetails.isError(): Boolean =
-    state == CredentialRequestState.VERIFICATION_FAILED || completionResult == CredentialCompletionResult.DENIED
+    state == CredentialRequestState.VERIFICATION_FAILED
 
 private fun ProfileUploadRequestState.label(): String = when (this) {
     ProfileUploadRequestState.REVIEW_PENDING -> "Action required"
@@ -866,9 +922,9 @@ private fun ProfileUploadRequestState.label(): String = when (this) {
     ProfileUploadRequestState.VERIFICATION_FAILED -> "Verification failed"
 }
 
-private fun ProfileUploadMode.actionLabel(): String = when (this) {
-    ProfileUploadMode.CREATE -> "New profile"
-    ProfileUploadMode.REPLACE -> "Full replacement"
+private fun ProfileUploadMode.titleLabel(): String = when (this) {
+    ProfileUploadMode.CREATE -> "Create"
+    ProfileUploadMode.REPLACE -> "Replace"
     ProfileUploadMode.UPDATE -> "Update"
 }
 

@@ -451,7 +451,9 @@ internal class RequestRepository(
                             ?.toCredentialCompletionResult(),
                         profileListState = null,
                         profileUploadState = null,
-                        title = credential.command,
+                        title = credential.command.substringAfterLast('/').ifBlank {
+                            credential.command
+                        },
                         subtitle = listOf(
                             credential.clientName,
                             requestedProfiles.joinToString(),
@@ -604,13 +606,17 @@ internal class RequestRepository(
             .filter { it.state == PairingState.ACTIVE.storedName }
             .mapNotNull { pairing ->
                 val state = pairing.relayClientState?.toRelayClientState() ?: return@mapNotNull null
+                val desiredState = pairing.desiredRelayClientState?.toRelayClientState()
+                if (state == RelayClientState.REVOKED || desiredState == RelayClientState.REVOKED) {
+                    return@mapNotNull null
+                }
                 ClientSummary(
                     clientId = pairing.clientId,
                     name = pairing.friendlyName ?: pairing.hostname ?: "Unnamed client",
                     hostname = pairing.hostname,
                     platform = pairing.platform,
                     state = state,
-                    desiredState = pairing.desiredRelayClientState?.toRelayClientState(),
+                    desiredState = desiredState,
                     pairedAt = pairing.completedAt,
                 )
             }
@@ -619,7 +625,11 @@ internal class RequestRepository(
 
     fun observeClient(clientId: String): Flow<ClientDetails?> =
         dao.observePairingByClientId(clientId).map { pairing ->
-            pairing?.takeIf { it.state == PairingState.ACTIVE.storedName }?.let {
+            pairing?.takeIf {
+                it.state == PairingState.ACTIVE.storedName &&
+                    it.relayClientState != RelayClientState.REVOKED.wireName &&
+                    it.desiredRelayClientState != RelayClientState.REVOKED.wireName
+            }?.let {
                 ClientDetails(
                     clientId = it.clientId,
                     name = it.friendlyName ?: it.hostname ?: "Unnamed client",
@@ -664,10 +674,10 @@ internal class RequestRepository(
                     val command = (listOf(credential.command) + arguments).joinToString(" ")
                     RequestNotification(
                         requestId = request.id,
-                        title = "Profile access requested",
-                        summary = listOf(credential.clientName, profiles.joinToString())
-                            .filter(String::isNotBlank).joinToString(" · "),
+                        title = "${credential.clientName} requests profile access",
+                        summary = profiles.joinToString(),
                         details = listOfNotNull(
+                            "Client: ${credential.clientName}",
                             credential.reason?.takeIf(String::isNotBlank)?.let { "Reason: $it" },
                             "Command: $command",
                             "Profiles: ${profiles.joinToString()}",
@@ -703,9 +713,9 @@ internal class RequestRepository(
                     }
                     RequestNotification(
                         requestId = request.id,
-                        title = "Profile proposal",
-                        summary = "${upload.proposedName} · ${upload.clientName}",
-                        details = "Environment variables · ${upload.variableNamesJson.let(::decodeStringList).joinToString()}",
+                        title = "${upload.mode.lowercase().replaceFirstChar(Char::uppercase)} ${upload.proposedName}",
+                        summary = "${upload.clientName} · Environment variables",
+                        details = "Variables: ${upload.variableNamesJson.let(::decodeStringList).joinToString()}",
                         credentialDecisionAvailable = false,
                     )
                 }
@@ -1529,6 +1539,7 @@ internal class RequestRepository(
                         updatedAt = now,
                         decidedAt = now,
                     ),
+                    discardUploadedValues = true,
                 )
                 audit.record(
                     AuditRecord(
@@ -1553,6 +1564,9 @@ internal class RequestRepository(
             ?: return@withLock ProfileUploadVariableValue.NotFound
         val upload = dao.getProfileUploadRequest(requestId)
             ?: return@withLock ProfileUploadVariableValue.NotFound
+        if (upload.state != ProfileUploadRequestState.REVIEW_PENDING.storedName) {
+            return@withLock ProfileUploadVariableValue.NotFound
+        }
         val variable = dao.getProfileUploadVariables(requestId).find { it.id == variableId }
             ?: return@withLock ProfileUploadVariableValue.NotFound
         when (
@@ -1619,6 +1633,7 @@ internal class RequestRepository(
                     updatedAt = now,
                     decidedAt = now,
                 ),
+                discardUploadedValues = true,
             )
             audit.record(
                 AuditRecord(

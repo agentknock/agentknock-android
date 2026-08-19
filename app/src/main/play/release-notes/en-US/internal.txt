@@ -1,1 +1,1 @@
-Test local automated Google Play publishing.
+Polishes navigation, request review, profiles, client management, notifications, and sensitive-data handling.

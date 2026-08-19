@@ -1,3 +1,5 @@
+@file:OptIn(androidx.compose.material3.ExperimentalMaterial3Api::class)
+
 package dev.agentknock.ui.vault
 
 import androidx.compose.foundation.layout.Arrangement
@@ -24,6 +26,11 @@ import androidx.compose.material3.SnackbarHost
 import androidx.compose.material3.SnackbarHostState
 import androidx.compose.material3.Text
 import androidx.compose.material3.TextButton
+import androidx.compose.material3.TopAppBar
+import androidx.compose.material3.Icon
+import androidx.compose.material3.IconButton
+import androidx.compose.material.icons.Icons
+import androidx.compose.material.icons.automirrored.outlined.ArrowBack
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.getValue
@@ -38,6 +45,7 @@ import androidx.compose.ui.platform.LocalResources
 import androidx.compose.ui.res.stringResource
 import androidx.compose.ui.text.font.FontFamily
 import androidx.compose.ui.text.TextRange
+import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.text.input.TextFieldValue
 import androidx.compose.ui.unit.dp
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
@@ -57,6 +65,8 @@ internal fun VaultScreen(
         onError: (String) -> Unit,
     ) -> Unit,
     onDone: (() -> Unit)?,
+    changeAddressInitially: Boolean = false,
+    onDeviceClaimed: () -> Unit,
     viewModel: VaultViewModel,
 ) {
     val claiming by viewModel.claiming.collectAsStateWithLifecycle()
@@ -64,8 +74,11 @@ internal fun VaultScreen(
     val resources = LocalResources.current
     val scope = rememberCoroutineScope()
     val snackbar = remember { SnackbarHostState() }
-    var editing by rememberSaveable {
-        mutableStateOf(configuration.active == null && configuration.candidate == null)
+    var editing by rememberSaveable(changeAddressInitially) {
+        mutableStateOf(
+            changeAddressInitially ||
+                (configuration.active == null && configuration.candidate == null),
+        )
     }
     var address by rememberSaveable { mutableStateOf(viewModel.generateAddress()) }
     var confirmChange by remember { mutableStateOf(false) }
@@ -80,82 +93,108 @@ internal fun VaultScreen(
         authenticate(title, { scope.launch { action() } }, ::report)
     }
 
-    fun claim() {
+    fun performClaim() {
         authenticateThen(resources.getString(R.string.confirm_claim_vault)) {
             editing = false
-            reportClaimResult(viewModel.stageAndClaim(address), resources::getString, ::report)
+            val result = viewModel.stageAndClaim(address)
+            reportClaimResult(result, resources::getString, ::report)
+            if (result == ClaimVaultResult.Claimed) {
+                onDeviceClaimed()
+                if (changeAddressInitially) onDone?.invoke()
+            }
         }
     }
 
+    fun claim() {
+        if (active == null) performClaim() else confirmChange = true
+    }
+
     Scaffold(snackbarHost = { SnackbarHost(snackbar) }) { padding ->
-        Column(
-            modifier = Modifier
-                .fillMaxSize()
-                .padding(padding)
-                .verticalScroll(rememberScrollState())
-                .padding(24.dp),
-            verticalArrangement = Arrangement.spacedBy(20.dp),
-        ) {
-            Row(
-                modifier = Modifier.fillMaxWidth(),
-                horizontalArrangement = Arrangement.SpaceBetween,
-                verticalAlignment = Alignment.CenterVertically,
+        Column(Modifier.fillMaxSize().padding(padding)) {
+            TopAppBar(
+                title = {
+                    Text(
+                        if (changeAddressInitially) {
+                            stringResource(R.string.change_vault_address)
+                        } else {
+                            stringResource(R.string.vault)
+                        },
+                        maxLines = 1,
+                        overflow = TextOverflow.Ellipsis,
+                    )
+                },
+                navigationIcon = {
+                    if (changeAddressInitially && onDone != null) {
+                        IconButton(onClick = onDone) {
+                            Icon(Icons.AutoMirrored.Outlined.ArrowBack, contentDescription = "Back")
+                        }
+                    }
+                },
+            )
+            Column(
+                modifier = Modifier
+                    .fillMaxSize()
+                    .verticalScroll(rememberScrollState())
+                    .padding(24.dp),
+                verticalArrangement = Arrangement.spacedBy(20.dp),
             ) {
-                Text(stringResource(R.string.vault), style = MaterialTheme.typography.headlineLarge)
-                onDone?.let { done ->
-                    TextButton(onClick = done) { Text(stringResource(R.string.done)) }
+                if (!changeAddressInitially) {
+                    active?.let { ActiveVaultCard(it) }
                 }
-            }
 
-            active?.let { ActiveVaultCard(it) }
+                if (active != null && !active.secretsAvailable) {
+                    WarningCard(
+                        title = stringResource(R.string.vault_keys_unavailable),
+                        message = stringResource(R.string.vault_keys_unavailable_explanation),
+                    )
+                }
 
-            if (active != null && !active.secretsAvailable) {
-                WarningCard(
-                    title = stringResource(R.string.vault_keys_unavailable),
-                    message = stringResource(R.string.vault_keys_unavailable_explanation),
-                )
-            }
-
-            if (candidate != null && !editing) {
-                CandidateCard(
-                    candidate = candidate,
-                    result = lastResult,
-                    claiming = claiming,
-                    onRetry = {
-                        authenticateThen(resources.getString(R.string.confirm_claim_vault)) {
-                            reportClaimResult(
-                                viewModel.retryClaim(),
-                                resources::getString,
-                                ::report,
-                            )
-                        }
-                    },
-                    onChooseAnother = {
-                        viewModel.clearClaimResult()
-                        address = viewModel.generateAddress()
-                        editing = true
-                    },
-                    onDiscard = active?.let {
-                        {
-                            authenticateThen(resources.getString(R.string.confirm_discard_claim)) {
-                                viewModel.discardCandidate()
+                if (candidate != null && !editing) {
+                    CandidateCard(
+                        candidate = candidate,
+                        result = lastResult,
+                        claiming = claiming,
+                        onRetry = {
+                            authenticateThen(resources.getString(R.string.confirm_claim_vault)) {
+                                val result = viewModel.retryClaim()
+                                reportClaimResult(
+                                    result,
+                                    resources::getString,
+                                    ::report,
+                                )
+                                if (result == ClaimVaultResult.Claimed) {
+                                    onDeviceClaimed()
+                                    if (changeAddressInitially) onDone?.invoke()
+                                }
                             }
-                        }
-                    },
-                )
-            } else if (editing || active == null) {
-                AddressEditor(
-                    address = address,
-                    activeAddress = active?.address,
-                    claiming = claiming,
-                    onAddressChange = { address = it },
-                    onGenerate = { address = viewModel.generateAddress() },
-                    onClaim = ::claim,
-                    onCancel = active?.let { { editing = false } },
-                )
-            } else {
-                Button(onClick = { confirmChange = true }) {
-                    Text(stringResource(R.string.change_vault_address))
+                        },
+                        onChooseAnother = {
+                            viewModel.clearClaimResult()
+                            address = viewModel.generateAddress()
+                            editing = true
+                        },
+                        onDiscard = active?.let {
+                            {
+                                authenticateThen(resources.getString(R.string.confirm_discard_claim)) {
+                                    viewModel.discardCandidate()
+                                }
+                            }
+                        },
+                    )
+                } else if (editing || active == null) {
+                    AddressEditor(
+                        address = address,
+                        activeAddress = active?.address,
+                        claiming = claiming,
+                        onAddressChange = { address = it },
+                        onGenerate = { address = viewModel.generateAddress() },
+                        onClaim = ::claim,
+                        onCancel = active?.let { { editing = false } },
+                    )
+                } else {
+                    Button(onClick = { confirmChange = true }) {
+                        Text(stringResource(R.string.change_vault_address))
+                    }
                 }
             }
         }
@@ -170,11 +209,20 @@ internal fun VaultScreen(
                 Button(
                     onClick = {
                         confirmChange = false
-                        viewModel.clearClaimResult()
-                        address = viewModel.generateAddress()
-                        editing = true
+                        if (editing) {
+                            performClaim()
+                        } else {
+                            viewModel.clearClaimResult()
+                            address = viewModel.generateAddress()
+                            editing = true
+                        }
                     },
-                ) { Text(stringResource(R.string.continue_action)) }
+                ) {
+                    Text(
+                        if (editing) stringResource(R.string.claim_vault_address)
+                        else stringResource(R.string.continue_action),
+                    )
+                }
             },
             dismissButton = {
                 TextButton(onClick = { confirmChange = false }) {

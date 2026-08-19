@@ -5,6 +5,7 @@ import androidx.test.ext.junit.runners.AndroidJUnit4
 import androidx.test.platform.app.InstrumentationRegistry
 import dev.agentknock.storage.AgentknockDatabase
 import dev.agentknock.storage.crypto.LocalEncryptionKeyEntity
+import dev.agentknock.storage.vault.VaultIdentityEntity
 import kotlinx.coroutines.runBlocking
 import kotlinx.coroutines.test.runTest
 import org.junit.After
@@ -134,6 +135,47 @@ class RequestDaoTransactionTest {
     }
 
     @Test
+    fun completedHistoryKeepsUsablePairingsButCanClearRevokedPairings() = runTest {
+        database.vaultDao().insertIdentity(
+            VaultIdentityEntity(
+                id = VAULT_ID,
+                role = "active",
+                address = "write-leader-hungry",
+                addressId = "address-id",
+                deviceId = DEVICE_ID,
+                devicePublicKey = ByteArray(32),
+                createdAt = 1,
+                claimedAt = 1,
+            ),
+        )
+        val rootId = dao.insertPairingRequest(
+            rootRequest().copy(state = "completed", completedAt = 2, updatedAt = 2),
+            pendingPairing().copy(
+                vaultIdentityId = VAULT_ID,
+                state = "active",
+                desiredRelayClientState = "active",
+                relayClientState = "active",
+                completedAt = 2,
+            ),
+        )
+
+        assertEquals(0, dao.clearCompletedHistory())
+        assertTrue(checkNotNull(dao.getRequestById(rootId)).listed)
+
+        val pairing = checkNotNull(dao.getPairing(rootId))
+        dao.updatePairing(
+            pairing.copy(
+                desiredRelayClientState = "revoked",
+                relayClientState = "revoked",
+                updatedAt = 3,
+            ),
+        )
+
+        assertEquals(1, dao.clearCompletedHistory())
+        assertTrue(!checkNotNull(dao.getRequestById(rootId)).listed)
+    }
+
+    @Test
     fun pairingRemovalAndItsFixedResponseAreAtomic() = runTest {
         val rootId = dao.insertPairingRequest(rootRequest(), pendingPairing())
         val pairing = checkNotNull(dao.getPairing(rootId)).copy(state = "active")
@@ -168,6 +210,74 @@ class RequestDaoTransactionTest {
         assertEquals("revoked", dao.getPairing(rootId)?.desiredRelayClientState)
         assertNull(dao.getPairingSecret(rootId, CURRENT_KIND))
         assertNull(dao.getPairingSecret(rootId, PREVIOUS_KIND))
+    }
+
+    @Test
+    fun decidingAProfileProposalDiscardsItsUploadedValues() = runTest {
+        val requestId = dao.insertProfileUploadRequest(
+            request = rootRequest().copy(
+                relayRequestId = "upload-request",
+                kind = "profile_upload",
+                state = "action_required",
+            ),
+            profileUpload = ProfileUploadRequestEntity(
+                requestId = 0,
+                pairingRequestId = null,
+                clientId = CLIENT_ID,
+                clientName = "Test client",
+                state = "review_pending",
+                cliVersion = "test",
+                mode = "CREATE",
+                proposedName = "test-profile",
+                acceptedName = null,
+                descriptionProvided = false,
+                description = null,
+                profileType = "environment",
+                variableNamesJson = "[\"TOKEN\"]",
+                addedVariablesJson = "[\"TOKEN\"]",
+                changedVariablesJson = "[]",
+                unchangedVariablesJson = "[]",
+                removedVariablesJson = "[]",
+                error = null,
+                transportResult = "RECEIVED",
+                transportMessage = null,
+                createdAt = 1,
+                updatedAt = 1,
+                decidedAt = null,
+                transportCompletedAt = null,
+            ),
+            variables = listOf(
+                ProfileUploadVariableEntity(
+                    id = "upload-variable",
+                    requestId = 0,
+                    name = "TOKEN",
+                    sensitive = true,
+                    encryptionFormat = 1,
+                    encryptionKeyId = KEY_ID,
+                    nonce = ByteArray(12),
+                    ciphertext = byteArrayOf(4),
+                    createdAt = 1,
+                ),
+            ),
+            requestSecret = requestSecret(),
+            currentPairingSecret = null,
+            previousPairingSecret = null,
+        )
+        assertEquals(1, dao.getProfileUploadVariables(requestId).size)
+
+        val request = checkNotNull(dao.getRequestById(requestId))
+        val upload = checkNotNull(dao.getProfileUploadRequest(requestId))
+        dao.updateProfileUploadRequest(
+            request = request.copy(state = "completed", completedAt = 2, updatedAt = 2),
+            profileUpload = upload.copy(state = "rejected", decidedAt = 2, updatedAt = 2),
+            discardUploadedValues = true,
+        )
+
+        assertTrue(dao.getProfileUploadVariables(requestId).isEmpty())
+        assertEquals(
+            "[\"TOKEN\"]",
+            dao.getProfileUploadRequest(requestId)?.variableNamesJson,
+        )
     }
 
     private fun rootRequest() = InboxRequestEntity(
@@ -290,6 +400,7 @@ class RequestDaoTransactionTest {
 
     private companion object {
         const val KEY_ID = "key"
+        const val VAULT_ID = "vault"
         const val CURRENT_ID = "current"
         const val PREVIOUS_ID = "previous"
         const val REQUEST_SECRET_ID = "request"

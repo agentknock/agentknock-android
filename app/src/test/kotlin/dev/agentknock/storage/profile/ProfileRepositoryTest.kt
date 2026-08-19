@@ -290,14 +290,19 @@ class ProfileRepositoryTest {
         fixture.createVariable(profileId, "AWS_REGION", "eu-west-1", false)
         val tokenId = fixture.createVariable(profileId, "AWS_TOKEN", "old-token", true)
 
+        val proposal = EnvironmentProfileProposal(
+            mode = ProfileUploadMode.UPDATE,
+            name = "aws-read-only",
+            descriptionProvided = false,
+            description = null,
+            variables = mapOf("AWS_TOKEN" to "new-token"),
+        )
+        val description = fixture.repository.describeEnvironmentProfileProposal(proposal)
+        check(description is EnvironmentProfileProposalResult.Valid)
+        assertEquals(listOf("AWS_REGION"), description.summary.unchangedVariables)
+
         val result = fixture.repository.applyEnvironmentProfileProposal(
-            EnvironmentProfileProposal(
-                mode = ProfileUploadMode.UPDATE,
-                name = "aws-read-only",
-                descriptionProvided = false,
-                description = null,
-                variables = mapOf("AWS_TOKEN" to "new-token"),
-            ),
+            proposal,
             acceptedName = "ignored-for-existing-profile",
         )
 

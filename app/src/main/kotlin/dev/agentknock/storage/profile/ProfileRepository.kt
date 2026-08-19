@@ -454,6 +454,9 @@ internal class ProfileRepository(
                 if (same) unchanged += name else changed += name
             }
         }
+        if (proposal.mode == ProfileUploadMode.UPDATE) {
+            unchanged += existingVariables.keys.minus(proposal.variables.keys).sorted()
+        }
         val removed = if (proposal.mode == ProfileUploadMode.REPLACE) {
             existingVariables.keys.minus(proposal.variables.keys).sorted()
         } else {

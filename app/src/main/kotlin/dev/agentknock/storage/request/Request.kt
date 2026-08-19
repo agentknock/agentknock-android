@@ -651,6 +651,19 @@ internal interface RequestDao {
     @Query("DELETE FROM pairing_secrets WHERE pairing_request_id = :pairingRequestId")
     suspend fun deletePairingSecrets(pairingRequestId: Long): Int
 
+    @Query("DELETE FROM profile_upload_variables WHERE request_id = :requestId")
+    suspend fun deleteProfileUploadVariables(requestId: Long): Int
+
+    @Query(
+        """
+        DELETE FROM profile_upload_variables
+        WHERE request_id IN (
+            SELECT request_id FROM profile_upload_requests WHERE state != 'review_pending'
+        )
+        """,
+    )
+    suspend fun discardDecidedProfileUploadValues(): Int
+
     @Transaction
     suspend fun revokePairing(pairing: PairingEntity) {
         check(updatePairing(pairing) == 1)
@@ -705,7 +718,9 @@ internal interface RequestDao {
           )
           AND id NOT IN (
             SELECT request_id FROM pairings
-            WHERE state = 'active' AND vault_identity_id IS NOT NULL
+            WHERE state = 'active'
+              AND vault_identity_id IS NOT NULL
+              AND COALESCE(desired_relay_client_state, relay_client_state) != 'revoked'
           )
         """,
     )
@@ -718,7 +733,9 @@ internal interface RequestDao {
           AND completed_at IS NOT NULL
           AND id NOT IN (
             SELECT request_id FROM pairings
-            WHERE state = 'active' AND vault_identity_id IS NOT NULL
+            WHERE state = 'active'
+              AND vault_identity_id IS NOT NULL
+              AND COALESCE(desired_relay_client_state, relay_client_state) != 'revoked'
           )
         """,
     )
@@ -890,9 +907,11 @@ internal interface RequestDao {
     suspend fun updateProfileUploadRequest(
         request: InboxRequestEntity,
         profileUpload: ProfileUploadRequestEntity,
+        discardUploadedValues: Boolean = false,
     ) {
         check(updateRequest(request) == 1)
         check(updateProfileUploadRequestRow(profileUpload) == 1)
+        if (discardUploadedValues) deleteProfileUploadVariables(request.id)
         trimCompletedHistory()
     }
 

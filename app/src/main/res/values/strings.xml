@@ -74,7 +74,6 @@
     <string name="unsupported_value">The stored value uses an unsupported encryption format</string>
     <string name="missing_value">That environment variable no longer exists</string>
     <string name="vault">Device setup</string>
-    <string name="done">Done</string>
     <string name="vault_ready">Ready for pairing</string>
     <string name="vault_needs_replacement">Device keys unavailable</string>
     <string name="vault_keys_unavailable">The device keys are unavailable on this phone</string>

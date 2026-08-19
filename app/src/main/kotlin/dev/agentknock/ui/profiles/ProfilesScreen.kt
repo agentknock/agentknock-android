@@ -30,8 +30,14 @@ import androidx.compose.material3.Card
 import androidx.compose.material3.CardDefaults
 import androidx.compose.material3.Checkbox
 import androidx.compose.material3.CircularProgressIndicator
+import androidx.compose.material3.DropdownMenu
+import androidx.compose.material3.DropdownMenuItem
 import androidx.compose.material3.HorizontalDivider
 import androidx.compose.material.icons.Icons
+import androidx.compose.material.icons.automirrored.outlined.ArrowBack
+import androidx.compose.material.icons.outlined.Add
+import androidx.compose.material.icons.outlined.Edit
+import androidx.compose.material.icons.outlined.MoreVert
 import androidx.compose.material.icons.outlined.Settings
 import androidx.compose.material3.Icon
 import androidx.compose.material3.IconButton
@@ -46,6 +52,7 @@ import androidx.compose.material3.TextButton
 import androidx.compose.material3.TopAppBar
 import androidx.compose.material3.VerticalDivider
 import androidx.compose.runtime.Composable
+import androidx.compose.runtime.DisposableEffect
 import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
@@ -59,11 +66,15 @@ import androidx.compose.ui.platform.LocalResources
 import androidx.compose.ui.res.pluralStringResource
 import androidx.compose.ui.res.stringResource
 import androidx.compose.ui.text.font.FontFamily
+import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.text.input.PasswordVisualTransformation
 import androidx.compose.ui.text.input.VisualTransformation
 import androidx.compose.ui.unit.dp
 import androidx.lifecycle.viewmodel.compose.viewModel
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
+import androidx.lifecycle.compose.LocalLifecycleOwner
+import androidx.lifecycle.Lifecycle
+import androidx.lifecycle.LifecycleEventObserver
 import dev.agentknock.R
 import dev.agentknock.storage.profile.CreateEnvironmentVariableResult
 import dev.agentknock.storage.profile.CreateProfileResult
@@ -98,6 +109,7 @@ internal fun ProfilesScreen(
         onError: (String) -> Unit,
     ) -> Unit,
     onOpenSettings: () -> Unit,
+    onTopLevelChanged: (Boolean) -> Unit,
     viewModel: ProfilesViewModel = viewModel(),
 ) {
     val profiles by viewModel.profiles.collectAsStateWithLifecycle()
@@ -112,6 +124,19 @@ internal fun ProfilesScreen(
     var profilePendingDeletion by remember { mutableStateOf<ProfileDetails?>(null) }
     var variablePendingDeletion by remember { mutableStateOf<EnvironmentVariableMetadata?>(null) }
     var revealedValues by remember { mutableStateOf<Map<String, String>>(emptyMap()) }
+    val lifecycle = LocalLifecycleOwner.current.lifecycle
+
+    DisposableEffect(lifecycle) {
+        val observer = LifecycleEventObserver { _, event ->
+            if (event == Lifecycle.Event.ON_STOP) revealedValues = emptyMap()
+        }
+        lifecycle.addObserver(observer)
+        onDispose { lifecycle.removeObserver(observer) }
+    }
+
+    LaunchedEffect(selection, profileEditor, variableEditor) {
+        onTopLevelChanged(selection == null && profileEditor == null && variableEditor == null)
+    }
 
     LaunchedEffect(selection) {
         revealedValues = emptyMap()
@@ -436,7 +461,12 @@ private fun ProfileList(
         TopAppBar(
             title = { Text(stringResource(R.string.profiles)) },
             actions = {
-                Button(onClick = onCreate) { Text(stringResource(R.string.new_profile)) }
+                IconButton(onClick = onCreate) {
+                    Icon(
+                        Icons.Outlined.Add,
+                        contentDescription = stringResource(R.string.new_profile),
+                    )
+                }
                 IconButton(onClick = onOpenSettings) {
                     Icon(Icons.Outlined.Settings, contentDescription = "Settings")
                 }
@@ -515,42 +545,77 @@ private fun ProfileDetail(
     onCopy: (EnvironmentVariableMetadata) -> Unit,
     modifier: Modifier = Modifier,
 ) {
+    var menuExpanded by remember(profile.id) { mutableStateOf(false) }
     Column(modifier) {
-        if (showBack) {
-            TextButton(onClick = onBack, modifier = Modifier.padding(start = 8.dp, top = 8.dp)) {
-                Text(stringResource(R.string.back))
-            }
-        }
-        Row(
+        TopAppBar(
+            title = { Text(profile.name, maxLines = 1, overflow = TextOverflow.Ellipsis) },
+            navigationIcon = {
+                if (showBack) {
+                    IconButton(onClick = onBack) {
+                        Icon(
+                            Icons.AutoMirrored.Outlined.ArrowBack,
+                            contentDescription = stringResource(R.string.back),
+                        )
+                    }
+                }
+            },
+            actions = {
+                IconButton(onClick = onEditProfile) {
+                    Icon(
+                        Icons.Outlined.Edit,
+                        contentDescription = stringResource(R.string.edit_profile),
+                    )
+                }
+                IconButton(onClick = { menuExpanded = true }) {
+                    Icon(Icons.Outlined.MoreVert, contentDescription = "More options")
+                }
+                DropdownMenu(
+                    expanded = menuExpanded,
+                    onDismissRequest = { menuExpanded = false },
+                ) {
+                    DropdownMenuItem(
+                        text = {
+                            Text(
+                                stringResource(R.string.delete_profile),
+                                color = MaterialTheme.colorScheme.error,
+                            )
+                        },
+                        onClick = {
+                            menuExpanded = false
+                            onDeleteProfile()
+                        },
+                    )
+                }
+            },
+        )
+        Column(
             modifier = Modifier
                 .fillMaxWidth()
                 .padding(horizontal = 20.dp, vertical = 12.dp),
-            horizontalArrangement = Arrangement.spacedBy(8.dp),
-            verticalAlignment = Alignment.CenterVertically,
+            verticalArrangement = Arrangement.spacedBy(4.dp),
         ) {
-            Column(Modifier.weight(1f)) {
-                Text(profile.name, style = MaterialTheme.typography.headlineMedium)
+            Text(
+                profile.type.displayName(),
+                style = MaterialTheme.typography.labelLarge,
+                color = MaterialTheme.colorScheme.primary,
+            )
+            if (profile.description.isNotBlank()) {
                 Text(
-                    profile.type.displayName(),
-                    style = MaterialTheme.typography.labelLarge,
-                    color = MaterialTheme.colorScheme.primary,
-                )
-                if (profile.description.isNotBlank()) {
-                    Text(
-                        profile.description,
-                        style = MaterialTheme.typography.bodyLarge,
-                        color = MaterialTheme.colorScheme.onSurfaceVariant,
-                    )
-                }
-                Text(
-                    "${stringResource(R.string.created, formatTimestamp(profile.createdAt))} · " +
-                        stringResource(R.string.updated, formatTimestamp(profile.updatedAt)),
-                    style = MaterialTheme.typography.labelSmall,
+                    profile.description,
+                    style = MaterialTheme.typography.bodyLarge,
                     color = MaterialTheme.colorScheme.onSurfaceVariant,
                 )
             }
-            TextButton(onClick = onEditProfile) { Text(stringResource(R.string.edit_profile)) }
-            TextButton(onClick = onDeleteProfile) { Text(stringResource(R.string.delete_profile)) }
+            Text(
+                stringResource(R.string.created, formatTimestamp(profile.createdAt)),
+                style = MaterialTheme.typography.labelSmall,
+                color = MaterialTheme.colorScheme.onSurfaceVariant,
+            )
+            Text(
+                stringResource(R.string.updated, formatTimestamp(profile.updatedAt)),
+                style = MaterialTheme.typography.labelSmall,
+                color = MaterialTheme.colorScheme.onSurfaceVariant,
+            )
         }
         HorizontalDivider()
         Row(
@@ -564,7 +629,11 @@ private fun ProfileDetail(
                 stringResource(R.string.environment_variables),
                 style = MaterialTheme.typography.titleLarge,
             )
-            Button(onClick = onAddVariable) { Text(stringResource(R.string.add_variable)) }
+            Button(onClick = onAddVariable) {
+                Icon(Icons.Outlined.Add, contentDescription = null)
+                Spacer(Modifier.width(6.dp))
+                Text(stringResource(R.string.add_variable))
+            }
         }
         if (profile.environmentVariables.isEmpty()) {
             EmptyMessage(
@@ -694,7 +763,12 @@ private fun ProfileEditorScreen(
                     )
                 },
                 navigationIcon = {
-                    TextButton(onClick = onDismiss) { Text(stringResource(R.string.back)) }
+                    IconButton(onClick = onDismiss) {
+                        Icon(
+                            Icons.AutoMirrored.Outlined.ArrowBack,
+                            contentDescription = stringResource(R.string.back),
+                        )
+                    }
                 },
             )
         },
@@ -736,6 +810,11 @@ private fun ProfileEditorScreen(
                     }
                     if (validationError == null) onSave(name, description)
                 },
+                enabled = name.isNotBlank() && (
+                    profile == null ||
+                        name != profile.name ||
+                        description != profile.description
+                    ),
                 modifier = Modifier.fillMaxWidth(),
             ) {
                 Text(
@@ -790,7 +869,12 @@ private fun EnvironmentVariableEditorScreen(
                     )
                 },
                 navigationIcon = {
-                    TextButton(onClick = onDismiss) { Text(stringResource(R.string.back)) }
+                    IconButton(onClick = onDismiss) {
+                        Icon(
+                            Icons.AutoMirrored.Outlined.ArrowBack,
+                            contentDescription = stringResource(R.string.back),
+                        )
+                    }
                 },
                 actions = {
                     onDelete?.let {
@@ -952,6 +1036,13 @@ private fun EnvironmentVariableEditorScreen(
                                 onSave(name, value, sensitive, notes, replaceValue)
                             }
                         },
+                        enabled = environmentVariableName.matches(name) && (
+                            variable == null ||
+                                name != variable.name ||
+                                sensitive != variable.sensitive ||
+                                notes != variable.notes ||
+                                replaceValue
+                            ),
                         modifier = Modifier.fillMaxWidth(),
                     ) {
                         Text(

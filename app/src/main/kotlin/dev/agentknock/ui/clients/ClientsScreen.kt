@@ -45,6 +45,7 @@ import androidx.compose.material3.Text
 import androidx.compose.material3.TextButton
 import androidx.compose.material3.TopAppBar
 import androidx.compose.runtime.Composable
+import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
@@ -53,6 +54,7 @@ import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.text.font.FontFamily
+import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import androidx.lifecycle.viewmodel.compose.viewModel
@@ -68,6 +70,8 @@ import kotlinx.coroutines.launch
 @Composable
 internal fun ClientsScreen(
     onOpenSettings: () -> Unit,
+    onTopLevelChanged: (Boolean) -> Unit,
+    authenticate: (String, () -> Unit, (String) -> Unit) -> Unit,
     viewModel: ClientsViewModel = viewModel(),
 ) {
     val clients by viewModel.clients.collectAsStateWithLifecycle()
@@ -76,6 +80,14 @@ internal fun ClientsScreen(
     val configuration by viewModel.configuration.collectAsStateWithLifecycle()
     val snackbar = remember { SnackbarHostState() }
     val scope = rememberCoroutineScope()
+
+    fun report(message: String) {
+        scope.launch { snackbar.showSnackbar(message) }
+    }
+
+    LaunchedEffect(selection) {
+        onTopLevelChanged(selection == null)
+    }
 
     Scaffold(snackbarHost = { SnackbarHost(snackbar) }) { padding ->
         if (selection == null) {
@@ -98,20 +110,42 @@ internal fun ClientsScreen(
                     client = client,
                     onBack = { viewModel.selectClient(null) },
                     onRename = { name ->
-                        scope.launch {
-                            val result = viewModel.rename(client.clientId, name)
-                            snackbar.showSnackbar(
-                                if (result == ClientChangeResult.CHANGED) "Client renamed" else "Client is no longer available",
-                            )
-                        }
+                        authenticate(
+                            "Rename client",
+                            {
+                                scope.launch {
+                                    val result = viewModel.rename(client.clientId, name.trim())
+                                    snackbar.showSnackbar(
+                                        if (result == ClientChangeResult.CHANGED) "Client renamed" else "Client is no longer available",
+                                    )
+                                }
+                            },
+                            ::report,
+                        )
                     },
                     onSetState = { state ->
-                        scope.launch {
-                            val result = viewModel.setState(client.clientId, state)
-                            snackbar.showSnackbar(
-                                if (result == ClientChangeResult.CHANGED) "Change sent to the relay" else "Client state could not be changed",
-                            )
-                        }
+                        authenticate(
+                            "${state.actionLabel()} client",
+                            {
+                                scope.launch {
+                                    val result = viewModel.setState(client.clientId, state)
+                                    if (
+                                        result == ClientChangeResult.CHANGED &&
+                                        state == RelayClientState.REVOKED
+                                    ) {
+                                        viewModel.selectClient(null)
+                                    }
+                                    snackbar.showSnackbar(
+                                        if (result == ClientChangeResult.CHANGED) {
+                                            state.successMessage()
+                                        } else {
+                                            "Client state could not be changed"
+                                        },
+                                    )
+                                }
+                            },
+                            ::report,
+                        )
                     },
                     modifier = Modifier.fillMaxSize().padding(padding),
                 )
@@ -205,7 +239,7 @@ private fun ClientDetail(
 
     Column(modifier) {
         TopAppBar(
-            title = { Text(client.name) },
+            title = { Text(client.name, maxLines = 1, overflow = TextOverflow.Ellipsis) },
             navigationIcon = {
                 IconButton(onClick = onBack) {
                     Icon(Icons.AutoMirrored.Outlined.ArrowBack, contentDescription = "Back")
@@ -323,7 +357,7 @@ private fun ClientDetail(
             },
             confirmButton = {
                 TextButton(
-                    enabled = name.isNotBlank(),
+                    enabled = name.isNotBlank() && name.trim() != client.name,
                     onClick = {
                         onRename(name)
                         showRename = false
@@ -396,6 +430,13 @@ private fun RelayClientState.actionLabel(): String = when (this) {
     RelayClientState.ACTIVE -> "Resume"
     RelayClientState.SUSPENDED -> "Suspend"
     RelayClientState.REVOKED -> "Revoke"
+}
+
+private fun RelayClientState.successMessage(): String = when (this) {
+    RelayClientState.ACTIVE -> "Client resumed"
+    RelayClientState.SUSPENDED -> "Client suspended"
+    RelayClientState.REVOKED -> "Client revoked"
+    RelayClientState.PENDING -> "Client state updated"
 }
 
 private fun formatTimestamp(timestamp: Long): String =

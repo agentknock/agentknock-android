@@ -22,20 +22,13 @@ internal data class RequestNavigation(
 
 class MainActivity : FragmentActivity() {
     private val requestNavigation = MutableStateFlow(RequestNavigation())
-    private val requestNotificationPermission = registerForActivityResult(
+    private val notificationPermissionRequestLauncher = registerForActivityResult(
         ActivityResultContracts.RequestPermission(),
     ) {}
 
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
         enableEdgeToEdge()
-        if (
-            Build.VERSION.SDK_INT >= Build.VERSION_CODES.TIRAMISU &&
-            checkSelfPermission(Manifest.permission.POST_NOTIFICATIONS) !=
-            PackageManager.PERMISSION_GRANTED
-        ) {
-            requestNotificationPermission.launch(Manifest.permission.POST_NOTIFICATIONS)
-        }
         handleIntent(intent)
         val authenticator = DeviceAuthenticator(this)
         setContent {
@@ -43,8 +36,19 @@ class MainActivity : FragmentActivity() {
                 AgentknockScreen(
                     authenticate = authenticator::authenticate,
                     requestNavigation = requestNavigation,
+                    requestNotificationPermission = ::requestNotificationPermission,
                 )
             }
+        }
+    }
+
+    private fun requestNotificationPermission() {
+        if (
+            Build.VERSION.SDK_INT >= Build.VERSION_CODES.TIRAMISU &&
+            checkSelfPermission(Manifest.permission.POST_NOTIFICATIONS) !=
+            PackageManager.PERMISSION_GRANTED
+        ) {
+            notificationPermissionRequestLauncher.launch(Manifest.permission.POST_NOTIFICATIONS)
         }
     }
 

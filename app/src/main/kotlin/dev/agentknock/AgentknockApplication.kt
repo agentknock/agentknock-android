@@ -58,6 +58,7 @@ internal class ApplicationContainer(application: Application) {
     // Every future worker and messaging entry point must await this before using local state.
     val localStorage = applicationScope.async(start = CoroutineStart.DEFAULT) {
         encryptionKeyManager.initialize()
+        database.requestDao().discardDecidedProfileUploadValues()
     }
 
     val audit = AuditRepository(database.auditDao())

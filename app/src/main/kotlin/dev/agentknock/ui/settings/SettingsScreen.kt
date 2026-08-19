@@ -4,6 +4,8 @@ package dev.agentknock.ui.settings
 
 import android.Manifest
 import android.app.NotificationManager
+import android.content.ClipData
+import android.content.ClipboardManager
 import android.content.Intent
 import android.content.pm.PackageManager
 import android.net.Uri
@@ -28,9 +30,12 @@ import androidx.compose.foundation.verticalScroll
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.automirrored.outlined.ArrowBack
 import androidx.compose.material.icons.outlined.ChevronRight
+import androidx.compose.material.icons.outlined.ContentCopy
 import androidx.compose.material.icons.outlined.DataUsage
 import androidx.compose.material.icons.outlined.DeleteForever
 import androidx.compose.material.icons.outlined.Description
+import androidx.compose.material.icons.outlined.ExpandLess
+import androidx.compose.material.icons.outlined.ExpandMore
 import androidx.compose.material.icons.outlined.History
 import androidx.compose.material.icons.outlined.Info
 import androidx.compose.material.icons.outlined.Lock
@@ -66,6 +71,7 @@ import androidx.compose.ui.Modifier
 import androidx.compose.ui.graphics.vector.ImageVector
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.text.font.FontFamily
+import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
 import androidx.core.content.ContextCompat
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
@@ -99,6 +105,7 @@ internal fun SettingsScreen(
     onClose: () -> Unit,
     onChangeAddress: () -> Unit,
     authenticate: (String, () -> Unit, (String) -> Unit) -> Unit,
+    requestNotificationPermission: () -> Unit,
     viewModel: SettingsViewModel = viewModel(),
 ) {
     var page by rememberSaveable { mutableStateOf(SettingsPage.OVERVIEW) }
@@ -139,14 +146,24 @@ internal fun SettingsScreen(
                 onBack = ::back,
                 onChangeAddress = onChangeAddress,
                 onSetPairingEnabled = { enabled ->
-                    scope.launch {
-                        snackbar.showSnackbar(viewModel.setPairingEnabled(enabled).message())
-                    }
+                    authenticate(
+                        if (enabled) "Resume new pairings" else "Pause new pairings",
+                        {
+                            scope.launch {
+                                snackbar.showSnackbar(
+                                    viewModel.setPairingEnabled(enabled).message(enabled),
+                                )
+                            }
+                        },
+                        { scope.launch { snackbar.showSnackbar(it) } },
+                    )
                 },
+                report = { scope.launch { snackbar.showSnackbar(it) } },
                 modifier = modifier,
             )
             SettingsPage.NOTIFICATIONS -> NotificationsSettings(
                 pushState = pushState?.wireName,
+                requestNotificationPermission = requestNotificationPermission,
                 onBack = ::back,
                 modifier = modifier,
             )
@@ -243,9 +260,13 @@ private fun DeviceAndPairing(
     onBack: () -> Unit,
     onChangeAddress: () -> Unit,
     onSetPairingEnabled: (Boolean) -> Unit,
+    report: (String) -> Unit,
     modifier: Modifier,
 ) {
     var confirmPairingChange by remember { mutableStateOf(false) }
+    var technicalExpanded by remember { mutableStateOf(false) }
+    val context = LocalContext.current
+    val pairingCommand = identity?.let { "agentknock pairing start ${it.address}" }
     Column(modifier) {
         PageTopBar("Device & pairing", onBack)
         Column(
@@ -268,11 +289,32 @@ private fun DeviceAndPairing(
                 Text(if (identity.pairingEnabled) "Pause new pairings" else "Resume new pairings")
             }
             HorizontalDivider()
-            Text("Pair a client", style = MaterialTheme.typography.titleMedium)
-            SelectionContainer {
+            if (identity.pairingEnabled) {
+                Text("Pair a client", style = MaterialTheme.typography.titleMedium)
+                SelectionContainer {
+                    Text(
+                        checkNotNull(pairingCommand),
+                        fontFamily = FontFamily.Monospace,
+                        color = MaterialTheme.colorScheme.onSurfaceVariant,
+                    )
+                }
+                OutlinedButton(
+                    onClick = {
+                        context.getSystemService(ClipboardManager::class.java).setPrimaryClip(
+                            ClipData.newPlainText("Agentknock pairing command", pairingCommand),
+                        )
+                        report("Pairing command copied")
+                    },
+                    modifier = Modifier.fillMaxWidth(),
+                ) {
+                    Icon(Icons.Outlined.ContentCopy, contentDescription = null)
+                    Spacer(Modifier.width(8.dp))
+                    Text("Copy pairing command")
+                }
+            } else {
+                Text("Pairing is paused", style = MaterialTheme.typography.titleMedium)
                 Text(
-                    "agentknock pairing start ${identity.address}",
-                    fontFamily = FontFamily.Monospace,
+                    "Resume new pairings before giving a pairing command to a client.",
                     color = MaterialTheme.colorScheme.onSurfaceVariant,
                 )
             }
@@ -284,11 +326,19 @@ private fun DeviceAndPairing(
                 "Existing clients keep working after the pairing address changes.",
                 color = MaterialTheme.colorScheme.onSurfaceVariant,
             )
-            SelectionContainer {
-                Column(verticalArrangement = Arrangement.spacedBy(4.dp)) {
-                    Text("Device ID", style = MaterialTheme.typography.labelMedium)
-                    Text(identity.deviceId, fontFamily = FontFamily.Monospace)
-                }
+            Row(
+                Modifier.fillMaxWidth().clickable { technicalExpanded = !technicalExpanded },
+                horizontalArrangement = Arrangement.SpaceBetween,
+                verticalAlignment = Alignment.CenterVertically,
+            ) {
+                Text("Technical details", style = MaterialTheme.typography.titleMedium)
+                Icon(
+                    if (technicalExpanded) Icons.Outlined.ExpandLess else Icons.Outlined.ExpandMore,
+                    contentDescription = null,
+                )
+            }
+            if (technicalExpanded) SelectionContainer {
+                LabeledValue("Device ID", identity.deviceId, true)
             }
         }
     }
@@ -296,7 +346,15 @@ private fun DeviceAndPairing(
         AlertDialog(
             onDismissRequest = { confirmPairingChange = false },
             title = { Text(if (identity.pairingEnabled) "Pause new pairings?" else "Resume new pairings?") },
-            text = { Text("An already admitted pairing request is not affected.") },
+            text = {
+                Text(
+                    if (identity.pairingEnabled) {
+                        "New clients will not be able to start pairing. A pairing request already shown in Requests is unaffected."
+                    } else {
+                        "New clients will be able to start pairing again. A pairing request already shown in Requests is unaffected."
+                    },
+                )
+            },
             confirmButton = {
                 TextButton(onClick = {
                     onSetPairingEnabled(!identity.pairingEnabled)
@@ -309,7 +367,12 @@ private fun DeviceAndPairing(
 }
 
 @Composable
-private fun NotificationsSettings(pushState: String?, onBack: () -> Unit, modifier: Modifier) {
+private fun NotificationsSettings(
+    pushState: String?,
+    requestNotificationPermission: () -> Unit,
+    onBack: () -> Unit,
+    modifier: Modifier,
+) {
     val context = LocalContext.current
     val notificationsEnabled = context.getSystemService(NotificationManager::class.java)
         .areNotificationsEnabled()
@@ -320,8 +383,20 @@ private fun NotificationsSettings(pushState: String?, onBack: () -> Unit, modifi
                 if (notificationsEnabled) "Notifications enabled" else "Notifications disabled",
                 style = MaterialTheme.typography.titleLarge,
             )
-            Text("Request notifications open Agentknock so the complete request can be reviewed.")
-            Button(
+            Text(
+                "Notifications identify the client and request. Profile access requests can be approved or denied directly when Android allows authentication from the notification; other requests open in Agentknock for review.",
+            )
+            Text(
+                "Android controls how much notification content is visible on the lock screen.",
+                color = MaterialTheme.colorScheme.onSurfaceVariant,
+            )
+            if (!notificationsEnabled && Build.VERSION.SDK_INT >= Build.VERSION_CODES.TIRAMISU) {
+                Button(
+                    onClick = requestNotificationPermission,
+                    modifier = Modifier.fillMaxWidth(),
+                ) { Text("Allow notifications") }
+            }
+            OutlinedButton(
                 onClick = {
                     val intent = Intent(Settings.ACTION_APP_NOTIFICATION_SETTINGS).apply {
                         putExtra(Settings.EXTRA_APP_PACKAGE, context.packageName)
@@ -387,7 +462,15 @@ private fun DataAndHistory(
             SettingsRow(Icons.Outlined.History, "Audit log", "${counts.auditEvents} events · kept for one year", onAudit)
             ListItem(
                 headlineContent = { Text("On this device") },
-                supportingContent = { Text("${counts.profiles} profiles · ${counts.clients} clients · ${counts.requests} requests") },
+                supportingContent = {
+                    Text(
+                        listOf(
+                            counts.profiles.countLabel("profile"),
+                            counts.clients.countLabel("client"),
+                            counts.requests.countLabel("request"),
+                        ).joinToString(" · "),
+                    )
+                },
             )
             HorizontalDivider()
             ListItem(
@@ -548,7 +631,7 @@ private fun Diagnostics(syncing: Boolean, result: RequestSyncResult?, onBack: ()
             Text(
                 when {
                     syncing -> "Synchronizing"
-                    result == null || result == RequestSyncResult.Success -> "Caught up"
+                    result == null || result == RequestSyncResult.Success -> "Up to date"
                     else -> "Temporarily unavailable"
                 },
                 style = MaterialTheme.typography.titleLarge,
@@ -561,7 +644,7 @@ private fun Diagnostics(syncing: Boolean, result: RequestSyncResult?, onBack: ()
                 Text("Reconnect and synchronize now")
             }
             SelectionContainer {
-                LabeledValue("Relay", "https://relay.agentknock.dev", true)
+                LabeledValue("Relay", "wss://relay.agentknock.dev", true)
             }
         }
     }
@@ -583,7 +666,7 @@ private fun About(onBack: () -> Unit, modifier: Modifier) {
 @Composable
 private fun PageTopBar(title: String, onBack: () -> Unit) {
     TopAppBar(
-        title = { Text(title) },
+        title = { Text(title, maxLines = 1, overflow = TextOverflow.Ellipsis) },
         navigationIcon = {
             IconButton(onClick = onBack) {
                 Icon(Icons.AutoMirrored.Outlined.ArrowBack, contentDescription = "Back")
@@ -600,8 +683,8 @@ private fun LabeledValue(label: String, value: String, monospace: Boolean = fals
     }
 }
 
-private fun DeviceManagementResult.message(): String = when (this) {
-    DeviceManagementResult.Changed -> "Pairing setting changed"
+private fun DeviceManagementResult.message(enabled: Boolean): String = when (this) {
+    DeviceManagementResult.Changed -> if (enabled) "New pairings resumed" else "New pairings paused"
     DeviceManagementResult.NoDevice -> "Device setup is incomplete"
     DeviceManagementResult.SecretsUnavailable -> "Device keys are unavailable"
     DeviceManagementResult.SecretsCorrupted -> "Device keys could not be verified"
@@ -610,6 +693,8 @@ private fun DeviceManagementResult.message(): String = when (this) {
     is DeviceManagementResult.Unavailable -> message ?: "The relay is unavailable"
     DeviceManagementResult.InvalidResponse -> "The relay returned an invalid response"
 }
+
+private fun Int.countLabel(noun: String): String = "$this $noun${if (this == 1) "" else "s"}"
 
 private fun RequestSyncResult?.diagnosticMessage(): String? = when (this) {
     null, RequestSyncResult.Success -> null
