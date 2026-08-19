@@ -5,5 +5,12 @@
 build/
 captures/
 local.properties
+# Local signing and Play publishing credentials
+*.jks
+*.keystore
+*.p12
+*.pfx
+/agentknock-*.json
+/play-publisher.json
 **/build/
 .DS_Store

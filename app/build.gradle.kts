@@ -1,10 +1,32 @@
+import com.github.triplet.gradle.androidpublisher.ReleaseStatus
+
 plugins {
     alias(libs.plugins.android.application)
     alias(libs.plugins.compose.compiler)
     alias(libs.plugins.google.services)
     alias(libs.plugins.kotlin.serialization)
     alias(libs.plugins.ksp)
+    alias(libs.plugins.play.publisher)
     alias(libs.plugins.room3)
+}
+
+val agentknockVersionCode = 2
+val agentknockVersionName = "0.1.0"
+val uploadStoreFile = providers.environmentVariable("AGENTKNOCK_UPLOAD_STORE_FILE")
+val uploadStorePassword = providers.environmentVariable("AGENTKNOCK_UPLOAD_STORE_PASSWORD")
+val uploadKeyAlias = providers.environmentVariable("AGENTKNOCK_UPLOAD_KEY_ALIAS")
+val uploadKeyPassword = providers.environmentVariable("AGENTKNOCK_UPLOAD_KEY_PASSWORD")
+val uploadSigningValues = listOf(
+    uploadStoreFile,
+    uploadStorePassword,
+    uploadKeyAlias,
+    uploadKeyPassword,
+)
+val uploadSigningConfigured = uploadSigningValues.all { it.isPresent }
+val playCredentialsFile = providers.environmentVariable("AGENTKNOCK_PLAY_CREDENTIALS_FILE")
+
+require(uploadSigningValues.none { it.isPresent } || uploadSigningConfigured) {
+    "Set all Agentknock upload-signing environment variables or none of them"
 }
 
 android {
@@ -15,8 +37,8 @@ android {
         applicationId = "dev.agentknock"
         minSdk = 26
         targetSdk = 37
-        versionCode = 1
-        versionName = "0.1.0"
+        versionCode = agentknockVersionCode
+        versionName = agentknockVersionName
         testInstrumentationRunner = "androidx.test.runner.AndroidJUnitRunner"
     }
 
@@ -25,9 +47,37 @@ android {
         targetCompatibility = JavaVersion.VERSION_17
     }
 
+    signingConfigs {
+        if (uploadSigningConfigured) {
+            create("upload") {
+                storeFile = file(uploadStoreFile.get())
+                storePassword = uploadStorePassword.get()
+                keyAlias = uploadKeyAlias.get()
+                keyPassword = uploadKeyPassword.get()
+            }
+        }
+    }
+
+    buildTypes {
+        release {
+            signingConfig = signingConfigs.findByName("upload")
+        }
+    }
+
     buildFeatures {
         buildConfig = true
         compose = true
+    }
+}
+
+play {
+    defaultToAppBundles.set(true)
+    releaseName.set("$agentknockVersionName-internal.$agentknockVersionCode")
+    releaseStatus.set(ReleaseStatus.COMPLETED)
+    track.set("internal")
+
+    if (playCredentialsFile.isPresent) {
+        serviceAccountCredentials.set(file(playCredentialsFile.get()))
     }
 }
 
@@ -76,4 +126,28 @@ dependencies {
 
     debugImplementation(libs.androidx.compose.ui.test.manifest)
     debugImplementation(libs.androidx.compose.ui.tooling)
+}
+
+val requireReleaseSigning = tasks.register("requireReleaseSigning") {
+    doLast {
+        check(uploadSigningConfigured) {
+            "Release builds require the Agentknock upload-signing environment variables"
+        }
+    }
+}
+
+tasks.matching { it.name == "bundleRelease" || it.name == "packageRelease" }.configureEach {
+    dependsOn(requireReleaseSigning)
+}
+
+val requirePlayCredentials = tasks.register("requirePlayCredentials") {
+    doLast {
+        check(playCredentialsFile.isPresent) {
+            "Play publishing requires AGENTKNOCK_PLAY_CREDENTIALS_FILE"
+        }
+    }
+}
+
+tasks.matching { it.name == "publishReleaseBundle" }.configureEach {
+    dependsOn(requirePlayCredentials)
 }

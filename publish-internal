@@ -1,0 +1,29 @@
+#!/usr/bin/env bash
+set -euo pipefail
+
+agentknock_project_dir="$(cd -- "$(dirname -- "${BASH_SOURCE[0]}")" && pwd)"
+agentknock_data_home="${XDG_DATA_HOME:-${HOME}/.local/share}"
+agentknock_credentials_dir="${agentknock_data_home}/agentknock-android"
+agentknock_password_file="${agentknock_credentials_dir}/upload-keystore.password"
+
+export AGENTKNOCK_PLAY_CREDENTIALS_FILE="${agentknock_credentials_dir}/play-publisher.json"
+export AGENTKNOCK_UPLOAD_STORE_FILE="${agentknock_credentials_dir}/upload-keystore.p12"
+export AGENTKNOCK_UPLOAD_KEY_ALIAS="agentknock-upload"
+
+for agentknock_required_file in \
+    "${AGENTKNOCK_PLAY_CREDENTIALS_FILE}" \
+    "${AGENTKNOCK_UPLOAD_STORE_FILE}" \
+    "${agentknock_password_file}"
+do
+    if [[ ! -f "${agentknock_required_file}" ]]; then
+        echo "Missing release credential: ${agentknock_required_file}" >&2
+        exit 1
+    fi
+done
+
+IFS= read -r AGENTKNOCK_UPLOAD_STORE_PASSWORD < "${agentknock_password_file}"
+export AGENTKNOCK_UPLOAD_STORE_PASSWORD
+export AGENTKNOCK_UPLOAD_KEY_PASSWORD="${AGENTKNOCK_UPLOAD_STORE_PASSWORD}"
+
+cd "${agentknock_project_dir}"
+exec nix develop --command ./gradlew publishReleaseBundle "$@"
