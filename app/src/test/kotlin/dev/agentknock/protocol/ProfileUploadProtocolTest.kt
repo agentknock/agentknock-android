@@ -61,6 +61,44 @@ class ProfileUploadProtocolTest {
     }
 
     @Test
+    fun `decodes an explicit null description without turning it into text`() {
+        val request = protocol.decodeRequest(
+            """
+            {
+              "cli_version":"0.2.0",
+              "method":"ProfileUpload",
+              "mode":"UPDATE",
+              "profile":{
+                "name":"existing",
+                "description":null,
+                "type":"environment",
+                "variables":{}
+              }
+            }
+            """.trimIndent().encodeToByteArray(),
+        )
+
+        assertTrue(request.descriptionProvided)
+        assertNull(request.description)
+    }
+
+    @Test
+    fun `rejects non-string fields instead of coercing them`() {
+        val invalidRequests = listOf(
+            """{"cli_version":2,"method":"ProfileUpload","mode":"CREATE","profile":{"name":"new","type":"environment","variables":{}}}""",
+            """{"cli_version":"0.2.0","method":"ProfileUpload","mode":"CREATE","profile":{"name":"new","type":"environment","variables":{"TOKEN":{"value":false}}}}""",
+            """{"cli_version":"0.2.0","method":"ProfileUpload","mode":"CREATE","profile":{"name":"new","description":3,"type":"environment","variables":{}}}""",
+        )
+
+        invalidRequests.forEach { request ->
+            assertTrue(
+                "Expected a non-string field to be rejected: $request",
+                runCatching { protocol.decodeRequest(request.encodeToByteArray()) }.isFailure,
+            )
+        }
+    }
+
+    @Test
     fun `encodes received and rejected results`() {
         assertEquals(
             json.parseToJsonElement("""{"result":"RECEIVED"}"""),

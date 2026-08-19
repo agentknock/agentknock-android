@@ -4,9 +4,10 @@ import kotlinx.serialization.SerialName
 import kotlinx.serialization.Serializable
 import kotlinx.serialization.encodeToString
 import kotlinx.serialization.json.Json
+import kotlinx.serialization.json.JsonNull
 import kotlinx.serialization.json.JsonObject
+import kotlinx.serialization.json.JsonPrimitive
 import kotlinx.serialization.json.jsonObject
-import kotlinx.serialization.json.jsonPrimitive
 
 internal enum class ProfileUploadMode(val wireName: String) {
     CREATE("CREATE"),
@@ -49,7 +50,7 @@ internal class ProfileUploadProtocol(
             } ?: error("Unsupported profile upload mode"),
             name = profile.requiredString("name"),
             descriptionProvided = "description" in profile,
-            description = profile["description"]?.jsonPrimitive?.content,
+            description = profile.optionalString("description"),
             variables = variables,
         )
     }
@@ -76,8 +77,20 @@ internal class ProfileUploadProtocol(
         )
     }
 
-    private fun JsonObject.requiredString(name: String): String =
-        getValue(name).jsonPrimitive.content
+    private fun JsonObject.requiredString(name: String): String {
+        val value = getValue(name)
+        require(value is JsonPrimitive && value.isString) { "$name must be a string" }
+        return value.content
+    }
+
+    private fun JsonObject.optionalString(name: String): String? = when (val value = this[name]) {
+        null, JsonNull -> null
+        is JsonPrimitive -> {
+            require(value.isString) { "$name must be a string or null" }
+            value.content
+        }
+        else -> throw IllegalArgumentException("$name must be a string or null")
+    }
 
     companion object {
         const val METHOD = "ProfileUpload"
