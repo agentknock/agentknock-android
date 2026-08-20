@@ -10,7 +10,7 @@ plugins {
     alias(libs.plugins.room3)
 }
 
-val agentknockVersionCode = 5
+val agentknockVersionCode = 6
 val agentknockVersionName = "0.1.0"
 val uploadStoreFile = providers.environmentVariable("AGENTKNOCK_UPLOAD_STORE_FILE")
 val uploadStorePassword = providers.environmentVariable("AGENTKNOCK_UPLOAD_STORE_PASSWORD")
@@ -60,6 +60,9 @@ android {
 
     buildTypes {
         release {
+            isMinifyEnabled = true
+            isShrinkResources = true
+            proguardFiles(getDefaultProguardFile("proguard-android-optimize.txt"))
             signingConfig = signingConfigs.findByName("upload")
         }
     }

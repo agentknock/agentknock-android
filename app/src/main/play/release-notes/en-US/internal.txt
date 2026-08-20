@@ -1,1 +1,1 @@
-Improves request triage, secret editing, client details, connection status, and foldable layouts. Adds swipe approval and rejection, and automatically rejects requests the device cannot fulfill.
+Reduces the app download size by optimizing release code and resources.
