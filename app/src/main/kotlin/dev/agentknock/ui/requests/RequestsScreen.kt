@@ -4,12 +4,15 @@ package dev.agentknock.ui.requests
 
 import androidx.activity.compose.BackHandler
 import androidx.compose.foundation.clickable
+import androidx.compose.foundation.background
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.BoxWithConstraints
 import androidx.compose.foundation.layout.Column
+import androidx.compose.foundation.layout.FlowRow
 import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.Spacer
+import androidx.compose.foundation.layout.WindowInsets
 import androidx.compose.foundation.layout.fillMaxHeight
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
@@ -18,6 +21,7 @@ import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.layout.width
 import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.items
+import androidx.compose.foundation.lazy.rememberLazyListState
 import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.text.selection.SelectionContainer
 import androidx.compose.foundation.verticalScroll
@@ -26,6 +30,9 @@ import androidx.compose.material.icons.automirrored.outlined.ArrowBack
 import androidx.compose.material.icons.outlined.ExpandLess
 import androidx.compose.material.icons.outlined.ExpandMore
 import androidx.compose.material.icons.outlined.Edit
+import androidx.compose.material.icons.outlined.Check
+import androidx.compose.material.icons.outlined.Close
+import androidx.compose.material.icons.outlined.ErrorOutline
 import androidx.compose.material.icons.outlined.Refresh
 import androidx.compose.material.icons.outlined.Settings
 import androidx.compose.material3.AlertDialog
@@ -37,6 +44,7 @@ import androidx.compose.material3.HorizontalDivider
 import androidx.compose.material3.Icon
 import androidx.compose.material3.IconButton
 import androidx.compose.material3.ListItem
+import androidx.compose.material3.ListItemDefaults
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.OutlinedButton
 import androidx.compose.material3.OutlinedTextField
@@ -46,6 +54,9 @@ import androidx.compose.material3.SnackbarHostState
 import androidx.compose.material3.Text
 import androidx.compose.material3.TextButton
 import androidx.compose.material3.Switch
+import androidx.compose.material3.SwipeToDismissBox
+import androidx.compose.material3.SwipeToDismissBoxValue
+import androidx.compose.material3.rememberSwipeToDismissBoxState
 import androidx.compose.material3.TopAppBar
 import androidx.compose.material3.VerticalDivider
 import androidx.compose.runtime.Composable
@@ -59,6 +70,7 @@ import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.graphics.Color
+import androidx.compose.ui.draw.alpha
 import androidx.compose.ui.text.font.FontFamily
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
@@ -112,7 +124,38 @@ internal fun RequestsScreen(
         scope.launch { snackbar.showSnackbar(message) }
     }
 
-    Scaffold(snackbarHost = { SnackbarHost(snackbar) }) { padding ->
+    fun approve(request: InboxRequestSummary) {
+        if (request.credentialState != CredentialRequestState.APPROVAL_PENDING) return
+        authenticate(
+            "Approve credential release",
+            {
+                scope.launch {
+                    report(viewModel.approveCredentialRequest(request.id).message())
+                }
+            },
+            ::report,
+        )
+    }
+
+    fun reject(request: InboxRequestSummary) {
+        scope.launch {
+            val message = when {
+                request.pairingState?.canReject() == true ->
+                    viewModel.rejectPairing(request.id).message()
+                request.credentialState == CredentialRequestState.APPROVAL_PENDING ->
+                    viewModel.denyCredentialRequest(request.id).message()
+                request.profileUploadState == ProfileUploadRequestState.REVIEW_PENDING ->
+                    viewModel.rejectProfileUpload(request.id).message()
+                else -> return@launch
+            }
+            report(message)
+        }
+    }
+
+    Scaffold(
+        snackbarHost = { SnackbarHost(snackbar) },
+        contentWindowInsets = WindowInsets(0, 0, 0, 0),
+    ) { padding ->
         BoxWithConstraints(Modifier.fillMaxSize().padding(padding)) {
             val twoPane = maxWidth >= 840.dp
             LaunchedEffect(selection, twoPane) {
@@ -126,8 +169,11 @@ internal fun RequestsScreen(
                         syncing = syncing,
                         syncProblem = lastSyncResult.problemMessage(),
                         onRefresh = viewModel::refresh,
+                        onShowSyncProblem = ::report,
                         onOpenSettings = onOpenSettings,
                         onOpen = viewModel::selectRequest,
+                        onApprove = ::approve,
+                        onReject = ::reject,
                         modifier = Modifier.width(440.dp).fillMaxHeight(),
                     )
                     VerticalDivider()
@@ -152,8 +198,11 @@ internal fun RequestsScreen(
                     syncing = syncing,
                     syncProblem = lastSyncResult.problemMessage(),
                     onRefresh = viewModel::refresh,
+                    onShowSyncProblem = ::report,
                     onOpenSettings = onOpenSettings,
                     onOpen = viewModel::selectRequest,
+                    onApprove = ::approve,
+                    onReject = ::reject,
                     modifier = Modifier.fillMaxSize(),
                 )
             } else {
@@ -261,14 +310,42 @@ private fun RequestList(
     syncing: Boolean,
     syncProblem: String?,
     onRefresh: () -> Unit,
+    onShowSyncProblem: (String) -> Unit,
     onOpenSettings: () -> Unit,
     onOpen: (Long) -> Unit,
+    onApprove: (InboxRequestSummary) -> Unit,
+    onReject: (InboxRequestSummary) -> Unit,
     modifier: Modifier = Modifier,
 ) {
+    val listState = rememberLazyListState()
+    var previousNewestRequestId by remember { mutableStateOf<Long?>(null) }
+    val newestRequestId = requests.firstOrNull()?.id
+    LaunchedEffect(newestRequestId) {
+        val previousNewest = previousNewestRequestId
+        if (newestRequestId != null && previousNewest != null && newestRequestId != previousNewest) {
+            val previousNewestIndex = requests.indexOfFirst { it.id == previousNewest }
+            if (
+                listState.firstVisibleItemIndex == 0 ||
+                listState.firstVisibleItemIndex == previousNewestIndex
+            ) {
+                listState.animateScrollToItem(0)
+            }
+        }
+        previousNewestRequestId = newestRequestId
+    }
     Column(modifier) {
         TopAppBar(
             title = { Text("Requests") },
             actions = {
+                syncProblem?.let { problem ->
+                    IconButton(onClick = { onShowSyncProblem(problem) }) {
+                        Icon(
+                            Icons.Outlined.ErrorOutline,
+                            contentDescription = "Connection problem",
+                            tint = MaterialTheme.colorScheme.error,
+                        )
+                    }
+                }
                 IconButton(onClick = onRefresh, enabled = !syncing) {
                     if (syncing) {
                         CircularProgressIndicator(Modifier.size(20.dp), strokeWidth = 2.dp)
@@ -281,13 +358,6 @@ private fun RequestList(
                 }
             },
         )
-        syncProblem?.let {
-            Text(
-                it,
-                color = MaterialTheme.colorScheme.error,
-                modifier = Modifier.padding(horizontal = 16.dp, vertical = 8.dp),
-            )
-        }
         if (requests.isEmpty()) {
             Box(Modifier.fillMaxSize(), contentAlignment = Alignment.Center) {
                 Column(
@@ -327,9 +397,14 @@ private fun RequestList(
                 }
             }
         } else {
-            LazyColumn(Modifier.fillMaxSize()) {
+            LazyColumn(Modifier.fillMaxSize(), state = listState) {
                 items(requests, key = InboxRequestSummary::id) { request ->
-                    RequestRow(request, onClick = { onOpen(request.id) })
+                    RequestRow(
+                        request = request,
+                        onClick = { onOpen(request.id) },
+                        onApprove = { onApprove(request) },
+                        onReject = { onReject(request) },
+                    )
                     HorizontalDivider()
                 }
             }
@@ -338,42 +413,123 @@ private fun RequestList(
 }
 
 @Composable
-private fun RequestRow(request: InboxRequestSummary, onClick: () -> Unit) {
+private fun RequestRow(
+    request: InboxRequestSummary,
+    onClick: () -> Unit,
+    onApprove: () -> Unit,
+    onReject: () -> Unit,
+) {
+    val canApprove = request.credentialState == CredentialRequestState.APPROVAL_PENDING
+    val canReject = request.canReject()
+    val swipeState = rememberSwipeToDismissBoxState(
+        positionalThreshold = { distance -> distance * 0.3f },
+    )
+    LaunchedEffect(swipeState.currentValue) {
+        when (swipeState.currentValue) {
+            SwipeToDismissBoxValue.StartToEnd -> if (canApprove) onApprove()
+            SwipeToDismissBoxValue.EndToStart -> if (canReject) onReject()
+            SwipeToDismissBoxValue.Settled -> return@LaunchedEffect
+        }
+        swipeState.reset()
+    }
+    SwipeToDismissBox(
+        state = swipeState,
+        enableDismissFromStartToEnd = canApprove,
+        enableDismissFromEndToStart = canReject,
+        backgroundContent = {
+            val direction = swipeState.dismissDirection
+            val approving = direction == SwipeToDismissBoxValue.StartToEnd
+            Box(
+                modifier = Modifier
+                    .fillMaxSize()
+                    .background(
+                        when (direction) {
+                            SwipeToDismissBoxValue.StartToEnd ->
+                                MaterialTheme.colorScheme.primaryContainer
+                            SwipeToDismissBoxValue.EndToStart ->
+                                MaterialTheme.colorScheme.errorContainer
+                            SwipeToDismissBoxValue.Settled ->
+                                MaterialTheme.colorScheme.surfaceVariant
+                        },
+                    )
+                    .padding(horizontal = 24.dp),
+                contentAlignment = if (approving) Alignment.CenterStart else Alignment.CenterEnd,
+            ) {
+                if (direction != SwipeToDismissBoxValue.Settled) {
+                    Row(
+                        horizontalArrangement = Arrangement.spacedBy(8.dp),
+                        verticalAlignment = Alignment.CenterVertically,
+                    ) {
+                        Icon(
+                            if (approving) Icons.Outlined.Check else Icons.Outlined.Close,
+                            contentDescription = null,
+                        )
+                        Text(if (approving) "Approve once" else "Reject")
+                    }
+                }
+            }
+        },
+    ) {
+        RequestRowContent(request, onClick)
+    }
+}
+
+@Composable
+private fun RequestRowContent(request: InboxRequestSummary, onClick: () -> Unit) {
+    val rejected = request.wasRejected()
+    val containerColor = when {
+        request.state == InboxRequestState.ACTION_REQUIRED ->
+            MaterialTheme.colorScheme.primaryContainer
+        rejected -> MaterialTheme.colorScheme.surfaceVariant
+        else -> MaterialTheme.colorScheme.surface
+    }
     ListItem(
         headlineContent = {
-            Column(verticalArrangement = Arrangement.spacedBy(4.dp)) {
+            if (request.command != null) {
+                Text(
+                    renderShellCommand(request.command, request.arguments),
+                    style = MaterialTheme.typography.titleMedium,
+                    fontFamily = FontFamily.Monospace,
+                    maxLines = 2,
+                    overflow = TextOverflow.Ellipsis,
+                )
+            } else {
+                Text(request.title, style = MaterialTheme.typography.titleMedium)
+            }
+        },
+        overlineContent = request.command?.let {
+            { Text(request.title) }
+        },
+        supportingContent = {
+            FlowRow(
+                horizontalArrangement = Arrangement.spacedBy(8.dp),
+                verticalArrangement = Arrangement.spacedBy(6.dp),
+                itemVerticalAlignment = Alignment.CenterVertically,
+            ) {
+                ClientIdentity(request.clientName)
+                if (request.profileNames.isNotEmpty()) {
+                    ProfileIdentities(request.profileNames)
+                }
+            }
+        },
+        trailingContent = {
+            Column(horizontalAlignment = Alignment.End) {
                 Text(
                     request.statusLabel(),
                     color = request.statusColor(),
                     style = MaterialTheme.typography.labelLarge,
                 )
-                if (request.command != null) {
-                    Text(
-                        renderShellCommand(request.command, request.arguments),
-                        style = MaterialTheme.typography.titleMedium,
-                        fontFamily = FontFamily.Monospace,
-                        maxLines = 2,
-                        overflow = TextOverflow.Ellipsis,
-                    )
-                } else {
-                    Text(request.title, style = MaterialTheme.typography.titleMedium)
-                }
-            }
-        },
-        supportingContent = {
-            Column(verticalArrangement = Arrangement.spacedBy(7.dp)) {
-                ClientIdentity(request.clientName)
-                if (request.profileNames.isNotEmpty()) {
-                    ProfileIdentities(request.profileNames)
-                }
                 Text(
                     formatTimestamp(request.receivedAt),
-                    style = MaterialTheme.typography.labelMedium,
+                    style = MaterialTheme.typography.labelSmall,
                     color = MaterialTheme.colorScheme.onSurfaceVariant,
                 )
             }
         },
-        modifier = Modifier.clickable(onClick = onClick),
+        colors = ListItemDefaults.colors(containerColor = containerColor),
+        modifier = Modifier
+            .alpha(if (rejected) 0.62f else 1f)
+            .clickable(onClick = onClick),
     )
 }
 
@@ -935,6 +1091,24 @@ private fun InboxRequestSummary.statusLabel(): String = when {
     state == InboxRequestState.WAITING -> "Waiting"
     else -> "Completed"
 }
+
+private fun InboxRequestSummary.canReject(): Boolean =
+    pairingState?.canReject() == true ||
+        credentialState == CredentialRequestState.APPROVAL_PENDING ||
+        profileUploadState == ProfileUploadRequestState.REVIEW_PENDING
+
+private fun PairingState.canReject(): Boolean = this in setOf(
+    PairingState.RECEIVING,
+    PairingState.SAS_VERIFICATION_PENDING,
+    PairingState.RELAY_ACTIVATION_PENDING,
+    PairingState.WAITING_FOR_FINISH,
+)
+
+private fun InboxRequestSummary.wasRejected(): Boolean =
+    pairingState == PairingState.REJECTED ||
+        credentialDecision == CredentialDecision.DENIED ||
+        credentialResult == CredentialCompletionResult.DENIED ||
+        profileUploadState == ProfileUploadRequestState.REJECTED
 
 @Composable
 private fun InboxRequestSummary.statusColor(): Color = when {

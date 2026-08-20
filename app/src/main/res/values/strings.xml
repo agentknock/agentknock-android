@@ -24,6 +24,7 @@
     <string name="not_sensitive">Not sensitive</string>
     <string name="value_unavailable">Value unavailable on this device</string>
     <string name="value_hidden">Value hidden</string>
+    <string name="loading_value">Loading value…</string>
     <string name="show">Show</string>
     <string name="hide">Hide</string>
     <string name="copy">Copy</string>
@@ -49,10 +50,8 @@
     <string name="new_environment_variable">New environment variable</string>
     <string name="variable_name">Variable name</string>
     <string name="variable_value">Value</string>
-    <string name="new_variable_value">New value</string>
     <string name="notes_optional">Notes (optional)</string>
     <string name="sensitive_explanation">Require device authentication before revealing or copying this value.</string>
-    <string name="replace_value">Replace stored value</string>
     <string name="replace_unavailable_value">The stored value cannot be decrypted on this device. Enter a replacement to use this variable again.</string>
     <string name="save_variable">Save variable</string>
     <string name="create_variable">Create variable</string>
@@ -68,6 +67,7 @@
     <string name="confirm_delete_variable">Confirm deleting environment variable</string>
     <string name="variable_deleted">Environment variable deleted</string>
     <string name="reveal_sensitive_value">Reveal %1$s</string>
+    <string name="edit_sensitive_value">Edit %1$s</string>
     <string name="copy_sensitive_value">Copy %1$s</string>
     <string name="copied_to_clipboard">Copied %1$s to the clipboard</string>
     <string name="corrupted_value">The stored value could not be authenticated</string>

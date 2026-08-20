@@ -108,6 +108,9 @@ internal fun AgentknockScreen(
         )
         else -> BoxWithConstraints(Modifier.fillMaxSize()) {
             val useNavigationRail = maxWidth >= 600.dp
+            LaunchedEffect(useNavigationRail) {
+                if (useNavigationRail) showNavigation = true
+            }
             if (useNavigationRail) {
                 Row(Modifier.fillMaxSize()) {
                     if (showNavigation) {
@@ -120,7 +123,7 @@ internal fun AgentknockScreen(
                         section = section,
                         authenticate = authenticate,
                         onOpenSettings = { showSettings = true },
-                        onTopLevelChanged = { showNavigation = it },
+                        onTopLevelChanged = { showNavigation = true },
                         requestsViewModel = requestsViewModel,
                         modifier = Modifier.weight(1f),
                     )

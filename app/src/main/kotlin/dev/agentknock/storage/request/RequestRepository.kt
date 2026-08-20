@@ -1786,6 +1786,7 @@ internal class RequestRepository(
                 requestPayload = requestPayload,
                 opened = opened,
                 acceptedSecrets = storedSecrets,
+                credentials = credentials,
             )
         } else if (method == ProfileListProtocol.LIST_METHOD) {
             processProfileListRequest(
@@ -1841,22 +1842,47 @@ internal class RequestRepository(
         requestPayload: JsonElement,
         opened: OpenedPairedRequest,
         acceptedSecrets: AcceptedRequestSecrets,
+        credentials: RelayDeviceCredentials,
     ): ProcessedRelayMessage? {
         if (pairing.state != PairingState.ACTIVE.storedName) return null
         val contents = runCatching {
             credentialProtocol.decodeRequest(opened.plaintext)
         }.getOrNull() ?: return null
         val description = profiles.describeCredentialProfiles(contents.profiles)
+        val automaticDenial = automaticCredentialDenial(contents.profiles)
+        val response = if (automaticDenial != null) {
+            runCatching {
+                pairingProtocol.sealPairedResponse(
+                    deviceId = pairing.deviceId,
+                    requestId = relayRequestId,
+                    clientId = pairing.clientId,
+                    clientPsk = opened.clientPsk,
+                    devicePrivateKey = credentials.devicePrivateKey,
+                    devicePublicKey = credentials.devicePublicKey,
+                    request = requestPayload,
+                    plaintext = credentialProtocol.deniedResponse(
+                        automaticDenial.first,
+                        automaticDenial.second,
+                    ),
+                )
+            }.getOrNull() ?: return null
+        } else {
+            null
+        }
         val now = currentTimeMillis()
         dao.insertCredentialRequest(
             request = InboxRequestEntity(
                 relayRequestId = relayRequestId,
                 parentRequestId = null,
                 kind = RequestKind.CREDENTIAL.storedName,
-                state = InboxRequestState.ACTION_REQUIRED.storedName,
+                state = if (automaticDenial == null) {
+                    InboxRequestState.ACTION_REQUIRED.storedName
+                } else {
+                    InboxRequestState.WAITING.storedName
+                },
                 listed = true,
                 requestJson = requestPayload.toString(),
-                responseJson = null,
+                responseJson = response?.toString(),
                 completionJson = null,
                 receivedAt = now,
                 updatedAt = now,
@@ -1870,7 +1896,17 @@ internal class RequestRepository(
                 contents = contents,
                 description = description,
                 now = now,
-            ),
+            ).let { credentialRequest ->
+                if (automaticDenial == null) {
+                    credentialRequest
+                } else {
+                    credentialRequest.copy(
+                        state = CredentialRequestState.WAITING_FOR_COMPLETION.storedName,
+                        decision = CredentialDecision.DENIED.storedName,
+                        decidedAt = now,
+                    )
+                }
+            },
             requestSecret = acceptedSecrets.requestSecret,
             currentPairingSecret = acceptedSecrets.currentPairingSecret,
             previousPairingSecret = acceptedSecrets.previousPairingSecret,
@@ -1885,7 +1921,42 @@ internal class RequestRepository(
                 relayRequestId = relayRequestId,
             ),
         )
-        return ProcessedRelayMessage()
+        if (automaticDenial != null) {
+            audit.record(
+                AuditRecord(
+                    category = AuditCategory.PROFILE_ACCESS,
+                    title = "Profile access denied automatically",
+                    detail = automaticDenial.second,
+                    outcome = AuditOutcome.DENIED,
+                    clientId = pairing.clientId,
+                    relayRequestId = relayRequestId,
+                ),
+            )
+        }
+        return ProcessedRelayMessage(response)
+    }
+
+    private suspend fun automaticCredentialDenial(
+        profileNames: List<String>,
+    ): Pair<CredentialDenialReason, String>? = when (
+        val result = profiles.credentialProfiles(profileNames)
+    ) {
+        is CredentialProfilesResult.Available -> null
+        is CredentialProfilesResult.MissingProfiles ->
+            CredentialDenialReason.INVALID_REQUEST to
+                "Missing profiles: ${result.names.joinToString()}"
+        is CredentialProfilesResult.ConflictingVariable ->
+            CredentialDenialReason.INVALID_REQUEST to
+                "Requested profiles conflict on ${result.name}."
+        CredentialProfilesResult.SecretUnavailable ->
+            CredentialDenialReason.OTHER to
+                "A requested profile value is unavailable on this device."
+        CredentialProfilesResult.SecretCorrupted ->
+            CredentialDenialReason.OTHER to
+                "A requested profile value could not be authenticated."
+        CredentialProfilesResult.UnsupportedEncryption ->
+            CredentialDenialReason.OTHER to
+                "A requested profile value uses an unsupported encryption format."
     }
 
     private suspend fun processProfileListRequest(

@@ -10,6 +10,7 @@ import androidx.compose.foundation.layout.BoxWithConstraints
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.Spacer
+import androidx.compose.foundation.layout.WindowInsets
 import androidx.compose.foundation.layout.fillMaxHeight
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
@@ -25,8 +26,6 @@ import androidx.compose.material.icons.automirrored.outlined.ArrowBack
 import androidx.compose.material.icons.outlined.Computer
 import androidx.compose.material.icons.outlined.DeleteForever
 import androidx.compose.material.icons.outlined.Edit
-import androidx.compose.material.icons.outlined.ExpandLess
-import androidx.compose.material.icons.outlined.ExpandMore
 import androidx.compose.material.icons.outlined.PauseCircle
 import androidx.compose.material.icons.outlined.PlayCircle
 import androidx.compose.material.icons.outlined.Settings
@@ -88,7 +87,10 @@ internal fun ClientsScreen(
         scope.launch { snackbar.showSnackbar(message) }
     }
 
-    Scaffold(snackbarHost = { SnackbarHost(snackbar) }) { padding ->
+    Scaffold(
+        snackbarHost = { SnackbarHost(snackbar) },
+        contentWindowInsets = WindowInsets(0, 0, 0, 0),
+    ) { padding ->
         BoxWithConstraints(Modifier.fillMaxSize().padding(padding)) {
             val twoPane = maxWidth >= 840.dp
             LaunchedEffect(selection, twoPane) {
@@ -302,7 +304,6 @@ private fun ClientDetail(
 ) {
     var showRename by remember { mutableStateOf(false) }
     var confirmation by remember { mutableStateOf<RelayClientState?>(null) }
-    var reportedExpanded by remember { mutableStateOf(false) }
 
     Column(modifier) {
         TopAppBar(
@@ -384,28 +385,16 @@ private fun ClientDetail(
             }
 
             HorizontalDivider()
-            Row(
-                Modifier.fillMaxWidth().clickable { reportedExpanded = !reportedExpanded },
-                horizontalArrangement = Arrangement.SpaceBetween,
-                verticalAlignment = Alignment.CenterVertically,
-            ) {
-                Text("Reported information", style = MaterialTheme.typography.titleMedium)
-                Icon(
-                    if (reportedExpanded) Icons.Outlined.ExpandLess else Icons.Outlined.ExpandMore,
-                    contentDescription = null,
-                )
-            }
-            if (reportedExpanded) {
-                SelectionContainer {
-                    Column(verticalArrangement = Arrangement.spacedBy(12.dp)) {
-                        ClientField("Hostname", client.hostname)
-                        ClientField("Platform", client.platform)
-                        ClientField("Architecture", client.architecture)
-                        ClientField("Operating system", client.osVersion)
-                        ClientField("CLI version", client.cliVersion)
-                        ClientField("Machine ID", client.machineId, monospace = true)
-                        ClientField("Client ID", client.clientId, monospace = true)
-                    }
+            Text("Reported information", style = MaterialTheme.typography.titleMedium)
+            SelectionContainer {
+                Column(verticalArrangement = Arrangement.spacedBy(12.dp)) {
+                    ClientField("Hostname", client.hostname)
+                    ClientField("Platform", client.platform)
+                    ClientField("Architecture", client.architecture)
+                    ClientField("Operating system", client.osVersion)
+                    ClientField("CLI version", client.cliVersion)
+                    ClientField("Machine ID", client.machineId, monospace = true)
+                    ClientField("Client ID", client.clientId, monospace = true)
                 }
             }
         }

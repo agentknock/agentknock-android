@@ -19,6 +19,7 @@ import androidx.compose.foundation.layout.BoxWithConstraints
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.Spacer
+import androidx.compose.foundation.layout.WindowInsets
 import androidx.compose.foundation.layout.fillMaxHeight
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
@@ -133,7 +134,10 @@ internal fun SettingsScreen(
     }
     BackHandler(onBack = ::back)
 
-    Scaffold(snackbarHost = { SnackbarHost(snackbar) }) { padding ->
+    Scaffold(
+        snackbarHost = { SnackbarHost(snackbar) },
+        contentWindowInsets = WindowInsets(0, 0, 0, 0),
+    ) { padding ->
         Box(Modifier.fillMaxSize().padding(padding)) {
             val modifier = if (page == SettingsPage.AUDIT) {
                 Modifier.fillMaxSize()

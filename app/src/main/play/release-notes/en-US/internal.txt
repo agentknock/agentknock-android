@@ -1,1 +1,1 @@
-Clarifies requests, commands, clients, and profiles throughout the app, improves notifications, and adds adaptive tablet layouts.
+Improves request triage, secret editing, client details, connection status, and foldable layouts. Adds swipe approval and rejection, and automatically rejects requests the device cannot fulfill.

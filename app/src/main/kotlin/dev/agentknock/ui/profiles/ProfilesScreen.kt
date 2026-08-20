@@ -15,6 +15,7 @@ import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.FlowRow
 import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.Spacer
+import androidx.compose.foundation.layout.WindowInsets
 import androidx.compose.foundation.layout.fillMaxHeight
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
@@ -29,7 +30,6 @@ import androidx.compose.material3.AlertDialog
 import androidx.compose.material3.Button
 import androidx.compose.material3.Card
 import androidx.compose.material3.CardDefaults
-import androidx.compose.material3.Checkbox
 import androidx.compose.material3.CircularProgressIndicator
 import androidx.compose.material3.DropdownMenu
 import androidx.compose.material3.DropdownMenuItem
@@ -40,6 +40,8 @@ import androidx.compose.material.icons.outlined.Add
 import androidx.compose.material.icons.outlined.Edit
 import androidx.compose.material.icons.outlined.MoreVert
 import androidx.compose.material.icons.outlined.Settings
+import androidx.compose.material.icons.outlined.Visibility
+import androidx.compose.material.icons.outlined.VisibilityOff
 import androidx.compose.material3.Icon
 import androidx.compose.material3.IconButton
 import androidx.compose.material3.MaterialTheme
@@ -99,7 +101,10 @@ private sealed interface ProfileEditor {
 
 private sealed interface VariableEditor {
     data class New(val profileId: String) : VariableEditor
-    data class Existing(val variable: EnvironmentVariableMetadata) : VariableEditor
+    data class Existing(
+        val variable: EnvironmentVariableMetadata,
+        val currentValue: String?,
+    ) : VariableEditor
 }
 
 @Composable
@@ -129,7 +134,12 @@ internal fun ProfilesScreen(
 
     DisposableEffect(lifecycle) {
         val observer = LifecycleEventObserver { _, event ->
-            if (event == Lifecycle.Event.ON_STOP) revealedValues = emptyMap()
+            if (event == Lifecycle.Event.ON_STOP) {
+                revealedValues = emptyMap()
+                if ((variableEditor as? VariableEditor.Existing)?.variable?.sensitive == true) {
+                    variableEditor = null
+                }
+            }
         }
         lifecycle.addObserver(observer)
         onDispose { lifecycle.removeObserver(observer) }
@@ -151,36 +161,32 @@ internal fun ProfilesScreen(
         )
     }
 
-    fun readValue(
-        variable: EnvironmentVariableMetadata,
-        onAvailable: (String) -> Unit,
-    ) {
-        scope.launch {
-            when (val value = viewModel.readEnvironmentVariableValue(variable.id)) {
-                is EnvironmentVariableValue.Available -> onAvailable(value.value)
-                EnvironmentVariableValue.Unavailable -> report(
-                    resources.getString(R.string.value_unavailable),
-                )
-                EnvironmentVariableValue.Corrupted -> report(
-                    resources.getString(R.string.corrupted_value),
-                )
-                EnvironmentVariableValue.UnsupportedFormat -> report(
-                    resources.getString(R.string.unsupported_value),
-                )
-                EnvironmentVariableValue.NotFound -> report(
-                    resources.getString(R.string.missing_value),
-                )
+    suspend fun readValue(variable: EnvironmentVariableMetadata): String? =
+        when (val value = viewModel.readEnvironmentVariableValue(variable.id)) {
+            is EnvironmentVariableValue.Available -> value.value
+            EnvironmentVariableValue.Unavailable -> null.also {
+                report(resources.getString(R.string.value_unavailable))
+            }
+            EnvironmentVariableValue.Corrupted -> null.also {
+                report(resources.getString(R.string.corrupted_value))
+            }
+            EnvironmentVariableValue.UnsupportedFormat -> null.also {
+                report(resources.getString(R.string.unsupported_value))
+            }
+            EnvironmentVariableValue.NotFound -> null.also {
+                report(resources.getString(R.string.missing_value))
             }
         }
-    }
 
     fun reveal(variable: EnvironmentVariableMetadata) {
         if (revealedValues.containsKey(variable.id)) {
             revealedValues -= variable.id
             return
         }
-        val action = {
-            readValue(variable) { value -> revealedValues += variable.id to value }
+        val action: () -> Unit = {
+            scope.launch {
+                readValue(variable)?.let { value -> revealedValues += variable.id to value }
+            }
         }
         if (variable.sensitive) {
             authenticate(
@@ -194,8 +200,9 @@ internal fun ProfilesScreen(
     }
 
     fun copy(variable: EnvironmentVariableMetadata) {
-        val action = {
-            readValue(variable) { value ->
+        val action: () -> Unit = {
+            scope.launch {
+                val value = readValue(variable) ?: return@launch
                 copyToClipboard(context, variable.name, value, variable.sensitive)
                 report(resources.getString(R.string.copied_to_clipboard, variable.name))
             }
@@ -211,8 +218,32 @@ internal fun ProfilesScreen(
         }
     }
 
+    fun edit(variable: EnvironmentVariableMetadata) {
+        if (!variable.valueAvailable) {
+            variableEditor = VariableEditor.Existing(variable, null)
+            return
+        }
+        val action: () -> Unit = {
+            scope.launch {
+                readValue(variable)?.let { value ->
+                    variableEditor = VariableEditor.Existing(variable, value)
+                }
+            }
+        }
+        if (variable.sensitive) {
+            authenticate(
+                resources.getString(R.string.edit_sensitive_value, variable.name),
+                action,
+                ::report,
+            )
+        } else {
+            action()
+        }
+    }
+
     Scaffold(
         snackbarHost = { SnackbarHost(snackbar) },
+        contentWindowInsets = WindowInsets(0, 0, 0, 0),
     ) { padding ->
         BoxWithConstraints(
             modifier = Modifier
@@ -260,8 +291,9 @@ internal fun ProfilesScreen(
                             onAddVariable = {
                                 variableEditor = VariableEditor.New(profile.id)
                             },
-                            onEditVariable = { variableEditor = VariableEditor.Existing(it) },
+                            onEditVariable = ::edit,
                             onReveal = ::reveal,
+                            onReadValue = ::readValue,
                             onCopy = ::copy,
                             modifier = Modifier.weight(1f),
                         )
@@ -294,8 +326,9 @@ internal fun ProfilesScreen(
                     onAddVariable = {
                         variableEditor = VariableEditor.New(profile.id)
                     },
-                    onEditVariable = { variableEditor = VariableEditor.Existing(it) },
+                    onEditVariable = ::edit,
                     onReveal = ::reveal,
+                    onReadValue = ::readValue,
                     onCopy = ::copy,
                     modifier = Modifier.fillMaxSize(),
                 )
@@ -348,6 +381,7 @@ internal fun ProfilesScreen(
         val variable = (editor as? VariableEditor.Existing)?.variable
         EnvironmentVariableEditorScreen(
             variable = variable,
+            currentValue = (editor as? VariableEditor.Existing)?.currentValue,
             onDismiss = { variableEditor = null },
             onDelete = variable?.let {
                 { variablePendingDeletion = it }
@@ -546,6 +580,7 @@ private fun ProfileDetail(
     onAddVariable: () -> Unit,
     onEditVariable: (EnvironmentVariableMetadata) -> Unit,
     onReveal: (EnvironmentVariableMetadata) -> Unit,
+    onReadValue: suspend (EnvironmentVariableMetadata) -> String?,
     onCopy: (EnvironmentVariableMetadata) -> Unit,
     modifier: Modifier = Modifier,
 ) {
@@ -663,6 +698,7 @@ private fun ProfileDetail(
                         variable = variable,
                         revealedValue = revealedValues[variable.id],
                         onReveal = { onReveal(variable) },
+                        onReadValue = { onReadValue(variable) },
                         onCopy = { onCopy(variable) },
                         onEdit = { onEditVariable(variable) },
                     )
@@ -677,9 +713,29 @@ private fun EnvironmentVariableCard(
     variable: EnvironmentVariableMetadata,
     revealedValue: String?,
     onReveal: () -> Unit,
+    onReadValue: suspend () -> String?,
     onCopy: () -> Unit,
     onEdit: () -> Unit,
 ) {
+    var publicValue by remember(
+        variable.id,
+        variable.valueUpdatedAt,
+        variable.sensitive,
+    ) { mutableStateOf<String?>(null) }
+    var publicValueUnavailable by remember(
+        variable.id,
+        variable.valueUpdatedAt,
+        variable.sensitive,
+    ) { mutableStateOf(false) }
+
+    LaunchedEffect(variable.id, variable.valueUpdatedAt, variable.sensitive, variable.valueAvailable) {
+        if (!variable.sensitive && variable.valueAvailable) {
+            publicValue = onReadValue()
+            publicValueUnavailable = publicValue == null
+        }
+    }
+
+    val displayedValue = if (variable.sensitive) revealedValue else publicValue
     Card(
         colors = CardDefaults.cardColors(
             containerColor = MaterialTheme.colorScheme.surfaceContainer,
@@ -711,19 +767,21 @@ private fun EnvironmentVariableCard(
                     color = MaterialTheme.colorScheme.onSurfaceVariant,
                 )
             }
-            if (!variable.valueAvailable) {
+            if (!variable.valueAvailable || publicValueUnavailable) {
                 Text(
                     stringResource(R.string.value_unavailable),
                     color = MaterialTheme.colorScheme.error,
                 )
-            } else if (revealedValue == null) {
+            } else if (displayedValue == null) {
                 Text(
-                    stringResource(R.string.value_hidden),
+                    stringResource(
+                        if (variable.sensitive) R.string.value_hidden else R.string.loading_value,
+                    ),
                     color = MaterialTheme.colorScheme.onSurfaceVariant,
                 )
             } else {
                 SelectionContainer {
-                    Text(revealedValue, fontFamily = FontFamily.Monospace)
+                    Text(displayedValue, fontFamily = FontFamily.Monospace)
                 }
             }
             if (variable.notes.isNotBlank()) {
@@ -733,12 +791,14 @@ private fun EnvironmentVariableCard(
                 modifier = Modifier.fillMaxWidth(),
                 horizontalArrangement = Arrangement.End,
             ) {
-                TextButton(onClick = onReveal, enabled = variable.valueAvailable) {
-                    Text(
-                        stringResource(
-                            if (revealedValue == null) R.string.show else R.string.hide,
-                        ),
-                    )
+                if (variable.sensitive) {
+                    TextButton(onClick = onReveal, enabled = variable.valueAvailable) {
+                        Text(
+                            stringResource(
+                                if (revealedValue == null) R.string.show else R.string.hide,
+                            ),
+                        )
+                    }
                 }
                 TextButton(onClick = onCopy, enabled = variable.valueAvailable) {
                     Text(stringResource(R.string.copy))
@@ -847,6 +907,7 @@ private fun ProfileEditorScreen(
 @Composable
 private fun EnvironmentVariableEditorScreen(
     variable: EnvironmentVariableMetadata?,
+    currentValue: String?,
     onDismiss: () -> Unit,
     onDelete: (() -> Unit)?,
     onSave: (
@@ -859,14 +920,21 @@ private fun EnvironmentVariableEditorScreen(
     snackbar: SnackbarHostState,
 ) {
     var name by remember(variable?.id) { mutableStateOf(variable?.name.orEmpty()) }
-    var value by remember(variable?.id) { mutableStateOf("") }
+    var value by remember(variable?.id) { mutableStateOf(currentValue.orEmpty()) }
+    var valueEdited by remember(variable?.id) { mutableStateOf(false) }
     var sensitive by remember(variable?.id) { mutableStateOf(variable?.sensitive ?: true) }
     var notes by remember(variable?.id) { mutableStateOf(variable?.notes.orEmpty()) }
-    var replaceValue by remember(variable?.id) {
-        mutableStateOf(variable == null || variable.valueAvailable.not())
-    }
     var showValue by remember(variable?.id) { mutableStateOf(false) }
     var nameInvalid by remember(variable?.id) { mutableStateOf(false) }
+    val lifecycle = LocalLifecycleOwner.current.lifecycle
+
+    DisposableEffect(lifecycle, sensitive) {
+        val observer = LifecycleEventObserver { _, event ->
+            if (event == Lifecycle.Event.ON_STOP && sensitive) onDismiss()
+        }
+        lifecycle.addObserver(observer)
+        onDispose { lifecycle.removeObserver(observer) }
+    }
 
     BackHandler(onBack = onDismiss)
     Scaffold(
@@ -922,63 +990,49 @@ private fun EnvironmentVariableEditorScreen(
                         modifier = Modifier.fillMaxWidth(),
                     )
                 }
-                if (variable != null) {
+                if (variable != null && currentValue == null) {
                     item {
-                        Row(verticalAlignment = Alignment.CenterVertically) {
-                            Checkbox(
-                                checked = replaceValue,
-                                onCheckedChange = { replaceValue = it },
-                            )
-                            Text(stringResource(R.string.replace_value))
-                        }
-                    }
-                    if (!variable.valueAvailable) {
-                        item {
-                            Text(
-                                stringResource(R.string.replace_unavailable_value),
-                                color = MaterialTheme.colorScheme.error,
-                            )
-                        }
-                    }
-                }
-                if (variable == null || replaceValue) {
-                    item {
-                        OutlinedTextField(
-                            value = value,
-                            onValueChange = { value = it },
-                            label = {
-                                Text(
-                                    stringResource(
-                                        if (variable == null) {
-                                            R.string.variable_value
-                                        } else {
-                                            R.string.new_variable_value
-                                        },
-                                    ),
-                                )
-                            },
-                            visualTransformation = if (sensitive && !showValue) {
-                                PasswordVisualTransformation()
-                            } else {
-                                VisualTransformation.None
-                            },
-                            minLines = 2,
-                            trailingIcon = if (sensitive) {
-                                {
-                                    TextButton(onClick = { showValue = !showValue }) {
-                                        Text(
-                                            stringResource(
-                                                if (showValue) R.string.hide else R.string.show,
-                                            ),
-                                        )
-                                    }
-                                }
-                            } else {
-                                null
-                            },
-                            modifier = Modifier.fillMaxWidth(),
+                        Text(
+                            stringResource(R.string.replace_unavailable_value),
+                            color = MaterialTheme.colorScheme.error,
                         )
                     }
+                }
+                item {
+                    OutlinedTextField(
+                        value = value,
+                        onValueChange = {
+                            value = it
+                            valueEdited = true
+                        },
+                        label = { Text(stringResource(R.string.variable_value)) },
+                        visualTransformation = if (sensitive && !showValue) {
+                            PasswordVisualTransformation()
+                        } else {
+                            VisualTransformation.None
+                        },
+                        minLines = 1,
+                        maxLines = 6,
+                        trailingIcon = if (sensitive) {
+                            {
+                                IconButton(onClick = { showValue = !showValue }) {
+                                    Icon(
+                                        if (showValue) {
+                                            Icons.Outlined.VisibilityOff
+                                        } else {
+                                            Icons.Outlined.Visibility
+                                        },
+                                        contentDescription = stringResource(
+                                            if (showValue) R.string.hide else R.string.show,
+                                        ),
+                                    )
+                                }
+                            }
+                        } else {
+                            null
+                        },
+                        modifier = Modifier.fillMaxWidth(),
+                    )
                 }
                 item {
                     Row(
@@ -1042,7 +1096,12 @@ private fun EnvironmentVariableEditorScreen(
                         onClick = {
                             nameInvalid = !environmentVariableName.matches(name)
                             if (!nameInvalid) {
-                                onSave(name, value, sensitive, notes, replaceValue)
+                                val valueChanged = when {
+                                    variable == null -> true
+                                    currentValue != null -> value != currentValue
+                                    else -> valueEdited
+                                }
+                                onSave(name, value, sensitive, notes, valueChanged)
                             }
                         },
                         enabled = environmentVariableName.matches(name) && (
@@ -1050,7 +1109,8 @@ private fun EnvironmentVariableEditorScreen(
                                 name != variable.name ||
                                 sensitive != variable.sensitive ||
                                 notes != variable.notes ||
-                                replaceValue
+                                (currentValue != null && value != currentValue) ||
+                                (currentValue == null && valueEdited)
                             ),
                         modifier = Modifier.fillMaxWidth(),
                     ) {
