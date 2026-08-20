@@ -5,7 +5,9 @@ import androidx.compose.foundation.layout.BoxWithConstraints
 import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.WindowInsets
 import androidx.compose.foundation.layout.fillMaxSize
+import androidx.compose.foundation.layout.navigationBars
 import androidx.compose.foundation.layout.padding
+import androidx.compose.foundation.layout.windowInsetsPadding
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.outlined.Computer
 import androidx.compose.material.icons.outlined.Inbox
@@ -112,7 +114,7 @@ internal fun AgentknockScreen(
                 if (useNavigationRail) showNavigation = true
             }
             if (useNavigationRail) {
-                Row(Modifier.fillMaxSize()) {
+                Row(Modifier.fillMaxSize().windowInsetsPadding(WindowInsets.navigationBars)) {
                     if (showNavigation) {
                         MainNavigationRail(
                             section = section,
@@ -130,7 +132,7 @@ internal fun AgentknockScreen(
                 }
             } else {
                 Scaffold(
-                    contentWindowInsets = WindowInsets(0, 0, 0, 0),
+                    contentWindowInsets = WindowInsets.navigationBars,
                     bottomBar = {
                         if (showNavigation) {
                             MainNavigationBar(

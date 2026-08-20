@@ -9,10 +9,12 @@ import androidx.compose.foundation.layout.Spacer
 import androidx.compose.foundation.layout.WindowInsets
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
+import androidx.compose.foundation.layout.navigationBars
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.layout.width
 import androidx.compose.foundation.rememberScrollState
+import androidx.compose.foundation.text.KeyboardOptions
 import androidx.compose.foundation.verticalScroll
 import androidx.compose.material3.AlertDialog
 import androidx.compose.material3.Button
@@ -48,6 +50,9 @@ import androidx.compose.ui.text.font.FontFamily
 import androidx.compose.ui.text.TextRange
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.text.input.TextFieldValue
+import androidx.compose.ui.text.input.ImeAction
+import androidx.compose.ui.text.input.KeyboardCapitalization
+import androidx.compose.ui.text.input.KeyboardType
 import androidx.compose.ui.unit.dp
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import dev.agentknock.R
@@ -112,7 +117,7 @@ internal fun VaultScreen(
 
     Scaffold(
         snackbarHost = { SnackbarHost(snackbar) },
-        contentWindowInsets = WindowInsets(0, 0, 0, 0),
+        contentWindowInsets = WindowInsets.navigationBars,
     ) { padding ->
         Column(Modifier.fillMaxSize().padding(padding)) {
             TopAppBar(
@@ -377,6 +382,12 @@ private fun AddressEditor(
             style = MaterialTheme.typography.titleLarge,
         )
         Text(stringResource(R.string.vault_address_description))
+        if (activeAddress != null) {
+            Text(
+                stringResource(R.string.change_vault_address_existing_clients),
+                color = MaterialTheme.colorScheme.onSurfaceVariant,
+            )
+        }
         OutlinedTextField(
             value = fieldValue,
             onValueChange = {
@@ -396,6 +407,12 @@ private fun AddressEditor(
             },
             isError = address.isNotEmpty() && !valid,
             singleLine = true,
+            keyboardOptions = KeyboardOptions(
+                capitalization = KeyboardCapitalization.None,
+                autoCorrectEnabled = false,
+                keyboardType = KeyboardType.Ascii,
+                imeAction = ImeAction.Done,
+            ),
         )
         Column(verticalArrangement = Arrangement.spacedBy(8.dp)) {
             Button(
@@ -407,7 +424,15 @@ private fun AddressEditor(
                     CircularProgressIndicator(Modifier.size(18.dp), strokeWidth = 2.dp)
                     Spacer(Modifier.width(8.dp))
                 }
-                Text(stringResource(R.string.claim_vault_address))
+                Text(
+                    stringResource(
+                        if (activeAddress == null) {
+                            R.string.claim_vault_address
+                        } else {
+                            R.string.change_vault_address
+                        },
+                    ),
+                )
             }
             OutlinedButton(
                 onClick = onGenerate,

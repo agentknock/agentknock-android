@@ -10,6 +10,10 @@ import android.content.BroadcastReceiver
 import android.content.Intent
 import android.content.pm.PackageManager
 import android.os.Build
+import android.graphics.Typeface
+import android.text.SpannableStringBuilder
+import android.text.Spanned
+import android.text.style.StyleSpan
 import android.util.Log
 import androidx.lifecycle.Lifecycle
 import androidx.lifecycle.ProcessLifecycleOwner
@@ -30,6 +34,7 @@ import dev.agentknock.MainActivity
 import dev.agentknock.R
 import dev.agentknock.storage.request.RequestSyncResult
 import dev.agentknock.storage.request.RequestNotification
+import dev.agentknock.storage.request.RequestNotificationDetail
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.SupervisorJob
@@ -188,6 +193,12 @@ internal object RequestNotifications {
             .createNotificationChannel(channel)
     }
 
+    fun areEnabled(context: Context): Boolean {
+        val manager = context.getSystemService(NotificationManager::class.java)
+        return manager.areNotificationsEnabled() &&
+            manager.getNotificationChannel(CHANNEL_ID)?.importance != NotificationManager.IMPORTANCE_NONE
+    }
+
     fun showWake(context: Context) {
         if (
             Build.VERSION.SDK_INT >= Build.VERSION_CODES.TIRAMISU &&
@@ -241,7 +252,7 @@ internal object RequestNotifications {
                 .setSmallIcon(R.drawable.ic_launcher_foreground)
                 .setContentTitle(request.title)
                 .setContentText(request.summary)
-                .setStyle(Notification.BigTextStyle().bigText(request.details))
+                .setStyle(Notification.BigTextStyle().bigText(styledDetails(request.details)))
                 .setContentIntent(openRequest)
                 .setAutoCancel(true)
                 .setOnlyAlertOnce(true)
@@ -263,6 +274,19 @@ internal object RequestNotifications {
         decision: String,
         title: String,
     ): Notification.Action {
+        if (decision == APPROVE_DECISION && Build.VERSION.SDK_INT < Build.VERSION_CODES.S) {
+            val openRequest = PendingIntent.getActivity(
+                context,
+                requestId.hashCode(),
+                Intent(context, MainActivity::class.java).apply {
+                    action = OPEN_REQUEST_ACTION
+                    putExtra(REQUEST_ID_EXTRA, requestId)
+                    flags = Intent.FLAG_ACTIVITY_CLEAR_TOP or Intent.FLAG_ACTIVITY_SINGLE_TOP
+                },
+                PendingIntent.FLAG_UPDATE_CURRENT or PendingIntent.FLAG_IMMUTABLE,
+            )
+            return Notification.Action.Builder(null, title, openRequest).build()
+        }
         val intent = PendingIntent.getBroadcast(
             context,
             (requestId.hashCode() * 31) + decision.hashCode(),
@@ -283,10 +307,31 @@ internal object RequestNotifications {
     private fun notificationId(requestId: Long): Int =
         REQUEST_NOTIFICATION_ID_BASE + (requestId.hashCode() and 0x1fffffff)
 
-    private fun canNotify(context: Context): Boolean =
-        Build.VERSION.SDK_INT < Build.VERSION_CODES.TIRAMISU ||
-            context.checkSelfPermission(android.Manifest.permission.POST_NOTIFICATIONS) ==
-            PackageManager.PERMISSION_GRANTED
+    private fun styledDetails(details: List<RequestNotificationDetail>): CharSequence =
+        SpannableStringBuilder().apply {
+            details.forEachIndexed { index, detail ->
+                if (index > 0) append('\n')
+                detail.label?.let { label ->
+                    val start = length
+                    append(label)
+                    setSpan(
+                        StyleSpan(Typeface.BOLD),
+                        start,
+                        length,
+                        Spanned.SPAN_EXCLUSIVE_EXCLUSIVE,
+                    )
+                    append(": ")
+                }
+                append(detail.value)
+            }
+        }
+
+    private fun canNotify(context: Context): Boolean = areEnabled(context) &&
+        (
+            Build.VERSION.SDK_INT < Build.VERSION_CODES.TIRAMISU ||
+                context.checkSelfPermission(android.Manifest.permission.POST_NOTIFICATIONS) ==
+                PackageManager.PERMISSION_GRANTED
+        )
 }
 
 class RequestNotificationActionReceiver : BroadcastReceiver() {

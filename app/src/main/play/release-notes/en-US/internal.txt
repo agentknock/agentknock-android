@@ -1,1 +1,1 @@
-Reduces the app download size by optimizing release code and resources.
+Improves clarity and polish across requests, profiles, clients, and settings, with safer secret handling and clearer request notifications.

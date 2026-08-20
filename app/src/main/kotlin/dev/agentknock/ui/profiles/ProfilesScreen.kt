@@ -5,9 +5,15 @@ package dev.agentknock.ui.profiles
 import android.content.ClipData
 import android.content.ClipboardManager
 import android.content.Context
+import android.os.Handler
+import android.os.Build
+import android.os.Looper
 import android.os.PersistableBundle
 import androidx.activity.compose.BackHandler
+import androidx.compose.foundation.shape.RoundedCornerShape
+import androidx.compose.foundation.BorderStroke
 import androidx.compose.foundation.clickable
+import androidx.compose.foundation.selection.toggleable
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.BoxWithConstraints
@@ -20,36 +26,44 @@ import androidx.compose.foundation.layout.fillMaxHeight
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.padding
+import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.layout.width
 import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.items
+import androidx.compose.foundation.lazy.itemsIndexed
 import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.text.selection.SelectionContainer
+import androidx.compose.foundation.text.KeyboardOptions
 import androidx.compose.foundation.verticalScroll
 import androidx.compose.material3.AlertDialog
 import androidx.compose.material3.Button
-import androidx.compose.material3.Card
-import androidx.compose.material3.CardDefaults
 import androidx.compose.material3.CircularProgressIndicator
 import androidx.compose.material3.DropdownMenu
 import androidx.compose.material3.DropdownMenuItem
+import androidx.compose.material3.FilledTonalButton
 import androidx.compose.material3.HorizontalDivider
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.automirrored.outlined.ArrowBack
+import androidx.compose.material.icons.automirrored.outlined.NavigateNext
 import androidx.compose.material.icons.outlined.Add
+import androidx.compose.material.icons.outlined.ContentCopy
 import androidx.compose.material.icons.outlined.Edit
+import androidx.compose.material.icons.outlined.Lock
 import androidx.compose.material.icons.outlined.MoreVert
 import androidx.compose.material.icons.outlined.Settings
 import androidx.compose.material.icons.outlined.Visibility
 import androidx.compose.material.icons.outlined.VisibilityOff
 import androidx.compose.material3.Icon
 import androidx.compose.material3.IconButton
+import androidx.compose.material3.ListItem
+import androidx.compose.material3.ListItemDefaults
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.OutlinedTextField
 import androidx.compose.material3.Scaffold
 import androidx.compose.material3.SnackbarHost
 import androidx.compose.material3.SnackbarHostState
 import androidx.compose.material3.Switch
+import androidx.compose.material3.Surface
 import androidx.compose.material3.Text
 import androidx.compose.material3.TextButton
 import androidx.compose.material3.TopAppBar
@@ -67,13 +81,20 @@ import androidx.compose.ui.Modifier
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.platform.LocalDensity
 import androidx.compose.ui.platform.LocalResources
-import androidx.compose.ui.res.pluralStringResource
 import androidx.compose.ui.res.stringResource
 import androidx.compose.ui.text.font.FontFamily
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.text.input.PasswordVisualTransformation
+import androidx.compose.ui.text.input.ImeAction
+import androidx.compose.ui.text.input.KeyboardCapitalization
+import androidx.compose.ui.text.input.KeyboardType
 import androidx.compose.ui.text.input.VisualTransformation
 import androidx.compose.ui.unit.dp
+import androidx.compose.ui.semantics.selected
+import androidx.compose.ui.semantics.contentDescription
+import androidx.compose.ui.semantics.clearAndSetSemantics
+import androidx.compose.ui.semantics.semantics
+import androidx.compose.ui.semantics.Role
 import androidx.lifecycle.viewmodel.compose.viewModel
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import androidx.lifecycle.compose.LocalLifecycleOwner
@@ -90,6 +111,7 @@ import dev.agentknock.storage.profile.ProfileSummary
 import dev.agentknock.storage.profile.SaveEnvironmentVariableResult
 import dev.agentknock.storage.profile.SaveProfileResult
 import kotlinx.coroutines.launch
+import java.util.UUID
 
 private val environmentVariableName = Regex("[A-Za-z_][A-Za-z0-9_]*")
 private val twoPaneWidth = 840.dp
@@ -204,7 +226,16 @@ internal fun ProfilesScreen(
             scope.launch {
                 val value = readValue(variable) ?: return@launch
                 copyToClipboard(context, variable.name, value, variable.sensitive)
-                report(resources.getString(R.string.copied_to_clipboard, variable.name))
+                report(
+                    resources.getString(
+                        if (variable.sensitive) {
+                            R.string.sensitive_copied_to_clipboard
+                        } else {
+                            R.string.copied_to_clipboard
+                        },
+                        variable.name,
+                    ),
+                )
             }
         }
         if (variable.sensitive) {
@@ -519,49 +550,52 @@ private fun ProfileList(
             )
         } else {
             LazyColumn(Modifier.fillMaxSize()) {
-                items(profiles, key = ProfileSummary::id) { profile ->
+                itemsIndexed(profiles, key = { _, profile -> profile.id }) { index, profile ->
                     val selected = profile.id == selectedProfileId
-                    Column(
+                    ListItem(
+                        headlineContent = {
+                            Text(
+                                profile.name,
+                                maxLines = 1,
+                                overflow = TextOverflow.Ellipsis,
+                            )
+                        },
+                        supportingContent = {
+                            Column(verticalArrangement = Arrangement.spacedBy(2.dp)) {
+                                if (profile.description.isNotBlank()) {
+                                    Text(
+                                        profile.description,
+                                        maxLines = 2,
+                                        overflow = TextOverflow.Ellipsis,
+                                    )
+                                }
+                                Text(
+                                    "${profile.type.displayName()} " +
+                                        "(${profile.environmentVariableCount})",
+                                    style = MaterialTheme.typography.labelMedium,
+                                )
+                            }
+                        },
+                        colors = ListItemDefaults.colors(
+                            containerColor = if (selected) {
+                                MaterialTheme.colorScheme.secondaryContainer
+                            } else {
+                                MaterialTheme.colorScheme.surface
+                            },
+                        ),
+                        trailingContent = {
+                            Icon(
+                                Icons.AutoMirrored.Outlined.NavigateNext,
+                                contentDescription = null,
+                            )
+                        },
                         modifier = Modifier
                             .fillMaxWidth()
                             .clickable { onSelect(profile.id) }
-                            .then(
-                                if (selected) {
-                                    Modifier.padding(horizontal = 4.dp)
-                                } else {
-                                    Modifier
-                                },
-                            )
-                            .padding(horizontal = 20.dp, vertical = 16.dp),
-                    ) {
-                        Text(
-                            profile.name,
-                            style = MaterialTheme.typography.titleMedium,
-                            color = if (selected) {
-                                MaterialTheme.colorScheme.primary
-                            } else {
-                                MaterialTheme.colorScheme.onSurface
-                            },
-                        )
-                        if (profile.description.isNotBlank()) {
-                            Text(
-                                profile.description,
-                                style = MaterialTheme.typography.bodyMedium,
-                                color = MaterialTheme.colorScheme.onSurfaceVariant,
-                            )
-                        }
-                        Text(
-                            listOf(
-                                profile.type.displayName(),
-                                pluralStringResource(
-                                    R.plurals.variable_count,
-                                    profile.environmentVariableCount,
-                                    profile.environmentVariableCount,
-                                ),
-                            ).joinToString(" · "),
-                            style = MaterialTheme.typography.labelMedium,
-                            color = MaterialTheme.colorScheme.onSurfaceVariant,
-                        )
+                            .semantics { this.selected = selected },
+                    )
+                    if (index < profiles.lastIndex) {
+                        HorizontalDivider(Modifier.padding(start = 20.dp))
                     }
                 }
             }
@@ -634,11 +668,6 @@ private fun ProfileDetail(
                 .padding(horizontal = 20.dp, vertical = 12.dp),
             verticalArrangement = Arrangement.spacedBy(4.dp),
         ) {
-            Text(
-                profile.type.displayName(),
-                style = MaterialTheme.typography.labelLarge,
-                color = MaterialTheme.colorScheme.primary,
-            )
             if (profile.description.isNotBlank()) {
                 Text(
                     profile.description,
@@ -647,14 +676,13 @@ private fun ProfileDetail(
                 )
             }
             Text(
-                stringResource(R.string.created, formatTimestamp(profile.createdAt)),
+                stringResource(R.string.profile_type),
                 style = MaterialTheme.typography.labelSmall,
                 color = MaterialTheme.colorScheme.onSurfaceVariant,
             )
             Text(
-                stringResource(R.string.updated, formatTimestamp(profile.updatedAt)),
-                style = MaterialTheme.typography.labelSmall,
-                color = MaterialTheme.colorScheme.onSurfaceVariant,
+                profile.type.displayName(),
+                style = MaterialTheme.typography.titleMedium,
             )
         }
         HorizontalDivider()
@@ -671,7 +699,7 @@ private fun ProfileDetail(
                 "Variables",
                 style = MaterialTheme.typography.titleLarge,
             )
-            Button(onClick = onAddVariable) {
+            FilledTonalButton(onClick = onAddVariable) {
                 Icon(Icons.Outlined.Add, contentDescription = null)
                 Spacer(Modifier.width(6.dp))
                 Text(stringResource(R.string.add_variable))
@@ -702,6 +730,23 @@ private fun ProfileDetail(
                         onCopy = { onCopy(variable) },
                         onEdit = { onEditVariable(variable) },
                     )
+                }
+                item {
+                    Column(
+                        modifier = Modifier.padding(top = 8.dp, bottom = 4.dp),
+                        verticalArrangement = Arrangement.spacedBy(2.dp),
+                    ) {
+                        Text(
+                            stringResource(R.string.created, formatTimestamp(profile.createdAt)),
+                            style = MaterialTheme.typography.labelSmall,
+                            color = MaterialTheme.colorScheme.onSurfaceVariant,
+                        )
+                        Text(
+                            stringResource(R.string.updated, formatTimestamp(profile.updatedAt)),
+                            style = MaterialTheme.typography.labelSmall,
+                            color = MaterialTheme.colorScheme.onSurfaceVariant,
+                        )
+                    }
                 }
             }
         }
@@ -736,16 +781,16 @@ private fun EnvironmentVariableCard(
     }
 
     val displayedValue = if (variable.sensitive) revealedValue else publicValue
-    Card(
-        colors = CardDefaults.cardColors(
-            containerColor = MaterialTheme.colorScheme.surfaceContainer,
-        ),
+    Surface(
+        color = MaterialTheme.colorScheme.surfaceContainerLow,
+        shape = RoundedCornerShape(12.dp),
+        tonalElevation = 1.dp,
     ) {
         Column(
             modifier = Modifier
                 .fillMaxWidth()
-                .padding(16.dp),
-            verticalArrangement = Arrangement.spacedBy(8.dp),
+                .padding(horizontal = 14.dp, vertical = 12.dp),
+            verticalArrangement = Arrangement.spacedBy(6.dp),
         ) {
             Row(
                 modifier = Modifier.fillMaxWidth(),
@@ -758,52 +803,104 @@ private fun EnvironmentVariableCard(
                     fontFamily = FontFamily.Monospace,
                     modifier = Modifier.weight(1f),
                 )
-                Spacer(Modifier.width(12.dp))
-                Text(
-                    stringResource(
-                        if (variable.sensitive) R.string.sensitive else R.string.not_sensitive,
-                    ),
-                    style = MaterialTheme.typography.labelMedium,
-                    color = MaterialTheme.colorScheme.onSurfaceVariant,
-                )
-            }
-            if (!variable.valueAvailable || publicValueUnavailable) {
-                Text(
-                    stringResource(R.string.value_unavailable),
-                    color = MaterialTheme.colorScheme.error,
-                )
-            } else if (displayedValue == null) {
-                Text(
-                    stringResource(
-                        if (variable.sensitive) R.string.value_hidden else R.string.loading_value,
-                    ),
-                    color = MaterialTheme.colorScheme.onSurfaceVariant,
-                )
-            } else {
-                SelectionContainer {
-                    Text(displayedValue, fontFamily = FontFamily.Monospace)
+                if (variable.sensitive) {
+                    Spacer(Modifier.width(12.dp))
+                    Surface(
+                        color = MaterialTheme.colorScheme.surfaceContainerHighest,
+                        contentColor = MaterialTheme.colorScheme.onSurfaceVariant,
+                        shape = RoundedCornerShape(100.dp),
+                        border = BorderStroke(1.dp, MaterialTheme.colorScheme.outlineVariant),
+                    ) {
+                        Row(
+                            modifier = Modifier.padding(horizontal = 9.dp, vertical = 4.dp),
+                            horizontalArrangement = Arrangement.spacedBy(4.dp),
+                            verticalAlignment = Alignment.CenterVertically,
+                        ) {
+                            Icon(
+                                Icons.Outlined.Lock,
+                                contentDescription = null,
+                                modifier = Modifier.size(13.dp),
+                            )
+                            Text(
+                                stringResource(R.string.sensitive),
+                                style = MaterialTheme.typography.labelSmall,
+                            )
+                        }
+                    }
                 }
             }
-            if (variable.notes.isNotBlank()) {
-                Text(variable.notes, style = MaterialTheme.typography.bodyMedium)
-            }
-            FlowRow(
+            Row(
                 modifier = Modifier.fillMaxWidth(),
-                horizontalArrangement = Arrangement.End,
+                verticalAlignment = Alignment.CenterVertically,
             ) {
-                if (variable.sensitive) {
-                    TextButton(onClick = onReveal, enabled = variable.valueAvailable) {
+                Column(Modifier.weight(1f)) {
+                    if (!variable.valueAvailable || publicValueUnavailable) {
                         Text(
-                            stringResource(
+                            stringResource(R.string.value_unavailable),
+                            color = MaterialTheme.colorScheme.error,
+                        )
+                    } else if (displayedValue == null) {
+                        if (variable.sensitive) {
+                            Text(
+                                stringResource(R.string.masked_value),
+                                style = MaterialTheme.typography.titleMedium,
+                                color = MaterialTheme.colorScheme.onSurfaceVariant,
+                                modifier = Modifier.clearAndSetSemantics {
+                                    contentDescription = "Value hidden"
+                                },
+                            )
+                        } else {
+                            Text(
+                                stringResource(R.string.loading_value),
+                                color = MaterialTheme.colorScheme.onSurfaceVariant,
+                            )
+                        }
+                    } else {
+                        SelectionContainer {
+                            Text(
+                                displayedValue,
+                                fontFamily = FontFamily.Monospace,
+                                maxLines = 6,
+                                overflow = TextOverflow.Ellipsis,
+                            )
+                        }
+                    }
+                }
+                if (variable.sensitive) {
+                    IconButton(onClick = onReveal, enabled = variable.valueAvailable) {
+                        Icon(
+                            if (revealedValue == null) {
+                                Icons.Outlined.Visibility
+                            } else {
+                                Icons.Outlined.VisibilityOff
+                            },
+                            contentDescription = stringResource(
                                 if (revealedValue == null) R.string.show else R.string.hide,
-                            ),
+                            ) + " ${variable.name}",
                         )
                     }
                 }
-                TextButton(onClick = onCopy, enabled = variable.valueAvailable) {
-                    Text(stringResource(R.string.copy))
+                IconButton(onClick = onCopy, enabled = variable.valueAvailable) {
+                    Icon(
+                        Icons.Outlined.ContentCopy,
+                        contentDescription = "Copy ${variable.name} value",
+                    )
                 }
-                TextButton(onClick = onEdit) { Text(stringResource(R.string.edit)) }
+                IconButton(onClick = onEdit) {
+                    Icon(
+                        Icons.Outlined.Edit,
+                        contentDescription = "Edit ${variable.name}",
+                    )
+                }
+            }
+            if (variable.notes.isNotBlank()) {
+                Text(
+                    variable.notes,
+                    style = MaterialTheme.typography.bodySmall,
+                    color = MaterialTheme.colorScheme.onSurfaceVariant,
+                    maxLines = 3,
+                    overflow = TextOverflow.Ellipsis,
+                )
             }
         }
     }
@@ -819,8 +916,17 @@ private fun ProfileEditorScreen(
     var name by remember(profile?.id) { mutableStateOf(profile?.name.orEmpty()) }
     var description by remember(profile?.id) { mutableStateOf(profile?.description.orEmpty()) }
     var validationError by remember(profile?.id) { mutableStateOf<Int?>(null) }
+    var confirmDiscard by remember(profile?.id) { mutableStateOf(false) }
+    val dirty = if (profile == null) {
+        name.isNotEmpty() || description.isNotEmpty()
+    } else {
+        name != profile.name || description != profile.description
+    }
+    fun requestDismiss() {
+        if (dirty) confirmDiscard = true else onDismiss()
+    }
 
-    BackHandler(onBack = onDismiss)
+    BackHandler(onBack = ::requestDismiss)
     Scaffold(
         topBar = {
             TopAppBar(
@@ -832,7 +938,7 @@ private fun ProfileEditorScreen(
                     )
                 },
                 navigationIcon = {
-                    IconButton(onClick = onDismiss) {
+                    IconButton(onClick = ::requestDismiss) {
                         Icon(
                             Icons.AutoMirrored.Outlined.ArrowBack,
                             contentDescription = stringResource(R.string.back),
@@ -848,7 +954,34 @@ private fun ProfileEditorScreen(
                 .padding(20.dp),
             verticalArrangement = Arrangement.spacedBy(18.dp),
         ) {
-            Text("Environment variables", color = MaterialTheme.colorScheme.primary)
+            Surface(
+                color = MaterialTheme.colorScheme.surfaceContainerLow,
+                shape = RoundedCornerShape(12.dp),
+                modifier = Modifier.fillMaxWidth(),
+            ) {
+                Column(
+                    modifier = Modifier.padding(14.dp),
+                    verticalArrangement = Arrangement.spacedBy(3.dp),
+                ) {
+                    Text(
+                        stringResource(R.string.profile_type),
+                        style = MaterialTheme.typography.labelMedium,
+                        color = MaterialTheme.colorScheme.onSurfaceVariant,
+                    )
+                    Text(
+                        stringResource(R.string.environment_variables),
+                        style = MaterialTheme.typography.titleMedium,
+                    )
+                    if (profile == null) {
+                        Text(
+                            stringResource(R.string.profile_type_immutable) + " " +
+                                stringResource(R.string.profile_variables_after_creation),
+                            style = MaterialTheme.typography.bodySmall,
+                            color = MaterialTheme.colorScheme.onSurfaceVariant,
+                        )
+                    }
+                }
+            }
             OutlinedTextField(
                 value = name,
                 onValueChange = {
@@ -861,6 +994,12 @@ private fun ProfileEditorScreen(
                 supportingText = validationError?.let { error ->
                     { Text(stringResource(error)) }
                 },
+                keyboardOptions = KeyboardOptions(
+                    capitalization = KeyboardCapitalization.None,
+                    autoCorrectEnabled = false,
+                    keyboardType = KeyboardType.Ascii,
+                    imeAction = ImeAction.Next,
+                ),
                 modifier = Modifier.fillMaxWidth(),
             )
             OutlinedTextField(
@@ -902,6 +1041,12 @@ private fun ProfileEditorScreen(
             }
         }
     }
+    if (confirmDiscard) {
+        DiscardChangesDialog(
+            onDismiss = { confirmDiscard = false },
+            onDiscard = onDismiss,
+        )
+    }
 }
 
 @Composable
@@ -926,7 +1071,21 @@ private fun EnvironmentVariableEditorScreen(
     var notes by remember(variable?.id) { mutableStateOf(variable?.notes.orEmpty()) }
     var showValue by remember(variable?.id) { mutableStateOf(false) }
     var nameInvalid by remember(variable?.id) { mutableStateOf(false) }
+    var menuExpanded by remember(variable?.id) { mutableStateOf(false) }
+    var confirmDiscard by remember(variable?.id) { mutableStateOf(false) }
     val lifecycle = LocalLifecycleOwner.current.lifecycle
+    val dirty = if (variable == null) {
+        name.isNotEmpty() || value.isNotEmpty() || notes.isNotEmpty() || !sensitive
+    } else {
+        name != variable.name ||
+            sensitive != variable.sensitive ||
+            notes != variable.notes ||
+            (currentValue != null && value != currentValue) ||
+            (currentValue == null && valueEdited)
+    }
+    fun requestDismiss() {
+        if (dirty) confirmDiscard = true else onDismiss()
+    }
 
     DisposableEffect(lifecycle, sensitive) {
         val observer = LifecycleEventObserver { _, event ->
@@ -936,17 +1095,23 @@ private fun EnvironmentVariableEditorScreen(
         onDispose { lifecycle.removeObserver(observer) }
     }
 
-    BackHandler(onBack = onDismiss)
+    BackHandler(onBack = ::requestDismiss)
     Scaffold(
         topBar = {
             TopAppBar(
                 title = {
                     Text(
-                        variable?.name ?: stringResource(R.string.new_environment_variable),
+                        stringResource(
+                            if (variable == null) {
+                                R.string.new_environment_variable
+                            } else {
+                                R.string.edit_environment_variable
+                            },
+                        ),
                     )
                 },
                 navigationIcon = {
-                    IconButton(onClick = onDismiss) {
+                    IconButton(onClick = ::requestDismiss) {
                         Icon(
                             Icons.AutoMirrored.Outlined.ArrowBack,
                             contentDescription = stringResource(R.string.back),
@@ -954,11 +1119,25 @@ private fun EnvironmentVariableEditorScreen(
                     }
                 },
                 actions = {
-                    onDelete?.let {
-                        TextButton(onClick = it) {
-                            Text(
-                                stringResource(R.string.delete),
-                                color = MaterialTheme.colorScheme.error,
+                    if (onDelete != null) {
+                        IconButton(onClick = { menuExpanded = true }) {
+                            Icon(Icons.Outlined.MoreVert, contentDescription = "More options")
+                        }
+                        DropdownMenu(
+                            expanded = menuExpanded,
+                            onDismissRequest = { menuExpanded = false },
+                        ) {
+                            DropdownMenuItem(
+                                text = {
+                                    Text(
+                                        stringResource(R.string.delete),
+                                        color = MaterialTheme.colorScheme.error,
+                                    )
+                                },
+                                onClick = {
+                                    menuExpanded = false
+                                    onDelete()
+                                },
                             )
                         }
                     }
@@ -987,6 +1166,12 @@ private fun EnvironmentVariableEditorScreen(
                         } else {
                             null
                         },
+                        keyboardOptions = KeyboardOptions(
+                            capitalization = KeyboardCapitalization.Characters,
+                            autoCorrectEnabled = false,
+                            keyboardType = KeyboardType.Ascii,
+                            imeAction = ImeAction.Next,
+                        ),
                         modifier = Modifier.fillMaxWidth(),
                     )
                 }
@@ -1036,7 +1221,13 @@ private fun EnvironmentVariableEditorScreen(
                 }
                 item {
                     Row(
-                        modifier = Modifier.fillMaxWidth(),
+                        modifier = Modifier
+                            .fillMaxWidth()
+                            .toggleable(
+                                value = sensitive,
+                                role = Role.Switch,
+                                onValueChange = { sensitive = it },
+                            ),
                         horizontalArrangement = Arrangement.SpaceBetween,
                         verticalAlignment = Alignment.CenterVertically,
                     ) {
@@ -1049,7 +1240,7 @@ private fun EnvironmentVariableEditorScreen(
                             )
                         }
                         Spacer(Modifier.width(12.dp))
-                        Switch(checked = sensitive, onCheckedChange = { sensitive = it })
+                        Switch(checked = sensitive, onCheckedChange = null)
                     }
                 }
                 item {
@@ -1060,36 +1251,6 @@ private fun EnvironmentVariableEditorScreen(
                         minLines = 2,
                         modifier = Modifier.fillMaxWidth(),
                     )
-                }
-                if (variable != null) {
-                    item {
-                        Column(verticalArrangement = Arrangement.spacedBy(2.dp)) {
-                            Text(
-                                stringResource(
-                                    R.string.created,
-                                    formatTimestamp(variable.createdAt),
-                                ),
-                                style = MaterialTheme.typography.labelSmall,
-                                color = MaterialTheme.colorScheme.onSurfaceVariant,
-                            )
-                            Text(
-                                stringResource(
-                                    R.string.updated,
-                                    formatTimestamp(variable.updatedAt),
-                                ),
-                                style = MaterialTheme.typography.labelSmall,
-                                color = MaterialTheme.colorScheme.onSurfaceVariant,
-                            )
-                            Text(
-                                stringResource(
-                                    R.string.value_updated,
-                                    formatTimestamp(variable.valueUpdatedAt),
-                                ),
-                                style = MaterialTheme.typography.labelSmall,
-                                color = MaterialTheme.colorScheme.onSurfaceVariant,
-                            )
-                        }
-                    }
                 }
                 item {
                     Button(
@@ -1125,8 +1286,55 @@ private fun EnvironmentVariableEditorScreen(
                         )
                     }
                 }
+                if (variable != null) {
+                    item {
+                        Column(verticalArrangement = Arrangement.spacedBy(2.dp)) {
+                            Text(
+                                stringResource(
+                                    R.string.created,
+                                    formatTimestamp(variable.createdAt),
+                                ),
+                                style = MaterialTheme.typography.labelSmall,
+                                color = MaterialTheme.colorScheme.onSurfaceVariant,
+                            )
+                            Text(
+                                stringResource(
+                                    R.string.updated,
+                                    formatTimestamp(variable.updatedAt),
+                                ),
+                                style = MaterialTheme.typography.labelSmall,
+                                color = MaterialTheme.colorScheme.onSurfaceVariant,
+                            )
+                            Text(
+                                stringResource(
+                                    R.string.value_updated,
+                                    formatTimestamp(variable.valueUpdatedAt),
+                                ),
+                                style = MaterialTheme.typography.labelSmall,
+                                color = MaterialTheme.colorScheme.onSurfaceVariant,
+                            )
+                        }
+                    }
+                }
             }
     }
+    if (confirmDiscard) {
+        DiscardChangesDialog(
+            onDismiss = { confirmDiscard = false },
+            onDiscard = onDismiss,
+        )
+    }
+}
+
+@Composable
+private fun DiscardChangesDialog(onDismiss: () -> Unit, onDiscard: () -> Unit) {
+    AlertDialog(
+        onDismissRequest = onDismiss,
+        title = { Text("Discard changes?") },
+        text = { Text("Your unsaved changes will be lost.") },
+        confirmButton = { TextButton(onClick = onDiscard) { Text("Discard") } },
+        dismissButton = { TextButton(onClick = onDismiss) { Text("Keep editing") } },
+    )
 }
 
 @Composable
@@ -1199,11 +1407,31 @@ private fun copyToClipboard(
     sensitive: Boolean,
 ) {
     val clip = ClipData.newPlainText(label, value)
+    var sensitiveClipId: String? = null
     if (sensitive) {
+        sensitiveClipId = UUID.randomUUID().toString()
         clip.description.extras = PersistableBundle().apply {
             putBoolean("android.content.extra.IS_SENSITIVE", true)
+            putString(SENSITIVE_CLIP_ID, sensitiveClipId)
         }
     }
     val clipboard = context.getSystemService(Context.CLIPBOARD_SERVICE) as ClipboardManager
     clipboard.setPrimaryClip(clip)
+    sensitiveClipId?.let { clipId ->
+        Handler(Looper.getMainLooper()).postDelayed(
+            {
+                if (clipboard.primaryClipDescription?.extras?.getString(SENSITIVE_CLIP_ID) == clipId) {
+                    if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.P) {
+                        clipboard.clearPrimaryClip()
+                    } else {
+                        clipboard.setPrimaryClip(ClipData.newPlainText("", ""))
+                    }
+                }
+            },
+            SENSITIVE_CLIP_LIFETIME_MILLIS,
+        )
+    }
 }
+
+private const val SENSITIVE_CLIP_ID = "dev.agentknock.clipboard.ID"
+private const val SENSITIVE_CLIP_LIFETIME_MILLIS = 60_000L

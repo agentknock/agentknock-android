@@ -8,6 +8,7 @@ import dev.agentknock.storage.FactoryResetResult
 import dev.agentknock.storage.crypto.LocalEncryptionProtection
 import dev.agentknock.storage.audit.AuditEvent
 import dev.agentknock.storage.request.RequestSyncResult
+import dev.agentknock.storage.request.ClientSummary
 import dev.agentknock.storage.vault.DeviceManagementResult
 import dev.agentknock.storage.vault.VaultConfiguration
 import kotlinx.coroutines.ExperimentalCoroutinesApi
@@ -23,6 +24,7 @@ import kotlinx.coroutines.launch
 
 internal data class DataCounts(
     val profiles: Int = 0,
+    val variables: Int = 0,
     val clients: Int = 0,
     val requests: Int = 0,
     val auditEvents: Int = 0,
@@ -42,9 +44,20 @@ internal class SettingsViewModel(application: Application) : AndroidViewModel(ap
         container.requests.observeRequestCount(),
         container.audit.observeCount(),
     ) { profiles, clients, requests, events ->
-        DataCounts(profiles.size, clients.size, requests, events)
+        DataCounts(
+            profiles = profiles.size,
+            variables = profiles.sumOf { it.environmentVariableCount },
+            clients = clients.size,
+            requests = requests,
+            auditEvents = events,
+        )
     }.stateIn(viewModelScope, SharingStarted.Eagerly, DataCounts())
     val auditEvents: StateFlow<List<AuditEvent>> = container.audit.observeEvents().stateIn(
+        viewModelScope,
+        SharingStarted.Eagerly,
+        emptyList(),
+    )
+    val clients: StateFlow<List<ClientSummary>> = container.requests.observeClients().stateIn(
         viewModelScope,
         SharingStarted.Eagerly,
         emptyList(),

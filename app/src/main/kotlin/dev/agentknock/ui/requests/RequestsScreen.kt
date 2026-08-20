@@ -3,8 +3,10 @@
 package dev.agentknock.ui.requests
 
 import androidx.activity.compose.BackHandler
+import androidx.compose.foundation.BorderStroke
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.background
+import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.BoxWithConstraints
@@ -20,13 +22,14 @@ import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.layout.width
 import androidx.compose.foundation.lazy.LazyColumn
-import androidx.compose.foundation.lazy.items
+import androidx.compose.foundation.lazy.itemsIndexed
 import androidx.compose.foundation.lazy.rememberLazyListState
 import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.text.selection.SelectionContainer
 import androidx.compose.foundation.verticalScroll
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.automirrored.outlined.ArrowBack
+import androidx.compose.material.icons.automirrored.outlined.NavigateNext
 import androidx.compose.material.icons.outlined.ExpandLess
 import androidx.compose.material.icons.outlined.ExpandMore
 import androidx.compose.material.icons.outlined.Edit
@@ -35,6 +38,8 @@ import androidx.compose.material.icons.outlined.Close
 import androidx.compose.material.icons.outlined.ErrorOutline
 import androidx.compose.material.icons.outlined.Refresh
 import androidx.compose.material.icons.outlined.Settings
+import androidx.compose.material.icons.outlined.Visibility
+import androidx.compose.material.icons.outlined.VisibilityOff
 import androidx.compose.material3.AlertDialog
 import androidx.compose.material3.Button
 import androidx.compose.material3.Card
@@ -54,6 +59,7 @@ import androidx.compose.material3.SnackbarHostState
 import androidx.compose.material3.Text
 import androidx.compose.material3.TextButton
 import androidx.compose.material3.Switch
+import androidx.compose.material3.Surface
 import androidx.compose.material3.SwipeToDismissBox
 import androidx.compose.material3.SwipeToDismissBoxValue
 import androidx.compose.material3.rememberSwipeToDismissBoxState
@@ -70,7 +76,8 @@ import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.graphics.Color
-import androidx.compose.ui.draw.alpha
+import androidx.compose.ui.semantics.contentDescription
+import androidx.compose.ui.semantics.semantics
 import androidx.compose.ui.text.font.FontFamily
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
@@ -398,14 +405,14 @@ private fun RequestList(
             }
         } else {
             LazyColumn(Modifier.fillMaxSize(), state = listState) {
-                items(requests, key = InboxRequestSummary::id) { request ->
+                itemsIndexed(requests, key = { _, request -> request.id }) { index, request ->
                     RequestRow(
                         request = request,
                         onClick = { onOpen(request.id) },
                         onApprove = { onApprove(request) },
                         onReject = { onReject(request) },
                     )
-                    HorizontalDivider()
+                    if (index < requests.lastIndex) HorizontalDivider()
                 }
             }
         }
@@ -483,24 +490,58 @@ private fun RequestRowContent(request: InboxRequestSummary, onClick: () -> Unit)
         rejected -> MaterialTheme.colorScheme.surfaceVariant
         else -> MaterialTheme.colorScheme.surface
     }
-    ListItem(
-        headlineContent = {
-            if (request.command != null) {
-                Text(
-                    renderShellCommand(request.command, request.arguments),
-                    style = MaterialTheme.typography.titleMedium,
-                    fontFamily = FontFamily.Monospace,
-                    maxLines = 2,
-                    overflow = TextOverflow.Ellipsis,
+    Surface(
+        color = containerColor,
+        modifier = Modifier
+            .fillMaxWidth()
+            .clickable(onClick = onClick),
+    ) {
+        Column(
+            modifier = Modifier.fillMaxWidth().padding(horizontal = 16.dp, vertical = 12.dp),
+            verticalArrangement = Arrangement.spacedBy(8.dp),
+        ) {
+            Row(
+                modifier = Modifier.fillMaxWidth(),
+                horizontalArrangement = Arrangement.spacedBy(12.dp),
+                verticalAlignment = Alignment.Top,
+            ) {
+                Column(Modifier.weight(1f), verticalArrangement = Arrangement.spacedBy(2.dp)) {
+                    if (request.command != null) {
+                        Text(
+                            request.title,
+                            style = MaterialTheme.typography.labelMedium,
+                            color = MaterialTheme.colorScheme.onSurfaceVariant,
+                        )
+                    }
+                    Text(
+                        request.command?.let {
+                            renderShellCommand(it, request.arguments)
+                        } ?: request.title,
+                        style = MaterialTheme.typography.titleMedium,
+                        fontFamily = if (request.command != null) {
+                            FontFamily.Monospace
+                        } else {
+                            FontFamily.Default
+                        },
+                        maxLines = 2,
+                        overflow = TextOverflow.Ellipsis,
+                    )
+                    request.listSummary?.let {
+                        Text(
+                            it,
+                            style = MaterialTheme.typography.bodyMedium,
+                            color = MaterialTheme.colorScheme.onSurfaceVariant,
+                        )
+                    }
+                }
+                RequestStatusBadge(request)
+                Icon(
+                    Icons.AutoMirrored.Outlined.NavigateNext,
+                    contentDescription = null,
+                    tint = MaterialTheme.colorScheme.onSurfaceVariant,
+                    modifier = Modifier.padding(top = 2.dp),
                 )
-            } else {
-                Text(request.title, style = MaterialTheme.typography.titleMedium)
             }
-        },
-        overlineContent = request.command?.let {
-            { Text(request.title) }
-        },
-        supportingContent = {
             FlowRow(
                 horizontalArrangement = Arrangement.spacedBy(8.dp),
                 verticalArrangement = Arrangement.spacedBy(6.dp),
@@ -508,29 +549,20 @@ private fun RequestRowContent(request: InboxRequestSummary, onClick: () -> Unit)
             ) {
                 ClientIdentity(request.clientName)
                 if (request.profileNames.isNotEmpty()) {
-                    ProfileIdentities(request.profileNames)
+                    ProfileIdentities(
+                        request.profileNames,
+                        unavailable = request.isInvalidCredential(),
+                    )
                 }
             }
-        },
-        trailingContent = {
-            Column(horizontalAlignment = Alignment.End) {
-                Text(
-                    request.statusLabel(),
-                    color = request.statusColor(),
-                    style = MaterialTheme.typography.labelLarge,
-                )
-                Text(
-                    formatTimestamp(request.receivedAt),
-                    style = MaterialTheme.typography.labelSmall,
-                    color = MaterialTheme.colorScheme.onSurfaceVariant,
-                )
-            }
-        },
-        colors = ListItemDefaults.colors(containerColor = containerColor),
-        modifier = Modifier
-            .alpha(if (rejected) 0.62f else 1f)
-            .clickable(onClick = onClick),
-    )
+            Text(
+                formatTimestamp(request.receivedAt),
+                style = MaterialTheme.typography.labelSmall,
+                color = MaterialTheme.colorScheme.onSurfaceVariant,
+                modifier = Modifier.align(Alignment.End),
+            )
+        }
+    }
 }
 
 @Composable
@@ -550,15 +582,33 @@ private fun PairingDetail(
                 (pairing.pairingState == PairingState.RECEIVING && pairing.error != null),
         )
         Text(
-            pairing.hostname ?: pairing.platform ?: "Unknown client",
+            "Current client name",
+            style = MaterialTheme.typography.labelMedium,
+            color = MaterialTheme.colorScheme.onSurfaceVariant,
+        )
+        Text(
+            pairing.clientName,
             style = MaterialTheme.typography.headlineSmall,
         )
         val reported = listOfNotNull(
+            pairing.hostname,
             pairing.platform?.let(::formatPlatformName),
             pairing.architecture,
         ).joinToString(" · ")
         if (reported.isNotEmpty()) {
+            Text(
+                "Reported by client at pairing",
+                style = MaterialTheme.typography.labelMedium,
+                color = MaterialTheme.colorScheme.onSurfaceVariant,
+            )
             Text(reported, color = MaterialTheme.colorScheme.onSurfaceVariant)
+        }
+        DetailValue("Request received", formatTimestamp(request.receivedAt))
+        pairing.decidedAt?.let {
+            DetailValue("User decision", formatTimestamp(it))
+        }
+        request.completedAt?.let {
+            DetailValue("Pairing completed", formatTimestamp(it))
         }
 
         when (pairing.pairingState) {
@@ -582,7 +632,10 @@ private fun PairingDetail(
                 "Activating pairing",
                 "Waiting for the relay to apply the client state.",
             )
-            PairingState.ACTIVE -> Notice("Pairing complete", "This client can now make requests.")
+            PairingState.ACTIVE -> Notice(
+                "Pairing completed",
+                "Access was granted to this client.",
+            )
             PairingState.REJECTED -> Notice("Pairing rejected", "No access was granted.", true)
             PairingState.RECEIVING -> if (pairing.error == null) {
                 Notice("Receiving pairing", "The request is still being verified.")
@@ -612,7 +665,6 @@ private fun PairingDetail(
             }
         }
         Disclosure("Technical details") {
-            DetailValue("Received", formatTimestamp(request.receivedAt))
             DetailValue("Pairing address", pairing.vaultAddress, true)
             pairing.osVersion?.let { DetailValue("OS version", it) }
             pairing.cliVersion?.let { DetailValue("CLI version", it) }
@@ -633,36 +685,99 @@ private fun CredentialDetail(
     modifier: Modifier,
 ) {
     val credential = checkNotNull(request.credential)
-    DetailPage("Profile access", onBack, modifier, showBack = showBack) {
+    DetailPage(
+        title = "Profile access",
+        onBack = onBack,
+        modifier = modifier,
+        showBack = showBack,
+        bottomContent = if (credential.state == CredentialRequestState.APPROVAL_PENDING) {
+            {
+                Surface(
+                    color = MaterialTheme.colorScheme.surfaceContainerLow,
+                    tonalElevation = 3.dp,
+                ) {
+                    Row(
+                        modifier = Modifier.fillMaxWidth().padding(12.dp),
+                        horizontalArrangement = Arrangement.spacedBy(10.dp),
+                    ) {
+                        OutlinedButton(onClick = onDeny, modifier = Modifier.weight(1f)) {
+                            Text("Deny once")
+                        }
+                        Button(
+                            onClick = onApprove,
+                            enabled = credential.missingProfiles.isEmpty(),
+                            modifier = Modifier.weight(1f),
+                        ) {
+                            Text("Approve once")
+                        }
+                    }
+                }
+            }
+        } else {
+            null
+        },
+    ) {
         StatusLine(credential.statusLabel(), credential.isError())
         ClientIdentity(credential.clientName)
         ProfileIdentities(credential.profiles)
+        Text(
+            buildString {
+                append(credential.clientName)
+                append(" is requesting one-time access to ")
+                append(credential.profiles.joinToString())
+                append(" for the command below.")
+            },
+            style = MaterialTheme.typography.bodyLarge,
+        )
+        DetailValue("Received", formatTimestamp(request.receivedAt))
 
         credential.reason?.takeIf(String::isNotBlank)?.let { reason ->
-            Card(colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.secondaryContainer)) {
+            Card(
+                colors = CardDefaults.cardColors(
+                    containerColor = MaterialTheme.colorScheme.surfaceContainerLow,
+                ),
+            ) {
                 Column(Modifier.padding(16.dp), verticalArrangement = Arrangement.spacedBy(4.dp)) {
                     Text("Reason reported by client", style = MaterialTheme.typography.labelLarge)
-                    Text(reason, style = MaterialTheme.typography.titleMedium)
                     Text(
-                        "This text is supplied by the requesting client.",
+                        "Untrusted context supplied by the requesting client.",
                         style = MaterialTheme.typography.bodySmall,
                         color = MaterialTheme.colorScheme.onSurfaceVariant,
+                    )
+                    Text(reason, style = MaterialTheme.typography.bodyLarge)
+                }
+            }
+        }
+
+        val renderedCommand = renderShellCommand(credential.command, credential.arguments)
+        Surface(
+            color = MaterialTheme.colorScheme.surfaceContainerLow,
+            shape = RoundedCornerShape(12.dp),
+            border = BorderStroke(1.dp, MaterialTheme.colorScheme.outlineVariant),
+            modifier = Modifier.fillMaxWidth(),
+        ) {
+            Column(
+                Modifier.padding(16.dp),
+                verticalArrangement = Arrangement.spacedBy(8.dp),
+            ) {
+                Text("Command", style = MaterialTheme.typography.labelLarge)
+                SelectionContainer {
+                    Text(renderedCommand, fontFamily = FontFamily.Monospace)
+                }
+                if (renderedCommand.any { it.code > 0x7e }) {
+                    Text(
+                        "This command contains non-ASCII characters.",
+                        style = MaterialTheme.typography.bodySmall,
+                        color = MaterialTheme.colorScheme.error,
                     )
                 }
             }
         }
 
-        Column(verticalArrangement = Arrangement.spacedBy(8.dp)) {
-            Text("Command", style = MaterialTheme.typography.titleMedium)
-            SelectionContainer {
-                Text(
-                    renderShellCommand(credential.command, credential.arguments),
-                    fontFamily = FontFamily.Monospace,
-                )
-            }
-        }
-
-        if (credential.missingProfiles.isNotEmpty()) {
+        if (
+            credential.missingProfiles.isNotEmpty() &&
+            credential.completionResult != CredentialCompletionResult.DENIED
+        ) {
             Notice(
                 "Profiles are unavailable",
                 credential.missingProfiles.joinToString(),
@@ -681,21 +796,11 @@ private fun CredentialDetail(
             }
         }
 
-        if (credential.state == CredentialRequestState.APPROVAL_PENDING) {
-            Button(
-                onClick = onApprove,
-                enabled = credential.missingProfiles.isEmpty(),
-                modifier = Modifier.fillMaxWidth(),
-            ) { Text("Approve once") }
-            OutlinedButton(onClick = onDeny, modifier = Modifier.fillMaxWidth()) {
-                Text("Deny once")
-            }
-        } else {
+        if (credential.state != CredentialRequestState.APPROVAL_PENDING) {
             CredentialOutcome(credential)
         }
 
         Disclosure("Technical details") {
-            DetailValue("Received", formatTimestamp(request.receivedAt))
             DetailValue("Working directory", credential.workingDirectory, true)
             DetailValue("Executable path", credential.executablePath, true)
             credential.executableHash?.let { DetailValue("Executable hash", it, true) }
@@ -740,6 +845,7 @@ private fun ProfileUploadDetail(
     }
     var editingName by remember { mutableStateOf(false) }
     var revealedValues by remember(request.id) { mutableStateOf<Map<String, String>>(emptyMap()) }
+    var reviewedVariableIds by remember(request.id) { mutableStateOf<Set<String>>(emptySet()) }
     val scope = rememberCoroutineScope()
     val lifecycle = LocalLifecycleOwner.current.lifecycle
 
@@ -773,10 +879,57 @@ private fun ProfileUploadDetail(
                 }
             }
         },
+        bottomContent = if (upload.state == ProfileUploadRequestState.REVIEW_PENDING) {
+            {
+                val reviewedCount = upload.variables.count { reviewedVariableIds.contains(it.id) }
+                Surface(
+                    color = MaterialTheme.colorScheme.surfaceContainerLow,
+                    tonalElevation = 3.dp,
+                ) {
+                    Column(
+                        Modifier.fillMaxWidth().padding(12.dp),
+                        verticalArrangement = Arrangement.spacedBy(8.dp),
+                    ) {
+                        Text(
+                            if (reviewedCount == upload.variables.size) {
+                                "All uploaded values have been reviewed"
+                            } else {
+                                "$reviewedCount of ${upload.variables.size} values reviewed · " +
+                                    "reveal each value to enable acceptance"
+                            },
+                            style = MaterialTheme.typography.labelMedium,
+                            color = MaterialTheme.colorScheme.onSurfaceVariant,
+                        )
+                        Row(
+                            modifier = Modifier.fillMaxWidth(),
+                            horizontalArrangement = Arrangement.spacedBy(10.dp),
+                        ) {
+                            OutlinedButton(
+                                onClick = onReject,
+                                modifier = Modifier.weight(1f),
+                            ) {
+                                Text("Reject")
+                            }
+                            Button(
+                                onClick = { onAccept(acceptedName.trim()) },
+                                enabled = acceptedName.isNotBlank() &&
+                                    reviewedCount == upload.variables.size,
+                                modifier = Modifier.weight(1f),
+                            ) {
+                                Text("Accept")
+                            }
+                        }
+                    }
+                }
+            }
+        } else {
+            null
+        },
     ) {
         StatusLine(upload.state.label(), upload.state == ProfileUploadRequestState.VERIFICATION_FAILED)
         DetailValue("Profile type", "Environment variables")
         DetailValue("Proposed by client", upload.clientName)
+        DetailValue("Received", formatTimestamp(request.receivedAt))
         upload.description?.takeIf(String::isNotBlank)?.let {
             DetailValue("Proposed description", it)
         }
@@ -808,6 +961,13 @@ private fun ProfileUploadDetail(
             },
             style = MaterialTheme.typography.titleLarge,
         )
+        if (upload.state == ProfileUploadRequestState.REVIEW_PENDING) {
+            Text(
+                "Review each value and choose whether it should require device authentication " +
+                    "after saving.",
+                color = MaterialTheme.colorScheme.onSurfaceVariant,
+            )
+        }
         if (upload.variableNames.isEmpty()) Text("No variables")
         if (upload.state != ProfileUploadRequestState.REVIEW_PENDING) {
             SelectionContainer {
@@ -820,53 +980,55 @@ private fun ProfileUploadDetail(
             )
         }
         if (upload.state == ProfileUploadRequestState.REVIEW_PENDING) upload.variables.forEach { variable ->
-            Card {
+            Surface(
+                color = MaterialTheme.colorScheme.surfaceContainerLow,
+                shape = RoundedCornerShape(12.dp),
+            ) {
                 Column(
-                    Modifier.fillMaxWidth().padding(16.dp),
-                    verticalArrangement = Arrangement.spacedBy(10.dp),
+                    Modifier.fillMaxWidth().padding(12.dp),
+                    verticalArrangement = Arrangement.spacedBy(8.dp),
                 ) {
-                    Text(variable.name, fontFamily = FontFamily.Monospace)
                     val value = revealedValues[variable.id]
-                    if (value == null) {
-                        Text("Value hidden", color = MaterialTheme.colorScheme.onSurfaceVariant)
-                        TextButton(
-                            onClick = {
-                                val reveal: () -> Unit = {
-                                    scope.launch {
-                                        when (val result = onReveal(variable.id)) {
-                                            is ProfileUploadVariableValue.Available -> {
-                                                revealedValues = revealedValues +
-                                                    (variable.id to result.value)
-                                            }
-                                            ProfileUploadVariableValue.NotFound ->
-                                                report("This variable is no longer available")
-                                            ProfileUploadVariableValue.Unavailable ->
-                                                report("The encryption key is unavailable")
-                                            ProfileUploadVariableValue.Corrupted ->
-                                                report("The uploaded value could not be authenticated")
-                                            ProfileUploadVariableValue.UnsupportedEncryption ->
-                                                report("The uploaded value uses unsupported encryption")
-                                        }
-                                    }
-                                }
-                                if (variable.sensitive) {
-                                    authenticate("Show uploaded value", reveal, report)
-                                } else {
-                                    reveal()
-                                }
-                            },
-                        ) { Text("Show value") }
-                    } else {
-                        SelectionContainer {
-                            Text(value, fontFamily = FontFamily.Monospace)
+                    val reviewed = reviewedVariableIds.contains(variable.id)
+                    val changeLabel = when {
+                        variable.name in upload.addedVariables -> "New"
+                        variable.name in upload.changedVariables -> "Updated"
+                        else -> null
+                    }
+                    Row(
+                        modifier = Modifier.fillMaxWidth(),
+                        verticalAlignment = Alignment.CenterVertically,
+                    ) {
+                        Text(
+                            variable.name,
+                            fontFamily = FontFamily.Monospace,
+                            style = MaterialTheme.typography.titleMedium,
+                            modifier = Modifier.weight(1f),
+                        )
+                        changeLabel?.let {
+                            Spacer(Modifier.width(8.dp))
+                            Surface(
+                                color = MaterialTheme.colorScheme.tertiaryContainer,
+                                contentColor = MaterialTheme.colorScheme.onTertiaryContainer,
+                                shape = RoundedCornerShape(100.dp),
+                            ) {
+                                Text(
+                                    it,
+                                    style = MaterialTheme.typography.labelSmall,
+                                    modifier = Modifier.padding(horizontal = 8.dp, vertical = 4.dp),
+                                )
+                            }
                         }
                     }
                     Row(
                         modifier = Modifier.fillMaxWidth(),
-                        horizontalArrangement = Arrangement.SpaceBetween,
                         verticalAlignment = Alignment.CenterVertically,
                     ) {
-                        Text("Sensitive")
+                        Text(
+                            "Sensitive",
+                            style = MaterialTheme.typography.labelMedium,
+                            modifier = Modifier.weight(1f),
+                        )
                         Switch(
                             checked = variable.sensitive,
                             enabled = upload.state == ProfileUploadRequestState.REVIEW_PENDING,
@@ -877,30 +1039,93 @@ private fun ProfileUploadDetail(
                                     }
                                 }
                             },
+                            modifier = Modifier.semantics {
+                                contentDescription = "Sensitive handling for ${variable.name}"
+                            },
                         )
+                    }
+                    OutlinedTextField(
+                        value = value ?: "••••••••",
+                        onValueChange = {},
+                        readOnly = true,
+                        label = { Text("Uploaded value") },
+                        minLines = 1,
+                        maxLines = 6,
+                        trailingIcon = {
+                            IconButton(
+                                onClick = {
+                                    if (value != null) {
+                                        revealedValues -= variable.id
+                                        return@IconButton
+                                    }
+                                    val reveal: () -> Unit = {
+                                        scope.launch {
+                                            when (val result = onReveal(variable.id)) {
+                                                is ProfileUploadVariableValue.Available -> {
+                                                    revealedValues = revealedValues +
+                                                        (variable.id to result.value)
+                                                    reviewedVariableIds = reviewedVariableIds + variable.id
+                                                }
+                                                ProfileUploadVariableValue.NotFound ->
+                                                    report("This variable is no longer available")
+                                                ProfileUploadVariableValue.Unavailable ->
+                                                    report("The encryption key is unavailable")
+                                                ProfileUploadVariableValue.Corrupted ->
+                                                    report("The uploaded value could not be authenticated")
+                                                ProfileUploadVariableValue.UnsupportedEncryption ->
+                                                    report("The uploaded value uses unsupported encryption")
+                                            }
+                                        }
+                                    }
+                                    if (variable.sensitive) {
+                                        authenticate("Show uploaded value", reveal, report)
+                                    } else {
+                                        reveal()
+                                    }
+                                },
+                            ) {
+                                Icon(
+                                    if (value == null) {
+                                        Icons.Outlined.Visibility
+                                    } else {
+                                        Icons.Outlined.VisibilityOff
+                                    },
+                                    contentDescription = if (value == null) {
+                                        "Show uploaded value for ${variable.name}"
+                                    } else {
+                                        "Hide uploaded value for ${variable.name}"
+                                    },
+                                )
+                            }
+                        },
+                        textStyle = MaterialTheme.typography.bodyLarge.copy(
+                            fontFamily = FontFamily.Monospace,
+                        ),
+                        modifier = Modifier.fillMaxWidth(),
+                    )
+                    if (reviewed) {
+                        Row(
+                            horizontalArrangement = Arrangement.spacedBy(6.dp),
+                            verticalAlignment = Alignment.CenterVertically,
+                        ) {
+                            Icon(
+                                Icons.Outlined.Check,
+                                contentDescription = null,
+                                modifier = Modifier.size(16.dp),
+                                tint = MaterialTheme.colorScheme.primary,
+                            )
+                            Text(
+                                "Reviewed",
+                                style = MaterialTheme.typography.labelMedium,
+                                color = MaterialTheme.colorScheme.primary,
+                            )
+                        }
                     }
                 }
             }
         }
 
-        if (upload.state == ProfileUploadRequestState.REVIEW_PENDING) {
-            Button(
-                onClick = { onAccept(acceptedName.trim()) },
-                enabled = acceptedName.isNotBlank() &&
-                    upload.variables.all { revealedValues.containsKey(it.id) },
-                modifier = Modifier.fillMaxWidth(),
-            ) { Text("Accept proposal") }
-            if (upload.variables.any { !revealedValues.containsKey(it.id) }) {
-                Text(
-                    "Review every incoming value before accepting.",
-                    style = MaterialTheme.typography.bodySmall,
-                    color = MaterialTheme.colorScheme.onSurfaceVariant,
-                )
-            }
-            OutlinedButton(onClick = onReject, modifier = Modifier.fillMaxWidth()) {
-                Text("Reject proposal")
-            }
-        } else {
+        if (upload.state != ProfileUploadRequestState.REVIEW_PENDING) {
             upload.acceptedName?.takeIf { it != upload.proposedName }?.let {
                 DetailValue("Proposed name", upload.proposedName)
             }
@@ -908,7 +1133,6 @@ private fun ProfileUploadDetail(
         }
 
         Disclosure("Technical details") {
-            DetailValue("Received", formatTimestamp(request.receivedAt))
             DetailValue("Profile type", upload.profileType)
             DetailValue("Client ID", upload.clientId, true)
             DetailValue("Request ID", request.relayRequestId, true)
@@ -953,7 +1177,21 @@ private fun CredentialOutcome(credential: CredentialRequestDetails) {
         )
         CredentialRequestState.COMPLETED -> when (credential.completionResult) {
             CredentialCompletionResult.APPROVED -> Triple("Delivered", "The client received the profile values.", false)
-            CredentialCompletionResult.DENIED -> Triple("Denied", credential.completionMessage ?: "No values were released.", false)
+            CredentialCompletionResult.DENIED -> if (
+                credential.completionReason == "INVALID_REQUEST"
+            ) {
+                Triple(
+                    "Request rejected",
+                    credential.completionMessage ?: "The request was invalid.",
+                    true,
+                )
+            } else {
+                Triple(
+                    "Denied",
+                    credential.completionMessage ?: "No values were released.",
+                    false,
+                )
+            }
             CredentialCompletionResult.ABORTED -> Triple("Aborted", credential.completionMessage ?: "The client stopped this request.", false)
             null -> Triple("Completed", "The request is complete.", false)
         }
@@ -1002,6 +1240,7 @@ private fun DetailPage(
     titleContent: @Composable () -> Unit = {
         Text(title, maxLines = 1, overflow = TextOverflow.Ellipsis)
     },
+    bottomContent: (@Composable () -> Unit)? = null,
     content: @Composable () -> Unit,
 ) {
     Column(modifier) {
@@ -1016,10 +1255,11 @@ private fun DetailPage(
             },
         )
         Column(
-            Modifier.fillMaxSize().verticalScroll(rememberScrollState())
+            Modifier.weight(1f).fillMaxWidth().verticalScroll(rememberScrollState())
                 .padding(horizontal = 20.dp, vertical = 12.dp),
             verticalArrangement = Arrangement.spacedBy(18.dp),
         ) { content() }
+        bottomContent?.invoke()
     }
 }
 
@@ -1059,11 +1299,56 @@ private fun Notice(title: String, detail: String, error: Boolean = false) {
 
 @Composable
 private fun StatusLine(label: String, error: Boolean = false) {
-    Text(
-        label,
-        style = MaterialTheme.typography.labelLarge,
-        color = if (error) MaterialTheme.colorScheme.error else MaterialTheme.colorScheme.primary,
-    )
+    Surface(
+        color = if (error) {
+            MaterialTheme.colorScheme.errorContainer
+        } else {
+            MaterialTheme.colorScheme.secondaryContainer
+        },
+        contentColor = if (error) {
+            MaterialTheme.colorScheme.onErrorContainer
+        } else {
+            MaterialTheme.colorScheme.onSecondaryContainer
+        },
+        shape = RoundedCornerShape(100.dp),
+    ) {
+        Text(
+            label,
+            style = MaterialTheme.typography.labelMedium,
+            modifier = Modifier.padding(horizontal = 10.dp, vertical = 5.dp),
+        )
+    }
+}
+
+@Composable
+private fun RequestStatusBadge(request: InboxRequestSummary) {
+    val error = request.pairingState?.isError() == true ||
+        request.credentialState == CredentialRequestState.VERIFICATION_FAILED ||
+        request.profileUploadState == ProfileUploadRequestState.VERIFICATION_FAILED ||
+        request.wasRejected()
+    val actionRequired = request.state == InboxRequestState.ACTION_REQUIRED
+    val accepted = request.wasAccepted()
+    Surface(
+        color = when {
+            error -> MaterialTheme.colorScheme.errorContainer
+            actionRequired -> MaterialTheme.colorScheme.primary
+            accepted -> MaterialTheme.colorScheme.secondaryContainer
+            else -> MaterialTheme.colorScheme.surfaceContainerHighest
+        },
+        contentColor = when {
+            error -> MaterialTheme.colorScheme.onErrorContainer
+            actionRequired -> MaterialTheme.colorScheme.onPrimary
+            accepted -> MaterialTheme.colorScheme.onSecondaryContainer
+            else -> MaterialTheme.colorScheme.onSurfaceVariant
+        },
+        shape = RoundedCornerShape(100.dp),
+    ) {
+        Text(
+            request.statusLabel(),
+            style = MaterialTheme.typography.labelSmall,
+            modifier = Modifier.padding(horizontal = 9.dp, vertical = 4.dp),
+        )
+    }
 }
 
 @Composable
@@ -1085,7 +1370,11 @@ private fun MissingDetail(onBack: () -> Unit, showBack: Boolean, modifier: Modif
 
 private fun InboxRequestSummary.statusLabel(): String = when {
     pairingState != null -> pairingState.label()
-    credentialState != null -> credentialStatusLabel(credentialState, credentialResult)
+    credentialState != null -> credentialStatusLabel(
+        credentialState,
+        credentialResult,
+        credentialCompletionReason,
+    )
     profileUploadState != null -> profileUploadState.label()
     state == InboxRequestState.ACTION_REQUIRED -> "Action required"
     state == InboxRequestState.WAITING -> "Waiting"
@@ -1110,13 +1399,13 @@ private fun InboxRequestSummary.wasRejected(): Boolean =
         credentialResult == CredentialCompletionResult.DENIED ||
         profileUploadState == ProfileUploadRequestState.REJECTED
 
-@Composable
-private fun InboxRequestSummary.statusColor(): Color = when {
-    pairingState?.isError() == true || credentialState == CredentialRequestState.VERIFICATION_FAILED ||
-        profileUploadState == ProfileUploadRequestState.VERIFICATION_FAILED -> MaterialTheme.colorScheme.error
-    state == InboxRequestState.ACTION_REQUIRED -> MaterialTheme.colorScheme.primary
-    else -> MaterialTheme.colorScheme.onSurfaceVariant
-}
+private fun InboxRequestSummary.wasAccepted(): Boolean =
+    pairingState == PairingState.ACTIVE ||
+        credentialResult == CredentialCompletionResult.APPROVED ||
+        profileUploadState == ProfileUploadRequestState.ACCEPTED
+
+private fun InboxRequestSummary.isInvalidCredential(): Boolean =
+    credentialCompletionReason == "INVALID_REQUEST"
 
 private fun PairingState.label(): String = when (this) {
     PairingState.RECEIVING -> "Receiving"
@@ -1124,31 +1413,40 @@ private fun PairingState.label(): String = when (this) {
     PairingState.RELAY_ACTIVATION_PENDING -> "Activating"
     PairingState.WAITING_FOR_FINISH -> "Waiting for client"
     PairingState.REJECTED -> "Rejected"
-    PairingState.ACTIVE -> "Paired"
+    PairingState.ACTIVE -> "Completed"
     PairingState.VERIFICATION_FAILED -> "Verification failed"
 }
 
 private fun PairingState.isError(): Boolean = this == PairingState.VERIFICATION_FAILED
 
-private fun CredentialRequestDetails.statusLabel(): String = credentialStatusLabel(state, completionResult)
+private fun CredentialRequestDetails.statusLabel(): String = credentialStatusLabel(
+    state,
+    completionResult,
+    completionReason,
+)
 
 private fun credentialStatusLabel(
     state: CredentialRequestState,
     result: CredentialCompletionResult?,
+    completionReason: String?,
 ): String = when (state) {
     CredentialRequestState.APPROVAL_PENDING -> "Action required"
     CredentialRequestState.WAITING_FOR_COMPLETION -> "Waiting for client"
     CredentialRequestState.VERIFICATION_FAILED -> "Verification failed"
     CredentialRequestState.COMPLETED -> when (result) {
         CredentialCompletionResult.APPROVED -> "Delivered"
-        CredentialCompletionResult.DENIED -> "Denied"
+        CredentialCompletionResult.DENIED -> if (completionReason == "INVALID_REQUEST") {
+            "Invalid request"
+        } else {
+            "Denied"
+        }
         CredentialCompletionResult.ABORTED -> "Aborted"
         null -> "Completed"
     }
 }
 
 private fun CredentialRequestDetails.isError(): Boolean =
-    state == CredentialRequestState.VERIFICATION_FAILED
+    state == CredentialRequestState.VERIFICATION_FAILED || completionReason == "INVALID_REQUEST"
 
 private fun ProfileUploadRequestState.label(): String = when (this) {
     ProfileUploadRequestState.REVIEW_PENDING -> "Action required"

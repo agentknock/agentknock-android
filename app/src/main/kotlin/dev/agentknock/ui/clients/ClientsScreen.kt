@@ -2,6 +2,9 @@
 
 package dev.agentknock.ui.clients
 
+import android.content.ClipData
+import android.content.ClipboardManager
+import androidx.compose.foundation.BorderStroke
 import androidx.activity.compose.BackHandler
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.Arrangement
@@ -16,21 +19,25 @@ import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.width
+import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.lazy.LazyColumn
-import androidx.compose.foundation.lazy.items
+import androidx.compose.foundation.lazy.itemsIndexed
 import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.text.selection.SelectionContainer
 import androidx.compose.foundation.verticalScroll
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.automirrored.outlined.ArrowBack
+import androidx.compose.material.icons.automirrored.outlined.NavigateNext
 import androidx.compose.material.icons.outlined.Computer
-import androidx.compose.material.icons.outlined.DeleteForever
+import androidx.compose.material.icons.outlined.ContentCopy
+import androidx.compose.material.icons.outlined.Block
 import androidx.compose.material.icons.outlined.Edit
 import androidx.compose.material.icons.outlined.PauseCircle
 import androidx.compose.material.icons.outlined.PlayCircle
 import androidx.compose.material.icons.outlined.Settings
 import androidx.compose.material3.AlertDialog
 import androidx.compose.material3.Button
+import androidx.compose.material3.ButtonDefaults
 import androidx.compose.material3.CircularProgressIndicator
 import androidx.compose.material3.HorizontalDivider
 import androidx.compose.material3.Icon
@@ -42,6 +49,7 @@ import androidx.compose.material3.OutlinedTextField
 import androidx.compose.material3.Scaffold
 import androidx.compose.material3.SnackbarHost
 import androidx.compose.material3.SnackbarHostState
+import androidx.compose.material3.Surface
 import androidx.compose.material3.Text
 import androidx.compose.material3.TextButton
 import androidx.compose.material3.TopAppBar
@@ -55,6 +63,7 @@ import androidx.compose.runtime.rememberCoroutineScope
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.text.font.FontFamily
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
@@ -202,6 +211,7 @@ private fun ClientSelectionDetail(
                 report,
             )
         },
+        report = report,
         modifier = modifier,
     )
 }
@@ -264,7 +274,7 @@ private fun ClientList(
             }
         } else {
             LazyColumn(Modifier.fillMaxSize()) {
-                items(clients, key = ClientSummary::clientId) { client ->
+                itemsIndexed(clients, key = { _, client -> client.clientId }) { index, client ->
                     ListItem(
                         headlineContent = { Text(client.name) },
                         supportingContent = {
@@ -281,12 +291,24 @@ private fun ClientList(
                         },
                         leadingContent = { Icon(Icons.Outlined.Computer, contentDescription = null) },
                         trailingContent = {
-                            val state = client.visibleState()
-                            if (state != null) Text(state, color = stateColor(client.state))
+                            Row(
+                                horizontalArrangement = Arrangement.spacedBy(8.dp),
+                                verticalAlignment = Alignment.CenterVertically,
+                            ) {
+                                client.visibleState()?.let {
+                                    Text(it, color = stateColor(client.state))
+                                }
+                                Icon(
+                                    Icons.AutoMirrored.Outlined.NavigateNext,
+                                    contentDescription = null,
+                                )
+                            }
                         },
                         modifier = Modifier.clickable { onOpen(client.clientId) },
                     )
-                    HorizontalDivider()
+                    if (index < clients.lastIndex) {
+                        HorizontalDivider(Modifier.padding(start = 72.dp))
+                    }
                 }
             }
         }
@@ -300,10 +322,19 @@ private fun ClientDetail(
     showBack: Boolean,
     onRename: (String) -> Unit,
     onSetState: (RelayClientState) -> Unit,
+    report: (String) -> Unit,
     modifier: Modifier = Modifier,
 ) {
     var showRename by remember { mutableStateOf(false) }
     var confirmation by remember { mutableStateOf<RelayClientState?>(null) }
+    val context = LocalContext.current
+
+    fun copy(label: String, value: String) {
+        context.getSystemService(ClipboardManager::class.java).setPrimaryClip(
+            ClipData.newPlainText(label, value),
+        )
+        report("$label copied")
+    }
 
     Column(modifier) {
         TopAppBar(
@@ -327,74 +358,98 @@ private fun ClientDetail(
             verticalArrangement = Arrangement.spacedBy(20.dp),
         ) {
             val pending = client.desiredState?.takeIf { it != client.state }
-            if (pending != null) {
-                Text(
-                    "Changing to ${pending.stateLabel().lowercase()}…",
-                    color = MaterialTheme.colorScheme.primary,
-                    style = MaterialTheme.typography.titleMedium,
-                )
-            } else if (client.state != RelayClientState.ACTIVE) {
-                Text(
-                    client.state.stateLabel(),
-                    color = stateColor(client.state),
-                    style = MaterialTheme.typography.titleMedium,
-                )
-            }
-            client.pairedAt?.let {
-                Text(
-                    "Paired ${formatTimestamp(it)}",
-                    style = MaterialTheme.typography.labelMedium,
-                    color = MaterialTheme.colorScheme.onSurfaceVariant,
+            ClientStateBadge(client.state, pending)
+            Text(
+                client.state.explanation(),
+                color = MaterialTheme.colorScheme.onSurfaceVariant,
+            )
+
+            Text("Pairing identity", style = MaterialTheme.typography.titleMedium)
+            Column(verticalArrangement = Arrangement.spacedBy(12.dp)) {
+                client.pairedAt?.let {
+                    ClientField("Paired", formatTimestamp(it))
+                }
+                ClientField(
+                    "Client ID",
+                    client.clientId,
+                    monospace = true,
+                    onCopy = { copy("Client ID", client.clientId) },
                 )
             }
 
-            when (client.state) {
-                RelayClientState.ACTIVE -> OutlinedButton(
-                    onClick = { confirmation = RelayClientState.SUSPENDED },
-                    modifier = Modifier.fillMaxWidth(),
-                ) {
-                    Icon(Icons.Outlined.PauseCircle, contentDescription = null)
-                    Spacer(Modifier.width(8.dp))
-                    Text("Suspend client")
+            Column(verticalArrangement = Arrangement.spacedBy(8.dp)) {
+                when (client.state) {
+                    RelayClientState.ACTIVE -> OutlinedButton(
+                        onClick = { confirmation = RelayClientState.SUSPENDED },
+                        modifier = Modifier.fillMaxWidth(),
+                    ) {
+                        Icon(Icons.Outlined.PauseCircle, contentDescription = null)
+                        Spacer(Modifier.width(8.dp))
+                        Text("Suspend client")
+                    }
+                    RelayClientState.SUSPENDED -> Button(
+                        onClick = { confirmation = RelayClientState.ACTIVE },
+                        modifier = Modifier.fillMaxWidth(),
+                    ) {
+                        Icon(Icons.Outlined.PlayCircle, contentDescription = null)
+                        Spacer(Modifier.width(8.dp))
+                        Text("Resume client")
+                    }
+                    RelayClientState.PENDING,
+                    RelayClientState.REVOKED,
+                    -> Unit
                 }
-                RelayClientState.SUSPENDED -> Button(
-                    onClick = { confirmation = RelayClientState.ACTIVE },
-                    modifier = Modifier.fillMaxWidth(),
-                ) {
-                    Icon(Icons.Outlined.PlayCircle, contentDescription = null)
-                    Spacer(Modifier.width(8.dp))
-                    Text("Resume client")
-                }
-                RelayClientState.PENDING,
-                RelayClientState.REVOKED,
-                -> Unit
-            }
-            if (client.state != RelayClientState.REVOKED) {
-                TextButton(
-                    onClick = { confirmation = RelayClientState.REVOKED },
-                    modifier = Modifier.align(Alignment.CenterHorizontally),
-                ) {
-                    Icon(
-                        Icons.Outlined.DeleteForever,
-                        contentDescription = null,
-                        tint = MaterialTheme.colorScheme.error,
+                when (client.state) {
+                    RelayClientState.ACTIVE -> Text(
+                        "Suspending temporarily blocks this client. You can resume it later.",
+                        color = MaterialTheme.colorScheme.onSurfaceVariant,
                     )
-                    Spacer(Modifier.width(8.dp))
-                    Text("Revoke client", color = MaterialTheme.colorScheme.error)
+                    RelayClientState.SUSPENDED -> Text(
+                        "Resuming lets this client connect and make requests again.",
+                        color = MaterialTheme.colorScheme.onSurfaceVariant,
+                    )
+                    RelayClientState.PENDING,
+                    RelayClientState.REVOKED,
+                    -> Unit
                 }
             }
 
             HorizontalDivider()
             Text("Reported information", style = MaterialTheme.typography.titleMedium)
-            SelectionContainer {
-                Column(verticalArrangement = Arrangement.spacedBy(12.dp)) {
-                    ClientField("Hostname", client.hostname)
-                    ClientField("Platform", client.platform)
-                    ClientField("Architecture", client.architecture)
-                    ClientField("Operating system", client.osVersion)
-                    ClientField("CLI version", client.cliVersion)
-                    ClientField("Machine ID", client.machineId, monospace = true)
-                    ClientField("Client ID", client.clientId, monospace = true)
+            Text(
+                "Supplied by the client when it paired.",
+                color = MaterialTheme.colorScheme.onSurfaceVariant,
+            )
+            Column(verticalArrangement = Arrangement.spacedBy(12.dp)) {
+                ClientField("Hostname", client.hostname)
+                ClientField("Platform", client.platform?.let(::formatPlatformName))
+                ClientField("Architecture", client.architecture)
+                ClientField("Operating system", client.osVersion)
+                ClientField("CLI version", client.cliVersion)
+                ClientField(
+                    "Machine ID",
+                    client.machineId,
+                    monospace = true,
+                    onCopy = client.machineId?.let { { copy("Machine ID", it) } },
+                )
+            }
+            if (client.state != RelayClientState.REVOKED) {
+                HorizontalDivider()
+                Text(
+                    "Revoking is permanent. This client must be paired again before it can reconnect.",
+                    color = MaterialTheme.colorScheme.onSurfaceVariant,
+                )
+                OutlinedButton(
+                    onClick = { confirmation = RelayClientState.REVOKED },
+                    modifier = Modifier.fillMaxWidth(),
+                    colors = ButtonDefaults.outlinedButtonColors(
+                        contentColor = MaterialTheme.colorScheme.error,
+                    ),
+                    border = BorderStroke(1.dp, MaterialTheme.colorScheme.error),
+                ) {
+                    Icon(Icons.Outlined.Block, contentDescription = null)
+                    Spacer(Modifier.width(8.dp))
+                    Text("Revoke client")
                 }
             }
         }
@@ -406,12 +461,15 @@ private fun ClientDetail(
             onDismissRequest = { showRename = false },
             title = { Text("Rename client") },
             text = {
-                OutlinedTextField(
-                    value = name,
-                    onValueChange = { name = it },
-                    label = { Text("Name") },
-                    singleLine = true,
-                )
+                Column(verticalArrangement = Arrangement.spacedBy(12.dp)) {
+                    Text("This only changes how the client appears in Agentknock.")
+                    OutlinedTextField(
+                        value = name,
+                        onValueChange = { name = it },
+                        label = { Text("Name") },
+                        singleLine = true,
+                    )
+                }
             },
             confirmButton = {
                 TextButton(
@@ -455,11 +513,57 @@ private fun ClientDetail(
 }
 
 @Composable
-private fun ClientField(label: String, value: String?, monospace: Boolean = false) {
+private fun ClientField(
+    label: String,
+    value: String?,
+    monospace: Boolean = false,
+    onCopy: (() -> Unit)? = null,
+) {
     if (value.isNullOrBlank()) return
-    Column {
-        Text(label, style = MaterialTheme.typography.labelMedium, color = MaterialTheme.colorScheme.onSurfaceVariant)
-        Text(value, fontFamily = if (monospace) FontFamily.Monospace else null)
+    Row(
+        modifier = Modifier.fillMaxWidth(),
+        verticalAlignment = Alignment.CenterVertically,
+    ) {
+        Column(Modifier.weight(1f)) {
+            Text(
+                label,
+                style = MaterialTheme.typography.labelMedium,
+                color = MaterialTheme.colorScheme.onSurfaceVariant,
+            )
+            SelectionContainer {
+                Text(value, fontFamily = if (monospace) FontFamily.Monospace else null)
+            }
+        }
+        onCopy?.let {
+            IconButton(onClick = it) {
+                Icon(Icons.Outlined.ContentCopy, contentDescription = "Copy $label")
+            }
+        }
+    }
+}
+
+@Composable
+private fun ClientStateBadge(state: RelayClientState, pending: RelayClientState?) {
+    val text = pending?.let { "Changing to ${it.stateLabel().lowercase()}…" }
+        ?: state.stateLabel()
+    Surface(
+        color = if (state == RelayClientState.REVOKED) {
+            MaterialTheme.colorScheme.errorContainer
+        } else {
+            MaterialTheme.colorScheme.surfaceContainerHighest
+        },
+        contentColor = if (state == RelayClientState.REVOKED) {
+            MaterialTheme.colorScheme.onErrorContainer
+        } else {
+            stateColor(state)
+        },
+        shape = androidx.compose.foundation.shape.RoundedCornerShape(100.dp),
+    ) {
+        Text(
+            text,
+            style = MaterialTheme.typography.labelMedium,
+            modifier = Modifier.padding(horizontal = 10.dp, vertical = 5.dp),
+        )
     }
 }
 
@@ -481,6 +585,13 @@ private fun RelayClientState.stateLabel(): String = when (this) {
     RelayClientState.ACTIVE -> "Active"
     RelayClientState.SUSPENDED -> "Suspended"
     RelayClientState.REVOKED -> "Revoked"
+}
+
+private fun RelayClientState.explanation(): String = when (this) {
+    RelayClientState.PENDING -> "Pairing has not finished yet."
+    RelayClientState.ACTIVE -> "This client can connect and make requests."
+    RelayClientState.SUSPENDED -> "This client cannot connect until it is resumed."
+    RelayClientState.REVOKED -> "This client's pairing has been permanently revoked."
 }
 
 private fun RelayClientState.actionLabel(): String = when (this) {

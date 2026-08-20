@@ -16,6 +16,7 @@ import dev.agentknock.protocol.ProfileUploadMode
 import dev.agentknock.protocol.ProfileUploadProtocol
 import dev.agentknock.protocol.ProfileUploadRequestMessage
 import dev.agentknock.presentation.renderShellCommand
+import dev.agentknock.presentation.renderSingleLineText
 import dev.agentknock.relay.RelayClientState
 import dev.agentknock.relay.RelayDeviceClient
 import dev.agentknock.relay.RelayDeviceConnection
@@ -156,11 +157,13 @@ internal data class InboxRequestSummary(
     val credentialState: CredentialRequestState?,
     val credentialDecision: CredentialDecision?,
     val credentialResult: CredentialCompletionResult?,
+    val credentialCompletionReason: String?,
     val profileListState: ProfileListRequestState?,
     val profileUploadState: ProfileUploadRequestState?,
     val title: String,
     val clientName: String,
     val profileNames: List<String>,
+    val listSummary: String?,
     val command: String?,
     val arguments: List<String>,
     val receivedAt: Long,
@@ -169,6 +172,7 @@ internal data class InboxRequestSummary(
 
 internal data class PairingRequestDetails(
     val pairingState: PairingState,
+    val clientName: String,
     val vaultAddress: String,
     val clientId: String,
     val sasOptions: List<String>,
@@ -303,8 +307,13 @@ internal data class RequestNotification(
     val requestId: Long,
     val title: String,
     val summary: String,
-    val details: String,
+    val details: List<RequestNotificationDetail>,
     val credentialDecisionAvailable: Boolean,
+)
+
+internal data class RequestNotificationDetail(
+    val label: String?,
+    val value: String,
 )
 
 internal sealed interface RequestSyncResult {
@@ -429,12 +438,14 @@ internal class RequestRepository(
                         credentialState = null,
                         credentialDecision = null,
                         credentialResult = null,
+                        credentialCompletionReason = null,
                         profileListState = null,
                         profileUploadState = null,
                         title = "Pairing request",
                         clientName = pairing.friendlyName ?: pairing.hostname
                             ?: pairing.platform ?: "Unknown client",
                         profileNames = emptyList(),
+                        listSummary = null,
                         command = null,
                         arguments = emptyList(),
                         receivedAt = request.receivedAt,
@@ -453,11 +464,13 @@ internal class RequestRepository(
                         credentialDecision = credential.decision?.toCredentialDecision(),
                         credentialResult = credential.completionResult
                             ?.toCredentialCompletionResult(),
+                        credentialCompletionReason = credential.completionReason,
                         profileListState = null,
                         profileUploadState = null,
                         title = "Profile access",
                         clientName = credential.clientName,
                         profileNames = requestedProfiles,
+                        listSummary = null,
                         command = credential.command,
                         arguments = decodeStringList(credential.argumentsJson),
                         receivedAt = request.receivedAt,
@@ -475,11 +488,13 @@ internal class RequestRepository(
                         credentialState = null,
                         credentialDecision = null,
                         credentialResult = null,
+                        credentialCompletionReason = null,
                         profileListState = null,
                         profileUploadState = upload.state.toProfileUploadRequestState(),
                         title = "${upload.mode.lowercase().replaceFirstChar(Char::uppercase)} profile",
                         clientName = pairing?.friendlyName ?: pairing?.hostname ?: "Unknown client",
                         profileNames = listOf(upload.proposedName),
+                        listSummary = upload.listSummary(),
                         command = null,
                         arguments = emptyList(),
                         receivedAt = request.receivedAt,
@@ -489,6 +504,21 @@ internal class RequestRepository(
                 else -> null
             }
         }
+    }
+
+    private fun ProfileUploadRequestEntity.listSummary(): String {
+        fun count(json: String): Int = decodeStringList(json).size
+        if (mode == ProfileUploadMode.UPDATE.wireName) {
+            return buildList {
+                count(addedVariablesJson).takeIf { it > 0 }?.let { add("$it added") }
+                count(changedVariablesJson).takeIf { it > 0 }?.let { add("$it updated") }
+                count(removedVariablesJson).takeIf { it > 0 }?.let { add("$it removed") }
+            }.ifEmpty {
+                listOf("No variable changes")
+            }.joinToString(" · ")
+        }
+        val count = count(variableNamesJson)
+        return "$count ${if (count == 1) "variable" else "variables"}"
     }
 
     fun observeRequest(id: Long): Flow<InboxRequestDetails?> = combine(
@@ -508,6 +538,7 @@ internal class RequestRepository(
             pairing = pairing?.let {
                 PairingRequestDetails(
                     pairingState = it.state.toPairingState(),
+                    clientName = it.friendlyName ?: it.hostname ?: it.platform ?: "Unknown client",
                     vaultAddress = it.vaultAddress,
                     clientId = it.clientId,
                     sasOptions = listOfNotNull(
@@ -677,16 +708,20 @@ internal class RequestRepository(
                     val profiles = decodeStringList(credential.profilesJson)
                     val arguments = decodeStringList(credential.argumentsJson)
                     val command = renderShellCommand(credential.command, arguments)
+                    val clientName = renderSingleLineText(credential.clientName)
+                    val profileNames = profiles.joinToString(transform = ::renderSingleLineText)
                     RequestNotification(
                         requestId = request.id,
                         title = "Profile access requested",
-                        summary = "${credential.clientName} requests ${profiles.joinToString()}",
+                        summary = "$clientName requests $profileNames",
                         details = listOfNotNull(
-                            "Client: ${credential.clientName}",
-                            credential.reason?.takeIf(String::isNotBlank)?.let { "Reason: $it" },
-                            "Command: $command",
-                            "Profiles: ${profiles.joinToString()}",
-                        ).joinToString("\n"),
+                            RequestNotificationDetail("Client", clientName),
+                            credential.reason?.takeIf(String::isNotBlank)?.let {
+                                RequestNotificationDetail("Reason", renderSingleLineText(it))
+                            },
+                            RequestNotificationDetail("Command", command),
+                            RequestNotificationDetail("Profiles", profileNames),
+                        ),
                         credentialDecisionAvailable = true,
                     )
                 }
@@ -695,9 +730,11 @@ internal class RequestRepository(
                     RequestNotification(
                         requestId = request.id,
                         title = "Pairing request",
-                        summary = pairing.friendlyName ?: pairing.hostname ?:
-                            pairing.platform ?: "Unknown client",
-                        details = when (pairing.state.toPairingState()) {
+                        summary = renderSingleLineText(
+                            pairing.friendlyName ?: pairing.hostname ?:
+                                pairing.platform ?: "Unknown client",
+                        ),
+                        details = listOf(RequestNotificationDetail(null, when (pairing.state.toPairingState()) {
                             PairingState.RECEIVING -> pairing.error ?:
                                 "Waiting for the client to complete the secure exchange."
                             PairingState.SAS_VERIFICATION_PENDING -> "Open Agentknock and compare the security code."
@@ -707,7 +744,7 @@ internal class RequestRepository(
                             PairingState.VERIFICATION_FAILED -> pairing.error ?:
                                 "The pairing message could not be verified."
                             else -> "Open Agentknock to review this pairing."
-                        },
+                        })),
                         credentialDecisionAvailable = false,
                     )
                 }
@@ -719,13 +756,25 @@ internal class RequestRepository(
                     RequestNotification(
                         requestId = request.id,
                         title = "Profile proposal",
-                        summary = "${upload.clientName} wants to ${upload.mode.lowercase()} ${upload.proposedName}",
+                        summary = "${renderSingleLineText(upload.clientName)} wants to " +
+                            "${upload.mode.lowercase()} ${renderSingleLineText(upload.proposedName)}",
                         details = listOf(
-                            "Client: ${upload.clientName}",
-                            "Change: ${upload.mode.lowercase().replaceFirstChar(Char::uppercase)} ${upload.proposedName}",
-                            "Profile type: Environment variables",
-                            "Variables: ${upload.variableNamesJson.let(::decodeStringList).joinToString()}",
-                        ).joinToString("\n"),
+                            RequestNotificationDetail(
+                                "Client",
+                                renderSingleLineText(upload.clientName),
+                            ),
+                            RequestNotificationDetail(
+                                "Change",
+                                "${upload.mode.lowercase().replaceFirstChar(Char::uppercase)} " +
+                                    renderSingleLineText(upload.proposedName),
+                            ),
+                            RequestNotificationDetail("Profile type", "Environment variables"),
+                            RequestNotificationDetail(
+                                "Variables",
+                                upload.variableNamesJson.let(::decodeStringList)
+                                    .joinToString(transform = ::renderSingleLineText),
+                            ),
+                        ),
                         credentialDecisionAvailable = false,
                     )
                 }
@@ -1903,6 +1952,8 @@ internal class RequestRepository(
                     credentialRequest.copy(
                         state = CredentialRequestState.WAITING_FOR_COMPLETION.storedName,
                         decision = CredentialDecision.DENIED.storedName,
+                        completionReason = automaticDenial.first.wireName,
+                        completionMessage = automaticDenial.second,
                         decidedAt = now,
                     )
                 }
@@ -2878,9 +2929,16 @@ internal class RequestRepository(
                 credentialRequest.decision == CredentialDecision.APPROVED.storedName
             }
             is CredentialCompletion.Denied -> {
-                credentialRequest.decision == CredentialDecision.DENIED.storedName &&
-                    completionResult.reason == CredentialDenialReason.USER_DENIED.wireName &&
-                    completionResult.message == CREDENTIAL_DENIAL_MESSAGE
+                if (credentialRequest.decision != CredentialDecision.DENIED.storedName) {
+                    false
+                } else {
+                    val expectedReason = credentialRequest.completionReason
+                        ?: CredentialDenialReason.USER_DENIED.wireName
+                    val expectedMessage = credentialRequest.completionMessage
+                        ?: CREDENTIAL_DENIAL_MESSAGE
+                    completionResult.reason == expectedReason &&
+                        completionResult.message == expectedMessage
+                }
             }
             is CredentialCompletion.Aborted -> true
             null -> false

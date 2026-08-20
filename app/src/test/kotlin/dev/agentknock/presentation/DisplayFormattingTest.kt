@@ -33,6 +33,14 @@ class DisplayFormattingTest {
     }
 
     @Test
+    fun notificationText_exposesLineBreaksAndDirectionalControls() {
+        assertEquals(
+            "Looks safe\\nCommand: fake\\u202evalue",
+            renderSingleLineText("Looks safe\nCommand: fake\u202evalue"),
+        )
+    }
+
+    @Test
     fun knownPlatformNames_areHumanizedWithoutRewritingUnknownValues() {
         assertEquals("Linux", formatPlatformName("linux"))
         assertEquals("macOS", formatPlatformName("Darwin"))

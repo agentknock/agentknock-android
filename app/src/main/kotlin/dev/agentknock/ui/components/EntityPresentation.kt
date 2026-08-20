@@ -4,8 +4,10 @@ import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.FlowRow
 import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.padding
+import androidx.compose.foundation.layout.size
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.outlined.Computer
+import androidx.compose.material.icons.outlined.Key
 import androidx.compose.material3.Icon
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.Surface
@@ -46,13 +48,14 @@ internal fun ClientIdentity(
 internal fun ProfileIdentities(
     names: List<String>,
     modifier: Modifier = Modifier,
+    unavailable: Boolean = false,
 ) {
     FlowRow(
         modifier = modifier,
         horizontalArrangement = Arrangement.spacedBy(6.dp),
         verticalArrangement = Arrangement.spacedBy(6.dp),
     ) {
-        names.forEach { name -> ProfileIdentity(name) }
+        names.forEach { name -> ProfileIdentity(name, unavailable = unavailable) }
     }
 }
 
@@ -60,17 +63,31 @@ internal fun ProfileIdentities(
 internal fun ProfileIdentity(
     name: String,
     modifier: Modifier = Modifier,
+    unavailable: Boolean = false,
 ) {
     Surface(
-        modifier = modifier.clearAndSetSemantics { contentDescription = "Profile $name" },
-        color = MaterialTheme.colorScheme.tertiaryContainer,
-        contentColor = MaterialTheme.colorScheme.onTertiaryContainer,
+        modifier = modifier.clearAndSetSemantics {
+            contentDescription = if (unavailable) "Unavailable profile $name" else "Profile $name"
+        },
+        color = if (unavailable) {
+            MaterialTheme.colorScheme.errorContainer
+        } else {
+            MaterialTheme.colorScheme.tertiaryContainer
+        },
+        contentColor = if (unavailable) {
+            MaterialTheme.colorScheme.onErrorContainer
+        } else {
+            MaterialTheme.colorScheme.onTertiaryContainer
+        },
         shape = MaterialTheme.shapes.small,
     ) {
-        Text(
-            name,
-            style = MaterialTheme.typography.labelLarge,
+        Row(
             modifier = Modifier.padding(horizontal = 9.dp, vertical = 5.dp),
-        )
+            horizontalArrangement = Arrangement.spacedBy(5.dp),
+            verticalAlignment = Alignment.CenterVertically,
+        ) {
+            Icon(Icons.Outlined.Key, contentDescription = null, modifier = Modifier.size(16.dp))
+            Text(name, style = MaterialTheme.typography.labelLarge)
+        }
     }
 }
