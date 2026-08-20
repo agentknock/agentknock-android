@@ -12,6 +12,7 @@ import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.BoxWithConstraints
 import androidx.compose.foundation.layout.Column
+import androidx.compose.foundation.layout.FlowRow
 import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.Spacer
 import androidx.compose.foundation.layout.fillMaxHeight
@@ -62,6 +63,7 @@ import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.platform.LocalContext
+import androidx.compose.ui.platform.LocalDensity
 import androidx.compose.ui.platform.LocalResources
 import androidx.compose.ui.res.pluralStringResource
 import androidx.compose.ui.res.stringResource
@@ -76,6 +78,7 @@ import androidx.lifecycle.compose.LocalLifecycleOwner
 import androidx.lifecycle.Lifecycle
 import androidx.lifecycle.LifecycleEventObserver
 import dev.agentknock.R
+import dev.agentknock.presentation.formatTimestamp
 import dev.agentknock.storage.profile.CreateEnvironmentVariableResult
 import dev.agentknock.storage.profile.CreateProfileResult
 import dev.agentknock.storage.profile.EnvironmentVariableMetadata
@@ -84,8 +87,6 @@ import dev.agentknock.storage.profile.ProfileDetails
 import dev.agentknock.storage.profile.ProfileSummary
 import dev.agentknock.storage.profile.SaveEnvironmentVariableResult
 import dev.agentknock.storage.profile.SaveProfileResult
-import java.text.DateFormat
-import java.util.Date
 import kotlinx.coroutines.launch
 
 private val environmentVariableName = Regex("[A-Za-z_][A-Za-z0-9_]*")
@@ -132,10 +133,6 @@ internal fun ProfilesScreen(
         }
         lifecycle.addObserver(observer)
         onDispose { lifecycle.removeObserver(observer) }
-    }
-
-    LaunchedEffect(selection, profileEditor, variableEditor) {
-        onTopLevelChanged(selection == null && profileEditor == null && variableEditor == null)
     }
 
     LaunchedEffect(selection) {
@@ -224,6 +221,13 @@ internal fun ProfilesScreen(
         ) {
             val twoPane = maxWidth >= twoPaneWidth
             val profile = selectedProfile
+            LaunchedEffect(selection, profileEditor, variableEditor, twoPane) {
+                onTopLevelChanged(
+                    (twoPane || selection == null) &&
+                        profileEditor == null &&
+                        variableEditor == null,
+                )
+            }
             if (twoPane) {
                 Row(Modifier.fillMaxSize()) {
                     ProfileList(
@@ -238,9 +242,9 @@ internal fun ProfilesScreen(
                     )
                     VerticalDivider()
                     if (selection == null) {
-                        EmptyProfileSelection(Modifier.weight(1f))
+                        EmptyProfileSelection(Modifier.weight(1f).fillMaxHeight())
                     } else if (profile == null) {
-                        Loading(Modifier.weight(1f))
+                        Loading(Modifier.weight(1f).fillMaxHeight())
                     } else {
                         ProfileDetail(
                             profile = profile,
@@ -546,6 +550,7 @@ private fun ProfileDetail(
     modifier: Modifier = Modifier,
 ) {
     var menuExpanded by remember(profile.id) { mutableStateOf(false) }
+    val fontScale = LocalDensity.current.fontScale
     Column(modifier) {
         TopAppBar(
             title = { Text(profile.name, maxLines = 1, overflow = TextOverflow.Ellipsis) },
@@ -618,15 +623,17 @@ private fun ProfileDetail(
             )
         }
         HorizontalDivider()
-        Row(
+        FlowRow(
             modifier = Modifier
                 .fillMaxWidth()
                 .padding(20.dp),
             horizontalArrangement = Arrangement.SpaceBetween,
-            verticalAlignment = Alignment.CenterVertically,
+            itemVerticalAlignment = Alignment.CenterVertically,
+            verticalArrangement = Arrangement.spacedBy(8.dp),
+            maxItemsInEachRow = if (fontScale >= 1.5f) 1 else Int.MAX_VALUE,
         ) {
             Text(
-                stringResource(R.string.environment_variables),
+                "Variables",
                 style = MaterialTheme.typography.titleLarge,
             )
             Button(onClick = onAddVariable) {
@@ -693,7 +700,9 @@ private fun EnvironmentVariableCard(
                     variable.name,
                     style = MaterialTheme.typography.titleMedium,
                     fontFamily = FontFamily.Monospace,
+                    modifier = Modifier.weight(1f),
                 )
+                Spacer(Modifier.width(12.dp))
                 Text(
                     stringResource(
                         if (variable.sensitive) R.string.sensitive else R.string.not_sensitive,
@@ -720,7 +729,7 @@ private fun EnvironmentVariableCard(
             if (variable.notes.isNotBlank()) {
                 Text(variable.notes, style = MaterialTheme.typography.bodyMedium)
             }
-            Row(
+            FlowRow(
                 modifier = Modifier.fillMaxWidth(),
                 horizontalArrangement = Arrangement.End,
             ) {
@@ -1117,9 +1126,6 @@ private fun Loading(modifier: Modifier = Modifier) {
         CircularProgressIndicator()
     }
 }
-
-private fun formatTimestamp(timestamp: Long): String =
-    DateFormat.getDateTimeInstance(DateFormat.MEDIUM, DateFormat.SHORT).format(Date(timestamp))
 
 private fun String.displayName(): String = when (this) {
     "environment" -> "Environment variables"

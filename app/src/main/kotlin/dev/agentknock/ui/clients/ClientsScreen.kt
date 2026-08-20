@@ -6,9 +6,11 @@ import androidx.activity.compose.BackHandler
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
+import androidx.compose.foundation.layout.BoxWithConstraints
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.Spacer
+import androidx.compose.foundation.layout.fillMaxHeight
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.padding
@@ -44,6 +46,7 @@ import androidx.compose.material3.SnackbarHostState
 import androidx.compose.material3.Text
 import androidx.compose.material3.TextButton
 import androidx.compose.material3.TopAppBar
+import androidx.compose.material3.VerticalDivider
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.getValue
@@ -58,13 +61,13 @@ import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import androidx.lifecycle.viewmodel.compose.viewModel
+import dev.agentknock.presentation.formatTimestamp
+import dev.agentknock.presentation.formatPlatformName
 import dev.agentknock.relay.RelayClientState
 import dev.agentknock.storage.request.ClientChangeResult
 import dev.agentknock.storage.request.ClientDetails
 import dev.agentknock.storage.request.ClientSummary
 import dev.agentknock.storage.vault.VaultIdentity
-import java.text.DateFormat
-import java.util.Date
 import kotlinx.coroutines.launch
 
 @Composable
@@ -85,72 +88,129 @@ internal fun ClientsScreen(
         scope.launch { snackbar.showSnackbar(message) }
     }
 
-    LaunchedEffect(selection) {
-        onTopLevelChanged(selection == null)
-    }
-
     Scaffold(snackbarHost = { SnackbarHost(snackbar) }) { padding ->
-        if (selection == null) {
-            ClientList(
-                clients = clients,
-                identity = configuration?.active,
-                onOpen = viewModel::selectClient,
-                onOpenSettings = onOpenSettings,
-                modifier = Modifier.fillMaxSize().padding(padding),
-            )
-        } else {
-            BackHandler { viewModel.selectClient(null) }
-            val client = selectedClient
-            if (client == null) {
-                Box(Modifier.fillMaxSize().padding(padding), contentAlignment = Alignment.Center) {
-                    CircularProgressIndicator()
+        BoxWithConstraints(Modifier.fillMaxSize().padding(padding)) {
+            val twoPane = maxWidth >= 840.dp
+            LaunchedEffect(selection, twoPane) {
+                onTopLevelChanged(twoPane || selection == null)
+            }
+            if (twoPane) {
+                Row(Modifier.fillMaxSize()) {
+                    ClientList(
+                        clients = clients,
+                        identity = configuration?.active,
+                        onOpen = viewModel::selectClient,
+                        onOpenSettings = onOpenSettings,
+                        modifier = Modifier.width(340.dp).fillMaxHeight(),
+                    )
+                    VerticalDivider()
+                    if (selection == null) {
+                        EmptyClientSelection(Modifier.weight(1f).fillMaxHeight())
+                    } else {
+                        ClientSelectionDetail(
+                            client = selectedClient,
+                            authenticate = authenticate,
+                            viewModel = viewModel,
+                            report = ::report,
+                            onBack = { viewModel.selectClient(null) },
+                            showBack = false,
+                            modifier = Modifier.weight(1f).fillMaxHeight(),
+                        )
+                    }
                 }
+            } else if (selection == null) {
+                ClientList(
+                    clients = clients,
+                    identity = configuration?.active,
+                    onOpen = viewModel::selectClient,
+                    onOpenSettings = onOpenSettings,
+                    modifier = Modifier.fillMaxSize(),
+                )
             } else {
-                ClientDetail(
-                    client = client,
+                BackHandler { viewModel.selectClient(null) }
+                ClientSelectionDetail(
+                    client = selectedClient,
+                    authenticate = authenticate,
+                    viewModel = viewModel,
+                    report = ::report,
                     onBack = { viewModel.selectClient(null) },
-                    onRename = { name ->
-                        authenticate(
-                            "Rename client",
-                            {
-                                scope.launch {
-                                    val result = viewModel.rename(client.clientId, name.trim())
-                                    snackbar.showSnackbar(
-                                        if (result == ClientChangeResult.CHANGED) "Client renamed" else "Client is no longer available",
-                                    )
-                                }
-                            },
-                            ::report,
-                        )
-                    },
-                    onSetState = { state ->
-                        authenticate(
-                            "${state.actionLabel()} client",
-                            {
-                                scope.launch {
-                                    val result = viewModel.setState(client.clientId, state)
-                                    if (
-                                        result == ClientChangeResult.CHANGED &&
-                                        state == RelayClientState.REVOKED
-                                    ) {
-                                        viewModel.selectClient(null)
-                                    }
-                                    snackbar.showSnackbar(
-                                        if (result == ClientChangeResult.CHANGED) {
-                                            state.successMessage()
-                                        } else {
-                                            "Client state could not be changed"
-                                        },
-                                    )
-                                }
-                            },
-                            ::report,
-                        )
-                    },
-                    modifier = Modifier.fillMaxSize().padding(padding),
+                    showBack = true,
+                    modifier = Modifier.fillMaxSize(),
                 )
             }
         }
+    }
+}
+
+@Composable
+private fun ClientSelectionDetail(
+    client: ClientDetails?,
+    authenticate: (String, () -> Unit, (String) -> Unit) -> Unit,
+    viewModel: ClientsViewModel,
+    report: (String) -> Unit,
+    onBack: () -> Unit,
+    showBack: Boolean,
+    modifier: Modifier,
+) {
+    val scope = rememberCoroutineScope()
+    if (client == null) {
+        Box(modifier, contentAlignment = Alignment.Center) { CircularProgressIndicator() }
+        return
+    }
+    ClientDetail(
+        client = client,
+        onBack = onBack,
+        showBack = showBack,
+        onRename = { name ->
+            authenticate(
+                "Rename client",
+                {
+                    scope.launch {
+                        val result = viewModel.rename(client.clientId, name.trim())
+                        report(
+                            if (result == ClientChangeResult.CHANGED) {
+                                "Client renamed"
+                            } else {
+                                "Client is no longer available"
+                            },
+                        )
+                    }
+                },
+                report,
+            )
+        },
+        onSetState = { state ->
+            authenticate(
+                "${state.actionLabel()} client",
+                {
+                    scope.launch {
+                        val result = viewModel.setState(client.clientId, state)
+                        if (result == ClientChangeResult.CHANGED && state == RelayClientState.REVOKED) {
+                            viewModel.selectClient(null)
+                        }
+                        report(
+                            if (result == ClientChangeResult.CHANGED) {
+                                state.successMessage()
+                            } else {
+                                "Client state could not be changed"
+                            },
+                        )
+                    }
+                },
+                report,
+            )
+        },
+        modifier = modifier,
+    )
+}
+
+@Composable
+private fun EmptyClientSelection(modifier: Modifier = Modifier) {
+    Box(modifier, contentAlignment = Alignment.Center) {
+        Text(
+            "Select a client to view its details",
+            color = MaterialTheme.colorScheme.onSurfaceVariant,
+        )
     }
 }
 
@@ -206,9 +266,15 @@ private fun ClientList(
                     ListItem(
                         headlineContent = { Text(client.name) },
                         supportingContent = {
-                            val machine = listOfNotNull(client.platform, client.hostname)
-                                .filterNot { it.equals(client.name, ignoreCase = true) }
-                                .distinct().joinToString(" · ")
+                            val hostname = client.hostname
+                                ?.takeUnless { it.equals(client.name, ignoreCase = true) }
+                            val platform = client.platform?.let(::formatPlatformName)
+                            val machine = when {
+                                hostname != null && platform != null -> "$platform on $hostname"
+                                hostname != null -> hostname
+                                platform != null -> platform
+                                else -> ""
+                            }
                             if (machine.isNotEmpty()) Text(machine)
                         },
                         leadingContent = { Icon(Icons.Outlined.Computer, contentDescription = null) },
@@ -229,6 +295,7 @@ private fun ClientList(
 private fun ClientDetail(
     client: ClientDetails,
     onBack: () -> Unit,
+    showBack: Boolean,
     onRename: (String) -> Unit,
     onSetState: (RelayClientState) -> Unit,
     modifier: Modifier = Modifier,
@@ -241,8 +308,10 @@ private fun ClientDetail(
         TopAppBar(
             title = { Text(client.name, maxLines = 1, overflow = TextOverflow.Ellipsis) },
             navigationIcon = {
-                IconButton(onClick = onBack) {
-                    Icon(Icons.AutoMirrored.Outlined.ArrowBack, contentDescription = "Back")
+                if (showBack) {
+                    IconButton(onClick = onBack) {
+                        Icon(Icons.AutoMirrored.Outlined.ArrowBack, contentDescription = "Back")
+                    }
                 }
             },
             actions = {
@@ -438,6 +507,3 @@ private fun RelayClientState.successMessage(): String = when (this) {
     RelayClientState.REVOKED -> "Client revoked"
     RelayClientState.PENDING -> "Client state updated"
 }
-
-private fun formatTimestamp(timestamp: Long): String =
-    DateFormat.getDateTimeInstance(DateFormat.MEDIUM, DateFormat.SHORT).format(Date(timestamp))

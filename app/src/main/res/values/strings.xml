@@ -81,7 +81,7 @@
     <string name="choose_vault_address">Choose your pairing address</string>
     <string name="choose_new_vault_address">Choose a new pairing address</string>
     <string name="vault_address">Pairing address</string>
-    <string name="vault_address_description">This is the address you give to a CLI when pairing. You may use the suggestion or enter your own.</string>
+    <string name="vault_address_description">This is the address you give to the Agentknock command-line app when pairing. You may use the suggestion or enter your own.</string>
     <string name="vault_address_format">Use lowercase English letters and hyphens only.</string>
     <string name="vault_address_unchanged">This is already your pairing address</string>
     <string name="claim_vault_address">Claim address</string>

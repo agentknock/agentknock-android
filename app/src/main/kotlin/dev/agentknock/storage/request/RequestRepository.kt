@@ -15,6 +15,7 @@ import dev.agentknock.protocol.ProfileListRequestMessage
 import dev.agentknock.protocol.ProfileUploadMode
 import dev.agentknock.protocol.ProfileUploadProtocol
 import dev.agentknock.protocol.ProfileUploadRequestMessage
+import dev.agentknock.presentation.renderShellCommand
 import dev.agentknock.relay.RelayClientState
 import dev.agentknock.relay.RelayDeviceClient
 import dev.agentknock.relay.RelayDeviceConnection
@@ -158,7 +159,10 @@ internal data class InboxRequestSummary(
     val profileListState: ProfileListRequestState?,
     val profileUploadState: ProfileUploadRequestState?,
     val title: String,
-    val subtitle: String,
+    val clientName: String,
+    val profileNames: List<String>,
+    val command: String?,
+    val arguments: List<String>,
     val receivedAt: Long,
     val completedAt: Long?,
 )
@@ -427,12 +431,12 @@ internal class RequestRepository(
                         credentialResult = null,
                         profileListState = null,
                         profileUploadState = null,
-                        title = pairing.friendlyName ?: pairing.hostname
-                            ?: pairing.platform?.let { platform ->
-                                pairing.architecture?.let { "$platform · $it" } ?: platform
-                            }
-                            ?: "Unknown client",
-                        subtitle = pairing.vaultAddress,
+                        title = "Pairing request",
+                        clientName = pairing.friendlyName ?: pairing.hostname
+                            ?: pairing.platform ?: "Unknown client",
+                        profileNames = emptyList(),
+                        command = null,
+                        arguments = emptyList(),
                         receivedAt = request.receivedAt,
                         completedAt = request.completedAt,
                     )
@@ -451,13 +455,11 @@ internal class RequestRepository(
                             ?.toCredentialCompletionResult(),
                         profileListState = null,
                         profileUploadState = null,
-                        title = credential.command.substringAfterLast('/').ifBlank {
-                            credential.command
-                        },
-                        subtitle = listOf(
-                            credential.clientName,
-                            requestedProfiles.joinToString(),
-                        ).filter(String::isNotBlank).joinToString(" · "),
+                        title = "Profile access",
+                        clientName = credential.clientName,
+                        profileNames = requestedProfiles,
+                        command = credential.command,
+                        arguments = decodeStringList(credential.argumentsJson),
                         receivedAt = request.receivedAt,
                         completedAt = request.completedAt,
                     )
@@ -475,8 +477,11 @@ internal class RequestRepository(
                         credentialResult = null,
                         profileListState = null,
                         profileUploadState = upload.state.toProfileUploadRequestState(),
-                        title = "${upload.mode.lowercase().replaceFirstChar(Char::uppercase)} ${upload.proposedName}",
-                        subtitle = pairing?.friendlyName ?: pairing?.hostname ?: "Unknown client",
+                        title = "${upload.mode.lowercase().replaceFirstChar(Char::uppercase)} profile",
+                        clientName = pairing?.friendlyName ?: pairing?.hostname ?: "Unknown client",
+                        profileNames = listOf(upload.proposedName),
+                        command = null,
+                        arguments = emptyList(),
                         receivedAt = request.receivedAt,
                         completedAt = request.completedAt,
                     )
@@ -671,11 +676,11 @@ internal class RequestRepository(
                     }
                     val profiles = decodeStringList(credential.profilesJson)
                     val arguments = decodeStringList(credential.argumentsJson)
-                    val command = (listOf(credential.command) + arguments).joinToString(" ")
+                    val command = renderShellCommand(credential.command, arguments)
                     RequestNotification(
                         requestId = request.id,
-                        title = "${credential.clientName} requests profile access",
-                        summary = profiles.joinToString(),
+                        title = "Profile access requested",
+                        summary = "${credential.clientName} requests ${profiles.joinToString()}",
                         details = listOfNotNull(
                             "Client: ${credential.clientName}",
                             credential.reason?.takeIf(String::isNotBlank)?.let { "Reason: $it" },
@@ -713,9 +718,14 @@ internal class RequestRepository(
                     }
                     RequestNotification(
                         requestId = request.id,
-                        title = "${upload.mode.lowercase().replaceFirstChar(Char::uppercase)} ${upload.proposedName}",
-                        summary = "${upload.clientName} · Environment variables",
-                        details = "Variables: ${upload.variableNamesJson.let(::decodeStringList).joinToString()}",
+                        title = "Profile proposal",
+                        summary = "${upload.clientName} wants to ${upload.mode.lowercase()} ${upload.proposedName}",
+                        details = listOf(
+                            "Client: ${upload.clientName}",
+                            "Change: ${upload.mode.lowercase().replaceFirstChar(Char::uppercase)} ${upload.proposedName}",
+                            "Profile type: Environment variables",
+                            "Variables: ${upload.variableNamesJson.let(::decodeStringList).joinToString()}",
+                        ).joinToString("\n"),
                         credentialDecisionAvailable = false,
                     )
                 }

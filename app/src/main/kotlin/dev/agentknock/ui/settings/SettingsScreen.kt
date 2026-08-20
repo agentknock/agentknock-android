@@ -15,13 +15,16 @@ import androidx.activity.compose.BackHandler
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
+import androidx.compose.foundation.layout.BoxWithConstraints
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.Spacer
+import androidx.compose.foundation.layout.fillMaxHeight
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.width
+import androidx.compose.foundation.layout.widthIn
 import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.items
 import androidx.compose.foundation.rememberScrollState
@@ -59,6 +62,7 @@ import androidx.compose.material3.SnackbarHostState
 import androidx.compose.material3.Text
 import androidx.compose.material3.TextButton
 import androidx.compose.material3.TopAppBar
+import androidx.compose.material3.VerticalDivider
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
@@ -77,6 +81,7 @@ import androidx.core.content.ContextCompat
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import androidx.lifecycle.viewmodel.compose.viewModel
 import dev.agentknock.BuildConfig
+import dev.agentknock.presentation.formatTimestamp
 import dev.agentknock.storage.FactoryResetResult
 import dev.agentknock.storage.crypto.EncryptionKeyBacking
 import dev.agentknock.storage.crypto.LocalEncryptionProtection
@@ -84,8 +89,6 @@ import dev.agentknock.storage.audit.AuditEvent
 import dev.agentknock.storage.request.RequestSyncResult
 import dev.agentknock.storage.vault.DeviceManagementResult
 import dev.agentknock.storage.vault.VaultIdentity
-import java.text.DateFormat
-import java.util.Date
 import kotlinx.coroutines.launch
 
 private enum class SettingsPage {
@@ -131,85 +134,144 @@ internal fun SettingsScreen(
     BackHandler(onBack = ::back)
 
     Scaffold(snackbarHost = { SnackbarHost(snackbar) }) { padding ->
-        val modifier = Modifier.fillMaxSize().padding(padding)
-        when (page) {
-            SettingsPage.OVERVIEW -> SettingsOverview(
-                onBack = onClose,
-                onOpen = { page = it },
-                pairing = configuration?.active,
-                counts = counts,
-                syncResult = syncResult,
-                modifier = modifier,
-            )
-            SettingsPage.DEVICE -> DeviceAndPairing(
-                identity = configuration?.active,
-                onBack = ::back,
-                onChangeAddress = onChangeAddress,
-                onSetPairingEnabled = { enabled ->
-                    authenticate(
-                        if (enabled) "Resume new pairings" else "Pause new pairings",
-                        {
-                            scope.launch {
-                                snackbar.showSnackbar(
-                                    viewModel.setPairingEnabled(enabled).message(enabled),
-                                )
-                            }
-                        },
-                        { scope.launch { snackbar.showSnackbar(it) } },
-                    )
-                },
-                report = { scope.launch { snackbar.showSnackbar(it) } },
-                modifier = modifier,
-            )
-            SettingsPage.NOTIFICATIONS -> NotificationsSettings(
-                pushState = pushState?.wireName,
-                requestNotificationPermission = requestNotificationPermission,
-                onBack = ::back,
-                modifier = modifier,
-            )
-            SettingsPage.SECURITY -> SecuritySettings(
-                protection = localEncryptionProtection,
-                onBack = ::back,
-                modifier = modifier,
-            )
-            SettingsPage.DATA -> DataAndHistory(
-                counts = counts,
-                onBack = ::back,
-                onAudit = { page = SettingsPage.AUDIT },
-                onFactoryReset = { page = SettingsPage.FACTORY_RESET },
-                onClearRequests = {
-                    scope.launch {
-                        val removed = viewModel.clearCompletedRequests()
-                        snackbar.showSnackbar("Cleared $removed completed requests")
-                    }
-                },
-                modifier = modifier,
-            )
-            SettingsPage.AUDIT -> if (selectedAudit == null) {
-                AuditList(
+        Box(Modifier.fillMaxSize().padding(padding)) {
+            val modifier = if (page == SettingsPage.AUDIT) {
+                Modifier.fillMaxSize()
+            } else {
+                Modifier.fillMaxHeight().widthIn(max = 720.dp).align(Alignment.TopCenter)
+            }
+            when (page) {
+                SettingsPage.OVERVIEW -> SettingsOverview(
+                    onBack = onClose,
+                    onOpen = { page = it },
+                    pairing = configuration?.active,
+                    counts = counts,
+                    syncResult = syncResult,
+                    modifier = modifier,
+                )
+                SettingsPage.DEVICE -> DeviceAndPairing(
+                    identity = configuration?.active,
+                    onBack = ::back,
+                    onChangeAddress = onChangeAddress,
+                    onSetPairingEnabled = { enabled ->
+                        authenticate(
+                            if (enabled) "Resume new pairings" else "Pause new pairings",
+                            {
+                                scope.launch {
+                                    snackbar.showSnackbar(
+                                        viewModel.setPairingEnabled(enabled).message(enabled),
+                                    )
+                                }
+                            },
+                            { scope.launch { snackbar.showSnackbar(it) } },
+                        )
+                    },
+                    report = { scope.launch { snackbar.showSnackbar(it) } },
+                    modifier = modifier,
+                )
+                SettingsPage.NOTIFICATIONS -> NotificationsSettings(
+                    pushState = pushState?.wireName,
+                    requestNotificationPermission = requestNotificationPermission,
+                    onBack = ::back,
+                    modifier = modifier,
+                )
+                SettingsPage.SECURITY -> SecuritySettings(
+                    protection = localEncryptionProtection,
+                    onBack = ::back,
+                    modifier = modifier,
+                )
+                SettingsPage.DATA -> DataAndHistory(
+                    counts = counts,
+                    onBack = ::back,
+                    onAudit = { page = SettingsPage.AUDIT },
+                    onFactoryReset = { page = SettingsPage.FACTORY_RESET },
+                    onClearRequests = {
+                        scope.launch {
+                            val removed = viewModel.clearCompletedRequests()
+                            snackbar.showSnackbar("Cleared $removed completed requests")
+                        }
+                    },
+                    modifier = modifier,
+                )
+                SettingsPage.AUDIT -> AuditBrowser(
                     events = auditEvents,
+                    selected = selectedAudit,
                     onBack = ::back,
                     onOpen = viewModel::selectAuditEvent,
                     modifier = modifier,
                 )
-            } else {
-                AuditDetail(event = checkNotNull(selectedAudit), onBack = ::back, modifier = modifier)
+                SettingsPage.FACTORY_RESET -> FactoryReset(
+                    onBack = ::back,
+                    authenticate = authenticate,
+                    reset = viewModel::factoryReset,
+                    report = { scope.launch { snackbar.showSnackbar(it) } },
+                    modifier = modifier,
+                )
+                SettingsPage.DIAGNOSTICS -> Diagnostics(
+                    syncing = syncing,
+                    result = syncResult,
+                    onBack = ::back,
+                    onReconnect = viewModel::reconnect,
+                    modifier = modifier,
+                )
+                SettingsPage.ABOUT -> About(onBack = ::back, modifier = modifier)
             }
-            SettingsPage.FACTORY_RESET -> FactoryReset(
-                onBack = ::back,
-                authenticate = authenticate,
-                reset = viewModel::factoryReset,
-                report = { scope.launch { snackbar.showSnackbar(it) } },
-                modifier = modifier,
+        }
+    }
+}
+
+@Composable
+private fun AuditBrowser(
+    events: List<AuditEvent>,
+    selected: AuditEvent?,
+    onBack: () -> Unit,
+    onOpen: (Long) -> Unit,
+    modifier: Modifier,
+) {
+    BoxWithConstraints(modifier) {
+        val twoPane = maxWidth >= 840.dp
+        if (twoPane) {
+            Row(Modifier.fillMaxSize()) {
+                AuditList(
+                    events = events,
+                    onBack = onBack,
+                    onOpen = onOpen,
+                    modifier = Modifier.width(420.dp).fillMaxHeight(),
+                )
+                VerticalDivider()
+                if (selected == null) {
+                    Box(
+                        Modifier.weight(1f).fillMaxHeight(),
+                        contentAlignment = Alignment.Center,
+                    ) {
+                        Text(
+                            "Select an event to view its details",
+                            color = MaterialTheme.colorScheme.onSurfaceVariant,
+                        )
+                    }
+                } else {
+                    AuditDetail(
+                        event = selected,
+                        onBack = onBack,
+                        showBack = false,
+                        modifier = Modifier.weight(1f).fillMaxHeight(),
+                    )
+                }
+            }
+        } else if (selected == null) {
+            AuditList(
+                events = events,
+                onBack = onBack,
+                onOpen = onOpen,
+                modifier = Modifier.fillMaxSize(),
             )
-            SettingsPage.DIAGNOSTICS -> Diagnostics(
-                syncing = syncing,
-                result = syncResult,
-                onBack = ::back,
-                onReconnect = viewModel::reconnect,
-                modifier = modifier,
+        } else {
+            AuditDetail(
+                event = selected,
+                onBack = onBack,
+                showBack = true,
+                modifier = Modifier.fillMaxSize(),
             )
-            SettingsPage.ABOUT -> About(onBack = ::back, modifier = modifier)
         }
     }
 }
@@ -511,7 +573,12 @@ private fun AuditList(events: List<AuditEvent>, onBack: () -> Unit, onOpen: (Lon
                     ListItem(
                         headlineContent = { Text(event.title) },
                         supportingContent = {
-                            Text(DateFormat.getDateTimeInstance(DateFormat.MEDIUM, DateFormat.SHORT).format(Date(event.occurredAt)))
+                            Column {
+                                event.detail.takeIf(String::isNotBlank)?.let {
+                                    Text(it, maxLines = 1, overflow = TextOverflow.Ellipsis)
+                                }
+                                Text(formatTimestamp(event.occurredAt))
+                            }
                         },
                         trailingContent = { Text(event.outcome.storedName.replaceFirstChar(Char::uppercase)) },
                         modifier = Modifier.clickable { onOpen(event.id) },
@@ -524,14 +591,25 @@ private fun AuditList(events: List<AuditEvent>, onBack: () -> Unit, onOpen: (Lon
 }
 
 @Composable
-private fun AuditDetail(event: AuditEvent, onBack: () -> Unit, modifier: Modifier) {
+private fun AuditDetail(
+    event: AuditEvent,
+    onBack: () -> Unit,
+    showBack: Boolean,
+    modifier: Modifier,
+) {
     Column(modifier) {
-        PageTopBar(event.title, onBack)
+        PageTopBar(event.title, onBack, showBack)
         SelectionContainer {
-            Column(Modifier.padding(20.dp), verticalArrangement = Arrangement.spacedBy(16.dp)) {
-                Text(event.outcome.storedName.replaceFirstChar(Char::uppercase), style = MaterialTheme.typography.titleLarge)
-                if (event.detail.isNotBlank()) Text(event.detail)
-                LabeledValue("Time", DateFormat.getDateTimeInstance().format(Date(event.occurredAt)))
+            Column(
+                Modifier.padding(20.dp),
+                verticalArrangement = Arrangement.spacedBy(16.dp),
+            ) {
+                Text(
+                    event.outcome.storedName.replaceFirstChar(Char::uppercase),
+                    style = MaterialTheme.typography.titleLarge,
+                )
+                if (event.detail.isNotBlank()) LabeledValue("Details", event.detail)
+                LabeledValue("Time", formatTimestamp(event.occurredAt))
                 event.clientId?.let { LabeledValue("Client ID", it, true) }
                 event.relayRequestId?.let { LabeledValue("Request ID", it, true) }
             }
@@ -664,12 +742,14 @@ private fun About(onBack: () -> Unit, modifier: Modifier) {
 }
 
 @Composable
-private fun PageTopBar(title: String, onBack: () -> Unit) {
+private fun PageTopBar(title: String, onBack: () -> Unit, showBack: Boolean = true) {
     TopAppBar(
         title = { Text(title, maxLines = 1, overflow = TextOverflow.Ellipsis) },
         navigationIcon = {
-            IconButton(onClick = onBack) {
-                Icon(Icons.AutoMirrored.Outlined.ArrowBack, contentDescription = "Back")
+            if (showBack) {
+                IconButton(onClick = onBack) {
+                    Icon(Icons.AutoMirrored.Outlined.ArrowBack, contentDescription = "Back")
+                }
             }
         },
     )

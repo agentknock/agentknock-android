@@ -6,9 +6,11 @@ import androidx.activity.compose.BackHandler
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
+import androidx.compose.foundation.layout.BoxWithConstraints
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.Spacer
+import androidx.compose.foundation.layout.fillMaxHeight
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.padding
@@ -45,6 +47,7 @@ import androidx.compose.material3.Text
 import androidx.compose.material3.TextButton
 import androidx.compose.material3.Switch
 import androidx.compose.material3.TopAppBar
+import androidx.compose.material3.VerticalDivider
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.DisposableEffect
 import androidx.compose.runtime.LaunchedEffect
@@ -65,6 +68,9 @@ import androidx.lifecycle.Lifecycle
 import androidx.lifecycle.LifecycleEventObserver
 import androidx.lifecycle.viewmodel.compose.viewModel
 import dev.agentknock.protocol.ProfileUploadMode
+import dev.agentknock.presentation.formatTimestamp
+import dev.agentknock.presentation.formatPlatformName
+import dev.agentknock.presentation.renderShellCommand
 import dev.agentknock.storage.profile.CredentialProfileMetadata
 import dev.agentknock.storage.request.CredentialCompletionResult
 import dev.agentknock.storage.request.CredentialDecision
@@ -72,7 +78,6 @@ import dev.agentknock.storage.request.CredentialDecisionResult
 import dev.agentknock.storage.request.CredentialRequestDetails
 import dev.agentknock.storage.request.CredentialRequestState
 import dev.agentknock.storage.request.InboxRequestDetails
-import dev.agentknock.storage.request.InboxRequestKind
 import dev.agentknock.storage.request.InboxRequestState
 import dev.agentknock.storage.request.InboxRequestSummary
 import dev.agentknock.storage.request.PairingDecisionResult
@@ -83,8 +88,8 @@ import dev.agentknock.storage.request.ProfileUploadRequestState
 import dev.agentknock.storage.request.ProfileUploadVariableValue
 import dev.agentknock.storage.request.RequestSyncResult
 import dev.agentknock.storage.vault.VaultIdentity
-import java.text.DateFormat
-import java.util.Date
+import dev.agentknock.ui.components.ClientIdentity
+import dev.agentknock.ui.components.ProfileIdentities
 import kotlinx.coroutines.launch
 
 @Composable
@@ -103,105 +108,149 @@ internal fun RequestsScreen(
     val snackbar = remember { SnackbarHostState() }
     val scope = rememberCoroutineScope()
 
-    LaunchedEffect(selection) {
-        onTopLevelChanged(selection == null)
-    }
-
     fun report(message: String) {
         scope.launch { snackbar.showSnackbar(message) }
     }
 
     Scaffold(snackbarHost = { SnackbarHost(snackbar) }) { padding ->
-        if (selection == null) {
-            RequestList(
-                requests = requests,
-                identity = configuration?.active,
-                syncing = syncing,
-                syncProblem = lastSyncResult.problemMessage(),
-                onRefresh = viewModel::refresh,
-                onOpenSettings = onOpenSettings,
-                onOpen = viewModel::selectRequest,
-                modifier = Modifier.fillMaxSize().padding(padding),
-            )
-            return@Scaffold
-        }
-
-        BackHandler { viewModel.selectRequest(null) }
-        val request = selectedRequest
-        if (request == null) {
-            Box(Modifier.fillMaxSize().padding(padding), contentAlignment = Alignment.Center) {
-                CircularProgressIndicator()
+        BoxWithConstraints(Modifier.fillMaxSize().padding(padding)) {
+            val twoPane = maxWidth >= 840.dp
+            LaunchedEffect(selection, twoPane) {
+                onTopLevelChanged(twoPane || selection == null)
             }
-            return@Scaffold
-        }
-
-        val modifier = Modifier.fillMaxSize().padding(padding)
-        when {
-            request.pairing != null -> PairingDetail(
-                request = request,
-                onBack = { viewModel.selectRequest(null) },
-                onChooseSas = { choice ->
-                    scope.launch {
-                        report(viewModel.chooseSas(request.id, choice).message())
+            if (twoPane) {
+                Row(Modifier.fillMaxSize()) {
+                    RequestList(
+                        requests = requests,
+                        identity = configuration?.active,
+                        syncing = syncing,
+                        syncProblem = lastSyncResult.problemMessage(),
+                        onRefresh = viewModel::refresh,
+                        onOpenSettings = onOpenSettings,
+                        onOpen = viewModel::selectRequest,
+                        modifier = Modifier.width(440.dp).fillMaxHeight(),
+                    )
+                    VerticalDivider()
+                    if (selection == null) {
+                        EmptyRequestSelection(Modifier.weight(1f).fillMaxHeight())
+                    } else {
+                        RequestDetail(
+                            request = selectedRequest,
+                            authenticate = authenticate,
+                            viewModel = viewModel,
+                            report = ::report,
+                            onBack = { viewModel.selectRequest(null) },
+                            showBack = false,
+                            modifier = Modifier.weight(1f).fillMaxHeight(),
+                        )
                     }
-                },
-                onReject = {
-                    scope.launch { report(viewModel.rejectPairing(request.id).message()) }
-                },
-                modifier = modifier,
-            )
-            request.credential != null -> CredentialDetail(
-                request = request,
-                onBack = { viewModel.selectRequest(null) },
-                onApprove = {
-                    authenticate(
-                        "Approve credential release",
-                        {
-                            scope.launch {
-                                report(viewModel.approveCredentialRequest(request.id).message())
-                            }
-                        },
-                        ::report,
-                    )
-                },
-                onDeny = {
-                    scope.launch { report(viewModel.denyCredentialRequest(request.id).message()) }
-                },
-                modifier = modifier,
-            )
-            request.profileUpload != null -> ProfileUploadDetail(
-                request = request,
-                onBack = { viewModel.selectRequest(null) },
-                onAccept = { name ->
-                    authenticate(
-                        "Accept profile proposal",
-                        {
-                            scope.launch {
-                                report(viewModel.acceptProfileUpload(request.id, name).message())
-                            }
-                        },
-                        ::report,
-                    )
-                },
-                onReject = {
-                    scope.launch { report(viewModel.rejectProfileUpload(request.id).message()) }
-                },
-                authenticate = authenticate,
-                onReveal = { variableId ->
-                    viewModel.readProfileUploadVariable(request.id, variableId)
-                },
-                onSensitivityChange = { variableId, sensitive ->
-                    viewModel.setProfileUploadVariableSensitivity(
-                        request.id,
-                        variableId,
-                        sensitive,
-                    )
-                },
-                report = ::report,
-                modifier = modifier,
-            )
-            else -> MissingDetail(onBack = { viewModel.selectRequest(null) }, modifier = modifier)
+                }
+            } else if (selection == null) {
+                RequestList(
+                    requests = requests,
+                    identity = configuration?.active,
+                    syncing = syncing,
+                    syncProblem = lastSyncResult.problemMessage(),
+                    onRefresh = viewModel::refresh,
+                    onOpenSettings = onOpenSettings,
+                    onOpen = viewModel::selectRequest,
+                    modifier = Modifier.fillMaxSize(),
+                )
+            } else {
+                BackHandler { viewModel.selectRequest(null) }
+                RequestDetail(
+                    request = selectedRequest,
+                    authenticate = authenticate,
+                    viewModel = viewModel,
+                    report = ::report,
+                    onBack = { viewModel.selectRequest(null) },
+                    showBack = true,
+                    modifier = Modifier.fillMaxSize(),
+                )
+            }
         }
+    }
+}
+
+@Composable
+private fun RequestDetail(
+    request: InboxRequestDetails?,
+    authenticate: (String, () -> Unit, (String) -> Unit) -> Unit,
+    viewModel: RequestsViewModel,
+    report: (String) -> Unit,
+    onBack: () -> Unit,
+    showBack: Boolean,
+    modifier: Modifier,
+) {
+    val scope = rememberCoroutineScope()
+    if (request == null) {
+        Box(modifier, contentAlignment = Alignment.Center) { CircularProgressIndicator() }
+        return
+    }
+    when {
+        request.pairing != null -> PairingDetail(
+            request = request,
+            onBack = onBack,
+            showBack = showBack,
+            onChooseSas = { choice ->
+                scope.launch { report(viewModel.chooseSas(request.id, choice).message()) }
+            },
+            onReject = { scope.launch { report(viewModel.rejectPairing(request.id).message()) } },
+            modifier = modifier,
+        )
+        request.credential != null -> CredentialDetail(
+            request = request,
+            onBack = onBack,
+            showBack = showBack,
+            onApprove = {
+                authenticate(
+                    "Approve credential release",
+                    {
+                        scope.launch {
+                            report(viewModel.approveCredentialRequest(request.id).message())
+                        }
+                    },
+                    report,
+                )
+            },
+            onDeny = { scope.launch { report(viewModel.denyCredentialRequest(request.id).message()) } },
+            modifier = modifier,
+        )
+        request.profileUpload != null -> ProfileUploadDetail(
+            request = request,
+            onBack = onBack,
+            showBack = showBack,
+            onAccept = { name ->
+                authenticate(
+                    "Accept profile proposal",
+                    {
+                        scope.launch {
+                            report(viewModel.acceptProfileUpload(request.id, name).message())
+                        }
+                    },
+                    report,
+                )
+            },
+            onReject = { scope.launch { report(viewModel.rejectProfileUpload(request.id).message()) } },
+            authenticate = authenticate,
+            onReveal = { variableId -> viewModel.readProfileUploadVariable(request.id, variableId) },
+            onSensitivityChange = { variableId, sensitive ->
+                viewModel.setProfileUploadVariableSensitivity(request.id, variableId, sensitive)
+            },
+            report = report,
+            modifier = modifier,
+        )
+        else -> MissingDetail(onBack = onBack, showBack = showBack, modifier = modifier)
+    }
+}
+
+@Composable
+private fun EmptyRequestSelection(modifier: Modifier = Modifier) {
+    Box(modifier, contentAlignment = Alignment.Center) {
+        Text(
+            "Select a request to view its details",
+            color = MaterialTheme.colorScheme.onSurfaceVariant,
+        )
     }
 }
 
@@ -292,24 +341,35 @@ private fun RequestList(
 private fun RequestRow(request: InboxRequestSummary, onClick: () -> Unit) {
     ListItem(
         headlineContent = {
-            Column(verticalArrangement = Arrangement.spacedBy(2.dp)) {
+            Column(verticalArrangement = Arrangement.spacedBy(4.dp)) {
                 Text(
                     request.statusLabel(),
                     color = request.statusColor(),
                     style = MaterialTheme.typography.labelLarge,
                 )
-                Text(request.title, style = MaterialTheme.typography.titleMedium)
+                if (request.command != null) {
+                    Text(
+                        renderShellCommand(request.command, request.arguments),
+                        style = MaterialTheme.typography.titleMedium,
+                        fontFamily = FontFamily.Monospace,
+                        maxLines = 2,
+                        overflow = TextOverflow.Ellipsis,
+                    )
+                } else {
+                    Text(request.title, style = MaterialTheme.typography.titleMedium)
+                }
             }
         },
         supportingContent = {
-            Column {
+            Column(verticalArrangement = Arrangement.spacedBy(7.dp)) {
+                ClientIdentity(request.clientName)
+                if (request.profileNames.isNotEmpty()) {
+                    ProfileIdentities(request.profileNames)
+                }
                 Text(
-                    listOf(request.kind.label(), request.subtitle)
-                        .filter(String::isNotBlank).joinToString(" · "),
-                )
-                Text(
-                    compactDate(request.receivedAt),
+                    formatTimestamp(request.receivedAt),
                     style = MaterialTheme.typography.labelMedium,
+                    color = MaterialTheme.colorScheme.onSurfaceVariant,
                 )
             }
         },
@@ -321,12 +381,13 @@ private fun RequestRow(request: InboxRequestSummary, onClick: () -> Unit) {
 private fun PairingDetail(
     request: InboxRequestDetails,
     onBack: () -> Unit,
+    showBack: Boolean,
     onChooseSas: (Int?) -> Unit,
     onReject: () -> Unit,
     modifier: Modifier,
 ) {
     val pairing = checkNotNull(request.pairing)
-    DetailPage("Pairing request", onBack, modifier) {
+    DetailPage("Pairing request", onBack, modifier, showBack = showBack) {
         StatusLine(
             pairing.pairingState.label(),
             pairing.pairingState.isError() ||
@@ -336,7 +397,10 @@ private fun PairingDetail(
             pairing.hostname ?: pairing.platform ?: "Unknown client",
             style = MaterialTheme.typography.headlineSmall,
         )
-        val reported = listOfNotNull(pairing.platform, pairing.architecture).joinToString(" · ")
+        val reported = listOfNotNull(
+            pairing.platform?.let(::formatPlatformName),
+            pairing.architecture,
+        ).joinToString(" · ")
         if (reported.isNotEmpty()) {
             Text(reported, color = MaterialTheme.colorScheme.onSurfaceVariant)
         }
@@ -392,7 +456,7 @@ private fun PairingDetail(
             }
         }
         Disclosure("Technical details") {
-            DetailValue("Received", fullDate(request.receivedAt))
+            DetailValue("Received", formatTimestamp(request.receivedAt))
             DetailValue("Pairing address", pairing.vaultAddress, true)
             pairing.osVersion?.let { DetailValue("OS version", it) }
             pairing.cliVersion?.let { DetailValue("CLI version", it) }
@@ -407,21 +471,16 @@ private fun PairingDetail(
 private fun CredentialDetail(
     request: InboxRequestDetails,
     onBack: () -> Unit,
+    showBack: Boolean,
     onApprove: () -> Unit,
     onDeny: () -> Unit,
     modifier: Modifier,
 ) {
     val credential = checkNotNull(request.credential)
-    DetailPage("Profile access requested", onBack, modifier) {
+    DetailPage("Profile access", onBack, modifier, showBack = showBack) {
         StatusLine(credential.statusLabel(), credential.isError())
-        Text(
-            credential.clientName,
-            style = MaterialTheme.typography.headlineSmall,
-        )
-        Text(
-            credential.profiles.joinToString(prefix = "Profiles: "),
-            color = MaterialTheme.colorScheme.onSurfaceVariant,
-        )
+        ClientIdentity(credential.clientName)
+        ProfileIdentities(credential.profiles)
 
         credential.reason?.takeIf(String::isNotBlank)?.let { reason ->
             Card(colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.secondaryContainer)) {
@@ -440,12 +499,10 @@ private fun CredentialDetail(
         Column(verticalArrangement = Arrangement.spacedBy(8.dp)) {
             Text("Command", style = MaterialTheme.typography.titleMedium)
             SelectionContainer {
-                Column(verticalArrangement = Arrangement.spacedBy(4.dp)) {
-                    Text(credential.command, fontFamily = FontFamily.Monospace)
-                    credential.arguments.forEachIndexed { index, value ->
-                        Text("${index + 1}. $value", fontFamily = FontFamily.Monospace)
-                    }
-                }
+                Text(
+                    renderShellCommand(credential.command, credential.arguments),
+                    fontFamily = FontFamily.Monospace,
+                )
             }
         }
 
@@ -455,6 +512,17 @@ private fun CredentialDetail(
                 credential.missingProfiles.joinToString(),
                 error = true,
             )
+        }
+
+        if (credential.profileDetails.isNotEmpty()) {
+            Disclosure("Profile details") {
+                credential.profileDetails.forEach { profile -> ProfileSummary(profile) }
+                Text(
+                    "Values are never shown in a request.",
+                    style = MaterialTheme.typography.bodySmall,
+                    color = MaterialTheme.colorScheme.onSurfaceVariant,
+                )
+            }
         }
 
         if (credential.state == CredentialRequestState.APPROVAL_PENDING) {
@@ -470,16 +538,8 @@ private fun CredentialDetail(
             CredentialOutcome(credential)
         }
 
-        Disclosure("Profile details") {
-            credential.profileDetails.forEach { profile -> ProfileSummary(profile) }
-            Text(
-                "Values are never shown in a request.",
-                style = MaterialTheme.typography.bodySmall,
-                color = MaterialTheme.colorScheme.onSurfaceVariant,
-            )
-        }
         Disclosure("Technical details") {
-            DetailValue("Received", fullDate(request.receivedAt))
+            DetailValue("Received", formatTimestamp(request.receivedAt))
             DetailValue("Working directory", credential.workingDirectory, true)
             DetailValue("Executable path", credential.executablePath, true)
             credential.executableHash?.let { DetailValue("Executable hash", it, true) }
@@ -490,8 +550,10 @@ private fun CredentialDetail(
             if (credential.launcherChain.isNotEmpty()) {
                 DetailValue("Launcher chain", credential.launcherChain.joinToString("\n"), true)
             }
-            val machine = listOfNotNull(credential.platform, credential.architecture).joinToString(" · ")
-            if (machine.isNotEmpty()) DetailValue("Platform reported by client", machine)
+            credential.platform?.let {
+                DetailValue("Platform reported by client", formatPlatformName(it))
+            }
+            credential.architecture?.let { DetailValue("Architecture reported by client", it) }
             credential.hostname?.takeIf { it != credential.clientName }
                 ?.let { DetailValue("Hostname reported by client", it) }
             credential.osVersion?.let { DetailValue("OS version", it) }
@@ -507,6 +569,7 @@ private fun CredentialDetail(
 private fun ProfileUploadDetail(
     request: InboxRequestDetails,
     onBack: () -> Unit,
+    showBack: Boolean,
     onAccept: (String) -> Unit,
     onReject: () -> Unit,
     authenticate: (String, () -> Unit, (String) -> Unit) -> Unit,
@@ -535,6 +598,7 @@ private fun ProfileUploadDetail(
         title = "${upload.mode.titleLabel()} $acceptedName",
         onBack = onBack,
         modifier = modifier,
+        showBack = showBack,
         titleContent = {
             Row(verticalAlignment = Alignment.CenterVertically) {
                 Text(
@@ -688,7 +752,7 @@ private fun ProfileUploadDetail(
         }
 
         Disclosure("Technical details") {
-            DetailValue("Received", fullDate(request.receivedAt))
+            DetailValue("Received", formatTimestamp(request.receivedAt))
             DetailValue("Profile type", upload.profileType)
             DetailValue("Client ID", upload.clientId, true)
             DetailValue("Request ID", request.relayRequestId, true)
@@ -778,6 +842,7 @@ private fun DetailPage(
     title: String,
     onBack: () -> Unit,
     modifier: Modifier,
+    showBack: Boolean,
     titleContent: @Composable () -> Unit = {
         Text(title, maxLines = 1, overflow = TextOverflow.Ellipsis)
     },
@@ -787,8 +852,10 @@ private fun DetailPage(
         TopAppBar(
             title = titleContent,
             navigationIcon = {
-                IconButton(onClick = onBack) {
-                    Icon(Icons.AutoMirrored.Outlined.ArrowBack, contentDescription = "Back")
+                if (showBack) {
+                    IconButton(onClick = onBack) {
+                        Icon(Icons.AutoMirrored.Outlined.ArrowBack, contentDescription = "Back")
+                    }
                 }
             },
         )
@@ -854,16 +921,10 @@ private fun DetailValue(label: String, value: String, monospace: Boolean = false
 }
 
 @Composable
-private fun MissingDetail(onBack: () -> Unit, modifier: Modifier) {
-    DetailPage("Request", onBack, modifier) {
+private fun MissingDetail(onBack: () -> Unit, showBack: Boolean, modifier: Modifier) {
+    DetailPage("Request", onBack, modifier, showBack = showBack) {
         Notice("Request unavailable", "This request has no displayable details.", true)
     }
-}
-
-private fun InboxRequestKind.label(): String = when (this) {
-    InboxRequestKind.PAIRING -> "Pairing"
-    InboxRequestKind.CREDENTIAL -> "Profile access"
-    InboxRequestKind.PROFILE_UPLOAD -> "Profile proposal"
 }
 
 private fun InboxRequestSummary.statusLabel(): String = when {
@@ -968,9 +1029,3 @@ private fun RequestSyncResult?.problemMessage(): String? = when (this) {
     is RequestSyncResult.RelayUnavailable -> message ?: "The relay is temporarily unavailable"
     RequestSyncResult.InvalidRelayResponse -> "The relay returned an invalid response"
 }
-
-private fun compactDate(timestamp: Long): String =
-    DateFormat.getDateTimeInstance(DateFormat.SHORT, DateFormat.SHORT).format(Date(timestamp))
-
-private fun fullDate(timestamp: Long): String =
-    DateFormat.getDateTimeInstance(DateFormat.FULL, DateFormat.MEDIUM).format(Date(timestamp))

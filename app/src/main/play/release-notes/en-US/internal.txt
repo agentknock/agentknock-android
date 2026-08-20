@@ -1,1 +1,1 @@
-Polishes navigation, request review, profiles, client management, notifications, and sensitive-data handling.
+Clarifies requests, commands, clients, and profiles throughout the app, improves notifications, and adds adaptive tablet layouts.

@@ -1,6 +1,8 @@
 package dev.agentknock.ui
 
 import androidx.compose.foundation.layout.Box
+import androidx.compose.foundation.layout.BoxWithConstraints
+import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.WindowInsets
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.padding
@@ -12,6 +14,8 @@ import androidx.compose.material3.Icon
 import androidx.compose.material3.CircularProgressIndicator
 import androidx.compose.material3.NavigationBar
 import androidx.compose.material3.NavigationBarItem
+import androidx.compose.material3.NavigationRail
+import androidx.compose.material3.NavigationRailItem
 import androidx.compose.material3.AlertDialog
 import androidx.compose.material3.Scaffold
 import androidx.compose.material3.Text
@@ -25,6 +29,7 @@ import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.res.stringResource
+import androidx.compose.ui.unit.dp
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import androidx.lifecycle.viewmodel.compose.viewModel
 import dev.agentknock.R
@@ -54,7 +59,7 @@ internal fun AgentknockScreen(
     var section by rememberSaveable { mutableStateOf(MainSection.REQUESTS) }
     var showSettings by rememberSaveable { mutableStateOf(false) }
     var showAddressEditor by rememberSaveable { mutableStateOf(false) }
-    var showBottomNavigation by rememberSaveable { mutableStateOf(true) }
+    var showNavigation by rememberSaveable { mutableStateOf(true) }
     var offerNotifications by rememberSaveable { mutableStateOf(false) }
     val requestNavigationTarget by requestNavigation.collectAsStateWithLifecycle()
     val current = configuration
@@ -101,48 +106,44 @@ internal fun AgentknockScreen(
             authenticate = authenticate,
             requestNotificationPermission = requestNotificationPermission,
         )
-        else -> Scaffold(
-            contentWindowInsets = WindowInsets(0, 0, 0, 0),
-            bottomBar = {
-                if (showBottomNavigation) NavigationBar {
-                    NavigationBarItem(
-                        selected = section == MainSection.REQUESTS,
-                        onClick = { section = MainSection.REQUESTS },
-                        icon = { Icon(Icons.Outlined.Inbox, contentDescription = null) },
-                        label = { Text(stringResource(R.string.requests)) },
-                    )
-                    NavigationBarItem(
-                        selected = section == MainSection.PROFILES,
-                        onClick = { section = MainSection.PROFILES },
-                        icon = { Icon(Icons.Outlined.Key, contentDescription = null) },
-                        label = { Text(stringResource(R.string.profiles)) },
-                    )
-                    NavigationBarItem(
-                        selected = section == MainSection.CLIENTS,
-                        onClick = { section = MainSection.CLIENTS },
-                        icon = { Icon(Icons.Outlined.Computer, contentDescription = null) },
-                        label = { Text("Clients") },
+        else -> BoxWithConstraints(Modifier.fillMaxSize()) {
+            val useNavigationRail = maxWidth >= 600.dp
+            if (useNavigationRail) {
+                Row(Modifier.fillMaxSize()) {
+                    if (showNavigation) {
+                        MainNavigationRail(
+                            section = section,
+                            onSelect = { section = it },
+                        )
+                    }
+                    MainContent(
+                        section = section,
+                        authenticate = authenticate,
+                        onOpenSettings = { showSettings = true },
+                        onTopLevelChanged = { showNavigation = it },
+                        requestsViewModel = requestsViewModel,
+                        modifier = Modifier.weight(1f),
                     )
                 }
-            },
-        ) { padding ->
-            Box(Modifier.fillMaxSize().padding(padding)) {
-                when (section) {
-                    MainSection.REQUESTS -> RequestsScreen(
+            } else {
+                Scaffold(
+                    contentWindowInsets = WindowInsets(0, 0, 0, 0),
+                    bottomBar = {
+                        if (showNavigation) {
+                            MainNavigationBar(
+                                section = section,
+                                onSelect = { section = it },
+                            )
+                        }
+                    },
+                ) { padding ->
+                    MainContent(
+                        section = section,
                         authenticate = authenticate,
                         onOpenSettings = { showSettings = true },
-                        viewModel = requestsViewModel,
-                        onTopLevelChanged = { showBottomNavigation = it },
-                    )
-                    MainSection.PROFILES -> ProfilesScreen(
-                        authenticate = authenticate,
-                        onOpenSettings = { showSettings = true },
-                        onTopLevelChanged = { showBottomNavigation = it },
-                    )
-                    MainSection.CLIENTS -> ClientsScreen(
-                        onOpenSettings = { showSettings = true },
-                        onTopLevelChanged = { showBottomNavigation = it },
-                        authenticate = authenticate,
+                        onTopLevelChanged = { showNavigation = it },
+                        requestsViewModel = requestsViewModel,
+                        modifier = Modifier.fillMaxSize().padding(padding),
                     )
                 }
             }
@@ -171,6 +172,84 @@ internal fun AgentknockScreen(
             },
         )
     }
+}
+
+@Composable
+private fun MainContent(
+    section: MainSection,
+    authenticate: (String, () -> Unit, (String) -> Unit) -> Unit,
+    onOpenSettings: () -> Unit,
+    onTopLevelChanged: (Boolean) -> Unit,
+    requestsViewModel: RequestsViewModel,
+    modifier: Modifier = Modifier,
+) {
+    Box(modifier) {
+        when (section) {
+            MainSection.REQUESTS -> RequestsScreen(
+                authenticate = authenticate,
+                onOpenSettings = onOpenSettings,
+                viewModel = requestsViewModel,
+                onTopLevelChanged = onTopLevelChanged,
+            )
+            MainSection.PROFILES -> ProfilesScreen(
+                authenticate = authenticate,
+                onOpenSettings = onOpenSettings,
+                onTopLevelChanged = onTopLevelChanged,
+            )
+            MainSection.CLIENTS -> ClientsScreen(
+                onOpenSettings = onOpenSettings,
+                onTopLevelChanged = onTopLevelChanged,
+                authenticate = authenticate,
+            )
+        }
+    }
+}
+
+@Composable
+private fun MainNavigationBar(section: MainSection, onSelect: (MainSection) -> Unit) {
+    NavigationBar {
+        MainSection.entries.forEach { item ->
+            NavigationBarItem(
+                selected = section == item,
+                onClick = { onSelect(item) },
+                icon = { MainSectionIcon(item) },
+                label = { Text(item.label()) },
+            )
+        }
+    }
+}
+
+@Composable
+private fun MainNavigationRail(section: MainSection, onSelect: (MainSection) -> Unit) {
+    NavigationRail {
+        MainSection.entries.forEach { item ->
+            NavigationRailItem(
+                selected = section == item,
+                onClick = { onSelect(item) },
+                icon = { MainSectionIcon(item) },
+                label = { Text(item.label()) },
+            )
+        }
+    }
+}
+
+@Composable
+private fun MainSectionIcon(section: MainSection) {
+    Icon(
+        when (section) {
+            MainSection.REQUESTS -> Icons.Outlined.Inbox
+            MainSection.PROFILES -> Icons.Outlined.Key
+            MainSection.CLIENTS -> Icons.Outlined.Computer
+        },
+        contentDescription = null,
+    )
+}
+
+@Composable
+private fun MainSection.label(): String = when (this) {
+    MainSection.REQUESTS -> stringResource(R.string.requests)
+    MainSection.PROFILES -> stringResource(R.string.profiles)
+    MainSection.CLIENTS -> "Clients"
 }
 
 private enum class MainSection {
