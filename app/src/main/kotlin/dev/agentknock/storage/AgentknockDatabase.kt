@@ -9,47 +9,47 @@ import dev.agentknock.storage.audit.AuditDao
 import dev.agentknock.storage.audit.AuditEventEntity
 import dev.agentknock.storage.crypto.LocalEncryptionKeyEntity
 import dev.agentknock.storage.crypto.LocalEncryptionStateEntity
-import dev.agentknock.storage.profile.EnvironmentVariableEntity
-import dev.agentknock.storage.profile.ProfileDao
-import dev.agentknock.storage.profile.ProfileEntity
+import dev.agentknock.storage.secret.EnvironmentVariableEntity
+import dev.agentknock.storage.secret.SecretDao
+import dev.agentknock.storage.secret.SecretEntity
 import dev.agentknock.storage.request.InboxRequestEntity
-import dev.agentknock.storage.request.CredentialRequestEntity
+import dev.agentknock.storage.request.SecretUseRequestEntity
 import dev.agentknock.storage.request.PairingEntity
 import dev.agentknock.storage.request.PairingSecretEntity
-import dev.agentknock.storage.request.ProfileListRequestEntity
-import dev.agentknock.storage.request.ProfileUploadRequestEntity
-import dev.agentknock.storage.request.ProfileUploadVariableEntity
+import dev.agentknock.storage.request.SecretListRequestEntity
+import dev.agentknock.storage.request.SecretUploadRequestEntity
+import dev.agentknock.storage.request.SecretUploadVariableEntity
 import dev.agentknock.storage.request.RequestDao
 import dev.agentknock.storage.request.RequestSecretEntity
 import dev.agentknock.storage.vault.VaultDao
-import dev.agentknock.storage.vault.VaultIdentityEntity
+import dev.agentknock.storage.vault.DeviceIdentityEntity
 import dev.agentknock.storage.vault.VaultSecretEntity
 
 @Database(
     entities = [
         LocalEncryptionKeyEntity::class,
         LocalEncryptionStateEntity::class,
-        ProfileEntity::class,
+        SecretEntity::class,
         EnvironmentVariableEntity::class,
-        VaultIdentityEntity::class,
+        DeviceIdentityEntity::class,
         VaultSecretEntity::class,
         InboxRequestEntity::class,
         PairingEntity::class,
         PairingSecretEntity::class,
         RequestSecretEntity::class,
-        CredentialRequestEntity::class,
-        ProfileListRequestEntity::class,
-        ProfileUploadRequestEntity::class,
-        ProfileUploadVariableEntity::class,
+        SecretUseRequestEntity::class,
+        SecretListRequestEntity::class,
+        SecretUploadRequestEntity::class,
+        SecretUploadVariableEntity::class,
         AuditEventEntity::class,
     ],
-    version = 3,
+    version = 4,
     exportSchema = true,
 )
 internal abstract class AgentknockDatabase : RoomDatabase() {
     abstract fun localEncryptionDao(): LocalEncryptionDao
 
-    abstract fun profileDao(): ProfileDao
+    abstract fun secretDao(): SecretDao
 
     abstract fun vaultDao(): VaultDao
 

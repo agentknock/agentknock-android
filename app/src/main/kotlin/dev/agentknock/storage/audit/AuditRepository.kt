@@ -5,11 +5,11 @@ import kotlinx.coroutines.flow.map
 
 internal enum class AuditCategory(val storedName: String) {
     PAIRING("pairing"),
-    PROFILE_ACCESS("profile_access"),
-    PROFILE_LIST("profile_list"),
-    PROFILE_PROPOSAL("profile_proposal"),
+    SECRET_USE("secret_use"),
+    SECRET_LIST("secret_list"),
+    SECRET_UPLOAD("secret_upload"),
     CLIENT("client"),
-    PROFILE("profile"),
+    SECRET("secret"),
     DEVICE("device"),
     VERIFICATION("verification"),
 }
@@ -18,7 +18,6 @@ internal enum class AuditOutcome(val storedName: String) {
     RECEIVED("received"),
     APPROVED("approved"),
     DENIED("denied"),
-    ACCEPTED("accepted"),
     REJECTED("rejected"),
     COMPLETED("completed"),
     CHANGED("changed"),

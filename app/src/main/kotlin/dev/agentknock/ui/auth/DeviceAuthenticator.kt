@@ -80,7 +80,7 @@ internal class DeviceAuthenticator(
     private fun authenticateWithDeviceCredential(title: String) {
         val keyguardManager = activity.getSystemService(Context.KEYGUARD_SERVICE) as KeyguardManager
         if (!keyguardManager.isDeviceSecure) {
-            completeWithError("Set up a screen lock before managing credential values")
+            completeWithError("Set up a screen lock before managing secret values")
             return
         }
         val intent = keyguardManager.createConfirmDeviceCredentialIntent(

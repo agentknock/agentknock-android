@@ -199,7 +199,7 @@ class PairingProtocolTest {
     }
 
     @Test
-    fun `opens a rotated credential request and its response and completion`() {
+    fun `opens a rotated secret use request and its response and completion`() {
         val oldClientPsk = ByteArray(32) { (it + 1).toByte() }
         val rotationSender = pskHpke.SetupPSKS(
             pskHpke.deserializePublicKey(devicePublicKey),
@@ -213,12 +213,12 @@ class PairingProtocolTest {
         )
         val requestSender = pskHpke.SetupPSKS(
             pskHpke.deserializePublicKey(devicePublicKey),
-            pairedProtocolInfo(CREDENTIAL_REQUEST_ID),
+            pairedProtocolInfo(SECRET_USE_REQUEST_ID),
             rotatedClientPsk,
             CLIENT_ID.ulidBytes(),
         )
         val requestPlaintext =
-            """{"cli_version":"0.1.0","method":"CredentialRequest","profiles":["test"],"operation":{"type":"exec","command":"env","arguments":[],"working_directory":"/tmp","stdin":"NULL_DEVICE","stdout":"TERMINAL","stderr":"TERMINAL"},"launcher_chain":[]}"""
+            """{"cli_version":"0.1.0","method":"SecretUse","secrets":["test"],"operation":{"type":"exec","command":"env","arguments":[],"working_directory":"/tmp","stdin":"NULL_DEVICE","stdout":"TERMINAL","stderr":"TERMINAL"},"launcher_chain":[]}"""
                 .encodeToByteArray()
         val request = json.parseToJsonElement(
             """{"version":"agentknock-v1","key":"${BASE64.encodeToString(requestSender.encapsulation)}","ciphertext":"${BASE64.encodeToString(requestSender.seal(EMPTY, requestPlaintext))}","rotation_key":"${BASE64.encodeToString(rotationSender.encapsulation)}"}""",
@@ -226,7 +226,7 @@ class PairingProtocolTest {
 
         val opened = protocol.openPairedRequest(
             deviceId = DEVICE_ID,
-            requestId = CREDENTIAL_REQUEST_ID,
+            requestId = SECRET_USE_REQUEST_ID,
             clientId = CLIENT_ID,
             clientPsk = oldClientPsk,
             devicePrivateKey = devicePrivateKey,
@@ -242,7 +242,7 @@ class PairingProtocolTest {
             """{"result":"APPROVED","environment":{"TOKEN":"value"}}""".encodeToByteArray()
         val response = protocol.sealPairedResponse(
             deviceId = DEVICE_ID,
-            requestId = CREDENTIAL_REQUEST_ID,
+            requestId = SECRET_USE_REQUEST_ID,
             clientId = CLIENT_ID,
             clientPsk = opened.clientPsk,
             devicePrivateKey = devicePrivateKey,
@@ -261,7 +261,7 @@ class PairingProtocolTest {
             completionPlaintext,
             protocol.openPairedCompletion(
                 deviceId = DEVICE_ID,
-                requestId = CREDENTIAL_REQUEST_ID,
+                requestId = SECRET_USE_REQUEST_ID,
                 clientId = CLIENT_ID,
                 clientPsk = opened.clientPsk,
                 devicePrivateKey = devicePrivateKey,
@@ -306,7 +306,7 @@ class PairingProtocolTest {
         )
         val opened = vectorProtocol.openPairedRequest(
             deviceId = DEVICE_ID,
-            requestId = CREDENTIAL_REQUEST_ID,
+            requestId = SECRET_USE_REQUEST_ID,
             clientId = CLIENT_ID,
             clientPsk = established.clientPsk,
             devicePrivateKey = devicePrivateKey,
@@ -321,7 +321,7 @@ class PairingProtocolTest {
             ),
             vectorProtocol.sealPairedResponse(
                 deviceId = DEVICE_ID,
-                requestId = CREDENTIAL_REQUEST_ID,
+                requestId = SECRET_USE_REQUEST_ID,
                 clientId = CLIENT_ID,
                 clientPsk = established.clientPsk,
                 devicePrivateKey = devicePrivateKey,
@@ -337,7 +337,7 @@ class PairingProtocolTest {
             "completion",
             vectorProtocol.openPairedCompletion(
                 deviceId = DEVICE_ID,
-                requestId = CREDENTIAL_REQUEST_ID,
+                requestId = SECRET_USE_REQUEST_ID,
                 clientId = CLIENT_ID,
                 clientPsk = established.clientPsk,
                 devicePrivateKey = devicePrivateKey,
@@ -358,7 +358,7 @@ class PairingProtocolTest {
         )
         val sender = pskHpke.SetupPSKS(
             pskHpke.deserializePublicKey(devicePublicKey),
-            pairedProtocolInfo(CREDENTIAL_REQUEST_ID),
+            pairedProtocolInfo(SECRET_USE_REQUEST_ID),
             newClientPsk,
             CLIENT_ID.ulidBytes(),
         )
@@ -367,7 +367,7 @@ class PairingProtocolTest {
         )
         val opened = protocol.openPairedRequest(
             deviceId = DEVICE_ID,
-            requestId = CREDENTIAL_REQUEST_ID,
+            requestId = SECRET_USE_REQUEST_ID,
             clientId = CLIENT_ID,
             clientPsk = oldClientPsk,
             devicePrivateKey = devicePrivateKey,
@@ -388,7 +388,7 @@ class PairingProtocolTest {
         )
         val sender = pskHpke.SetupPSKS(
             pskHpke.deserializePublicKey(devicePublicKey),
-            pairedProtocolInfo(CREDENTIAL_REQUEST_ID),
+            pairedProtocolInfo(SECRET_USE_REQUEST_ID),
             newClientPsk,
             CLIENT_ID.ulidBytes(),
         )
@@ -399,7 +399,7 @@ class PairingProtocolTest {
         val result = runCatching {
             protocol.openPairedRequest(
                 deviceId = DEVICE_ID,
-                requestId = CREDENTIAL_REQUEST_ID,
+                requestId = SECRET_USE_REQUEST_ID,
                 clientId = CLIENT_ID,
                 clientPsk = oldClientPsk,
                 allowRotation = false,
@@ -427,7 +427,7 @@ class PairingProtocolTest {
         val previousClientPsk = ByteArray(32) { 0x22 }
         val sender = pskHpke.SetupPSKS(
             pskHpke.deserializePublicKey(devicePublicKey),
-            pairedProtocolInfo(CREDENTIAL_REQUEST_ID),
+            pairedProtocolInfo(SECRET_USE_REQUEST_ID),
             previousClientPsk,
             CLIENT_ID.ulidBytes(),
         )
@@ -438,7 +438,7 @@ class PairingProtocolTest {
 
         val opened = protocol.openPairedRequest(
             deviceId = DEVICE_ID,
-            requestId = CREDENTIAL_REQUEST_ID,
+            requestId = SECRET_USE_REQUEST_ID,
             clientId = CLIENT_ID,
             clientPsk = currentClientPsk,
             previousClientPsk = previousClientPsk,
@@ -456,7 +456,7 @@ class PairingProtocolTest {
         val currentClientPsk = ByteArray(32) { 0x11 }
         val sender = pskHpke.SetupPSKS(
             pskHpke.deserializePublicKey(devicePublicKey),
-            pairedProtocolInfo(CREDENTIAL_REQUEST_ID),
+            pairedProtocolInfo(SECRET_USE_REQUEST_ID),
             currentClientPsk,
             CLIENT_ID.ulidBytes(),
         )
@@ -467,7 +467,7 @@ class PairingProtocolTest {
 
         val opened = protocol.openPairedRequest(
             deviceId = DEVICE_ID,
-            requestId = CREDENTIAL_REQUEST_ID,
+            requestId = SECRET_USE_REQUEST_ID,
             clientId = CLIENT_ID,
             clientPsk = currentClientPsk,
             devicePrivateKey = devicePrivateKey,
@@ -485,7 +485,7 @@ class PairingProtocolTest {
         val unrelatedClientPsk = ByteArray(32) { 0x22 }
         val sender = pskHpke.SetupPSKS(
             pskHpke.deserializePublicKey(devicePublicKey),
-            pairedProtocolInfo(CREDENTIAL_REQUEST_ID),
+            pairedProtocolInfo(SECRET_USE_REQUEST_ID),
             unrelatedClientPsk,
             CLIENT_ID.ulidBytes(),
         )
@@ -502,7 +502,7 @@ class PairingProtocolTest {
             val failure = runCatching {
                 protocol.openPairedRequest(
                     deviceId = DEVICE_ID,
-                    requestId = CREDENTIAL_REQUEST_ID,
+                    requestId = SECRET_USE_REQUEST_ID,
                     clientId = CLIENT_ID,
                     clientPsk = currentClientPsk,
                     devicePrivateKey = devicePrivateKey,
@@ -525,7 +525,7 @@ class PairingProtocolTest {
         val failure = runCatching {
             protocol.openPairedRequest(
                 deviceId = DEVICE_ID,
-                requestId = CREDENTIAL_REQUEST_ID,
+                requestId = SECRET_USE_REQUEST_ID,
                 clientId = CLIENT_ID,
                 clientPsk = ByteArray(32),
                 devicePrivateKey = devicePrivateKey,
@@ -650,7 +650,7 @@ class PairingProtocolTest {
         const val DEVICE_ID = "01K2ENXDTW1P3XAR4J7V7C9D0H"
         const val CLIENT_ID = "01K2EP16NWNAGJYF8J1Q2V6P3X"
         const val FINISH_REQUEST_ID = "01ARZ3NDEKTSV4RRFFQ69G5FAW"
-        const val CREDENTIAL_REQUEST_ID = "01ARZ3NDEKTSV4RRFFQ69G5FAX"
+        const val SECRET_USE_REQUEST_ID = "01ARZ3NDEKTSV4RRFFQ69G5FAX"
         val DEVICE_RANDOM = ByteArray(32) { (0xa0 + it).toByte() }
         val EMPTY = ByteArray(0)
         val BASE64: Base64.Encoder = Base64.getEncoder()

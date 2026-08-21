@@ -7,19 +7,19 @@ import org.junit.Assert.assertNull
 import org.junit.Assert.assertTrue
 import org.junit.Test
 
-class ProfileUploadProtocolTest {
-    private val protocol = ProfileUploadProtocol()
+class SecretUploadProtocolTest {
+    private val protocol = SecretUploadProtocol()
     private val json = Json
 
     @Test
-    fun `decodes an environment profile proposal`() {
+    fun `decodes an environment secret upload`() {
         val request = protocol.decodeRequest(
             """
             {
               "cli_version":"0.2.0",
-              "method":"ProfileUpload",
+              "method":"SecretUpload",
               "mode":"UPDATE",
-              "profile":{
+              "secret":{
                 "name":"aws-read-only",
                 "description":"Production read access",
                 "type":"environment",
@@ -33,7 +33,7 @@ class ProfileUploadProtocolTest {
         )
 
         assertEquals("0.2.0", request.cliVersion)
-        assertEquals(ProfileUploadMode.UPDATE, request.mode)
+        assertEquals(SecretUploadMode.UPDATE, request.mode)
         assertEquals("aws-read-only", request.name)
         assertTrue(request.descriptionProvided)
         assertEquals("Production read access", request.description)
@@ -49,9 +49,9 @@ class ProfileUploadProtocolTest {
             """
             {
               "cli_version":"0.2.0",
-              "method":"ProfileUpload",
+              "method":"SecretUpload",
               "mode":"CREATE",
-              "profile":{"name":"new","type":"environment","variables":{}}
+              "secret":{"name":"new","type":"environment","variables":{}}
             }
             """.trimIndent().encodeToByteArray(),
         )
@@ -66,9 +66,9 @@ class ProfileUploadProtocolTest {
             """
             {
               "cli_version":"0.2.0",
-              "method":"ProfileUpload",
+              "method":"SecretUpload",
               "mode":"UPDATE",
-              "profile":{
+              "secret":{
                 "name":"existing",
                 "description":null,
                 "type":"environment",
@@ -85,9 +85,9 @@ class ProfileUploadProtocolTest {
     @Test
     fun `rejects non-string fields instead of coercing them`() {
         val invalidRequests = listOf(
-            """{"cli_version":2,"method":"ProfileUpload","mode":"CREATE","profile":{"name":"new","type":"environment","variables":{}}}""",
-            """{"cli_version":"0.2.0","method":"ProfileUpload","mode":"CREATE","profile":{"name":"new","type":"environment","variables":{"TOKEN":{"value":false}}}}""",
-            """{"cli_version":"0.2.0","method":"ProfileUpload","mode":"CREATE","profile":{"name":"new","description":3,"type":"environment","variables":{}}}""",
+            """{"cli_version":2,"method":"SecretUpload","mode":"CREATE","secret":{"name":"new","type":"environment","variables":{}}}""",
+            """{"cli_version":"0.2.0","method":"SecretUpload","mode":"CREATE","secret":{"name":"new","type":"environment","variables":{"TOKEN":{"value":false}}}}""",
+            """{"cli_version":"0.2.0","method":"SecretUpload","mode":"CREATE","secret":{"name":"new","description":3,"type":"environment","variables":{}}}""",
         )
 
         invalidRequests.forEach { request ->
@@ -106,10 +106,10 @@ class ProfileUploadProtocolTest {
         )
         assertEquals(
             json.parseToJsonElement(
-                """{"result":"REJECTED","message":"Invalid proposal."}""",
+                """{"result":"REJECTED","message":"Invalid upload."}""",
             ),
             json.parseToJsonElement(
-                protocol.rejectedResponse("Invalid proposal.").decodeToString(),
+                protocol.rejectedResponse("Invalid upload.").decodeToString(),
             ),
         )
     }
@@ -117,7 +117,7 @@ class ProfileUploadProtocolTest {
     @Test
     fun `decodes the echoed completion`() {
         assertEquals(
-            ProfileUploadCompletion("0.2.0", "RECEIVED", null),
+            SecretUploadCompletion("0.2.0", "RECEIVED", null),
             protocol.decodeCompletion(
                 """{"cli_version":"0.2.0","result":"RECEIVED"}"""
                     .encodeToByteArray(),

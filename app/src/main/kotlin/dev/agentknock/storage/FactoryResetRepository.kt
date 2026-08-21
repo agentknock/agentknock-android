@@ -11,7 +11,7 @@ internal sealed interface FactoryResetResult {
         FactoryResetResult
     data class RemoteUnavailable(val message: String?) : FactoryResetResult
     data object InvalidRemoteResponse : FactoryResetResult
-    data object LocalSecretsUnavailable : FactoryResetResult
+    data object DeviceCredentialsUnavailable : FactoryResetResult
 }
 
 internal class FactoryResetRepository(
@@ -24,10 +24,10 @@ internal class FactoryResetRepository(
     ) {
         DeviceManagementResult.Changed -> resetLocal()
         DeviceManagementResult.NoDevice -> FactoryResetResult.NoDevice
-        DeviceManagementResult.SecretsUnavailable,
-        DeviceManagementResult.SecretsCorrupted,
+        DeviceManagementResult.CredentialsUnavailable,
+        DeviceManagementResult.CredentialsCorrupted,
         DeviceManagementResult.UnsupportedEncryption,
-        -> FactoryResetResult.LocalSecretsUnavailable
+        -> FactoryResetResult.DeviceCredentialsUnavailable
         is DeviceManagementResult.Rejected -> FactoryResetResult.RemoteRejected(
             remote.status,
             remote.code,

@@ -5,12 +5,12 @@ import org.junit.Assert.assertEquals
 import org.junit.Assert.assertTrue
 import org.junit.Test
 
-class VaultAddressGeneratorTest {
+class PairingAddressGeneratorTest {
     @Test
     fun `generates three different words separated by dashes`() {
         val indices = ArrayDeque(listOf(2, 2, 0, 1))
         val bounds = mutableListOf<Int>()
-        val generator = VaultAddressGenerator(
+        val generator = PairingAddressGenerator(
             words = listOf("amber", "river", "maple"),
             nextIndex = { bound ->
                 bounds += bound
@@ -20,12 +20,12 @@ class VaultAddressGeneratorTest {
 
         assertEquals("maple-amber-river", generator.generate())
         assertEquals(listOf(3, 3, 3, 3), bounds)
-        assertTrue(VaultProtocol.validAddress("maple-amber-river"))
+        assertTrue(DeviceProtocol.validPairingAddress("maple-amber-river"))
     }
 
     @Test(expected = IllegalArgumentException::class)
-    fun `rejects words outside the vault address alphabet`() {
-        VaultAddressGenerator(
+    fun `rejects words outside the pairing address alphabet`() {
+        PairingAddressGenerator(
             words = listOf("amber", "blue-sky", "maple"),
             nextIndex = { 0 },
         )

@@ -8,7 +8,7 @@ import dev.agentknock.relay.RelayClientState
 import dev.agentknock.storage.request.ClientChangeResult
 import dev.agentknock.storage.request.ClientDetails
 import dev.agentknock.storage.request.ClientSummary
-import dev.agentknock.storage.vault.VaultConfiguration
+import dev.agentknock.storage.vault.DeviceConfiguration
 import kotlinx.coroutines.ExperimentalCoroutinesApi
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.SharingStarted
@@ -37,7 +37,7 @@ internal class ClientsViewModel(application: Application) : AndroidViewModel(app
         started = SharingStarted.Eagerly,
         initialValue = null,
     )
-    val configuration: StateFlow<VaultConfiguration?> = container.vault.observeConfiguration()
+    val configuration: StateFlow<DeviceConfiguration?> = container.vault.observeConfiguration()
         .stateIn(
             scope = viewModelScope,
             started = SharingStarted.Eagerly,

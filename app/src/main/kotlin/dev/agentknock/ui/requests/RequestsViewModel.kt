@@ -4,14 +4,14 @@ import android.app.Application
 import androidx.lifecycle.AndroidViewModel
 import androidx.lifecycle.viewModelScope
 import dev.agentknock.AgentknockApplication
-import dev.agentknock.storage.request.CredentialDecisionResult
+import dev.agentknock.storage.request.SecretUseDecisionResult
 import dev.agentknock.storage.request.InboxRequestDetails
 import dev.agentknock.storage.request.InboxRequestSummary
 import dev.agentknock.storage.request.PairingDecisionResult
-import dev.agentknock.storage.request.ProfileUploadDecisionResult
-import dev.agentknock.storage.request.ProfileUploadVariableValue
+import dev.agentknock.storage.request.SecretUploadDecisionResult
+import dev.agentknock.storage.request.SecretUploadVariableValue
 import dev.agentknock.storage.request.RequestSyncResult
-import dev.agentknock.storage.vault.VaultConfiguration
+import dev.agentknock.storage.vault.DeviceConfiguration
 import kotlinx.coroutines.ExperimentalCoroutinesApi
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.SharingStarted
@@ -43,7 +43,7 @@ internal class RequestsViewModel(application: Application) : AndroidViewModel(ap
         )
     val syncing: StateFlow<Boolean> = connection.syncing
     val lastSyncResult: StateFlow<RequestSyncResult?> = connection.lastSyncResult
-    val configuration: StateFlow<VaultConfiguration?> = container.vault.observeConfiguration()
+    val configuration: StateFlow<DeviceConfiguration?> = container.vault.observeConfiguration()
         .stateIn(
             scope = viewModelScope,
             started = SharingStarted.Eagerly,
@@ -68,44 +68,44 @@ internal class RequestsViewModel(application: Application) : AndroidViewModel(ap
         return repository.rejectPairing(requestId)
     }
 
-    suspend fun approveCredentialRequest(requestId: Long): CredentialDecisionResult {
+    suspend fun approveSecretUseRequest(requestId: Long): SecretUseDecisionResult {
         container.localStorage.await()
-        return repository.approveCredentialRequest(requestId)
+        return repository.approveSecretUseRequest(requestId)
     }
 
-    suspend fun denyCredentialRequest(requestId: Long): CredentialDecisionResult {
+    suspend fun denySecretUseRequest(requestId: Long): SecretUseDecisionResult {
         container.localStorage.await()
-        return repository.denyCredentialRequest(requestId)
+        return repository.denySecretUseRequest(requestId)
     }
 
-    suspend fun acceptProfileUpload(
+    suspend fun approveSecretUpload(
         requestId: Long,
-        acceptedName: String,
-    ): ProfileUploadDecisionResult {
+        approvedName: String,
+    ): SecretUploadDecisionResult {
         container.localStorage.await()
-        return repository.acceptProfileUpload(requestId, acceptedName)
+        return repository.approveSecretUpload(requestId, approvedName)
     }
 
-    suspend fun rejectProfileUpload(requestId: Long): ProfileUploadDecisionResult {
+    suspend fun rejectSecretUpload(requestId: Long): SecretUploadDecisionResult {
         container.localStorage.await()
-        return repository.rejectProfileUpload(requestId)
+        return repository.rejectSecretUpload(requestId)
     }
 
-    suspend fun readProfileUploadVariable(
+    suspend fun readSecretUploadVariable(
         requestId: Long,
         variableId: String,
-    ): ProfileUploadVariableValue {
+    ): SecretUploadVariableValue {
         container.localStorage.await()
-        return repository.readProfileUploadVariable(requestId, variableId)
+        return repository.readSecretUploadVariable(requestId, variableId)
     }
 
-    suspend fun setProfileUploadVariableSensitivity(
+    suspend fun setSecretUploadVariableSensitivity(
         requestId: Long,
         variableId: String,
         sensitive: Boolean,
     ): Boolean {
         container.localStorage.await()
-        return repository.setProfileUploadVariableSensitivity(
+        return repository.setSecretUploadVariableSensitivity(
             requestId,
             variableId,
             sensitive,

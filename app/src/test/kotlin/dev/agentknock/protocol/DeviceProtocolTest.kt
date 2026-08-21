@@ -9,30 +9,30 @@ import org.junit.Assert.assertFalse
 import org.junit.Assert.assertTrue
 import org.junit.Test
 
-class VaultProtocolTest {
+class DeviceProtocolTest {
     @Test
     fun `derives the same address id as the cli`() {
         assertEquals(
             "9e6f33bf47382846903dffa0962ea313",
-            VaultProtocol.addressId("yup-its-free"),
+            DeviceProtocol.addressId("yup-its-free"),
         )
     }
 
     @Test
-    fun `uses the cli vault address alphabet`() {
-        assertTrue(VaultProtocol.validAddress("amber-river-maple"))
-        assertFalse(VaultProtocol.validAddress(""))
-        assertFalse(VaultProtocol.validAddress("Amber-river-maple"))
-        assertFalse(VaultProtocol.validAddress("amber_river_maple"))
-        assertFalse(VaultProtocol.validAddress("amber-rivér-maple"))
-        assertFalse(VaultProtocol.validAddress("-amber-river-maple"))
-        assertFalse(VaultProtocol.validAddress("amber-river-maple-"))
-        assertFalse(VaultProtocol.validAddress("amber--river-maple"))
+    fun `uses the cli pairing address alphabet`() {
+        assertTrue(DeviceProtocol.validPairingAddress("amber-river-maple"))
+        assertFalse(DeviceProtocol.validPairingAddress(""))
+        assertFalse(DeviceProtocol.validPairingAddress("Amber-river-maple"))
+        assertFalse(DeviceProtocol.validPairingAddress("amber_river_maple"))
+        assertFalse(DeviceProtocol.validPairingAddress("amber-rivér-maple"))
+        assertFalse(DeviceProtocol.validPairingAddress("-amber-river-maple"))
+        assertFalse(DeviceProtocol.validPairingAddress("amber-river-maple-"))
+        assertFalse(DeviceProtocol.validPairingAddress("amber--river-maple"))
     }
 
     @Test
     fun `generates an x25519 device key pair`() {
-        val pair = VaultProtocol.generateDeviceKeyPair(SecureRandom(byteArrayOf(1, 2, 3)))
+        val pair = DeviceProtocol.generateDeviceKeyPair(SecureRandom(byteArrayOf(1, 2, 3)))
 
         assertEquals(32, pair.privateKey.size)
         assertEquals(32, pair.publicKey.size)
@@ -44,7 +44,7 @@ class VaultProtocolTest {
 
     @Test
     fun `generates a canonical device ulid`() {
-        val deviceId = VaultProtocol.generateDeviceId(
+        val deviceId = DeviceProtocol.generateDeviceId(
             timestampMillis = 1_700_000_000_000,
             random = SecureRandom(byteArrayOf(4, 5, 6)),
         )
@@ -57,7 +57,7 @@ class VaultProtocolTest {
     fun `encodes a 32 byte device token as unpadded base64url`() {
         val deviceToken = ByteArray(32) { index -> index.toByte() }
 
-        val encoded = VaultProtocol.encodeDeviceToken(deviceToken)
+        val encoded = DeviceProtocol.encodeDeviceToken(deviceToken)
 
         assertTrue(encoded.matches(Regex("[A-Za-z0-9_-]{43}")))
         assertArrayEquals(deviceToken, Base64.getUrlDecoder().decode(encoded))

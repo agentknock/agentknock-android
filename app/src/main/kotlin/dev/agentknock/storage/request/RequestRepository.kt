@@ -1,20 +1,20 @@
 package dev.agentknock.storage.request
 
-import dev.agentknock.protocol.CredentialCompletion
-import dev.agentknock.protocol.CredentialDenialReason
-import dev.agentknock.protocol.CredentialProtocol
-import dev.agentknock.protocol.CredentialRequestMessage
+import dev.agentknock.protocol.SecretUseCompletion
+import dev.agentknock.protocol.SecretUseDenialReason
+import dev.agentknock.protocol.SecretUseProtocol
+import dev.agentknock.protocol.SecretUseRequestMessage
 import dev.agentknock.protocol.OpenedPairedRequest
 import dev.agentknock.protocol.PairedRequestKeySource
 import dev.agentknock.protocol.PairedRequestProtocol
 import dev.agentknock.protocol.PairingProtocol
 import dev.agentknock.protocol.PairingRemoveProtocol
-import dev.agentknock.protocol.ProfileListProfile
-import dev.agentknock.protocol.ProfileListProtocol
-import dev.agentknock.protocol.ProfileListRequestMessage
-import dev.agentknock.protocol.ProfileUploadMode
-import dev.agentknock.protocol.ProfileUploadProtocol
-import dev.agentknock.protocol.ProfileUploadRequestMessage
+import dev.agentknock.protocol.SecretListSecret
+import dev.agentknock.protocol.SecretListProtocol
+import dev.agentknock.protocol.SecretListRequestMessage
+import dev.agentknock.protocol.SecretUploadMode
+import dev.agentknock.protocol.SecretUploadProtocol
+import dev.agentknock.protocol.SecretUploadRequestMessage
 import dev.agentknock.presentation.renderShellCommand
 import dev.agentknock.presentation.renderSingleLineText
 import dev.agentknock.relay.RelayClientState
@@ -33,14 +33,14 @@ import dev.agentknock.storage.crypto.EncryptedValue
 import dev.agentknock.storage.crypto.EncryptionBinding
 import dev.agentknock.storage.crypto.EncryptionLocation
 import dev.agentknock.storage.crypto.LocalEncryptionKeyManager
-import dev.agentknock.protocol.CredentialResponseProfile
-import dev.agentknock.storage.profile.CredentialProfilesResult
-import dev.agentknock.storage.profile.CredentialProfileMetadata
-import dev.agentknock.storage.profile.CredentialProfileDescription
-import dev.agentknock.storage.profile.ApplyEnvironmentProfileProposalResult
-import dev.agentknock.storage.profile.EnvironmentProfileProposal
-import dev.agentknock.storage.profile.EnvironmentProfileProposalResult
-import dev.agentknock.storage.profile.ProfileRepository
+import dev.agentknock.protocol.SecretUseResponseSecret
+import dev.agentknock.storage.secret.RequestedSecretsResult
+import dev.agentknock.storage.secret.SecretMetadata
+import dev.agentknock.storage.secret.RequestedSecretDescription
+import dev.agentknock.storage.secret.ApplyEnvironmentSecretUploadResult
+import dev.agentknock.storage.secret.EnvironmentSecretUpload
+import dev.agentknock.storage.secret.EnvironmentSecretUploadResult
+import dev.agentknock.storage.secret.SecretRepository
 import dev.agentknock.storage.audit.AuditCategory
 import dev.agentknock.storage.audit.AuditOutcome
 import dev.agentknock.storage.audit.AuditRecord
@@ -89,37 +89,37 @@ internal enum class PairingState(val storedName: String) {
 
 internal enum class InboxRequestKind {
     PAIRING,
-    CREDENTIAL,
-    PROFILE_UPLOAD,
+    SECRET_USE,
+    SECRET_UPLOAD,
 }
 
-internal enum class CredentialRequestState(val storedName: String) {
+internal enum class SecretUseRequestState(val storedName: String) {
     APPROVAL_PENDING("approval_pending"),
     WAITING_FOR_COMPLETION("waiting_for_completion"),
     COMPLETED("completed"),
     VERIFICATION_FAILED("verification_failed"),
 }
 
-internal enum class CredentialDecision(val storedName: String) {
+internal enum class SecretUseDecision(val storedName: String) {
     APPROVED("approved"),
     DENIED("denied"),
 }
 
-internal enum class CredentialCompletionResult(val storedName: String) {
+internal enum class SecretUseCompletionResult(val storedName: String) {
     APPROVED("approved"),
     DENIED("denied"),
     ABORTED("aborted"),
 }
 
-internal enum class ProfileListRequestState(val storedName: String) {
+internal enum class SecretListRequestState(val storedName: String) {
     WAITING_FOR_COMPLETION("waiting_for_completion"),
     COMPLETED("completed"),
     VERIFICATION_FAILED("verification_failed"),
 }
 
-internal enum class ProfileUploadRequestState(val storedName: String) {
+internal enum class SecretUploadRequestState(val storedName: String) {
     REVIEW_PENDING("review_pending"),
-    ACCEPTED("accepted"),
+    APPROVED("approved"),
     REJECTED("rejected"),
     VERIFICATION_FAILED("verification_failed"),
 }
@@ -154,15 +154,15 @@ internal data class InboxRequestSummary(
     val kind: InboxRequestKind,
     val state: InboxRequestState,
     val pairingState: PairingState?,
-    val credentialState: CredentialRequestState?,
-    val credentialDecision: CredentialDecision?,
-    val credentialResult: CredentialCompletionResult?,
-    val credentialCompletionReason: String?,
-    val profileListState: ProfileListRequestState?,
-    val profileUploadState: ProfileUploadRequestState?,
+    val secretUseState: SecretUseRequestState?,
+    val secretUseDecision: SecretUseDecision?,
+    val secretUseResult: SecretUseCompletionResult?,
+    val secretUseCompletionReason: String?,
+    val secretListState: SecretListRequestState?,
+    val secretUploadState: SecretUploadRequestState?,
     val title: String,
     val clientName: String,
-    val profileNames: List<String>,
+    val secretNames: List<String>,
     val listSummary: String?,
     val command: String?,
     val arguments: List<String>,
@@ -173,7 +173,7 @@ internal data class InboxRequestSummary(
 internal data class PairingRequestDetails(
     val pairingState: PairingState,
     val clientName: String,
-    val vaultAddress: String,
+    val pairingAddress: String,
     val clientId: String,
     val sasOptions: List<String>,
     val cliVersion: String?,
@@ -193,15 +193,15 @@ internal data class InboxRequestDetails(
     val receivedAt: Long,
     val completedAt: Long?,
     val pairing: PairingRequestDetails?,
-    val credential: CredentialRequestDetails?,
-    val profileList: ProfileListRequestDetails?,
-    val profileUpload: ProfileUploadRequestDetails?,
+    val secretUse: SecretUseRequestDetails?,
+    val secretList: SecretListRequestDetails?,
+    val secretUpload: SecretUploadRequestDetails?,
 )
 
-internal data class ProfileListRequestDetails(
-    val state: ProfileListRequestState,
-    val profiles: List<CredentialProfileMetadata>,
-    val vaultAddress: String,
+internal data class SecretListRequestDetails(
+    val state: SecretListRequestState,
+    val secrets: List<SecretMetadata>,
+    val pairingAddress: String,
     val clientId: String,
     val hostname: String?,
     val platform: String?,
@@ -212,15 +212,15 @@ internal data class ProfileListRequestDetails(
     val error: String?,
 )
 
-internal data class CredentialRequestDetails(
-    val state: CredentialRequestState,
-    val decision: CredentialDecision?,
-    val completionResult: CredentialCompletionResult?,
+internal data class SecretUseRequestDetails(
+    val state: SecretUseRequestState,
+    val decision: SecretUseDecision?,
+    val completionResult: SecretUseCompletionResult?,
     val completionReason: String?,
     val completionMessage: String?,
-    val profiles: List<String>,
-    val profileDetails: List<CredentialProfileMetadata>,
-    val missingProfiles: List<String>,
+    val secrets: List<String>,
+    val secretDetails: List<SecretMetadata>,
+    val missingSecrets: List<String>,
     val reason: String?,
     val command: String,
     val arguments: List<String>,
@@ -232,7 +232,7 @@ internal data class CredentialRequestDetails(
     val stdoutKind: String,
     val stderrKind: String,
     val launcherChain: List<String>,
-    val vaultAddress: String,
+    val pairingAddress: String,
     val clientId: String,
     val clientName: String,
     val hostname: String?,
@@ -245,16 +245,16 @@ internal data class CredentialRequestDetails(
     val decidedAt: Long?,
 )
 
-internal data class ProfileUploadRequestDetails(
-    val state: ProfileUploadRequestState,
-    val mode: ProfileUploadMode,
-    val proposedName: String,
-    val acceptedName: String?,
+internal data class SecretUploadRequestDetails(
+    val state: SecretUploadRequestState,
+    val mode: SecretUploadMode,
+    val uploadedName: String,
+    val approvedName: String?,
     val descriptionProvided: Boolean,
     val description: String?,
-    val profileType: String,
+    val secretType: String,
     val variableNames: List<String>,
-    val variables: List<ProfileUploadVariableDetails>,
+    val variables: List<SecretUploadVariableDetails>,
     val addedVariables: List<String>,
     val changedVariables: List<String>,
     val unchangedVariables: List<String>,
@@ -265,18 +265,18 @@ internal data class ProfileUploadRequestDetails(
     val decidedAt: Long?,
 )
 
-internal data class ProfileUploadVariableDetails(
+internal data class SecretUploadVariableDetails(
     val id: String,
     val name: String,
     val sensitive: Boolean,
 )
 
-internal sealed interface ProfileUploadVariableValue {
-    data class Available(val value: String) : ProfileUploadVariableValue
-    data object NotFound : ProfileUploadVariableValue
-    data object Unavailable : ProfileUploadVariableValue
-    data object Corrupted : ProfileUploadVariableValue
-    data object UnsupportedEncryption : ProfileUploadVariableValue
+internal sealed interface SecretUploadVariableValue {
+    data class Available(val value: String) : SecretUploadVariableValue
+    data object NotFound : SecretUploadVariableValue
+    data object Unavailable : SecretUploadVariableValue
+    data object Corrupted : SecretUploadVariableValue
+    data object UnsupportedEncryption : SecretUploadVariableValue
 }
 
 internal data class ClientSummary(
@@ -308,7 +308,7 @@ internal data class RequestNotification(
     val title: String,
     val summary: String,
     val details: List<RequestNotificationDetail>,
-    val credentialDecisionAvailable: Boolean,
+    val secretUseDecisionAvailable: Boolean,
 )
 
 internal data class RequestNotificationDetail(
@@ -319,13 +319,13 @@ internal data class RequestNotificationDetail(
 internal sealed interface RequestSyncResult {
     data object Success : RequestSyncResult
 
-    data object NoVault : RequestSyncResult
+    data object NoDevice : RequestSyncResult
 
-    data object VaultSecretsUnavailable : RequestSyncResult
+    data object DeviceCredentialsUnavailable : RequestSyncResult
 
-    data object VaultSecretsCorrupted : RequestSyncResult
+    data object DeviceCredentialsCorrupted : RequestSyncResult
 
-    data object UnsupportedVaultEncryption : RequestSyncResult
+    data object UnsupportedDeviceCredentialEncryption : RequestSyncResult
 
     data class RelayRejected(val status: Int, val message: String?) : RequestSyncResult
 
@@ -347,37 +347,37 @@ internal enum class PairingDecisionResult {
     NOT_FOUND,
 }
 
-internal sealed interface CredentialDecisionResult {
-    data object Decided : CredentialDecisionResult
+internal sealed interface SecretUseDecisionResult {
+    data object Decided : SecretUseDecisionResult
 
-    data object ProfilesChanged : CredentialDecisionResult
+    data object SecretsChanged : SecretUseDecisionResult
 
-    data object NotPending : CredentialDecisionResult
+    data object NotPending : SecretUseDecisionResult
 
-    data object NotFound : CredentialDecisionResult
+    data object NotFound : SecretUseDecisionResult
 
-    data class MissingProfiles(val names: List<String>) : CredentialDecisionResult
+    data class MissingSecrets(val names: List<String>) : SecretUseDecisionResult
 
-    data class ConflictingVariable(val name: String) : CredentialDecisionResult
+    data class ConflictingVariable(val name: String) : SecretUseDecisionResult
 
-    data object SecretUnavailable : CredentialDecisionResult
+    data object SecretUnavailable : SecretUseDecisionResult
 
-    data object SecretCorrupted : CredentialDecisionResult
+    data object SecretCorrupted : SecretUseDecisionResult
 
-    data object UnsupportedEncryption : CredentialDecisionResult
+    data object UnsupportedEncryption : SecretUseDecisionResult
 
-    data object PairingUnavailable : CredentialDecisionResult
+    data object PairingUnavailable : SecretUseDecisionResult
 }
 
-internal sealed interface ProfileUploadDecisionResult {
-    data class Accepted(val profileId: String) : ProfileUploadDecisionResult
-    data object Rejected : ProfileUploadDecisionResult
-    data object NotPending : ProfileUploadDecisionResult
-    data object NotFound : ProfileUploadDecisionResult
-    data class Invalid(val message: String) : ProfileUploadDecisionResult
-    data object SecretUnavailable : ProfileUploadDecisionResult
-    data object SecretCorrupted : ProfileUploadDecisionResult
-    data object UnsupportedEncryption : ProfileUploadDecisionResult
+internal sealed interface SecretUploadDecisionResult {
+    data class Approved(val secretId: String) : SecretUploadDecisionResult
+    data object Rejected : SecretUploadDecisionResult
+    data object NotPending : SecretUploadDecisionResult
+    data object NotFound : SecretUploadDecisionResult
+    data class Invalid(val message: String) : SecretUploadDecisionResult
+    data object SecretUnavailable : SecretUploadDecisionResult
+    data object SecretCorrupted : SecretUploadDecisionResult
+    data object UnsupportedEncryption : SecretUploadDecisionResult
 }
 
 internal enum class ClientChangeResult {
@@ -389,7 +389,7 @@ internal enum class ClientChangeResult {
 internal class RequestRepository(
     private val dao: RequestDao,
     private val deviceCredentials: RelayDeviceCredentialSource,
-    private val profiles: ProfileRepository,
+    private val secrets: SecretRepository,
     private val relay: RelayDeviceClient,
     private val keyManager: LocalEncryptionKeyManager,
     private val encryption: AesGcmEncryption,
@@ -397,9 +397,9 @@ internal class RequestRepository(
     private val requestPushRegistration: () -> Unit = {},
     private val pairingProtocol: PairingProtocol = PairingProtocol(),
     private val pairedRequestProtocol: PairedRequestProtocol = PairedRequestProtocol(),
-    private val credentialProtocol: CredentialProtocol = CredentialProtocol(),
-    private val profileListProtocol: ProfileListProtocol = ProfileListProtocol(),
-    private val profileUploadProtocol: ProfileUploadProtocol = ProfileUploadProtocol(),
+    private val secretUseProtocol: SecretUseProtocol = SecretUseProtocol(),
+    private val secretListProtocol: SecretListProtocol = SecretListProtocol(),
+    private val secretUploadProtocol: SecretUploadProtocol = SecretUploadProtocol(),
     private val pairingRemoveProtocol: PairingRemoveProtocol = PairingRemoveProtocol(),
     private val json: Json = Json,
     private val newId: () -> String = { UUID.randomUUID().toString() },
@@ -417,14 +417,14 @@ internal class RequestRepository(
     fun observeRequests(): Flow<List<InboxRequestSummary>> = combine(
         dao.observeListedRequests(),
         dao.observePairings(),
-        dao.observeCredentialRequests(),
-        dao.observeProfileUploadRequests(),
-    ) { requests, pairings, credentialRequests, profileUploadRequests ->
+        dao.observeSecretUseRequests(),
+        dao.observeSecretUploadRequests(),
+    ) { requests, pairings, secretUseRequests, secretUploadRequests ->
         val pairingByRequest = pairings.associateBy(PairingEntity::requestId)
         val pairingByClient = pairings.associateBy(PairingEntity::clientId)
-        val credentialByRequest = credentialRequests.associateBy(CredentialRequestEntity::requestId)
-        val profileUploadByRequest = profileUploadRequests.associateBy(
-            ProfileUploadRequestEntity::requestId,
+        val secretUseByRequest = secretUseRequests.associateBy(SecretUseRequestEntity::requestId)
+        val secretUploadByRequest = secretUploadRequests.associateBy(
+            SecretUploadRequestEntity::requestId,
         )
         requests.mapNotNull { request ->
             when (request.kind) {
@@ -435,16 +435,16 @@ internal class RequestRepository(
                         kind = InboxRequestKind.PAIRING,
                         state = request.state.toInboxRequestState(),
                         pairingState = pairing.state.toPairingState(),
-                        credentialState = null,
-                        credentialDecision = null,
-                        credentialResult = null,
-                        credentialCompletionReason = null,
-                        profileListState = null,
-                        profileUploadState = null,
-                        title = "Pairing request",
+                        secretUseState = null,
+                        secretUseDecision = null,
+                        secretUseResult = null,
+                        secretUseCompletionReason = null,
+                        secretListState = null,
+                        secretUploadState = null,
+                        title = "Pairing",
                         clientName = pairing.friendlyName ?: pairing.hostname
                             ?: pairing.platform ?: "Unknown client",
-                        profileNames = emptyList(),
+                        secretNames = emptyList(),
                         listSummary = null,
                         command = null,
                         arguments = emptyList(),
@@ -452,48 +452,48 @@ internal class RequestRepository(
                         completedAt = request.completedAt,
                     )
                 }
-                RequestKind.CREDENTIAL.storedName -> {
-                    val credential = credentialByRequest[request.id] ?: return@mapNotNull null
-                    val requestedProfiles = decodeStringList(credential.profilesJson)
+                RequestKind.SECRET_USE.storedName -> {
+                    val secretUse = secretUseByRequest[request.id] ?: return@mapNotNull null
+                    val requestedSecrets = decodeStringList(secretUse.secretsJson)
                     InboxRequestSummary(
                         id = request.id,
-                        kind = InboxRequestKind.CREDENTIAL,
+                        kind = InboxRequestKind.SECRET_USE,
                         state = request.state.toInboxRequestState(),
                         pairingState = null,
-                        credentialState = credential.state.toCredentialRequestState(),
-                        credentialDecision = credential.decision?.toCredentialDecision(),
-                        credentialResult = credential.completionResult
-                            ?.toCredentialCompletionResult(),
-                        credentialCompletionReason = credential.completionReason,
-                        profileListState = null,
-                        profileUploadState = null,
-                        title = "Profile access",
-                        clientName = credential.clientName,
-                        profileNames = requestedProfiles,
+                        secretUseState = secretUse.state.toSecretUseRequestState(),
+                        secretUseDecision = secretUse.decision?.toSecretUseDecision(),
+                        secretUseResult = secretUse.completionResult
+                            ?.toSecretUseCompletionResult(),
+                        secretUseCompletionReason = secretUse.completionReason,
+                        secretListState = null,
+                        secretUploadState = null,
+                        title = "Secret use",
+                        clientName = secretUse.clientName,
+                        secretNames = requestedSecrets,
                         listSummary = null,
-                        command = credential.command,
-                        arguments = decodeStringList(credential.argumentsJson),
+                        command = secretUse.command,
+                        arguments = decodeStringList(secretUse.argumentsJson),
                         receivedAt = request.receivedAt,
                         completedAt = request.completedAt,
                     )
                 }
-                RequestKind.PROFILE_UPLOAD.storedName -> {
-                    val upload = profileUploadByRequest[request.id] ?: return@mapNotNull null
+                RequestKind.SECRET_UPLOAD.storedName -> {
+                    val upload = secretUploadByRequest[request.id] ?: return@mapNotNull null
                     val pairing = pairingByClient[upload.clientId]
                     InboxRequestSummary(
                         id = request.id,
-                        kind = InboxRequestKind.PROFILE_UPLOAD,
+                        kind = InboxRequestKind.SECRET_UPLOAD,
                         state = request.state.toInboxRequestState(),
                         pairingState = null,
-                        credentialState = null,
-                        credentialDecision = null,
-                        credentialResult = null,
-                        credentialCompletionReason = null,
-                        profileListState = null,
-                        profileUploadState = upload.state.toProfileUploadRequestState(),
-                        title = "${upload.mode.lowercase().replaceFirstChar(Char::uppercase)} profile",
+                        secretUseState = null,
+                        secretUseDecision = null,
+                        secretUseResult = null,
+                        secretUseCompletionReason = null,
+                        secretListState = null,
+                        secretUploadState = upload.state.toSecretUploadRequestState(),
+                        title = "Secret upload",
                         clientName = pairing?.friendlyName ?: pairing?.hostname ?: "Unknown client",
-                        profileNames = listOf(upload.proposedName),
+                        secretNames = listOf(upload.uploadedName),
                         listSummary = upload.listSummary(),
                         command = null,
                         arguments = emptyList(),
@@ -506,28 +506,28 @@ internal class RequestRepository(
         }
     }
 
-    private fun ProfileUploadRequestEntity.listSummary(): String {
+    private fun SecretUploadRequestEntity.listSummary(): String {
         fun count(json: String): Int = decodeStringList(json).size
-        if (mode == ProfileUploadMode.UPDATE.wireName) {
+        if (mode == SecretUploadMode.UPDATE.wireName) {
             return buildList {
                 count(addedVariablesJson).takeIf { it > 0 }?.let { add("$it added") }
                 count(changedVariablesJson).takeIf { it > 0 }?.let { add("$it updated") }
                 count(removedVariablesJson).takeIf { it > 0 }?.let { add("$it removed") }
             }.ifEmpty {
-                listOf("No variable changes")
+                listOf("No environment variable changes")
             }.joinToString(" · ")
         }
         val count = count(variableNamesJson)
-        return "$count ${if (count == 1) "variable" else "variables"}"
+        return "$count ${if (count == 1) "environment variable" else "environment variables"}"
     }
 
     fun observeRequest(id: Long): Flow<InboxRequestDetails?> = combine(
         dao.observeRequest(id),
         dao.observePairing(id),
-        dao.observeCredentialRequest(id),
-        dao.observeProfileListRequest(id),
-        dao.observeProfileUploadRequest(id),
-    ) { request, pairing, credential, profileList, profileUpload ->
+        dao.observeSecretUseRequest(id),
+        dao.observeSecretListRequest(id),
+        dao.observeSecretUploadRequest(id),
+    ) { request, pairing, secretUse, secretList, secretUpload ->
         if (request == null) return@combine null
         InboxRequestDetails(
             id = request.id,
@@ -539,7 +539,7 @@ internal class RequestRepository(
                 PairingRequestDetails(
                     pairingState = it.state.toPairingState(),
                     clientName = it.friendlyName ?: it.hostname ?: it.platform ?: "Unknown client",
-                    vaultAddress = it.vaultAddress,
+                    pairingAddress = it.pairingAddress,
                     clientId = it.clientId,
                     sasOptions = listOfNotNull(
                         it.sasOption0,
@@ -556,16 +556,16 @@ internal class RequestRepository(
                     decidedAt = it.decidedAt,
                 )
             },
-            credential = credential?.let {
-                CredentialRequestDetails(
-                    state = it.state.toCredentialRequestState(),
-                    decision = it.decision?.toCredentialDecision(),
-                    completionResult = it.completionResult?.toCredentialCompletionResult(),
+            secretUse = secretUse?.let {
+                SecretUseRequestDetails(
+                    state = it.state.toSecretUseRequestState(),
+                    decision = it.decision?.toSecretUseDecision(),
+                    completionResult = it.completionResult?.toSecretUseCompletionResult(),
                     completionReason = it.completionReason,
                     completionMessage = it.completionMessage,
-                    profiles = decodeStringList(it.profilesJson),
-                    profileDetails = json.decodeFromString(it.profileDetailsJson),
-                    missingProfiles = decodeStringList(it.missingProfilesJson),
+                    secrets = decodeStringList(it.secretsJson),
+                    secretDetails = json.decodeFromString(it.secretDetailsJson),
+                    missingSecrets = decodeStringList(it.missingSecretsJson),
                     reason = it.reason,
                     command = it.command,
                     arguments = decodeStringList(it.argumentsJson),
@@ -577,7 +577,7 @@ internal class RequestRepository(
                     stdoutKind = it.stdoutKind,
                     stderrKind = it.stderrKind,
                     launcherChain = decodeStringList(it.launcherChainJson),
-                    vaultAddress = it.vaultAddress,
+                    pairingAddress = it.pairingAddress,
                     clientId = it.clientId,
                     clientName = it.clientName,
                     hostname = it.hostname,
@@ -590,11 +590,11 @@ internal class RequestRepository(
                     decidedAt = it.decidedAt,
                 )
             },
-            profileList = profileList?.let {
-                ProfileListRequestDetails(
-                    state = it.state.toProfileListRequestState(),
-                    profiles = json.decodeFromString(it.profilesJson),
-                    vaultAddress = it.vaultAddress,
+            secretList = secretList?.let {
+                SecretListRequestDetails(
+                    state = it.state.toSecretListRequestState(),
+                    secrets = json.decodeFromString(it.secretsJson),
+                    pairingAddress = it.pairingAddress,
                     clientId = it.clientId,
                     hostname = it.hostname,
                     platform = it.platform,
@@ -605,15 +605,15 @@ internal class RequestRepository(
                     error = it.error,
                 )
             },
-            profileUpload = profileUpload?.let {
-                ProfileUploadRequestDetails(
-                    state = it.state.toProfileUploadRequestState(),
-                    mode = ProfileUploadMode.entries.single { mode -> mode.wireName == it.mode },
-                    proposedName = it.proposedName,
-                    acceptedName = it.acceptedName,
+            secretUpload = secretUpload?.let {
+                SecretUploadRequestDetails(
+                    state = it.state.toSecretUploadRequestState(),
+                    mode = SecretUploadMode.entries.single { mode -> mode.wireName == it.mode },
+                    uploadedName = it.uploadedName,
+                    approvedName = it.approvedName,
                     descriptionProvided = it.descriptionProvided,
                     description = it.description,
-                    profileType = it.profileType,
+                    secretType = it.secretType,
                     variableNames = decodeStringList(it.variableNamesJson),
                     variables = emptyList(),
                     addedVariables = decodeStringList(it.addedVariablesJson),
@@ -627,11 +627,11 @@ internal class RequestRepository(
                 )
             },
         )
-    }.combine(dao.observeProfileUploadVariables(id)) { details, variables ->
+    }.combine(dao.observeSecretUploadVariables(id)) { details, variables ->
         details?.copy(
-            profileUpload = details.profileUpload?.copy(
+            secretUpload = details.secretUpload?.copy(
                 variables = variables.map {
-                    ProfileUploadVariableDetails(it.id, it.name, it.sensitive)
+                    SecretUploadVariableDetails(it.id, it.name, it.sensitive)
                 },
             ),
         )
@@ -700,36 +700,36 @@ internal class RequestRepository(
     suspend fun pendingNotifications(): List<RequestNotification> =
         dao.getActionRequiredRequests().mapNotNull { request ->
             when (request.kind) {
-                RequestKind.CREDENTIAL.storedName -> {
-                    val credential = dao.getCredentialRequest(request.id) ?: return@mapNotNull null
-                    if (credential.state != CredentialRequestState.APPROVAL_PENDING.storedName) {
+                RequestKind.SECRET_USE.storedName -> {
+                    val secretUse = dao.getSecretUseRequest(request.id) ?: return@mapNotNull null
+                    if (secretUse.state != SecretUseRequestState.APPROVAL_PENDING.storedName) {
                         return@mapNotNull null
                     }
-                    val profiles = decodeStringList(credential.profilesJson)
-                    val arguments = decodeStringList(credential.argumentsJson)
-                    val command = renderShellCommand(credential.command, arguments)
-                    val clientName = renderSingleLineText(credential.clientName)
-                    val profileNames = profiles.joinToString(transform = ::renderSingleLineText)
+                    val secrets = decodeStringList(secretUse.secretsJson)
+                    val arguments = decodeStringList(secretUse.argumentsJson)
+                    val command = renderShellCommand(secretUse.command, arguments)
+                    val clientName = renderSingleLineText(secretUse.clientName)
+                    val secretNames = secrets.joinToString(transform = ::renderSingleLineText)
                     RequestNotification(
                         requestId = request.id,
-                        title = "Profile access requested",
-                        summary = "$clientName requests $profileNames",
+                        title = "Secret use requested",
+                        summary = "$clientName requests $secretNames",
                         details = listOfNotNull(
                             RequestNotificationDetail("Client", clientName),
-                            credential.reason?.takeIf(String::isNotBlank)?.let {
+                            secretUse.reason?.takeIf(String::isNotBlank)?.let {
                                 RequestNotificationDetail("Reason", renderSingleLineText(it))
                             },
                             RequestNotificationDetail("Command", command),
-                            RequestNotificationDetail("Profiles", profileNames),
+                            RequestNotificationDetail("Secrets", secretNames),
                         ),
-                        credentialDecisionAvailable = true,
+                        secretUseDecisionAvailable = true,
                     )
                 }
                 RequestKind.PAIRING.storedName -> {
                     val pairing = dao.getPairing(request.id) ?: return@mapNotNull null
                     RequestNotification(
                         requestId = request.id,
-                        title = "Pairing request",
+                        title = "Pairing requested",
                         summary = renderSingleLineText(
                             pairing.friendlyName ?: pairing.hostname ?:
                                 pairing.platform ?: "Unknown client",
@@ -745,19 +745,19 @@ internal class RequestRepository(
                                 "The pairing message could not be verified."
                             else -> "Open Agentknock to review this pairing."
                         })),
-                        credentialDecisionAvailable = false,
+                        secretUseDecisionAvailable = false,
                     )
                 }
-                RequestKind.PROFILE_UPLOAD.storedName -> {
-                    val upload = dao.getProfileUploadRequest(request.id) ?: return@mapNotNull null
-                    if (upload.state != ProfileUploadRequestState.REVIEW_PENDING.storedName) {
+                RequestKind.SECRET_UPLOAD.storedName -> {
+                    val upload = dao.getSecretUploadRequest(request.id) ?: return@mapNotNull null
+                    if (upload.state != SecretUploadRequestState.REVIEW_PENDING.storedName) {
                         return@mapNotNull null
                     }
                     RequestNotification(
                         requestId = request.id,
-                        title = "Profile proposal",
+                        title = "Secret upload received",
                         summary = "${renderSingleLineText(upload.clientName)} wants to " +
-                            "${upload.mode.lowercase()} ${renderSingleLineText(upload.proposedName)}",
+                            "${upload.mode.lowercase()} ${renderSingleLineText(upload.uploadedName)}",
                         details = listOf(
                             RequestNotificationDetail(
                                 "Client",
@@ -766,16 +766,16 @@ internal class RequestRepository(
                             RequestNotificationDetail(
                                 "Change",
                                 "${upload.mode.lowercase().replaceFirstChar(Char::uppercase)} " +
-                                    renderSingleLineText(upload.proposedName),
+                                    renderSingleLineText(upload.uploadedName),
                             ),
-                            RequestNotificationDetail("Profile type", "Environment variables"),
+                            RequestNotificationDetail("Type", "Environment variables"),
                             RequestNotificationDetail(
-                                "Variables",
+                                "Environment variables",
                                 upload.variableNamesJson.let(::decodeStringList)
                                     .joinToString(transform = ::renderSingleLineText),
                             ),
                         ),
-                        credentialDecisionAvailable = false,
+                        secretUseDecisionAvailable = false,
                     )
                 }
                 else -> null
@@ -793,15 +793,15 @@ internal class RequestRepository(
     ): RequestSyncResult = connectionMutex.withLock {
         val credentials = when (val result = deviceCredentials.activeDeviceCredentials()) {
             is RelayDeviceCredentialsResult.Available -> result.credentials
-            RelayDeviceCredentialsResult.Missing -> return@withLock RequestSyncResult.NoVault
-            RelayDeviceCredentialsResult.SecretsUnavailable -> {
-                return@withLock RequestSyncResult.VaultSecretsUnavailable
+            RelayDeviceCredentialsResult.Missing -> return@withLock RequestSyncResult.NoDevice
+            RelayDeviceCredentialsResult.CredentialsUnavailable -> {
+                return@withLock RequestSyncResult.DeviceCredentialsUnavailable
             }
-            RelayDeviceCredentialsResult.SecretsCorrupted -> {
-                return@withLock RequestSyncResult.VaultSecretsCorrupted
+            RelayDeviceCredentialsResult.CredentialsCorrupted -> {
+                return@withLock RequestSyncResult.DeviceCredentialsCorrupted
             }
             RelayDeviceCredentialsResult.UnsupportedEncryption -> {
-                return@withLock RequestSyncResult.UnsupportedVaultEncryption
+                return@withLock RequestSyncResult.UnsupportedDeviceCredentialEncryption
             }
         }
 
@@ -1037,7 +1037,7 @@ internal class RequestRepository(
         }
         return operationMutex.withLock {
             for (pairing in dao.getPairings()) {
-                if (pairing.vaultIdentityId != credentials.vaultIdentityId) continue
+                if (pairing.deviceIdentityId != credentials.deviceIdentityId) continue
                 val desired = pairing.desiredRelayClientState?.toRelayClientState() ?: continue
                 if (pairing.relayClientState == desired.wireName) continue
                 if (awaitingClientStates[pairing.clientId] == desired) continue
@@ -1052,7 +1052,7 @@ internal class RequestRepository(
             for (request in dao.getUnacknowledgedResponses()) {
                 if (request.relayRequestId in awaitingResponses) continue
                 val pairing = pairingForRequest(request) ?: continue
-                if (pairing.vaultIdentityId != credentials.vaultIdentityId) continue
+                if (pairing.deviceIdentityId != credentials.deviceIdentityId) continue
                 if (
                     !connection.send(
                         RelayDeviceFrame.Message(
@@ -1073,7 +1073,7 @@ internal class RequestRepository(
                 if (request.requestAcknowledgedAt == null) continue
                 if (request.relayRequestId in awaitingStates) continue
                 val pairing = pairingForRequest(request) ?: continue
-                if (pairing.vaultIdentityId != credentials.vaultIdentityId) continue
+                if (pairing.deviceIdentityId != credentials.deviceIdentityId) continue
                 if (
                     !connection.send(
                         RelayDeviceFrame.Resume(pairing.clientId, request.relayRequestId),
@@ -1180,42 +1180,42 @@ internal class RequestRepository(
                     )
                 }
             }
-            RequestKind.CREDENTIAL.storedName -> {
-                val credential = dao.getCredentialRequest(request.id) ?: return
-                dao.updateCredentialRequest(
+            RequestKind.SECRET_USE.storedName -> {
+                val secretUse = dao.getSecretUseRequest(request.id) ?: return
+                dao.updateSecretUseRequest(
                     request.copy(
                         state = InboxRequestState.COMPLETED.storedName,
                         updatedAt = now,
                         completedAt = now,
                     ),
-                    credential.copy(
-                        state = CredentialRequestState.VERIFICATION_FAILED.storedName,
+                    secretUse.copy(
+                        state = SecretUseRequestState.VERIFICATION_FAILED.storedName,
                         error = message,
                         updatedAt = now,
                         completedAt = now,
                     ),
                 )
             }
-            RequestKind.PROFILE_LIST.storedName -> {
-                val profileList = dao.getProfileListRequest(request.id) ?: return
-                dao.updateProfileListRequest(
+            RequestKind.SECRET_LIST.storedName -> {
+                val secretList = dao.getSecretListRequest(request.id) ?: return
+                dao.updateSecretListRequest(
                     request.copy(
                         state = InboxRequestState.COMPLETED.storedName,
                         updatedAt = now,
                         completedAt = now,
                     ),
-                    profileList.copy(
-                        state = ProfileListRequestState.VERIFICATION_FAILED.storedName,
+                    secretList.copy(
+                        state = SecretListRequestState.VERIFICATION_FAILED.storedName,
                         error = message,
                         updatedAt = now,
                         completedAt = now,
                     ),
                 )
             }
-            RequestKind.PROFILE_UPLOAD.storedName -> {
-                val upload = dao.getProfileUploadRequest(request.id) ?: return
-                val pending = upload.state == ProfileUploadRequestState.REVIEW_PENDING.storedName
-                dao.updateProfileUploadRequest(
+            RequestKind.SECRET_UPLOAD.storedName -> {
+                val upload = dao.getSecretUploadRequest(request.id) ?: return
+                val pending = upload.state == SecretUploadRequestState.REVIEW_PENDING.storedName
+                dao.updateSecretUploadRequest(
                     request.copy(
                         state = if (pending) {
                             InboxRequestState.ACTION_REQUIRED.storedName
@@ -1356,107 +1356,107 @@ internal class RequestRepository(
         if (result == PairingDecisionResult.REJECTED) requestSync()
     }
 
-    suspend fun approveCredentialRequest(requestId: Long): CredentialDecisionResult =
+    suspend fun approveSecretUseRequest(requestId: Long): SecretUseDecisionResult =
         operationMutex.withLock {
             val request = dao.getRequestById(requestId)
-                ?: return CredentialDecisionResult.NotFound
-            val credentialRequest = dao.getCredentialRequest(requestId)
-                ?: return CredentialDecisionResult.NotFound
-            if (credentialRequest.state != CredentialRequestState.APPROVAL_PENDING.storedName) {
-                return CredentialDecisionResult.NotPending
+                ?: return SecretUseDecisionResult.NotFound
+            val secretUseRequest = dao.getSecretUseRequest(requestId)
+                ?: return SecretUseDecisionResult.NotFound
+            if (secretUseRequest.state != SecretUseRequestState.APPROVAL_PENDING.storedName) {
+                return SecretUseDecisionResult.NotPending
             }
-            val requestedProfiles = decodeStringList(credentialRequest.profilesJson)
-            val latestDescription = profiles.describeCredentialProfiles(requestedProfiles)
-            val storedProfiles = json.decodeFromString<List<CredentialProfileMetadata>>(
-                credentialRequest.profileDetailsJson,
+            val requestedSecrets = decodeStringList(secretUseRequest.secretsJson)
+            val latestDescription = secrets.describeRequestedSecrets(requestedSecrets)
+            val storedSecrets = json.decodeFromString<List<SecretMetadata>>(
+                secretUseRequest.secretDetailsJson,
             )
-            val storedMissingProfiles = decodeStringList(credentialRequest.missingProfilesJson)
+            val storedMissingSecrets = decodeStringList(secretUseRequest.missingSecretsJson)
             if (
-                latestDescription.profiles != storedProfiles ||
-                latestDescription.missingProfiles != storedMissingProfiles
+                latestDescription.secrets != storedSecrets ||
+                latestDescription.missingSecrets != storedMissingSecrets
             ) {
                 val now = currentTimeMillis()
-                dao.updateCredentialRequest(
+                dao.updateSecretUseRequest(
                     request = request.copy(updatedAt = now),
-                    credentialRequest = credentialRequest.copy(
-                        profileDetailsJson = json.encodeToString(latestDescription.profiles),
-                        missingProfilesJson = encodeStringList(latestDescription.missingProfiles),
+                    secretUseRequest = secretUseRequest.copy(
+                        secretDetailsJson = json.encodeToString(latestDescription.secrets),
+                        missingSecretsJson = encodeStringList(latestDescription.missingSecrets),
                         updatedAt = now,
                     ),
                 )
-                return CredentialDecisionResult.ProfilesChanged
+                return SecretUseDecisionResult.SecretsChanged
             }
-            val responseProfiles = when (
-                val result = profiles.credentialProfiles(requestedProfiles)
+            val responseSecrets = when (
+                val result = secrets.requestedSecrets(requestedSecrets)
             ) {
-                is CredentialProfilesResult.Available -> result.profiles.mapValues { (_, profile) ->
-                    CredentialResponseProfile(profile.description, profile.environment)
+                is RequestedSecretsResult.Available -> result.secrets.mapValues { (_, secret) ->
+                    SecretUseResponseSecret(secret.description, secret.environment)
                 }
-                is CredentialProfilesResult.MissingProfiles -> {
-                    return CredentialDecisionResult.MissingProfiles(result.names)
+                is RequestedSecretsResult.MissingSecrets -> {
+                    return SecretUseDecisionResult.MissingSecrets(result.names)
                 }
-                is CredentialProfilesResult.ConflictingVariable -> {
-                    return CredentialDecisionResult.ConflictingVariable(result.name)
+                is RequestedSecretsResult.ConflictingVariable -> {
+                    return SecretUseDecisionResult.ConflictingVariable(result.name)
                 }
-                CredentialProfilesResult.SecretUnavailable -> {
-                    return CredentialDecisionResult.SecretUnavailable
+                RequestedSecretsResult.SecretUnavailable -> {
+                    return SecretUseDecisionResult.SecretUnavailable
                 }
-                CredentialProfilesResult.SecretCorrupted -> {
-                    return CredentialDecisionResult.SecretCorrupted
+                RequestedSecretsResult.SecretCorrupted -> {
+                    return SecretUseDecisionResult.SecretCorrupted
                 }
-                CredentialProfilesResult.UnsupportedEncryption -> {
-                    return CredentialDecisionResult.UnsupportedEncryption
+                RequestedSecretsResult.UnsupportedEncryption -> {
+                    return SecretUseDecisionResult.UnsupportedEncryption
                 }
             }
-            decideCredentialRequest(
+            decideSecretUseRequest(
                 request = request,
-                credentialRequest = credentialRequest,
-                decision = CredentialDecision.APPROVED,
-                responsePlaintext = credentialProtocol.approvedResponse(responseProfiles),
+                secretUseRequest = secretUseRequest,
+                decision = SecretUseDecision.APPROVED,
+                responsePlaintext = secretUseProtocol.approvedResponse(responseSecrets),
             )
         }.also { result ->
-            if (result == CredentialDecisionResult.Decided) requestSync()
+            if (result == SecretUseDecisionResult.Decided) requestSync()
         }
 
-    suspend fun denyCredentialRequest(requestId: Long): CredentialDecisionResult =
+    suspend fun denySecretUseRequest(requestId: Long): SecretUseDecisionResult =
         operationMutex.withLock {
             val request = dao.getRequestById(requestId)
-                ?: return CredentialDecisionResult.NotFound
-            val credentialRequest = dao.getCredentialRequest(requestId)
-                ?: return CredentialDecisionResult.NotFound
-            if (credentialRequest.state != CredentialRequestState.APPROVAL_PENDING.storedName) {
-                return CredentialDecisionResult.NotPending
+                ?: return SecretUseDecisionResult.NotFound
+            val secretUseRequest = dao.getSecretUseRequest(requestId)
+                ?: return SecretUseDecisionResult.NotFound
+            if (secretUseRequest.state != SecretUseRequestState.APPROVAL_PENDING.storedName) {
+                return SecretUseDecisionResult.NotPending
             }
-            decideCredentialRequest(
+            decideSecretUseRequest(
                 request = request,
-                credentialRequest = credentialRequest,
-                decision = CredentialDecision.DENIED,
-                responsePlaintext = credentialProtocol.deniedResponse(
-                    CredentialDenialReason.USER_DENIED,
-                    CREDENTIAL_DENIAL_MESSAGE,
+                secretUseRequest = secretUseRequest,
+                decision = SecretUseDecision.DENIED,
+                responsePlaintext = secretUseProtocol.deniedResponse(
+                    SecretUseDenialReason.USER_DENIED,
+                    SECRET_USE_DENIAL_MESSAGE,
                 ),
             )
         }.also { result ->
-            if (result == CredentialDecisionResult.Decided) requestSync()
+            if (result == SecretUseDecisionResult.Decided) requestSync()
         }
 
-    private suspend fun decideCredentialRequest(
+    private suspend fun decideSecretUseRequest(
         request: InboxRequestEntity,
-        credentialRequest: CredentialRequestEntity,
-        decision: CredentialDecision,
+        secretUseRequest: SecretUseRequestEntity,
+        decision: SecretUseDecision,
         responsePlaintext: ByteArray,
-    ): CredentialDecisionResult {
-        val pairingRequestId = credentialRequest.pairingRequestId
-            ?: return CredentialDecisionResult.PairingUnavailable
+    ): SecretUseDecisionResult {
+        val pairingRequestId = secretUseRequest.pairingRequestId
+            ?: return SecretUseDecisionResult.PairingUnavailable
         val pairing = dao.getPairing(pairingRequestId)
-            ?: return CredentialDecisionResult.PairingUnavailable
+            ?: return SecretUseDecisionResult.PairingUnavailable
         if (pairing.state != PairingState.ACTIVE.storedName) {
-            return CredentialDecisionResult.PairingUnavailable
+            return SecretUseDecisionResult.PairingUnavailable
         }
         val credentials = credentialsForPairing(pairing)
-            ?: return CredentialDecisionResult.PairingUnavailable
+            ?: return SecretUseDecisionResult.PairingUnavailable
         val clientPsk = decryptRequestPsk(request, pairing)
-            ?: return CredentialDecisionResult.PairingUnavailable
+            ?: return SecretUseDecisionResult.PairingUnavailable
         val response = runCatching {
             pairingProtocol.sealPairedResponse(
                 deviceId = pairing.deviceId,
@@ -1468,17 +1468,17 @@ internal class RequestRepository(
                 request = json.parseToJsonElement(request.requestJson),
                 plaintext = responsePlaintext,
             )
-        }.getOrNull() ?: return CredentialDecisionResult.PairingUnavailable
+        }.getOrNull() ?: return SecretUseDecisionResult.PairingUnavailable
         val now = currentTimeMillis()
-        dao.updateCredentialRequest(
+        dao.updateSecretUseRequest(
             request = request.copy(
                 state = InboxRequestState.WAITING.storedName,
                 responseJson = response.toString(),
                 responseAcknowledgedAt = null,
                 updatedAt = now,
             ),
-            credentialRequest = credentialRequest.copy(
-                state = CredentialRequestState.WAITING_FOR_COMPLETION.storedName,
+            secretUseRequest = secretUseRequest.copy(
+                state = SecretUseRequestState.WAITING_FOR_COMPLETION.storedName,
                 decision = decision.storedName,
                 updatedAt = now,
                 decidedAt = now,
@@ -1486,23 +1486,23 @@ internal class RequestRepository(
         )
         audit.record(
             AuditRecord(
-                category = AuditCategory.PROFILE_ACCESS,
-                title = if (decision == CredentialDecision.APPROVED) {
-                    "Profile access approved"
+                category = AuditCategory.SECRET_USE,
+                title = if (decision == SecretUseDecision.APPROVED) {
+                    "Secret use approved"
                 } else {
-                    "Profile access denied"
+                    "Secret use denied"
                 },
-                detail = decodeStringList(credentialRequest.profilesJson).joinToString(),
-                outcome = if (decision == CredentialDecision.APPROVED) {
+                detail = decodeStringList(secretUseRequest.secretsJson).joinToString(),
+                outcome = if (decision == SecretUseDecision.APPROVED) {
                     AuditOutcome.APPROVED
                 } else {
                     AuditOutcome.DENIED
                 },
-                clientId = credentialRequest.clientId,
+                clientId = secretUseRequest.clientId,
                 relayRequestId = request.relayRequestId,
             ),
         )
-        return CredentialDecisionResult.Decided
+        return SecretUseDecisionResult.Decided
     }
 
     private suspend fun processRequest(
@@ -1522,19 +1522,19 @@ internal class RequestRepository(
         return processNewRequest(credentials, message, requestPayload)
     }
 
-    suspend fun acceptProfileUpload(
+    suspend fun approveSecretUpload(
         requestId: Long,
-        acceptedName: String,
-    ): ProfileUploadDecisionResult = operationMutex.withLock {
+        approvedName: String,
+    ): SecretUploadDecisionResult = operationMutex.withLock {
         val request = dao.getRequestById(requestId)
-            ?: return@withLock ProfileUploadDecisionResult.NotFound
-        val upload = dao.getProfileUploadRequest(requestId)
-            ?: return@withLock ProfileUploadDecisionResult.NotFound
-        if (upload.state != ProfileUploadRequestState.REVIEW_PENDING.storedName) {
-            return@withLock ProfileUploadDecisionResult.NotPending
+            ?: return@withLock SecretUploadDecisionResult.NotFound
+        val uploadRequest = dao.getSecretUploadRequest(requestId)
+            ?: return@withLock SecretUploadDecisionResult.NotFound
+        if (uploadRequest.state != SecretUploadRequestState.REVIEW_PENDING.storedName) {
+            return@withLock SecretUploadDecisionResult.NotPending
         }
         val values = sortedMapOf<String, String>()
-        val variableRows = dao.getProfileUploadVariables(requestId)
+        val variableRows = dao.getSecretUploadVariables(requestId)
         for (variable in variableRows) {
             when (
                 val result = withContext(cryptographyDispatcher) {
@@ -1545,10 +1545,10 @@ internal class RequestRepository(
                             nonce = variable.nonce,
                             ciphertext = variable.ciphertext,
                         ),
-                        location = profileUploadVariableLocation(
+                        location = secretUploadVariableLocation(
                             variable.id,
                             request.relayRequestId,
-                            upload.clientId,
+                            uploadRequest.clientId,
                             variable.name,
                         ),
                     )
@@ -1557,44 +1557,44 @@ internal class RequestRepository(
                 is DecryptionResult.Plaintext -> {
                     values[variable.name] = runCatching {
                         result.value.decodeToString(throwOnInvalidSequence = true)
-                    }.getOrElse { return@withLock ProfileUploadDecisionResult.SecretCorrupted }
+                    }.getOrElse { return@withLock SecretUploadDecisionResult.SecretCorrupted }
                 }
                 DecryptionResult.KeyUnavailable -> {
-                    return@withLock ProfileUploadDecisionResult.SecretUnavailable
+                    return@withLock SecretUploadDecisionResult.SecretUnavailable
                 }
                 DecryptionResult.AuthenticationFailed -> {
-                    return@withLock ProfileUploadDecisionResult.SecretCorrupted
+                    return@withLock SecretUploadDecisionResult.SecretCorrupted
                 }
                 DecryptionResult.UnsupportedFormat -> {
-                    return@withLock ProfileUploadDecisionResult.UnsupportedEncryption
+                    return@withLock SecretUploadDecisionResult.UnsupportedEncryption
                 }
             }
         }
-        val proposal = EnvironmentProfileProposal(
-            mode = ProfileUploadMode.entries.single { it.wireName == upload.mode },
-            name = upload.proposedName,
-            descriptionProvided = upload.descriptionProvided,
-            description = upload.description,
+        val upload = EnvironmentSecretUpload(
+            mode = SecretUploadMode.entries.single { it.wireName == uploadRequest.mode },
+            name = uploadRequest.uploadedName,
+            descriptionProvided = uploadRequest.descriptionProvided,
+            description = uploadRequest.description,
             variables = values,
             variableSensitivity = variableRows.associate { it.name to it.sensitive },
         )
         when (
-            val result = profiles.applyEnvironmentProfileProposal(proposal, acceptedName.trim())
+            val result = secrets.applyEnvironmentSecretUpload(upload, approvedName.trim())
         ) {
-            is ApplyEnvironmentProfileProposalResult.Invalid -> {
-                ProfileUploadDecisionResult.Invalid(result.message)
+            is ApplyEnvironmentSecretUploadResult.Invalid -> {
+                SecretUploadDecisionResult.Invalid(result.message)
             }
-            is ApplyEnvironmentProfileProposalResult.Applied -> {
+            is ApplyEnvironmentSecretUploadResult.Applied -> {
                 val now = currentTimeMillis()
-                dao.updateProfileUploadRequest(
+                dao.updateSecretUploadRequest(
                     request = request.copy(
                         state = InboxRequestState.COMPLETED.storedName,
                         updatedAt = now,
                         completedAt = now,
                     ),
-                    profileUpload = upload.copy(
-                        state = ProfileUploadRequestState.ACCEPTED.storedName,
-                        acceptedName = acceptedName.trim(),
+                    secretUpload = uploadRequest.copy(
+                        state = SecretUploadRequestState.APPROVED.storedName,
+                        approvedName = approvedName.trim(),
                         updatedAt = now,
                         decidedAt = now,
                     ),
@@ -1602,32 +1602,32 @@ internal class RequestRepository(
                 )
                 audit.record(
                     AuditRecord(
-                        category = AuditCategory.PROFILE_PROPOSAL,
-                        title = "Profile proposal accepted",
-                        detail = upload.proposedName,
-                        outcome = AuditOutcome.ACCEPTED,
-                        clientId = upload.clientId,
+                        category = AuditCategory.SECRET_UPLOAD,
+                        title = "Secret upload approved",
+                        detail = uploadRequest.uploadedName,
+                        outcome = AuditOutcome.APPROVED,
+                        clientId = uploadRequest.clientId,
                         relayRequestId = request.relayRequestId,
                     ),
                 )
-                ProfileUploadDecisionResult.Accepted(result.profileId)
+                SecretUploadDecisionResult.Approved(result.secretId)
             }
         }
     }
 
-    suspend fun readProfileUploadVariable(
+    suspend fun readSecretUploadVariable(
         requestId: Long,
         variableId: String,
-    ): ProfileUploadVariableValue = operationMutex.withLock {
+    ): SecretUploadVariableValue = operationMutex.withLock {
         val request = dao.getRequestById(requestId)
-            ?: return@withLock ProfileUploadVariableValue.NotFound
-        val upload = dao.getProfileUploadRequest(requestId)
-            ?: return@withLock ProfileUploadVariableValue.NotFound
-        if (upload.state != ProfileUploadRequestState.REVIEW_PENDING.storedName) {
-            return@withLock ProfileUploadVariableValue.NotFound
+            ?: return@withLock SecretUploadVariableValue.NotFound
+        val upload = dao.getSecretUploadRequest(requestId)
+            ?: return@withLock SecretUploadVariableValue.NotFound
+        if (upload.state != SecretUploadRequestState.REVIEW_PENDING.storedName) {
+            return@withLock SecretUploadVariableValue.NotFound
         }
-        val variable = dao.getProfileUploadVariables(requestId).find { it.id == variableId }
-            ?: return@withLock ProfileUploadVariableValue.NotFound
+        val variable = dao.getSecretUploadVariables(requestId).find { it.id == variableId }
+            ?: return@withLock SecretUploadVariableValue.NotFound
         when (
             val result = withContext(cryptographyDispatcher) {
                 encryption.decrypt(
@@ -1637,7 +1637,7 @@ internal class RequestRepository(
                         nonce = variable.nonce,
                         ciphertext = variable.ciphertext,
                     ),
-                    location = profileUploadVariableLocation(
+                    location = secretUploadVariableLocation(
                         variable.id,
                         request.relayRequestId,
                         upload.clientId,
@@ -1647,48 +1647,48 @@ internal class RequestRepository(
             }
         ) {
             is DecryptionResult.Plaintext -> runCatching {
-                ProfileUploadVariableValue.Available(
+                SecretUploadVariableValue.Available(
                     result.value.decodeToString(throwOnInvalidSequence = true),
                 )
-            }.getOrDefault(ProfileUploadVariableValue.Corrupted)
-            DecryptionResult.KeyUnavailable -> ProfileUploadVariableValue.Unavailable
-            DecryptionResult.AuthenticationFailed -> ProfileUploadVariableValue.Corrupted
-            DecryptionResult.UnsupportedFormat -> ProfileUploadVariableValue.UnsupportedEncryption
+            }.getOrDefault(SecretUploadVariableValue.Corrupted)
+            DecryptionResult.KeyUnavailable -> SecretUploadVariableValue.Unavailable
+            DecryptionResult.AuthenticationFailed -> SecretUploadVariableValue.Corrupted
+            DecryptionResult.UnsupportedFormat -> SecretUploadVariableValue.UnsupportedEncryption
         }
     }
 
-    suspend fun setProfileUploadVariableSensitivity(
+    suspend fun setSecretUploadVariableSensitivity(
         requestId: Long,
         variableId: String,
         sensitive: Boolean,
     ): Boolean = operationMutex.withLock {
-        val upload = dao.getProfileUploadRequest(requestId) ?: return@withLock false
-        if (upload.state != ProfileUploadRequestState.REVIEW_PENDING.storedName) {
+        val upload = dao.getSecretUploadRequest(requestId) ?: return@withLock false
+        if (upload.state != SecretUploadRequestState.REVIEW_PENDING.storedName) {
             return@withLock false
         }
-        val variable = dao.getProfileUploadVariables(requestId).find { it.id == variableId }
+        val variable = dao.getSecretUploadVariables(requestId).find { it.id == variableId }
             ?: return@withLock false
-        dao.updateProfileUploadVariable(variable.copy(sensitive = sensitive)) == 1
+        dao.updateSecretUploadVariable(variable.copy(sensitive = sensitive)) == 1
     }
 
-    suspend fun rejectProfileUpload(requestId: Long): ProfileUploadDecisionResult =
+    suspend fun rejectSecretUpload(requestId: Long): SecretUploadDecisionResult =
         operationMutex.withLock {
             val request = dao.getRequestById(requestId)
-                ?: return@withLock ProfileUploadDecisionResult.NotFound
-            val upload = dao.getProfileUploadRequest(requestId)
-                ?: return@withLock ProfileUploadDecisionResult.NotFound
-            if (upload.state != ProfileUploadRequestState.REVIEW_PENDING.storedName) {
-                return@withLock ProfileUploadDecisionResult.NotPending
+                ?: return@withLock SecretUploadDecisionResult.NotFound
+            val upload = dao.getSecretUploadRequest(requestId)
+                ?: return@withLock SecretUploadDecisionResult.NotFound
+            if (upload.state != SecretUploadRequestState.REVIEW_PENDING.storedName) {
+                return@withLock SecretUploadDecisionResult.NotPending
             }
             val now = currentTimeMillis()
-            dao.updateProfileUploadRequest(
+            dao.updateSecretUploadRequest(
                 request = request.copy(
                     state = InboxRequestState.COMPLETED.storedName,
                     updatedAt = now,
                     completedAt = now,
                 ),
-                profileUpload = upload.copy(
-                    state = ProfileUploadRequestState.REJECTED.storedName,
+                secretUpload = upload.copy(
+                    state = SecretUploadRequestState.REJECTED.storedName,
                     updatedAt = now,
                     decidedAt = now,
                 ),
@@ -1696,15 +1696,15 @@ internal class RequestRepository(
             )
             audit.record(
                 AuditRecord(
-                    category = AuditCategory.PROFILE_PROPOSAL,
-                    title = "Profile proposal rejected",
-                    detail = upload.proposedName,
+                    category = AuditCategory.SECRET_UPLOAD,
+                    title = "Secret upload rejected",
+                    detail = upload.uploadedName,
                     outcome = AuditOutcome.REJECTED,
                     clientId = upload.clientId,
                     relayRequestId = request.relayRequestId,
                 ),
             )
-            ProfileUploadDecisionResult.Rejected
+            SecretUploadDecisionResult.Rejected
         }
 
     suspend fun renameClient(clientId: String, name: String): ClientChangeResult =
@@ -1770,7 +1770,7 @@ internal class RequestRepository(
         }
 
         val pairing = dao.getPairingByClientId(message.clientId) ?: return null
-        if (pairing.vaultIdentityId != credentials.vaultIdentityId) return null
+        if (pairing.deviceIdentityId != credentials.deviceIdentityId) return null
         val pairingState = pairing.state.toPairingState()
         if (
             pairingState != PairingState.ACTIVE &&
@@ -1828,8 +1828,8 @@ internal class RequestRepository(
         val storedSecrets = acceptedSecrets.withoutRotationUnless(
             pairingState == PairingState.ACTIVE,
         )
-        val processed = if (method == CredentialProtocol.CREDENTIAL_REQUEST_METHOD) {
-            processCredentialRequest(
+        val processed = if (method == SecretUseProtocol.METHOD) {
+            processSecretUseRequest(
                 pairing = pairing,
                 relayRequestId = message.requestId,
                 requestPayload = requestPayload,
@@ -1837,8 +1837,8 @@ internal class RequestRepository(
                 acceptedSecrets = storedSecrets,
                 credentials = credentials,
             )
-        } else if (method == ProfileListProtocol.LIST_METHOD) {
-            processProfileListRequest(
+        } else if (method == SecretListProtocol.METHOD) {
+            processSecretListRequest(
                 pairing = pairing,
                 relayRequestId = message.requestId,
                 requestPayload = requestPayload,
@@ -1846,8 +1846,8 @@ internal class RequestRepository(
                 acceptedSecrets = storedSecrets,
                 credentials = credentials,
             )
-        } else if (method == ProfileUploadProtocol.METHOD) {
-            processProfileUploadRequest(
+        } else if (method == SecretUploadProtocol.METHOD) {
+            processSecretUploadRequest(
                 pairing = pairing,
                 relayRequestId = message.requestId,
                 requestPayload = requestPayload,
@@ -1885,7 +1885,7 @@ internal class RequestRepository(
         )
     }
 
-    private suspend fun processCredentialRequest(
+    private suspend fun processSecretUseRequest(
         pairing: PairingEntity,
         relayRequestId: String,
         requestPayload: JsonElement,
@@ -1895,10 +1895,10 @@ internal class RequestRepository(
     ): ProcessedRelayMessage? {
         if (pairing.state != PairingState.ACTIVE.storedName) return null
         val contents = runCatching {
-            credentialProtocol.decodeRequest(opened.plaintext)
+            secretUseProtocol.decodeRequest(opened.plaintext)
         }.getOrNull() ?: return null
-        val description = profiles.describeCredentialProfiles(contents.profiles)
-        val automaticDenial = automaticCredentialDenial(contents.profiles)
+        val description = secrets.describeRequestedSecrets(contents.secrets)
+        val automaticDenial = automaticSecretUseDenial(contents.secrets)
         val response = if (automaticDenial != null) {
             runCatching {
                 pairingProtocol.sealPairedResponse(
@@ -1909,7 +1909,7 @@ internal class RequestRepository(
                     devicePrivateKey = credentials.devicePrivateKey,
                     devicePublicKey = credentials.devicePublicKey,
                     request = requestPayload,
-                    plaintext = credentialProtocol.deniedResponse(
+                    plaintext = secretUseProtocol.deniedResponse(
                         automaticDenial.first,
                         automaticDenial.second,
                     ),
@@ -1919,11 +1919,11 @@ internal class RequestRepository(
             null
         }
         val now = currentTimeMillis()
-        dao.insertCredentialRequest(
+        dao.insertSecretUseRequest(
             request = InboxRequestEntity(
                 relayRequestId = relayRequestId,
                 parentRequestId = null,
-                kind = RequestKind.CREDENTIAL.storedName,
+                kind = RequestKind.SECRET_USE.storedName,
                 state = if (automaticDenial == null) {
                     InboxRequestState.ACTION_REQUIRED.storedName
                 } else {
@@ -1940,18 +1940,18 @@ internal class RequestRepository(
                 responseAcknowledgedAt = null,
                 completionAcknowledgedAt = null,
             ),
-            credentialRequest = credentialRequestEntity(
+            secretUseRequest = secretUseRequestEntity(
                 pairing = pairing,
                 contents = contents,
                 description = description,
                 now = now,
-            ).let { credentialRequest ->
+            ).let { secretUseRequest ->
                 if (automaticDenial == null) {
-                    credentialRequest
+                    secretUseRequest
                 } else {
-                    credentialRequest.copy(
-                        state = CredentialRequestState.WAITING_FOR_COMPLETION.storedName,
-                        decision = CredentialDecision.DENIED.storedName,
+                    secretUseRequest.copy(
+                        state = SecretUseRequestState.WAITING_FOR_COMPLETION.storedName,
+                        decision = SecretUseDecision.DENIED.storedName,
                         completionReason = automaticDenial.first.wireName,
                         completionMessage = automaticDenial.second,
                         decidedAt = now,
@@ -1964,9 +1964,9 @@ internal class RequestRepository(
         )
         audit.record(
             AuditRecord(
-                category = AuditCategory.PROFILE_ACCESS,
-                title = "Profile access requested",
-                detail = contents.profiles.joinToString(),
+                category = AuditCategory.SECRET_USE,
+                title = "Secret use requested",
+                detail = contents.secrets.joinToString(),
                 outcome = AuditOutcome.RECEIVED,
                 clientId = pairing.clientId,
                 relayRequestId = relayRequestId,
@@ -1975,8 +1975,8 @@ internal class RequestRepository(
         if (automaticDenial != null) {
             audit.record(
                 AuditRecord(
-                    category = AuditCategory.PROFILE_ACCESS,
-                    title = "Profile access denied automatically",
+                    category = AuditCategory.SECRET_USE,
+                    title = "Secret use denied automatically",
                     detail = automaticDenial.second,
                     outcome = AuditOutcome.DENIED,
                     clientId = pairing.clientId,
@@ -1987,30 +1987,30 @@ internal class RequestRepository(
         return ProcessedRelayMessage(response)
     }
 
-    private suspend fun automaticCredentialDenial(
-        profileNames: List<String>,
-    ): Pair<CredentialDenialReason, String>? = when (
-        val result = profiles.credentialProfiles(profileNames)
+    private suspend fun automaticSecretUseDenial(
+        secretNames: List<String>,
+    ): Pair<SecretUseDenialReason, String>? = when (
+        val result = secrets.requestedSecrets(secretNames)
     ) {
-        is CredentialProfilesResult.Available -> null
-        is CredentialProfilesResult.MissingProfiles ->
-            CredentialDenialReason.INVALID_REQUEST to
-                "Missing profiles: ${result.names.joinToString()}"
-        is CredentialProfilesResult.ConflictingVariable ->
-            CredentialDenialReason.INVALID_REQUEST to
-                "Requested profiles conflict on ${result.name}."
-        CredentialProfilesResult.SecretUnavailable ->
-            CredentialDenialReason.OTHER to
-                "A requested profile value is unavailable on this device."
-        CredentialProfilesResult.SecretCorrupted ->
-            CredentialDenialReason.OTHER to
-                "A requested profile value could not be authenticated."
-        CredentialProfilesResult.UnsupportedEncryption ->
-            CredentialDenialReason.OTHER to
-                "A requested profile value uses an unsupported encryption format."
+        is RequestedSecretsResult.Available -> null
+        is RequestedSecretsResult.MissingSecrets ->
+            SecretUseDenialReason.INVALID_REQUEST to
+                "Missing secrets: ${result.names.joinToString()}"
+        is RequestedSecretsResult.ConflictingVariable ->
+            SecretUseDenialReason.INVALID_REQUEST to
+                "Requested secrets provide conflicting values for the environment variable ${result.name}."
+        RequestedSecretsResult.SecretUnavailable ->
+            SecretUseDenialReason.OTHER to
+                "A requested secret value is unavailable on this device."
+        RequestedSecretsResult.SecretCorrupted ->
+            SecretUseDenialReason.OTHER to
+                "A requested secret value could not be authenticated."
+        RequestedSecretsResult.UnsupportedEncryption ->
+            SecretUseDenialReason.OTHER to
+                "A requested secret value uses an unsupported encryption format."
     }
 
-    private suspend fun processProfileListRequest(
+    private suspend fun processSecretListRequest(
         pairing: PairingEntity,
         relayRequestId: String,
         requestPayload: JsonElement,
@@ -2020,14 +2020,14 @@ internal class RequestRepository(
     ): ProcessedRelayMessage? {
         if (pairing.state != PairingState.ACTIVE.storedName) return null
         val contents = runCatching {
-            profileListProtocol.decodeRequest(opened.plaintext)
+            secretListProtocol.decodeRequest(opened.plaintext)
         }.getOrNull() ?: return null
-        val profileMetadata = profiles.listCredentialProfiles()
-        val responsePlaintext = profileListProtocol.response(
-            profileMetadata.associateTo(sortedMapOf()) { profile ->
-                profile.name to ProfileListProfile(
-                    description = profile.description,
-                    environmentVariableNames = profile.environmentVariableNames,
+        val secretMetadata = secrets.listSecretsForClient()
+        val responsePlaintext = secretListProtocol.response(
+            secretMetadata.associateTo(sortedMapOf()) { secret ->
+                secret.name to SecretListSecret(
+                    description = secret.description,
+                    environmentVariableNames = secret.environmentVariableNames,
                 )
             },
         )
@@ -2044,11 +2044,11 @@ internal class RequestRepository(
             )
         }.getOrNull() ?: return null
         val now = currentTimeMillis()
-        dao.insertProfileListRequest(
+        dao.insertSecretListRequest(
             request = InboxRequestEntity(
                 relayRequestId = relayRequestId,
                 parentRequestId = null,
-                kind = RequestKind.PROFILE_LIST.storedName,
+                kind = RequestKind.SECRET_LIST.storedName,
                 state = InboxRequestState.WAITING.storedName,
                 listed = false,
                 requestJson = requestPayload.toString(),
@@ -2061,10 +2061,10 @@ internal class RequestRepository(
                 responseAcknowledgedAt = null,
                 completionAcknowledgedAt = null,
             ),
-            profileListRequest = profileListRequestEntity(
+            secretListRequest = secretListRequestEntity(
                 pairing = pairing,
                 contents = contents,
-                profileMetadata = profileMetadata,
+                secretMetadata = secretMetadata,
                 now = now,
             ),
             requestSecret = acceptedSecrets.requestSecret,
@@ -2073,9 +2073,9 @@ internal class RequestRepository(
         )
         audit.record(
             AuditRecord(
-                category = AuditCategory.PROFILE_LIST,
-                title = "Profile list requested",
-                detail = "${profileMetadata.size} profiles sent to ${pairing.friendlyName ?: pairing.hostname ?: "client"}",
+                category = AuditCategory.SECRET_LIST,
+                title = "Secret list requested",
+                detail = "${secretMetadata.size} secrets sent to ${pairing.friendlyName ?: pairing.hostname ?: "client"}",
                 outcome = AuditOutcome.RECEIVED,
                 clientId = pairing.clientId,
                 relayRequestId = relayRequestId,
@@ -2084,7 +2084,7 @@ internal class RequestRepository(
         return ProcessedRelayMessage(response)
     }
 
-    private suspend fun processProfileUploadRequest(
+    private suspend fun processSecretUploadRequest(
         pairing: PairingEntity,
         relayRequestId: String,
         requestPayload: JsonElement,
@@ -2094,22 +2094,22 @@ internal class RequestRepository(
     ): ProcessedRelayMessage? {
         if (pairing.state != PairingState.ACTIVE.storedName) return null
         val contents = runCatching {
-            profileUploadProtocol.decodeRequest(opened.plaintext)
+            secretUploadProtocol.decodeRequest(opened.plaintext)
         }.getOrNull() ?: return null
-        val proposal = EnvironmentProfileProposal(
+        val upload = EnvironmentSecretUpload(
             mode = contents.mode,
             name = contents.name,
             descriptionProvided = contents.descriptionProvided,
             description = contents.description,
             variables = contents.variables,
         )
-        val validation = profiles.describeEnvironmentProfileProposal(proposal)
-        val valid = validation as? EnvironmentProfileProposalResult.Valid
-        val invalid = validation as? EnvironmentProfileProposalResult.Invalid
+        val validation = secrets.describeEnvironmentSecretUpload(upload)
+        val valid = validation as? EnvironmentSecretUploadResult.Valid
+        val invalid = validation as? EnvironmentSecretUploadResult.Invalid
         val responsePlaintext = if (valid != null) {
-            profileUploadProtocol.receivedResponse()
+            secretUploadProtocol.receivedResponse()
         } else {
-            profileUploadProtocol.rejectedResponse(checkNotNull(invalid).message)
+            secretUploadProtocol.rejectedResponse(checkNotNull(invalid).message)
         }
         val response = runCatching {
             pairingProtocol.sealPairedResponse(
@@ -2128,7 +2128,7 @@ internal class RequestRepository(
             emptyList()
         } else {
             contents.variables.map { (name, value) ->
-                encryptProfileUploadVariable(
+                encryptSecretUploadVariable(
                     relayRequestId = relayRequestId,
                     clientId = pairing.clientId,
                     name = name,
@@ -2138,11 +2138,11 @@ internal class RequestRepository(
                 )
             }
         }
-        dao.insertProfileUploadRequest(
+        dao.insertSecretUploadRequest(
             request = InboxRequestEntity(
                 relayRequestId = relayRequestId,
                 parentRequestId = null,
-                kind = RequestKind.PROFILE_UPLOAD.storedName,
+                kind = RequestKind.SECRET_UPLOAD.storedName,
                 state = if (valid != null) {
                     InboxRequestState.ACTION_REQUIRED.storedName
                 } else {
@@ -2159,23 +2159,23 @@ internal class RequestRepository(
                 responseAcknowledgedAt = null,
                 completionAcknowledgedAt = null,
             ),
-            profileUpload = ProfileUploadRequestEntity(
+            secretUpload = SecretUploadRequestEntity(
                 requestId = 0,
                 pairingRequestId = pairing.requestId,
                 clientId = pairing.clientId,
                 clientName = pairing.friendlyName ?: pairing.hostname ?: "Unknown client",
                 state = if (valid != null) {
-                    ProfileUploadRequestState.REVIEW_PENDING.storedName
+                    SecretUploadRequestState.REVIEW_PENDING.storedName
                 } else {
-                    ProfileUploadRequestState.REJECTED.storedName
+                    SecretUploadRequestState.REJECTED.storedName
                 },
                 cliVersion = contents.cliVersion,
                 mode = contents.mode.wireName,
-                proposedName = contents.name,
-                acceptedName = null,
+                uploadedName = contents.name,
+                approvedName = null,
                 descriptionProvided = contents.descriptionProvided,
                 description = contents.description,
-                profileType = "environment",
+                secretType = "environment",
                 variableNamesJson = encodeStringList(contents.variables.keys.sorted()),
                 addedVariablesJson = encodeStringList(valid?.summary?.addedVariables.orEmpty()),
                 changedVariablesJson = encodeStringList(valid?.summary?.changedVariables.orEmpty()),
@@ -2185,9 +2185,9 @@ internal class RequestRepository(
                 removedVariablesJson = encodeStringList(valid?.summary?.removedVariables.orEmpty()),
                 error = invalid?.message,
                 transportResult = if (valid != null) {
-                    ProfileUploadProtocol.RESULT_RECEIVED
+                    SecretUploadProtocol.RESULT_RECEIVED
                 } else {
-                    ProfileUploadProtocol.RESULT_REJECTED
+                    SecretUploadProtocol.RESULT_REJECTED
                 },
                 transportMessage = invalid?.message,
                 createdAt = now,
@@ -2202,8 +2202,8 @@ internal class RequestRepository(
         )
         audit.record(
             AuditRecord(
-                category = AuditCategory.PROFILE_PROPOSAL,
-                title = if (valid != null) "Profile proposal received" else "Profile proposal rejected",
+                category = AuditCategory.SECRET_UPLOAD,
+                title = if (valid != null) "Secret upload received" else "Secret upload rejected",
                 detail = invalid?.message ?: "${contents.mode.wireName.lowercase()} ${contents.name}",
                 outcome = if (valid != null) AuditOutcome.RECEIVED else AuditOutcome.REJECTED,
                 clientId = pairing.clientId,
@@ -2348,8 +2348,8 @@ internal class RequestRepository(
             request = request,
             pairing = PairingEntity(
                 requestId = 0,
-                vaultIdentityId = credentials.vaultIdentityId,
-                vaultAddress = credentials.address,
+                deviceIdentityId = credentials.deviceIdentityId,
+                pairingAddress = credentials.address,
                 deviceId = credentials.deviceId,
                 clientId = message.clientId,
                 friendlyName = null,
@@ -2377,7 +2377,7 @@ internal class RequestRepository(
         audit.record(
             AuditRecord(
                 category = AuditCategory.PAIRING,
-                title = "Pairing request received",
+                title = "Pairing requested",
                 outcome = AuditOutcome.RECEIVED,
                 clientId = message.clientId,
                 relayRequestId = message.requestId,
@@ -2386,27 +2386,27 @@ internal class RequestRepository(
         return ProcessedRelayMessage(response)
     }
 
-    private fun credentialRequestEntity(
+    private fun secretUseRequestEntity(
         pairing: PairingEntity,
-        contents: CredentialRequestMessage,
-        description: CredentialProfileDescription,
+        contents: SecretUseRequestMessage,
+        description: RequestedSecretDescription,
         now: Long,
-    ) = CredentialRequestEntity(
+    ) = SecretUseRequestEntity(
         requestId = 0,
         pairingRequestId = pairing.requestId,
         clientId = pairing.clientId,
         clientName = pairing.friendlyName ?: pairing.hostname ?: "Unknown client",
-        vaultAddress = pairing.vaultAddress,
+        pairingAddress = pairing.pairingAddress,
         hostname = pairing.hostname,
         platform = pairing.platform,
         architecture = pairing.architecture,
         machineId = pairing.machineId,
         osVersion = pairing.osVersion,
-        state = CredentialRequestState.APPROVAL_PENDING.storedName,
+        state = SecretUseRequestState.APPROVAL_PENDING.storedName,
         cliVersion = contents.cliVersion,
-        profilesJson = encodeStringList(contents.profiles),
-        profileDetailsJson = json.encodeToString(description.profiles),
-        missingProfilesJson = encodeStringList(description.missingProfiles),
+        secretsJson = encodeStringList(contents.secrets),
+        secretDetailsJson = json.encodeToString(description.secrets),
+        missingSecretsJson = encodeStringList(description.missingSecrets),
         reason = contents.reason,
         command = contents.operation.command,
         argumentsJson = encodeStringList(contents.operation.arguments),
@@ -2429,24 +2429,24 @@ internal class RequestRepository(
         completedAt = null,
     )
 
-    private fun profileListRequestEntity(
+    private fun secretListRequestEntity(
         pairing: PairingEntity,
-        contents: ProfileListRequestMessage,
-        profileMetadata: List<CredentialProfileMetadata>,
+        contents: SecretListRequestMessage,
+        secretMetadata: List<SecretMetadata>,
         now: Long,
-    ) = ProfileListRequestEntity(
+    ) = SecretListRequestEntity(
         requestId = 0,
         pairingRequestId = pairing.requestId,
         clientId = pairing.clientId,
-        vaultAddress = pairing.vaultAddress,
+        pairingAddress = pairing.pairingAddress,
         hostname = pairing.hostname,
         platform = pairing.platform,
         architecture = pairing.architecture,
         machineId = pairing.machineId,
         osVersion = pairing.osVersion,
-        state = ProfileListRequestState.WAITING_FOR_COMPLETION.storedName,
+        state = SecretListRequestState.WAITING_FOR_COMPLETION.storedName,
         cliVersion = contents.cliVersion,
-        profilesJson = json.encodeToString(profileMetadata),
+        secretsJson = json.encodeToString(secretMetadata),
         error = null,
         createdAt = now,
         updatedAt = now,
@@ -2533,7 +2533,7 @@ internal class RequestRepository(
         opened: OpenedPairedRequest,
         acceptedSecrets: AcceptedRequestSecrets,
     ): ProcessedRelayMessage? {
-        if (pairing.vaultIdentityId != credentials.vaultIdentityId) return null
+        if (pairing.deviceIdentityId != credentials.deviceIdentityId) return null
         if (
             pairing.state != PairingState.RELAY_ACTIVATION_PENDING.storedName &&
             pairing.state != PairingState.WAITING_FOR_FINISH.storedName
@@ -2614,14 +2614,14 @@ internal class RequestRepository(
             RequestKind.PAIRING_FINISH.storedName -> {
                 processFinishCompletion(activeCredentials, request, completion)
             }
-            RequestKind.CREDENTIAL.storedName -> {
-                processCredentialCompletion(activeCredentials, request, completion)
+            RequestKind.SECRET_USE.storedName -> {
+                processSecretUseCompletion(activeCredentials, request, completion)
             }
-            RequestKind.PROFILE_LIST.storedName -> {
-                processProfileListCompletion(activeCredentials, request, completion)
+            RequestKind.SECRET_LIST.storedName -> {
+                processSecretListCompletion(activeCredentials, request, completion)
             }
-            RequestKind.PROFILE_UPLOAD.storedName -> {
-                processProfileUploadCompletion(activeCredentials, request, completion)
+            RequestKind.SECRET_UPLOAD.storedName -> {
+                processSecretUploadCompletion(activeCredentials, request, completion)
             }
             RequestKind.PAIRING_REMOVE.storedName -> {
                 processPairingRemoveCompletion(activeCredentials, request, completion)
@@ -2664,19 +2664,19 @@ internal class RequestRepository(
         return ProcessedRelayMessage()
     }
 
-    private suspend fun processProfileListCompletion(
+    private suspend fun processSecretListCompletion(
         activeCredentials: RelayDeviceCredentials,
         request: InboxRequestEntity,
         completion: JsonElement,
     ): ProcessedRelayMessage? {
-        val profileListRequest = dao.getProfileListRequest(request.id) ?: return null
+        val secretListRequest = dao.getSecretListRequest(request.id) ?: return null
         if (
-            profileListRequest.state == ProfileListRequestState.COMPLETED.storedName ||
-            profileListRequest.state == ProfileListRequestState.VERIFICATION_FAILED.storedName
+            secretListRequest.state == SecretListRequestState.COMPLETED.storedName ||
+            secretListRequest.state == SecretListRequestState.VERIFICATION_FAILED.storedName
         ) {
             return ProcessedRelayMessage()
         }
-        val pairingRequestId = profileListRequest.pairingRequestId ?: return null
+        val pairingRequestId = secretListRequest.pairingRequestId ?: return null
         val pairing = dao.getPairing(pairingRequestId) ?: return null
         val credentials = credentialsFor(pairing, activeCredentials) ?: return null
         val clientPsk = decryptRequestPsk(request, pairing) ?: return null
@@ -2692,10 +2692,10 @@ internal class RequestRepository(
                 completion = completion,
             )
         }.getOrNull() ?: return null
-        val decoded = runCatching { profileListProtocol.decodeCompletion(plaintext) }
-        val valid = decoded.getOrNull() == profileListRequest.cliVersion
+        val decoded = runCatching { secretListProtocol.decodeCompletion(plaintext) }
+        val valid = decoded.getOrNull() == secretListRequest.cliVersion
         val now = currentTimeMillis()
-        dao.updateProfileListRequest(
+        dao.updateSecretListRequest(
             request = request.copy(
                 state = InboxRequestState.COMPLETED.storedName,
                 completionJson = completion.toString(),
@@ -2703,17 +2703,17 @@ internal class RequestRepository(
                 updatedAt = now,
                 completedAt = now,
             ),
-            profileListRequest = profileListRequest.copy(
+            secretListRequest = secretListRequest.copy(
                 state = if (valid) {
-                    ProfileListRequestState.COMPLETED.storedName
+                    SecretListRequestState.COMPLETED.storedName
                 } else {
-                    ProfileListRequestState.VERIFICATION_FAILED.storedName
+                    SecretListRequestState.VERIFICATION_FAILED.storedName
                 },
                 error = if (valid) {
                     null
                 } else {
                     decoded.exceptionOrNull()?.message
-                        ?: "Profile list completion did not match the request."
+                        ?: "Secret list completion did not match the request."
                 },
                 updatedAt = now,
                 completedAt = now,
@@ -2721,23 +2721,23 @@ internal class RequestRepository(
         )
         audit.record(
             AuditRecord(
-                category = if (valid) AuditCategory.PROFILE_LIST else AuditCategory.VERIFICATION,
-                title = if (valid) "Profile list delivered" else "Profile list confirmation failed",
-                detail = "${json.decodeFromString<List<CredentialProfileMetadata>>(profileListRequest.profilesJson).size} profiles",
+                category = if (valid) AuditCategory.SECRET_LIST else AuditCategory.VERIFICATION,
+                title = if (valid) "Secret list delivered" else "Secret list confirmation failed",
+                detail = "${json.decodeFromString<List<SecretMetadata>>(secretListRequest.secretsJson).size} secrets",
                 outcome = if (valid) AuditOutcome.COMPLETED else AuditOutcome.FAILED,
-                clientId = profileListRequest.clientId,
+                clientId = secretListRequest.clientId,
                 relayRequestId = request.relayRequestId,
             ),
         )
         return ProcessedRelayMessage()
     }
 
-    private suspend fun processProfileUploadCompletion(
+    private suspend fun processSecretUploadCompletion(
         activeCredentials: RelayDeviceCredentials,
         request: InboxRequestEntity,
         completion: JsonElement,
     ): ProcessedRelayMessage? {
-        val upload = dao.getProfileUploadRequest(request.id) ?: return null
+        val upload = dao.getSecretUploadRequest(request.id) ?: return null
         if (upload.transportCompletedAt != null) return ProcessedRelayMessage()
         val pairingRequestId = upload.pairingRequestId ?: return null
         val pairing = dao.getPairing(pairingRequestId) ?: return null
@@ -2755,27 +2755,27 @@ internal class RequestRepository(
                 completion = completion,
             )
         }.getOrNull() ?: return null
-        val decoded = runCatching { profileUploadProtocol.decodeCompletion(plaintext) }
+        val decoded = runCatching { secretUploadProtocol.decodeCompletion(plaintext) }
         val result = decoded.getOrNull()
         val valid = result?.cliVersion == upload.cliVersion &&
             result.result == upload.transportResult &&
             result.message == upload.transportMessage
         val now = currentTimeMillis()
-        val proposalStillPending = upload.state == ProfileUploadRequestState.REVIEW_PENDING.storedName
-        dao.updateProfileUploadRequest(
+        val uploadStillPending = upload.state == SecretUploadRequestState.REVIEW_PENDING.storedName
+        dao.updateSecretUploadRequest(
             request = request.copy(
                 state = when {
-                    proposalStillPending -> InboxRequestState.ACTION_REQUIRED.storedName
+                    uploadStillPending -> InboxRequestState.ACTION_REQUIRED.storedName
                     else -> InboxRequestState.COMPLETED.storedName
                 },
                 completionJson = completion.toString(),
                 responseAcknowledgedAt = request.responseAcknowledgedAt ?: now,
                 updatedAt = now,
-                completedAt = request.completedAt ?: if (proposalStillPending) null else now,
+                completedAt = request.completedAt ?: if (uploadStillPending) null else now,
             ),
-            profileUpload = upload.copy(
+            secretUpload = upload.copy(
                 error = if (valid) upload.error else decoded.exceptionOrNull()?.message
-                    ?: "The Client completion did not match the received proposal.",
+                    ?: "The client completion did not match the received upload.",
                 updatedAt = now,
                 transportCompletedAt = now,
             ),
@@ -2783,16 +2783,16 @@ internal class RequestRepository(
         audit.record(
             AuditRecord(
                 category = if (valid) {
-                    AuditCategory.PROFILE_PROPOSAL
+                    AuditCategory.SECRET_UPLOAD
                 } else {
                     AuditCategory.VERIFICATION
                 },
                 title = if (valid) {
-                    "Profile proposal receipt confirmed"
+                    "Secret upload receipt confirmed"
                 } else {
-                    "Profile proposal confirmation failed"
+                    "Secret upload confirmation failed"
                 },
-                detail = upload.proposedName,
+                detail = upload.uploadedName,
                 outcome = if (valid) AuditOutcome.COMPLETED else AuditOutcome.FAILED,
                 clientId = upload.clientId,
                 relayRequestId = request.relayRequestId,
@@ -2893,19 +2893,19 @@ internal class RequestRepository(
         requestSync()
     }
 
-    private suspend fun processCredentialCompletion(
+    private suspend fun processSecretUseCompletion(
         activeCredentials: RelayDeviceCredentials,
         request: InboxRequestEntity,
         completion: JsonElement,
     ): ProcessedRelayMessage? {
-        val credentialRequest = dao.getCredentialRequest(request.id) ?: return null
+        val secretUseRequest = dao.getSecretUseRequest(request.id) ?: return null
         if (
-            credentialRequest.state == CredentialRequestState.COMPLETED.storedName ||
-            credentialRequest.state == CredentialRequestState.VERIFICATION_FAILED.storedName
+            secretUseRequest.state == SecretUseRequestState.COMPLETED.storedName ||
+            secretUseRequest.state == SecretUseRequestState.VERIFICATION_FAILED.storedName
         ) {
             return ProcessedRelayMessage()
         }
-        val pairingRequestId = credentialRequest.pairingRequestId ?: return null
+        val pairingRequestId = secretUseRequest.pairingRequestId ?: return null
         val pairing = dao.getPairing(pairingRequestId) ?: return null
         val credentials = credentialsFor(pairing, activeCredentials) ?: return null
         val clientPsk = decryptRequestPsk(request, pairing) ?: return null
@@ -2921,29 +2921,29 @@ internal class RequestRepository(
                 completion = completion,
             )
         }.getOrNull() ?: return null
-        val decoded = runCatching { credentialProtocol.decodeCompletion(plaintext) }
+        val decoded = runCatching { secretUseProtocol.decodeCompletion(plaintext) }
         val now = currentTimeMillis()
         val completionResult = decoded.getOrNull()
         val valid = when (completionResult) {
-            is CredentialCompletion.Approved -> {
-                credentialRequest.decision == CredentialDecision.APPROVED.storedName
+            is SecretUseCompletion.Approved -> {
+                secretUseRequest.decision == SecretUseDecision.APPROVED.storedName
             }
-            is CredentialCompletion.Denied -> {
-                if (credentialRequest.decision != CredentialDecision.DENIED.storedName) {
+            is SecretUseCompletion.Denied -> {
+                if (secretUseRequest.decision != SecretUseDecision.DENIED.storedName) {
                     false
                 } else {
-                    val expectedReason = credentialRequest.completionReason
-                        ?: CredentialDenialReason.USER_DENIED.wireName
-                    val expectedMessage = credentialRequest.completionMessage
-                        ?: CREDENTIAL_DENIAL_MESSAGE
+                    val expectedReason = secretUseRequest.completionReason
+                        ?: SecretUseDenialReason.USER_DENIED.wireName
+                    val expectedMessage = secretUseRequest.completionMessage
+                        ?: SECRET_USE_DENIAL_MESSAGE
                     completionResult.reason == expectedReason &&
                         completionResult.message == expectedMessage
                 }
             }
-            is CredentialCompletion.Aborted -> true
+            is SecretUseCompletion.Aborted -> true
             null -> false
         }
-        dao.updateCredentialRequest(
+        dao.updateSecretUseRequest(
             request = request.copy(
                 state = InboxRequestState.COMPLETED.storedName,
                 completionJson = completion.toString(),
@@ -2951,39 +2951,39 @@ internal class RequestRepository(
                 updatedAt = now,
                 completedAt = now,
             ),
-            credentialRequest = credentialRequest.copy(
+            secretUseRequest = secretUseRequest.copy(
                 state = if (valid) {
-                    CredentialRequestState.COMPLETED.storedName
+                    SecretUseRequestState.COMPLETED.storedName
                 } else {
-                    CredentialRequestState.VERIFICATION_FAILED.storedName
+                    SecretUseRequestState.VERIFICATION_FAILED.storedName
                 },
                 completionResult = when (completionResult) {
-                    is CredentialCompletion.Approved -> {
-                        CredentialCompletionResult.APPROVED.storedName
+                    is SecretUseCompletion.Approved -> {
+                        SecretUseCompletionResult.APPROVED.storedName
                     }
-                    is CredentialCompletion.Denied -> {
-                        CredentialCompletionResult.DENIED.storedName
+                    is SecretUseCompletion.Denied -> {
+                        SecretUseCompletionResult.DENIED.storedName
                     }
-                    is CredentialCompletion.Aborted -> {
-                        CredentialCompletionResult.ABORTED.storedName
+                    is SecretUseCompletion.Aborted -> {
+                        SecretUseCompletionResult.ABORTED.storedName
                     }
                     null -> null
                 },
                 completionReason = when (completionResult) {
-                    is CredentialCompletion.Denied -> completionResult.reason
-                    is CredentialCompletion.Aborted -> completionResult.reason
+                    is SecretUseCompletion.Denied -> completionResult.reason
+                    is SecretUseCompletion.Aborted -> completionResult.reason
                     else -> null
                 },
                 completionMessage = when (completionResult) {
-                    is CredentialCompletion.Denied -> completionResult.message
-                    is CredentialCompletion.Aborted -> completionResult.message
+                    is SecretUseCompletion.Denied -> completionResult.message
+                    is SecretUseCompletion.Aborted -> completionResult.message
                     else -> null
                 },
                 error = if (valid) {
                     null
                 } else {
                     decoded.exceptionOrNull()?.message
-                        ?: "Credential completion did not match the phone decision."
+                        ?: "Secret use completion did not match the device decision."
                 },
                 updatedAt = now,
                 completedAt = now,
@@ -2991,20 +2991,20 @@ internal class RequestRepository(
         )
         audit.record(
             AuditRecord(
-                category = if (valid) AuditCategory.PROFILE_ACCESS else AuditCategory.VERIFICATION,
+                category = if (valid) AuditCategory.SECRET_USE else AuditCategory.VERIFICATION,
                 title = when {
-                    !valid -> "Profile access confirmation failed"
-                    completionResult is CredentialCompletion.Approved -> "Profile access delivered"
-                    completionResult is CredentialCompletion.Denied -> "Profile access denial confirmed"
-                    else -> "Profile access aborted"
+                    !valid -> "Secret use confirmation failed"
+                    completionResult is SecretUseCompletion.Approved -> "Secret use delivered"
+                    completionResult is SecretUseCompletion.Denied -> "Secret use denial confirmed"
+                    else -> "Secret use aborted"
                 },
-                detail = decodeStringList(credentialRequest.profilesJson).joinToString(),
+                detail = decodeStringList(secretUseRequest.secretsJson).joinToString(),
                 outcome = when {
                     !valid -> AuditOutcome.FAILED
-                    completionResult is CredentialCompletion.Denied -> AuditOutcome.DENIED
+                    completionResult is SecretUseCompletion.Denied -> AuditOutcome.DENIED
                     else -> AuditOutcome.COMPLETED
                 },
-                clientId = credentialRequest.clientId,
+                clientId = secretUseRequest.clientId,
                 relayRequestId = request.relayRequestId,
             ),
         )
@@ -3066,9 +3066,9 @@ internal class RequestRepository(
         pairing: PairingEntity,
         active: RelayDeviceCredentials,
     ): RelayDeviceCredentials? {
-        val vaultIdentityId = pairing.vaultIdentityId ?: return null
-        if (vaultIdentityId == active.vaultIdentityId) return active
-        return when (val result = deviceCredentials.deviceCredentials(vaultIdentityId)) {
+        val deviceIdentityId = pairing.deviceIdentityId ?: return null
+        if (deviceIdentityId == active.deviceIdentityId) return active
+        return when (val result = deviceCredentials.deviceCredentials(deviceIdentityId)) {
             is RelayDeviceCredentialsResult.Available -> result.credentials
             else -> null
         }
@@ -3077,8 +3077,8 @@ internal class RequestRepository(
     private suspend fun credentialsForPairing(
         pairing: PairingEntity,
     ): RelayDeviceCredentials? {
-        val vaultIdentityId = pairing.vaultIdentityId ?: return null
-        return when (val result = deviceCredentials.deviceCredentials(vaultIdentityId)) {
+        val deviceIdentityId = pairing.deviceIdentityId ?: return null
+        return when (val result = deviceCredentials.deviceCredentials(deviceIdentityId)) {
             is RelayDeviceCredentialsResult.Available -> result.credentials
             else -> null
         }
@@ -3090,14 +3090,14 @@ internal class RequestRepository(
             RequestKind.PAIRING_FINISH.storedName -> {
                 request.parentRequestId?.let { dao.getPairing(it) }
             }
-            RequestKind.CREDENTIAL.storedName -> {
-                dao.getCredentialRequest(request.id)?.pairingRequestId?.let { dao.getPairing(it) }
+            RequestKind.SECRET_USE.storedName -> {
+                dao.getSecretUseRequest(request.id)?.pairingRequestId?.let { dao.getPairing(it) }
             }
-            RequestKind.PROFILE_LIST.storedName -> {
-                dao.getProfileListRequest(request.id)?.pairingRequestId?.let { dao.getPairing(it) }
+            RequestKind.SECRET_LIST.storedName -> {
+                dao.getSecretListRequest(request.id)?.pairingRequestId?.let { dao.getPairing(it) }
             }
-            RequestKind.PROFILE_UPLOAD.storedName -> {
-                dao.getProfileUploadRequest(request.id)?.pairingRequestId?.let { dao.getPairing(it) }
+            RequestKind.SECRET_UPLOAD.storedName -> {
+                dao.getSecretUploadRequest(request.id)?.pairingRequestId?.let { dao.getPairing(it) }
             }
             RequestKind.PAIRING_REMOVE.storedName -> {
                 request.parentRequestId?.let { dao.getPairing(it) }
@@ -3108,24 +3108,24 @@ internal class RequestRepository(
             else -> null
         }
 
-    private suspend fun encryptProfileUploadVariable(
+    private suspend fun encryptSecretUploadVariable(
         relayRequestId: String,
         clientId: String,
         name: String,
         value: String,
         sensitive: Boolean,
         now: Long,
-    ): ProfileUploadVariableEntity {
+    ): SecretUploadVariableEntity {
         val id = newId()
         val key = keyManager.activeKey()
         val encrypted = withContext(cryptographyDispatcher) {
             encryption.encrypt(
                 keyId = key.id,
-                location = profileUploadVariableLocation(id, relayRequestId, clientId, name),
+                location = secretUploadVariableLocation(id, relayRequestId, clientId, name),
                 plaintext = value.encodeToByteArray(),
             )
         }
-        return ProfileUploadVariableEntity(
+        return SecretUploadVariableEntity(
             id = id,
             requestId = 0,
             name = name,
@@ -3138,13 +3138,13 @@ internal class RequestRepository(
         )
     }
 
-    private fun profileUploadVariableLocation(
+    private fun secretUploadVariableLocation(
         id: String,
         relayRequestId: String,
         clientId: String,
         name: String,
     ) = EncryptionLocation(
-        recordType = "profile_upload_variable",
+        recordType = "secret_upload_variable",
         recordId = id,
         fieldName = "value",
         bindings = listOf(
@@ -3368,20 +3368,20 @@ internal class RequestRepository(
     private fun String.toRelayClientState(): RelayClientState =
         checkNotNull(RelayClientState.entries.find { it.wireName == this })
 
-    private fun String.toCredentialRequestState(): CredentialRequestState =
-        checkNotNull(CredentialRequestState.entries.find { it.storedName == this })
+    private fun String.toSecretUseRequestState(): SecretUseRequestState =
+        checkNotNull(SecretUseRequestState.entries.find { it.storedName == this })
 
-    private fun String.toCredentialDecision(): CredentialDecision =
-        checkNotNull(CredentialDecision.entries.find { it.storedName == this })
+    private fun String.toSecretUseDecision(): SecretUseDecision =
+        checkNotNull(SecretUseDecision.entries.find { it.storedName == this })
 
-    private fun String.toCredentialCompletionResult(): CredentialCompletionResult =
-        checkNotNull(CredentialCompletionResult.entries.find { it.storedName == this })
+    private fun String.toSecretUseCompletionResult(): SecretUseCompletionResult =
+        checkNotNull(SecretUseCompletionResult.entries.find { it.storedName == this })
 
-    private fun String.toProfileListRequestState(): ProfileListRequestState =
-        checkNotNull(ProfileListRequestState.entries.find { it.storedName == this })
+    private fun String.toSecretListRequestState(): SecretListRequestState =
+        checkNotNull(SecretListRequestState.entries.find { it.storedName == this })
 
-    private fun String.toProfileUploadRequestState(): ProfileUploadRequestState =
-        checkNotNull(ProfileUploadRequestState.entries.find { it.storedName == this })
+    private fun String.toSecretUploadRequestState(): SecretUploadRequestState =
+        checkNotNull(SecretUploadRequestState.entries.find { it.storedName == this })
 
     private fun encodeStringList(values: List<String>): String =
         json.encodeToString(STRING_LIST_SERIALIZER, values)
@@ -3392,7 +3392,7 @@ internal class RequestRepository(
     private companion object {
         const val CLIENT_PSK_BYTES = 32
         const val IDEMPOTENCY_RETENTION_MILLIS = 25 * 60 * 60 * 1_000L
-        const val CREDENTIAL_DENIAL_MESSAGE = "Denied on phone."
+        const val SECRET_USE_DENIAL_MESSAGE = "Denied on device."
         val STRING_LIST_SERIALIZER = ListSerializer(String.serializer())
     }
 }
@@ -3400,9 +3400,9 @@ internal class RequestRepository(
 private enum class RequestKind(val storedName: String) {
     PAIRING("pairing"),
     PAIRING_FINISH("pairing_finish"),
-    CREDENTIAL("credential"),
-    PROFILE_LIST("profile_list"),
-    PROFILE_UPLOAD("profile_upload"),
+    SECRET_USE("secret_use"),
+    SECRET_LIST("secret_list"),
+    SECRET_UPLOAD("secret_upload"),
     PAIRING_REMOVE("pairing_remove"),
     UNKNOWN("unknown"),
 }

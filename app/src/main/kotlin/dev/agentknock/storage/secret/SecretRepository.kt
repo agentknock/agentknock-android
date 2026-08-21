@@ -1,4 +1,4 @@
-package dev.agentknock.storage.profile
+package dev.agentknock.storage.secret
 
 import dev.agentknock.storage.crypto.AesGcmEncryption
 import dev.agentknock.storage.crypto.DecryptionResult
@@ -11,7 +11,7 @@ import dev.agentknock.storage.audit.AuditOutcome
 import dev.agentknock.storage.audit.AuditRecord
 import dev.agentknock.storage.audit.AuditSink
 import dev.agentknock.storage.audit.NoOpAuditSink
-import dev.agentknock.protocol.ProfileUploadMode
+import dev.agentknock.protocol.SecretUploadMode
 import java.util.UUID
 import kotlinx.coroutines.CoroutineDispatcher
 import kotlinx.coroutines.Dispatchers
@@ -21,7 +21,7 @@ import kotlinx.coroutines.flow.map
 import kotlinx.coroutines.withContext
 import kotlinx.serialization.Serializable
 
-internal data class ProfileSummary(
+internal data class SecretSummary(
     val id: String,
     val name: String,
     val description: String,
@@ -31,7 +31,7 @@ internal data class ProfileSummary(
     val updatedAt: Long,
 )
 
-internal data class ProfileDetails(
+internal data class SecretDetails(
     val id: String,
     val name: String,
     val description: String,
@@ -43,7 +43,7 @@ internal data class ProfileDetails(
 
 internal data class EnvironmentVariableMetadata(
     val id: String,
-    val profileId: String,
+    val secretId: String,
     val name: String,
     val sensitive: Boolean,
     val notes: String,
@@ -65,13 +65,13 @@ internal sealed interface EnvironmentVariableValue {
     data object NotFound : EnvironmentVariableValue
 }
 
-internal sealed interface CreateProfileResult {
-    data class Created(val id: String) : CreateProfileResult
+internal sealed interface CreateSecretResult {
+    data class Created(val id: String) : CreateSecretResult
 
-    data object NameInUse : CreateProfileResult
+    data object NameInUse : CreateSecretResult
 }
 
-internal enum class SaveProfileResult {
+internal enum class SaveSecretResult {
     SAVED,
     NAME_IN_USE,
     NOT_FOUND,
@@ -82,7 +82,7 @@ internal sealed interface CreateEnvironmentVariableResult {
 
     data object NameInUse : CreateEnvironmentVariableResult
 
-    data object ProfileNotFound : CreateEnvironmentVariableResult
+    data object SecretNotFound : CreateEnvironmentVariableResult
 }
 
 internal enum class SaveEnvironmentVariableResult {
@@ -94,8 +94,8 @@ internal enum class SaveEnvironmentVariableResult {
     UNSUPPORTED_FORMAT,
 }
 
-internal data class EnvironmentProfileProposal(
-    val mode: ProfileUploadMode,
+internal data class EnvironmentSecretUpload(
+    val mode: SecretUploadMode,
     val name: String,
     val descriptionProvided: Boolean,
     val description: String?,
@@ -103,8 +103,8 @@ internal data class EnvironmentProfileProposal(
     val variableSensitivity: Map<String, Boolean> = emptyMap(),
 )
 
-internal data class EnvironmentProfileProposalSummary(
-    val existingProfileId: String?,
+internal data class EnvironmentSecretUploadSummary(
+    val existingSecretId: String?,
     val addedVariables: List<String>,
     val changedVariables: List<String>,
     val unchangedVariables: List<String>,
@@ -112,68 +112,68 @@ internal data class EnvironmentProfileProposalSummary(
     val variableSensitivity: Map<String, Boolean>,
 )
 
-internal sealed interface EnvironmentProfileProposalResult {
-    data class Valid(val summary: EnvironmentProfileProposalSummary) :
-        EnvironmentProfileProposalResult
-    data class Invalid(val message: String) : EnvironmentProfileProposalResult
+internal sealed interface EnvironmentSecretUploadResult {
+    data class Valid(val summary: EnvironmentSecretUploadSummary) :
+        EnvironmentSecretUploadResult
+    data class Invalid(val message: String) : EnvironmentSecretUploadResult
 }
 
-internal sealed interface ApplyEnvironmentProfileProposalResult {
-    data class Applied(val profileId: String) : ApplyEnvironmentProfileProposalResult
-    data class Invalid(val message: String) : ApplyEnvironmentProfileProposalResult
+internal sealed interface ApplyEnvironmentSecretUploadResult {
+    data class Applied(val secretId: String) : ApplyEnvironmentSecretUploadResult
+    data class Invalid(val message: String) : ApplyEnvironmentSecretUploadResult
 }
 
 @Serializable
-internal data class CredentialProfileMetadata(
+internal data class SecretMetadata(
     val name: String,
     val description: String,
     val environmentVariableNames: List<String>,
 )
 
-internal data class CredentialProfileDescription(
-    val profiles: List<CredentialProfileMetadata>,
-    val missingProfiles: List<String>,
+internal data class RequestedSecretDescription(
+    val secrets: List<SecretMetadata>,
+    val missingSecrets: List<String>,
 )
 
-internal data class CredentialProfileValues(
+internal data class SecretValues(
     val description: String,
     val environment: Map<String, String>,
 )
 
-internal sealed interface CredentialProfilesResult {
-    data class Available(val profiles: Map<String, CredentialProfileValues>) : CredentialProfilesResult
+internal sealed interface RequestedSecretsResult {
+    data class Available(val secrets: Map<String, SecretValues>) : RequestedSecretsResult
 
-    data class MissingProfiles(val names: List<String>) : CredentialProfilesResult
+    data class MissingSecrets(val names: List<String>) : RequestedSecretsResult
 
-    data class ConflictingVariable(val name: String) : CredentialProfilesResult
+    data class ConflictingVariable(val name: String) : RequestedSecretsResult
 
-    data object SecretUnavailable : CredentialProfilesResult
+    data object SecretUnavailable : RequestedSecretsResult
 
-    data object SecretCorrupted : CredentialProfilesResult
+    data object SecretCorrupted : RequestedSecretsResult
 
-    data object UnsupportedEncryption : CredentialProfilesResult
+    data object UnsupportedEncryption : RequestedSecretsResult
 }
 
-internal interface CredentialProfileSource {
-    suspend fun listCredentialProfiles(): List<CredentialProfileMetadata>
+internal interface RequestedSecretSource {
+    suspend fun listSecretsForClient(): List<SecretMetadata>
 
-    suspend fun describeCredentialProfiles(names: List<String>): CredentialProfileDescription
+    suspend fun describeRequestedSecrets(names: List<String>): RequestedSecretDescription
 
-    suspend fun credentialProfiles(names: List<String>): CredentialProfilesResult
+    suspend fun requestedSecrets(names: List<String>): RequestedSecretsResult
 }
 
-internal class ProfileRepository(
-    private val dao: ProfileDao,
+internal class SecretRepository(
+    private val dao: SecretDao,
     private val keyManager: LocalEncryptionKeyManager,
     private val encryption: AesGcmEncryption,
     private val audit: AuditSink = NoOpAuditSink,
     private val newId: () -> String = { UUID.randomUUID().toString() },
     private val currentTimeMillis: () -> Long = System::currentTimeMillis,
     private val cryptographyDispatcher: CoroutineDispatcher = Dispatchers.IO,
-) : CredentialProfileSource {
-    fun observeProfiles(): Flow<List<ProfileSummary>> = dao.observeProfiles().map { rows ->
+) : RequestedSecretSource {
+    fun observeSecrets(): Flow<List<SecretSummary>> = dao.observeSecrets().map { rows ->
         rows.map { row ->
-            ProfileSummary(
+            SecretSummary(
                 id = row.id,
                 name = row.name,
                 description = row.description,
@@ -185,24 +185,24 @@ internal class ProfileRepository(
         }
     }
 
-    fun observeProfile(id: String): Flow<ProfileDetails?> = combine(
-        dao.observeProfile(id),
+    fun observeSecret(id: String): Flow<SecretDetails?> = combine(
+        dao.observeSecret(id),
         dao.observeEnvironmentVariables(id),
-    ) { profile, variables ->
-        profile?.let {
+    ) { secret, variables ->
+        secret?.let {
             val availability = variables
                 .map(EnvironmentVariableMetadataRow::encryptionKeyId)
                 .distinct()
                 .associateWith { keyId -> keyManager.keyAvailable(keyId) }
-            ProfileDetails(
-                id = profile.id,
-                name = profile.name,
-                description = profile.description,
-                type = profile.type,
+            SecretDetails(
+                id = secret.id,
+                name = secret.name,
+                description = secret.description,
+                type = secret.type,
                 environmentVariables = variables.map { variable ->
                     EnvironmentVariableMetadata(
                         id = variable.id,
-                        profileId = variable.profileId,
+                        secretId = variable.secretId,
                         name = variable.name,
                         sensitive = variable.sensitive,
                         notes = variable.notes,
@@ -212,19 +212,19 @@ internal class ProfileRepository(
                         valueUpdatedAt = variable.valueUpdatedAt,
                     )
                 },
-                createdAt = profile.createdAt,
-                updatedAt = profile.updatedAt,
+                createdAt = secret.createdAt,
+                updatedAt = secret.updatedAt,
             )
         }
     }
 
-    suspend fun createProfile(name: String, description: String): CreateProfileResult {
-        validateProfileName(name)
-        if (dao.profileNameInUse(name, excludingId = "")) return CreateProfileResult.NameInUse
+    suspend fun createSecret(name: String, description: String): CreateSecretResult {
+        validateSecretName(name)
+        if (dao.secretNameInUse(name, excludingId = "")) return CreateSecretResult.NameInUse
         val id = newId()
         val now = currentTimeMillis()
-        dao.insertProfile(
-            ProfileEntity(
+        dao.insertSecret(
+            SecretEntity(
                 id = id,
                 name = name,
                 description = description,
@@ -234,20 +234,20 @@ internal class ProfileRepository(
         )
         audit.record(
             AuditRecord(
-                category = AuditCategory.PROFILE,
-                title = "Profile created",
+                category = AuditCategory.SECRET,
+                title = "Secret created",
                 detail = name,
                 outcome = AuditOutcome.CHANGED,
             ),
         )
-        return CreateProfileResult.Created(id)
+        return CreateSecretResult.Created(id)
     }
 
-    suspend fun saveProfile(id: String, name: String, description: String): SaveProfileResult {
-        validateProfileName(name)
-        val existing = dao.getProfile(id) ?: return SaveProfileResult.NOT_FOUND
-        if (dao.profileNameInUse(name, excludingId = id)) return SaveProfileResult.NAME_IN_USE
-        dao.updateProfile(
+    suspend fun saveSecret(id: String, name: String, description: String): SaveSecretResult {
+        validateSecretName(name)
+        val existing = dao.getSecret(id) ?: return SaveSecretResult.NOT_FOUND
+        if (dao.secretNameInUse(name, excludingId = id)) return SaveSecretResult.NAME_IN_USE
+        dao.updateSecret(
             existing.copy(
                 name = name,
                 description = description,
@@ -256,23 +256,23 @@ internal class ProfileRepository(
         )
         audit.record(
             AuditRecord(
-                category = AuditCategory.PROFILE,
-                title = "Profile updated",
+                category = AuditCategory.SECRET,
+                title = "Secret updated",
                 detail = name,
                 outcome = AuditOutcome.CHANGED,
             ),
         )
-        return SaveProfileResult.SAVED
+        return SaveSecretResult.SAVED
     }
 
-    suspend fun deleteProfile(id: String): Boolean {
-        val profile = dao.getProfile(id) ?: return false
-        dao.deleteProfile(profile)
+    suspend fun deleteSecret(id: String): Boolean {
+        val secret = dao.getSecret(id) ?: return false
+        dao.deleteSecret(secret)
         audit.record(
             AuditRecord(
-                category = AuditCategory.PROFILE,
-                title = "Profile deleted",
-                detail = profile.name,
+                category = AuditCategory.SECRET,
+                title = "Secret deleted",
+                detail = secret.name,
                 outcome = AuditOutcome.CHANGED,
             ),
         )
@@ -280,7 +280,7 @@ internal class ProfileRepository(
     }
 
     suspend fun createEnvironmentVariable(
-        profileId: String,
+        secretId: String,
         name: String,
         value: String,
         sensitive: Boolean,
@@ -288,20 +288,20 @@ internal class ProfileRepository(
     ): CreateEnvironmentVariableResult {
         validateEnvironmentVariableName(name)
         validateEnvironmentVariableValue(value)
-        if (dao.getProfile(profileId) == null) {
-            return CreateEnvironmentVariableResult.ProfileNotFound
+        if (dao.getSecret(secretId) == null) {
+            return CreateEnvironmentVariableResult.SecretNotFound
         }
-        if (dao.environmentVariableNameInUse(profileId, name, excludingId = "")) {
+        if (dao.environmentVariableNameInUse(secretId, name, excludingId = "")) {
             return CreateEnvironmentVariableResult.NameInUse
         }
 
         val id = newId()
-        val encrypted = encrypt(id, profileId, name, sensitive, value)
+        val encrypted = encrypt(id, secretId, name, sensitive, value)
         val now = currentTimeMillis()
         dao.insertEnvironmentVariable(
             EnvironmentVariableEntity(
                 id = id,
-                profileId = profileId,
+                secretId = secretId,
                 name = name,
                 sensitive = sensitive,
                 notes = notes,
@@ -316,9 +316,9 @@ internal class ProfileRepository(
         )
         audit.record(
             AuditRecord(
-                category = AuditCategory.PROFILE,
-                title = "Variable added",
-                detail = "$name in ${dao.getProfile(profileId)?.name.orEmpty()}",
+                category = AuditCategory.SECRET,
+                title = "Environment variable added",
+                detail = "$name in ${dao.getSecret(secretId)?.name.orEmpty()}",
                 outcome = AuditOutcome.CHANGED,
             ),
         )
@@ -340,17 +340,17 @@ internal class ProfileRepository(
         validateEnvironmentVariableName(name)
         replacementValue?.let(::validateEnvironmentVariableValue)
         val existing = dao.getEnvironmentVariable(id) ?: return SaveEnvironmentVariableResult.NOT_FOUND
-        if (dao.environmentVariableNameInUse(existing.profileId, name, excludingId = id)) {
+        if (dao.environmentVariableNameInUse(existing.secretId, name, excludingId = id)) {
             return SaveEnvironmentVariableResult.NAME_IN_USE
         }
 
         val authenticatedFieldsChanged = name != existing.name || sensitive != existing.sensitive
         val encrypted = when {
-            replacementValue != null -> encrypt(id, existing.profileId, name, sensitive, replacementValue)
+            replacementValue != null -> encrypt(id, existing.secretId, name, sensitive, replacementValue)
             authenticatedFieldsChanged -> when (val decrypted = decrypt(existing)) {
                 is DecryptionResult.Plaintext -> encrypt(
                     id,
-                    existing.profileId,
+                    existing.secretId,
                     name,
                     sensitive,
                     decrypted.value.decodeToString(throwOnInvalidSequence = true),
@@ -386,8 +386,8 @@ internal class ProfileRepository(
         )
         audit.record(
             AuditRecord(
-                category = AuditCategory.PROFILE,
-                title = "Variable updated",
+                category = AuditCategory.SECRET,
+                title = "Environment variable updated",
                 detail = name,
                 outcome = AuditOutcome.CHANGED,
             ),
@@ -397,11 +397,11 @@ internal class ProfileRepository(
 
     suspend fun deleteEnvironmentVariable(id: String): Boolean {
         val variable = dao.getEnvironmentVariable(id) ?: return false
-        dao.deleteEnvironmentVariable(variable, profileUpdatedAt = currentTimeMillis())
+        dao.deleteEnvironmentVariable(variable, secretUpdatedAt = currentTimeMillis())
         audit.record(
             AuditRecord(
-                category = AuditCategory.PROFILE,
-                title = "Variable deleted",
+                category = AuditCategory.SECRET,
+                title = "Environment variable deleted",
                 detail = variable.name,
                 outcome = AuditOutcome.CHANGED,
             ),
@@ -409,42 +409,42 @@ internal class ProfileRepository(
         return true
     }
 
-    suspend fun describeEnvironmentProfileProposal(
-        proposal: EnvironmentProfileProposal,
-    ): EnvironmentProfileProposalResult {
-        val invalid = validateProposalInput(proposal)
-        if (invalid != null) return EnvironmentProfileProposalResult.Invalid(invalid)
-        val existing = dao.getProfilesByName(listOf(proposal.name)).singleOrNull()
-        when (proposal.mode) {
-            ProfileUploadMode.CREATE -> if (existing != null) {
-                return EnvironmentProfileProposalResult.Invalid(
-                    "A Profile named ${proposal.name} already exists.",
+    suspend fun describeEnvironmentSecretUpload(
+        upload: EnvironmentSecretUpload,
+    ): EnvironmentSecretUploadResult {
+        val invalid = validateUploadInput(upload)
+        if (invalid != null) return EnvironmentSecretUploadResult.Invalid(invalid)
+        val existing = dao.getSecretsByName(listOf(upload.name)).singleOrNull()
+        when (upload.mode) {
+            SecretUploadMode.CREATE -> if (existing != null) {
+                return EnvironmentSecretUploadResult.Invalid(
+                    "A secret named ${upload.name} already exists.",
                 )
             }
-            ProfileUploadMode.REPLACE,
-            ProfileUploadMode.UPDATE,
+            SecretUploadMode.REPLACE,
+            SecretUploadMode.UPDATE,
             -> {
                 if (existing == null) {
-                    return EnvironmentProfileProposalResult.Invalid(
-                        "The target Profile ${proposal.name} does not exist.",
+                    return EnvironmentSecretUploadResult.Invalid(
+                        "The target secret ${upload.name} does not exist.",
                     )
                 }
-                if (existing.type != ENVIRONMENT_PROFILE_TYPE) {
-                    return EnvironmentProfileProposalResult.Invalid(
-                        "The target Profile has a different type.",
+                if (existing.type != ENVIRONMENT_SECRET_TYPE) {
+                    return EnvironmentSecretUploadResult.Invalid(
+                        "The target secret has a different type.",
                     )
                 }
             }
         }
         val existingVariables = existing?.let {
-            dao.getEnvironmentVariablesForProfiles(listOf(it.id)).associateBy { variable ->
+            dao.getEnvironmentVariablesForSecrets(listOf(it.id)).associateBy { variable ->
                 variable.name
             }
         }.orEmpty()
         val added = mutableListOf<String>()
         val changed = mutableListOf<String>()
         val unchanged = mutableListOf<String>()
-        proposal.variables.toSortedMap().forEach { (name, value) ->
+        upload.variables.toSortedMap().forEach { (name, value) ->
             val current = existingVariables[name]
             if (current == null) {
                 added += name
@@ -454,74 +454,74 @@ internal class ProfileRepository(
                 if (same) unchanged += name else changed += name
             }
         }
-        if (proposal.mode == ProfileUploadMode.UPDATE) {
-            unchanged += existingVariables.keys.minus(proposal.variables.keys).sorted()
+        if (upload.mode == SecretUploadMode.UPDATE) {
+            unchanged += existingVariables.keys.minus(upload.variables.keys).sorted()
         }
-        val removed = if (proposal.mode == ProfileUploadMode.REPLACE) {
-            existingVariables.keys.minus(proposal.variables.keys).sorted()
+        val removed = if (upload.mode == SecretUploadMode.REPLACE) {
+            existingVariables.keys.minus(upload.variables.keys).sorted()
         } else {
             emptyList()
         }
-        return EnvironmentProfileProposalResult.Valid(
-            EnvironmentProfileProposalSummary(
-                existingProfileId = existing?.id,
+        return EnvironmentSecretUploadResult.Valid(
+            EnvironmentSecretUploadSummary(
+                existingSecretId = existing?.id,
                 addedVariables = added,
                 changedVariables = changed,
                 unchangedVariables = unchanged,
                 removedVariables = removed,
-                variableSensitivity = proposal.variables.keys.associateWith { name ->
+                variableSensitivity = upload.variables.keys.associateWith { name ->
                     existingVariables[name]?.sensitive ?: true
                 },
             ),
         )
     }
 
-    suspend fun applyEnvironmentProfileProposal(
-        proposal: EnvironmentProfileProposal,
-        acceptedName: String,
-    ): ApplyEnvironmentProfileProposalResult {
-        val validation = describeEnvironmentProfileProposal(proposal)
-        if (validation is EnvironmentProfileProposalResult.Invalid) {
-            return ApplyEnvironmentProfileProposalResult.Invalid(validation.message)
+    suspend fun applyEnvironmentSecretUpload(
+        upload: EnvironmentSecretUpload,
+        approvedName: String,
+    ): ApplyEnvironmentSecretUploadResult {
+        val validation = describeEnvironmentSecretUpload(upload)
+        if (validation is EnvironmentSecretUploadResult.Invalid) {
+            return ApplyEnvironmentSecretUploadResult.Invalid(validation.message)
         }
-        validateProfileName(acceptedName)
-        val summary = (validation as EnvironmentProfileProposalResult.Valid).summary
-        val existing = summary.existingProfileId?.let { id -> dao.getProfile(id) }
+        validateSecretName(approvedName)
+        val summary = (validation as EnvironmentSecretUploadResult.Valid).summary
+        val existing = summary.existingSecretId?.let { id -> dao.getSecret(id) }
         if (
-            proposal.mode == ProfileUploadMode.CREATE &&
-            dao.profileNameInUse(acceptedName, excludingId = "")
+            upload.mode == SecretUploadMode.CREATE &&
+            dao.secretNameInUse(approvedName, excludingId = "")
         ) {
-            return ApplyEnvironmentProfileProposalResult.Invalid(
-                "A Profile named $acceptedName already exists.",
+            return ApplyEnvironmentSecretUploadResult.Invalid(
+                "A secret named $approvedName already exists.",
             )
         }
         val now = currentTimeMillis()
-        val profileId = existing?.id ?: newId()
-        val profile = ProfileEntity(
-            id = profileId,
-            name = if (proposal.mode == ProfileUploadMode.CREATE) acceptedName else proposal.name,
+        val secretId = existing?.id ?: newId()
+        val secret = SecretEntity(
+            id = secretId,
+            name = if (upload.mode == SecretUploadMode.CREATE) approvedName else upload.name,
             description = when {
-                proposal.descriptionProvided -> proposal.description.orEmpty()
-                proposal.mode == ProfileUploadMode.UPDATE -> existing?.description.orEmpty()
+                upload.descriptionProvided -> upload.description.orEmpty()
+                upload.mode == SecretUploadMode.UPDATE -> existing?.description.orEmpty()
                 else -> ""
             },
-            type = ENVIRONMENT_PROFILE_TYPE,
+            type = ENVIRONMENT_SECRET_TYPE,
             createdAt = existing?.createdAt ?: now,
             updatedAt = now,
         )
         val existingVariables = existing?.let {
-            dao.getEnvironmentVariablesForProfiles(listOf(it.id)).associateBy { variable ->
+            dao.getEnvironmentVariablesForSecrets(listOf(it.id)).associateBy { variable ->
                 variable.name
             }
         }.orEmpty()
-        val variables = proposal.variables.map { (name, value) ->
+        val variables = upload.variables.map { (name, value) ->
             val current = existingVariables[name]
             val id = current?.id ?: newId()
-            val sensitive = proposal.variableSensitivity[name] ?: current?.sensitive ?: true
-            val encrypted = encrypt(id, profileId, name, sensitive, value)
+            val sensitive = upload.variableSensitivity[name] ?: current?.sensitive ?: true
+            val encrypted = encrypt(id, secretId, name, sensitive, value)
             EnvironmentVariableEntity(
                 id = id,
-                profileId = profileId,
+                secretId = secretId,
                 name = name,
                 sensitive = sensitive,
                 notes = current?.notes.orEmpty(),
@@ -534,105 +534,105 @@ internal class ProfileRepository(
                 valueUpdatedAt = now,
             )
         }
-        dao.applyEnvironmentProfile(
-            profile = profile,
+        dao.applyEnvironmentSecret(
+            secret = secret,
             variables = variables,
-            replaceVariables = proposal.mode != ProfileUploadMode.UPDATE,
+            replaceVariables = upload.mode != SecretUploadMode.UPDATE,
         )
-        return ApplyEnvironmentProfileProposalResult.Applied(profileId)
+        return ApplyEnvironmentSecretUploadResult.Applied(secretId)
     }
 
-    override suspend fun listCredentialProfiles(): List<CredentialProfileMetadata> {
-        val variablesByProfile = dao.getEnvironmentVariables()
-            .groupBy(EnvironmentVariableEntity::profileId)
-        return dao.getProfiles().map { profile ->
-            CredentialProfileMetadata(
-                    name = profile.name,
-                    description = profile.description,
-                environmentVariableNames = variablesByProfile[profile.id]
+    override suspend fun listSecretsForClient(): List<SecretMetadata> {
+        val variablesBySecret = dao.getEnvironmentVariables()
+            .groupBy(EnvironmentVariableEntity::secretId)
+        return dao.getSecrets().map { secret ->
+            SecretMetadata(
+                    name = secret.name,
+                    description = secret.description,
+                environmentVariableNames = variablesBySecret[secret.id]
                     .orEmpty()
                     .map(EnvironmentVariableEntity::name),
             )
         }
     }
 
-    override suspend fun describeCredentialProfiles(
+    override suspend fun describeRequestedSecrets(
         names: List<String>,
-    ): CredentialProfileDescription {
+    ): RequestedSecretDescription {
         val requestedNames = names.distinct()
-        val profiles = if (requestedNames.isEmpty()) {
+        val secrets = if (requestedNames.isEmpty()) {
             emptyList()
         } else {
-            dao.getProfilesByName(requestedNames)
+            dao.getSecretsByName(requestedNames)
         }
-        val profileByName = profiles.associateBy(ProfileEntity::name)
-        val variables = if (profiles.isEmpty()) {
+        val secretByName = secrets.associateBy(SecretEntity::name)
+        val variables = if (secrets.isEmpty()) {
             emptyList()
         } else {
-            dao.getEnvironmentVariablesForProfiles(profiles.map(ProfileEntity::id))
+            dao.getEnvironmentVariablesForSecrets(secrets.map(SecretEntity::id))
         }
-        val variablesByProfile = variables.groupBy(EnvironmentVariableEntity::profileId)
-        return CredentialProfileDescription(
-            profiles = requestedNames.mapNotNull { name ->
-                profileByName[name]?.let { profile ->
-                    CredentialProfileMetadata(
-                        name = profile.name,
-                        description = profile.description,
-                        environmentVariableNames = variablesByProfile[profile.id]
+        val variablesBySecret = variables.groupBy(EnvironmentVariableEntity::secretId)
+        return RequestedSecretDescription(
+            secrets = requestedNames.mapNotNull { name ->
+                secretByName[name]?.let { secret ->
+                    SecretMetadata(
+                        name = secret.name,
+                        description = secret.description,
+                        environmentVariableNames = variablesBySecret[secret.id]
                             .orEmpty()
                             .map(EnvironmentVariableEntity::name)
                             .sorted(),
                     )
                 }
             },
-            missingProfiles = requestedNames.filterNot(profileByName::containsKey),
+            missingSecrets = requestedNames.filterNot(secretByName::containsKey),
         )
     }
 
-    override suspend fun credentialProfiles(names: List<String>): CredentialProfilesResult {
+    override suspend fun requestedSecrets(names: List<String>): RequestedSecretsResult {
         val requestedNames = names.distinct()
         if (requestedNames.isEmpty()) {
-            return CredentialProfilesResult.MissingProfiles(emptyList())
+            return RequestedSecretsResult.MissingSecrets(emptyList())
         }
-        val profiles = dao.getProfilesByName(requestedNames)
-        val profileByName = profiles.associateBy(ProfileEntity::name)
-        val missing = requestedNames.filterNot(profileByName::containsKey)
-        if (missing.isNotEmpty()) return CredentialProfilesResult.MissingProfiles(missing)
+        val secrets = dao.getSecretsByName(requestedNames)
+        val secretByName = secrets.associateBy(SecretEntity::name)
+        val missing = requestedNames.filterNot(secretByName::containsKey)
+        if (missing.isNotEmpty()) return RequestedSecretsResult.MissingSecrets(missing)
 
-        val variables = dao.getEnvironmentVariablesForProfiles(profiles.map(ProfileEntity::id))
+        val variables = dao.getEnvironmentVariablesForSecrets(secrets.map(SecretEntity::id))
         val combinedEnvironment = sortedMapOf<String, String>()
-        val profileEnvironments = profiles.associate { profile ->
-            profile.id to sortedMapOf<String, String>()
+        val secretEnvironments = secrets.associate { secret ->
+            secret.id to sortedMapOf<String, String>()
         }
         for (variable in variables) {
             val value = when (val decrypted = decrypt(variable)) {
                 is DecryptionResult.Plaintext -> try {
                     decrypted.value.decodeToString(throwOnInvalidSequence = true)
                 } catch (_: IllegalArgumentException) {
-                    return CredentialProfilesResult.SecretCorrupted
+                    return RequestedSecretsResult.SecretCorrupted
                 }
                 DecryptionResult.KeyUnavailable -> {
-                    return CredentialProfilesResult.SecretUnavailable
+                    return RequestedSecretsResult.SecretUnavailable
                 }
                 DecryptionResult.AuthenticationFailed -> {
-                    return CredentialProfilesResult.SecretCorrupted
+                    return RequestedSecretsResult.SecretCorrupted
                 }
                 DecryptionResult.UnsupportedFormat -> {
-                    return CredentialProfilesResult.UnsupportedEncryption
+                    return RequestedSecretsResult.UnsupportedEncryption
                 }
             }
-            profileEnvironments.getValue(variable.profileId)[variable.name] = value
+            secretEnvironments.getValue(variable.secretId)[variable.name] = value
             val previous = combinedEnvironment.putIfAbsent(variable.name, value)
             if (previous != null && previous != value) {
-                return CredentialProfilesResult.ConflictingVariable(variable.name)
+                return RequestedSecretsResult.ConflictingVariable(variable.name)
             }
         }
-        return CredentialProfilesResult.Available(
+        return RequestedSecretsResult.Available(
             requestedNames.associateWith { name ->
-                val profile = profileByName.getValue(name)
-                CredentialProfileValues(
-                    description = profile.description,
-                    environment = profileEnvironments.getValue(profile.id),
+                val secret = secretByName.getValue(name)
+                SecretValues(
+                    description = secret.description,
+                    environment = secretEnvironments.getValue(secret.id),
                 )
             },
         )
@@ -640,7 +640,7 @@ internal class ProfileRepository(
 
     private suspend fun encrypt(
         id: String,
-        profileId: String,
+        secretId: String,
         name: String,
         sensitive: Boolean,
         value: String,
@@ -649,7 +649,7 @@ internal class ProfileRepository(
         return withContext(cryptographyDispatcher) {
             encryption.encrypt(
                 keyId = key.id,
-                location = location(id, profileId, name, sensitive),
+                location = location(id, secretId, name, sensitive),
                 plaintext = value.encodeToByteArray(),
             )
         }
@@ -666,7 +666,7 @@ internal class ProfileRepository(
                 ),
                 location = location(
                     id = variable.id,
-                    profileId = variable.profileId,
+                    secretId = variable.secretId,
                     name = variable.name,
                     sensitive = variable.sensitive,
                 ),
@@ -686,7 +686,7 @@ internal class ProfileRepository(
 
     private fun location(
         id: String,
-        profileId: String,
+        secretId: String,
         name: String,
         sensitive: Boolean,
     ) = EncryptionLocation(
@@ -694,15 +694,15 @@ internal class ProfileRepository(
         recordId = id,
         fieldName = "value",
         bindings = listOf(
-            EncryptionBinding("profile_id", profileId),
+            EncryptionBinding("secret_id", secretId),
             EncryptionBinding("name", name),
             EncryptionBinding("sensitive", sensitive.toString()),
         ),
     )
 
-    private fun validateProfileName(name: String) {
-        require(name.isNotBlank()) { "A profile must have a name" }
-        require(name == name.trim()) { "A profile name cannot start or end with whitespace" }
+    private fun validateSecretName(name: String) {
+        require(name.isNotBlank()) { "A secret must have a name" }
+        require(name == name.trim()) { "A secret name cannot start or end with whitespace" }
     }
 
     private fun validateEnvironmentVariableName(name: String) {
@@ -715,10 +715,10 @@ internal class ProfileRepository(
         require('\u0000' !in value) { "An environment variable value cannot contain a null byte" }
     }
 
-    private fun validateProposalInput(proposal: EnvironmentProfileProposal): String? =
+    private fun validateUploadInput(upload: EnvironmentSecretUpload): String? =
         runCatching {
-            validateProfileName(proposal.name)
-            proposal.variables.forEach { (name, value) ->
+            validateSecretName(upload.name)
+            upload.variables.forEach { (name, value) ->
                 validateEnvironmentVariableName(name)
                 validateEnvironmentVariableValue(value)
             }
@@ -726,6 +726,6 @@ internal class ProfileRepository(
 
     private companion object {
         val ENVIRONMENT_VARIABLE_NAME = Regex("[A-Za-z_][A-Za-z0-9_]*")
-        const val ENVIRONMENT_PROFILE_TYPE = "environment"
+        const val ENVIRONMENT_SECRET_TYPE = "environment"
     }
 }

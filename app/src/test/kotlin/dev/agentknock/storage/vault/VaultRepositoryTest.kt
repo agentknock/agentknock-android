@@ -25,11 +25,11 @@ import org.junit.Test
 @OptIn(ExperimentalCoroutinesApi::class)
 class VaultRepositoryTest {
     @Test
-    fun `claims and promotes a locally encrypted vault identity`() = runTest {
+    fun `claims and promotes a locally encrypted device identity`() = runTest {
         val fixture = Fixture(UnconfinedTestDispatcher(testScheduler))
 
         assertEquals(
-            ClaimVaultResult.Claimed,
+            ClaimPairingAddressResult.Claimed,
             fixture.repository.stageAndClaim("yup-its-free"),
         )
 
@@ -59,13 +59,13 @@ class VaultRepositoryTest {
 
         assertTrue(
             fixture.repository.stageAndClaim("amber-river-maple") is
-                ClaimVaultResult.RelayUnavailable,
+                ClaimPairingAddressResult.RelayUnavailable,
         )
         val candidateId = fixture.dao.identities.value.single().id
         val firstClaim = fixture.relay.claims.single()
 
         assertEquals(
-            ClaimVaultResult.Claimed,
+            ClaimPairingAddressResult.Claimed,
             fixture.repository.stageAndClaim("amber-river-maple"),
         )
 
@@ -76,17 +76,17 @@ class VaultRepositoryTest {
     }
 
     @Test
-    fun `an unavailable replacement leaves the active vault intact`() = runTest {
+    fun `an unavailable replacement leaves the active device identity intact`() = runTest {
         val fixture = Fixture(UnconfinedTestDispatcher(testScheduler))
         assertEquals(
-            ClaimVaultResult.Claimed,
+            ClaimPairingAddressResult.Claimed,
             fixture.repository.stageAndClaim("amber-river-maple"),
         )
         val activeId = fixture.dao.identities.value.single().id
         fixture.relay.results += RelayClaimResult.AddressUnavailable
 
         assertEquals(
-            ClaimVaultResult.AddressUnavailable,
+            ClaimPairingAddressResult.AddressUnavailable,
             fixture.repository.stageAndClaim("silent-forest-cloud"),
         )
 
@@ -104,7 +104,7 @@ class VaultRepositoryTest {
     fun `changing address preserves the device identity keys and pairings anchor`() = runTest {
         val fixture = Fixture(UnconfinedTestDispatcher(testScheduler))
         assertEquals(
-            ClaimVaultResult.Claimed,
+            ClaimPairingAddressResult.Claimed,
             fixture.repository.stageAndClaim("amber-river-maple"),
         )
         val before = (
@@ -113,7 +113,7 @@ class VaultRepositoryTest {
             ).credentials
 
         assertEquals(
-            ClaimVaultResult.Claimed,
+            ClaimPairingAddressResult.Claimed,
             fixture.repository.stageAndClaim("silent-forest-cloud"),
         )
         val after = (
@@ -121,7 +121,7 @@ class VaultRepositoryTest {
                 RelayDeviceCredentialsResult.Available
             ).credentials
 
-        assertEquals(before.vaultIdentityId, after.vaultIdentityId)
+        assertEquals(before.deviceIdentityId, after.deviceIdentityId)
         assertEquals(before.deviceId, after.deviceId)
         assertEquals("silent-forest-cloud", after.address)
         assertNotEquals(before.addressId, after.addressId)
@@ -133,7 +133,7 @@ class VaultRepositoryTest {
     }
 
     @Test
-    fun `a restored vault keeps its metadata and reports unavailable secrets`() = runTest {
+    fun `a restored vault keeps device metadata and reports unavailable secrets`() = runTest {
         val fixture = Fixture(UnconfinedTestDispatcher(testScheduler))
         fixture.repository.stageAndClaim("amber-river-maple")
 
@@ -156,12 +156,12 @@ class VaultRepositoryTest {
         val configuration = restored.observeConfiguration().first()
 
         assertEquals("amber-river-maple", configuration.active?.address)
-        assertFalse(configuration.active?.secretsAvailable ?: true)
+        assertFalse(configuration.active?.credentialsAvailable ?: true)
         assertEquals(2, fixture.dao.secrets.value.size)
     }
 
     @Test
-    fun `a restored vault can claim a replacement device`() = runTest {
+    fun `a restored vault can claim a replacement device identity`() = runTest {
         val fixture = Fixture(UnconfinedTestDispatcher(testScheduler))
         fixture.repository.stageAndClaim("amber-river-maple")
         val original = fixture.dao.identities.value.single()
@@ -184,7 +184,7 @@ class VaultRepositoryTest {
         )
 
         assertEquals(
-            ClaimVaultResult.Claimed,
+            ClaimPairingAddressResult.Claimed,
             restored.stageAndClaim("silent-forest-cloud"),
         )
 
@@ -245,17 +245,17 @@ private class FakeRelayClaimClient : RelayClaimClient {
 }
 
 private class FakeVaultDao : VaultDao {
-    val identities = MutableStateFlow<List<VaultIdentityEntity>>(emptyList())
+    val identities = MutableStateFlow<List<DeviceIdentityEntity>>(emptyList())
     val secrets = MutableStateFlow<List<VaultSecretEntity>>(emptyList())
 
-    override fun observeIdentities(): Flow<List<VaultIdentityEntity>> = identities
+    override fun observeIdentities(): Flow<List<DeviceIdentityEntity>> = identities
 
     override fun observeSecrets(): Flow<List<VaultSecretEntity>> = secrets
 
-    override suspend fun getIdentity(role: String): VaultIdentityEntity? =
+    override suspend fun getIdentity(role: String): DeviceIdentityEntity? =
         identities.value.singleOrNull { it.role == role }
 
-    override suspend fun getIdentityById(id: String): VaultIdentityEntity? =
+    override suspend fun getIdentityById(id: String): DeviceIdentityEntity? =
         identities.value.singleOrNull { it.id == id }
 
     override suspend fun getSecrets(identityId: String): List<VaultSecretEntity> =
@@ -273,7 +273,7 @@ private class FakeVaultDao : VaultDao {
     override suspend fun identityExists(id: String, role: String): Boolean =
         identities.value.any { it.id == id && it.role == role }
 
-    override suspend fun insertIdentity(identity: VaultIdentityEntity) {
+    override suspend fun insertIdentity(identity: DeviceIdentityEntity) {
         check(identities.value.none { it.id == identity.id || it.role == identity.role })
         identities.value += identity
     }

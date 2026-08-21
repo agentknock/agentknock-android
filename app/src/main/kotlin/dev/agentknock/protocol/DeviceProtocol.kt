@@ -13,11 +13,11 @@ internal data class DeviceKeyPair(
     val publicKey: ByteArray,
 )
 
-internal object VaultProtocol {
+internal object DeviceProtocol {
     private val baseDerivationSalt = "agentknock-v1".encodeToByteArray()
     private val addressDerivationInfo = "agentknock-v1 address".encodeToByteArray()
 
-    fun validAddress(address: String): Boolean = address
+    fun validPairingAddress(address: String): Boolean = address
         .split('-')
         .all { word -> word.isNotEmpty() && word.all { it in 'a'..'z' } }
 

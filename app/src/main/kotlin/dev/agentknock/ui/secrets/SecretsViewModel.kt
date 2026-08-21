@@ -1,16 +1,16 @@
-package dev.agentknock.ui.profiles
+package dev.agentknock.ui.secrets
 
 import android.app.Application
 import androidx.lifecycle.AndroidViewModel
 import androidx.lifecycle.viewModelScope
 import dev.agentknock.AgentknockApplication
-import dev.agentknock.storage.profile.CreateEnvironmentVariableResult
-import dev.agentknock.storage.profile.CreateProfileResult
-import dev.agentknock.storage.profile.EnvironmentVariableValue
-import dev.agentknock.storage.profile.ProfileDetails
-import dev.agentknock.storage.profile.ProfileSummary
-import dev.agentknock.storage.profile.SaveEnvironmentVariableResult
-import dev.agentknock.storage.profile.SaveProfileResult
+import dev.agentknock.storage.secret.CreateEnvironmentVariableResult
+import dev.agentknock.storage.secret.CreateSecretResult
+import dev.agentknock.storage.secret.EnvironmentVariableValue
+import dev.agentknock.storage.secret.SecretDetails
+import dev.agentknock.storage.secret.SecretSummary
+import dev.agentknock.storage.secret.SaveEnvironmentVariableResult
+import dev.agentknock.storage.secret.SaveSecretResult
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.SharingStarted
 import kotlinx.coroutines.flow.StateFlow
@@ -21,53 +21,53 @@ import kotlinx.coroutines.flow.stateIn
 import kotlinx.coroutines.ExperimentalCoroutinesApi
 
 @OptIn(ExperimentalCoroutinesApi::class)
-internal class ProfilesViewModel(application: Application) : AndroidViewModel(application) {
-    private val repository = (application as AgentknockApplication).container.profiles
-    private val selectedProfileId = MutableStateFlow<String?>(null)
+internal class SecretsViewModel(application: Application) : AndroidViewModel(application) {
+    private val repository = (application as AgentknockApplication).container.secrets
+    private val selectedSecretId = MutableStateFlow<String?>(null)
 
-    val selection: StateFlow<String?> = selectedProfileId.asStateFlow()
+    val selection: StateFlow<String?> = selectedSecretId.asStateFlow()
 
-    val profiles: StateFlow<List<ProfileSummary>> = repository.observeProfiles().stateIn(
+    val secrets: StateFlow<List<SecretSummary>> = repository.observeSecrets().stateIn(
         scope = viewModelScope,
         started = SharingStarted.Eagerly,
         initialValue = emptyList(),
     )
 
-    val selectedProfile: StateFlow<ProfileDetails?> = selectedProfileId
-        .flatMapLatest { id -> id?.let(repository::observeProfile) ?: flowOf(null) }
+    val selectedSecret: StateFlow<SecretDetails?> = selectedSecretId
+        .flatMapLatest { id -> id?.let(repository::observeSecret) ?: flowOf(null) }
         .stateIn(
             scope = viewModelScope,
             started = SharingStarted.Eagerly,
             initialValue = null,
         )
 
-    fun selectProfile(id: String?) {
-        selectedProfileId.value = id
+    fun selectSecret(id: String?) {
+        selectedSecretId.value = id
     }
 
-    suspend fun createProfile(name: String, description: String): CreateProfileResult =
-        repository.createProfile(name, description)
+    suspend fun createSecret(name: String, description: String): CreateSecretResult =
+        repository.createSecret(name, description)
 
-    suspend fun saveProfile(
+    suspend fun saveSecret(
         id: String,
         name: String,
         description: String,
-    ): SaveProfileResult = repository.saveProfile(id, name, description)
+    ): SaveSecretResult = repository.saveSecret(id, name, description)
 
-    suspend fun deleteProfile(id: String): Boolean {
-        val deleted = repository.deleteProfile(id)
-        if (deleted && selectedProfileId.value == id) selectedProfileId.value = null
+    suspend fun deleteSecret(id: String): Boolean {
+        val deleted = repository.deleteSecret(id)
+        if (deleted && selectedSecretId.value == id) selectedSecretId.value = null
         return deleted
     }
 
     suspend fun createEnvironmentVariable(
-        profileId: String,
+        secretId: String,
         name: String,
         value: String,
         sensitive: Boolean,
         notes: String,
     ): CreateEnvironmentVariableResult = repository.createEnvironmentVariable(
-        profileId = profileId,
+        secretId = secretId,
         name = name,
         value = value,
         sensitive = sensitive,

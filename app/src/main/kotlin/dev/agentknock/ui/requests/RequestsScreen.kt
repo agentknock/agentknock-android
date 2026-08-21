@@ -86,29 +86,29 @@ import androidx.lifecycle.compose.LocalLifecycleOwner
 import androidx.lifecycle.Lifecycle
 import androidx.lifecycle.LifecycleEventObserver
 import androidx.lifecycle.viewmodel.compose.viewModel
-import dev.agentknock.protocol.ProfileUploadMode
+import dev.agentknock.protocol.SecretUploadMode
 import dev.agentknock.presentation.formatTimestamp
 import dev.agentknock.presentation.formatPlatformName
 import dev.agentknock.presentation.renderShellCommand
-import dev.agentknock.storage.profile.CredentialProfileMetadata
-import dev.agentknock.storage.request.CredentialCompletionResult
-import dev.agentknock.storage.request.CredentialDecision
-import dev.agentknock.storage.request.CredentialDecisionResult
-import dev.agentknock.storage.request.CredentialRequestDetails
-import dev.agentknock.storage.request.CredentialRequestState
+import dev.agentknock.storage.secret.SecretMetadata
+import dev.agentknock.storage.request.SecretUseCompletionResult
+import dev.agentknock.storage.request.SecretUseDecision
+import dev.agentknock.storage.request.SecretUseDecisionResult
+import dev.agentknock.storage.request.SecretUseRequestDetails
+import dev.agentknock.storage.request.SecretUseRequestState
 import dev.agentknock.storage.request.InboxRequestDetails
 import dev.agentknock.storage.request.InboxRequestState
 import dev.agentknock.storage.request.InboxRequestSummary
 import dev.agentknock.storage.request.PairingDecisionResult
 import dev.agentknock.storage.request.PairingState
-import dev.agentknock.storage.request.ProfileUploadDecisionResult
-import dev.agentknock.storage.request.ProfileUploadRequestDetails
-import dev.agentknock.storage.request.ProfileUploadRequestState
-import dev.agentknock.storage.request.ProfileUploadVariableValue
+import dev.agentknock.storage.request.SecretUploadDecisionResult
+import dev.agentknock.storage.request.SecretUploadRequestDetails
+import dev.agentknock.storage.request.SecretUploadRequestState
+import dev.agentknock.storage.request.SecretUploadVariableValue
 import dev.agentknock.storage.request.RequestSyncResult
-import dev.agentknock.storage.vault.VaultIdentity
+import dev.agentknock.storage.vault.DeviceIdentity
 import dev.agentknock.ui.components.ClientIdentity
-import dev.agentknock.ui.components.ProfileIdentities
+import dev.agentknock.ui.components.SecretIdentities
 import kotlinx.coroutines.launch
 
 @Composable
@@ -132,12 +132,12 @@ internal fun RequestsScreen(
     }
 
     fun approve(request: InboxRequestSummary) {
-        if (request.credentialState != CredentialRequestState.APPROVAL_PENDING) return
+        if (request.secretUseState != SecretUseRequestState.APPROVAL_PENDING) return
         authenticate(
-            "Approve credential release",
+            "Approve secret use",
             {
                 scope.launch {
-                    report(viewModel.approveCredentialRequest(request.id).message())
+                    report(viewModel.approveSecretUseRequest(request.id).message())
                 }
             },
             ::report,
@@ -149,10 +149,10 @@ internal fun RequestsScreen(
             val message = when {
                 request.pairingState?.canReject() == true ->
                     viewModel.rejectPairing(request.id).message()
-                request.credentialState == CredentialRequestState.APPROVAL_PENDING ->
-                    viewModel.denyCredentialRequest(request.id).message()
-                request.profileUploadState == ProfileUploadRequestState.REVIEW_PENDING ->
-                    viewModel.rejectProfileUpload(request.id).message()
+                request.secretUseState == SecretUseRequestState.APPROVAL_PENDING ->
+                    viewModel.denySecretUseRequest(request.id).message()
+                request.secretUploadState == SecretUploadRequestState.REVIEW_PENDING ->
+                    viewModel.rejectSecretUpload(request.id).message()
                 else -> return@launch
             }
             report(message)
@@ -254,44 +254,44 @@ private fun RequestDetail(
             onReject = { scope.launch { report(viewModel.rejectPairing(request.id).message()) } },
             modifier = modifier,
         )
-        request.credential != null -> CredentialDetail(
+        request.secretUse != null -> SecretUseDetail(
             request = request,
             onBack = onBack,
             showBack = showBack,
             onApprove = {
                 authenticate(
-                    "Approve credential release",
+                    "Approve secret use",
                     {
                         scope.launch {
-                            report(viewModel.approveCredentialRequest(request.id).message())
+                            report(viewModel.approveSecretUseRequest(request.id).message())
                         }
                     },
                     report,
                 )
             },
-            onDeny = { scope.launch { report(viewModel.denyCredentialRequest(request.id).message()) } },
+            onDeny = { scope.launch { report(viewModel.denySecretUseRequest(request.id).message()) } },
             modifier = modifier,
         )
-        request.profileUpload != null -> ProfileUploadDetail(
+        request.secretUpload != null -> SecretUploadDetail(
             request = request,
             onBack = onBack,
             showBack = showBack,
-            onAccept = { name ->
+            onApprove = { name ->
                 authenticate(
-                    "Accept profile proposal",
+                    "Approve secret upload",
                     {
                         scope.launch {
-                            report(viewModel.acceptProfileUpload(request.id, name).message())
+                            report(viewModel.approveSecretUpload(request.id, name).message())
                         }
                     },
                     report,
                 )
             },
-            onReject = { scope.launch { report(viewModel.rejectProfileUpload(request.id).message()) } },
+            onReject = { scope.launch { report(viewModel.rejectSecretUpload(request.id).message()) } },
             authenticate = authenticate,
-            onReveal = { variableId -> viewModel.readProfileUploadVariable(request.id, variableId) },
+            onReveal = { variableId -> viewModel.readSecretUploadVariable(request.id, variableId) },
             onSensitivityChange = { variableId, sensitive ->
-                viewModel.setProfileUploadVariableSensitivity(request.id, variableId, sensitive)
+                viewModel.setSecretUploadVariableSensitivity(request.id, variableId, sensitive)
             },
             report = report,
             modifier = modifier,
@@ -313,7 +313,7 @@ private fun EmptyRequestSelection(modifier: Modifier = Modifier) {
 @Composable
 private fun RequestList(
     requests: List<InboxRequestSummary>,
-    identity: VaultIdentity?,
+    identity: DeviceIdentity?,
     syncing: Boolean,
     syncProblem: String?,
     onRefresh: () -> Unit,
@@ -426,7 +426,7 @@ private fun RequestRow(
     onApprove: () -> Unit,
     onReject: () -> Unit,
 ) {
-    val canApprove = request.credentialState == CredentialRequestState.APPROVAL_PENDING
+    val canApprove = request.secretUseState == SecretUseRequestState.APPROVAL_PENDING
     val canReject = request.canReject()
     val swipeState = rememberSwipeToDismissBoxState(
         positionalThreshold = { distance -> distance * 0.3f },
@@ -548,10 +548,10 @@ private fun RequestRowContent(request: InboxRequestSummary, onClick: () -> Unit)
                 itemVerticalAlignment = Alignment.CenterVertically,
             ) {
                 ClientIdentity(request.clientName)
-                if (request.profileNames.isNotEmpty()) {
-                    ProfileIdentities(
-                        request.profileNames,
-                        unavailable = request.isInvalidCredential(),
+                if (request.secretNames.isNotEmpty()) {
+                    SecretIdentities(
+                        request.secretNames,
+                        unavailable = request.isInvalidSecretUse(),
                     )
                 }
             }
@@ -575,7 +575,7 @@ private fun PairingDetail(
     modifier: Modifier,
 ) {
     val pairing = checkNotNull(request.pairing)
-    DetailPage("Pairing request", onBack, modifier, showBack = showBack) {
+    DetailPage("Pairing", onBack, modifier, showBack = showBack) {
         StatusLine(
             pairing.pairingState.label(),
             pairing.pairingState.isError() ||
@@ -665,7 +665,7 @@ private fun PairingDetail(
             }
         }
         Disclosure("Technical details") {
-            DetailValue("Pairing address", pairing.vaultAddress, true)
+            DetailValue("Pairing address", pairing.pairingAddress, true)
             pairing.osVersion?.let { DetailValue("OS version", it) }
             pairing.cliVersion?.let { DetailValue("CLI version", it) }
             pairing.machineId?.let { DetailValue("Machine ID reported by client", it, true) }
@@ -676,7 +676,7 @@ private fun PairingDetail(
 }
 
 @Composable
-private fun CredentialDetail(
+private fun SecretUseDetail(
     request: InboxRequestDetails,
     onBack: () -> Unit,
     showBack: Boolean,
@@ -684,13 +684,13 @@ private fun CredentialDetail(
     onDeny: () -> Unit,
     modifier: Modifier,
 ) {
-    val credential = checkNotNull(request.credential)
+    val secretUse = checkNotNull(request.secretUse)
     DetailPage(
-        title = "Profile access",
+        title = "Secret use",
         onBack = onBack,
         modifier = modifier,
         showBack = showBack,
-        bottomContent = if (credential.state == CredentialRequestState.APPROVAL_PENDING) {
+        bottomContent = if (secretUse.state == SecretUseRequestState.APPROVAL_PENDING) {
             {
                 Surface(
                     color = MaterialTheme.colorScheme.surfaceContainerLow,
@@ -705,7 +705,7 @@ private fun CredentialDetail(
                         }
                         Button(
                             onClick = onApprove,
-                            enabled = credential.missingProfiles.isEmpty(),
+                            enabled = secretUse.missingSecrets.isEmpty(),
                             modifier = Modifier.weight(1f),
                         ) {
                             Text("Approve once")
@@ -717,21 +717,12 @@ private fun CredentialDetail(
             null
         },
     ) {
-        StatusLine(credential.statusLabel(), credential.isError())
-        ClientIdentity(credential.clientName)
-        ProfileIdentities(credential.profiles)
-        Text(
-            buildString {
-                append(credential.clientName)
-                append(" is requesting one-time access to ")
-                append(credential.profiles.joinToString())
-                append(" for the command below.")
-            },
-            style = MaterialTheme.typography.bodyLarge,
-        )
+        StatusLine(secretUse.statusLabel(), secretUse.isError())
+        ClientIdentity(secretUse.clientName)
+        SecretIdentities(secretUse.secrets)
         DetailValue("Received", formatTimestamp(request.receivedAt))
 
-        credential.reason?.takeIf(String::isNotBlank)?.let { reason ->
+        secretUse.reason?.takeIf(String::isNotBlank)?.let { reason ->
             Card(
                 colors = CardDefaults.cardColors(
                     containerColor = MaterialTheme.colorScheme.surfaceContainerLow,
@@ -749,7 +740,7 @@ private fun CredentialDetail(
             }
         }
 
-        val renderedCommand = renderShellCommand(credential.command, credential.arguments)
+        val renderedCommand = renderShellCommand(secretUse.command, secretUse.arguments)
         Surface(
             color = MaterialTheme.colorScheme.surfaceContainerLow,
             shape = RoundedCornerShape(12.dp),
@@ -775,19 +766,19 @@ private fun CredentialDetail(
         }
 
         if (
-            credential.missingProfiles.isNotEmpty() &&
-            credential.completionResult != CredentialCompletionResult.DENIED
+            secretUse.missingSecrets.isNotEmpty() &&
+            secretUse.completionResult != SecretUseCompletionResult.DENIED
         ) {
             Notice(
-                "Profiles are unavailable",
-                credential.missingProfiles.joinToString(),
+                "Secrets are unavailable",
+                secretUse.missingSecrets.joinToString(),
                 error = true,
             )
         }
 
-        if (credential.profileDetails.isNotEmpty()) {
-            Disclosure("Profile details") {
-                credential.profileDetails.forEach { profile -> ProfileSummary(profile) }
+        if (secretUse.secretDetails.isNotEmpty()) {
+            Disclosure("Secret details") {
+                secretUse.secretDetails.forEach { secret -> SecretSummary(secret) }
                 Text(
                     "Values are never shown in a request.",
                     style = MaterialTheme.typography.bodySmall,
@@ -796,52 +787,52 @@ private fun CredentialDetail(
             }
         }
 
-        if (credential.state != CredentialRequestState.APPROVAL_PENDING) {
-            CredentialOutcome(credential)
+        if (secretUse.state != SecretUseRequestState.APPROVAL_PENDING) {
+            SecretUseOutcome(secretUse)
         }
 
         Disclosure("Technical details") {
-            DetailValue("Working directory", credential.workingDirectory, true)
-            DetailValue("Executable path", credential.executablePath, true)
-            credential.executableHash?.let { DetailValue("Executable hash", it, true) }
-            DetailValue("Executable mode", credential.executableMode)
-            DetailValue("Standard input", credential.stdinKind)
-            DetailValue("Standard output", credential.stdoutKind)
-            DetailValue("Standard error", credential.stderrKind)
-            if (credential.launcherChain.isNotEmpty()) {
-                DetailValue("Launcher chain", credential.launcherChain.joinToString("\n"), true)
+            DetailValue("Working directory", secretUse.workingDirectory, true)
+            DetailValue("Executable path", secretUse.executablePath, true)
+            secretUse.executableHash?.let { DetailValue("Executable hash", it, true) }
+            DetailValue("Executable mode", secretUse.executableMode)
+            DetailValue("Standard input", secretUse.stdinKind)
+            DetailValue("Standard output", secretUse.stdoutKind)
+            DetailValue("Standard error", secretUse.stderrKind)
+            if (secretUse.launcherChain.isNotEmpty()) {
+                DetailValue("Launcher chain", secretUse.launcherChain.joinToString("\n"), true)
             }
-            credential.platform?.let {
+            secretUse.platform?.let {
                 DetailValue("Platform reported by client", formatPlatformName(it))
             }
-            credential.architecture?.let { DetailValue("Architecture reported by client", it) }
-            credential.hostname?.takeIf { it != credential.clientName }
+            secretUse.architecture?.let { DetailValue("Architecture reported by client", it) }
+            secretUse.hostname?.takeIf { it != secretUse.clientName }
                 ?.let { DetailValue("Hostname reported by client", it) }
-            credential.osVersion?.let { DetailValue("OS version", it) }
-            DetailValue("CLI version", credential.cliVersion)
-            credential.machineId?.let { DetailValue("Machine ID reported by client", it, true) }
-            DetailValue("Client ID", credential.clientId, true)
+            secretUse.osVersion?.let { DetailValue("OS version", it) }
+            DetailValue("CLI version", secretUse.cliVersion)
+            secretUse.machineId?.let { DetailValue("Machine ID reported by client", it, true) }
+            DetailValue("Client ID", secretUse.clientId, true)
             DetailValue("Request ID", request.relayRequestId, true)
         }
     }
 }
 
 @Composable
-private fun ProfileUploadDetail(
+private fun SecretUploadDetail(
     request: InboxRequestDetails,
     onBack: () -> Unit,
     showBack: Boolean,
-    onAccept: (String) -> Unit,
+    onApprove: (String) -> Unit,
     onReject: () -> Unit,
     authenticate: (String, () -> Unit, (String) -> Unit) -> Unit,
-    onReveal: suspend (String) -> ProfileUploadVariableValue,
+    onReveal: suspend (String) -> SecretUploadVariableValue,
     onSensitivityChange: suspend (String, Boolean) -> Boolean,
     report: (String) -> Unit,
     modifier: Modifier,
 ) {
-    val upload = checkNotNull(request.profileUpload)
-    var acceptedName by remember(upload.proposedName, upload.acceptedName) {
-        mutableStateOf(upload.acceptedName ?: upload.proposedName)
+    val upload = checkNotNull(request.secretUpload)
+    var approvedName by remember(upload.uploadedName, upload.approvedName) {
+        mutableStateOf(upload.approvedName ?: upload.uploadedName)
     }
     var editingName by remember { mutableStateOf(false) }
     var revealedValues by remember(request.id) { mutableStateOf<Map<String, String>>(emptyMap()) }
@@ -857,29 +848,29 @@ private fun ProfileUploadDetail(
         onDispose { lifecycle.removeObserver(observer) }
     }
     DetailPage(
-        title = "${upload.mode.titleLabel()} $acceptedName",
+        title = "${upload.mode.titleLabel()} $approvedName",
         onBack = onBack,
         modifier = modifier,
         showBack = showBack,
         titleContent = {
             Row(verticalAlignment = Alignment.CenterVertically) {
                 Text(
-                    "${upload.mode.titleLabel()} $acceptedName",
+                    "${upload.mode.titleLabel()} $approvedName",
                     modifier = Modifier.weight(1f),
                     maxLines = 1,
                     overflow = TextOverflow.Ellipsis,
                 )
                 if (
-                    upload.mode == ProfileUploadMode.CREATE &&
-                    upload.state == ProfileUploadRequestState.REVIEW_PENDING
+                    upload.mode == SecretUploadMode.CREATE &&
+                    upload.state == SecretUploadRequestState.REVIEW_PENDING
                 ) {
                     IconButton(onClick = { editingName = true }) {
-                        Icon(Icons.Outlined.Edit, contentDescription = "Rename profile")
+                        Icon(Icons.Outlined.Edit, contentDescription = "Rename secret")
                     }
                 }
             }
         },
-        bottomContent = if (upload.state == ProfileUploadRequestState.REVIEW_PENDING) {
+        bottomContent = if (upload.state == SecretUploadRequestState.REVIEW_PENDING) {
             {
                 val reviewedCount = upload.variables.count { reviewedVariableIds.contains(it.id) }
                 Surface(
@@ -895,7 +886,7 @@ private fun ProfileUploadDetail(
                                 "All uploaded values have been reviewed"
                             } else {
                                 "$reviewedCount of ${upload.variables.size} values reviewed · " +
-                                    "reveal each value to enable acceptance"
+                                    "reveal each value to enable approval"
                             },
                             style = MaterialTheme.typography.labelMedium,
                             color = MaterialTheme.colorScheme.onSurfaceVariant,
@@ -911,12 +902,12 @@ private fun ProfileUploadDetail(
                                 Text("Reject")
                             }
                             Button(
-                                onClick = { onAccept(acceptedName.trim()) },
-                                enabled = acceptedName.isNotBlank() &&
+                                onClick = { onApprove(approvedName.trim()) },
+                                enabled = approvedName.isNotBlank() &&
                                     reviewedCount == upload.variables.size,
                                 modifier = Modifier.weight(1f),
                             ) {
-                                Text("Accept")
+                                Text("Approve")
                             }
                         }
                     }
@@ -926,15 +917,15 @@ private fun ProfileUploadDetail(
             null
         },
     ) {
-        StatusLine(upload.state.label(), upload.state == ProfileUploadRequestState.VERIFICATION_FAILED)
-        DetailValue("Profile type", "Environment variables")
-        DetailValue("Proposed by client", upload.clientName)
+        StatusLine(upload.state.label(), upload.state == SecretUploadRequestState.VERIFICATION_FAILED)
+        DetailValue("Type", "Environment variables")
+        DetailValue("Client", upload.clientName)
         DetailValue("Received", formatTimestamp(request.receivedAt))
         upload.description?.takeIf(String::isNotBlank)?.let {
-            DetailValue("Proposed description", it)
+            DetailValue("Description", it)
         }
 
-        if (upload.mode != ProfileUploadMode.CREATE) {
+        if (upload.mode != SecretUploadMode.CREATE) {
             Card(
                 colors = CardDefaults.cardColors(
                     containerColor = MaterialTheme.colorScheme.secondaryContainer,
@@ -944,7 +935,7 @@ private fun ProfileUploadDetail(
                     Modifier.fillMaxWidth().padding(16.dp),
                     verticalArrangement = Arrangement.spacedBy(10.dp),
                 ) {
-                    Text("Changes to the existing profile", style = MaterialTheme.typography.titleMedium)
+                    Text("Changes to the existing secret", style = MaterialTheme.typography.titleMedium)
                     ChangeGroup("New", upload.addedVariables)
                     ChangeGroup("Updated", upload.changedVariables)
                     ChangeGroup("Removed", upload.removedVariables)
@@ -954,32 +945,32 @@ private fun ProfileUploadDetail(
         }
 
         Text(
-            if (upload.state == ProfileUploadRequestState.REVIEW_PENDING) {
-                "Incoming variables"
+            if (upload.state == SecretUploadRequestState.REVIEW_PENDING) {
+                "Uploaded environment variables"
             } else {
-                "Incoming variable names"
+                "Uploaded environment variable names"
             },
             style = MaterialTheme.typography.titleLarge,
         )
-        if (upload.state == ProfileUploadRequestState.REVIEW_PENDING) {
+        if (upload.state == SecretUploadRequestState.REVIEW_PENDING) {
             Text(
                 "Review each value and choose whether it should require device authentication " +
                     "after saving.",
                 color = MaterialTheme.colorScheme.onSurfaceVariant,
             )
         }
-        if (upload.variableNames.isEmpty()) Text("No variables")
-        if (upload.state != ProfileUploadRequestState.REVIEW_PENDING) {
+        if (upload.variableNames.isEmpty()) Text("No environment variables")
+        if (upload.state != SecretUploadRequestState.REVIEW_PENDING) {
             SelectionContainer {
                 Text(upload.variableNames.joinToString("\n"), fontFamily = FontFamily.Monospace)
             }
             Text(
-                "Uploaded values were discarded after this proposal was decided.",
+                "Uploaded values were discarded after this upload was decided.",
                 style = MaterialTheme.typography.bodySmall,
                 color = MaterialTheme.colorScheme.onSurfaceVariant,
             )
         }
-        if (upload.state == ProfileUploadRequestState.REVIEW_PENDING) upload.variables.forEach { variable ->
+        if (upload.state == SecretUploadRequestState.REVIEW_PENDING) upload.variables.forEach { variable ->
             Surface(
                 color = MaterialTheme.colorScheme.surfaceContainerLow,
                 shape = RoundedCornerShape(12.dp),
@@ -1031,7 +1022,7 @@ private fun ProfileUploadDetail(
                         )
                         Switch(
                             checked = variable.sensitive,
-                            enabled = upload.state == ProfileUploadRequestState.REVIEW_PENDING,
+                            enabled = upload.state == SecretUploadRequestState.REVIEW_PENDING,
                             onCheckedChange = { sensitive ->
                                 scope.launch {
                                     if (!onSensitivityChange(variable.id, sensitive)) {
@@ -1061,18 +1052,18 @@ private fun ProfileUploadDetail(
                                     val reveal: () -> Unit = {
                                         scope.launch {
                                             when (val result = onReveal(variable.id)) {
-                                                is ProfileUploadVariableValue.Available -> {
+                                                is SecretUploadVariableValue.Available -> {
                                                     revealedValues = revealedValues +
                                                         (variable.id to result.value)
                                                     reviewedVariableIds = reviewedVariableIds + variable.id
                                                 }
-                                                ProfileUploadVariableValue.NotFound ->
-                                                    report("This variable is no longer available")
-                                                ProfileUploadVariableValue.Unavailable ->
+                                                SecretUploadVariableValue.NotFound ->
+                                                    report("This environment variable is no longer available")
+                                                SecretUploadVariableValue.Unavailable ->
                                                     report("The encryption key is unavailable")
-                                                ProfileUploadVariableValue.Corrupted ->
+                                                SecretUploadVariableValue.Corrupted ->
                                                     report("The uploaded value could not be authenticated")
-                                                ProfileUploadVariableValue.UnsupportedEncryption ->
+                                                SecretUploadVariableValue.UnsupportedEncryption ->
                                                     report("The uploaded value uses unsupported encryption")
                                             }
                                         }
@@ -1125,24 +1116,23 @@ private fun ProfileUploadDetail(
             }
         }
 
-        if (upload.state != ProfileUploadRequestState.REVIEW_PENDING) {
-            upload.acceptedName?.takeIf { it != upload.proposedName }?.let {
-                DetailValue("Proposed name", upload.proposedName)
+        if (upload.state != SecretUploadRequestState.REVIEW_PENDING) {
+            upload.approvedName?.takeIf { it != upload.uploadedName }?.let {
+                DetailValue("Uploaded name", upload.uploadedName)
             }
-            upload.error?.let { Notice("Proposal could not be verified", it, true) }
+            upload.error?.let { Notice("Upload could not be verified", it, true) }
         }
 
         Disclosure("Technical details") {
-            DetailValue("Profile type", upload.profileType)
             DetailValue("Client ID", upload.clientId, true)
             DetailValue("Request ID", request.relayRequestId, true)
         }
     }
     if (editingName) {
-        var editedName by remember(acceptedName) { mutableStateOf(acceptedName) }
+        var editedName by remember(approvedName) { mutableStateOf(approvedName) }
         AlertDialog(
             onDismissRequest = { editingName = false },
-            title = { Text("Profile name") },
+            title = { Text("Secret name") },
             text = {
                 OutlinedTextField(
                     value = editedName,
@@ -1155,7 +1145,7 @@ private fun ProfileUploadDetail(
                 TextButton(
                     enabled = editedName.isNotBlank(),
                     onClick = {
-                        acceptedName = editedName.trim()
+                        approvedName = editedName.trim()
                         editingName = false
                     },
                 ) { Text("Save") }
@@ -1168,52 +1158,52 @@ private fun ProfileUploadDetail(
 }
 
 @Composable
-private fun CredentialOutcome(credential: CredentialRequestDetails) {
-    val (title, detail, error) = when (credential.state) {
-        CredentialRequestState.WAITING_FOR_COMPLETION -> Triple(
-            if (credential.decision == CredentialDecision.APPROVED) "Approved" else "Denied",
+private fun SecretUseOutcome(secretUse: SecretUseRequestDetails) {
+    val (title, detail, error) = when (secretUse.state) {
+        SecretUseRequestState.WAITING_FOR_COMPLETION -> Triple(
+            if (secretUse.decision == SecretUseDecision.APPROVED) "Approved" else "Denied",
             "Waiting for the client to finish.",
-            credential.decision == CredentialDecision.DENIED,
+            secretUse.decision == SecretUseDecision.DENIED,
         )
-        CredentialRequestState.COMPLETED -> when (credential.completionResult) {
-            CredentialCompletionResult.APPROVED -> Triple("Delivered", "The client received the profile values.", false)
-            CredentialCompletionResult.DENIED -> if (
-                credential.completionReason == "INVALID_REQUEST"
+        SecretUseRequestState.COMPLETED -> when (secretUse.completionResult) {
+            SecretUseCompletionResult.APPROVED -> Triple("Delivered", "The client received the secret values.", false)
+            SecretUseCompletionResult.DENIED -> if (
+                secretUse.completionReason == "INVALID_REQUEST"
             ) {
                 Triple(
                     "Request rejected",
-                    credential.completionMessage ?: "The request was invalid.",
+                    secretUse.completionMessage ?: "The request was invalid.",
                     true,
                 )
             } else {
                 Triple(
                     "Denied",
-                    credential.completionMessage ?: "No values were released.",
+                    secretUse.completionMessage ?: "No values were released.",
                     false,
                 )
             }
-            CredentialCompletionResult.ABORTED -> Triple("Aborted", credential.completionMessage ?: "The client stopped this request.", false)
+            SecretUseCompletionResult.ABORTED -> Triple("Aborted", secretUse.completionMessage ?: "The client stopped this request.", false)
             null -> Triple("Completed", "The request is complete.", false)
         }
-        CredentialRequestState.VERIFICATION_FAILED -> Triple(
+        SecretUseRequestState.VERIFICATION_FAILED -> Triple(
             "Could not verify request",
-            credential.error ?: "The cryptographic message was invalid.",
+            secretUse.error ?: "The cryptographic message was invalid.",
             true,
         )
-        CredentialRequestState.APPROVAL_PENDING -> return
+        SecretUseRequestState.APPROVAL_PENDING -> return
     }
     Notice(title, detail, error)
 }
 
 @Composable
-private fun ProfileSummary(profile: CredentialProfileMetadata) {
+private fun SecretSummary(secret: SecretMetadata) {
     Column(Modifier.padding(vertical = 4.dp), verticalArrangement = Arrangement.spacedBy(2.dp)) {
-        Text(profile.name, style = MaterialTheme.typography.titleMedium)
-        if (profile.description.isNotBlank()) {
-            Text(profile.description, color = MaterialTheme.colorScheme.onSurfaceVariant)
+        Text(secret.name, style = MaterialTheme.typography.titleMedium)
+        if (secret.description.isNotBlank()) {
+            Text(secret.description, color = MaterialTheme.colorScheme.onSurfaceVariant)
         }
         SelectionContainer {
-            Text(profile.environmentVariableNames.joinToString("\n"), fontFamily = FontFamily.Monospace)
+            Text(secret.environmentVariableNames.joinToString("\n"), fontFamily = FontFamily.Monospace)
         }
     }
 }
@@ -1323,8 +1313,8 @@ private fun StatusLine(label: String, error: Boolean = false) {
 @Composable
 private fun RequestStatusBadge(request: InboxRequestSummary) {
     val error = request.pairingState?.isError() == true ||
-        request.credentialState == CredentialRequestState.VERIFICATION_FAILED ||
-        request.profileUploadState == ProfileUploadRequestState.VERIFICATION_FAILED ||
+        request.secretUseState == SecretUseRequestState.VERIFICATION_FAILED ||
+        request.secretUploadState == SecretUploadRequestState.VERIFICATION_FAILED ||
         request.wasRejected()
     val actionRequired = request.state == InboxRequestState.ACTION_REQUIRED
     val accepted = request.wasAccepted()
@@ -1370,12 +1360,12 @@ private fun MissingDetail(onBack: () -> Unit, showBack: Boolean, modifier: Modif
 
 private fun InboxRequestSummary.statusLabel(): String = when {
     pairingState != null -> pairingState.label()
-    credentialState != null -> credentialStatusLabel(
-        credentialState,
-        credentialResult,
-        credentialCompletionReason,
+    secretUseState != null -> secretUseStatusLabel(
+        secretUseState,
+        secretUseResult,
+        secretUseCompletionReason,
     )
-    profileUploadState != null -> profileUploadState.label()
+    secretUploadState != null -> secretUploadState.label()
     state == InboxRequestState.ACTION_REQUIRED -> "Action required"
     state == InboxRequestState.WAITING -> "Waiting"
     else -> "Completed"
@@ -1383,8 +1373,8 @@ private fun InboxRequestSummary.statusLabel(): String = when {
 
 private fun InboxRequestSummary.canReject(): Boolean =
     pairingState?.canReject() == true ||
-        credentialState == CredentialRequestState.APPROVAL_PENDING ||
-        profileUploadState == ProfileUploadRequestState.REVIEW_PENDING
+        secretUseState == SecretUseRequestState.APPROVAL_PENDING ||
+        secretUploadState == SecretUploadRequestState.REVIEW_PENDING
 
 private fun PairingState.canReject(): Boolean = this in setOf(
     PairingState.RECEIVING,
@@ -1395,17 +1385,17 @@ private fun PairingState.canReject(): Boolean = this in setOf(
 
 private fun InboxRequestSummary.wasRejected(): Boolean =
     pairingState == PairingState.REJECTED ||
-        credentialDecision == CredentialDecision.DENIED ||
-        credentialResult == CredentialCompletionResult.DENIED ||
-        profileUploadState == ProfileUploadRequestState.REJECTED
+        secretUseDecision == SecretUseDecision.DENIED ||
+        secretUseResult == SecretUseCompletionResult.DENIED ||
+        secretUploadState == SecretUploadRequestState.REJECTED
 
 private fun InboxRequestSummary.wasAccepted(): Boolean =
     pairingState == PairingState.ACTIVE ||
-        credentialResult == CredentialCompletionResult.APPROVED ||
-        profileUploadState == ProfileUploadRequestState.ACCEPTED
+        secretUseResult == SecretUseCompletionResult.APPROVED ||
+        secretUploadState == SecretUploadRequestState.APPROVED
 
-private fun InboxRequestSummary.isInvalidCredential(): Boolean =
-    credentialCompletionReason == "INVALID_REQUEST"
+private fun InboxRequestSummary.isInvalidSecretUse(): Boolean =
+    secretUseCompletionReason == "INVALID_REQUEST"
 
 private fun PairingState.label(): String = when (this) {
     PairingState.RECEIVING -> "Receiving"
@@ -1419,46 +1409,46 @@ private fun PairingState.label(): String = when (this) {
 
 private fun PairingState.isError(): Boolean = this == PairingState.VERIFICATION_FAILED
 
-private fun CredentialRequestDetails.statusLabel(): String = credentialStatusLabel(
+private fun SecretUseRequestDetails.statusLabel(): String = secretUseStatusLabel(
     state,
     completionResult,
     completionReason,
 )
 
-private fun credentialStatusLabel(
-    state: CredentialRequestState,
-    result: CredentialCompletionResult?,
+private fun secretUseStatusLabel(
+    state: SecretUseRequestState,
+    result: SecretUseCompletionResult?,
     completionReason: String?,
 ): String = when (state) {
-    CredentialRequestState.APPROVAL_PENDING -> "Action required"
-    CredentialRequestState.WAITING_FOR_COMPLETION -> "Waiting for client"
-    CredentialRequestState.VERIFICATION_FAILED -> "Verification failed"
-    CredentialRequestState.COMPLETED -> when (result) {
-        CredentialCompletionResult.APPROVED -> "Delivered"
-        CredentialCompletionResult.DENIED -> if (completionReason == "INVALID_REQUEST") {
+    SecretUseRequestState.APPROVAL_PENDING -> "Action required"
+    SecretUseRequestState.WAITING_FOR_COMPLETION -> "Waiting for client"
+    SecretUseRequestState.VERIFICATION_FAILED -> "Verification failed"
+    SecretUseRequestState.COMPLETED -> when (result) {
+        SecretUseCompletionResult.APPROVED -> "Delivered"
+        SecretUseCompletionResult.DENIED -> if (completionReason == "INVALID_REQUEST") {
             "Invalid request"
         } else {
             "Denied"
         }
-        CredentialCompletionResult.ABORTED -> "Aborted"
+        SecretUseCompletionResult.ABORTED -> "Aborted"
         null -> "Completed"
     }
 }
 
-private fun CredentialRequestDetails.isError(): Boolean =
-    state == CredentialRequestState.VERIFICATION_FAILED || completionReason == "INVALID_REQUEST"
+private fun SecretUseRequestDetails.isError(): Boolean =
+    state == SecretUseRequestState.VERIFICATION_FAILED || completionReason == "INVALID_REQUEST"
 
-private fun ProfileUploadRequestState.label(): String = when (this) {
-    ProfileUploadRequestState.REVIEW_PENDING -> "Action required"
-    ProfileUploadRequestState.ACCEPTED -> "Accepted"
-    ProfileUploadRequestState.REJECTED -> "Rejected"
-    ProfileUploadRequestState.VERIFICATION_FAILED -> "Verification failed"
+private fun SecretUploadRequestState.label(): String = when (this) {
+    SecretUploadRequestState.REVIEW_PENDING -> "Action required"
+    SecretUploadRequestState.APPROVED -> "Approved"
+    SecretUploadRequestState.REJECTED -> "Rejected"
+    SecretUploadRequestState.VERIFICATION_FAILED -> "Verification failed"
 }
 
-private fun ProfileUploadMode.titleLabel(): String = when (this) {
-    ProfileUploadMode.CREATE -> "Create"
-    ProfileUploadMode.REPLACE -> "Replace"
-    ProfileUploadMode.UPDATE -> "Update"
+private fun SecretUploadMode.titleLabel(): String = when (this) {
+    SecretUploadMode.CREATE -> "Create"
+    SecretUploadMode.REPLACE -> "Replace"
+    SecretUploadMode.UPDATE -> "Update"
 }
 
 private fun PairingDecisionResult.message(): String = when (this) {
@@ -1468,35 +1458,36 @@ private fun PairingDecisionResult.message(): String = when (this) {
     PairingDecisionResult.NOT_FOUND -> "Request is no longer available"
 }
 
-private fun CredentialDecisionResult.message(): String = when (this) {
-    CredentialDecisionResult.Decided -> "Decision saved"
-    CredentialDecisionResult.ProfilesChanged -> "A requested profile changed; review the request again"
-    CredentialDecisionResult.NotPending -> "This request no longer needs a decision"
-    CredentialDecisionResult.NotFound -> "Request is no longer available"
-    is CredentialDecisionResult.MissingProfiles -> "Missing profiles: ${names.joinToString()}"
-    is CredentialDecisionResult.ConflictingVariable -> "Conflicting variable: $name"
-    CredentialDecisionResult.SecretUnavailable -> "A profile value is unavailable on this device"
-    CredentialDecisionResult.SecretCorrupted -> "A profile value could not be authenticated"
-    CredentialDecisionResult.UnsupportedEncryption -> "A profile value uses unsupported encryption"
-    CredentialDecisionResult.PairingUnavailable -> "The paired client is unavailable"
+private fun SecretUseDecisionResult.message(): String = when (this) {
+    SecretUseDecisionResult.Decided -> "Decision saved"
+    SecretUseDecisionResult.SecretsChanged -> "A requested secret changed; review the request again"
+    SecretUseDecisionResult.NotPending -> "This request no longer needs a decision"
+    SecretUseDecisionResult.NotFound -> "Request is no longer available"
+    is SecretUseDecisionResult.MissingSecrets -> "Missing secrets: ${names.joinToString()}"
+    is SecretUseDecisionResult.ConflictingVariable ->
+        "Conflicting environment variable: $name"
+    SecretUseDecisionResult.SecretUnavailable -> "A secret value is unavailable on this device"
+    SecretUseDecisionResult.SecretCorrupted -> "A secret value could not be authenticated"
+    SecretUseDecisionResult.UnsupportedEncryption -> "A secret value uses unsupported encryption"
+    SecretUseDecisionResult.PairingUnavailable -> "The paired client is unavailable"
 }
 
-private fun ProfileUploadDecisionResult.message(): String = when (this) {
-    is ProfileUploadDecisionResult.Accepted -> "Profile proposal accepted"
-    ProfileUploadDecisionResult.Rejected -> "Profile proposal rejected"
-    ProfileUploadDecisionResult.NotPending -> "This proposal no longer needs a decision"
-    ProfileUploadDecisionResult.NotFound -> "Proposal is no longer available"
-    is ProfileUploadDecisionResult.Invalid -> message
-    ProfileUploadDecisionResult.SecretUnavailable -> "An uploaded value is unavailable on this device"
-    ProfileUploadDecisionResult.SecretCorrupted -> "An uploaded value could not be authenticated"
-    ProfileUploadDecisionResult.UnsupportedEncryption -> "An uploaded value uses unsupported encryption"
+private fun SecretUploadDecisionResult.message(): String = when (this) {
+    is SecretUploadDecisionResult.Approved -> "Secret upload approved"
+    SecretUploadDecisionResult.Rejected -> "Secret upload rejected"
+    SecretUploadDecisionResult.NotPending -> "This upload no longer needs a decision"
+    SecretUploadDecisionResult.NotFound -> "Upload is no longer available"
+    is SecretUploadDecisionResult.Invalid -> message
+    SecretUploadDecisionResult.SecretUnavailable -> "An uploaded value is unavailable on this device"
+    SecretUploadDecisionResult.SecretCorrupted -> "An uploaded value could not be authenticated"
+    SecretUploadDecisionResult.UnsupportedEncryption -> "An uploaded value uses unsupported encryption"
 }
 
 private fun RequestSyncResult?.problemMessage(): String? = when (this) {
-    null, RequestSyncResult.Success, RequestSyncResult.NoVault -> null
-    RequestSyncResult.VaultSecretsUnavailable -> "Device keys are unavailable"
-    RequestSyncResult.VaultSecretsCorrupted -> "Device keys could not be verified"
-    RequestSyncResult.UnsupportedVaultEncryption -> "Device keys use unsupported encryption"
+    null, RequestSyncResult.Success, RequestSyncResult.NoDevice -> null
+    RequestSyncResult.DeviceCredentialsUnavailable -> "Device keys are unavailable"
+    RequestSyncResult.DeviceCredentialsCorrupted -> "Device keys could not be verified"
+    RequestSyncResult.UnsupportedDeviceCredentialEncryption -> "Device keys use unsupported encryption"
     is RequestSyncResult.RelayRejected -> message ?: "The relay rejected the connection"
     is RequestSyncResult.RelayUnavailable -> message ?: "The relay is temporarily unavailable"
     RequestSyncResult.InvalidRelayResponse -> "The relay returned an invalid response"

@@ -1,4 +1,4 @@
-package dev.agentknock.storage.profile
+package dev.agentknock.storage.secret
 
 import androidx.room3.ColumnInfo
 import androidx.room3.Dao
@@ -15,10 +15,10 @@ import dev.agentknock.storage.crypto.LocalEncryptionKeyEntity
 import kotlinx.coroutines.flow.Flow
 
 @Entity(
-    tableName = "profiles",
+    tableName = "secrets",
     indices = [Index(value = ["name"], unique = true)],
 )
-internal data class ProfileEntity(
+internal data class SecretEntity(
     @PrimaryKey
     @ColumnInfo(name = "id")
     val id: String,
@@ -38,9 +38,9 @@ internal data class ProfileEntity(
     tableName = "environment_variables",
     foreignKeys = [
         ForeignKey(
-            entity = ProfileEntity::class,
+            entity = SecretEntity::class,
             parentColumns = ["id"],
-            childColumns = ["profile_id"],
+            childColumns = ["secret_id"],
             onDelete = ForeignKey.CASCADE,
             onUpdate = ForeignKey.NO_ACTION,
         ),
@@ -53,7 +53,7 @@ internal data class ProfileEntity(
         ),
     ],
     indices = [
-        Index(value = ["profile_id", "name"], unique = true),
+        Index(value = ["secret_id", "name"], unique = true),
         Index(value = ["encryption_key_id"]),
     ],
 )
@@ -61,8 +61,8 @@ internal data class EnvironmentVariableEntity(
     @PrimaryKey
     @ColumnInfo(name = "id")
     val id: String,
-    @ColumnInfo(name = "profile_id")
-    val profileId: String,
+    @ColumnInfo(name = "secret_id")
+    val secretId: String,
     @ColumnInfo(name = "name")
     val name: String,
     @ColumnInfo(name = "sensitive")
@@ -85,7 +85,7 @@ internal data class EnvironmentVariableEntity(
     val valueUpdatedAt: Long,
 )
 
-internal data class ProfileSummaryRow(
+internal data class SecretSummaryRow(
     @ColumnInfo(name = "id")
     val id: String,
     @ColumnInfo(name = "name")
@@ -105,8 +105,8 @@ internal data class ProfileSummaryRow(
 internal data class EnvironmentVariableMetadataRow(
     @ColumnInfo(name = "id")
     val id: String,
-    @ColumnInfo(name = "profile_id")
-    val profileId: String,
+    @ColumnInfo(name = "secret_id")
+    val secretId: String,
     @ColumnInfo(name = "name")
     val name: String,
     @ColumnInfo(name = "sensitive")
@@ -124,31 +124,31 @@ internal data class EnvironmentVariableMetadataRow(
 )
 
 @Dao
-internal interface ProfileDao {
+internal interface SecretDao {
     @Query(
         """
-        SELECT profiles.id,
-               profiles.name,
-               profiles.description,
-               profiles.type,
-               profiles.created_at,
-               profiles.updated_at,
+        SELECT secrets.id,
+               secrets.name,
+               secrets.description,
+               secrets.type,
+               secrets.created_at,
+               secrets.updated_at,
                count(environment_variables.id) AS environment_variable_count
-        FROM profiles
-        LEFT JOIN environment_variables ON environment_variables.profile_id = profiles.id
-        GROUP BY profiles.id
-        ORDER BY profiles.name COLLATE NOCASE, profiles.id
+        FROM secrets
+        LEFT JOIN environment_variables ON environment_variables.secret_id = secrets.id
+        GROUP BY secrets.id
+        ORDER BY secrets.name COLLATE NOCASE, secrets.id
         """,
     )
-    fun observeProfiles(): Flow<List<ProfileSummaryRow>>
+    fun observeSecrets(): Flow<List<SecretSummaryRow>>
 
-    @Query("SELECT * FROM profiles WHERE id = :id")
-    fun observeProfile(id: String): Flow<ProfileEntity?>
+    @Query("SELECT * FROM secrets WHERE id = :id")
+    fun observeSecret(id: String): Flow<SecretEntity?>
 
     @Query(
         """
         SELECT id,
-               profile_id,
+               secret_id,
                name,
                sensitive,
                notes,
@@ -157,60 +157,60 @@ internal interface ProfileDao {
                updated_at,
                value_updated_at
         FROM environment_variables
-        WHERE profile_id = :profileId
+        WHERE secret_id = :secretId
         ORDER BY name COLLATE NOCASE, id
         """,
     )
     fun observeEnvironmentVariables(
-        profileId: String,
+        secretId: String,
     ): Flow<List<EnvironmentVariableMetadataRow>>
 
-    @Query("SELECT * FROM profiles WHERE id = :id")
-    suspend fun getProfile(id: String): ProfileEntity?
+    @Query("SELECT * FROM secrets WHERE id = :id")
+    suspend fun getSecret(id: String): SecretEntity?
 
     @Query("SELECT * FROM environment_variables WHERE id = :id")
     suspend fun getEnvironmentVariable(id: String): EnvironmentVariableEntity?
 
-    @Query("SELECT * FROM profiles ORDER BY name COLLATE NOCASE, id")
-    suspend fun getProfiles(): List<ProfileEntity>
+    @Query("SELECT * FROM secrets ORDER BY name COLLATE NOCASE, id")
+    suspend fun getSecrets(): List<SecretEntity>
 
-    @Query("SELECT * FROM environment_variables ORDER BY profile_id, name COLLATE NOCASE, id")
+    @Query("SELECT * FROM environment_variables ORDER BY secret_id, name COLLATE NOCASE, id")
     suspend fun getEnvironmentVariables(): List<EnvironmentVariableEntity>
 
-    @Query("SELECT * FROM profiles WHERE name IN (:names)")
-    suspend fun getProfilesByName(names: List<String>): List<ProfileEntity>
+    @Query("SELECT * FROM secrets WHERE name IN (:names)")
+    suspend fun getSecretsByName(names: List<String>): List<SecretEntity>
 
-    @Query("SELECT * FROM environment_variables WHERE profile_id IN (:profileIds)")
-    suspend fun getEnvironmentVariablesForProfiles(
-        profileIds: List<String>,
+    @Query("SELECT * FROM environment_variables WHERE secret_id IN (:secretIds)")
+    suspend fun getEnvironmentVariablesForSecrets(
+        secretIds: List<String>,
     ): List<EnvironmentVariableEntity>
 
-    @Query("SELECT EXISTS(SELECT 1 FROM profiles WHERE name = :name AND id != :excludingId)")
-    suspend fun profileNameInUse(name: String, excludingId: String): Boolean
+    @Query("SELECT EXISTS(SELECT 1 FROM secrets WHERE name = :name AND id != :excludingId)")
+    suspend fun secretNameInUse(name: String, excludingId: String): Boolean
 
     @Query(
         """
         SELECT EXISTS(
             SELECT 1
             FROM environment_variables
-            WHERE profile_id = :profileId AND name = :name AND id != :excludingId
+            WHERE secret_id = :secretId AND name = :name AND id != :excludingId
         )
         """,
     )
     suspend fun environmentVariableNameInUse(
-        profileId: String,
+        secretId: String,
         name: String,
         excludingId: String,
     ): Boolean
 
     @Insert
-    suspend fun insertProfile(profile: ProfileEntity)
+    suspend fun insertSecret(secret: SecretEntity)
 
     @Update
-    suspend fun updateProfile(profile: ProfileEntity): Int
+    suspend fun updateSecret(secret: SecretEntity): Int
 
     @Delete
-    suspend fun deleteProfile(profile: ProfileEntity)
+    suspend fun deleteSecret(secret: SecretEntity)
 
     @Insert
     suspend fun insertEnvironmentVariableRow(variable: EnvironmentVariableEntity)
@@ -221,55 +221,55 @@ internal interface ProfileDao {
     @Delete
     suspend fun deleteEnvironmentVariableRow(variable: EnvironmentVariableEntity)
 
-    @Query("UPDATE profiles SET updated_at = :updatedAt WHERE id = :profileId")
-    suspend fun touchProfile(profileId: String, updatedAt: Long)
+    @Query("UPDATE secrets SET updated_at = :updatedAt WHERE id = :secretId")
+    suspend fun touchSecret(secretId: String, updatedAt: Long)
 
-    @Query("DELETE FROM environment_variables WHERE profile_id = :profileId")
-    suspend fun deleteAllEnvironmentVariables(profileId: String): Int
+    @Query("DELETE FROM environment_variables WHERE secret_id = :secretId")
+    suspend fun deleteAllEnvironmentVariables(secretId: String): Int
 
     @Query(
-        "DELETE FROM environment_variables WHERE profile_id = :profileId AND name NOT IN (:names)",
+        "DELETE FROM environment_variables WHERE secret_id = :secretId AND name NOT IN (:names)",
     )
-    suspend fun deleteEnvironmentVariablesExcept(profileId: String, names: List<String>): Int
+    suspend fun deleteEnvironmentVariablesExcept(secretId: String, names: List<String>): Int
 
     @Transaction
     suspend fun insertEnvironmentVariable(variable: EnvironmentVariableEntity) {
         insertEnvironmentVariableRow(variable)
-        touchProfile(variable.profileId, variable.updatedAt)
+        touchSecret(variable.secretId, variable.updatedAt)
     }
 
     @Transaction
     suspend fun updateEnvironmentVariable(variable: EnvironmentVariableEntity): Int {
         val updated = updateEnvironmentVariableRow(variable)
-        if (updated == 1) touchProfile(variable.profileId, variable.updatedAt)
+        if (updated == 1) touchSecret(variable.secretId, variable.updatedAt)
         return updated
     }
 
     @Transaction
     suspend fun deleteEnvironmentVariable(
         variable: EnvironmentVariableEntity,
-        profileUpdatedAt: Long,
+        secretUpdatedAt: Long,
     ) {
         deleteEnvironmentVariableRow(variable)
-        touchProfile(variable.profileId, profileUpdatedAt)
+        touchSecret(variable.secretId, secretUpdatedAt)
     }
 
     @Transaction
-    suspend fun applyEnvironmentProfile(
-        profile: ProfileEntity,
+    suspend fun applyEnvironmentSecret(
+        secret: SecretEntity,
         variables: List<EnvironmentVariableEntity>,
         replaceVariables: Boolean,
     ) {
-        if (getProfile(profile.id) == null) {
-            insertProfile(profile)
+        if (getSecret(secret.id) == null) {
+            insertSecret(secret)
         } else {
-            check(updateProfile(profile) == 1)
+            check(updateSecret(secret) == 1)
         }
         if (replaceVariables) {
             if (variables.isEmpty()) {
-                deleteAllEnvironmentVariables(profile.id)
+                deleteAllEnvironmentVariables(secret.id)
             } else {
-                deleteEnvironmentVariablesExcept(profile.id, variables.map { it.name })
+                deleteEnvironmentVariablesExcept(secret.id, variables.map { it.name })
             }
         }
         variables.forEach { variable ->

@@ -8,13 +8,13 @@ import dev.agentknock.storage.vault.RelayDeviceCredentialsResult
 internal sealed interface PushRegistrationResult {
     data object Registered : PushRegistrationResult
 
-    data object NoVault : PushRegistrationResult
+    data object NoDevice : PushRegistrationResult
 
-    data object VaultSecretsUnavailable : PushRegistrationResult
+    data object DeviceCredentialsUnavailable : PushRegistrationResult
 
-    data object VaultSecretsCorrupted : PushRegistrationResult
+    data object DeviceCredentialsCorrupted : PushRegistrationResult
 
-    data object UnsupportedVaultEncryption : PushRegistrationResult
+    data object UnsupportedDeviceCredentialEncryption : PushRegistrationResult
 
     data class RelayRejected(
         val status: Int,
@@ -34,15 +34,15 @@ internal class PushRegistrationRepository(
     suspend fun register(firebaseInstallationId: String): PushRegistrationResult {
         val credentials = when (val result = deviceCredentials.activeDeviceCredentials()) {
             is RelayDeviceCredentialsResult.Available -> result.credentials
-            RelayDeviceCredentialsResult.Missing -> return PushRegistrationResult.NoVault
-            RelayDeviceCredentialsResult.SecretsUnavailable -> {
-                return PushRegistrationResult.VaultSecretsUnavailable
+            RelayDeviceCredentialsResult.Missing -> return PushRegistrationResult.NoDevice
+            RelayDeviceCredentialsResult.CredentialsUnavailable -> {
+                return PushRegistrationResult.DeviceCredentialsUnavailable
             }
-            RelayDeviceCredentialsResult.SecretsCorrupted -> {
-                return PushRegistrationResult.VaultSecretsCorrupted
+            RelayDeviceCredentialsResult.CredentialsCorrupted -> {
+                return PushRegistrationResult.DeviceCredentialsCorrupted
             }
             RelayDeviceCredentialsResult.UnsupportedEncryption -> {
-                return PushRegistrationResult.UnsupportedVaultEncryption
+                return PushRegistrationResult.UnsupportedDeviceCredentialEncryption
             }
         }
         return when (

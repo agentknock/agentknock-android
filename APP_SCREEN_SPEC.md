@@ -21,11 +21,11 @@ not a required widget hierarchy. Their visual grouping and presentation may
 change as long as the terminology, available choices, consequences, and
 navigation relationships remain clear.
 
-The proposal is grounded in:
+The specification is grounded in:
 
 - the Agentknock PRD;
 - the current Android application and its persisted data;
-- the current CLI, including pairing, Profile listing and upload, execution,
+- the current CLI, including pairing, secret listing and upload, execution,
   and unpairing;
 - the relay's current connection, enrollment, and push-registration behavior;
   and
@@ -37,48 +37,33 @@ decisions** instead of being silently resolved.
 
 ## Product vocabulary
 
-Use these terms consistently in user-facing copy:
+[Agentknock terminology](TERMINOLOGY.md) is authoritative for product and UI
+language. In particular, the public requestable object is a *secret*, the
+Android installation is a *device*, and the paired CLI installation is a
+*client*. *Environment variable* is always written in full. Bold terms below
+may identify exact UI labels; prose uses the capitalization rules in the
+terminology document.
 
-| Term | Meaning |
-| --- | --- |
-| **Device** | This Android app installation. It owns the device identity, device token, and phone-held cryptographic keys. |
-| **Pairing address** | The human-readable three-word address used only to begin a new pairing. It routes pairing attempts to this device; it is not authentication. |
-| **Client** | One paired Agentknock CLI installation, whether it runs on a laptop, server, VM, container, or hosted execution environment. |
-| **Profile** | A globally named, atomically requested capability with exactly one concrete type, such as Environment variables, AWS temporary credentials, or SSH key. |
-| **Profile type** | The immutable schema and delivery contract of a profile. Provider-specific behavior is expressed by a concrete type, such as AWS temporary credentials, rather than a separate provider field on a generic dynamic type. |
-| **Variable** | One fixed name and value inside an Environment variables profile. A variable has its own sensitivity and lifecycle metadata. |
-| **Delivery** | How a profile is made usable by a client, as defined by its type: environment variables, an SSH helper, or a later type-specific adapter. |
-| **Request** | A durable authorization workflow that requires a user decision or evaluation by a phone-held policy. It remains in the request history after completion, subject to bounded retention. |
-| **Profile proposal** | A Create, Replace, or Update change uploaded by a Client for review on the Device. It does not create or alter an active Profile until the user accepts it. |
-| **Audit event** | One append-only record of a security-relevant action or state transition, including operations that require no authorization. Audit events form the Audit log. |
-| **Policy** | A phone-held rule that may decide matching profile access requests automatically. Every match still creates a unique, single-use, auditable request. |
+A secret is the reusable unit that a client requests. Secret names occupy one
+flat, globally unique namespace; type is not part of a secret's identity. A
+command composes capabilities by requesting multiple secrets, for example
+`agentknock exec -s aws-read-only -s production-ssh -- command`. Secrets do
+not contain or reference other secrets.
 
-Use *client* for the paired CLI installation throughout ordinary UI as well as
-in technical details such as “Client ID.” Reserve *device* for this Android app
-installation and *environment* for an actual execution environment or an
-environment variable.
-
-A profile is the reusable unit that a client requests. Profile names occupy one
-flat, globally unique namespace; type is not part of a profile's identity. A
-command composes capabilities by requesting multiple profiles, for example
-`agentknock exec -p aws-read-only -p production-ssh -- command`. Profiles do
-not contain or reference other profiles.
-
-Each profile has one concrete, immutable type. An Environment variables
-profile contains a cohesive set of fixed Variables. An AWS temporary
-credentials profile owns its generation configuration and provides a fixed,
+Each secret has one concrete, immutable type. An Environment variables secret
+contains a cohesive set of fixed environment variables. An AWS temporary
+credentials secret owns its generation configuration and provides a fixed,
 publicly listed set of environment variables together with one lifetime. The
-names are visible before access is requested; their generated values are not
-stored Variables. An SSH key profile owns one key and uses SSH-specific delivery
-rather than pretending the key is an environment variable. Changing a profile
-to another type means creating a new profile.
+names are visible before use is requested; their generated values are not
+stored environment variables. An SSH key secret owns one key and uses
+SSH-specific delivery rather than pretending the key is an environment
+variable. Changing a secret to another type means creating a new secret.
 
-Use *secret* only as a general description of confidential material, not as a
-separate product object. Sensitivity is an independent property of Variables;
-a useful environment variable may be non-sensitive even though all stored
-values are encrypted. Types with inherently confidential material enforce
-appropriate handling. Use *credential* for authentication material such as an
-AWS credential set, not as the structural name for every profile.
+Sensitivity is an independent property of stored values; a useful environment
+variable may be non-sensitive even though all stored values are encrypted.
+Types with inherently confidential material enforce appropriate handling. Use
+*credential* for authentication material such as an AWS credential set, not as
+the structural name for every secret.
 
 ## Screen and field conventions
 
@@ -87,7 +72,7 @@ mistaken for a separate screen:
 
 - A **destination screen** is directly reachable from primary navigation or
   Settings and owns a list or overview.
-- A **detail screen** is opened for one durable object. Request and Audit event
+- A **detail screen** is opened for one durable object. Request and audit-event
   types are variants of their shared detail screen, not separate navigation
   destinations.
 - An **editor screen** creates or changes one object. It may reuse a detail
@@ -124,15 +109,15 @@ word-for-word copy.
 
 Names do not need redundant type prefixes:
 
-- A Client detail uses the friendly name as its title, for example **my
+- A client detail uses the friendly name as its title, for example **my
   laptop**, not **Client: my laptop**. Its reported hostname is separately
   labeled because it is a different value.
-- A Profile detail uses the Profile name as its title, for example
+- A secret detail uses the secret name as its title, for example
   **aws-read-only**, with its type shown as supporting information rather than
-  **Profile: aws-read-only**.
-- A policy detail uses the policy name as its title. A Request or Audit event
+  **Secret: aws-read-only**.
+- A policy detail uses the policy name as its title. A request or audit event
   without a user-assigned name uses a concise type or operation title.
-- Inside another object's detail, a role label such as **Client**, **Profile**,
+- Inside another object's detail, a role label such as **Client**, **Secret**,
   or **Policy** precedes a linked name when the relationship would otherwise be
   ambiguous.
 - IDs, timestamps with distinct meanings, reported-versus-authoritative data,
@@ -156,7 +141,7 @@ an everyday task. The primary destinations should therefore be:
 
 1. **Requests** — the home destination and authoritative authorization inbox
    and history.
-2. **Profiles** — typed capabilities that clients can request.
+2. **Secrets** — typed capabilities that clients can request.
 3. **Clients** — active, suspended, and previously paired CLI installations.
 
 Settings remains a secondary destination rather than a fourth primary domain.
@@ -176,13 +161,13 @@ Main application
 ├── Requests
 │   └── Request detail
 │       ├── Pairing variant
-│       ├── Profile access variant
-│       ├── Profile proposal variant
+│       ├── Secret use variant
+│       ├── Secret upload variant
 │       └── Future authorized-operation variants
-├── Profiles
-│   ├── Profile detail with embedded type-specific display
-│   ├── New profile and type-selection editor
-│   ├── Variable editor
+├── Secrets
+│   ├── Secret detail with embedded type-specific display
+│   ├── New secret and type-selection editor
+│   ├── Environment variable editor
 │   ├── AWS configuration editor
 │   └── SSH key action editors
 ├── Clients
@@ -207,7 +192,7 @@ Main application
 ```
 
 Approval policies are reachable both from **Settings > Automation** and from
-the profile, client, and request they affect. They are a domain workflow,
+the secret, client, and request they affect. They are a domain workflow,
 not merely a collection of switches.
 
 ### Application-wide exceptional state
@@ -222,7 +207,7 @@ Every main destination shares the following application-level behavior:
   attention required and link to Connection diagnostics. The icon has an
   accessible text description but need not consume a labeled row or banner.
 - An actionable, non-modal banner appears when device keys are unavailable,
-  notifications that the user expects are not deliverable, a Client has a
+  notifications that the user expects are not deliverable, a client has a
   security warning,
   or synchronization has a durable error that requires user action. Temporary
   connection changes do not produce banners.
@@ -240,12 +225,12 @@ Every main destination shares the following application-level behavior:
 Relay-internal administrative controls are not presented as product states.
 When they affect observable behavior, the app uses its ordinary offline,
 temporarily unavailable, retrying, or delivery-unknown presentation. It does
-not add operator-suspension screens, banners, or Client badges, and it does not
+not add operator-suspension screens, banners, or client badges, and it does not
 claim a cause that the public protocol cannot establish.
 
 ### Phone and tablet behavior
 
-Requests, Profiles, Clients, the Audit log, and policy management are
+Requests, Secrets, Clients, the Audit log, and policy management are
 list-detail flows:
 
 - Compact windows show either list or detail, with normal back navigation.
@@ -262,16 +247,16 @@ own navigation state on every window size.
 
 ### S-01 — Welcome and setup
 
-**Surface:** Initial destination screen shown only before Device setup.
+**Surface:** Initial destination screen shown only before **Device setup**.
 
 **Purpose:** Explain the minimum product model and establish this app
-installation as the phone-held device.
+installation as the device.
 
 **Show:**
 
 - A one-paragraph explanation: this device stores or issues the material used
-  by typed profiles, which paired clients can request.
-- Setup progress: device identity, notifications, first profile, and first
+  by typed secrets, which paired clients can request.
+- Setup progress: device identity, notifications, first secret, and first
   client. Only device identity is required before entering the normal app.
 - Whether the device has a secure screen lock and whether protected local key
   storage is available. Explain a blocking prerequisite only when the app truly
@@ -279,7 +264,7 @@ installation as the phone-held device.
 - Primary action: **Set up this device**.
 - Secondary action: a short security and privacy explanation.
 
-Request notification permission only after explaining why Requests need it.
+Request notification permission only after explaining why requests need it.
 
 ### S-02 — Claim pairing address
 
@@ -298,7 +283,7 @@ Request notification permission only after explaining why Requests need it.
 - A clear distinction between the public address and the private device keys.
 
 On success, continue into the app and present contextual next actions: create a
-profile, pair a client, and enable notifications. A separate “setup
+secret, pair a client, and enable notifications. A separate “setup
 complete” ceremony is unnecessary.
 
 ### S-03 — Enable notifications
@@ -310,12 +295,12 @@ surface. It is not a mandatory standalone Agentknock screen.
 
 **Show:**
 
-- That a push wake signal contains no Request details. After the app retrieves
-  and authenticates a Request, it may show a notification with enough
-  information to identify that Request.
-- That Agentknock marks Request details as private and supplies generic public
+- That a push wake signal contains no request details. After the app retrieves
+  and authenticates a request, it may show a notification with enough
+  information to identify that request.
+- That Agentknock marks request details as private and supplies generic public
   lock-screen content. When Android's user-controlled visibility settings show
-  private content, it may include the client, request type, command, and profile
+  private content, it may include the client, request type, command, and secret
   names, but never Reasons, secret values, or private key material.
 - That requests are still authoritative in the app if push delivery is delayed
   or disabled.
@@ -337,18 +322,18 @@ device-bound private keys are unavailable.
 **Show:**
 
 - A persistent explanation that history and other metadata were restored, but
-  private keys for the device identity and pairings, and stored profile
+  private keys for the device identity and pairings, and stored secret
   material, cannot be decrypted on this device.
-- Counts of affected profiles, clients, and outstanding requests.
+- Counts of affected secrets, clients, and outstanding requests.
 - **Set up this device again** as the main recovery action.
-- After replacement, a checklist to replace unavailable Variables and SSH
+- After replacement, a checklist to replace unavailable environment variables and SSH
   keys, reconfigure affected credential issuers, and pair clients again.
 - A link to Data and history explaining backup behavior.
 
 This state must not hide the main application. Requests and metadata remain
-readable; profiles with unavailable material are marked in place. Profile
-access and pairing continuation fail closed until replacement is complete.
-**Set up this device again** reuses the Device setup and Claim pairing address
+readable; secrets with unavailable material are marked in place. Secret
+use and pairing continuation fail closed until replacement is complete.
+**Set up this device again** reuses the **Device setup** and **Claim pairing address**
 screens in recovery mode rather than introducing another recovery editor.
 
 ## Requests
@@ -361,7 +346,7 @@ screens in recovery mode rather than introducing another recovery editor.
 and history for operations that require a user decision or policy evaluation.
 
 Purely read-only or automatically handled operations do not appear here merely
-because they arrived from a client. Profile list access, automatic
+because they arrived from a client. Secret-list operations, automatic
 unpairing, local management actions, and non-actionable protocol failures are
 recorded in the Audit log instead.
 
@@ -377,31 +362,30 @@ recorded in the Audit log instead.
 
 Each row directly shows:
 
-- one operation-specific title: **Pairing request**, the reported command for
-  Profile access, or the proposal mode and Profile name such as **Update
-  aws-read-only**;
+- one request label: **Pairing**, **Secret use**, or **Secret upload**;
 - current status;
-- the Client's friendly name as supporting text, falling back to reported
-  hostname and then an unknown-Client label; and
+- the client's friendly name as supporting text, falling back to reported
+  hostname and then an unknown-client label; and
 - received time.
 
-A Profile access row also shows a compact Profile-name summary when it fits the
-phone row, such as one name plus a count of additional Profiles. It never shows
-values. A completed row may show a compact automatic-decision marker; the full
+A secret use row also shows the complete shell command and a compact
+secret-name summary when they fit, such as one name plus a count of additional
+secrets. It never shows values. A secret upload row shows its mode and secret
+name. A completed row may show a compact automatic-decision marker; the full
 decision source, policy version, and delivery state belong to detail. The
-operation title makes a redundant **Request:** or **Client:** prefix
+request label makes redundant **Request:** and **Client:** prefixes
 unnecessary.
 
 Status language must distinguish **Needs approval**, **Needs review**, **Waiting
-for Client**, **Delivered**, **Accepted**, **Rejected**, **Denied**,
+for client**, **Delivered**, **Approved**, **Rejected**, **Denied**,
 **Cancelled**, **Expired**, **Unconfirmed**, and **Verification failed** as
-appropriate to the Request type. “Completed” alone is too vague for security
+appropriate to the request type. “Completed” alone is too vague for security
 history.
 
 Empty state shows whether new pairings are accepted. When they are accepted, it
 shows the current pairing address, a copyable pairing command, and links to
-create the first Profile and view pairing instructions. When they are paused,
-it instead links to Device & pairing to resume them.
+create the first secret and view pairing instructions. When they are paused,
+it instead links to **Device & pairing** to resume them.
 
 The list must not automatically open a new request or place a modal over the
 current screen. Several requests remain independently navigable.
@@ -410,11 +394,11 @@ All non-terminal requests are retained regardless of the history limit.
 Terminal requests are kept in reverse arrival order up to a fixed product
 limit; pruning removes the oldest terminal rows only. The exact limit remains
 an open product decision. Request history participates in normal Android backup
-and device transfer and is independent of Audit log retention.
+and device transfer and is independent of audit-log retention.
 
 ### R-02 — Common request detail structure
 
-**Surface:** Shared content within every Request detail screen; not a separate
+**Surface:** Shared content within every request detail screen; not a separate
 screen.
 
 Every request detail starts with:
@@ -432,13 +416,13 @@ Every request detail starts with:
 - **Delete from history** only for terminal requests.
 
 The title does not repeat **Request:**. Primary content is the status, the
-operation being authorized or reviewed, the Client, and any available action.
-Lifecycle and decision information is supporting content. Relay Request ID,
-Client ID, decided/completed/last-updated timestamps, versions, and
+operation being authorized or reviewed, the client, and any available action.
+Lifecycle and decision information is supporting content. **Request ID**,
+**Client ID**, decided/completed/last-updated timestamps, versions, and
 cryptographic diagnostics remain under Technical details.
 
-Deletion removes the local history entry, not profiles, policies, or an active
-client. Active or unsettled requests cannot be deleted. Existing Audit log
+Deletion removes the local history entry, not secrets, policies, or an active
+client. Active or unsettled requests cannot be deleted. Existing audit-log
 events about the request remain and show that the detailed request record is no
 longer available.
 
@@ -449,15 +433,15 @@ Fields are grouped by trust:
 2. **Reported by client** — hostname, platform, command, executable, and
    working directory. These are authenticated as the paired client's report
    but not independently attested.
-3. **Reason reported by Client** — optional, untrusted text supplied with the
-   Request.
+3. **Reason reported by client** — optional, untrusted text supplied with the
+   request.
 
 The warning about reported data should be concise and visible without making
 the useful request data unreadable.
 
 ### R-03 — Pairing request detail
 
-**Surface:** Pairing variant of the Request detail screen.
+**Surface:** Pairing variant of the request detail screen.
 
 **Show:**
 
@@ -474,90 +458,89 @@ the useful request data unreadable.
 - **Reject pairing** while the pairing still admits a user decision.
 - After the correct SAS: explain whether the relay is activating the client or
   the CLI must run `agentknock pairing finish`.
-- After activation: link to the new Client detail.
+- After activation: link to the new client detail.
 
-Architecture, operating-system version, machine ID, CLI version, Client ID,
+Architecture, operating-system version, machine ID, CLI version, client ID,
 and pairing address used remain available under Reported information or
 Technical details; they do not compete with the SAS decision.
 
 Current product behavior admits only one incomplete pairing. An existing
 pending pairing remains in the list until the user accepts or rejects it.
 Pausing new pairings does not cancel a pairing that the relay already admitted;
-that Request remains actionable.
+that request remains actionable.
 
-The screen title is **Pairing request**. The proposed Client name is a primary
-editable value, not the screen title, because the pairing has not created a
-Client yet. Reported hostname and other machine information retain labels that
+The screen title is **Pairing**. The client name is a primary editable value,
+not the screen title, because the pairing has not created a client yet. Reported hostname and other machine information retain labels that
 make their reported origin clear.
 
-### R-04 — Profile access request detail
+### R-04 — Secret use request detail
 
-**Surface:** Profile access variant of the Request detail screen.
+**Surface:** Secret use variant of the request detail screen.
 
 **Purpose:** Let the user make an informed decision about one atomic set of
 requested capabilities without revealing confidential material.
 
 **Show:**
 
-- The exact requested profile names, descriptions, concrete types, and public
+- The exact requested secret names, descriptions, concrete types, and public
   delivery contracts.
-- For an Environment variables profile, every Variable name; for AWS temporary
+- For an Environment variables secret, every environment variable name; for AWS temporary
   credentials, the account, role, lifetime, and fixed environment variables it
   provides; and for an SSH key, its algorithm, public-key fingerprint, and
   delivery helper.
-- Missing profiles, unavailable material, invalid provider configuration, and
+- Missing secrets, unavailable material, invalid provider configuration, and
   conflicting provided environment variables as blocking errors.
 - A reminder that approval authorizes the complete displayed set atomically;
   partial approval is unavailable.
 - The reported command and each argument as separate structured values.
-- Optional Reason reported by the Client, visually separated from the
+- Optional reason reported by the client, visually separated from the
   operation.
-- Reported Client identity: friendly name and hostname.
+- Reported client identity: friendly name and hostname.
 - Request timing and any expiry or cancellation state.
-- The decision mode: manual, matching phone-held policy, or later remote
+- The decision mode: manual, matching device-held policy, or later remote
   reviewer under a named policy.
 
 A supporting **Execution details** section shows working directory, executable
 path and mode, SHA-256 identity when reported, standard-stream kinds, and
 launcher chain. Reported platform, architecture, OS version, machine ID, and
-CLI version remain in the linked Client or under Reported information. These
-fields stay reachable but do not crowd the Profile, command, and decision
+CLI version remain in the linked client or under Reported information. These
+fields stay reachable but do not crowd the secret, command, and decision
 actions.
 
 Manual pending state always provides:
 
-1. **Deny once** — deny only this Request.
-2. **Approve once** — approve only this Request without creating a policy.
+1. **Deny once** — deny only this request.
+2. **Approve once** — approve only this request without creating a policy.
 
-When the Client has reported the executable identity required for safe reuse,
+When the client has reported the executable identity required for safe reuse,
 it also provides:
 
 3. **Approve this command with these arguments for 4 hours** — approve this
-   Request and create a temporary policy for the exact client, requested
-   Profile set, command, and ordered argument vector.
+   request and create a temporary policy for the exact client, requested
+   secret set, command, and ordered argument vector.
 4. **Approve this command with any arguments for 4 hours** — approve this
-   Request and create a temporary policy for the exact client, requested
-   Profile set, and command while leaving the argument vector unrestricted.
+   request and create a temporary policy for the exact client, requested
+   secret set, and command while leaving the argument vector unrestricted.
 
-The reusable actions are unavailable when the Request lacks a resolved
+The reusable actions are unavailable when the request lacks a resolved
 executable path or executable hash. The screen explains that one-time approval
 is still possible but Agentknock cannot safely recognize the same executable
-for later Requests.
+for later requests.
 
 The four-hour duration is an editable default. Either temporary-policy action
-opens the Policy editor defined in A-03, prefilled with the selected argument
+opens the policy editor defined in A-03, prefilled with the selected argument
 mode. The user can change the duration and review the exact expiry and scope
 before one final save-and-approve action. The unrestricted argument choice is
 visually distinguished as broader. No prefix, pattern, partial-argument, or
 indefinite matching mode is offered initially.
 
-Every approving action revalidates the Request and every Profile's type,
+Every approving action revalidates the request and every secret's type,
 configuration, contents, and availability before responding. If anything
 changed since the screen was rendered, the decision stops and the updated
 details must be reviewed again. Creating the temporary policy and recording
 the current decision must not produce a duplicate or broader policy if delivery
-is retried. The current Request records the user as its decision source and
-links the newly created policy; only later matching Requests identify that
+is retried. The current request records the user as its decision source and
+links the newly created policy; only later matching requests identify that
 policy as their automatic decision source.
 
 Terminal states must separately report:
@@ -573,66 +556,66 @@ Additional policy detail, if offered, remains within that editor. There is no
 second unnamed confirmation screen, and the editor never creates or widens a
 policy without authenticated review.
 
-The reported command is the primary operation title when present; otherwise
-the title is **Profile access**. **Profiles**, **Client**, **Command**,
-**Arguments**, **Working directory**, and **Reason reported by Client** are
-labeled because each has a distinct role in the decision. The common Request
-status is not repeated in every group. Each requested Profile is identified by
-name without a **Profile:** prefix; its type and delivery contract are attached
-supporting information. Complete Variable or provided environment-variable
-names remain available within that Profile's request detail without becoming
+The title is **Secret use**. **Requested secrets**, **Client**, **Command**,
+**Working directory**, and **Reason reported by client** are labeled because
+each has a distinct role in the decision. Arguments are rendered with the
+command as one shell-readable value. The common request
+status is not repeated in every group. Each requested secret is identified by
+name without a **Secret:** prefix; its type and delivery contract are attached
+supporting information. Complete environment variable or provided environment variable
+names remain available within that secret's request detail without becoming
 headline fields.
 
-### R-05 — Profile proposal request detail
+### R-05 — Secret upload request detail
 
-**Surface:** Profile proposal variant of the Request detail screen.
+**Surface:** Secret upload variant of the request detail screen.
 
-**Purpose:** Let the user review a Profile uploaded by a Client before it
-changes the Device's Profile collection.
+**Purpose:** Let the user review a secret uploaded by a client before it
+changes the device's secret collection.
 
 **Show:**
 
-- the proposing Client and received time;
-- the proposal mode: **Create**, **Replace**, or **Update**, with a concise
+- the uploading client and received time;
+- the upload mode: **Create**, **Replace**, or **Update**, with a concise
   explanation of what that mode changes;
-- proposed Profile name, description, and concrete type;
-- for an Environment variables proposal, every Variable name with its value
+- uploaded secret name, description, and concrete type;
+- for an Environment variables upload, every environment variable name with its value
   masked;
 - a change summary that clearly separates added, changed, removed, and
-  unchanged fields and Variables; and
-- the existing target Profile for Replace or Update, with a link to its detail.
+  unchanged fields and environment variables; and
+- the existing target secret for Replace or Update, with a link to its detail.
 
-Create proposes a new Profile and allows its name to be edited before
-acceptance. Replace and Update target one existing Profile by name; the target
-name and immutable type cannot be changed during review. Replace proposes the
-complete new contents, including removals. Update changes only the supplied
-fields and Variables.
+Create uploads a new secret and allows its name to be edited before approval.
+Replace and Update target one existing secret by name; the target name and
+immutable type cannot be changed during review. Replace uploads the complete
+new contents, including removals. Update changes only the supplied
+fields and environment variables.
 
-Every newly added Variable is marked **Sensitive** by default. When Replace or
-Update supplies a new value for a Variable that already exists under the same
-name, that Variable keeps its existing sensitivity setting. An upload never
-silently changes an existing Variable from non-sensitive to sensitive or vice
+Every newly added environment variable is marked **Sensitive** by default. When Replace or
+Update supplies a new value for an environment variable that already exists under the same
+name, that environment variable keeps its existing sensitivity setting. An upload never
+silently changes an existing environment variable from non-sensitive to sensitive or vice
 versa merely because its value changed. The user can change sensitivity later
-from the accepted Profile's Variable editor.
+from the approved secret's environment variable editor.
 
-Actions are **Accept proposal** and **Reject proposal**. The acceptance review
-states the resulting Profile name and summarizes removals before confirmation.
-Accepted and rejected proposals remain in Request history with the exact mode
+Actions are **Approve** and **Reject**. The approval review states the
+resulting secret name and summarizes removals before confirmation.
+Approved and rejected uploads remain in request history with the exact mode
 and safe change summary, but never retain displayable values there.
 
-A proposal that targets a missing Profile, conflicts with an existing name,
+An upload that targets a missing secret, conflicts with an existing name,
 uses a different type from its Replace or Update target, or is otherwise
-invalid cannot be accepted. Such a proposal is rejected without becoming an
-actionable Request and is recorded in the Audit log with a safe reason.
+invalid cannot be approved. Such an upload is rejected without becoming an
+actionable request and is recorded in the audit log with a safe reason.
 
-The Client completes upload after the Device has durably received a valid
-proposal; it does not wait for the later user decision. The detail therefore
-distinguishes **Received for review** from **Accepted** and **Rejected**, and
-does not imply that the original Client will receive the eventual decision.
+The client completes upload after the device has durably received a valid
+upload; it does not wait for the later user decision. The detail therefore
+distinguishes **Received for review** from **Approved** and **Rejected**, and
+does not imply that the original client will receive the eventual decision.
 
 The title combines mode and name, such as **Create bootstrap** or **Update
-aws-read-only**, rather than **Profile proposal: aws-read-only**. The concrete
-type is supporting information. Change categories and affected Variable names
+aws-read-only**, rather than **Secret upload: aws-read-only**. The concrete
+type is supporting information. Change categories and affected environment variable names
 are labeled; individual unchanged fields need not occupy the primary summary.
 
 ## Audit log
@@ -644,7 +627,7 @@ required authorization. It is a secondary, security-oriented screen under
 Requests and audit events are separate records. One request produces several
 audit events as it moves through receipt, decision, response, and confirmed or
 unconfirmed delivery. An operation that requires no decision produces audit
-events without creating a Request row.
+events without creating a request row.
 
 ### L-01 — Audit log list
 
@@ -655,15 +638,15 @@ device, user, and policy activity.
 
 Record at least:
 
-- Profile list access and its outcome;
+- Secret-list operations and their outcomes;
 - request receipt, user or policy decision, response, expiry, cancellation,
   and delivery confirmation;
-- Profile proposal receipt, acceptance, rejection, and validation failure;
+- Secret upload receipt, approval, rejection, and validation failure;
 - pairing activation, rejection, failure, and client-initiated unpairing;
 - client rename, requested and confirmed suspension or resumption,
   reauthorization, and revocation;
 - pairing-address claim and replacement, and pausing or resuming new pairings;
-- Profile, Variable, SSH key, issuer configuration, and policy creation,
+- Secret, environment variable, SSH key, issuer configuration, and policy creation,
   change, replacement, and deletion;
 - device setup, recovery, and protected-key availability changes; and
 - security-relevant authentication, cryptographic, and protocol failures.
@@ -675,13 +658,13 @@ actions, not internal events.
 
 Each reverse-chronological row directly shows:
 
-- a concise event-and-outcome title, such as **Client suspended** or **Profile
-  proposal rejected**;
+- a concise event-and-outcome title, such as **Client suspended** or **Secret
+  upload rejected**;
 - timestamp; and
 - up to two supporting identities: actor and affected object, using their names
   without redundant type prefixes when context is already clear.
 
-A compact indicator shows when a retained Request detail is available. Exact
+A compact indicator shows when a retained request detail is available. Exact
 IDs, versions, event phases, and before-and-after data remain in event detail.
 
 Filters cover event category, actor, outcome, affected object, and date range.
@@ -698,7 +681,7 @@ separate screen.
 - actor and decision source;
 - stable IDs and friendly-name snapshots for affected objects;
 - safe before-and-after summaries for local management changes;
-- related request, client, profile, or policy links when those records still
+- related request, client, secret, or policy links when those records still
   exist;
 - delivery or client-confirmation state when applicable;
 - a sanitized failure category; and
@@ -710,49 +693,49 @@ Friendly snapshots are primary supporting data, while stable IDs and versions
 remain under Technical details.
 
 An audit event retains enough names and safe metadata to remain intelligible
-after the live object or bounded Request record is deleted. It never contains
+after the live object or bounded request record is deleted. It never contains
 secret values, generated temporary credentials, private keys, device or client
 tokens, encrypted blobs, raw messages, commands, Reasons, or other fields that are
 not necessary to identify the event.
 
-### L-03 — Profile list access events
+### L-03 — Secret-list events
 
-**Surface:** Profile-list-access variant of the Audit event detail screen.
+**Surface:** Secret-list variant of the audit-event detail screen.
 
 **Show:**
 
 - the requesting client and its reported information;
-- event phase: operation received, Profile list sent, delivery confirmed,
+- event phase: operation received, secret list sent, delivery confirmed,
   or failure;
-- the number, names, and concrete types of profiles returned, captured on the
+- the number, names, and concrete types of secrets returned, captured on the
   operation-received event;
 - the operation's stable correlation ID and links to its other audit events;
   and
 - sent, delivered, unconfirmed, or verification-failed outcome as known at the
   time of this event.
 
-The detail states that Profile list access is automatic but audited because
+The detail states that secret listing is automatic but audited because
 names and usage patterns may be sensitive metadata. Descriptions, values,
-provided environment-variable names, and private-key material are not copied
+provided environment variable names, and private-key material are not copied
 into the Audit log.
 
-### L-04 — Profile proposal events
+### L-04 — Secret upload events
 
-**Surface:** Profile-proposal variant of the Audit event detail screen.
+**Surface:** Secret-upload variant of the audit-event detail screen.
 
 **Show:**
 
-- the proposing Client, proposal mode, Profile name, and concrete type;
-- received, accepted, rejected, or validation-failed outcome;
-- a safe summary of which fields and Variable names were added, changed, or
+- the uploading client, upload mode, secret name, and concrete type;
+- received, approved, rejected, or validation-failed outcome;
+- a safe summary of which fields and environment variable names were added, changed, or
   removed when useful;
-- the resulting Profile link after acceptance;
-- the related Request link when a valid proposal reached user review; and
+- the resulting secret link after approval;
+- the related request link when a valid upload reached user review; and
 - a safe rejection category for a missing target, name conflict, type mismatch,
-  or invalid proposal.
+  or invalid upload.
 
-Values are never copied into the Audit log. A proposal validation failure may
-have Audit events without a Request because it never became actionable.
+Values are never copied into the audit log. An upload validation failure may
+have audit events without a request because it never became actionable.
 
 ### L-05 — Client unpairing events
 
@@ -770,9 +753,9 @@ have Audit events without a Request because it never became actionable.
 - a link to the historical Client detail.
 
 Client-initiated unpairing normally resolves automatically and therefore does
-not impersonate a user-facing authorization Request. A Client's force-remove
-operation changes only that Client's local state, so the Device cannot show or
-audit it unless the Client later communicates with the Device again.
+not impersonate a user-facing authorization request. A client's force-remove
+operation changes only that client's local state, so the device cannot show or
+audit it unless the client later communicates with the device again.
 
 ### L-06 — Unsupported or unverifiable operation event
 
@@ -806,24 +789,24 @@ The initial product retains audit events for one year. Retention removes whole
 expired rows during normal maintenance and is the only deletion path other
 than Factory reset. Shorter periods or **Keep forever** can be added later if
 real use requires a setting. The Audit log participates in normal Android
-backup and device transfer independently of whether protected profile material
+backup and device transfer independently of whether protected secret material
 remains decryptable.
 
-## Profiles
+## Secrets
 
-Profiles use one flat, global namespace. A name therefore identifies a profile
+Secrets use one flat, global namespace. A name therefore identifies a secret
 without a separate type qualifier: `aws-read-only` cannot simultaneously name
-an Environment variables profile and an SSH key profile. The type is immutable
-after creation. Profiles are not nested and do not share child objects;
+an Environment variables secret and an SSH key secret. The type is immutable
+after creation. Secrets are not nested and do not share child objects;
 composition happens in a request, such as:
 
 ```text
-agentknock exec --profile aws-read-only --profile production-ssh -- command
+agentknock exec --secret aws-read-only --secret production-ssh -- command
 ```
 
-`-p` is the shorthand for each `--profile` occurrence.
+`-s` is the shorthand for each `--secret` occurrence.
 
-### P-01 — Profile list
+### S-01 — Secret list
 
 **Surface:** Primary destination and list screen.
 
@@ -831,31 +814,31 @@ agentknock exec --profile aws-read-only --profile production-ssh -- command
 
 Each row directly shows:
 
-- Profile name as the primary text, without a **Profile:** prefix;
+- Secret name as the primary text, without a **Secret:** prefix;
 - concrete type;
 - availability or attention state; and
-- one compact type-specific summary, such as a Variable count, AWS account and
+- one compact type-specific summary, such as an environment variable count, AWS account and
   role, or abbreviated SSH fingerprint.
 
-Description, complete provided environment-variable names, delivery mechanism,
+Description, complete provided environment variable names, delivery mechanism,
 created and updated times, last request and outcome, active policies, and any
-high-value classification belong to Profile detail. A compact policy or
+high-value classification belong to secret detail. A compact policy or
 high-value marker may appear in the row only when it changes how the user
-should interpret the Profile.
+should interpret the secret.
 
-Primary action: **New profile**.
+Primary action: **New secret**.
 
-Empty state explains that each profile supplies one kind of capability and
-that a command can request several profiles together. Examples should include
-an Environment variables profile, AWS temporary credentials, and an SSH key.
+Empty state explains that each secret supplies one kind of capability and
+that a command can request several secrets together. Examples should include
+an Environment variables secret, AWS temporary credentials, and an SSH key.
 
-### P-02 — New profile and type selection
+### S-02 — New secret and type selection
 
-**Surface:** Profile creation editor screen.
+**Surface:** Secret creation editor screen.
 
 **Show:**
 
-- globally unique profile name;
+- globally unique secret name;
 - optional description; and
 - one concrete type: **Environment variables**, **AWS temporary credentials**,
   or **SSH key**.
@@ -863,98 +846,102 @@ an Environment variables profile, AWS temporary credentials, and an SSH key.
 The type choice determines the configuration form, the environment variables
 it provides when applicable, and delivery behavior. There is no generic
 “dynamic” type with a separate provider selector: provider-specific semantics
-belong to types such as AWS temporary credentials. A saved profile cannot
-change type; the user creates a new profile instead.
+belong to types such as AWS temporary credentials. A saved secret cannot
+change type; the user creates a new secret instead.
 
 Validate empty names, leading or trailing whitespace, and global uniqueness
 before opening or saving the type-specific editor.
 
-The screen title is **New profile**. Because no Profile name has yet been
+The screen title is **New secret**. Because no secret name has yet been
 established as a title, **Name**, **Description**, and **Type** are explicit
 field labels. Selecting a type continues within the creation flow; it does not
 create a new Settings or primary-navigation destination.
 
-### P-03 — Profile detail
+### S-03 — Secret detail
 
-**Surface:** Detail screen for one Profile.
+**Surface:** Detail screen for one secret.
 
-Every profile detail shows:
+Every secret detail shows:
 
 - name, description, immutable concrete type, created time, updated time, last
   requested time, and aggregate request count;
 - availability and any type-specific configuration error;
 - its public delivery contract and, where applicable, the fixed environment
   variables it provides;
-- active policies that reference the profile; and
-- recent authorization Requests and audit events filtered to this profile,
+- active policies that reference the secret; and
+- recent authorization requests and audit events filtered to this secret,
   linking to their normal details.
 
 The detail then presents the type-specific information defined below. Stored
 values and private keys remain masked. Generated temporary credentials are not
 exposed or retained merely because a request completed.
 
-Profile actions are **Edit**, **Rename**, and **Delete**, plus type-specific
+Secret actions are **Edit**, **Rename**, and **Delete**, plus type-specific
 actions such as replacing stored material or testing issuer configuration.
 Renaming changes the CLI-facing handle but preserves the stable internal ID,
 policies, and history. Deleting makes future requests by that name fail;
-history retains the profile name, type, and request metadata, never values.
+history retains the secret name, type, and request metadata, never values.
 
 Saving, renaming, and deleting are security-sensitive management actions and
 use the device's configured authentication controls.
 
-The Profile name is the screen title. Type, availability, and description are
+The secret name is the screen title. Type, availability, and description are
 primary or supporting information directly below that identity without
-repeating **Profile name**. Created, updated, and usage timestamps are labeled
-because their meanings differ. Stable Profile ID, if ever exposed, belongs
+repeating **Secret name**. Created, updated, and usage timestamps are labeled
+because their meanings differ. A stable secret ID, if ever exposed, belongs
 under Technical details.
 
-### P-04 — Environment variables profile
+### S-04 — Environment variables secret
 
-**Surface:** Type-specific content within Profile detail, plus a separate
-Variable editor screen for Add variable and Edit variable.
+**Surface:** Type-specific content within secret detail, plus a separate
+environment variable editor screen for **Add environment variable** and **Edit
+environment variable**.
 
 **Purpose:** Manage a cohesive set of fixed environment variables that must be
 released together.
 
-The Profile detail directly shows:
+The secret detail directly shows:
 
-- one row per Variable with its environment-variable name as primary text;
-- sensitivity and availability for each Variable; and
+- one row per environment variable with its name as primary text;
+- sensitivity and availability for each environment variable; and
 - type-level last-used state when useful.
 
 Created, updated, and value-updated times and notes are available after opening
-that Variable rather than filling every Profile-detail row. The Variable editor
-shows labeled **Name**, **Value**, **Sensitive**, and **Notes** fields, plus the
-existing Variable's lifecycle timestamps as read-only supporting information.
+that environment variable rather than filling every secret-detail row. The
+environment variable editor shows labeled **Name**, **Value**, **Sensitive**,
+and **Notes** fields, plus the existing environment variable's lifecycle
+timestamps as read-only supporting information.
 The value remains masked until the user deliberately reveals or replaces it.
 
-An existing Variable editor uses the environment-variable name as its title;
-the add flow uses **New variable**. Neither needs a **Variable:** title prefix.
+An existing environment variable editor uses the environment variable name as
+its title; the add flow uses **New environment variable**. Neither needs an
+**Environment variable:** title prefix.
 
-Each Variable owns its fixed environment-variable name and value. The app must
+Each environment variable owns its fixed name and value. The app must
 never reinterpret an existing value under a different name or sensitivity
 setting. If the value is unavailable, changing either property requires
-replacing the value. Non-sensitive Variables are permitted because not every
+replacing the value. Non-sensitive environment variables are permitted because not every
 value, such as `AWS_REGION`, is confidential; all values remain encrypted at
-rest regardless. Changing a Variable's value does not change its sensitivity.
+rest regardless. Changing an environment variable's value does not change its sensitivity.
 
-Actions are **Add variable**, **Edit variable**, and **Delete variable**.
+Actions are **Add environment variable**, **Edit environment variable**, and
+**Delete environment variable**.
 Editing can reveal or copy a value only after device authentication when its
 sensitivity requires it. The editor never substitutes an empty value and does
 not silently merge duplicate names.
 
-### P-05 — AWS temporary credentials profile
+### S-05 — AWS temporary credentials secret
 
-**Surface:** Type-specific content within Profile detail, plus an editor screen
+**Surface:** Type-specific content within secret detail, plus an editor screen
 for its AWS configuration.
 
 **Purpose:** Configure one AWS temporary-credential provider whose generated
 environment variables share one lifetime and must remain synchronized.
 
-The Profile detail directly shows:
+The secret detail directly shows:
 
 - AWS account and role;
-- the fixed list of environment variables provided to the Client, including
+- the fixed list of environment variables provided to the client, including
   `AWS_ACCESS_KEY_ID`, `AWS_SECRET_ACCESS_KEY`, and `AWS_SESSION_TOKEN`, plus
   optional names such as `AWS_REGION` when the type supports them;
 - configured lifetime;
@@ -966,21 +953,21 @@ The editor shows the labeled authorization, scope, account, role, and lifetime
 inputs required by this concrete type. Provider-specific technical identifiers
 that are not needed to recognize the account or role remain secondary.
 
-AWS is inherent in this profile type; there is no separate provider flag. One
+AWS is inherent in this secret type; there is no separate provider flag. One
 request produces the full credential set atomically with one expiry. The same
-fixed list of provided environment-variable names is visible on the Device and
-in the CLI's Profile list. Generated values are retained only as long as
+fixed list of provided environment variable names is visible on the device and
+in the CLI's secret list. Generated values are retained only as long as
 delivery and audit correctness require and do not become durable stored
-Variables.
+environment variables.
 
-### P-06 — SSH key profile
+### S-06 — SSH key secret
 
-**Surface:** Type-specific content within Profile detail, plus focused Generate
+**Surface:** Type-specific content within secret detail, plus focused Generate
 key, Import key, and Replace key editor screens.
 
 **Purpose:** Manage one SSH key and expose it through an SSH-specific helper.
 
-The Profile detail directly shows:
+The secret detail directly shows:
 
 - key algorithm, public key, fingerprint, and comment;
 - whether private-key material is available;
@@ -993,7 +980,7 @@ and public key are labeled supporting fields. Lifecycle timestamps and delivery
 details remain secondary; private-key material is never a display field.
 
 Generate key shows the selectable supported algorithm, optional public comment,
-and the fact that a new private key will be created on this Device. Import key
+and the fact that a new private key will be created on this device. Import key
 shows the detected algorithm, public-key fingerprint, and validation result
 before saving. Replace key shows both the current and proposed public
 fingerprints and clearly states that future access uses the replacement. These
@@ -1001,12 +988,12 @@ editor screens never render private-key bytes after input.
 
 Actions are **Generate key** or **Import key**, **Replace key**, and
 type-appropriate public-key copy actions. Private-key material remains hidden
-unless a later explicit export feature is designed. The profile has no
+unless a later explicit export feature is designed. The secret has no
 environment variables and cannot contain multiple keys.
 
-Stored confidential profile material remains encrypted at rest. If it is
+Stored confidential secret material remains encrypted at rest. If it is
 unavailable after restore or transfer, metadata and history remain visible,
-but the material must be replaced before the profile can be used or its bound
+but the material must be replaced before the secret can be used or its bound
 properties changed.
 
 ## Clients
@@ -1015,13 +1002,13 @@ properties changed.
 
 **Surface:** Primary destination and list screen.
 
-**Purpose:** Manage the installations that can ask this device for profile
+**Purpose:** Manage the installations that can ask this device for secret
 metadata or values.
 
 Each row directly shows:
 
 - user-assigned friendly name as primary text, falling back to reported
-  hostname and then an unknown-Client label;
+  hostname and then an unknown-client label;
 - state: active, suspending, suspended, resuming,
   stale/reauthorization required, security attention, revoking, revoked, or
   keys unavailable on this restored device;
@@ -1029,9 +1016,9 @@ Each row directly shows:
   the friendly name; and
 - last activity time.
 
-A pending-Request indicator appears when nonzero because it requires attention.
-Paired time, full platform information, active-policy count, and exact Request
-counts belong to Client detail. Rows use **my laptop**, not **Client: my
+A pending-request indicator appears when nonzero because it requires attention.
+Paired time, full platform information, active-policy count, and exact request
+counts belong to client detail. Rows use **my laptop**, not **Client: my
 laptop**.
 
 Default view prioritizes active and attention-requiring clients. A
@@ -1042,24 +1029,24 @@ Empty state shows whether new pairings are accepted. If they are, it shows the
 pairing address and a copyable
 `agentknock pairing start <PAIRING_ADDRESS>` command. If they are paused, it
 links to the control that resumes them. Pending pairing attempts link to their
-Request detail rather than becoming half-created client rows.
+request detail rather than becoming half-created client rows.
 
 ### C-02 — Client detail
 
-**Surface:** Detail screen for one Client.
+**Surface:** Detail screen for one client.
 
 **Show:**
 
-- friendly name, editable by the phone user;
+- friendly name, editable by the user;
 - authoritative Agentknock state and any security warning;
 - reported hostname, platform, architecture, OS version, machine ID, CLI
   version, and client ID;
-- paired, last authorization Request, last successful Request, last Profile
-  list access, and last seen times when available;
+- paired, last authorization request, last successful request, last secret-list
+  operation, and last seen times when available;
 - continuity-key rotation status in user language: healthy, stale,
   reauthorization required, or competing copy detected;
 - active approval policies for this client;
-- authorization Requests and audit events filtered to this client; and
+- authorization requests and audit events filtered to this client; and
 - an explanation that reported machine information is not independent host
   attestation.
 
@@ -1071,44 +1058,44 @@ Actions:
 - **Revoke client**; and
 - **View approval policies** when policies are available.
 
-The Client remains **Suspending**, **Resuming**, or **Revoking** until the relay
+The client remains **Suspending**, **Resuming**, or **Revoking** until the relay
 confirms the requested state. These transitions survive leaving the screen or
 restarting the app and remain visibly retryable after a delivery failure.
 
-Once suspension is confirmed, the Client cannot send new traffic and its
-pairing is retained for later resumption. A Request already delivered to the
-Device remains visible and can still be decided, but its response cannot reach
-the Client until the Client resumes and reconnects; it may expire first.
-Suspension does not revive messages already discarded or Requests already
+Once suspension is confirmed, the client cannot send new traffic and its
+pairing is retained for later resumption. A request already delivered to the
+device remains visible and can still be decided, but its response cannot reach
+the client until the client resumes and reconnects; it may expire first.
+Suspension does not revive messages already discarded or requests already
 expired.
 
-Revocation is authoritative and permanent for that pairing: future Requests
+Revocation is authoritative and permanent for that pairing: future requests
 fail, outstanding exchanges and delayed responses are terminated, the CLI must
-pair as a new Client, and local history remains.
+pair as a new client, and local history remains.
 
 A competing-copy warning automatically suspends policies for that client
 until the user explicitly reauthorizes or revokes it.
 
 The friendly name is the screen title. State and any security warning are
 primary. **Reported hostname**, **Platform**, **Architecture**, **OS version**,
-and **Machine ID** remain explicitly labeled because they are Client-reported
+and **Machine ID** remain explicitly labeled because they are client-reported
 attributes, while **Client ID** and CLI/protocol versions belong under
 Technical details. Related policies, Requests, and Audit events are named
-sections rather than fields competing with the Client identity. **View approval
-policies** opens the existing Policy list filtered to this Client; it does not
-create a Client-specific policy screen.
+sections rather than fields competing with the client identity. **View approval
+policies** opens the existing policy list filtered to this client; it does not
+create a client-specific policy screen.
 
 ### C-03 — Client reauthorization
 
-**Surface:** Focused action screen opened from Client detail only when the
-Client is eligible for reauthorization.
+**Surface:** Focused action screen opened from client detail only when the
+client is eligible for reauthorization.
 
 **Purpose:** Let the user deliberately restore trust after stale continuity
 state or a competing-copy warning.
 
 **Show:**
 
-- the friendly Client name and current warning;
+- the friendly client name and current warning;
 - the reported hostname and platform snapshot being reauthorized;
 - why reauthorization is required and what evidence the user must compare or
   confirm once that protocol is defined;
@@ -1118,7 +1105,7 @@ state or a competing-copy warning.
   each action is valid.
 
 The screen title is **Reauthorize my laptop**, substituting the friendly name,
-not **Reauthorize Client: my laptop**. Technical identifiers and protocol
+not **Reauthorize client: my laptop**. Technical identifiers and protocol
 transcript state remain secondary. Until a concrete verification contract
 exists, the UI must not substitute a generic confirmation that treats reported
 machine metadata as proof.
@@ -1132,36 +1119,36 @@ should be reserved now so that it does not become a loose collection of toggles.
 
 **Surface:** List screen reached from Automation and contextual policy links.
 
-**Purpose:** Inspect and stop reusable phone-held authorization.
+**Purpose:** Inspect and stop reusable device-held authorization.
 
 **Show:**
 
 - master state: automatic approvals enabled or paused;
 - each policy's name as primary text, enabled/paused/expired status, concise
-  Client/Profile scope, and expiry;
+  client/secret scope, and expiry;
 - prominent warnings for policies suspended by client competition,
-  unavailable profile material, invalid issuer configuration, or subscription
+  unavailable secret material, invalid issuer configuration, or subscription
   entitlement; and
 - a link to every automatic decision through normal request history.
 
 Last match, recent match count, complete executable scope, and version belong to
-Policy detail. A row uses the policy name without a **Policy:** prefix.
+policy detail. A row uses the policy name without a **Policy:** prefix.
 
-The initial creation path starts from a pending Profile access Request so the
+The initial creation path starts from a pending secret use request so the
 app can capture and show a concrete scope. A global **Pause automatic
 approvals** action is fast and reversible; it does not delete policy
 definitions.
 
 ### A-02 — Policy detail
 
-**Surface:** Detail screen for one Policy.
+**Surface:** Detail screen for one policy.
 
 **Show:**
 
 - policy name, stable identifier, and current version;
 - enabled, paused, expired, or blocked state and reason;
 - exact client selector;
-- exact profile or profile-set selector and how profile configuration changes
+- exact secret or secret-set selector and how secret configuration changes
   affect matching;
 - original command name, resolved executable path, and executable-content
   identity used to recognize the same command version;
@@ -1169,7 +1156,7 @@ definitions.
 - start, expiry, created, updated, and last-used times;
 - whether matching requests are approved deterministically, sent to a remote
   reviewer, or escalated for manual review;
-- high-value profile restrictions;
+- high-value secret restrictions;
 - automatic decision count and recent matching requests; and
 - what request data a remote reviewer may see, if applicable.
 
@@ -1177,29 +1164,29 @@ Actions: **Pause/enable**, **Edit**, **Revoke**, and **View matching activity**.
 Revoke prevents future matches but cannot retract material already delivered
 or operations already completed.
 
-**View matching activity** opens the existing Request list filtered to this
-Policy rather than a separate activity screen.
+**View matching activity** opens the existing request list filtered to this
+policy rather than a separate activity screen.
 
 The policy name is the screen title and current status is primary. **Client**,
-**Profiles**, **Command**, **Arguments**, **Decision mode**, and **Expires** are
+**Secrets**, **Command**, **Arguments**, **Decision mode**, and **Expires** are
 labeled scope fields. Stable identifier, version, exact hash, and timestamps
 other than expiry and last use remain under Technical details or a secondary
 history section.
 
 ### A-03 — Create or edit a temporary policy
 
-**Surface:** Policy editor screen opened from a pending Profile access Request
-or an existing Policy detail.
+**Surface:** Policy editor screen opened from a pending secret use request
+or an existing policy detail.
 
 **Show and require review of:**
 
 - a generated, editable user-visible policy name;
-- the one exact client copied from the Request;
-- the exact profile set and whether authorization-relevant changes to a
-  selected profile require manual review;
+- the one exact client copied from the request;
+- the exact secret set and whether authorization-relevant changes to a
+  selected secret require manual review;
 - the original command name, resolved executable path, and SHA-256 executable
-  identity copied from the Request;
-- argument mode: the exact ordered argument vector copied from the Request, or
+  identity copied from the request;
+- argument mode: the exact ordered argument vector copied from the request, or
   any arguments;
 - an editable duration defaulting to four hours and the resulting absolute
   expiry time;
@@ -1210,14 +1197,14 @@ or an existing Policy detail.
 
 The exact-arguments comparison operates on the structured ordered argument
 vector, not a rendered shell command. **Any arguments** removes only that
-comparison; it does not broaden the client, Profile set, original command name,
+comparison; it does not broaden the client, secret set, original command name,
 resolved executable path, or executable contents. A different order of the
-same requested Profile names still represents the same set. Launcher-chain
-information remains visible as Client-reported context but does not broaden or
-narrow the initial policy match. A Profile change with authorization
-consequences fails policy matching and returns the Request to manual review.
+same requested secret names still represents the same set. Launcher-chain
+information remains visible as client-reported context but does not broaden or
+narrow the initial policy match. A secret change with authorization
+consequences fails policy matching and returns the request to manual review.
 
-A reusable policy cannot be created from a Request that lacks the resolved
+A reusable policy cannot be created from a request that lacks the resolved
 executable path or SHA-256 identity. The normal UI can describe the hash as the
 same executable version; the exact value remains available in technical
 details.
@@ -1232,7 +1219,7 @@ authentication. The stored version increments whenever authorization-relevant
 fields change so history can identify the exact rule that acted.
 
 The create flow uses a **New approval policy** title and a labeled **Name**
-field. Editing an existing Policy uses its policy name as the title without a
+field. Editing an existing policy uses its policy name as the title without a
 **Policy:** prefix.
 
 ### A-04 — Remote reviewer setup
@@ -1243,7 +1230,7 @@ field. Editing an existing Policy uses its policy name as the title without a
 
 **Show before enabling:**
 
-- the difference between phone-held deterministic policy and remote LLM
+- the difference between device-held deterministic policy and remote LLM
   review;
 - exact request fields sent to the provider;
 - that no secret values, generated temporary credentials, private keys, or
@@ -1271,7 +1258,7 @@ Rows show their current state in supporting text and open focused subscreens:
 - **Notifications** — enabled, disabled, or delivery setup needs attention.
 - **Security** — device protection and local-key status.
 - **Automation** — off, paused, or number of active policies.
-- **Data and history** — backup, bounded request history, and Audit log.
+- **Data and history** — backup, bounded request history, and audit log.
 - **Plan and billing** — Free, paid plan name, payment attention, or unavailable.
 - **Connection diagnostics** — connected, offline, or last error.
 
@@ -1296,16 +1283,13 @@ cryptographic algorithms, or other implementation knobs.
 - replacement device-identity setup when keys are unavailable.
 
 Pausing affects only previously unknown pairing attempts. It keeps the pairing
-address, does not cancel an already admitted pairing Request, and remains in
+address, does not cancel an already admitted pairing request, and remains in
 effect until the user explicitly resumes it; there is no automatic timeout.
 
-Address change must explain its exact effect on existing clients before
-confirmation: once the replacement is claimed, every existing Client must pair
-again and its approval policies can no longer authorize access. Profiles and
-history remain. Address replacement is not shown as complete until the required
-Client revocations are confirmed. The working address remains available until
-its replacement has been claimed successfully, and an interrupted change
-remains resumable.
+Changing the pairing address affects only future pairings. Existing clients,
+secrets, policies, and history are unaffected. The current address remains in
+use until the replacement has been claimed successfully, and an interrupted
+change remains resumable.
 
 Never display or export the device token or private device keys.
 
@@ -1327,7 +1311,7 @@ surfaces where Android owns the choice.
 - last successful push registration and last generic wake, when known;
 - **Enable notifications** or **Open system notification settings** as
   appropriate;
-- whether actionable Request notifications are available on this device;
+- whether actionable request notifications are available on this device;
 - whether automatic approvals generate informational notifications, once that
   feature exists; and
 - **Test notification** only if it can exercise the real production path
@@ -1342,31 +1326,31 @@ attention; registration and wake timestamps are supporting diagnostics rather
 than top-level settings rows.
 
 An actionable notification appears only after the app has retrieved and
-authenticated the Request. A generic push wake can never authorize anything.
-Agentknock supplies generic public lock-screen content and marks Request details
+authenticated the request. A generic push wake can never authorize anything.
+Agentknock supplies generic public lock-screen content and marks request details
 as private. Subject to Android's user-controlled visibility settings, private
 content shows enough context to distinguish the client, request type, command,
-and Profiles without showing confidential material or a Reason reported by the
-Client.
+and secrets without showing confidential material or a reason reported by the
+client.
 
-Pending Profile access notifications initially provide **Deny once** and
+Pending secret use notifications initially provide **Deny once** and
 **Approve once**:
 
-- **Deny once** applies only if the same Request is still pending and is safe to
+- **Deny once** applies only if the same request is still pending and is safe to
   repeat without changing the outcome.
 - **Approve once** requires device authentication and the same complete
   revalidation as approval in the app. If Android cannot provide the required
   authenticated interaction from the notification, the action opens the exact
-  Request detail to finish approval.
+  request detail to finish approval.
 
 Creating a temporary policy remains an in-app action initially. Its broader
-scope, argument mode, Profile set, and editable expiry require the focused
-review surface. Dismissing a notification has no effect on its Request, and a
-notification is removed or updated when the Request resolves elsewhere.
+scope, argument mode, secret set, and editable expiry require the focused
+review surface. Dismissing a notification has no effect on its request, and a
+notification is removed or updated when the request resolves elsewhere.
 
-A Profile proposal notification identifies its Client, mode, and Profile name
-and opens the proposal detail for review. It does not offer an acceptance
-shortcut before the user has seen the proposed changes.
+A secret upload notification identifies its client, mode, and secret name and
+opens the upload detail for review. It does not offer an approval shortcut
+before the user has seen the uploaded changes.
 
 ### T-04 — Security
 
@@ -1378,8 +1362,8 @@ shortcut before the user has seen the proposed changes.
 - local encryption-key state and whether hardware-backed protection is in use
   when Android can report it reliably;
 - a plain explanation that hardware backing is best effort and the trusted
-  phone OS can use protected material while authorized;
-- number of profiles with sensitive or unavailable material;
+  Android OS can use protected material while authorized;
+- number of secrets with sensitive or unavailable material;
 - clients with stale or competing state; and
 - links to manage step-up requirements if that later feature is enabled.
 
@@ -1418,23 +1402,23 @@ reset.
 
 **Show:**
 
-- local counts for profiles, Variables, clients, Requests, audit events, and
+- local counts for secrets, environment variables, clients, requests, audit events, and
   policies;
 - what Android backup/device transfer preserves: metadata and encrypted stored
   material, including Request history and the Audit log;
-- what it cannot preserve: device-bound private keys, so restored profile
+- what it cannot preserve: device-bound private keys, so restored secret
   material and pairings may be unavailable;
-- that the relay removes a Device after 180 days without authenticated Device
-  activity; Client traffic and push attempts do not by themselves keep that
-  Device registered;
-- the terminal Request history limit and current count;
+- that the relay removes a device after 180 days without authenticated device
+  activity; client traffic and push attempts do not by themselves keep that
+  device registered;
+- the terminal request-history limit and current count;
 - **Audit log**, showing its one-year retention period and oldest retained
   event;
 - **Clear completed request history** with count and confirmation; and
 - **Factory reset Agentknock**, visually separated from ordinary data and
   history controls as an irreversible recovery and deletion action.
 
-Clearing history never deletes active clients, profiles, policies, or
+Clearing history never deletes active clients, secrets, policies, or
 unsettled Requests. It also does not delete Audit log events about pruned or
 manually deleted Requests. Individual audit events cannot be deleted; normal
 retention removes expired events, and Factory reset removes the log with
@@ -1451,7 +1435,7 @@ visually isolated from Clear completed request history.
 **Surface:** Focused action screen reached manually from Data and history.
 
 **Purpose:** Give the user a deliberate way to erase Agentknock completely and
-recover by starting again when the current Device can no longer be used.
+recover by starting again when the current device can no longer be used.
 
 This is a dedicated full-screen destructive flow, not a routine confirmation
 dialog. It is manually reachable from Data and history even while the relay is
@@ -1460,14 +1444,14 @@ unavailable.
 **Show before reset:**
 
 - an unmistakable **This cannot be undone** warning;
-- every local category that will be erased: Device identity and keys, Profiles
+- every local category that will be erased: device identity and keys, secrets
   and values, Clients, Requests, policies, Audit log, and settings;
-- the remote state Agentknock will attempt to delete: the relay Device, Client
+- the remote state Agentknock will attempt to delete: the relay device, client
   registrations, pending exchanges, and push registration;
 - that deletion removes live relay state while any limited infrastructure
   recovery retention follows the published privacy policy;
-- that every Client must pair again;
-- that setup starts from the beginning with a new Device identity and pairing
+- that every client must pair again;
+- that setup starts from the beginning with a new device identity and pairing
   address;
 - that the previous pairing address may remain unavailable during its relay
   quarantine; and
@@ -1480,9 +1464,9 @@ dialog, such as entering a displayed confirmation phrase. The destructive
 button remains visually and spatially separate from retry, cancel, and normal
 data-management actions.
 
-Agentknock first asks the relay to delete the Device. If deletion is confirmed,
+Agentknock first asks the relay to delete the device. If deletion is confirmed,
 it erases all local state and returns to initial setup. If the relay
-unambiguously confirms that the Device is already absent, the same local reset
+unambiguously confirms that the device is already absent, the same local reset
 may continue after the full confirmation.
 
 If remote deletion cannot be confirmed because the relay is unreachable or
@@ -1494,10 +1478,10 @@ remote state may remain until the relay's inactivity cleanup removes it.
 Factory reset is never suggested, preselected, or opened in response to a
 connection, synchronization, authentication, or protocol error. In particular,
 one or many `404` responses, regardless of duration, are not proof that the
-mailbox was permanently deleted. Such failures retain all local state and use
-ordinary retry behavior. If the mailbox truly is gone or permanently
-inaccessible, Factory reset remains a manual recovery path rather than an
-automatic diagnosis.
+relay device registration was permanently deleted. Such failures retain all
+local state and use ordinary retry behavior. If the registration truly is gone
+or permanently inaccessible, Factory reset remains a manual recovery path
+rather than an automatic diagnosis.
 
 Using Android's system **Clear storage** action erases only local app data and
 cannot request relay deletion. Help and this screen explain that distinction.
@@ -1524,7 +1508,7 @@ icon or error action.
 
 Actions: **Reconnect/synchronize now**, **Retry push registration**, and links
 to resolve the specific system setting. Never include device/client tokens,
-private keys, encrypted profile material or values, full request payloads, or
+private keys, encrypted secret material or values, full request payloads, or
 Reasons reported by Clients in copied diagnostics.
 
 Retryable rate and capacity failures use ordinary backoff and must not be shown
@@ -1600,7 +1584,7 @@ ordinary app navigation into repeated paywall interruptions.
 - **View plan** plus a clear back/dismiss path.
 
 Never cover a live manual approval with a paywall. Billing failure must not be
-misrepresented as a profile access denial or cryptographic failure.
+misrepresented as a secret use denial or cryptographic failure.
 
 ### T-11 — Help
 
@@ -1608,9 +1592,9 @@ misrepresented as a profile access denial or cryptographic failure.
 
 **Show:**
 
-- getting started: create a profile, pair a client, execute, and review;
+- getting started: create a secret, pair a client, execute, and review;
 - exact examples for `agentknock pairing start <PAIRING_ADDRESS>`,
-  `agentknock pairing finish`, `agentknock profile list`, Profile upload, and
+  `agentknock pairing finish`, `agentknock secret list`, secret upload, and
   `agentknock exec`, using the current pairing address where applicable;
 - troubleshooting links for offline requests, notification problems, broken
   pairing, unavailable restored values, Factory reset, and subscription state;
@@ -1630,7 +1614,7 @@ Help examples never include real stored values or request data.
 - privacy policy, terms, and subscription terms when applicable;
 - open-source licenses;
 - relay-service status/support links when available; and
-- a short statement of the phone-held trust mode and what metadata the relay
+- a short statement of the device-held trust mode and what metadata the relay
   and push provider can see.
 
 ## Confirmations and authentication surfaces
@@ -1641,12 +1625,12 @@ Android-owned authentication surfaces; none are navigation destinations.
 These are dialogs or system authentication surfaces, not independent
 navigation destinations:
 
-- allow or deny a profile access request when a confirmation is useful;
-- accept or reject a Profile proposal;
-- delete a Variable or profile;
+- allow or deny a secret use request when a confirmation is useful;
+- accept or reject a secret upload;
+- delete an environment variable or secret;
 - suspend, resume, reauthorize, or revoke a client;
 - pause or resume new pairings;
-- clear completed Request history;
+- clear completed request history;
 - change pairing address or discard an incomplete claim;
 - reveal/copy a sensitive value; and
 - create, widen, extend, enable, or revoke an approval policy.
@@ -1663,8 +1647,8 @@ dedicated full-screen flow defined above.
 
 Simple Rename actions use a small labeled name editor rather than gaining a
 screen in the navigation tree. Changing the pairing address reuses the Claim
-pairing address editor in replacement mode, adding the existing-Client
-consequences and replacement progress. Google Play owns the purchase system
+pairing address editor in replacement mode, adding the effect on future
+pairings and replacement progress. Google Play owns the purchase system
 surface launched from Plan and billing.
 
 ## Cross-screen behavior and presentation
@@ -1674,7 +1658,7 @@ surface launched from Plan and billing.
 - Format times in the device locale and time zone.
 - Lists may use relative time plus date grouping; details show full date and
   time.
-- Never derive “delivered” from the phone's approval alone. Show it only after
+- Never derive “delivered” from the device's approval alone. Show it only after
   authenticated client confirmation.
 - Unknown or ambiguous delivery remains **Unconfirmed**, not successful.
 
@@ -1691,15 +1675,15 @@ surface launched from Plan and billing.
 - Values containing secret material are masked by default and omitted entirely
   from request presentation and history. Concrete non-sensitive values are
   revealed only in their management UI when useful.
-- Profile names, Variable names, commands, paths, Reasons, hostnames, and
+- Secret names, environment variable names, commands, paths, reasons, hostnames, and
   usage patterns are sensitive metadata even though they are not secret values.
 - Push wake signals and public lock-screen notification content remain generic.
-  Agentknock marks Request details as private; Android's user-controlled
+  Agentknock marks request details as private; Android's user-controlled
   visibility settings determine whether the minimum metadata needed for an
   informed one-time action appears on the lock screen.
-- Screens that show command or Reason data should opt out of unintended
+- Screens that show command or reason data should opt out of unintended
   system capture where practical, without claiming this defeats a compromised
-  phone.
+  device.
 - Search, analytics, crash reports, and diagnostics do not ingest request
   content.
 
@@ -1726,7 +1710,7 @@ These decisions materially affect the user contract or screen structure and
 should be resolved before the corresponding functionality is specified in
 detail:
 
-1. **Request history limit.** Non-terminal Requests are never pruned, while
+1. **Request history limit.** Non-terminal requests are never pruned, while
    terminal Requests are bounded independently of the one-year Audit log.
    Decide the exact terminal-record limit; 100 is the current candidate.
 2. **Client friendly name timing.** Decide whether the default reported
@@ -1736,8 +1720,8 @@ detail:
    protocol lifecycle, expiry, and effect on existing policies before the
    focused reauthorization screen is finalized. Reported machine metadata is
    not sufficient evidence by itself.
-4. **Profile type contracts.** Define the exact public metadata, fixed provided
-   environment-variable names where applicable, request result, delivery
+4. **Secret type contracts.** Define the exact public metadata, fixed provided
+   environment variable names where applicable, request result, delivery
    behavior, and combination rules for each type before its screens are
    finalized.
 5. **AWS credential generation.** Choose the authorization mechanism,
@@ -1746,16 +1730,16 @@ detail:
 6. **SSH delivery.** Define the client-side helper, authorization boundary,
    operation lifecycle, and whether the first version supports signing only or
    any other key operation.
-7. **Sensitivity granularity.** A Variable can have a sensitivity choice,
-   while inherently confidential profile types require protected handling.
+7. **Sensitivity granularity.** An environment variable can have a sensitivity choice,
+   while inherently confidential secret types require protected handling.
    Decide whether compound type metadata ever needs field-level sensitivity.
 8. **High-value scope.** Decide whether step-up authentication is attached to
-   an entire profile, individual Variables within an Environment variables
-   profile, or both. Profile-level classification works consistently across
-   all profile types.
+   an entire secret, individual environment variables within an Environment variables
+   secret, or both. Secret-level classification works consistently across
+   all secret types.
 9. **Paid capabilities.** No feature-to-plan mapping or price is assumed here.
    Decide what remains free, what is paid, usage limits, and whether manual
-   phone-held release always remains available during billing problems.
+   device-held release always remains available during billing problems.
 10. **Subscription identity.** Decide how a Google Play purchase is bound to the
    pseudonymous Agentknock device identity, and what restoration or
    multiple-device behavior is promised before the backend entitlement model

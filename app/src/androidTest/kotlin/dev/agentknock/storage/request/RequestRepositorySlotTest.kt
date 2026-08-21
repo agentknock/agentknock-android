@@ -18,11 +18,11 @@ import dev.agentknock.storage.crypto.EncryptionKeyBacking
 import dev.agentknock.storage.crypto.EncryptionKeyStore
 import dev.agentknock.storage.crypto.GeneratedEncryptionKey
 import dev.agentknock.storage.crypto.LocalEncryptionKeyManager
-import dev.agentknock.storage.profile.ProfileRepository
+import dev.agentknock.storage.secret.SecretRepository
 import dev.agentknock.storage.vault.RelayDeviceCredentialSource
 import dev.agentknock.storage.vault.RelayDeviceCredentials
 import dev.agentknock.storage.vault.RelayDeviceCredentialsResult
-import dev.agentknock.storage.vault.VaultIdentityEntity
+import dev.agentknock.storage.vault.DeviceIdentityEntity
 import java.math.BigInteger
 import java.security.SecureRandom
 import java.util.ArrayDeque
@@ -76,7 +76,7 @@ class RequestRepositorySlotTest {
         val devicePublicKey = X25519PrivateKeyParameters(devicePrivateKey, 0)
             .generatePublicKey().encoded
         credentials = RelayDeviceCredentials(
-            vaultIdentityId = VAULT_ID,
+            deviceIdentityId = DEVICE_IDENTITY_ID,
             address = ADDRESS,
             addressId = ADDRESS_ID,
             deviceId = DEVICE_ID,
@@ -85,8 +85,8 @@ class RequestRepositorySlotTest {
             deviceToken = "token",
         )
         database.vaultDao().insertIdentity(
-            VaultIdentityEntity(
-                id = VAULT_ID,
+            DeviceIdentityEntity(
+                id = DEVICE_IDENTITY_ID,
                 role = "active",
                 address = ADDRESS,
                 addressId = ADDRESS_ID,
@@ -100,8 +100,8 @@ class RequestRepositorySlotTest {
         repository = RequestRepository(
             dao = database.requestDao(),
             deviceCredentials = StaticCredentialSource(credentials),
-            profiles = ProfileRepository(
-                dao = database.profileDao(),
+            secrets = SecretRepository(
+                dao = database.secretDao(),
                 keyManager = keyManager,
                 encryption = encryption,
                 cryptographyDispatcher = Dispatchers.Unconfined,
@@ -275,7 +275,7 @@ class RequestRepositorySlotTest {
     }
 
     private companion object {
-        const val VAULT_ID = "vault"
+        const val DEVICE_IDENTITY_ID = "device-identity"
         const val ADDRESS = "write-leader-hungry"
         const val ADDRESS_ID = "0123456789abcdef0123456789abcdef"
         const val DEVICE_ID = "01K2ENXDTW1P3XAR4J7V7C9D0H"
@@ -299,7 +299,7 @@ private class StaticCredentialSource(
     override suspend fun activeDeviceCredentials() =
         RelayDeviceCredentialsResult.Available(credentials)
 
-    override suspend fun deviceCredentials(vaultIdentityId: String) =
+    override suspend fun deviceCredentials(deviceIdentityId: String) =
         RelayDeviceCredentialsResult.Available(credentials)
 }
 

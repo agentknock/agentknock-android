@@ -2,15 +2,17 @@ package dev.agentknock.protocol
 
 import java.security.SecureRandom
 
-internal class VaultAddressGenerator(
+internal class PairingAddressGenerator(
     private val words: List<String>,
     private val nextIndex: (Int) -> Int = SecureRandom()::nextInt,
 ) {
     init {
-        require(words.size >= WORD_COUNT) { "The vault address word list is too short" }
-        require(words.distinct().size == words.size) { "The vault address word list has duplicates" }
+        require(words.size >= WORD_COUNT) { "The pairing address word list is too short" }
+        require(words.distinct().size == words.size) {
+            "The pairing address word list has duplicates"
+        }
         require(words.all { word -> word.isNotEmpty() && word.all { it in 'a'..'z' } }) {
-            "Vault address words must contain only lowercase ASCII letters"
+            "Pairing address words must contain only lowercase ASCII letters"
         }
     }
 

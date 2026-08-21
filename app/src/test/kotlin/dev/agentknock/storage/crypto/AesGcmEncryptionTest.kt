@@ -56,7 +56,7 @@ class AesGcmEncryptionTest {
         val boundLocation = location.copy(
             bindings = listOf(
                 EncryptionBinding("name", "AWS_SECRET_ACCESS_KEY"),
-                EncryptionBinding("profile_id", "aws-read-only"),
+                EncryptionBinding("secret_id", "aws-read-only"),
                 EncryptionBinding("sensitive", "true"),
             ),
         )

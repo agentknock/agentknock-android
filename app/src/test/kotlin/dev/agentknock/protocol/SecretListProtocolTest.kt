@@ -4,16 +4,16 @@ import kotlinx.serialization.json.Json
 import org.junit.Assert.assertEquals
 import org.junit.Test
 
-class ProfileListProtocolTest {
-    private val protocol = ProfileListProtocol()
+class SecretListProtocolTest {
+    private val protocol = SecretListProtocol()
     private val json = Json
 
     @Test
     fun `decodes the cli list request and empty completion`() {
         assertEquals(
-            ProfileListRequestMessage("0.1.0"),
+            SecretListRequestMessage("0.1.0"),
             protocol.decodeRequest(
-                """{"cli_version":"0.1.0","method":"ProfileList"}""".encodeToByteArray(),
+                """{"cli_version":"0.1.0","method":"SecretList"}""".encodeToByteArray(),
             ),
         )
         assertEquals(
@@ -25,17 +25,17 @@ class ProfileListProtocolTest {
     }
 
     @Test
-    fun `encodes profile metadata without stored values`() {
+    fun `encodes secret metadata without stored values`() {
         val response = protocol.response(
             sortedMapOf(
-                "aws-read-only" to ProfileListProfile(
+                "aws-read-only" to SecretListSecret(
                     description = "Read production logs",
                     environmentVariableNames = listOf(
                         "AWS_ACCESS_KEY_ID",
                         "AWS_SECRET_ACCESS_KEY",
                     ),
                 ),
-                "empty" to ProfileListProfile(
+                "empty" to SecretListSecret(
                     description = "No variables yet",
                     environmentVariableNames = emptyList(),
                 ),
@@ -46,7 +46,7 @@ class ProfileListProtocolTest {
             json.parseToJsonElement(
                 """
                 {
-                  "profiles":{
+                  "secrets":{
                     "aws-read-only":{
                       "description":"Read production logs",
                       "type":"environment",

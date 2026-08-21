@@ -4,15 +4,15 @@ import kotlinx.serialization.SerialName
 import kotlinx.serialization.Serializable
 import kotlinx.serialization.json.Json
 
-internal data class CredentialRequestMessage(
+internal data class SecretUseRequestMessage(
     val cliVersion: String,
-    val profiles: List<String>,
+    val secrets: List<String>,
     val reason: String?,
-    val operation: CredentialExecOperation,
+    val operation: SecretUseExecOperation,
     val launcherChain: List<String>,
 )
 
-internal data class CredentialExecOperation(
+internal data class SecretUseExecOperation(
     val command: String,
     val arguments: List<String>,
     val workingDirectory: String,
@@ -24,50 +24,50 @@ internal data class CredentialExecOperation(
     val stderr: String,
 )
 
-internal data class CredentialResponseProfile(
+internal data class SecretUseResponseSecret(
     val description: String,
     val environment: Map<String, String>,
 )
 
-internal enum class CredentialDenialReason(val wireName: String) {
+internal enum class SecretUseDenialReason(val wireName: String) {
     USER_DENIED("USER_DENIED"),
     POLICY_DENIED("POLICY_DENIED"),
     INVALID_REQUEST("INVALID_REQUEST"),
     OTHER("OTHER"),
 }
 
-internal sealed interface CredentialCompletion {
+internal sealed interface SecretUseCompletion {
     val cliVersion: String
 
-    data class Approved(override val cliVersion: String) : CredentialCompletion
+    data class Approved(override val cliVersion: String) : SecretUseCompletion
 
     data class Denied(
         override val cliVersion: String,
         val reason: String,
         val message: String,
-    ) : CredentialCompletion
+    ) : SecretUseCompletion
 
     data class Aborted(
         override val cliVersion: String,
         val reason: String,
         val message: String,
-    ) : CredentialCompletion
+    ) : SecretUseCompletion
 }
 
-internal class CredentialProtocol(
+internal class SecretUseProtocol(
     private val json: Json = Json { ignoreUnknownKeys = true },
 ) {
-    fun decodeRequest(plaintext: ByteArray): CredentialRequestMessage {
-        val request = json.decodeFromString<CredentialRequestWire>(plaintext.decodeToString())
-        require(request.method == CREDENTIAL_REQUEST_METHOD) { "Unexpected request method" }
-        require(request.profiles.isNotEmpty()) { "Credential request has no profiles" }
-        require(request.profiles.none(String::isEmpty)) { "Credential request has an empty profile" }
+    fun decodeRequest(plaintext: ByteArray): SecretUseRequestMessage {
+        val request = json.decodeFromString<SecretUseRequestWire>(plaintext.decodeToString())
+        require(request.method == METHOD) { "Unexpected request method" }
+        require(request.secrets.isNotEmpty()) { "Secret use request has no secrets" }
+        require(request.secrets.none(String::isEmpty)) { "Secret use request has an empty secret" }
         require(request.operation.type == EXEC_OPERATION_TYPE) { "Unsupported operation type" }
-        return CredentialRequestMessage(
+        return SecretUseRequestMessage(
             cliVersion = request.cliVersion,
-            profiles = request.profiles,
+            secrets = request.secrets,
             reason = request.reason,
-            operation = CredentialExecOperation(
+            operation = SecretUseExecOperation(
                 command = request.operation.command,
                 arguments = request.operation.arguments,
                 workingDirectory = request.operation.workingDirectory,
@@ -82,55 +82,56 @@ internal class CredentialProtocol(
         )
     }
 
-    fun approvedResponse(profiles: Map<String, CredentialResponseProfile>): ByteArray = json.encodeToString(
-        CredentialResponseWire.serializer(),
-        CredentialResponseWire(
+    fun approvedResponse(secrets: Map<String, SecretUseResponseSecret>): ByteArray = json.encodeToString(
+        SecretUseResponseWire.serializer(),
+        SecretUseResponseWire(
             result = RESULT_APPROVED,
-            profiles = profiles.mapValues { (_, profile) ->
-                CredentialResponseProfileWire(
-                    description = profile.description.ifEmpty { null },
-                    type = "environment",
-                    variables = profile.environment.mapValues { (_, value) ->
-                        CredentialResponseVariableWire(value)
+            secrets = secrets.mapValues { (_, secret) ->
+                SecretUseResponseSecretWire(
+                    description = secret.description.ifEmpty { null },
+                    type = TYPE_ENVIRONMENT,
+                    variables = secret.environment.mapValues { (_, value) ->
+                        SecretUseResponseEnvironmentVariableWire(value)
                     },
                 )
             },
         ),
     ).encodeToByteArray()
 
-    fun deniedResponse(reason: CredentialDenialReason, message: String): ByteArray =
+    fun deniedResponse(reason: SecretUseDenialReason, message: String): ByteArray =
         json.encodeToString(
-            CredentialResponseWire.serializer(),
-            CredentialResponseWire(
+            SecretUseResponseWire.serializer(),
+            SecretUseResponseWire(
                 result = RESULT_DENIED,
                 reason = reason.wireName,
                 message = message,
             ),
         ).encodeToByteArray()
 
-    fun decodeCompletion(plaintext: ByteArray): CredentialCompletion {
-        val completion = json.decodeFromString<CredentialCompletionWire>(
+    fun decodeCompletion(plaintext: ByteArray): SecretUseCompletion {
+        val completion = json.decodeFromString<SecretUseCompletionWire>(
             plaintext.decodeToString(),
         )
         return when (completion.result) {
-            RESULT_APPROVED -> CredentialCompletion.Approved(completion.cliVersion)
-            RESULT_DENIED -> CredentialCompletion.Denied(
+            RESULT_APPROVED -> SecretUseCompletion.Approved(completion.cliVersion)
+            RESULT_DENIED -> SecretUseCompletion.Denied(
                 cliVersion = completion.cliVersion,
                 reason = requireNotNull(completion.reason) { "Denied completion has no reason" },
                 message = requireNotNull(completion.message) { "Denied completion has no message" },
             )
-            RESULT_ABORTED -> CredentialCompletion.Aborted(
+            RESULT_ABORTED -> SecretUseCompletion.Aborted(
                 cliVersion = completion.cliVersion,
                 reason = requireNotNull(completion.reason) { "Aborted completion has no reason" },
                 message = requireNotNull(completion.message) { "Aborted completion has no message" },
             )
-            else -> error("Unsupported credential completion result")
+            else -> error("Unsupported secret use completion result")
         }
     }
 
     companion object {
-        const val CREDENTIAL_REQUEST_METHOD = "CredentialRequest"
+        const val METHOD = "SecretUse"
         private const val EXEC_OPERATION_TYPE = "exec"
+        private const val TYPE_ENVIRONMENT = "environment"
         private const val RESULT_APPROVED = "APPROVED"
         private const val RESULT_DENIED = "DENIED"
         private const val RESULT_ABORTED = "ABORTED"
@@ -138,17 +139,17 @@ internal class CredentialProtocol(
 }
 
 @Serializable
-private data class CredentialRequestWire(
+private data class SecretUseRequestWire(
     @SerialName("cli_version") val cliVersion: String,
     val method: String,
-    val profiles: List<String>,
+    val secrets: List<String>,
     val reason: String? = null,
-    val operation: CredentialOperationWire,
+    val operation: SecretUseOperationWire,
     @SerialName("launcher_chain") val launcherChain: List<String>,
 )
 
 @Serializable
-private data class CredentialOperationWire(
+private data class SecretUseOperationWire(
     val type: String,
     val command: String,
     val arguments: List<String>,
@@ -162,25 +163,25 @@ private data class CredentialOperationWire(
 )
 
 @Serializable
-private data class CredentialResponseWire(
+private data class SecretUseResponseWire(
     val result: String,
-    val profiles: Map<String, CredentialResponseProfileWire>? = null,
+    val secrets: Map<String, SecretUseResponseSecretWire>? = null,
     val reason: String? = null,
     val message: String? = null,
 )
 
 @Serializable
-private data class CredentialResponseProfileWire(
+private data class SecretUseResponseSecretWire(
     val description: String? = null,
     val type: String,
-    val variables: Map<String, CredentialResponseVariableWire>,
+    val variables: Map<String, SecretUseResponseEnvironmentVariableWire>,
 )
 
 @Serializable
-private data class CredentialResponseVariableWire(val value: String)
+private data class SecretUseResponseEnvironmentVariableWire(val value: String)
 
 @Serializable
-private data class CredentialCompletionWire(
+private data class SecretUseCompletionWire(
     @SerialName("cli_version") val cliVersion: String,
     val result: String,
     val reason: String? = null,

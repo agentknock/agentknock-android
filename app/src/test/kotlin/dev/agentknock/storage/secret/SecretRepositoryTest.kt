@@ -1,6 +1,6 @@
-package dev.agentknock.storage.profile
+package dev.agentknock.storage.secret
 
-import dev.agentknock.protocol.ProfileUploadMode
+import dev.agentknock.protocol.SecretUploadMode
 import dev.agentknock.storage.crypto.AesGcmEncryption
 import dev.agentknock.storage.crypto.FakeEncryptionKeyStore
 import dev.agentknock.storage.crypto.FakeLocalEncryptionDao
@@ -17,33 +17,33 @@ import org.junit.Assert.assertNotEquals
 import org.junit.Assert.assertTrue
 import org.junit.Test
 
-class ProfileRepositoryTest {
+class SecretRepositoryTest {
     @Test
-    fun `stores one encrypted row for each profile environment variable`() = runTest {
+    fun `stores one encrypted row for each secret environment variable`() = runTest {
         val fixture = Fixture()
-        val profileId = fixture.createProfile("aws-read-only")
+        val secretId = fixture.createSecret("aws-read-only")
 
-        fixture.createVariable(profileId, "AWS_ACCESS_KEY_ID", "AKIAEXAMPLE", sensitive = true)
-        fixture.createVariable(profileId, "AWS_REGION", "eu-west-1", sensitive = false)
+        fixture.createVariable(secretId, "AWS_ACCESS_KEY_ID", "AKIAEXAMPLE", sensitive = true)
+        fixture.createVariable(secretId, "AWS_REGION", "eu-west-1", sensitive = false)
 
         val rows = fixture.dao.variables.value
         assertEquals(2, rows.size)
-        assertTrue(rows.all { it.profileId == profileId })
+        assertTrue(rows.all { it.secretId == secretId })
         assertFalse(rows[0].ciphertext.contentEquals("AKIAEXAMPLE".encodeToByteArray()))
         assertFalse(rows[1].ciphertext.contentEquals("eu-west-1".encodeToByteArray()))
 
-        val profile = fixture.repository.observeProfile(profileId).first()
-        checkNotNull(profile)
-        assertEquals(2, profile.environmentVariables.size)
-        assertTrue(profile.environmentVariables.all { it.valueAvailable })
+        val secret = fixture.repository.observeSecret(secretId).first()
+        checkNotNull(secret)
+        assertEquals(2, secret.environmentVariables.size)
+        assertTrue(secret.environmentVariables.all { it.valueAvailable })
     }
 
     @Test
     fun `binds ciphertext to its environment variable metadata`() = runTest {
         val fixture = Fixture()
-        val profileId = fixture.createProfile("aws-read-only")
+        val secretId = fixture.createSecret("aws-read-only")
         val variableId = fixture.createVariable(
-            profileId,
+            secretId,
             "AWS_SECRET_ACCESS_KEY",
             "secret-value",
             sensitive = true,
@@ -62,8 +62,8 @@ class ProfileRepositoryTest {
     @Test
     fun `legitimate metadata changes re-encrypt without changing the value timestamp`() = runTest {
         val fixture = Fixture()
-        val profileId = fixture.createProfile("aws-read-only")
-        val variableId = fixture.createVariable(profileId, "AWS_REGION", "eu-west-1", false)
+        val secretId = fixture.createSecret("aws-read-only")
+        val variableId = fixture.createVariable(secretId, "AWS_REGION", "eu-west-1", false)
         val before = fixture.dao.variables.value.single()
 
         val result = fixture.repository.saveEnvironmentVariable(
@@ -85,15 +85,15 @@ class ProfileRepositoryTest {
     }
 
     @Test
-    fun `renaming a profile does not re-encrypt its values`() = runTest {
+    fun `renaming a secret does not re-encrypt its values`() = runTest {
         val fixture = Fixture()
-        val profileId = fixture.createProfile("aws-read-only")
-        fixture.createVariable(profileId, "AWS_REGION", "eu-west-1", false)
+        val secretId = fixture.createSecret("aws-read-only")
+        fixture.createVariable(secretId, "AWS_REGION", "eu-west-1", false)
         val before = fixture.dao.variables.value.single()
 
         assertEquals(
-            SaveProfileResult.SAVED,
-            fixture.repository.saveProfile(profileId, "aws-reader", "Renamed profile"),
+            SaveSecretResult.SAVED,
+            fixture.repository.saveSecret(secretId, "aws-reader", "Renamed secret"),
         )
 
         val after = fixture.dao.variables.value.single()
@@ -104,10 +104,10 @@ class ProfileRepositoryTest {
     }
 
     @Test
-    fun `restored rows stay in their profiles until their values are re-entered`() = runTest {
+    fun `restored rows stay in their secrets until their values are re-entered`() = runTest {
         val original = Fixture(keyId = "original-key")
-        val profileId = original.createProfile("cloudflare-read-only")
-        val variableId = original.createVariable(profileId, "CF_TOKEN", "old-token", true)
+        val secretId = original.createSecret("cloudflare-read-only")
+        val variableId = original.createVariable(secretId, "CF_TOKEN", "old-token", true)
         val originalRow = original.dao.variables.value.single()
 
         val replacementKeyStore = FakeEncryptionKeyStore()
@@ -117,7 +117,7 @@ class ProfileRepositoryTest {
             newKeyId = { "replacement-key" },
             currentTimeMillis = { 500L },
         )
-        val restoredRepository = ProfileRepository(
+        val restoredRepository = SecretRepository(
             dao = original.dao,
             keyManager = replacementManager,
             encryption = AesGcmEncryption(replacementKeyStore),
@@ -126,10 +126,10 @@ class ProfileRepositoryTest {
         )
 
         replacementManager.initialize()
-        val restoredProfile = restoredRepository.observeProfile(profileId).first()
-        checkNotNull(restoredProfile)
-        assertEquals(1, restoredProfile.environmentVariables.size)
-        assertFalse(restoredProfile.environmentVariables.single().valueAvailable)
+        val restoredSecret = restoredRepository.observeSecret(secretId).first()
+        checkNotNull(restoredSecret)
+        assertEquals(1, restoredSecret.environmentVariables.size)
+        assertFalse(restoredSecret.environmentVariables.single().valueAvailable)
         assertEquals(
             EnvironmentVariableValue.Unavailable,
             restoredRepository.readEnvironmentVariableValue(variableId),
@@ -155,113 +155,113 @@ class ProfileRepositoryTest {
     }
 
     @Test
-    fun `credential profiles merge equal bindings without exposing metadata values`() = runTest {
+    fun `requested secrets merge equal bindings without exposing metadata values`() = runTest {
         val fixture = Fixture()
-        val first = fixture.createProfile("first")
-        val second = fixture.createProfile("second")
+        val first = fixture.createSecret("first")
+        val second = fixture.createSecret("second")
         fixture.createVariable(first, "SHARED_TOKEN", "same-value", true)
         fixture.createVariable(first, "FIRST_REGION", "eu-west-1", false)
         fixture.createVariable(second, "SHARED_TOKEN", "same-value", true)
 
-        val description = fixture.repository.describeCredentialProfiles(listOf("first", "second"))
-        assertEquals(emptyList<String>(), description.missingProfiles)
+        val description = fixture.repository.describeRequestedSecrets(listOf("first", "second"))
+        assertEquals(emptyList<String>(), description.missingSecrets)
         assertEquals(
             listOf("FIRST_REGION", "SHARED_TOKEN"),
-            description.profiles.first().environmentVariableNames,
+            description.secrets.first().environmentVariableNames,
         )
 
-        val result = fixture.repository.credentialProfiles(listOf("first", "second"))
-        check(result is CredentialProfilesResult.Available)
+        val result = fixture.repository.requestedSecrets(listOf("first", "second"))
+        check(result is RequestedSecretsResult.Available)
         assertEquals(
             mapOf(
-                "first" to CredentialProfileValues(
+                "first" to SecretValues(
                     "",
                     mapOf("FIRST_REGION" to "eu-west-1", "SHARED_TOKEN" to "same-value"),
                 ),
-                "second" to CredentialProfileValues("", mapOf("SHARED_TOKEN" to "same-value")),
+                "second" to SecretValues("", mapOf("SHARED_TOKEN" to "same-value")),
             ),
-            result.profiles,
+            result.secrets,
         )
         assertEquals(
             listOf(
-                CredentialProfileMetadata(
+                SecretMetadata(
                     name = "first",
                     description = "",
                     environmentVariableNames = listOf("FIRST_REGION", "SHARED_TOKEN"),
                 ),
-                CredentialProfileMetadata(
+                SecretMetadata(
                     name = "second",
                     description = "",
                     environmentVariableNames = listOf("SHARED_TOKEN"),
                 ),
             ),
-            fixture.repository.listCredentialProfiles(),
+            fixture.repository.listSecretsForClient(),
         )
     }
 
     @Test
-    fun `credential profiles reject conflicting bindings atomically`() = runTest {
+    fun `requested secrets reject conflicting bindings atomically`() = runTest {
         val fixture = Fixture()
-        val first = fixture.createProfile("first")
-        val second = fixture.createProfile("second")
+        val first = fixture.createSecret("first")
+        val second = fixture.createSecret("second")
         fixture.createVariable(first, "TOKEN", "first-value", true)
         fixture.createVariable(second, "TOKEN", "second-value", true)
 
         assertEquals(
-            CredentialProfilesResult.ConflictingVariable("TOKEN"),
-            fixture.repository.credentialProfiles(listOf("first", "second")),
+            RequestedSecretsResult.ConflictingVariable("TOKEN"),
+            fixture.repository.requestedSecrets(listOf("first", "second")),
         )
         assertEquals(
-            CredentialProfilesResult.MissingProfiles(listOf("missing")),
-            fixture.repository.credentialProfiles(listOf("missing")),
+            RequestedSecretsResult.MissingSecrets(listOf("missing")),
+            fixture.repository.requestedSecrets(listOf("missing")),
         )
     }
 
     @Test
-    fun `uploaded profiles make new variables sensitive by default`() = runTest {
+    fun `uploaded secrets make new environment variables sensitive by default`() = runTest {
         val fixture = Fixture()
 
-        val result = fixture.repository.applyEnvironmentProfileProposal(
-            EnvironmentProfileProposal(
-                mode = ProfileUploadMode.CREATE,
+        val result = fixture.repository.applyEnvironmentSecretUpload(
+            EnvironmentSecretUpload(
+                mode = SecretUploadMode.CREATE,
                 name = "cloudflare-read-only",
                 descriptionProvided = true,
                 description = "Cloudflare production account",
                 variables = mapOf("CF_ACCOUNT_ID" to "account", "CF_TOKEN" to "token"),
             ),
-            acceptedName = "cloudflare-read-only",
+            approvedName = "cloudflare-read-only",
         )
 
-        check(result is ApplyEnvironmentProfileProposalResult.Applied)
-        val profile = fixture.repository.observeProfile(result.profileId).first()
-        checkNotNull(profile)
-        assertEquals("Cloudflare production account", profile.description)
-        assertTrue(profile.environmentVariables.all(EnvironmentVariableMetadata::sensitive))
+        check(result is ApplyEnvironmentSecretUploadResult.Applied)
+        val secret = fixture.repository.observeSecret(result.secretId).first()
+        checkNotNull(secret)
+        assertEquals("Cloudflare production account", secret.description)
+        assertTrue(secret.environmentVariables.all(EnvironmentVariableMetadata::sensitive))
         assertEquals(
             EnvironmentVariableValue.Available("token"),
             fixture.repository.readEnvironmentVariableValue(
-                profile.environmentVariables.single { it.name == "CF_TOKEN" }.id,
+                secret.environmentVariables.single { it.name == "CF_TOKEN" }.id,
             ),
         )
     }
 
     @Test
-    fun `replace proposals preserve variable sensitivity and notes`() = runTest {
+    fun `replace uploads preserve environment variable sensitivity and notes`() = runTest {
         val fixture = Fixture()
-        val profileId = fixture.createProfile("aws-read-only")
+        val secretId = fixture.createSecret("aws-read-only")
         val region = fixture.repository.createEnvironmentVariable(
-            profileId = profileId,
+            secretId = secretId,
             name = "AWS_REGION",
             value = "eu-west-1",
             sensitive = false,
             notes = "Safe to display",
         )
         check(region is CreateEnvironmentVariableResult.Created)
-        fixture.createVariable(profileId, "OLD_VARIABLE", "old", true)
+        fixture.createVariable(secretId, "OLD_VARIABLE", "old", true)
 
-        val result = fixture.repository.applyEnvironmentProfileProposal(
-            EnvironmentProfileProposal(
-                mode = ProfileUploadMode.REPLACE,
+        val result = fixture.repository.applyEnvironmentSecretUpload(
+            EnvironmentSecretUpload(
+                mode = SecretUploadMode.REPLACE,
                 name = "aws-read-only",
                 descriptionProvided = false,
                 description = null,
@@ -270,46 +270,46 @@ class ProfileRepositoryTest {
                     "AWS_ACCESS_KEY_ID" to "new-key",
                 ),
             ),
-            acceptedName = "ignored-for-existing-profile",
+            approvedName = "ignored-for-existing-secret",
         )
 
-        assertTrue(result is ApplyEnvironmentProfileProposalResult.Applied)
-        val profile = fixture.repository.observeProfile(profileId).first()
-        checkNotNull(profile)
-        assertEquals(listOf("AWS_ACCESS_KEY_ID", "AWS_REGION"), profile.environmentVariables.map { it.name })
-        val updatedRegion = profile.environmentVariables.single { it.name == "AWS_REGION" }
+        assertTrue(result is ApplyEnvironmentSecretUploadResult.Applied)
+        val secret = fixture.repository.observeSecret(secretId).first()
+        checkNotNull(secret)
+        assertEquals(listOf("AWS_ACCESS_KEY_ID", "AWS_REGION"), secret.environmentVariables.map { it.name })
+        val updatedRegion = secret.environmentVariables.single { it.name == "AWS_REGION" }
         assertFalse(updatedRegion.sensitive)
         assertEquals("Safe to display", updatedRegion.notes)
-        assertTrue(profile.environmentVariables.single { it.name == "AWS_ACCESS_KEY_ID" }.sensitive)
+        assertTrue(secret.environmentVariables.single { it.name == "AWS_ACCESS_KEY_ID" }.sensitive)
     }
 
     @Test
-    fun `update proposals leave omitted variables untouched`() = runTest {
+    fun `update uploads leave omitted environment variables untouched`() = runTest {
         val fixture = Fixture()
-        val profileId = fixture.createProfile("aws-read-only")
-        fixture.createVariable(profileId, "AWS_REGION", "eu-west-1", false)
-        val tokenId = fixture.createVariable(profileId, "AWS_TOKEN", "old-token", true)
+        val secretId = fixture.createSecret("aws-read-only")
+        fixture.createVariable(secretId, "AWS_REGION", "eu-west-1", false)
+        val tokenId = fixture.createVariable(secretId, "AWS_TOKEN", "old-token", true)
 
-        val proposal = EnvironmentProfileProposal(
-            mode = ProfileUploadMode.UPDATE,
+        val upload = EnvironmentSecretUpload(
+            mode = SecretUploadMode.UPDATE,
             name = "aws-read-only",
             descriptionProvided = false,
             description = null,
             variables = mapOf("AWS_TOKEN" to "new-token"),
         )
-        val description = fixture.repository.describeEnvironmentProfileProposal(proposal)
-        check(description is EnvironmentProfileProposalResult.Valid)
+        val description = fixture.repository.describeEnvironmentSecretUpload(upload)
+        check(description is EnvironmentSecretUploadResult.Valid)
         assertEquals(listOf("AWS_REGION"), description.summary.unchangedVariables)
 
-        val result = fixture.repository.applyEnvironmentProfileProposal(
-            proposal,
-            acceptedName = "ignored-for-existing-profile",
+        val result = fixture.repository.applyEnvironmentSecretUpload(
+            upload,
+            approvedName = "ignored-for-existing-secret",
         )
 
-        assertTrue(result is ApplyEnvironmentProfileProposalResult.Applied)
-        val profile = fixture.repository.observeProfile(profileId).first()
-        checkNotNull(profile)
-        assertEquals(listOf("AWS_REGION", "AWS_TOKEN"), profile.environmentVariables.map { it.name })
+        assertTrue(result is ApplyEnvironmentSecretUploadResult.Applied)
+        val secret = fixture.repository.observeSecret(secretId).first()
+        checkNotNull(secret)
+        assertEquals(listOf("AWS_REGION", "AWS_TOKEN"), secret.environmentVariables.map { it.name })
         assertEquals(
             EnvironmentVariableValue.Available("new-token"),
             fixture.repository.readEnvironmentVariableValue(tokenId),
@@ -319,7 +319,7 @@ class ProfileRepositoryTest {
     private class Fixture(keyId: String = "storage-key") {
         val encryptionMetadata = FakeLocalEncryptionDao()
         val keyStore = FakeEncryptionKeyStore()
-        val dao = FakeProfileDao()
+        val dao = FakeSecretDao()
         private var id = 0
         private var time = 100L
         private val keyManager = LocalEncryptionKeyManager(
@@ -328,7 +328,7 @@ class ProfileRepositoryTest {
             newKeyId = { keyId },
             currentTimeMillis = { nextTime() },
         )
-        val repository = ProfileRepository(
+        val repository = SecretRepository(
             dao = dao,
             keyManager = keyManager,
             encryption = AesGcmEncryption(keyStore),
@@ -336,20 +336,20 @@ class ProfileRepositoryTest {
             currentTimeMillis = { nextTime() },
         )
 
-        suspend fun createProfile(name: String): String {
-            val result = repository.createProfile(name, "")
-            check(result is CreateProfileResult.Created)
+        suspend fun createSecret(name: String): String {
+            val result = repository.createSecret(name, "")
+            check(result is CreateSecretResult.Created)
             return result.id
         }
 
         suspend fun createVariable(
-            profileId: String,
+            secretId: String,
             name: String,
             value: String,
             sensitive: Boolean,
         ): String {
             val result = repository.createEnvironmentVariable(
-                profileId = profileId,
+                secretId = secretId,
                 name = name,
                 value = value,
                 sensitive = sensitive,
@@ -363,43 +363,43 @@ class ProfileRepositoryTest {
     }
 }
 
-private class FakeProfileDao : ProfileDao {
-    val profiles = MutableStateFlow<List<ProfileEntity>>(emptyList())
+private class FakeSecretDao : SecretDao {
+    val secrets = MutableStateFlow<List<SecretEntity>>(emptyList())
     val variables = MutableStateFlow<List<EnvironmentVariableEntity>>(emptyList())
 
-    override fun observeProfiles(): Flow<List<ProfileSummaryRow>> = combine(
-        profiles,
+    override fun observeSecrets(): Flow<List<SecretSummaryRow>> = combine(
+        secrets,
         variables,
-    ) { currentProfiles, currentVariables ->
-        currentProfiles
-            .sortedWith(compareBy(String.CASE_INSENSITIVE_ORDER, ProfileEntity::name))
-            .map { profile ->
-                ProfileSummaryRow(
-                    id = profile.id,
-                    name = profile.name,
-                    description = profile.description,
-                    type = profile.type,
-                    createdAt = profile.createdAt,
-                    updatedAt = profile.updatedAt,
+    ) { currentSecrets, currentVariables ->
+        currentSecrets
+            .sortedWith(compareBy(String.CASE_INSENSITIVE_ORDER, SecretEntity::name))
+            .map { secret ->
+                SecretSummaryRow(
+                    id = secret.id,
+                    name = secret.name,
+                    description = secret.description,
+                    type = secret.type,
+                    createdAt = secret.createdAt,
+                    updatedAt = secret.updatedAt,
                     environmentVariableCount = currentVariables.count {
-                        it.profileId == profile.id
+                        it.secretId == secret.id
                     },
                 )
             }
     }
 
-    override fun observeProfile(id: String): Flow<ProfileEntity?> =
-        profiles.map { all -> all.find { it.id == id } }
+    override fun observeSecret(id: String): Flow<SecretEntity?> =
+        secrets.map { all -> all.find { it.id == id } }
 
     override fun observeEnvironmentVariables(
-        profileId: String,
+        secretId: String,
     ): Flow<List<EnvironmentVariableMetadataRow>> = variables.map { all ->
-        all.filter { it.profileId == profileId }
+        all.filter { it.secretId == secretId }
             .sortedWith(compareBy(String.CASE_INSENSITIVE_ORDER, EnvironmentVariableEntity::name))
             .map { variable ->
                 EnvironmentVariableMetadataRow(
                     id = variable.id,
-                    profileId = variable.profileId,
+                    secretId = variable.secretId,
                     name = variable.name,
                     sensitive = variable.sensitive,
                     notes = variable.notes,
@@ -411,52 +411,52 @@ private class FakeProfileDao : ProfileDao {
             }
     }
 
-    override suspend fun getProfile(id: String): ProfileEntity? = profiles.value.find { it.id == id }
+    override suspend fun getSecret(id: String): SecretEntity? = secrets.value.find { it.id == id }
 
     override suspend fun getEnvironmentVariable(id: String): EnvironmentVariableEntity? =
         variables.value.find { it.id == id }
 
-    override suspend fun getProfiles(): List<ProfileEntity> = profiles.value
-        .sortedWith(compareBy(String.CASE_INSENSITIVE_ORDER, ProfileEntity::name))
+    override suspend fun getSecrets(): List<SecretEntity> = secrets.value
+        .sortedWith(compareBy(String.CASE_INSENSITIVE_ORDER, SecretEntity::name))
 
     override suspend fun getEnvironmentVariables(): List<EnvironmentVariableEntity> =
         variables.value.sortedWith(
-            compareBy<EnvironmentVariableEntity> { it.profileId }
+            compareBy<EnvironmentVariableEntity> { it.secretId }
                 .thenBy(String.CASE_INSENSITIVE_ORDER) { it.name },
         )
 
-    override suspend fun getProfilesByName(names: List<String>): List<ProfileEntity> =
-        profiles.value.filter { it.name in names }
+    override suspend fun getSecretsByName(names: List<String>): List<SecretEntity> =
+        secrets.value.filter { it.name in names }
 
-    override suspend fun getEnvironmentVariablesForProfiles(
-        profileIds: List<String>,
-    ): List<EnvironmentVariableEntity> = variables.value.filter { it.profileId in profileIds }
+    override suspend fun getEnvironmentVariablesForSecrets(
+        secretIds: List<String>,
+    ): List<EnvironmentVariableEntity> = variables.value.filter { it.secretId in secretIds }
 
-    override suspend fun profileNameInUse(name: String, excludingId: String): Boolean =
-        profiles.value.any { it.name == name && it.id != excludingId }
+    override suspend fun secretNameInUse(name: String, excludingId: String): Boolean =
+        secrets.value.any { it.name == name && it.id != excludingId }
 
     override suspend fun environmentVariableNameInUse(
-        profileId: String,
+        secretId: String,
         name: String,
         excludingId: String,
     ): Boolean = variables.value.any {
-        it.profileId == profileId && it.name == name && it.id != excludingId
+        it.secretId == secretId && it.name == name && it.id != excludingId
     }
 
-    override suspend fun insertProfile(profile: ProfileEntity) {
-        check(profiles.value.none { it.id == profile.id || it.name == profile.name })
-        profiles.value += profile
+    override suspend fun insertSecret(secret: SecretEntity) {
+        check(secrets.value.none { it.id == secret.id || it.name == secret.name })
+        secrets.value += secret
     }
 
-    override suspend fun updateProfile(profile: ProfileEntity): Int {
-        if (profiles.value.none { it.id == profile.id }) return 0
-        profiles.value = profiles.value.map { if (it.id == profile.id) profile else it }
+    override suspend fun updateSecret(secret: SecretEntity): Int {
+        if (secrets.value.none { it.id == secret.id }) return 0
+        secrets.value = secrets.value.map { if (it.id == secret.id) secret else it }
         return 1
     }
 
-    override suspend fun deleteProfile(profile: ProfileEntity) {
-        profiles.value = profiles.value.filterNot { it.id == profile.id }
-        variables.value = variables.value.filterNot { it.profileId == profile.id }
+    override suspend fun deleteSecret(secret: SecretEntity) {
+        secrets.value = secrets.value.filterNot { it.id == secret.id }
+        variables.value = variables.value.filterNot { it.secretId == secret.id }
     }
 
     override suspend fun insertEnvironmentVariableRow(variable: EnvironmentVariableEntity) {
@@ -474,25 +474,25 @@ private class FakeProfileDao : ProfileDao {
         variables.value = variables.value.filterNot { it.id == variable.id }
     }
 
-    override suspend fun touchProfile(profileId: String, updatedAt: Long) {
-        profiles.value = profiles.value.map {
-            if (it.id == profileId) it.copy(updatedAt = updatedAt) else it
+    override suspend fun touchSecret(secretId: String, updatedAt: Long) {
+        secrets.value = secrets.value.map {
+            if (it.id == secretId) it.copy(updatedAt = updatedAt) else it
         }
     }
 
-    override suspend fun deleteAllEnvironmentVariables(profileId: String): Int {
+    override suspend fun deleteAllEnvironmentVariables(secretId: String): Int {
         val before = variables.value.size
-        variables.value = variables.value.filterNot { it.profileId == profileId }
+        variables.value = variables.value.filterNot { it.secretId == secretId }
         return before - variables.value.size
     }
 
     override suspend fun deleteEnvironmentVariablesExcept(
-        profileId: String,
+        secretId: String,
         names: List<String>,
     ): Int {
         val before = variables.value.size
         variables.value = variables.value.filterNot {
-            it.profileId == profileId && it.name !in names
+            it.secretId == secretId && it.name !in names
         }
         return before - variables.value.size
     }

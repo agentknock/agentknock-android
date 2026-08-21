@@ -5,7 +5,7 @@ import androidx.test.ext.junit.runners.AndroidJUnit4
 import androidx.test.platform.app.InstrumentationRegistry
 import dev.agentknock.storage.AgentknockDatabase
 import dev.agentknock.storage.crypto.LocalEncryptionKeyEntity
-import dev.agentknock.storage.vault.VaultIdentityEntity
+import dev.agentknock.storage.vault.DeviceIdentityEntity
 import kotlinx.coroutines.runBlocking
 import kotlinx.coroutines.test.runTest
 import org.junit.After
@@ -137,8 +137,8 @@ class RequestDaoTransactionTest {
     @Test
     fun completedHistoryKeepsUsablePairingsButCanClearRevokedPairings() = runTest {
         database.vaultDao().insertIdentity(
-            VaultIdentityEntity(
-                id = VAULT_ID,
+            DeviceIdentityEntity(
+                id = DEVICE_IDENTITY_ID,
                 role = "active",
                 address = "write-leader-hungry",
                 addressId = "address-id",
@@ -151,7 +151,7 @@ class RequestDaoTransactionTest {
         val rootId = dao.insertPairingRequest(
             rootRequest().copy(state = "completed", completedAt = 2, updatedAt = 2),
             pendingPairing().copy(
-                vaultIdentityId = VAULT_ID,
+                deviceIdentityId = DEVICE_IDENTITY_ID,
                 state = "active",
                 desiredRelayClientState = "active",
                 relayClientState = "active",
@@ -213,14 +213,14 @@ class RequestDaoTransactionTest {
     }
 
     @Test
-    fun decidingAProfileProposalDiscardsItsUploadedValues() = runTest {
-        val requestId = dao.insertProfileUploadRequest(
+    fun decidingASecretUploadDiscardsItsUploadedValues() = runTest {
+        val requestId = dao.insertSecretUploadRequest(
             request = rootRequest().copy(
                 relayRequestId = "upload-request",
-                kind = "profile_upload",
+                kind = "secret_upload",
                 state = "action_required",
             ),
-            profileUpload = ProfileUploadRequestEntity(
+            secretUpload = SecretUploadRequestEntity(
                 requestId = 0,
                 pairingRequestId = null,
                 clientId = CLIENT_ID,
@@ -228,11 +228,11 @@ class RequestDaoTransactionTest {
                 state = "review_pending",
                 cliVersion = "test",
                 mode = "CREATE",
-                proposedName = "test-profile",
-                acceptedName = null,
+                uploadedName = "test-secret",
+                approvedName = null,
                 descriptionProvided = false,
                 description = null,
-                profileType = "environment",
+                secretType = "environment",
                 variableNamesJson = "[\"TOKEN\"]",
                 addedVariablesJson = "[\"TOKEN\"]",
                 changedVariablesJson = "[]",
@@ -247,7 +247,7 @@ class RequestDaoTransactionTest {
                 transportCompletedAt = null,
             ),
             variables = listOf(
-                ProfileUploadVariableEntity(
+                SecretUploadVariableEntity(
                     id = "upload-variable",
                     requestId = 0,
                     name = "TOKEN",
@@ -263,20 +263,20 @@ class RequestDaoTransactionTest {
             currentPairingSecret = null,
             previousPairingSecret = null,
         )
-        assertEquals(1, dao.getProfileUploadVariables(requestId).size)
+        assertEquals(1, dao.getSecretUploadVariables(requestId).size)
 
         val request = checkNotNull(dao.getRequestById(requestId))
-        val upload = checkNotNull(dao.getProfileUploadRequest(requestId))
-        dao.updateProfileUploadRequest(
+        val upload = checkNotNull(dao.getSecretUploadRequest(requestId))
+        dao.updateSecretUploadRequest(
             request = request.copy(state = "completed", completedAt = 2, updatedAt = 2),
-            profileUpload = upload.copy(state = "rejected", decidedAt = 2, updatedAt = 2),
+            secretUpload = upload.copy(state = "rejected", decidedAt = 2, updatedAt = 2),
             discardUploadedValues = true,
         )
 
-        assertTrue(dao.getProfileUploadVariables(requestId).isEmpty())
+        assertTrue(dao.getSecretUploadVariables(requestId).isEmpty())
         assertEquals(
             "[\"TOKEN\"]",
-            dao.getProfileUploadRequest(requestId)?.variableNamesJson,
+            dao.getSecretUploadRequest(requestId)?.variableNamesJson,
         )
     }
 
@@ -299,8 +299,8 @@ class RequestDaoTransactionTest {
 
     private fun pendingPairing() = PairingEntity(
         requestId = 0,
-        vaultIdentityId = null,
-        vaultAddress = "write-leader-hungry",
+        deviceIdentityId = null,
+        pairingAddress = "write-leader-hungry",
         deviceId = DEVICE_ID,
         clientId = CLIENT_ID,
         friendlyName = "Test client",
@@ -400,7 +400,7 @@ class RequestDaoTransactionTest {
 
     private companion object {
         const val KEY_ID = "key"
-        const val VAULT_ID = "vault"
+        const val DEVICE_IDENTITY_ID = "device-identity"
         const val CURRENT_ID = "current"
         const val PREVIOUS_ID = "previous"
         const val REQUEST_SECRET_ID = "request"

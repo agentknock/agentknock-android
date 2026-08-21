@@ -10,8 +10,8 @@ import dev.agentknock.storage.audit.AuditSink
 internal sealed interface DeviceManagementResult {
     data object Changed : DeviceManagementResult
     data object NoDevice : DeviceManagementResult
-    data object SecretsUnavailable : DeviceManagementResult
-    data object SecretsCorrupted : DeviceManagementResult
+    data object CredentialsUnavailable : DeviceManagementResult
+    data object CredentialsCorrupted : DeviceManagementResult
     data object UnsupportedEncryption : DeviceManagementResult
     data class Rejected(val status: Int, val code: String?, val message: String?) :
         DeviceManagementResult
@@ -40,7 +40,7 @@ internal class DeviceManagementRepository(
             RelayDeviceManagementResult.Changed -> {
                 check(
                     vaultDao.updatePairingEnabled(
-                        identityId = active.vaultIdentityId,
+                        identityId = active.deviceIdentityId,
                         enabled = enabled,
                         activeRole = "active",
                     ) == 1,
@@ -95,11 +95,11 @@ internal class DeviceManagementRepository(
             RelayDeviceCredentialsResult.Missing -> CredentialLookup.Failed(
                 DeviceManagementResult.NoDevice,
             )
-            RelayDeviceCredentialsResult.SecretsUnavailable -> CredentialLookup.Failed(
-                DeviceManagementResult.SecretsUnavailable,
+            RelayDeviceCredentialsResult.CredentialsUnavailable -> CredentialLookup.Failed(
+                DeviceManagementResult.CredentialsUnavailable,
             )
-            RelayDeviceCredentialsResult.SecretsCorrupted -> CredentialLookup.Failed(
-                DeviceManagementResult.SecretsCorrupted,
+            RelayDeviceCredentialsResult.CredentialsCorrupted -> CredentialLookup.Failed(
+                DeviceManagementResult.CredentialsCorrupted,
             )
             RelayDeviceCredentialsResult.UnsupportedEncryption -> CredentialLookup.Failed(
                 DeviceManagementResult.UnsupportedEncryption,

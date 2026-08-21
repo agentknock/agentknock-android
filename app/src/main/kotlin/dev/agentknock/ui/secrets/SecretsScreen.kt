@@ -1,6 +1,6 @@
 @file:OptIn(androidx.compose.material3.ExperimentalMaterial3Api::class)
 
-package dev.agentknock.ui.profiles
+package dev.agentknock.ui.secrets
 
 import android.content.ClipData
 import android.content.ClipboardManager
@@ -102,27 +102,27 @@ import androidx.lifecycle.Lifecycle
 import androidx.lifecycle.LifecycleEventObserver
 import dev.agentknock.R
 import dev.agentknock.presentation.formatTimestamp
-import dev.agentknock.storage.profile.CreateEnvironmentVariableResult
-import dev.agentknock.storage.profile.CreateProfileResult
-import dev.agentknock.storage.profile.EnvironmentVariableMetadata
-import dev.agentknock.storage.profile.EnvironmentVariableValue
-import dev.agentknock.storage.profile.ProfileDetails
-import dev.agentknock.storage.profile.ProfileSummary
-import dev.agentknock.storage.profile.SaveEnvironmentVariableResult
-import dev.agentknock.storage.profile.SaveProfileResult
+import dev.agentknock.storage.secret.CreateEnvironmentVariableResult
+import dev.agentknock.storage.secret.CreateSecretResult
+import dev.agentknock.storage.secret.EnvironmentVariableMetadata
+import dev.agentknock.storage.secret.EnvironmentVariableValue
+import dev.agentknock.storage.secret.SecretDetails
+import dev.agentknock.storage.secret.SecretSummary
+import dev.agentknock.storage.secret.SaveEnvironmentVariableResult
+import dev.agentknock.storage.secret.SaveSecretResult
 import kotlinx.coroutines.launch
 import java.util.UUID
 
 private val environmentVariableName = Regex("[A-Za-z_][A-Za-z0-9_]*")
 private val twoPaneWidth = 840.dp
 
-private sealed interface ProfileEditor {
-    data object New : ProfileEditor
-    data class Existing(val profile: ProfileDetails) : ProfileEditor
+private sealed interface SecretEditor {
+    data object New : SecretEditor
+    data class Existing(val secret: SecretDetails) : SecretEditor
 }
 
 private sealed interface VariableEditor {
-    data class New(val profileId: String) : VariableEditor
+    data class New(val secretId: String) : VariableEditor
     data class Existing(
         val variable: EnvironmentVariableMetadata,
         val currentValue: String?,
@@ -130,7 +130,7 @@ private sealed interface VariableEditor {
 }
 
 @Composable
-internal fun ProfilesScreen(
+internal fun SecretsScreen(
     authenticate: (
         title: String,
         onSuccess: () -> Unit,
@@ -138,18 +138,18 @@ internal fun ProfilesScreen(
     ) -> Unit,
     onOpenSettings: () -> Unit,
     onTopLevelChanged: (Boolean) -> Unit,
-    viewModel: ProfilesViewModel = viewModel(),
+    viewModel: SecretsViewModel = viewModel(),
 ) {
-    val profiles by viewModel.profiles.collectAsStateWithLifecycle()
+    val secrets by viewModel.secrets.collectAsStateWithLifecycle()
     val selection by viewModel.selection.collectAsStateWithLifecycle()
-    val selectedProfile by viewModel.selectedProfile.collectAsStateWithLifecycle()
+    val selectedSecret by viewModel.selectedSecret.collectAsStateWithLifecycle()
     val scope = rememberCoroutineScope()
     val snackbar = remember { SnackbarHostState() }
     val context = LocalContext.current
     val resources = LocalResources.current
-    var profileEditor by remember { mutableStateOf<ProfileEditor?>(null) }
+    var secretEditor by remember { mutableStateOf<SecretEditor?>(null) }
     var variableEditor by remember { mutableStateOf<VariableEditor?>(null) }
-    var profilePendingDeletion by remember { mutableStateOf<ProfileDetails?>(null) }
+    var secretPendingDeletion by remember { mutableStateOf<SecretDetails?>(null) }
     var variablePendingDeletion by remember { mutableStateOf<EnvironmentVariableMetadata?>(null) }
     var revealedValues by remember { mutableStateOf<Map<String, String>>(emptyMap()) }
     val lifecycle = LocalLifecycleOwner.current.lifecycle
@@ -282,21 +282,21 @@ internal fun ProfilesScreen(
                 .padding(padding),
         ) {
             val twoPane = maxWidth >= twoPaneWidth
-            val profile = selectedProfile
-            LaunchedEffect(selection, profileEditor, variableEditor, twoPane) {
+            val secret = selectedSecret
+            LaunchedEffect(selection, secretEditor, variableEditor, twoPane) {
                 onTopLevelChanged(
                     (twoPane || selection == null) &&
-                        profileEditor == null &&
+                        secretEditor == null &&
                         variableEditor == null,
                 )
             }
             if (twoPane) {
                 Row(Modifier.fillMaxSize()) {
-                    ProfileList(
-                        profiles = profiles,
-                        selectedProfileId = selection,
-                        onSelect = viewModel::selectProfile,
-                        onCreate = { profileEditor = ProfileEditor.New },
+                    SecretList(
+                        secrets = secrets,
+                        selectedSecretId = selection,
+                        onSelect = viewModel::selectSecret,
+                        onCreate = { secretEditor = SecretEditor.New },
                         onOpenSettings = onOpenSettings,
                         modifier = Modifier
                             .width(340.dp)
@@ -304,23 +304,23 @@ internal fun ProfilesScreen(
                     )
                     VerticalDivider()
                     if (selection == null) {
-                        EmptyProfileSelection(Modifier.weight(1f).fillMaxHeight())
-                    } else if (profile == null) {
+                        EmptySecretSelection(Modifier.weight(1f).fillMaxHeight())
+                    } else if (secret == null) {
                         Loading(Modifier.weight(1f).fillMaxHeight())
                     } else {
-                        ProfileDetail(
-                            profile = profile,
+                        SecretDetail(
+                            secret = secret,
                             revealedValues = revealedValues,
                             showBack = false,
                             onBack = {},
-                            onEditProfile = {
-                                profileEditor = ProfileEditor.Existing(profile)
+                            onEditSecret = {
+                                secretEditor = SecretEditor.Existing(secret)
                             },
-                            onDeleteProfile = {
-                                profilePendingDeletion = profile
+                            onDeleteSecret = {
+                                secretPendingDeletion = secret
                             },
                             onAddVariable = {
-                                variableEditor = VariableEditor.New(profile.id)
+                                variableEditor = VariableEditor.New(secret.id)
                             },
                             onEditVariable = ::edit,
                             onReveal = ::reveal,
@@ -331,31 +331,31 @@ internal fun ProfilesScreen(
                     }
                 }
             } else if (selection == null) {
-                ProfileList(
-                    profiles = profiles,
-                    selectedProfileId = null,
-                    onSelect = viewModel::selectProfile,
-                    onCreate = { profileEditor = ProfileEditor.New },
+                SecretList(
+                    secrets = secrets,
+                    selectedSecretId = null,
+                    onSelect = viewModel::selectSecret,
+                    onCreate = { secretEditor = SecretEditor.New },
                     onOpenSettings = onOpenSettings,
                     modifier = Modifier.fillMaxSize(),
                 )
-            } else if (profile == null) {
+            } else if (secret == null) {
                 Loading(Modifier.fillMaxSize())
             } else {
-                BackHandler { viewModel.selectProfile(null) }
-                ProfileDetail(
-                    profile = profile,
+                BackHandler { viewModel.selectSecret(null) }
+                SecretDetail(
+                    secret = secret,
                     revealedValues = revealedValues,
                     showBack = true,
-                    onBack = { viewModel.selectProfile(null) },
-                    onEditProfile = {
-                        profileEditor = ProfileEditor.Existing(profile)
+                    onBack = { viewModel.selectSecret(null) },
+                    onEditSecret = {
+                        secretEditor = SecretEditor.Existing(secret)
                     },
-                    onDeleteProfile = {
-                        profilePendingDeletion = profile
+                    onDeleteSecret = {
+                        secretPendingDeletion = secret
                     },
                     onAddVariable = {
-                        variableEditor = VariableEditor.New(profile.id)
+                        variableEditor = VariableEditor.New(secret.id)
                     },
                     onEditVariable = ::edit,
                     onReveal = ::reveal,
@@ -367,37 +367,37 @@ internal fun ProfilesScreen(
         }
     }
 
-    profileEditor?.let { editor ->
-        ProfileEditorScreen(
-            profile = (editor as? ProfileEditor.Existing)?.profile,
-            onDismiss = { profileEditor = null },
+    secretEditor?.let { editor ->
+        SecretEditorScreen(
+            secret = (editor as? SecretEditor.Existing)?.secret,
+            onDismiss = { secretEditor = null },
             onSave = { name, description ->
-                afterAuthentication("Confirm saving profile") {
+                afterAuthentication("Confirm saving secret") {
                     val error = when (editor) {
-                        ProfileEditor.New -> when (
-                            val result = viewModel.createProfile(name, description)
+                        SecretEditor.New -> when (
+                            val result = viewModel.createSecret(name, description)
                         ) {
-                            is CreateProfileResult.Created -> {
-                                profileEditor = null
-                                viewModel.selectProfile(result.id)
+                            is CreateSecretResult.Created -> {
+                                secretEditor = null
+                                viewModel.selectSecret(result.id)
                                 null
                             }
-                            CreateProfileResult.NameInUse -> resources.getString(
-                                R.string.profile_name_in_use,
+                            CreateSecretResult.NameInUse -> resources.getString(
+                                R.string.secret_name_in_use,
                             )
                         }
-                        is ProfileEditor.Existing -> when (
-                            viewModel.saveProfile(editor.profile.id, name, description)
+                        is SecretEditor.Existing -> when (
+                            viewModel.saveSecret(editor.secret.id, name, description)
                         ) {
-                            SaveProfileResult.SAVED -> {
-                                profileEditor = null
+                            SaveSecretResult.SAVED -> {
+                                secretEditor = null
                                 null
                             }
-                            SaveProfileResult.NAME_IN_USE -> resources.getString(
-                                R.string.profile_name_in_use,
+                            SaveSecretResult.NAME_IN_USE -> resources.getString(
+                                R.string.secret_name_in_use,
                             )
-                            SaveProfileResult.NOT_FOUND -> resources.getString(
-                                R.string.profile_not_found,
+                            SaveSecretResult.NOT_FOUND -> resources.getString(
+                                R.string.secret_not_found,
                             )
                         }
                     }
@@ -422,7 +422,7 @@ internal fun ProfilesScreen(
                     val error = when (editor) {
                         is VariableEditor.New -> when (
                             viewModel.createEnvironmentVariable(
-                                profileId = editor.profileId,
+                                secretId = editor.secretId,
                                 name = name,
                                 value = value,
                                 sensitive = sensitive,
@@ -436,8 +436,8 @@ internal fun ProfilesScreen(
                             CreateEnvironmentVariableResult.NameInUse -> resources.getString(
                                 R.string.variable_name_in_use,
                             )
-                            CreateEnvironmentVariableResult.ProfileNotFound -> resources.getString(
-                                R.string.profile_not_found,
+                            CreateEnvironmentVariableResult.SecretNotFound -> resources.getString(
+                                R.string.secret_not_found,
                             )
                         }
                         is VariableEditor.Existing -> when (
@@ -478,18 +478,18 @@ internal fun ProfilesScreen(
         )
     }
 
-    profilePendingDeletion?.let { profile ->
+    secretPendingDeletion?.let { secret ->
         DeleteDialog(
-            title = stringResource(R.string.delete_profile_question, profile.name),
-            explanation = stringResource(R.string.delete_profile_explanation),
-            onDismiss = { profilePendingDeletion = null },
+            title = stringResource(R.string.delete_secret_question, secret.name),
+            explanation = stringResource(R.string.delete_secret_explanation),
+            onDismiss = { secretPendingDeletion = null },
             onDelete = {
-                profilePendingDeletion = null
-                afterAuthentication(resources.getString(R.string.confirm_delete_profile)) {
-                    if (viewModel.deleteProfile(profile.id)) {
-                        report(resources.getString(R.string.profile_deleted))
+                secretPendingDeletion = null
+                afterAuthentication(resources.getString(R.string.confirm_delete_secret)) {
+                    if (viewModel.deleteSecret(secret.id)) {
+                        report(resources.getString(R.string.secret_deleted))
                     } else {
-                        report(resources.getString(R.string.profile_not_found))
+                        report(resources.getString(R.string.secret_not_found))
                     }
                 }
             },
@@ -518,9 +518,9 @@ internal fun ProfilesScreen(
 }
 
 @Composable
-private fun ProfileList(
-    profiles: List<ProfileSummary>,
-    selectedProfileId: String?,
+private fun SecretList(
+    secrets: List<SecretSummary>,
+    selectedSecretId: String?,
     onSelect: (String) -> Unit,
     onCreate: () -> Unit,
     onOpenSettings: () -> Unit,
@@ -528,12 +528,12 @@ private fun ProfileList(
 ) {
     Column(modifier) {
         TopAppBar(
-            title = { Text(stringResource(R.string.profiles)) },
+            title = { Text(stringResource(R.string.secrets)) },
             actions = {
                 IconButton(onClick = onCreate) {
                     Icon(
                         Icons.Outlined.Add,
-                        contentDescription = stringResource(R.string.new_profile),
+                        contentDescription = stringResource(R.string.new_secret),
                     )
                 }
                 IconButton(onClick = onOpenSettings) {
@@ -542,36 +542,36 @@ private fun ProfileList(
             },
         )
         HorizontalDivider()
-        if (profiles.isEmpty()) {
+        if (secrets.isEmpty()) {
             EmptyMessage(
-                title = stringResource(R.string.no_profiles),
-                description = stringResource(R.string.no_profiles_description),
+                title = stringResource(R.string.no_secrets),
+                description = stringResource(R.string.no_secrets_description),
                 modifier = Modifier.fillMaxSize(),
             )
         } else {
             LazyColumn(Modifier.fillMaxSize()) {
-                itemsIndexed(profiles, key = { _, profile -> profile.id }) { index, profile ->
-                    val selected = profile.id == selectedProfileId
+                itemsIndexed(secrets, key = { _, secret -> secret.id }) { index, secret ->
+                    val selected = secret.id == selectedSecretId
                     ListItem(
                         headlineContent = {
                             Text(
-                                profile.name,
+                                secret.name,
                                 maxLines = 1,
                                 overflow = TextOverflow.Ellipsis,
                             )
                         },
                         supportingContent = {
                             Column(verticalArrangement = Arrangement.spacedBy(2.dp)) {
-                                if (profile.description.isNotBlank()) {
+                                if (secret.description.isNotBlank()) {
                                     Text(
-                                        profile.description,
+                                        secret.description,
                                         maxLines = 2,
                                         overflow = TextOverflow.Ellipsis,
                                     )
                                 }
                                 Text(
-                                    "${profile.type.displayName()} " +
-                                        "(${profile.environmentVariableCount})",
+                                    "${secret.type.displayName()} " +
+                                        "(${secret.environmentVariableCount})",
                                     style = MaterialTheme.typography.labelMedium,
                                 )
                             }
@@ -591,10 +591,10 @@ private fun ProfileList(
                         },
                         modifier = Modifier
                             .fillMaxWidth()
-                            .clickable { onSelect(profile.id) }
+                            .clickable { onSelect(secret.id) }
                             .semantics { this.selected = selected },
                     )
-                    if (index < profiles.lastIndex) {
+                    if (index < secrets.lastIndex) {
                         HorizontalDivider(Modifier.padding(start = 20.dp))
                     }
                 }
@@ -604,13 +604,13 @@ private fun ProfileList(
 }
 
 @Composable
-private fun ProfileDetail(
-    profile: ProfileDetails,
+private fun SecretDetail(
+    secret: SecretDetails,
     revealedValues: Map<String, String>,
     showBack: Boolean,
     onBack: () -> Unit,
-    onEditProfile: () -> Unit,
-    onDeleteProfile: () -> Unit,
+    onEditSecret: () -> Unit,
+    onDeleteSecret: () -> Unit,
     onAddVariable: () -> Unit,
     onEditVariable: (EnvironmentVariableMetadata) -> Unit,
     onReveal: (EnvironmentVariableMetadata) -> Unit,
@@ -618,11 +618,11 @@ private fun ProfileDetail(
     onCopy: (EnvironmentVariableMetadata) -> Unit,
     modifier: Modifier = Modifier,
 ) {
-    var menuExpanded by remember(profile.id) { mutableStateOf(false) }
+    var menuExpanded by remember(secret.id) { mutableStateOf(false) }
     val fontScale = LocalDensity.current.fontScale
     Column(modifier) {
         TopAppBar(
-            title = { Text(profile.name, maxLines = 1, overflow = TextOverflow.Ellipsis) },
+            title = { Text(secret.name, maxLines = 1, overflow = TextOverflow.Ellipsis) },
             navigationIcon = {
                 if (showBack) {
                     IconButton(onClick = onBack) {
@@ -634,10 +634,10 @@ private fun ProfileDetail(
                 }
             },
             actions = {
-                IconButton(onClick = onEditProfile) {
+                IconButton(onClick = onEditSecret) {
                     Icon(
                         Icons.Outlined.Edit,
-                        contentDescription = stringResource(R.string.edit_profile),
+                        contentDescription = stringResource(R.string.edit_secret),
                     )
                 }
                 IconButton(onClick = { menuExpanded = true }) {
@@ -650,13 +650,13 @@ private fun ProfileDetail(
                     DropdownMenuItem(
                         text = {
                             Text(
-                                stringResource(R.string.delete_profile),
+                                stringResource(R.string.delete_secret),
                                 color = MaterialTheme.colorScheme.error,
                             )
                         },
                         onClick = {
                             menuExpanded = false
-                            onDeleteProfile()
+                            onDeleteSecret()
                         },
                     )
                 }
@@ -668,20 +668,20 @@ private fun ProfileDetail(
                 .padding(horizontal = 20.dp, vertical = 12.dp),
             verticalArrangement = Arrangement.spacedBy(4.dp),
         ) {
-            if (profile.description.isNotBlank()) {
+            if (secret.description.isNotBlank()) {
                 Text(
-                    profile.description,
+                    secret.description,
                     style = MaterialTheme.typography.bodyLarge,
                     color = MaterialTheme.colorScheme.onSurfaceVariant,
                 )
             }
             Text(
-                stringResource(R.string.profile_type),
+                stringResource(R.string.secret_type),
                 style = MaterialTheme.typography.labelSmall,
                 color = MaterialTheme.colorScheme.onSurfaceVariant,
             )
             Text(
-                profile.type.displayName(),
+                secret.type.displayName(),
                 style = MaterialTheme.typography.titleMedium,
             )
         }
@@ -696,7 +696,7 @@ private fun ProfileDetail(
             maxItemsInEachRow = if (fontScale >= 1.5f) 1 else Int.MAX_VALUE,
         ) {
             Text(
-                "Variables",
+                "Environment variables",
                 style = MaterialTheme.typography.titleLarge,
             )
             FilledTonalButton(onClick = onAddVariable) {
@@ -705,7 +705,7 @@ private fun ProfileDetail(
                 Text(stringResource(R.string.add_variable))
             }
         }
-        if (profile.environmentVariables.isEmpty()) {
+        if (secret.environmentVariables.isEmpty()) {
             EmptyMessage(
                 title = stringResource(R.string.no_variables),
                 description = stringResource(R.string.no_variables_description),
@@ -721,7 +721,7 @@ private fun ProfileDetail(
                 ),
                 verticalArrangement = Arrangement.spacedBy(12.dp),
             ) {
-                items(profile.environmentVariables, key = EnvironmentVariableMetadata::id) { variable ->
+                items(secret.environmentVariables, key = EnvironmentVariableMetadata::id) { variable ->
                     EnvironmentVariableCard(
                         variable = variable,
                         revealedValue = revealedValues[variable.id],
@@ -737,12 +737,12 @@ private fun ProfileDetail(
                         verticalArrangement = Arrangement.spacedBy(2.dp),
                     ) {
                         Text(
-                            stringResource(R.string.created, formatTimestamp(profile.createdAt)),
+                            stringResource(R.string.created, formatTimestamp(secret.createdAt)),
                             style = MaterialTheme.typography.labelSmall,
                             color = MaterialTheme.colorScheme.onSurfaceVariant,
                         )
                         Text(
-                            stringResource(R.string.updated, formatTimestamp(profile.updatedAt)),
+                            stringResource(R.string.updated, formatTimestamp(secret.updatedAt)),
                             style = MaterialTheme.typography.labelSmall,
                             color = MaterialTheme.colorScheme.onSurfaceVariant,
                         )
@@ -907,20 +907,20 @@ private fun EnvironmentVariableCard(
 }
 
 @Composable
-private fun ProfileEditorScreen(
-    profile: ProfileDetails?,
+private fun SecretEditorScreen(
+    secret: SecretDetails?,
     onDismiss: () -> Unit,
     onSave: (name: String, description: String) -> Unit,
     snackbar: SnackbarHostState,
 ) {
-    var name by remember(profile?.id) { mutableStateOf(profile?.name.orEmpty()) }
-    var description by remember(profile?.id) { mutableStateOf(profile?.description.orEmpty()) }
-    var validationError by remember(profile?.id) { mutableStateOf<Int?>(null) }
-    var confirmDiscard by remember(profile?.id) { mutableStateOf(false) }
-    val dirty = if (profile == null) {
+    var name by remember(secret?.id) { mutableStateOf(secret?.name.orEmpty()) }
+    var description by remember(secret?.id) { mutableStateOf(secret?.description.orEmpty()) }
+    var validationError by remember(secret?.id) { mutableStateOf<Int?>(null) }
+    var confirmDiscard by remember(secret?.id) { mutableStateOf(false) }
+    val dirty = if (secret == null) {
         name.isNotEmpty() || description.isNotEmpty()
     } else {
-        name != profile.name || description != profile.description
+        name != secret.name || description != secret.description
     }
     fun requestDismiss() {
         if (dirty) confirmDiscard = true else onDismiss()
@@ -933,7 +933,7 @@ private fun ProfileEditorScreen(
                 title = {
                     Text(
                         stringResource(
-                            if (profile == null) R.string.new_profile else R.string.edit_profile,
+                            if (secret == null) R.string.new_secret else R.string.edit_secret,
                         ),
                     )
                 },
@@ -964,7 +964,7 @@ private fun ProfileEditorScreen(
                     verticalArrangement = Arrangement.spacedBy(3.dp),
                 ) {
                     Text(
-                        stringResource(R.string.profile_type),
+                        stringResource(R.string.secret_type),
                         style = MaterialTheme.typography.labelMedium,
                         color = MaterialTheme.colorScheme.onSurfaceVariant,
                     )
@@ -972,10 +972,10 @@ private fun ProfileEditorScreen(
                         stringResource(R.string.environment_variables),
                         style = MaterialTheme.typography.titleMedium,
                     )
-                    if (profile == null) {
+                    if (secret == null) {
                         Text(
-                            stringResource(R.string.profile_type_immutable) + " " +
-                                stringResource(R.string.profile_variables_after_creation),
+                            stringResource(R.string.secret_type_immutable) + " " +
+                                stringResource(R.string.secret_variables_after_creation),
                             style = MaterialTheme.typography.bodySmall,
                             color = MaterialTheme.colorScheme.onSurfaceVariant,
                         )
@@ -988,7 +988,7 @@ private fun ProfileEditorScreen(
                     name = it
                     validationError = null
                 },
-                label = { Text(stringResource(R.string.profile_name)) },
+                label = { Text(stringResource(R.string.secret_name)) },
                 singleLine = true,
                 isError = validationError != null,
                 supportingText = validationError?.let { error ->
@@ -1012,26 +1012,26 @@ private fun ProfileEditorScreen(
             Button(
                 onClick = {
                     validationError = when {
-                        name.isBlank() -> R.string.profile_name_required
-                        name != name.trim() -> R.string.profile_name_whitespace
+                        name.isBlank() -> R.string.secret_name_required
+                        name != name.trim() -> R.string.secret_name_whitespace
                         else -> null
                     }
                     if (validationError == null) onSave(name, description)
                 },
                 enabled = name.isNotBlank() && (
-                    profile == null ||
-                        name != profile.name ||
-                        description != profile.description
+                    secret == null ||
+                        name != secret.name ||
+                        description != secret.description
                     ),
                 modifier = Modifier.fillMaxWidth(),
             ) {
                 Text(
                     stringResource(
-                        if (profile == null) R.string.create_profile else R.string.save_profile,
+                        if (secret == null) R.string.create_secret else R.string.save_secret,
                     ),
                 )
             }
-            profile?.let {
+            secret?.let {
                 Text(
                     "${stringResource(R.string.created, formatTimestamp(it.createdAt))} · " +
                         stringResource(R.string.updated, formatTimestamp(it.updatedAt)),
@@ -1358,10 +1358,10 @@ private fun DeleteDialog(
 }
 
 @Composable
-private fun EmptyProfileSelection(modifier: Modifier = Modifier) {
+private fun EmptySecretSelection(modifier: Modifier = Modifier) {
     EmptyMessage(
-        title = stringResource(R.string.select_profile),
-        description = stringResource(R.string.select_profile_description),
+        title = stringResource(R.string.select_secret),
+        description = stringResource(R.string.select_secret_description),
         modifier = modifier,
     )
 }

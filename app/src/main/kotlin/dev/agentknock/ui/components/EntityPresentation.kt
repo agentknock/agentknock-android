@@ -45,7 +45,7 @@ internal fun ClientIdentity(
 }
 
 @Composable
-internal fun ProfileIdentities(
+internal fun SecretIdentities(
     names: List<String>,
     modifier: Modifier = Modifier,
     unavailable: Boolean = false,
@@ -55,19 +55,19 @@ internal fun ProfileIdentities(
         horizontalArrangement = Arrangement.spacedBy(6.dp),
         verticalArrangement = Arrangement.spacedBy(6.dp),
     ) {
-        names.forEach { name -> ProfileIdentity(name, unavailable = unavailable) }
+        names.forEach { name -> SecretIdentity(name, unavailable = unavailable) }
     }
 }
 
 @Composable
-internal fun ProfileIdentity(
+internal fun SecretIdentity(
     name: String,
     modifier: Modifier = Modifier,
     unavailable: Boolean = false,
 ) {
     Surface(
         modifier = modifier.clearAndSetSemantics {
-            contentDescription = if (unavailable) "Unavailable profile $name" else "Profile $name"
+            contentDescription = if (unavailable) "Unavailable secret $name" else "Secret $name"
         },
         color = if (unavailable) {
             MaterialTheme.colorScheme.errorContainer

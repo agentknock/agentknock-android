@@ -12,7 +12,7 @@ import dev.agentknock.storage.audit.AuditRepository
 import dev.agentknock.storage.crypto.AesGcmEncryption
 import dev.agentknock.storage.crypto.AndroidEncryptionKeyStore
 import dev.agentknock.storage.crypto.LocalEncryptionKeyManager
-import dev.agentknock.storage.profile.ProfileRepository
+import dev.agentknock.storage.secret.SecretRepository
 import dev.agentknock.relay.HttpRelayClaimClient
 import dev.agentknock.relay.HttpRelayPushRegistrationClient
 import dev.agentknock.relay.HttpRelayDeviceManagementClient
@@ -58,13 +58,13 @@ internal class ApplicationContainer(application: Application) {
     // Every future worker and messaging entry point must await this before using local state.
     val localStorage = applicationScope.async(start = CoroutineStart.DEFAULT) {
         encryptionKeyManager.initialize()
-        database.requestDao().discardDecidedProfileUploadValues()
+        database.requestDao().discardDecidedSecretUploadValues()
     }
 
     val audit = AuditRepository(database.auditDao())
 
-    val profiles = ProfileRepository(
-        dao = database.profileDao(),
+    val secrets = SecretRepository(
+        dao = database.secretDao(),
         keyManager = encryptionKeyManager,
         encryption = encryption,
         audit = audit,
@@ -93,7 +93,7 @@ internal class ApplicationContainer(application: Application) {
     val requests = RequestRepository(
         dao = database.requestDao(),
         deviceCredentials = vault,
-        profiles = profiles,
+        secrets = secrets,
         relay = WebSocketRelayDeviceClient(httpClient),
         keyManager = encryptionKeyManager,
         encryption = encryption,

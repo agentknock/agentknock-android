@@ -5,18 +5,18 @@ import org.junit.Assert.assertEquals
 import org.junit.Assert.assertNull
 import org.junit.Test
 
-class CredentialProtocolTest {
-    private val protocol = CredentialProtocol()
+class SecretUseProtocolTest {
+    private val protocol = SecretUseProtocol()
     private val json = Json
 
     @Test
-    fun `decodes the cli credential request shape`() {
+    fun `decodes the cli secret use request shape`() {
         val request = protocol.decodeRequest(
             """
             {
               "cli_version":"0.1.0",
-              "method":"CredentialRequest",
-              "profiles":["aws-read-only","common"],
+              "method":"SecretUse",
+              "secrets":["aws-read-only","common"],
               "reason":"Inspect production logs",
               "operation":{
                 "type":"exec",
@@ -36,7 +36,7 @@ class CredentialProtocolTest {
         )
 
         assertEquals("0.1.0", request.cliVersion)
-        assertEquals(listOf("aws-read-only", "common"), request.profiles)
+        assertEquals(listOf("aws-read-only", "common"), request.secrets)
         assertEquals("Inspect production logs", request.reason)
         assertEquals("aws", request.operation.command)
         assertEquals(listOf("logs", "tail", "service"), request.operation.arguments)
@@ -54,12 +54,12 @@ class CredentialProtocolTest {
     fun `encodes exact approved and denied response variants`() {
         assertEquals(
             json.parseToJsonElement(
-                """{"result":"APPROVED","profiles":{"aws-read-only":{"type":"environment","variables":{"AWS_REGION":{"value":"eu-west-1"},"TOKEN":{"value":"secret"}}}}}""",
+                """{"result":"APPROVED","secrets":{"aws-read-only":{"type":"environment","variables":{"AWS_REGION":{"value":"eu-west-1"},"TOKEN":{"value":"secret"}}}}}""",
             ),
             json.parseToJsonElement(
                 protocol.approvedResponse(
                     mapOf(
-                        "aws-read-only" to CredentialResponseProfile(
+                        "aws-read-only" to SecretUseResponseSecret(
                             description = "",
                             environment = linkedMapOf(
                                 "AWS_REGION" to "eu-west-1",
@@ -72,12 +72,12 @@ class CredentialProtocolTest {
         )
         assertEquals(
             json.parseToJsonElement(
-                """{"result":"DENIED","reason":"USER_DENIED","message":"Denied on phone."}""",
+                """{"result":"DENIED","reason":"USER_DENIED","message":"Denied on device."}""",
             ),
             json.parseToJsonElement(
                 protocol.deniedResponse(
-                    CredentialDenialReason.USER_DENIED,
-                    "Denied on phone.",
+                    SecretUseDenialReason.USER_DENIED,
+                    "Denied on device.",
                 ).decodeToString(),
             ),
         )
@@ -86,15 +86,15 @@ class CredentialProtocolTest {
     @Test
     fun `decodes all cli completion variants`() {
         assertEquals(
-            CredentialCompletion.Approved("0.1.0"),
+            SecretUseCompletion.Approved("0.1.0"),
             protocol.decodeCompletion(
                 """{"cli_version":"0.1.0","result":"APPROVED"}""".encodeToByteArray(),
             ),
         )
         assertEquals(
-            CredentialCompletion.Denied("0.1.0", "USER_DENIED", "Denied on phone."),
+            SecretUseCompletion.Denied("0.1.0", "USER_DENIED", "Denied on device."),
             protocol.decodeCompletion(
-                """{"cli_version":"0.1.0","result":"DENIED","reason":"USER_DENIED","message":"Denied on phone."}"""
+                """{"cli_version":"0.1.0","result":"DENIED","reason":"USER_DENIED","message":"Denied on device."}"""
                     .encodeToByteArray(),
             ),
         )
@@ -102,12 +102,12 @@ class CredentialProtocolTest {
             """{"cli_version":"0.1.0","result":"ABORTED","reason":"CANCELLED","message":"Cancelled by user."}"""
                 .encodeToByteArray(),
         )
-        check(aborted is CredentialCompletion.Aborted)
+        check(aborted is SecretUseCompletion.Aborted)
         assertEquals("CANCELLED", aborted.reason)
         assertEquals("Cancelled by user.", aborted.message)
         assertNull(
             protocol.decodeRequest(
-                """{"cli_version":"0.1.0","method":"CredentialRequest","profiles":["test"],"operation":{"type":"exec","command":"env","arguments":[],"working_directory":"/tmp","executable_path":"/bin/env","executable_mode":"BINARY","stdin":"TERMINAL","stdout":"TERMINAL","stderr":"TERMINAL"},"launcher_chain":[]}"""
+                """{"cli_version":"0.1.0","method":"SecretUse","secrets":["test"],"operation":{"type":"exec","command":"env","arguments":[],"working_directory":"/tmp","executable_path":"/bin/env","executable_mode":"BINARY","stdin":"TERMINAL","stdout":"TERMINAL","stderr":"TERMINAL"},"launcher_chain":[]}"""
                     .encodeToByteArray(),
             ).reason,
         )

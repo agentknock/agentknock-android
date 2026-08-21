@@ -115,7 +115,7 @@ import dev.agentknock.storage.audit.AuditOutcome
 import dev.agentknock.storage.request.RequestSyncResult
 import dev.agentknock.storage.request.ClientSummary
 import dev.agentknock.storage.vault.DeviceManagementResult
-import dev.agentknock.storage.vault.VaultIdentity
+import dev.agentknock.storage.vault.DeviceIdentity
 import kotlinx.coroutines.launch
 
 private enum class SettingsPage {
@@ -329,7 +329,7 @@ private fun AuditBrowser(
 private fun SettingsOverview(
     onBack: () -> Unit,
     onOpen: (SettingsPage) -> Unit,
-    pairing: VaultIdentity?,
+    pairing: DeviceIdentity?,
     counts: DataCounts,
     syncResult: RequestSyncResult?,
     pushState: String?,
@@ -372,7 +372,7 @@ private fun SettingsOverview(
                 SettingsRow(
                     Icons.Outlined.History,
                     "Data & history",
-                    "${counts.profiles.countLabel("profile")} · " +
+                    "${counts.secrets.countLabel("secret")} · " +
                         "${counts.requests.countLabel("request")} · " +
                         "${counts.auditEvents.countLabel("audit event")}",
                 ) { onOpen(SettingsPage.DATA) }
@@ -416,7 +416,7 @@ private fun SettingsRow(
 
 @Composable
 private fun DeviceAndPairing(
-    identity: VaultIdentity?,
+    identity: DeviceIdentity?,
     onBack: () -> Unit,
     onChangeAddress: () -> Unit,
     onSetPairingEnabled: (Boolean) -> Unit,
@@ -651,7 +651,7 @@ private fun NotificationsSettings(
                 },
             )
             Text(
-                "Profile access notifications can include Approve once and Deny once actions. Approving requires the device to be unlocked; on older Android versions, Agentknock opens the request for authenticated review.",
+                "Secret use notifications can include Approve once and Deny once actions. Approving requires the device to be unlocked; on older Android versions, Agentknock opens the request for authenticated review.",
             )
             Text(
                 "Android controls notification sounds and how much content is visible on the lock screen.",
@@ -825,8 +825,8 @@ private fun DataAndHistory(
                 supportingContent = {
                     Text(
                         listOf(
-                            counts.profiles.countLabel("profile"),
-                            counts.variables.countLabel("variable"),
+                            counts.secrets.countLabel("secret"),
+                            counts.variables.countLabel("environment variable"),
                             counts.clients.countLabel("client"),
                             counts.requests.countLabel("request"),
                         ).joinToString(" · "),
@@ -839,7 +839,7 @@ private fun DataAndHistory(
                 headlineContent = { Text("Android backup and transfer") },
                 supportingContent = {
                     Text(
-                        "Profiles, clients, request history, audit events, and encrypted values are included. Device-bound keys cannot be restored on another device.",
+                        "Secrets, clients, request history, audit events, and encrypted values are included. Device-bound keys cannot be restored on another device.",
                     )
                 },
                 leadingContent = { Icon(Icons.Outlined.Backup, contentDescription = null) },
@@ -886,7 +886,7 @@ private fun DataAndHistory(
                     Text("Factory reset Agentknock", color = MaterialTheme.colorScheme.error)
                 },
                 supportingContent = {
-                    Text("Erase this Agentknock device identity, profiles, clients, and history")
+                    Text("Erase this Agentknock device identity, secrets, clients, and history")
                 },
                 leadingContent = {
                     Icon(
@@ -903,7 +903,7 @@ private fun DataAndHistory(
         AlertDialog(
             onDismissRequest = { confirmClear = false },
             title = { Text("Clear completed requests?") },
-            text = { Text("Pending requests, paired clients, profiles, and the audit log are not removed.") },
+            text = { Text("Pending requests, paired clients, secrets, and the audit log are not removed.") },
             confirmButton = { TextButton(onClick = { onClearRequests(); confirmClear = false }) { Text("Clear") } },
             dismissButton = { TextButton(onClick = { confirmClear = false }) { Text("Cancel") } },
         )
@@ -1041,7 +1041,6 @@ private fun AuditOutcomeBadge(outcome: AuditOutcome) {
         outcome == AuditOutcome.REJECTED ||
         outcome == AuditOutcome.FAILED
     val positive = outcome == AuditOutcome.APPROVED ||
-        outcome == AuditOutcome.ACCEPTED ||
         outcome == AuditOutcome.COMPLETED ||
         outcome == AuditOutcome.CHANGED
     Surface(
@@ -1102,9 +1101,9 @@ private fun FactoryReset(
                             allowLocalOnly = true
                             report("Relay deletion could not be confirmed. Nothing was erased.")
                         }
-                        FactoryResetResult.LocalSecretsUnavailable -> {
+                        FactoryResetResult.DeviceCredentialsUnavailable -> {
                             allowLocalOnly = true
-                            report("Device credentials are unavailable. Nothing was erased.")
+                            report("Relay authentication is unavailable. Nothing was erased.")
                         }
                     }
                     working = false
@@ -1130,7 +1129,7 @@ private fun FactoryReset(
             Text("It will then permanently erase:")
             Column(verticalArrangement = Arrangement.spacedBy(6.dp)) {
                 Text("• Device identity and encryption keys")
-                Text("• Profiles and their stored values")
+                Text("• Secrets and their stored values")
                 Text("• Paired clients and requests")
                 Text("• Audit log and settings")
             }
@@ -1313,7 +1312,7 @@ private fun About(onBack: () -> Unit, report: (String) -> Unit, modifier: Modifi
                 }
             }
             Text(
-                "Stored values and device identity keys are protected on this phone. Credential responses are encrypted end to end for the paired client. The relay routes ciphertext and generic wake signals.",
+                "Stored values and device identity keys are protected on this device. Secret use responses are encrypted end to end for the paired client. The relay routes ciphertext and generic wake signals.",
             )
             Text("Made by Full Disclosure", color = MaterialTheme.colorScheme.onSurfaceVariant)
         }
@@ -1345,8 +1344,8 @@ private fun LabeledValue(label: String, value: String, monospace: Boolean = fals
 private fun DeviceManagementResult.message(enabled: Boolean): String = when (this) {
     DeviceManagementResult.Changed -> if (enabled) "New pairings resumed" else "New pairings paused"
     DeviceManagementResult.NoDevice -> "Device setup is incomplete"
-    DeviceManagementResult.SecretsUnavailable -> "Device keys are unavailable"
-    DeviceManagementResult.SecretsCorrupted -> "Device keys could not be verified"
+    DeviceManagementResult.CredentialsUnavailable -> "Device keys are unavailable"
+    DeviceManagementResult.CredentialsCorrupted -> "Device keys could not be verified"
     DeviceManagementResult.UnsupportedEncryption -> "Device keys use unsupported encryption"
     is DeviceManagementResult.Rejected -> message ?: "The relay rejected the change"
     is DeviceManagementResult.Unavailable -> message ?: "The relay is unavailable"
@@ -1357,10 +1356,10 @@ private fun Int.countLabel(noun: String): String = "$this $noun${if (this == 1) 
 
 private fun RequestSyncResult?.diagnosticMessage(): String? = when (this) {
     null, RequestSyncResult.Success -> null
-    RequestSyncResult.NoVault -> "Device setup is incomplete."
-    RequestSyncResult.VaultSecretsUnavailable -> "Device keys are unavailable on this phone."
-    RequestSyncResult.VaultSecretsCorrupted -> "Device keys could not be verified."
-    RequestSyncResult.UnsupportedVaultEncryption -> "Device keys use unsupported encryption."
+    RequestSyncResult.NoDevice -> "Device setup is incomplete."
+    RequestSyncResult.DeviceCredentialsUnavailable -> "Device keys are unavailable on this device."
+    RequestSyncResult.DeviceCredentialsCorrupted -> "Device keys could not be verified."
+    RequestSyncResult.UnsupportedDeviceCredentialEncryption -> "Device keys use unsupported encryption."
     is RequestSyncResult.RelayRejected -> message ?: "The relay rejected the connection."
     is RequestSyncResult.RelayUnavailable -> message ?: "The relay could not be reached."
     RequestSyncResult.InvalidRelayResponse -> "The relay returned an invalid response."

@@ -13,13 +13,13 @@ import dev.agentknock.storage.crypto.LocalEncryptionKeyEntity
 import kotlinx.coroutines.flow.Flow
 
 @Entity(
-    tableName = "vault_identities",
+    tableName = "device_identities",
     indices = [
         Index(value = ["role"], unique = true),
         Index(value = ["address_id"], unique = true),
     ],
 )
-internal data class VaultIdentityEntity(
+internal data class DeviceIdentityEntity(
     @PrimaryKey
     @ColumnInfo(name = "id")
     val id: String,
@@ -45,7 +45,7 @@ internal data class VaultIdentityEntity(
     tableName = "vault_secrets",
     foreignKeys = [
         ForeignKey(
-            entity = VaultIdentityEntity::class,
+            entity = DeviceIdentityEntity::class,
             parentColumns = ["id"],
             childColumns = ["identity_id"],
             onDelete = ForeignKey.CASCADE,
@@ -88,36 +88,36 @@ internal data class VaultSecretEntity(
 
 @Dao
 internal interface VaultDao {
-    @Query("SELECT * FROM vault_identities ORDER BY role")
-    fun observeIdentities(): Flow<List<VaultIdentityEntity>>
+    @Query("SELECT * FROM device_identities ORDER BY role")
+    fun observeIdentities(): Flow<List<DeviceIdentityEntity>>
 
     @Query("SELECT * FROM vault_secrets ORDER BY identity_id, kind")
     fun observeSecrets(): Flow<List<VaultSecretEntity>>
 
-    @Query("SELECT * FROM vault_identities WHERE role = :role")
-    suspend fun getIdentity(role: String): VaultIdentityEntity?
+    @Query("SELECT * FROM device_identities WHERE role = :role")
+    suspend fun getIdentity(role: String): DeviceIdentityEntity?
 
-    @Query("SELECT * FROM vault_identities WHERE id = :id")
-    suspend fun getIdentityById(id: String): VaultIdentityEntity?
+    @Query("SELECT * FROM device_identities WHERE id = :id")
+    suspend fun getIdentityById(id: String): DeviceIdentityEntity?
 
     @Query("SELECT * FROM vault_secrets WHERE identity_id = :identityId ORDER BY kind")
     suspend fun getSecrets(identityId: String): List<VaultSecretEntity>
 
-    @Query("DELETE FROM vault_identities WHERE role = :role")
+    @Query("DELETE FROM device_identities WHERE role = :role")
     suspend fun deleteIdentity(role: String): Int
 
-    @Query("SELECT EXISTS(SELECT 1 FROM vault_identities WHERE id = :id AND role = :role)")
+    @Query("SELECT EXISTS(SELECT 1 FROM device_identities WHERE id = :id AND role = :role)")
     suspend fun identityExists(id: String, role: String): Boolean
 
     @Insert
-    suspend fun insertIdentity(identity: VaultIdentityEntity)
+    suspend fun insertIdentity(identity: DeviceIdentityEntity)
 
     @Insert
     suspend fun insertSecrets(secrets: List<VaultSecretEntity>)
 
     @Query(
         """
-        UPDATE vault_identities
+        UPDATE device_identities
         SET role = :activeRole, claimed_at = :claimedAt
         WHERE id = :candidateId AND role = :candidateRole
         """,
@@ -131,7 +131,7 @@ internal interface VaultDao {
 
     @Query(
         """
-        UPDATE vault_identities
+        UPDATE device_identities
         SET address = :address,
             address_id = :addressId,
             claimed_at = :claimedAt
@@ -148,7 +148,7 @@ internal interface VaultDao {
 
     @Query(
         """
-        UPDATE vault_identities
+        UPDATE device_identities
         SET pairing_enabled = :enabled
         WHERE id = :identityId AND role = :activeRole
         """,
@@ -161,7 +161,7 @@ internal interface VaultDao {
 
     @Transaction
     suspend fun replaceCandidate(
-        identity: VaultIdentityEntity,
+        identity: DeviceIdentityEntity,
         secrets: List<VaultSecretEntity>,
         candidateRole: String,
     ) {

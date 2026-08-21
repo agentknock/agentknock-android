@@ -1,6 +1,6 @@
 package dev.agentknock.storage.vault
 
-import dev.agentknock.protocol.VaultProtocol
+import dev.agentknock.protocol.DeviceProtocol
 import dev.agentknock.relay.RelayClaimClient
 import dev.agentknock.relay.RelayClaimResult
 import dev.agentknock.storage.crypto.AesGcmEncryption
@@ -21,24 +21,24 @@ import kotlinx.coroutines.flow.Flow
 import kotlinx.coroutines.flow.combine
 import kotlinx.coroutines.withContext
 
-internal data class VaultConfiguration(
-    val active: VaultIdentity?,
-    val candidate: VaultIdentity?,
+internal data class DeviceConfiguration(
+    val active: DeviceIdentity?,
+    val candidate: DeviceIdentity?,
 )
 
-internal data class VaultIdentity(
+internal data class DeviceIdentity(
     val id: String,
     val address: String,
     val addressId: String,
     val deviceId: String,
-    val secretsAvailable: Boolean,
+    val credentialsAvailable: Boolean,
     val pairingEnabled: Boolean,
     val createdAt: Long,
     val claimedAt: Long?,
 )
 
 internal data class RelayDeviceCredentials(
-    val vaultIdentityId: String,
+    val deviceIdentityId: String,
     val address: String,
     val addressId: String,
     val deviceId: String,
@@ -52,43 +52,43 @@ internal sealed interface RelayDeviceCredentialsResult {
 
     data object Missing : RelayDeviceCredentialsResult
 
-    data object SecretsUnavailable : RelayDeviceCredentialsResult
+    data object CredentialsUnavailable : RelayDeviceCredentialsResult
 
-    data object SecretsCorrupted : RelayDeviceCredentialsResult
+    data object CredentialsCorrupted : RelayDeviceCredentialsResult
 
     data object UnsupportedEncryption : RelayDeviceCredentialsResult
 }
 
-internal sealed interface ClaimVaultResult {
-    data object Claimed : ClaimVaultResult
+internal sealed interface ClaimPairingAddressResult {
+    data object Claimed : ClaimPairingAddressResult
 
-    data object AddressUnavailable : ClaimVaultResult
+    data object AddressUnavailable : ClaimPairingAddressResult
 
-    data object SameAddress : ClaimVaultResult
+    data object SameAddress : ClaimPairingAddressResult
 
-    data object NoCandidate : ClaimVaultResult
+    data object NoCandidate : ClaimPairingAddressResult
 
-    data object SecretsUnavailable : ClaimVaultResult
+    data object CredentialsUnavailable : ClaimPairingAddressResult
 
-    data object SecretsCorrupted : ClaimVaultResult
+    data object CredentialsCorrupted : ClaimPairingAddressResult
 
-    data object UnsupportedEncryption : ClaimVaultResult
+    data object UnsupportedEncryption : ClaimPairingAddressResult
 
     data class RelayRejected(
         val status: Int,
         val code: String?,
         val message: String?,
-    ) : ClaimVaultResult
+    ) : ClaimPairingAddressResult
 
-    data class RelayUnavailable(val message: String?) : ClaimVaultResult
+    data class RelayUnavailable(val message: String?) : ClaimPairingAddressResult
 
-    data object InvalidRelayResponse : ClaimVaultResult
+    data object InvalidRelayResponse : ClaimPairingAddressResult
 }
 
 internal interface RelayDeviceCredentialSource {
     suspend fun activeDeviceCredentials(): RelayDeviceCredentialsResult
 
-    suspend fun deviceCredentials(vaultIdentityId: String): RelayDeviceCredentialsResult
+    suspend fun deviceCredentials(deviceIdentityId: String): RelayDeviceCredentialsResult
 }
 
 internal class VaultRepository(
@@ -101,7 +101,7 @@ internal class VaultRepository(
     private val currentTimeMillis: () -> Long = System::currentTimeMillis,
     private val cryptographyDispatcher: CoroutineDispatcher = Dispatchers.IO,
 ) : RelayDeviceCredentialSource {
-    fun observeConfiguration(): Flow<VaultConfiguration> = combine(
+    fun observeConfiguration(): Flow<DeviceConfiguration> = combine(
         dao.observeIdentities(),
         dao.observeSecrets(),
     ) { identities, secrets ->
@@ -112,47 +112,47 @@ internal class VaultRepository(
         val identityModels = identities.associate { identity ->
             val identitySecrets = secrets.filter { it.identityId == identity.id }
             identity.role to identity.toModel(
-                secretsAvailable = VaultSecretKind.entries.all { kind ->
+                credentialsAvailable = VaultSecretKind.entries.all { kind ->
                     identitySecrets.singleOrNull { it.kind == kind.storedName }
                         ?.let { availability.getValue(it.encryptionKeyId) } == true
                 },
             )
         }
-        VaultConfiguration(
-            active = identityModels[VaultIdentityRole.ACTIVE.storedName],
-            candidate = identityModels[VaultIdentityRole.CANDIDATE.storedName],
+        DeviceConfiguration(
+            active = identityModels[DeviceIdentityRole.ACTIVE.storedName],
+            candidate = identityModels[DeviceIdentityRole.CANDIDATE.storedName],
         )
     }
 
-    suspend fun stageAndClaim(address: String): ClaimVaultResult {
-        require(VaultProtocol.validAddress(address)) { "Invalid vault address" }
-        val active = dao.getIdentity(VaultIdentityRole.ACTIVE.storedName)
+    suspend fun stageAndClaim(address: String): ClaimPairingAddressResult {
+        require(DeviceProtocol.validPairingAddress(address)) { "Invalid pairing address" }
+        val active = dao.getIdentity(DeviceIdentityRole.ACTIVE.storedName)
         if (active?.address == address) {
-            return ClaimVaultResult.SameAddress
+            return ClaimPairingAddressResult.SameAddress
         }
-        if (dao.getIdentity(VaultIdentityRole.CANDIDATE.storedName)?.address == address) {
+        if (dao.getIdentity(DeviceIdentityRole.CANDIDATE.storedName)?.address == address) {
             return claimCandidate()
         }
 
         val identityId = newId()
-        val addressId = VaultProtocol.addressId(address)
+        val addressId = DeviceProtocol.addressId(address)
         val device = if (active == null) {
             newDeviceMaterial()
         } else {
             when (val result = deviceMaterial(active)) {
                 is DeviceMaterialResult.Available -> result.value
                 DeviceMaterialResult.Unavailable -> newDeviceMaterial()
-                DeviceMaterialResult.Corrupted -> return ClaimVaultResult.SecretsCorrupted
+                DeviceMaterialResult.Corrupted -> return ClaimPairingAddressResult.CredentialsCorrupted
                 DeviceMaterialResult.Unsupported -> {
-                    return ClaimVaultResult.UnsupportedEncryption
+                    return ClaimPairingAddressResult.UnsupportedEncryption
                 }
             }
         }
         val encryptionKey = keyManager.activeKey()
         val now = currentTimeMillis()
-        val identity = VaultIdentityEntity(
+        val identity = DeviceIdentityEntity(
             id = identityId,
-            role = VaultIdentityRole.CANDIDATE.storedName,
+            role = DeviceIdentityRole.CANDIDATE.storedName,
             address = address,
             addressId = addressId,
             deviceId = device.deviceId,
@@ -180,24 +180,24 @@ internal class VaultRepository(
         dao.replaceCandidate(
             identity = identity,
             secrets = secrets,
-            candidateRole = VaultIdentityRole.CANDIDATE.storedName,
+            candidateRole = DeviceIdentityRole.CANDIDATE.storedName,
         )
         return claimCandidate()
     }
 
-    suspend fun claimCandidate(): ClaimVaultResult {
-        val candidate = dao.getIdentity(VaultIdentityRole.CANDIDATE.storedName)
-            ?: return ClaimVaultResult.NoCandidate
-        val previous = dao.getIdentity(VaultIdentityRole.ACTIVE.storedName)
+    suspend fun claimCandidate(): ClaimPairingAddressResult {
+        val candidate = dao.getIdentity(DeviceIdentityRole.CANDIDATE.storedName)
+            ?: return ClaimPairingAddressResult.NoCandidate
+        val previous = dao.getIdentity(DeviceIdentityRole.ACTIVE.storedName)
         val secrets = dao.getSecrets(candidate.id)
         when (val result = decryptSecret(candidate, secrets, VaultSecretKind.DEVICE_PRIVATE_KEY)) {
             is SecretResult.Available -> if (result.value.size != DEVICE_PRIVATE_KEY_BYTES) {
-                return ClaimVaultResult.SecretsCorrupted
+                return ClaimPairingAddressResult.CredentialsCorrupted
             }
-            SecretResult.Unavailable -> return ClaimVaultResult.SecretsUnavailable
-            SecretResult.Corrupted -> return ClaimVaultResult.SecretsCorrupted
-            SecretResult.Unsupported -> return ClaimVaultResult.UnsupportedEncryption
-            SecretResult.Missing -> return ClaimVaultResult.SecretsCorrupted
+            SecretResult.Unavailable -> return ClaimPairingAddressResult.CredentialsUnavailable
+            SecretResult.Corrupted -> return ClaimPairingAddressResult.CredentialsCorrupted
+            SecretResult.Unsupported -> return ClaimPairingAddressResult.UnsupportedEncryption
+            SecretResult.Missing -> return ClaimPairingAddressResult.CredentialsCorrupted
         }
         val deviceToken = when (
             val result = decryptSecret(
@@ -207,18 +207,18 @@ internal class VaultRepository(
             )
         ) {
             is SecretResult.Available -> result.value
-            SecretResult.Unavailable -> return ClaimVaultResult.SecretsUnavailable
-            SecretResult.Corrupted -> return ClaimVaultResult.SecretsCorrupted
-            SecretResult.Unsupported -> return ClaimVaultResult.UnsupportedEncryption
-            SecretResult.Missing -> return ClaimVaultResult.SecretsCorrupted
+            SecretResult.Unavailable -> return ClaimPairingAddressResult.CredentialsUnavailable
+            SecretResult.Corrupted -> return ClaimPairingAddressResult.CredentialsCorrupted
+            SecretResult.Unsupported -> return ClaimPairingAddressResult.UnsupportedEncryption
+            SecretResult.Missing -> return ClaimPairingAddressResult.CredentialsCorrupted
         }
-        if (deviceToken.size != DEVICE_TOKEN_BYTES) return ClaimVaultResult.SecretsCorrupted
+        if (deviceToken.size != DEVICE_TOKEN_BYTES) return ClaimPairingAddressResult.CredentialsCorrupted
 
         return when (
             val result = relay.claim(
                 deviceId = candidate.deviceId,
                 addressId = candidate.addressId,
-                deviceToken = VaultProtocol.encodeDeviceToken(deviceToken),
+                deviceToken = DeviceProtocol.encodeDeviceToken(deviceToken),
             )
         ) {
             RelayClaimResult.Claimed -> {
@@ -226,8 +226,8 @@ internal class VaultRepository(
                     dao.promoteCandidate(
                         candidateId = candidate.id,
                         claimedAt = currentTimeMillis(),
-                        activeRole = VaultIdentityRole.ACTIVE.storedName,
-                        candidateRole = VaultIdentityRole.CANDIDATE.storedName,
+                        activeRole = DeviceIdentityRole.ACTIVE.storedName,
+                        candidateRole = DeviceIdentityRole.CANDIDATE.storedName,
                     )
                 ) {
                     audit.record(
@@ -242,53 +242,53 @@ internal class VaultRepository(
                             outcome = AuditOutcome.CHANGED,
                         ),
                     )
-                    ClaimVaultResult.Claimed
+                    ClaimPairingAddressResult.Claimed
                 } else {
-                    ClaimVaultResult.NoCandidate
+                    ClaimPairingAddressResult.NoCandidate
                 }
             }
-            RelayClaimResult.AddressUnavailable -> ClaimVaultResult.AddressUnavailable
-            is RelayClaimResult.Rejected -> ClaimVaultResult.RelayRejected(
+            RelayClaimResult.AddressUnavailable -> ClaimPairingAddressResult.AddressUnavailable
+            is RelayClaimResult.Rejected -> ClaimPairingAddressResult.RelayRejected(
                 status = result.status,
                 code = result.code,
                 message = result.message,
             )
-            is RelayClaimResult.Unavailable -> ClaimVaultResult.RelayUnavailable(
+            is RelayClaimResult.Unavailable -> ClaimPairingAddressResult.RelayUnavailable(
                 result.cause.message,
             )
-            RelayClaimResult.InvalidResponse -> ClaimVaultResult.InvalidRelayResponse
+            RelayClaimResult.InvalidResponse -> ClaimPairingAddressResult.InvalidRelayResponse
         }
     }
 
     suspend fun discardCandidate() {
-        dao.deleteIdentity(VaultIdentityRole.CANDIDATE.storedName)
+        dao.deleteIdentity(DeviceIdentityRole.CANDIDATE.storedName)
     }
 
     override suspend fun activeDeviceCredentials(): RelayDeviceCredentialsResult {
-        val identity = dao.getIdentity(VaultIdentityRole.ACTIVE.storedName)
+        val identity = dao.getIdentity(DeviceIdentityRole.ACTIVE.storedName)
             ?: return RelayDeviceCredentialsResult.Missing
         return deviceCredentials(identity)
     }
 
     override suspend fun deviceCredentials(
-        vaultIdentityId: String,
+        deviceIdentityId: String,
     ): RelayDeviceCredentialsResult {
-        val identity = dao.getIdentityById(vaultIdentityId)
+        val identity = dao.getIdentityById(deviceIdentityId)
             ?: return RelayDeviceCredentialsResult.Missing
         return deviceCredentials(identity)
     }
 
     private suspend fun deviceCredentials(
-        identity: VaultIdentityEntity,
+        identity: DeviceIdentityEntity,
     ): RelayDeviceCredentialsResult {
         val secrets = dao.getSecrets(identity.id)
         val privateKey = when (
             val result = decryptSecret(identity, secrets, VaultSecretKind.DEVICE_PRIVATE_KEY)
         ) {
             is SecretResult.Available -> result.value
-            SecretResult.Unavailable -> return RelayDeviceCredentialsResult.SecretsUnavailable
+            SecretResult.Unavailable -> return RelayDeviceCredentialsResult.CredentialsUnavailable
             SecretResult.Corrupted, SecretResult.Missing -> {
-                return RelayDeviceCredentialsResult.SecretsCorrupted
+                return RelayDeviceCredentialsResult.CredentialsCorrupted
             }
             SecretResult.Unsupported -> return RelayDeviceCredentialsResult.UnsupportedEncryption
         }
@@ -300,9 +300,9 @@ internal class VaultRepository(
             )
         ) {
             is SecretResult.Available -> result.value
-            SecretResult.Unavailable -> return RelayDeviceCredentialsResult.SecretsUnavailable
+            SecretResult.Unavailable -> return RelayDeviceCredentialsResult.CredentialsUnavailable
             SecretResult.Corrupted, SecretResult.Missing -> {
-                return RelayDeviceCredentialsResult.SecretsCorrupted
+                return RelayDeviceCredentialsResult.CredentialsCorrupted
             }
             SecretResult.Unsupported -> return RelayDeviceCredentialsResult.UnsupportedEncryption
         }
@@ -311,23 +311,23 @@ internal class VaultRepository(
             identity.devicePublicKey.size != DEVICE_PRIVATE_KEY_BYTES ||
             deviceToken.size != DEVICE_TOKEN_BYTES
         ) {
-            return RelayDeviceCredentialsResult.SecretsCorrupted
+            return RelayDeviceCredentialsResult.CredentialsCorrupted
         }
         return RelayDeviceCredentialsResult.Available(
             RelayDeviceCredentials(
-                vaultIdentityId = identity.id,
+                deviceIdentityId = identity.id,
                 address = identity.address,
                 addressId = identity.addressId,
                 deviceId = identity.deviceId,
                 devicePublicKey = identity.devicePublicKey,
                 devicePrivateKey = privateKey,
-                deviceToken = VaultProtocol.encodeDeviceToken(deviceToken),
+                deviceToken = DeviceProtocol.encodeDeviceToken(deviceToken),
             ),
         )
     }
 
     private suspend fun newSecret(
-        identity: VaultIdentityEntity,
+        identity: DeviceIdentityEntity,
         kind: VaultSecretKind,
         value: ByteArray,
         encryptionKeyId: String,
@@ -355,14 +355,14 @@ internal class VaultRepository(
     }
 
     private fun newDeviceMaterial() = DeviceMaterial(
-        deviceId = VaultProtocol.generateDeviceId(
+        deviceId = DeviceProtocol.generateDeviceId(
             timestampMillis = currentTimeMillis(),
         ),
-        keyPair = VaultProtocol.generateDeviceKeyPair(),
-        deviceToken = VaultProtocol.generateDeviceToken(),
+        keyPair = DeviceProtocol.generateDeviceKeyPair(),
+        deviceToken = DeviceProtocol.generateDeviceToken(),
     )
 
-    private suspend fun deviceMaterial(identity: VaultIdentityEntity): DeviceMaterialResult {
+    private suspend fun deviceMaterial(identity: DeviceIdentityEntity): DeviceMaterialResult {
         val secrets = dao.getSecrets(identity.id)
         val privateKey = when (
             val result = decryptSecret(identity, secrets, VaultSecretKind.DEVICE_PRIVATE_KEY)
@@ -408,7 +408,7 @@ internal class VaultRepository(
     }
 
     private suspend fun decryptSecret(
-        identity: VaultIdentityEntity,
+        identity: DeviceIdentityEntity,
         secrets: List<VaultSecretEntity>,
         kind: VaultSecretKind,
     ): SecretResult {
@@ -435,7 +435,7 @@ internal class VaultRepository(
 
     private fun location(
         secretId: String,
-        identity: VaultIdentityEntity,
+        identity: DeviceIdentityEntity,
         kind: VaultSecretKind,
     ) = EncryptionLocation(
         recordType = "vault_secret",
@@ -448,12 +448,12 @@ internal class VaultRepository(
         ),
     )
 
-    private fun VaultIdentityEntity.toModel(secretsAvailable: Boolean) = VaultIdentity(
+    private fun DeviceIdentityEntity.toModel(credentialsAvailable: Boolean) = DeviceIdentity(
         id = id,
         address = address,
         addressId = addressId,
         deviceId = deviceId,
-        secretsAvailable = secretsAvailable,
+        credentialsAvailable = credentialsAvailable,
         createdAt = createdAt,
         claimedAt = claimedAt,
         pairingEnabled = pairingEnabled,
@@ -493,7 +493,7 @@ private data class DeviceMaterial(
     val deviceToken: ByteArray,
 )
 
-private enum class VaultIdentityRole(val storedName: String) {
+private enum class DeviceIdentityRole(val storedName: String) {
     ACTIVE("active"),
     CANDIDATE("candidate"),
 }

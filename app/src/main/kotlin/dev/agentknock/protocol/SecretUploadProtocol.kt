@@ -9,68 +9,68 @@ import kotlinx.serialization.json.JsonObject
 import kotlinx.serialization.json.JsonPrimitive
 import kotlinx.serialization.json.jsonObject
 
-internal enum class ProfileUploadMode(val wireName: String) {
+internal enum class SecretUploadMode(val wireName: String) {
     CREATE("CREATE"),
     REPLACE("REPLACE"),
     UPDATE("UPDATE"),
 }
 
-internal data class ProfileUploadRequestMessage(
+internal data class SecretUploadRequestMessage(
     val cliVersion: String,
-    val mode: ProfileUploadMode,
+    val mode: SecretUploadMode,
     val name: String,
     val descriptionProvided: Boolean,
     val description: String?,
     val variables: Map<String, String>,
 )
 
-internal data class ProfileUploadCompletion(
+internal data class SecretUploadCompletion(
     val cliVersion: String,
     val result: String,
     val message: String?,
 )
 
-internal class ProfileUploadProtocol(
+internal class SecretUploadProtocol(
     private val json: Json = Json { ignoreUnknownKeys = true },
 ) {
-    fun decodeRequest(plaintext: ByteArray): ProfileUploadRequestMessage {
+    fun decodeRequest(plaintext: ByteArray): SecretUploadRequestMessage {
         val root = json.parseToJsonElement(plaintext.decodeToString()).jsonObject
         require(root.requiredString("method") == METHOD) { "Unexpected request method" }
-        val profile = root.getValue("profile").jsonObject
-        require(profile.requiredString("type") == TYPE_ENVIRONMENT) {
-            "Unsupported profile type"
+        val secret = root.getValue("secret").jsonObject
+        require(secret.requiredString("type") == TYPE_ENVIRONMENT) {
+            "Unsupported secret type"
         }
-        val variables = profile.getValue("variables").jsonObject.mapValues { (_, value) ->
+        val variables = secret.getValue("variables").jsonObject.mapValues { (_, value) ->
             value.jsonObject.requiredString("value")
         }
-        return ProfileUploadRequestMessage(
+        return SecretUploadRequestMessage(
             cliVersion = root.requiredString("cli_version"),
-            mode = ProfileUploadMode.entries.singleOrNull {
+            mode = SecretUploadMode.entries.singleOrNull {
                 it.wireName == root.requiredString("mode")
-            } ?: error("Unsupported profile upload mode"),
-            name = profile.requiredString("name"),
-            descriptionProvided = "description" in profile,
-            description = profile.optionalString("description"),
+            } ?: error("Unsupported secret upload mode"),
+            name = secret.requiredString("name"),
+            descriptionProvided = "description" in secret,
+            description = secret.optionalString("description"),
             variables = variables,
         )
     }
 
     fun receivedResponse(): ByteArray = json.encodeToString(
-        ProfileUploadResultWire(result = RESULT_RECEIVED),
+        SecretUploadResultWire(result = RESULT_RECEIVED),
     ).encodeToByteArray()
 
     fun rejectedResponse(message: String): ByteArray = json.encodeToString(
-        ProfileUploadResultWire(result = RESULT_REJECTED, message = message),
+        SecretUploadResultWire(result = RESULT_REJECTED, message = message),
     ).encodeToByteArray()
 
-    fun decodeCompletion(plaintext: ByteArray): ProfileUploadCompletion {
-        val completion = json.decodeFromString<ProfileUploadCompletionWire>(
+    fun decodeCompletion(plaintext: ByteArray): SecretUploadCompletion {
+        val completion = json.decodeFromString<SecretUploadCompletionWire>(
             plaintext.decodeToString(),
         )
         require(completion.result == RESULT_RECEIVED || completion.result == RESULT_REJECTED) {
-            "Unsupported profile upload completion result"
+            "Unsupported secret upload completion result"
         }
-        return ProfileUploadCompletion(
+        return SecretUploadCompletion(
             cliVersion = completion.cliVersion,
             result = completion.result,
             message = completion.message,
@@ -93,7 +93,7 @@ internal class ProfileUploadProtocol(
     }
 
     companion object {
-        const val METHOD = "ProfileUpload"
+        const val METHOD = "SecretUpload"
         const val RESULT_RECEIVED = "RECEIVED"
         const val RESULT_REJECTED = "REJECTED"
         private const val TYPE_ENVIRONMENT = "environment"
@@ -101,13 +101,13 @@ internal class ProfileUploadProtocol(
 }
 
 @Serializable
-private data class ProfileUploadResultWire(
+private data class SecretUploadResultWire(
     val result: String,
     val message: String? = null,
 )
 
 @Serializable
-private data class ProfileUploadCompletionWire(
+private data class SecretUploadCompletionWire(
     @SerialName("cli_version") val cliVersion: String,
     val result: String,
     val message: String? = null,

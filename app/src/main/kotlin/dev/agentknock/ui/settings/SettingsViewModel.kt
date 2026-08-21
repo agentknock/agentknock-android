@@ -10,7 +10,7 @@ import dev.agentknock.storage.audit.AuditEvent
 import dev.agentknock.storage.request.RequestSyncResult
 import dev.agentknock.storage.request.ClientSummary
 import dev.agentknock.storage.vault.DeviceManagementResult
-import dev.agentknock.storage.vault.VaultConfiguration
+import dev.agentknock.storage.vault.DeviceConfiguration
 import kotlinx.coroutines.ExperimentalCoroutinesApi
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.SharingStarted
@@ -23,7 +23,7 @@ import kotlinx.coroutines.flow.stateIn
 import kotlinx.coroutines.launch
 
 internal data class DataCounts(
-    val profiles: Int = 0,
+    val secrets: Int = 0,
     val variables: Int = 0,
     val clients: Int = 0,
     val requests: Int = 0,
@@ -36,17 +36,17 @@ internal class SettingsViewModel(application: Application) : AndroidViewModel(ap
     private val selectedAuditId = MutableStateFlow<Long?>(null)
     private val _localEncryptionProtection = MutableStateFlow<LocalEncryptionProtection?>(null)
 
-    val configuration: StateFlow<VaultConfiguration?> = container.vault.observeConfiguration()
+    val configuration: StateFlow<DeviceConfiguration?> = container.vault.observeConfiguration()
         .stateIn(viewModelScope, SharingStarted.Eagerly, null)
     val dataCounts: StateFlow<DataCounts> = combine(
-        container.profiles.observeProfiles(),
+        container.secrets.observeSecrets(),
         container.requests.observeClients(),
         container.requests.observeRequestCount(),
         container.audit.observeCount(),
-    ) { profiles, clients, requests, events ->
+    ) { secrets, clients, requests, events ->
         DataCounts(
-            profiles = profiles.size,
-            variables = profiles.sumOf { it.environmentVariableCount },
+            secrets = secrets.size,
+            variables = secrets.sumOf { it.environmentVariableCount },
             clients = clients.size,
             requests = requests,
             auditEvents = events,

@@ -76,10 +76,10 @@ class PushRegistrationWorker(
         container.localStorage.await()
         return when (val result = container.pushRegistration.register(firebaseInstallationId)) {
             PushRegistrationResult.Registered,
-            PushRegistrationResult.NoVault,
-            PushRegistrationResult.VaultSecretsUnavailable,
-            PushRegistrationResult.VaultSecretsCorrupted,
-            PushRegistrationResult.UnsupportedVaultEncryption,
+            PushRegistrationResult.NoDevice,
+            PushRegistrationResult.DeviceCredentialsUnavailable,
+            PushRegistrationResult.DeviceCredentialsCorrupted,
+            PushRegistrationResult.UnsupportedDeviceCredentialEncryption,
             -> Result.success()
             is PushRegistrationResult.RelayUnavailable -> {
                 val detail = result.message?.let { ": $it" }.orEmpty()
@@ -131,10 +131,10 @@ class PushSynchronizationWorker(
         container.localStorage.await()
         return when (container.requests.sync()) {
             RequestSyncResult.Success,
-            RequestSyncResult.NoVault,
-            RequestSyncResult.VaultSecretsUnavailable,
-            RequestSyncResult.VaultSecretsCorrupted,
-            RequestSyncResult.UnsupportedVaultEncryption,
+            RequestSyncResult.NoDevice,
+            RequestSyncResult.DeviceCredentialsUnavailable,
+            RequestSyncResult.DeviceCredentialsCorrupted,
+            RequestSyncResult.UnsupportedDeviceCredentialEncryption,
             -> {
                 RequestNotifications.showRequests(
                     applicationContext,
@@ -258,7 +258,7 @@ internal object RequestNotifications {
                 .setOnlyAlertOnce(true)
                 .setCategory(Notification.CATEGORY_MESSAGE)
                 .setVisibility(Notification.VISIBILITY_PUBLIC)
-            if (request.credentialDecisionAvailable) {
+            if (request.secretUseDecisionAvailable) {
                 builder.addAction(decisionAction(context, request.requestId, DENY_DECISION, "Deny once"))
                 builder.addAction(
                     decisionAction(context, request.requestId, APPROVE_DECISION, "Approve once"),
@@ -347,9 +347,9 @@ class RequestNotificationActionReceiver : BroadcastReceiver() {
                 application.container.localStorage.await()
                 when (decision) {
                     RequestNotifications.APPROVE_DECISION ->
-                        application.container.requests.approveCredentialRequest(requestId)
+                        application.container.requests.approveSecretUseRequest(requestId)
                     RequestNotifications.DENY_DECISION ->
-                        application.container.requests.denyCredentialRequest(requestId)
+                        application.container.requests.denySecretUseRequest(requestId)
                     else -> return@launch
                 }
                 RequestNotifications.showRequests(

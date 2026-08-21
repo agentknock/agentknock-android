@@ -75,7 +75,7 @@ import dev.agentknock.relay.RelayClientState
 import dev.agentknock.storage.request.ClientChangeResult
 import dev.agentknock.storage.request.ClientDetails
 import dev.agentknock.storage.request.ClientSummary
-import dev.agentknock.storage.vault.VaultIdentity
+import dev.agentknock.storage.vault.DeviceIdentity
 import kotlinx.coroutines.launch
 
 @Composable
@@ -229,7 +229,7 @@ private fun EmptyClientSelection(modifier: Modifier = Modifier) {
 @Composable
 private fun ClientList(
     clients: List<ClientSummary>,
-    identity: VaultIdentity?,
+    identity: DeviceIdentity?,
     onOpen: (String) -> Unit,
     onOpenSettings: () -> Unit,
     modifier: Modifier = Modifier,
@@ -364,7 +364,7 @@ private fun ClientDetail(
                 color = MaterialTheme.colorScheme.onSurfaceVariant,
             )
 
-            Text("Pairing identity", style = MaterialTheme.typography.titleMedium)
+            Text("Pairing", style = MaterialTheme.typography.titleMedium)
             Column(verticalArrangement = Arrangement.spacedBy(12.dp)) {
                 client.pairedAt?.let {
                     ClientField("Paired", formatTimestamp(it))

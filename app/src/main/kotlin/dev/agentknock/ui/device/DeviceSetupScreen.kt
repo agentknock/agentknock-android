@@ -1,6 +1,6 @@
 @file:OptIn(androidx.compose.material3.ExperimentalMaterial3Api::class)
 
-package dev.agentknock.ui.vault
+package dev.agentknock.ui.device
 
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Column
@@ -56,15 +56,15 @@ import androidx.compose.ui.text.input.KeyboardType
 import androidx.compose.ui.unit.dp
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import dev.agentknock.R
-import dev.agentknock.protocol.VaultProtocol
-import dev.agentknock.storage.vault.ClaimVaultResult
-import dev.agentknock.storage.vault.VaultConfiguration
-import dev.agentknock.storage.vault.VaultIdentity
+import dev.agentknock.protocol.DeviceProtocol
+import dev.agentknock.storage.vault.ClaimPairingAddressResult
+import dev.agentknock.storage.vault.DeviceConfiguration
+import dev.agentknock.storage.vault.DeviceIdentity
 import kotlinx.coroutines.launch
 
 @Composable
-internal fun VaultScreen(
-    configuration: VaultConfiguration,
+internal fun DeviceSetupScreen(
+    configuration: DeviceConfiguration,
     authenticate: (
         title: String,
         onSuccess: () -> Unit,
@@ -73,7 +73,7 @@ internal fun VaultScreen(
     onDone: (() -> Unit)?,
     changeAddressInitially: Boolean = false,
     onDeviceClaimed: () -> Unit,
-    viewModel: VaultViewModel,
+    viewModel: DeviceSetupViewModel,
 ) {
     val claiming by viewModel.claiming.collectAsStateWithLifecycle()
     val lastResult by viewModel.lastClaimResult.collectAsStateWithLifecycle()
@@ -100,11 +100,11 @@ internal fun VaultScreen(
     }
 
     fun performClaim() {
-        authenticateThen(resources.getString(R.string.confirm_claim_vault)) {
+        authenticateThen(resources.getString(R.string.confirm_claim_pairing_address)) {
             editing = false
             val result = viewModel.stageAndClaim(address)
             reportClaimResult(result, resources::getString, ::report)
-            if (result == ClaimVaultResult.Claimed) {
+            if (result == ClaimPairingAddressResult.Claimed) {
                 onDeviceClaimed()
                 if (changeAddressInitially) onDone?.invoke()
             }
@@ -124,9 +124,9 @@ internal fun VaultScreen(
                 title = {
                     Text(
                         if (changeAddressInitially) {
-                            stringResource(R.string.change_vault_address)
+                            stringResource(R.string.change_pairing_address)
                         } else {
-                            stringResource(R.string.vault)
+                            stringResource(R.string.device_setup)
                         },
                         maxLines = 1,
                         overflow = TextOverflow.Ellipsis,
@@ -148,13 +148,13 @@ internal fun VaultScreen(
                 verticalArrangement = Arrangement.spacedBy(20.dp),
             ) {
                 if (!changeAddressInitially) {
-                    active?.let { ActiveVaultCard(it) }
+                    active?.let { ActiveDeviceCard(it) }
                 }
 
-                if (active != null && !active.secretsAvailable) {
+                if (active != null && !active.credentialsAvailable) {
                     WarningCard(
-                        title = stringResource(R.string.vault_keys_unavailable),
-                        message = stringResource(R.string.vault_keys_unavailable_explanation),
+                        title = stringResource(R.string.device_keys_unavailable),
+                        message = stringResource(R.string.device_keys_unavailable_explanation),
                     )
                 }
 
@@ -164,14 +164,14 @@ internal fun VaultScreen(
                         result = lastResult,
                         claiming = claiming,
                         onRetry = {
-                            authenticateThen(resources.getString(R.string.confirm_claim_vault)) {
+                            authenticateThen(resources.getString(R.string.confirm_claim_pairing_address)) {
                                 val result = viewModel.retryClaim()
                                 reportClaimResult(
                                     result,
                                     resources::getString,
                                     ::report,
                                 )
-                                if (result == ClaimVaultResult.Claimed) {
+                                if (result == ClaimPairingAddressResult.Claimed) {
                                     onDeviceClaimed()
                                     if (changeAddressInitially) onDone?.invoke()
                                 }
@@ -202,7 +202,7 @@ internal fun VaultScreen(
                     )
                 } else {
                     Button(onClick = { confirmChange = true }) {
-                        Text(stringResource(R.string.change_vault_address))
+                        Text(stringResource(R.string.change_pairing_address))
                     }
                 }
             }
@@ -212,8 +212,8 @@ internal fun VaultScreen(
     if (confirmChange) {
         AlertDialog(
             onDismissRequest = { confirmChange = false },
-            title = { Text(stringResource(R.string.change_vault_address_question)) },
-            text = { Text(stringResource(R.string.change_vault_address_explanation)) },
+            title = { Text(stringResource(R.string.change_pairing_address_question)) },
+            text = { Text(stringResource(R.string.change_pairing_address_explanation)) },
             confirmButton = {
                 Button(
                     onClick = {
@@ -228,7 +228,7 @@ internal fun VaultScreen(
                     },
                 ) {
                     Text(
-                        if (editing) stringResource(R.string.claim_vault_address)
+                        if (editing) stringResource(R.string.claim_pairing_address)
                         else stringResource(R.string.continue_action),
                     )
                 }
@@ -243,10 +243,10 @@ internal fun VaultScreen(
 }
 
 @Composable
-private fun ActiveVaultCard(identity: VaultIdentity) {
+private fun ActiveDeviceCard(identity: DeviceIdentity) {
     Card(
         colors = CardDefaults.cardColors(
-            containerColor = if (identity.secretsAvailable) {
+            containerColor = if (identity.credentialsAvailable) {
                 MaterialTheme.colorScheme.primaryContainer
             } else {
                 MaterialTheme.colorScheme.errorContainer
@@ -258,10 +258,10 @@ private fun ActiveVaultCard(identity: VaultIdentity) {
             verticalArrangement = Arrangement.spacedBy(6.dp),
         ) {
             Text(
-                if (identity.secretsAvailable) {
-                    stringResource(R.string.vault_ready)
+                if (identity.credentialsAvailable) {
+                    stringResource(R.string.pairing_ready)
                 } else {
-                    stringResource(R.string.vault_needs_replacement)
+                    stringResource(R.string.device_keys_unavailable_title)
                 },
                 style = MaterialTheme.typography.titleMedium,
             )
@@ -293,14 +293,14 @@ private fun WarningCard(title: String, message: String) {
 
 @Composable
 private fun CandidateCard(
-    candidate: VaultIdentity,
-    result: ClaimVaultResult?,
+    candidate: DeviceIdentity,
+    result: ClaimPairingAddressResult?,
     claiming: Boolean,
     onRetry: () -> Unit,
     onChooseAnother: () -> Unit,
     onDiscard: (() -> Unit)?,
 ) {
-    val unavailable = result == ClaimVaultResult.AddressUnavailable
+    val unavailable = result == ClaimPairingAddressResult.AddressUnavailable
     Card {
         Column(
             Modifier.padding(20.dp),
@@ -308,18 +308,18 @@ private fun CandidateCard(
         ) {
             Text(
                 if (unavailable) {
-                    stringResource(R.string.vault_address_unavailable)
+                    stringResource(R.string.pairing_address_unavailable)
                 } else {
-                    stringResource(R.string.vault_claim_incomplete)
+                    stringResource(R.string.pairing_address_claim_incomplete)
                 },
                 style = MaterialTheme.typography.titleMedium,
             )
             Text(candidate.address, fontFamily = FontFamily.Monospace)
             Text(
                 if (unavailable) {
-                    stringResource(R.string.vault_address_unavailable_explanation)
+                    stringResource(R.string.pairing_address_unavailable_explanation)
                 } else {
-                    stringResource(R.string.vault_claim_incomplete_explanation)
+                    stringResource(R.string.pairing_address_claim_incomplete_explanation)
                 },
             )
             Column(verticalArrangement = Arrangement.spacedBy(8.dp)) {
@@ -363,7 +363,7 @@ private fun AddressEditor(
     onClaim: () -> Unit,
     onCancel: (() -> Unit)?,
 ) {
-    val valid = VaultProtocol.validAddress(address) && address != activeAddress
+    val valid = DeviceProtocol.validPairingAddress(address) && address != activeAddress
     var fieldValue by remember {
         mutableStateOf(TextFieldValue(address, selection = TextRange(address.length)))
     }
@@ -375,16 +375,16 @@ private fun AddressEditor(
     Column(verticalArrangement = Arrangement.spacedBy(12.dp)) {
         Text(
             if (activeAddress == null) {
-                stringResource(R.string.choose_vault_address)
+                stringResource(R.string.choose_pairing_address)
             } else {
-                stringResource(R.string.choose_new_vault_address)
+                stringResource(R.string.choose_new_pairing_address)
             },
             style = MaterialTheme.typography.titleLarge,
         )
-        Text(stringResource(R.string.vault_address_description))
+        Text(stringResource(R.string.pairing_address_description))
         if (activeAddress != null) {
             Text(
-                stringResource(R.string.change_vault_address_existing_clients),
+                stringResource(R.string.change_pairing_address_existing_clients),
                 color = MaterialTheme.colorScheme.onSurfaceVariant,
             )
         }
@@ -395,13 +395,13 @@ private fun AddressEditor(
                 onAddressChange(it.text)
             },
             modifier = Modifier.fillMaxWidth(),
-            label = { Text(stringResource(R.string.vault_address)) },
+            label = { Text(stringResource(R.string.pairing_address)) },
             supportingText = {
                 Text(
                     if (address == activeAddress) {
-                        stringResource(R.string.vault_address_unchanged)
+                        stringResource(R.string.pairing_address_unchanged)
                     } else {
-                        stringResource(R.string.vault_address_format)
+                        stringResource(R.string.pairing_address_format)
                     },
                 )
             },
@@ -427,9 +427,9 @@ private fun AddressEditor(
                 Text(
                     stringResource(
                         if (activeAddress == null) {
-                            R.string.claim_vault_address
+                            R.string.claim_pairing_address
                         } else {
-                            R.string.change_vault_address
+                            R.string.change_pairing_address
                         },
                     ),
                 )
@@ -451,21 +451,21 @@ private fun AddressEditor(
 }
 
 private fun reportClaimResult(
-    result: ClaimVaultResult,
+    result: ClaimPairingAddressResult,
     getString: (Int) -> String,
     report: (String) -> Unit,
 ) {
     val message = when (result) {
-        ClaimVaultResult.Claimed -> getString(R.string.vault_claimed)
-        ClaimVaultResult.AddressUnavailable -> getString(R.string.vault_address_unavailable)
-        ClaimVaultResult.SameAddress -> getString(R.string.vault_address_unchanged)
-        ClaimVaultResult.NoCandidate -> getString(R.string.vault_claim_missing)
-        ClaimVaultResult.SecretsUnavailable -> getString(R.string.vault_keys_unavailable)
-        ClaimVaultResult.SecretsCorrupted -> getString(R.string.vault_keys_corrupted)
-        ClaimVaultResult.UnsupportedEncryption -> getString(R.string.vault_keys_unsupported)
-        is ClaimVaultResult.RelayRejected -> getString(R.string.vault_relay_rejected)
-        is ClaimVaultResult.RelayUnavailable -> getString(R.string.vault_relay_unavailable)
-        ClaimVaultResult.InvalidRelayResponse -> getString(R.string.vault_relay_invalid_response)
+        ClaimPairingAddressResult.Claimed -> getString(R.string.pairing_address_claimed)
+        ClaimPairingAddressResult.AddressUnavailable -> getString(R.string.pairing_address_unavailable)
+        ClaimPairingAddressResult.SameAddress -> getString(R.string.pairing_address_unchanged)
+        ClaimPairingAddressResult.NoCandidate -> getString(R.string.pairing_address_claim_missing)
+        ClaimPairingAddressResult.CredentialsUnavailable -> getString(R.string.device_keys_unavailable)
+        ClaimPairingAddressResult.CredentialsCorrupted -> getString(R.string.device_keys_corrupted)
+        ClaimPairingAddressResult.UnsupportedEncryption -> getString(R.string.device_keys_unsupported)
+        is ClaimPairingAddressResult.RelayRejected -> getString(R.string.device_setup_relay_rejected)
+        is ClaimPairingAddressResult.RelayUnavailable -> getString(R.string.device_setup_relay_unavailable)
+        ClaimPairingAddressResult.InvalidRelayResponse -> getString(R.string.device_setup_relay_invalid_response)
     }
     report(message)
 }

@@ -18,7 +18,7 @@ import org.junit.Test
 @OptIn(ExperimentalCoroutinesApi::class)
 class RelayClaimClientTest {
     @Test
-    fun `sends the phone claim contract`() = runTest {
+    fun `sends the device claim contract`() = runTest {
         MockWebServer().use { server ->
             server.start()
             server.enqueue(

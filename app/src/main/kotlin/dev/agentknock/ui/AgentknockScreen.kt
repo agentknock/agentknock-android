@@ -37,12 +37,12 @@ import androidx.lifecycle.viewmodel.compose.viewModel
 import dev.agentknock.R
 import dev.agentknock.RequestNavigation
 import dev.agentknock.ui.clients.ClientsScreen
-import dev.agentknock.ui.profiles.ProfilesScreen
+import dev.agentknock.ui.secrets.SecretsScreen
 import dev.agentknock.ui.requests.RequestsScreen
 import dev.agentknock.ui.requests.RequestsViewModel
 import dev.agentknock.ui.settings.SettingsScreen
-import dev.agentknock.ui.vault.VaultScreen
-import dev.agentknock.ui.vault.VaultViewModel
+import dev.agentknock.ui.device.DeviceSetupScreen
+import dev.agentknock.ui.device.DeviceSetupViewModel
 import kotlinx.coroutines.flow.StateFlow
 
 @Composable
@@ -54,10 +54,10 @@ internal fun AgentknockScreen(
     ) -> Unit,
     requestNavigation: StateFlow<RequestNavigation>,
     requestNotificationPermission: () -> Unit,
-    vaultViewModel: VaultViewModel = viewModel(),
+    deviceSetupViewModel: DeviceSetupViewModel = viewModel(),
     requestsViewModel: RequestsViewModel = viewModel(),
 ) {
-    val configuration by vaultViewModel.configuration.collectAsStateWithLifecycle()
+    val configuration by deviceSetupViewModel.configuration.collectAsStateWithLifecycle()
     var section by rememberSaveable { mutableStateOf(MainSection.REQUESTS) }
     var showSettings by rememberSaveable { mutableStateOf(false) }
     var showAddressEditor by rememberSaveable { mutableStateOf(false) }
@@ -79,16 +79,16 @@ internal fun AgentknockScreen(
         current == null -> Box(Modifier.fillMaxSize(), contentAlignment = Alignment.Center) {
             CircularProgressIndicator()
         }
-        current.active == null || !current.active.secretsAvailable -> VaultScreen(
+        current.active == null || !current.active.credentialsAvailable -> DeviceSetupScreen(
             configuration = current,
             authenticate = authenticate,
-            onDone = current.active?.takeIf { it.secretsAvailable }?.let {
+            onDone = current.active?.takeIf { it.credentialsAvailable }?.let {
                 { section = MainSection.REQUESTS }
             },
             onDeviceClaimed = { offerNotifications = true },
-            viewModel = vaultViewModel,
+            viewModel = deviceSetupViewModel,
         )
-        showAddressEditor -> VaultScreen(
+        showAddressEditor -> DeviceSetupScreen(
             configuration = current,
             authenticate = authenticate,
             onDone = {
@@ -97,7 +97,7 @@ internal fun AgentknockScreen(
             },
             changeAddressInitially = true,
             onDeviceClaimed = {},
-            viewModel = vaultViewModel,
+            viewModel = deviceSetupViewModel,
         )
         showSettings -> SettingsScreen(
             onClose = { showSettings = false },
@@ -161,7 +161,7 @@ internal fun AgentknockScreen(
             title = { Text("Stay informed about requests?") },
             text = {
                 Text(
-                    "Agentknock can notify you when a pairing, profile proposal, or profile access request needs attention. You control notification privacy in Android settings.",
+                    "Agentknock can notify you when a pairing, secret upload, or secret use request needs attention. You control notification privacy in Android settings.",
                 )
             },
             confirmButton = {
@@ -196,7 +196,7 @@ private fun MainContent(
                 viewModel = requestsViewModel,
                 onTopLevelChanged = onTopLevelChanged,
             )
-            MainSection.PROFILES -> ProfilesScreen(
+            MainSection.SECRETS -> SecretsScreen(
                 authenticate = authenticate,
                 onOpenSettings = onOpenSettings,
                 onTopLevelChanged = onTopLevelChanged,
@@ -243,7 +243,7 @@ private fun MainSectionIcon(section: MainSection) {
     Icon(
         when (section) {
             MainSection.REQUESTS -> Icons.Outlined.Inbox
-            MainSection.PROFILES -> Icons.Outlined.Key
+            MainSection.SECRETS -> Icons.Outlined.Key
             MainSection.CLIENTS -> Icons.Outlined.Computer
         },
         contentDescription = null,
@@ -253,12 +253,12 @@ private fun MainSectionIcon(section: MainSection) {
 @Composable
 private fun MainSection.label(): String = when (this) {
     MainSection.REQUESTS -> stringResource(R.string.requests)
-    MainSection.PROFILES -> stringResource(R.string.profiles)
+    MainSection.SECRETS -> stringResource(R.string.secrets)
     MainSection.CLIENTS -> "Clients"
 }
 
 private enum class MainSection {
     REQUESTS,
-    PROFILES,
+    SECRETS,
     CLIENTS,
 }
