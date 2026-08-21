@@ -4,8 +4,9 @@ import dev.agentknock.relay.RelayClaimClient
 import dev.agentknock.relay.RelayClaimResult
 import dev.agentknock.storage.crypto.AesGcmEncryption
 import dev.agentknock.storage.crypto.FakeEncryptionKeyStore
-import dev.agentknock.storage.crypto.FakeLocalEncryptionDao
-import dev.agentknock.storage.crypto.LocalEncryptionKeyManager
+import dev.agentknock.storage.crypto.FakeVaultKeyDao
+import dev.agentknock.storage.crypto.VaultKeyManager
+import dev.agentknock.storage.crypto.VaultKeyPurpose
 import java.io.IOException
 import kotlinx.coroutines.CoroutineDispatcher
 import kotlinx.coroutines.ExperimentalCoroutinesApi
@@ -47,6 +48,12 @@ class VaultRepositoryTest {
         )
         assertTrue(secrets.all { it.identityId == active.id })
         assertTrue(secrets.all { it.ciphertext.size > 32 })
+        assertEquals(
+            setOf(VaultKeyPurpose.DEVICE_STATE.storedName),
+            secrets.map { secret ->
+                fixture.encryptionMetadata.getKey(secret.encryptionKeyId)?.purpose
+            }.toSet(),
+        )
         assertEquals(1, fixture.relay.claims.size)
         assertTrue(fixture.relay.claims.single().deviceToken.matches(Regex("[A-Za-z0-9_-]{43}")))
     }
@@ -138,10 +145,11 @@ class VaultRepositoryTest {
         fixture.repository.stageAndClaim("amber-river-maple")
 
         val replacementKeys = FakeEncryptionKeyStore()
-        val replacementManager = LocalEncryptionKeyManager(
+        val replacementIds = ArrayDeque(listOf("replacement-secret-key", "replacement-device-key"))
+        val replacementManager = VaultKeyManager(
             dao = fixture.encryptionMetadata,
             keyStore = replacementKeys,
-            newKeyId = { "replacement-key" },
+            newKeyId = { replacementIds.removeFirst() },
             currentTimeMillis = { 999L },
         )
         replacementManager.initialize()
@@ -167,10 +175,11 @@ class VaultRepositoryTest {
         val original = fixture.dao.identities.value.single()
 
         val replacementKeys = FakeEncryptionKeyStore()
-        val replacementManager = LocalEncryptionKeyManager(
+        val replacementIds = ArrayDeque(listOf("replacement-secret-key", "replacement-device-key"))
+        val replacementManager = VaultKeyManager(
             dao = fixture.encryptionMetadata,
             keyStore = replacementKeys,
-            newKeyId = { "replacement-key" },
+            newKeyId = { replacementIds.removeFirst() },
             currentTimeMillis = { 999L },
         )
         replacementManager.initialize()
@@ -200,16 +209,17 @@ class VaultRepositoryTest {
     }
 
     private class Fixture(dispatcher: CoroutineDispatcher) {
-        val encryptionMetadata = FakeLocalEncryptionDao()
+        val encryptionMetadata = FakeVaultKeyDao()
         private val keyStore = FakeEncryptionKeyStore()
         val dao = FakeVaultDao()
         val relay = FakeRelayClaimClient()
         private var id = 0
         private var time = 100L
-        private val keyManager = LocalEncryptionKeyManager(
+        private val keyIds = ArrayDeque(listOf("secret-storage-key", "device-storage-key"))
+        private val keyManager = VaultKeyManager(
             dao = encryptionMetadata,
             keyStore = keyStore,
-            newKeyId = { "storage-key" },
+            newKeyId = { keyIds.removeFirst() },
             currentTimeMillis = { ++time },
         )
         val repository = VaultRepository(

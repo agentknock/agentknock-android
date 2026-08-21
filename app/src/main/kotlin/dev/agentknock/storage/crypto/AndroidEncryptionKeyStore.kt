@@ -5,11 +5,13 @@ import android.os.Build
 import android.security.keystore.KeyGenParameterSpec
 import android.security.keystore.KeyInfo
 import android.security.keystore.KeyProperties
+import android.security.keystore.KeyProtection
 import android.security.keystore.StrongBoxUnavailableException
 import java.security.KeyStore
 import javax.crypto.KeyGenerator
 import javax.crypto.SecretKey
 import javax.crypto.SecretKeyFactory
+import javax.crypto.spec.SecretKeySpec
 
 internal enum class EncryptionKeyBacking {
     STRONGBOX,
@@ -27,6 +29,8 @@ internal interface EncryptionKeyStore : EncryptionKeySource {
     fun contains(keyId: String): Boolean
 
     fun generate(keyId: String): GeneratedEncryptionKey
+
+    fun importKey(keyId: String, keyMaterial: ByteArray): GeneratedEncryptionKey
 
     fun delete(keyId: String)
 }
@@ -71,6 +75,34 @@ internal class AndroidEncryptionKeyStore(
         return GeneratedEncryptionKey(backing = backing)
     }
 
+    @Synchronized
+    override fun importKey(keyId: String, keyMaterial: ByteArray): GeneratedEncryptionKey {
+        require(keyMaterial.size == KEY_SIZE_BYTES) { "Imported vault keys must be AES-128 keys" }
+        val alias = alias(keyId)
+        check(!keyStore.containsAlias(alias)) { "Encryption key already exists: $keyId" }
+
+        val strongBoxRequested = Build.VERSION.SDK_INT >= Build.VERSION_CODES.S &&
+            packageManager.hasSystemFeature(PackageManager.FEATURE_STRONGBOX_KEYSTORE)
+        val strongBoxUsed = if (strongBoxRequested) {
+            try {
+                importMaterial(alias, keyMaterial, useStrongBox = true)
+                true
+            } catch (_: StrongBoxUnavailableException) {
+                keyStore.deleteEntry(alias)
+                importMaterial(alias, keyMaterial, useStrongBox = false)
+                false
+            }
+        } else {
+            importMaterial(alias, keyMaterial, useStrongBox = false)
+            false
+        }
+
+        val key = checkNotNull(get(keyId)) { "Imported encryption key is unavailable: $keyId" }
+        val backing = runCatching { determineBacking(key, strongBoxUsed) }
+            .getOrDefault(EncryptionKeyBacking.UNKNOWN)
+        return GeneratedEncryptionKey(backing = backing)
+    }
+
     private fun generate(alias: String, useStrongBox: Boolean): SecretKey {
         val parameters = KeyGenParameterSpec.Builder(
             alias,
@@ -91,6 +123,32 @@ internal class AndroidEncryptionKeyStore(
         return KeyGenerator.getInstance(KeyProperties.KEY_ALGORITHM_AES, ANDROID_KEY_STORE).run {
             init(parameters)
             generateKey()
+        }
+    }
+
+    private fun importMaterial(alias: String, keyMaterial: ByteArray, useStrongBox: Boolean) {
+        val material = keyMaterial.copyOf()
+        try {
+            val protection = KeyProtection.Builder(
+                KeyProperties.PURPOSE_ENCRYPT or KeyProperties.PURPOSE_DECRYPT,
+            )
+                .setBlockModes(KeyProperties.BLOCK_MODE_GCM)
+                .setEncryptionPaddings(KeyProperties.ENCRYPTION_PADDING_NONE)
+                .setRandomizedEncryptionRequired(true)
+                .setUserAuthenticationRequired(false)
+                .apply {
+                    if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.S && useStrongBox) {
+                        setIsStrongBoxBacked(true)
+                    }
+                }
+                .build()
+            keyStore.setEntry(
+                alias,
+                KeyStore.SecretKeyEntry(SecretKeySpec(material, KeyProperties.KEY_ALGORITHM_AES)),
+                protection,
+            )
+        } finally {
+            material.fill(0)
         }
     }
 
@@ -124,5 +182,6 @@ internal class AndroidEncryptionKeyStore(
         private const val ANDROID_KEY_STORE = "AndroidKeyStore"
         private const val ALIAS_PREFIX = "dev.agentknock.local-encryption."
         private const val KEY_SIZE_BITS = 128
+        private const val KEY_SIZE_BYTES = KEY_SIZE_BITS / 8
     }
 }

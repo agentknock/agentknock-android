@@ -1,6 +1,6 @@
 package dev.agentknock.storage
 
-import dev.agentknock.storage.crypto.LocalEncryptionKeyManager
+import dev.agentknock.storage.crypto.VaultKeyManager
 import dev.agentknock.storage.vault.DeviceManagementRepository
 import dev.agentknock.storage.vault.DeviceManagementResult
 
@@ -16,7 +16,7 @@ internal sealed interface FactoryResetResult {
 
 internal class FactoryResetRepository(
     private val database: AgentknockDatabase,
-    private val encryptionKeys: LocalEncryptionKeyManager,
+    private val encryptionKeys: VaultKeyManager,
     private val deviceManagement: DeviceManagementRepository,
 ) {
     suspend fun reset(): FactoryResetResult = when (

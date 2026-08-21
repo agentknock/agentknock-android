@@ -3,8 +3,9 @@ package dev.agentknock.storage.secret
 import dev.agentknock.protocol.SecretUploadMode
 import dev.agentknock.storage.crypto.AesGcmEncryption
 import dev.agentknock.storage.crypto.FakeEncryptionKeyStore
-import dev.agentknock.storage.crypto.FakeLocalEncryptionDao
-import dev.agentknock.storage.crypto.LocalEncryptionKeyManager
+import dev.agentknock.storage.crypto.FakeVaultKeyDao
+import dev.agentknock.storage.crypto.VaultKeyManager
+import dev.agentknock.storage.crypto.VaultKeyPurpose
 import kotlinx.coroutines.flow.Flow
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.combine
@@ -28,6 +29,12 @@ class SecretRepositoryTest {
 
         val rows = fixture.dao.variables.value
         assertEquals(2, rows.size)
+        assertEquals(
+            setOf(VaultKeyPurpose.SECRET_VALUES.storedName),
+            rows.map { variable ->
+                fixture.encryptionMetadata.getKey(variable.encryptionKeyId)?.purpose
+            }.toSet(),
+        )
         assertTrue(rows.all { it.secretId == secretId })
         assertFalse(rows[0].ciphertext.contentEquals("AKIAEXAMPLE".encodeToByteArray()))
         assertFalse(rows[1].ciphertext.contentEquals("eu-west-1".encodeToByteArray()))
@@ -111,10 +118,11 @@ class SecretRepositoryTest {
         val originalRow = original.dao.variables.value.single()
 
         val replacementKeyStore = FakeEncryptionKeyStore()
-        val replacementManager = LocalEncryptionKeyManager(
+        val replacementIds = ArrayDeque(listOf("replacement-secret-key", "replacement-device-key"))
+        val replacementManager = VaultKeyManager(
             dao = original.encryptionMetadata,
             keyStore = replacementKeyStore,
-            newKeyId = { "replacement-key" },
+            newKeyId = { replacementIds.removeFirst() },
             currentTimeMillis = { 500L },
         )
         val restoredRepository = SecretRepository(
@@ -148,7 +156,7 @@ class SecretRepositoryTest {
 
         val replacementRow = original.dao.variables.value.single()
         assertEquals(originalRow.id, replacementRow.id)
-        assertEquals("replacement-key", replacementRow.encryptionKeyId)
+        assertEquals("replacement-secret-key", replacementRow.encryptionKeyId)
         val replacementValue = restoredRepository.readEnvironmentVariableValue(variableId)
         assertTrue(replacementValue is EnvironmentVariableValue.Available)
         assertEquals("new-token", (replacementValue as EnvironmentVariableValue.Available).value)
@@ -317,15 +325,16 @@ class SecretRepositoryTest {
     }
 
     private class Fixture(keyId: String = "storage-key") {
-        val encryptionMetadata = FakeLocalEncryptionDao()
+        val encryptionMetadata = FakeVaultKeyDao()
         val keyStore = FakeEncryptionKeyStore()
         val dao = FakeSecretDao()
         private var id = 0
         private var time = 100L
-        private val keyManager = LocalEncryptionKeyManager(
+        private val keyIds = ArrayDeque(listOf("$keyId-secret", "$keyId-device"))
+        private val keyManager = VaultKeyManager(
             dao = encryptionMetadata,
             keyStore = keyStore,
-            newKeyId = { keyId },
+            newKeyId = { keyIds.removeFirst() },
             currentTimeMillis = { nextTime() },
         )
         val repository = SecretRepository(

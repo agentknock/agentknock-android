@@ -32,7 +32,8 @@ import dev.agentknock.storage.crypto.DecryptionResult
 import dev.agentknock.storage.crypto.EncryptedValue
 import dev.agentknock.storage.crypto.EncryptionBinding
 import dev.agentknock.storage.crypto.EncryptionLocation
-import dev.agentknock.storage.crypto.LocalEncryptionKeyManager
+import dev.agentknock.storage.crypto.VaultKeyManager
+import dev.agentknock.storage.crypto.VaultKeyPurpose
 import dev.agentknock.protocol.SecretUseResponseSecret
 import dev.agentknock.storage.secret.RequestedSecretsResult
 import dev.agentknock.storage.secret.SecretMetadata
@@ -391,7 +392,7 @@ internal class RequestRepository(
     private val deviceCredentials: RelayDeviceCredentialSource,
     private val secrets: SecretRepository,
     private val relay: RelayDeviceClient,
-    private val keyManager: LocalEncryptionKeyManager,
+    private val keyManager: VaultKeyManager,
     private val encryption: AesGcmEncryption,
     private val audit: AuditSink = NoOpAuditSink,
     private val requestPushRegistration: () -> Unit = {},
@@ -3117,7 +3118,7 @@ internal class RequestRepository(
         now: Long,
     ): SecretUploadVariableEntity {
         val id = newId()
-        val key = keyManager.activeKey()
+        val key = keyManager.activeKey(VaultKeyPurpose.SECRET_VALUES)
         val encrypted = withContext(cryptographyDispatcher) {
             encryption.encrypt(
                 keyId = key.id,
@@ -3194,7 +3195,7 @@ internal class RequestRepository(
     ): RequestSecretEntity {
         require(clientPsk.size == CLIENT_PSK_BYTES)
         val id = newId()
-        val key = keyManager.activeKey()
+        val key = keyManager.activeKey(VaultKeyPurpose.DEVICE_STATE)
         val encrypted = withContext(cryptographyDispatcher) {
             encryption.encrypt(
                 keyId = key.id,
@@ -3260,7 +3261,7 @@ internal class RequestRepository(
     ): PairingSecretEntity {
         require(clientPsk.size == CLIENT_PSK_BYTES)
         val id = newId()
-        val key = keyManager.activeKey()
+        val key = keyManager.activeKey(VaultKeyPurpose.DEVICE_STATE)
         val encrypted = withContext(cryptographyDispatcher) {
             encryption.encrypt(
                 keyId = key.id,
@@ -3288,7 +3289,7 @@ internal class RequestRepository(
         now: Long,
     ): PairingSecretEntity {
         require(clientPsk.size == CLIENT_PSK_BYTES)
-        val key = keyManager.activeKey()
+        val key = keyManager.activeKey(VaultKeyPurpose.DEVICE_STATE)
         val encrypted = withContext(cryptographyDispatcher) {
             encryption.encrypt(
                 keyId = key.id,

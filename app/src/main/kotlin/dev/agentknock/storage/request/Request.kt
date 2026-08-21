@@ -11,7 +11,7 @@ import androidx.room3.Query
 import androidx.room3.Transaction
 import androidx.room3.Update
 import androidx.room3.Upsert
-import dev.agentknock.storage.crypto.LocalEncryptionKeyEntity
+import dev.agentknock.storage.crypto.VaultKeyEntity
 import dev.agentknock.storage.vault.DeviceIdentityEntity
 import kotlinx.coroutines.flow.Flow
 
@@ -155,7 +155,7 @@ internal data class PairingEntity(
             onUpdate = ForeignKey.NO_ACTION,
         ),
         ForeignKey(
-            entity = LocalEncryptionKeyEntity::class,
+            entity = VaultKeyEntity::class,
             parentColumns = ["id"],
             childColumns = ["encryption_key_id"],
             onDelete = ForeignKey.RESTRICT,
@@ -200,7 +200,7 @@ internal data class PairingSecretEntity(
             onUpdate = ForeignKey.NO_ACTION,
         ),
         ForeignKey(
-            entity = LocalEncryptionKeyEntity::class,
+            entity = VaultKeyEntity::class,
             parentColumns = ["id"],
             childColumns = ["encryption_key_id"],
             onDelete = ForeignKey.RESTRICT,
@@ -472,7 +472,7 @@ internal data class SecretUploadRequestEntity(
             onUpdate = ForeignKey.NO_ACTION,
         ),
         ForeignKey(
-            entity = LocalEncryptionKeyEntity::class,
+            entity = VaultKeyEntity::class,
             parentColumns = ["id"],
             childColumns = ["encryption_key_id"],
             onDelete = ForeignKey.RESTRICT,

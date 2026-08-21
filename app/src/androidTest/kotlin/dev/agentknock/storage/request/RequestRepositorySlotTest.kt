@@ -17,7 +17,8 @@ import dev.agentknock.storage.crypto.AesGcmEncryption
 import dev.agentknock.storage.crypto.EncryptionKeyBacking
 import dev.agentknock.storage.crypto.EncryptionKeyStore
 import dev.agentknock.storage.crypto.GeneratedEncryptionKey
-import dev.agentknock.storage.crypto.LocalEncryptionKeyManager
+import dev.agentknock.storage.crypto.VaultKeyManager
+import dev.agentknock.storage.crypto.VaultKeyPurpose
 import dev.agentknock.storage.secret.SecretRepository
 import dev.agentknock.storage.vault.RelayDeviceCredentialSource
 import dev.agentknock.storage.vault.RelayDeviceCredentials
@@ -64,10 +65,11 @@ class RequestRepositorySlotTest {
             AgentknockDatabase::class.java,
         ).build()
         val keyStore = MemoryEncryptionKeyStore()
-        val keyManager = LocalEncryptionKeyManager(
-            dao = database.localEncryptionDao(),
+        val keyIds = ArrayDeque(listOf("slot-secret-key", "slot-device-key"))
+        val keyManager = VaultKeyManager(
+            dao = database.vaultKeyDao(),
             keyStore = keyStore,
-            newKeyId = { "local-key" },
+            newKeyId = { keyIds.removeFirst() },
             currentTimeMillis = { now },
             keyStoreDispatcher = Dispatchers.Unconfined,
         )
@@ -178,7 +180,13 @@ class RequestRepositorySlotTest {
         val acceptedPairing = checkNotNull(database.requestDao().getPairing(root.id))
         assertEquals(acceptedCompletion.toString(), acceptedRequest.completionJson)
         assertEquals("sas_verification_pending", acceptedPairing.state)
-        assertNotNull(database.requestDao().getPairingSecret(root.id, "current_client_psk"))
+        val pairingSecret = checkNotNull(
+            database.requestDao().getPairingSecret(root.id, "current_client_psk"),
+        )
+        assertEquals(
+            VaultKeyPurpose.DEVICE_STATE.storedName,
+            database.vaultKeyDao().getKey(pairingSecret.encryptionKeyId)?.purpose,
+        )
 
         now += 1
         synchronize(
@@ -341,6 +349,13 @@ private class MemoryEncryptionKeyStore : EncryptionKeyStore {
     override fun generate(keyId: String): GeneratedEncryptionKey {
         check(keyId !in keys)
         keys[keyId] = SecretKeySpec(ByteArray(16) { it.toByte() }, "AES")
+        return GeneratedEncryptionKey(EncryptionKeyBacking.SOFTWARE)
+    }
+
+    override fun importKey(keyId: String, keyMaterial: ByteArray): GeneratedEncryptionKey {
+        check(keyId !in keys)
+        require(keyMaterial.size == 16)
+        keys[keyId] = SecretKeySpec(keyMaterial.copyOf(), "AES")
         return GeneratedEncryptionKey(EncryptionKeyBacking.SOFTWARE)
     }
 

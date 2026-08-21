@@ -11,7 +11,7 @@ import dev.agentknock.storage.FactoryResetRepository
 import dev.agentknock.storage.audit.AuditRepository
 import dev.agentknock.storage.crypto.AesGcmEncryption
 import dev.agentknock.storage.crypto.AndroidEncryptionKeyStore
-import dev.agentknock.storage.crypto.LocalEncryptionKeyManager
+import dev.agentknock.storage.crypto.VaultKeyManager
 import dev.agentknock.storage.secret.SecretRepository
 import dev.agentknock.relay.HttpRelayClaimClient
 import dev.agentknock.relay.HttpRelayPushRegistrationClient
@@ -45,8 +45,8 @@ class AgentknockApplication : Application() {
 internal class ApplicationContainer(application: Application) {
     private val database = AgentknockDatabase.create(application)
     private val encryptionKeyStore = AndroidEncryptionKeyStore(application.packageManager)
-    val encryptionKeyManager = LocalEncryptionKeyManager(
-        dao = database.localEncryptionDao(),
+    val vaultKeyManager = VaultKeyManager(
+        dao = database.vaultKeyDao(),
         keyStore = encryptionKeyStore,
     )
     private val encryption = AesGcmEncryption(encryptionKeyStore)
@@ -57,7 +57,7 @@ internal class ApplicationContainer(application: Application) {
 
     // Every future worker and messaging entry point must await this before using local state.
     val localStorage = applicationScope.async(start = CoroutineStart.DEFAULT) {
-        encryptionKeyManager.initialize()
+        vaultKeyManager.initialize()
         database.requestDao().discardDecidedSecretUploadValues()
     }
 
@@ -65,14 +65,14 @@ internal class ApplicationContainer(application: Application) {
 
     val secrets = SecretRepository(
         dao = database.secretDao(),
-        keyManager = encryptionKeyManager,
+        keyManager = vaultKeyManager,
         encryption = encryption,
         audit = audit,
     )
 
     val vault = VaultRepository(
         dao = database.vaultDao(),
-        keyManager = encryptionKeyManager,
+        keyManager = vaultKeyManager,
         encryption = encryption,
         relay = HttpRelayClaimClient(httpClient),
         audit = audit,
@@ -95,7 +95,7 @@ internal class ApplicationContainer(application: Application) {
         deviceCredentials = vault,
         secrets = secrets,
         relay = WebSocketRelayDeviceClient(httpClient),
-        keyManager = encryptionKeyManager,
+        keyManager = vaultKeyManager,
         encryption = encryption,
         audit = audit,
         requestPushRegistration = {
@@ -131,7 +131,7 @@ internal class ApplicationContainer(application: Application) {
 
     val factoryReset = FactoryResetRepository(
         database = database,
-        encryptionKeys = encryptionKeyManager,
+        encryptionKeys = vaultKeyManager,
         deviceManagement = deviceManagement,
     )
 }

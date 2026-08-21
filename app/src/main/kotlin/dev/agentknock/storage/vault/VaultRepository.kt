@@ -8,7 +8,8 @@ import dev.agentknock.storage.crypto.DecryptionResult
 import dev.agentknock.storage.crypto.EncryptedValue
 import dev.agentknock.storage.crypto.EncryptionBinding
 import dev.agentknock.storage.crypto.EncryptionLocation
-import dev.agentknock.storage.crypto.LocalEncryptionKeyManager
+import dev.agentknock.storage.crypto.VaultKeyManager
+import dev.agentknock.storage.crypto.VaultKeyPurpose
 import dev.agentknock.storage.audit.AuditCategory
 import dev.agentknock.storage.audit.AuditOutcome
 import dev.agentknock.storage.audit.AuditRecord
@@ -93,7 +94,7 @@ internal interface RelayDeviceCredentialSource {
 
 internal class VaultRepository(
     private val dao: VaultDao,
-    private val keyManager: LocalEncryptionKeyManager,
+    private val keyManager: VaultKeyManager,
     private val encryption: AesGcmEncryption,
     private val relay: RelayClaimClient,
     private val audit: AuditSink = NoOpAuditSink,
@@ -148,7 +149,7 @@ internal class VaultRepository(
                 }
             }
         }
-        val encryptionKey = keyManager.activeKey()
+        val encryptionKey = keyManager.activeKey(VaultKeyPurpose.DEVICE_STATE)
         val now = currentTimeMillis()
         val identity = DeviceIdentityEntity(
             id = identityId,

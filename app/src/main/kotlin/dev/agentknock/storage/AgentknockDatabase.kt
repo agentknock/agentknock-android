@@ -4,11 +4,10 @@ import android.content.Context
 import androidx.room3.Database
 import androidx.room3.Room
 import androidx.room3.RoomDatabase
-import dev.agentknock.storage.crypto.LocalEncryptionDao
 import dev.agentknock.storage.audit.AuditDao
 import dev.agentknock.storage.audit.AuditEventEntity
-import dev.agentknock.storage.crypto.LocalEncryptionKeyEntity
-import dev.agentknock.storage.crypto.LocalEncryptionStateEntity
+import dev.agentknock.storage.crypto.VaultKeyDao
+import dev.agentknock.storage.crypto.VaultKeyEntity
 import dev.agentknock.storage.secret.EnvironmentVariableEntity
 import dev.agentknock.storage.secret.SecretDao
 import dev.agentknock.storage.secret.SecretEntity
@@ -27,8 +26,7 @@ import dev.agentknock.storage.vault.VaultSecretEntity
 
 @Database(
     entities = [
-        LocalEncryptionKeyEntity::class,
-        LocalEncryptionStateEntity::class,
+        VaultKeyEntity::class,
         SecretEntity::class,
         EnvironmentVariableEntity::class,
         DeviceIdentityEntity::class,
@@ -43,11 +41,11 @@ import dev.agentknock.storage.vault.VaultSecretEntity
         SecretUploadVariableEntity::class,
         AuditEventEntity::class,
     ],
-    version = 4,
+    version = 5,
     exportSchema = true,
 )
 internal abstract class AgentknockDatabase : RoomDatabase() {
-    abstract fun localEncryptionDao(): LocalEncryptionDao
+    abstract fun vaultKeyDao(): VaultKeyDao
 
     abstract fun secretDao(): SecretDao
 

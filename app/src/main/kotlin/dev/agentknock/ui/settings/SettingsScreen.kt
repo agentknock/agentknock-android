@@ -109,7 +109,8 @@ import dev.agentknock.push.RequestNotifications
 import dev.agentknock.presentation.formatTimestamp
 import dev.agentknock.storage.FactoryResetResult
 import dev.agentknock.storage.crypto.EncryptionKeyBacking
-import dev.agentknock.storage.crypto.LocalEncryptionProtection
+import dev.agentknock.storage.crypto.VaultKeyPurpose
+import dev.agentknock.storage.crypto.VaultProtection
 import dev.agentknock.storage.audit.AuditEvent
 import dev.agentknock.storage.audit.AuditOutcome
 import dev.agentknock.storage.request.RequestSyncResult
@@ -147,7 +148,7 @@ internal fun SettingsScreen(
     val syncing by viewModel.syncing.collectAsStateWithLifecycle()
     val syncResult by viewModel.lastSyncResult.collectAsStateWithLifecycle()
     val pushState by viewModel.pushRegistrationState.collectAsStateWithLifecycle()
-    val localEncryptionProtection by viewModel.localEncryptionProtection.collectAsStateWithLifecycle()
+    val vaultProtection by viewModel.vaultProtection.collectAsStateWithLifecycle()
     val snackbar = remember { SnackbarHostState() }
     val scope = rememberCoroutineScope()
 
@@ -179,7 +180,7 @@ internal fun SettingsScreen(
                     counts = counts,
                     syncResult = syncResult,
                     pushState = pushState?.wireName,
-                    protection = localEncryptionProtection,
+                    protection = vaultProtection,
                     modifier = modifier,
                 )
                 SettingsPage.DEVICE -> DeviceAndPairing(
@@ -209,7 +210,7 @@ internal fun SettingsScreen(
                     modifier = modifier,
                 )
                 SettingsPage.SECURITY -> SecuritySettings(
-                    protection = localEncryptionProtection,
+                    protection = vaultProtection,
                     onBack = ::back,
                     modifier = modifier,
                 )
@@ -333,7 +334,7 @@ private fun SettingsOverview(
     counts: DataCounts,
     syncResult: RequestSyncResult?,
     pushState: String?,
-    protection: LocalEncryptionProtection?,
+    protection: VaultProtection?,
     modifier: Modifier,
 ) {
     val context = LocalContext.current
@@ -685,19 +686,20 @@ private fun NotificationsSettings(
 
 @Composable
 private fun SecuritySettings(
-    protection: LocalEncryptionProtection?,
+    protection: VaultProtection?,
     onBack: () -> Unit,
     modifier: Modifier,
 ) {
     val context = LocalContext.current
     val deviceSecure = context.getSystemService(KeyguardManager::class.java).isDeviceSecure
-    val hardwareBacked = protection is LocalEncryptionProtection.Available &&
-        protection.backing in setOf(
-            EncryptionKeyBacking.STRONGBOX,
-            EncryptionKeyBacking.TRUSTED_ENVIRONMENT,
-            EncryptionKeyBacking.UNKNOWN_SECURE,
-        )
-    val protectionKnown = protection is LocalEncryptionProtection.Available
+    val hardwareBackings = setOf(
+        EncryptionKeyBacking.STRONGBOX,
+        EncryptionKeyBacking.TRUSTED_ENVIRONMENT,
+        EncryptionKeyBacking.UNKNOWN_SECURE,
+    )
+    val hardwareBacked = protection is VaultProtection.Available &&
+        protection.backings.values.all { it in hardwareBackings }
+    val protectionKnown = protection is VaultProtection.Available
     Column(modifier) {
         PageTopBar("Security", onBack)
         Column(
@@ -727,8 +729,8 @@ private fun SecuritySettings(
                     Column {
                         Text(
                             if (
-                                protection is LocalEncryptionProtection.Available &&
-                                protection.backing == EncryptionKeyBacking.SOFTWARE
+                                protection is VaultProtection.Available &&
+                                protection.backings.values.any { it == EncryptionKeyBacking.SOFTWARE }
                             ) {
                                 "Encrypted without hardware protection"
                             } else {
@@ -744,7 +746,14 @@ private fun SecuritySettings(
                 }
             }
             LabeledValue("Encryption", "AES-128-GCM")
-            LabeledValue("Key protection", protection.description())
+            LabeledValue(
+                "Secret values key",
+                protection.description(VaultKeyPurpose.SECRET_VALUES),
+            )
+            LabeledValue(
+                "Device state key",
+                protection.description(VaultKeyPurpose.DEVICE_STATE),
+            )
             LabeledValue(
                 "Device authentication",
                 if (deviceSecure) "Secure screen lock configured" else "No secure screen lock configured",
@@ -757,48 +766,45 @@ private fun SecuritySettings(
     }
 }
 
-private fun LocalEncryptionProtection?.description(): String = when (this) {
+private fun VaultProtection?.description(purpose: VaultKeyPurpose): String = when (this) {
     null -> "Checking this device…"
-    is LocalEncryptionProtection.Available -> when (backing) {
+    is VaultProtection.Available -> when (backings[purpose]) {
         EncryptionKeyBacking.STRONGBOX -> "StrongBox hardware"
         EncryptionKeyBacking.TRUSTED_ENVIRONMENT -> "Trusted execution environment"
         EncryptionKeyBacking.SOFTWARE -> "Android Keystore (software-backed)"
         EncryptionKeyBacking.UNKNOWN_SECURE -> "Secure hardware (type unavailable)"
         EncryptionKeyBacking.UNKNOWN -> "Android Keystore (backing unknown)"
+        null -> "Protection could not be determined"
     }
-    LocalEncryptionProtection.KeyUnavailable -> "Key unavailable on this device"
-    LocalEncryptionProtection.Unknown -> "Protection could not be determined"
+    is VaultProtection.KeyUnavailable -> if (purpose in purposes) {
+        "Key unavailable on this device"
+    } else {
+        "Protection could not be determined"
+    }
+    VaultProtection.Unknown -> "Protection could not be determined"
 }
 
-private fun LocalEncryptionProtection?.overviewDescription(): String = when (this) {
+private fun VaultProtection?.overviewDescription(): String = when (this) {
     null -> "Checking this device…"
-    is LocalEncryptionProtection.Available -> when (backing) {
-        EncryptionKeyBacking.STRONGBOX,
-        EncryptionKeyBacking.TRUSTED_ENVIRONMENT,
-        EncryptionKeyBacking.UNKNOWN_SECURE,
-        -> "Hardware-backed encryption"
-        EncryptionKeyBacking.SOFTWARE -> "OS-protected encryption"
-        EncryptionKeyBacking.UNKNOWN -> "Encryption protection unknown"
+    is VaultProtection.Available -> when {
+        backings.values.all {
+            it == EncryptionKeyBacking.STRONGBOX ||
+                it == EncryptionKeyBacking.TRUSTED_ENVIRONMENT ||
+                it == EncryptionKeyBacking.UNKNOWN_SECURE
+        } -> "Hardware-backed encryption"
+        backings.values.any { it == EncryptionKeyBacking.SOFTWARE } -> "OS-protected encryption"
+        else -> "Encryption protection unknown"
     }
-    LocalEncryptionProtection.KeyUnavailable -> "Encryption key unavailable"
-    LocalEncryptionProtection.Unknown -> "Protection could not be determined"
+    is VaultProtection.KeyUnavailable -> "Encryption key unavailable"
+    VaultProtection.Unknown -> "Protection could not be determined"
 }
 
-private fun LocalEncryptionProtection?.protectionExplanation(): String = when (this) {
-    is LocalEncryptionProtection.Available -> when (backing) {
-        EncryptionKeyBacking.STRONGBOX -> "The encryption key is protected by StrongBox hardware."
-        EncryptionKeyBacking.TRUSTED_ENVIRONMENT ->
-            "The encryption key is protected by this device's trusted hardware."
-        EncryptionKeyBacking.UNKNOWN_SECURE ->
-            "Android reports that the encryption key is protected by secure hardware."
-        EncryptionKeyBacking.SOFTWARE ->
-            "The encryption key is managed by Android Keystore without secure hardware backing."
-        EncryptionKeyBacking.UNKNOWN ->
-            "The encryption key stays in Android Keystore, but Android did not report how it is protected."
-    }
-    LocalEncryptionProtection.KeyUnavailable -> "The local encryption key is not available on this device."
-    LocalEncryptionProtection.Unknown -> "Agentknock could not determine how the encryption key is protected."
-    null -> "Checking how this device protects the encryption key…"
+private fun VaultProtection?.protectionExplanation(): String = when (this) {
+    is VaultProtection.Available ->
+        "Secret values and device state use separate keys in Android Keystore."
+    is VaultProtection.KeyUnavailable -> "A vault key is not available on this device."
+    VaultProtection.Unknown -> "Agentknock could not determine how the vault keys are protected."
+    null -> "Checking how this device protects the vault keys…"
 }
 
 @Composable

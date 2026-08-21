@@ -5,7 +5,8 @@ import dev.agentknock.storage.crypto.DecryptionResult
 import dev.agentknock.storage.crypto.EncryptedValue
 import dev.agentknock.storage.crypto.EncryptionBinding
 import dev.agentknock.storage.crypto.EncryptionLocation
-import dev.agentknock.storage.crypto.LocalEncryptionKeyManager
+import dev.agentknock.storage.crypto.VaultKeyManager
+import dev.agentknock.storage.crypto.VaultKeyPurpose
 import dev.agentknock.storage.audit.AuditCategory
 import dev.agentknock.storage.audit.AuditOutcome
 import dev.agentknock.storage.audit.AuditRecord
@@ -164,7 +165,7 @@ internal interface RequestedSecretSource {
 
 internal class SecretRepository(
     private val dao: SecretDao,
-    private val keyManager: LocalEncryptionKeyManager,
+    private val keyManager: VaultKeyManager,
     private val encryption: AesGcmEncryption,
     private val audit: AuditSink = NoOpAuditSink,
     private val newId: () -> String = { UUID.randomUUID().toString() },
@@ -645,7 +646,7 @@ internal class SecretRepository(
         sensitive: Boolean,
         value: String,
     ): EncryptedValue {
-        val key = keyManager.activeKey()
+        val key = keyManager.activeKey(VaultKeyPurpose.SECRET_VALUES)
         return withContext(cryptographyDispatcher) {
             encryption.encrypt(
                 keyId = key.id,

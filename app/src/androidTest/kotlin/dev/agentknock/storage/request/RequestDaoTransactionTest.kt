@@ -4,7 +4,8 @@ import androidx.room3.Room
 import androidx.test.ext.junit.runners.AndroidJUnit4
 import androidx.test.platform.app.InstrumentationRegistry
 import dev.agentknock.storage.AgentknockDatabase
-import dev.agentknock.storage.crypto.LocalEncryptionKeyEntity
+import dev.agentknock.storage.crypto.VaultKeyEntity
+import dev.agentknock.storage.crypto.VaultKeyPurpose
 import dev.agentknock.storage.vault.DeviceIdentityEntity
 import kotlinx.coroutines.runBlocking
 import kotlinx.coroutines.test.runTest
@@ -31,9 +32,11 @@ class RequestDaoTransactionTest {
         ).build()
         dao = database.requestDao()
         runBlocking {
-            database.localEncryptionDao().activate(
-                LocalEncryptionKeyEntity(
+            database.vaultKeyDao().activate(
+                VaultKeyEntity(
                     id = KEY_ID,
+                    purpose = VaultKeyPurpose.DEVICE_STATE.storedName,
+                    active = true,
                     createdAt = 1,
                     backing = "SOFTWARE",
                 ),

@@ -9,7 +9,7 @@ import androidx.room3.Insert
 import androidx.room3.PrimaryKey
 import androidx.room3.Query
 import androidx.room3.Transaction
-import dev.agentknock.storage.crypto.LocalEncryptionKeyEntity
+import dev.agentknock.storage.crypto.VaultKeyEntity
 import kotlinx.coroutines.flow.Flow
 
 @Entity(
@@ -52,7 +52,7 @@ internal data class DeviceIdentityEntity(
             onUpdate = ForeignKey.NO_ACTION,
         ),
         ForeignKey(
-            entity = LocalEncryptionKeyEntity::class,
+            entity = VaultKeyEntity::class,
             parentColumns = ["id"],
             childColumns = ["encryption_key_id"],
             onDelete = ForeignKey.RESTRICT,
