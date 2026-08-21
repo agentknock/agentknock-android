@@ -10,6 +10,7 @@ import android.os.Build
 import android.os.Looper
 import android.os.PersistableBundle
 import androidx.activity.compose.BackHandler
+import androidx.activity.compose.LocalActivity
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.foundation.BorderStroke
 import androidx.compose.foundation.clickable
@@ -76,6 +77,7 @@ import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
 import androidx.compose.runtime.rememberCoroutineScope
+import androidx.compose.runtime.saveable.rememberSaveable
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
@@ -120,18 +122,22 @@ import java.util.UUID
 private val environmentVariableName = Regex("[A-Za-z_][A-Za-z0-9_]*")
 private val twoPaneWidth = 840.dp
 
-private sealed interface SecretEditor {
-    data object New : SecretEditor
-    data class Existing(val secret: SecretDetails) : SecretEditor
-}
+internal data class SecretEditorState(
+    val secret: SecretDetails?,
+    val name: String,
+    val description: String,
+)
 
-private sealed interface VariableEditor {
-    data class New(val secretId: String) : VariableEditor
-    data class Existing(
-        val variable: EnvironmentVariableMetadata,
-        val currentValue: String?,
-    ) : VariableEditor
-}
+internal data class VariableEditorState(
+    val secretId: String,
+    val variable: EnvironmentVariableMetadata?,
+    val currentValue: String?,
+    val name: String,
+    val value: String,
+    val valueEdited: Boolean,
+    val sensitive: Boolean,
+    val notes: String,
+)
 
 @Composable
 internal fun SecretsScreen(
@@ -147,28 +153,39 @@ internal fun SecretsScreen(
     val secrets by viewModel.secrets.collectAsStateWithLifecycle()
     val selection by viewModel.selection.collectAsStateWithLifecycle()
     val selectedSecret by viewModel.selectedSecret.collectAsStateWithLifecycle()
+    val secretEditor by viewModel.secretEditor.collectAsStateWithLifecycle()
+    val variableEditor by viewModel.variableEditor.collectAsStateWithLifecycle()
     val scope = rememberCoroutineScope()
     val snackbar = remember { SnackbarHostState() }
     val context = LocalContext.current
     val resources = LocalResources.current
-    var secretEditor by remember { mutableStateOf<SecretEditor?>(null) }
-    var variableEditor by remember { mutableStateOf<VariableEditor?>(null) }
     var secretPendingDeletion by remember { mutableStateOf<SecretDetails?>(null) }
     var variablePendingDeletion by remember { mutableStateOf<EnvironmentVariableMetadata?>(null) }
     var revealedValues by remember { mutableStateOf<Map<String, String>>(emptyMap()) }
     val lifecycle = LocalLifecycleOwner.current.lifecycle
+    val activity = LocalActivity.current
 
-    DisposableEffect(lifecycle) {
+    DisposableEffect(lifecycle, activity) {
+        fun clearSensitiveEditor() {
+            val editor = viewModel.variableEditor.value
+            if (editor?.variable?.sensitive == true || editor?.sensitive == true) {
+                viewModel.updateVariableEditor(null)
+            }
+        }
         val observer = LifecycleEventObserver { _, event ->
-            if (event == Lifecycle.Event.ON_STOP) {
+            if (
+                event == Lifecycle.Event.ON_STOP &&
+                activity?.isChangingConfigurations != true
+            ) {
                 revealedValues = emptyMap()
-                if ((variableEditor as? VariableEditor.Existing)?.variable?.sensitive == true) {
-                    variableEditor = null
-                }
+                clearSensitiveEditor()
             }
         }
         lifecycle.addObserver(observer)
-        onDispose { lifecycle.removeObserver(observer) }
+        onDispose {
+            lifecycle.removeObserver(observer)
+            if (activity?.isChangingConfigurations != true) clearSensitiveEditor()
+        }
     }
 
     LaunchedEffect(selection) {
@@ -255,13 +272,13 @@ internal fun SecretsScreen(
 
     fun edit(variable: EnvironmentVariableMetadata) {
         if (!variable.valueAvailable) {
-            variableEditor = VariableEditor.Existing(variable, null)
+            viewModel.startEditingEnvironmentVariable(variable, null)
             return
         }
         val action: () -> Unit = {
             scope.launch {
                 readValue(variable)?.let { value ->
-                    variableEditor = VariableEditor.Existing(variable, value)
+                    viewModel.startEditingEnvironmentVariable(variable, value)
                 }
             }
         }
@@ -300,7 +317,7 @@ internal fun SecretsScreen(
                         secrets = secrets,
                         selectedSecretId = selection,
                         onSelect = viewModel::selectSecret,
-                        onCreate = { secretEditor = SecretEditor.New },
+                        onCreate = viewModel::startNewSecret,
                         onOpenSettings = onOpenSettings,
                         modifier = Modifier
                             .width(340.dp)
@@ -318,13 +335,13 @@ internal fun SecretsScreen(
                             showBack = false,
                             onBack = {},
                             onEditSecret = {
-                                secretEditor = SecretEditor.Existing(secret)
+                                viewModel.startEditingSecret(secret)
                             },
                             onDeleteSecret = {
                                 secretPendingDeletion = secret
                             },
                             onAddVariable = {
-                                variableEditor = VariableEditor.New(secret.id)
+                                viewModel.startNewEnvironmentVariable(secret.id)
                             },
                             onEditVariable = ::edit,
                             onReveal = ::reveal,
@@ -339,7 +356,7 @@ internal fun SecretsScreen(
                     secrets = secrets,
                     selectedSecretId = null,
                     onSelect = viewModel::selectSecret,
-                    onCreate = { secretEditor = SecretEditor.New },
+                    onCreate = viewModel::startNewSecret,
                     onOpenSettings = onOpenSettings,
                     modifier = Modifier.fillMaxSize(),
                 )
@@ -353,13 +370,13 @@ internal fun SecretsScreen(
                     showBack = true,
                     onBack = { viewModel.selectSecret(null) },
                     onEditSecret = {
-                        secretEditor = SecretEditor.Existing(secret)
+                        viewModel.startEditingSecret(secret)
                     },
                     onDeleteSecret = {
                         secretPendingDeletion = secret
                     },
                     onAddVariable = {
-                        variableEditor = VariableEditor.New(secret.id)
+                        viewModel.startNewEnvironmentVariable(secret.id)
                     },
                     onEditVariable = ::edit,
                     onReveal = ::reveal,
@@ -373,16 +390,17 @@ internal fun SecretsScreen(
 
     secretEditor?.let { editor ->
         SecretEditorScreen(
-            secret = (editor as? SecretEditor.Existing)?.secret,
-            onDismiss = { secretEditor = null },
+            editor = editor,
+            onEditorChange = viewModel::updateSecretEditor,
+            onDismiss = { viewModel.updateSecretEditor(null) },
             onSave = { name, description ->
                 afterAuthentication("Confirm saving secret") {
-                    val error = when (editor) {
-                        SecretEditor.New -> when (
+                    val error = if (editor.secret == null) {
+                        when (
                             val result = viewModel.createSecret(name, description)
                         ) {
                             is CreateSecretResult.Created -> {
-                                secretEditor = null
+                                viewModel.updateSecretEditor(null)
                                 viewModel.selectSecret(result.id)
                                 null
                             }
@@ -390,11 +408,12 @@ internal fun SecretsScreen(
                                 R.string.secret_name_in_use,
                             )
                         }
-                        is SecretEditor.Existing -> when (
+                    } else {
+                        when (
                             viewModel.saveSecret(editor.secret.id, name, description)
                         ) {
                             SaveSecretResult.SAVED -> {
-                                secretEditor = null
+                                viewModel.updateSecretEditor(null)
                                 null
                             }
                             SaveSecretResult.NAME_IN_USE -> resources.getString(
@@ -413,18 +432,18 @@ internal fun SecretsScreen(
     }
 
     variableEditor?.let { editor ->
-        val variable = (editor as? VariableEditor.Existing)?.variable
+        val variable = editor.variable
         EnvironmentVariableEditorScreen(
-            variable = variable,
-            currentValue = (editor as? VariableEditor.Existing)?.currentValue,
-            onDismiss = { variableEditor = null },
+            editor = editor,
+            onEditorChange = viewModel::updateVariableEditor,
+            onDismiss = { viewModel.updateVariableEditor(null) },
             onDelete = variable?.let {
                 { variablePendingDeletion = it }
             },
             onSave = { name, value, sensitive, notes, replaceValue ->
                 afterAuthentication(resources.getString(R.string.confirm_save_variable)) {
-                    val error = when (editor) {
-                        is VariableEditor.New -> when (
+                    val error = if (editor.variable == null) {
+                        when (
                             viewModel.createEnvironmentVariable(
                                 secretId = editor.secretId,
                                 name = name,
@@ -434,7 +453,7 @@ internal fun SecretsScreen(
                             )
                         ) {
                             is CreateEnvironmentVariableResult.Created -> {
-                                variableEditor = null
+                                viewModel.updateVariableEditor(null)
                                 null
                             }
                             CreateEnvironmentVariableResult.NameInUse -> resources.getString(
@@ -444,7 +463,8 @@ internal fun SecretsScreen(
                                 R.string.secret_not_found,
                             )
                         }
-                        is VariableEditor.Existing -> when (
+                    } else {
+                        when (
                             viewModel.saveEnvironmentVariable(
                                 id = editor.variable.id,
                                 name = name,
@@ -454,7 +474,7 @@ internal fun SecretsScreen(
                             )
                         ) {
                             SaveEnvironmentVariableResult.SAVED -> {
-                                variableEditor = null
+                                viewModel.updateVariableEditor(null)
                                 revealedValues -= editor.variable.id
                                 null
                             }
@@ -509,7 +529,7 @@ internal fun SecretsScreen(
                 variablePendingDeletion = null
                 afterAuthentication(resources.getString(R.string.confirm_delete_variable)) {
                     if (viewModel.deleteEnvironmentVariable(variable.id)) {
-                        variableEditor = null
+                        viewModel.updateVariableEditor(null)
                         revealedValues -= variable.id
                         report(resources.getString(R.string.variable_deleted))
                     } else {
@@ -895,15 +915,17 @@ private fun EnvironmentVariableCard(
 
 @Composable
 private fun SecretEditorScreen(
-    secret: SecretDetails?,
+    editor: SecretEditorState,
+    onEditorChange: (SecretEditorState) -> Unit,
     onDismiss: () -> Unit,
     onSave: (name: String, description: String) -> Unit,
     snackbar: SnackbarHostState,
 ) {
-    var name by remember(secret?.id) { mutableStateOf(secret?.name.orEmpty()) }
-    var description by remember(secret?.id) { mutableStateOf(secret?.description.orEmpty()) }
-    var validationError by remember(secret?.id) { mutableStateOf<Int?>(null) }
-    var confirmDiscard by remember(secret?.id) { mutableStateOf(false) }
+    val secret = editor.secret
+    val name = editor.name
+    val description = editor.description
+    var validationError by rememberSaveable(secret?.id) { mutableStateOf<Int?>(null) }
+    var confirmDiscard by rememberSaveable(secret?.id) { mutableStateOf(false) }
     val dirty = if (secret == null) {
         name.isNotEmpty() || description.isNotEmpty()
     } else {
@@ -972,7 +994,7 @@ private fun SecretEditorScreen(
             OutlinedTextField(
                 value = name,
                 onValueChange = {
-                    name = it
+                    onEditorChange(editor.copy(name = it))
                     validationError = null
                 },
                 label = { Text(stringResource(R.string.secret_name)) },
@@ -991,7 +1013,7 @@ private fun SecretEditorScreen(
             )
             OutlinedTextField(
                 value = description,
-                onValueChange = { description = it },
+                onValueChange = { onEditorChange(editor.copy(description = it)) },
                 label = { Text(stringResource(R.string.description_optional)) },
                 minLines = 2,
                 modifier = Modifier.fillMaxWidth(),
@@ -1038,8 +1060,8 @@ private fun SecretEditorScreen(
 
 @Composable
 private fun EnvironmentVariableEditorScreen(
-    variable: EnvironmentVariableMetadata?,
-    currentValue: String?,
+    editor: VariableEditorState,
+    onEditorChange: (VariableEditorState) -> Unit,
     onDismiss: () -> Unit,
     onDelete: (() -> Unit)?,
     onSave: (
@@ -1051,16 +1073,18 @@ private fun EnvironmentVariableEditorScreen(
     ) -> Unit,
     snackbar: SnackbarHostState,
 ) {
-    var name by remember(variable?.id) { mutableStateOf(variable?.name.orEmpty()) }
-    var value by remember(variable?.id) { mutableStateOf(currentValue.orEmpty()) }
-    var valueEdited by remember(variable?.id) { mutableStateOf(false) }
-    var sensitive by remember(variable?.id) { mutableStateOf(variable?.sensitive ?: true) }
-    var notes by remember(variable?.id) { mutableStateOf(variable?.notes.orEmpty()) }
-    var showValue by remember(variable?.id) { mutableStateOf(false) }
-    var nameInvalid by remember(variable?.id) { mutableStateOf(false) }
-    var menuExpanded by remember(variable?.id) { mutableStateOf(false) }
-    var confirmDiscard by remember(variable?.id) { mutableStateOf(false) }
-    val lifecycle = LocalLifecycleOwner.current.lifecycle
+    val variable = editor.variable
+    val currentValue = editor.currentValue
+    val name = editor.name
+    val value = editor.value
+    val valueEdited = editor.valueEdited
+    val sensitive = editor.sensitive
+    val notes = editor.notes
+    val editorKey = variable?.id ?: "new:${editor.secretId}"
+    var showValue by remember(editorKey) { mutableStateOf(false) }
+    var nameInvalid by rememberSaveable(editorKey) { mutableStateOf(false) }
+    var menuExpanded by rememberSaveable(editorKey) { mutableStateOf(false) }
+    var confirmDiscard by rememberSaveable(editorKey) { mutableStateOf(false) }
     val dirty = if (variable == null) {
         name.isNotEmpty() || value.isNotEmpty() || notes.isNotEmpty() || !sensitive
     } else {
@@ -1072,14 +1096,6 @@ private fun EnvironmentVariableEditorScreen(
     }
     fun requestDismiss() {
         if (dirty) confirmDiscard = true else onDismiss()
-    }
-
-    DisposableEffect(lifecycle, sensitive) {
-        val observer = LifecycleEventObserver { _, event ->
-            if (event == Lifecycle.Event.ON_STOP && sensitive) onDismiss()
-        }
-        lifecycle.addObserver(observer)
-        onDispose { lifecycle.removeObserver(observer) }
     }
 
     BackHandler(onBack = ::requestDismiss)
@@ -1142,7 +1158,7 @@ private fun EnvironmentVariableEditorScreen(
                     OutlinedTextField(
                         value = name,
                         onValueChange = {
-                            name = it
+                            onEditorChange(editor.copy(name = it))
                             nameInvalid = false
                         },
                         label = { Text(stringResource(R.string.variable_name)) },
@@ -1174,8 +1190,7 @@ private fun EnvironmentVariableEditorScreen(
                     OutlinedTextField(
                         value = value,
                         onValueChange = {
-                            value = it
-                            valueEdited = true
+                            onEditorChange(editor.copy(value = it, valueEdited = true))
                         },
                         label = { Text(stringResource(R.string.variable_value)) },
                         visualTransformation = if (sensitive && !showValue) {
@@ -1213,7 +1228,9 @@ private fun EnvironmentVariableEditorScreen(
                             .toggleable(
                                 value = sensitive,
                                 role = Role.Switch,
-                                onValueChange = { sensitive = it },
+                                onValueChange = {
+                                    onEditorChange(editor.copy(sensitive = it))
+                                },
                             ),
                         horizontalArrangement = Arrangement.SpaceBetween,
                         verticalAlignment = Alignment.CenterVertically,
@@ -1233,7 +1250,7 @@ private fun EnvironmentVariableEditorScreen(
                 item {
                     OutlinedTextField(
                         value = notes,
-                        onValueChange = { notes = it },
+                        onValueChange = { onEditorChange(editor.copy(notes = it)) },
                         label = { Text(stringResource(R.string.notes_optional)) },
                         minLines = 2,
                         modifier = Modifier.fillMaxWidth(),

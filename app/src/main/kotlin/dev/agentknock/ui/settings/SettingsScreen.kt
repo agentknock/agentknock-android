@@ -97,6 +97,7 @@ import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.semantics.stateDescription
 import androidx.compose.ui.semantics.Role
 import androidx.compose.ui.semantics.heading
+import androidx.compose.ui.semantics.selected
 import androidx.compose.ui.semantics.semantics
 import androidx.compose.ui.text.input.KeyboardCapitalization
 import androidx.compose.ui.text.input.KeyboardType
@@ -109,6 +110,8 @@ import androidx.lifecycle.viewmodel.compose.viewModel
 import dev.agentknock.BuildConfig
 import dev.agentknock.push.RequestNotifications
 import dev.agentknock.presentation.formatTimestamp
+import dev.agentknock.ui.components.InformationRow
+import dev.agentknock.ui.components.InformationSurface
 import dev.agentknock.ui.components.TonalIcon
 import dev.agentknock.storage.FactoryResetResult
 import dev.agentknock.storage.crypto.EncryptionKeyBacking
@@ -139,6 +142,7 @@ internal fun SettingsScreen(
     onClose: () -> Unit,
     onChangeAddress: () -> Unit,
     authenticate: (String, () -> Unit, (String) -> Unit) -> Unit,
+    notificationStateGeneration: Long,
     requestNotificationPermission: () -> Unit,
     viewModel: SettingsViewModel = viewModel(),
 ) {
@@ -208,6 +212,7 @@ internal fun SettingsScreen(
                 )
                 SettingsPage.NOTIFICATIONS -> NotificationsSettings(
                     pushState = pushState?.wireName,
+                    refreshGeneration = notificationStateGeneration,
                     requestNotificationPermission = requestNotificationPermission,
                     onBack = ::back,
                     modifier = modifier,
@@ -281,6 +286,7 @@ private fun AuditBrowser(
             Row(Modifier.fillMaxSize()) {
                 AuditList(
                     events = events,
+                    selectedEventId = selected?.id,
                     onBack = onBack,
                     onOpen = onOpen,
                     clientNames = clientNames,
@@ -311,6 +317,7 @@ private fun AuditBrowser(
         } else if (selected == null) {
             AuditList(
                 events = events,
+                selectedEventId = selected?.id,
                 onBack = onBack,
                 onOpen = onOpen,
                 clientNames = clientNames,
@@ -616,12 +623,15 @@ private fun DeviceAndPairing(
 @Composable
 private fun NotificationsSettings(
     pushState: String?,
+    refreshGeneration: Long,
     requestNotificationPermission: () -> Unit,
     onBack: () -> Unit,
     modifier: Modifier,
 ) {
     val context = LocalContext.current
-    val notificationsEnabled = RequestNotifications.areEnabled(context)
+    val notificationsEnabled = remember(refreshGeneration) {
+        RequestNotifications.areEnabled(context)
+    }
     Column(modifier) {
         PageTopBar("Notifications", onBack)
         Column(
@@ -949,6 +959,7 @@ private fun SettingsActionRow(
 @Composable
 private fun AuditList(
     events: List<AuditEvent>,
+    selectedEventId: Long?,
     clientNames: Map<String, String>,
     onBack: () -> Unit,
     onOpen: (Long) -> Unit,
@@ -959,36 +970,54 @@ private fun AuditList(
         if (events.isEmpty()) {
             Box(Modifier.fillMaxSize(), contentAlignment = Alignment.Center) { Text("No audit events yet") }
         } else {
-            LazyColumn {
-                itemsIndexed(events, key = { _, event -> event.id }) { index, event ->
-                    ListItem(
-                        headlineContent = { Text(event.title) },
-                        supportingContent = {
-                            Column {
-                                event.clientId?.let(clientNames::get)?.let {
-                                    Text("Client: $it", maxLines = 1, overflow = TextOverflow.Ellipsis)
-                                }
-                                event.detail.takeIf(String::isNotBlank)?.let {
-                                    Text(it, maxLines = 1, overflow = TextOverflow.Ellipsis)
-                                }
-                                Text(formatTimestamp(event.occurredAt))
-                            }
+            LazyColumn(
+                contentPadding = PaddingValues(start = 16.dp, end = 16.dp, top = 4.dp, bottom = 16.dp),
+                verticalArrangement = Arrangement.spacedBy(6.dp),
+            ) {
+                items(events, key = AuditEvent::id) { event ->
+                    val selected = event.id == selectedEventId
+                    Surface(
+                        color = if (selected) {
+                            MaterialTheme.colorScheme.secondaryContainer
+                        } else {
+                            MaterialTheme.colorScheme.surfaceContainerLow
                         },
-                        trailingContent = {
-                            Row(
-                                horizontalArrangement = Arrangement.spacedBy(8.dp),
-                                verticalAlignment = Alignment.CenterVertically,
-                            ) {
-                                AuditOutcomeBadge(event.outcome)
-                                Icon(
-                                    Icons.Outlined.ChevronRight,
-                                    contentDescription = null,
-                                )
-                            }
+                        shape = MaterialTheme.shapes.medium,
+                        onClick = { onOpen(event.id) },
+                        modifier = Modifier.fillMaxWidth().semantics {
+                            this.selected = selected
                         },
-                        modifier = Modifier.clickable { onOpen(event.id) },
-                    )
-                    if (index < events.lastIndex) HorizontalDivider()
+                    ) {
+                        ListItem(
+                            headlineContent = { Text(event.title) },
+                            supportingContent = {
+                                Column(verticalArrangement = Arrangement.spacedBy(2.dp)) {
+                                    event.clientId?.let(clientNames::get)?.let {
+                                        Text("Client: $it", maxLines = 1, overflow = TextOverflow.Ellipsis)
+                                    }
+                                    event.detail.takeIf(String::isNotBlank)?.let {
+                                        Text(it, maxLines = 1, overflow = TextOverflow.Ellipsis)
+                                    }
+                                    Text(formatTimestamp(event.occurredAt))
+                                }
+                            },
+                            trailingContent = {
+                                Row(
+                                    horizontalArrangement = Arrangement.spacedBy(8.dp),
+                                    verticalAlignment = Alignment.CenterVertically,
+                                ) {
+                                    AuditOutcomeBadge(event.outcome)
+                                    Icon(
+                                        Icons.Outlined.ChevronRight,
+                                        contentDescription = null,
+                                    )
+                                }
+                            },
+                            colors = ListItemDefaults.colors(
+                                containerColor = androidx.compose.ui.graphics.Color.Transparent,
+                            ),
+                        )
+                    }
                 }
             }
         }
@@ -1020,37 +1049,39 @@ private fun AuditDetail(
                 Modifier.verticalScroll(rememberScrollState()).padding(20.dp),
                 verticalArrangement = Arrangement.spacedBy(16.dp),
             ) {
-                Text(event.title, style = MaterialTheme.typography.headlineSmall)
-                AuditOutcomeBadge(event.outcome)
+                InformationSurface {
+                    Text(event.title, style = MaterialTheme.typography.headlineSmall)
+                    AuditOutcomeBadge(event.outcome)
+                }
                 if (event.detail.isNotBlank()) {
-                    Surface(
-                        color = MaterialTheme.colorScheme.surfaceContainerLow,
-                        shape = RoundedCornerShape(12.dp),
-                        modifier = Modifier.fillMaxWidth(),
-                    ) {
-                        Column(Modifier.padding(16.dp)) {
-                            Text(
-                                "Recorded details",
-                                style = MaterialTheme.typography.labelMedium,
-                                color = MaterialTheme.colorScheme.onSurfaceVariant,
-                            )
-                            Text(event.detail, style = MaterialTheme.typography.titleMedium)
-                        }
+                    InformationSurface {
+                        Text(
+                            "Recorded details",
+                            style = MaterialTheme.typography.labelMedium,
+                            color = MaterialTheme.colorScheme.onSurfaceVariant,
+                        )
+                        Text(event.detail, style = MaterialTheme.typography.titleMedium)
                     }
                 }
-                LabeledValue("Time", formatTimestamp(event.occurredAt))
-                LabeledValue(
-                    "Category",
-                    event.category.storedName.replace('_', ' ').replaceFirstChar(Char::uppercase),
-                )
-                clientName?.let { LabeledValue("Client", it) }
-                event.clientId?.let {
-                    CopyableLabeledValue("Client ID", it) { copy("Client ID", it) }
+                InformationSurface {
+                    InformationRow("Time", formatTimestamp(event.occurredAt))
+                    InformationRow(
+                        "Category",
+                        event.category.storedName.replace('_', ' ').replaceFirstChar(Char::uppercase),
+                    )
+                    clientName?.let { InformationRow("Client", it) }
+                    event.clientId?.let {
+                        CopyableLabeledValue("Client ID", it) { copy("Client ID", it) }
+                    }
+                    event.relayRequestId?.let {
+                        CopyableLabeledValue("Request ID", it) { copy("Request ID", it) }
+                    }
+                    InformationRow(
+                        "Audit sequence number",
+                        event.id.toString(),
+                        monospace = true,
+                    )
                 }
-                event.relayRequestId?.let {
-                    CopyableLabeledValue("Request ID", it) { copy("Request ID", it) }
-                }
-                LabeledValue("Audit sequence number", event.id.toString(), true)
             }
         }
     }
@@ -1073,21 +1104,22 @@ private fun CopyableLabeledValue(label: String, value: String, onCopy: () -> Uni
 
 @Composable
 private fun AuditOutcomeBadge(outcome: AuditOutcome) {
-    val negative = outcome == AuditOutcome.DENIED ||
-        outcome == AuditOutcome.REJECTED ||
-        outcome == AuditOutcome.FAILED
+    val failed = outcome == AuditOutcome.FAILED
+    val rejected = outcome == AuditOutcome.DENIED || outcome == AuditOutcome.REJECTED
     val positive = outcome == AuditOutcome.APPROVED ||
         outcome == AuditOutcome.COMPLETED ||
         outcome == AuditOutcome.CHANGED
     Surface(
         color = when {
-            negative -> MaterialTheme.colorScheme.errorContainer
+            failed -> MaterialTheme.colorScheme.errorContainer
             positive -> MaterialTheme.colorScheme.secondaryContainer
+            rejected -> MaterialTheme.colorScheme.surfaceContainerHighest
             else -> MaterialTheme.colorScheme.surfaceContainerHighest
         },
         contentColor = when {
-            negative -> MaterialTheme.colorScheme.onErrorContainer
+            failed -> MaterialTheme.colorScheme.onErrorContainer
             positive -> MaterialTheme.colorScheme.onSecondaryContainer
+            rejected -> MaterialTheme.colorScheme.onSurfaceVariant
             else -> MaterialTheme.colorScheme.onSurfaceVariant
         },
         shape = RoundedCornerShape(100.dp),

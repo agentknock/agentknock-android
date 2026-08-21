@@ -66,6 +66,8 @@ import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.platform.LocalContext
+import androidx.compose.ui.semantics.selected
+import androidx.compose.ui.semantics.semantics
 import androidx.compose.ui.text.font.FontFamily
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
@@ -114,6 +116,7 @@ internal fun ClientsScreen(
                 Row(Modifier.fillMaxSize()) {
                     ClientList(
                         clients = clients,
+                        selectedClientId = selection,
                         identity = configuration?.active,
                         onOpen = viewModel::selectClient,
                         onOpenSettings = onOpenSettings,
@@ -137,6 +140,7 @@ internal fun ClientsScreen(
             } else if (selection == null) {
                 ClientList(
                     clients = clients,
+                    selectedClientId = selection,
                     identity = configuration?.active,
                     onOpen = viewModel::selectClient,
                     onOpenSettings = onOpenSettings,
@@ -234,6 +238,7 @@ private fun EmptyClientSelection(modifier: Modifier = Modifier) {
 @Composable
 private fun ClientList(
     clients: List<ClientSummary>,
+    selectedClientId: String?,
     identity: DeviceIdentity?,
     onOpen: (String) -> Unit,
     onOpenSettings: () -> Unit,
@@ -284,11 +289,18 @@ private fun ClientList(
                 verticalArrangement = Arrangement.spacedBy(8.dp),
             ) {
                 itemsIndexed(clients, key = { _, client -> client.clientId }) { _, client ->
+                    val selected = client.clientId == selectedClientId
                     Surface(
-                        color = MaterialTheme.colorScheme.surfaceContainerLow,
+                        color = if (selected) {
+                            MaterialTheme.colorScheme.secondaryContainer
+                        } else {
+                            MaterialTheme.colorScheme.surfaceContainerLow
+                        },
                         shape = MaterialTheme.shapes.large,
                         onClick = { onOpen(client.clientId) },
-                        modifier = Modifier.fillMaxWidth(),
+                        modifier = Modifier.fillMaxWidth().semantics {
+                            this.selected = selected
+                        },
                     ) {
                         ListItem(
                             headlineContent = { Text(client.name) },

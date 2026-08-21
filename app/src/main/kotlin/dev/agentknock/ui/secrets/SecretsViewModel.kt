@@ -6,6 +6,7 @@ import androidx.lifecycle.viewModelScope
 import dev.agentknock.AgentknockApplication
 import dev.agentknock.storage.secret.CreateEnvironmentVariableResult
 import dev.agentknock.storage.secret.CreateSecretResult
+import dev.agentknock.storage.secret.EnvironmentVariableMetadata
 import dev.agentknock.storage.secret.EnvironmentVariableValue
 import dev.agentknock.storage.secret.SecretDetails
 import dev.agentknock.storage.secret.SecretSummary
@@ -24,8 +25,12 @@ import kotlinx.coroutines.ExperimentalCoroutinesApi
 internal class SecretsViewModel(application: Application) : AndroidViewModel(application) {
     private val repository = (application as AgentknockApplication).container.secrets
     private val selectedSecretId = MutableStateFlow<String?>(null)
+    private val secretEditorState = MutableStateFlow<SecretEditorState?>(null)
+    private val variableEditorState = MutableStateFlow<VariableEditorState?>(null)
 
     val selection: StateFlow<String?> = selectedSecretId.asStateFlow()
+    val secretEditor: StateFlow<SecretEditorState?> = secretEditorState.asStateFlow()
+    val variableEditor: StateFlow<VariableEditorState?> = variableEditorState.asStateFlow()
 
     val secrets: StateFlow<List<SecretSummary>> = repository.observeSecrets().stateIn(
         scope = viewModelScope,
@@ -43,6 +48,59 @@ internal class SecretsViewModel(application: Application) : AndroidViewModel(app
 
     fun selectSecret(id: String?) {
         selectedSecretId.value = id
+    }
+
+    fun startNewSecret() {
+        secretEditorState.value = SecretEditorState(
+            secret = null,
+            name = "",
+            description = "",
+        )
+    }
+
+    fun startEditingSecret(secret: SecretDetails) {
+        secretEditorState.value = SecretEditorState(
+            secret = secret,
+            name = secret.name,
+            description = secret.description,
+        )
+    }
+
+    fun updateSecretEditor(state: SecretEditorState?) {
+        secretEditorState.value = state
+    }
+
+    fun startNewEnvironmentVariable(secretId: String) {
+        variableEditorState.value = VariableEditorState(
+            secretId = secretId,
+            variable = null,
+            currentValue = null,
+            name = "",
+            value = "",
+            valueEdited = false,
+            sensitive = true,
+            notes = "",
+        )
+    }
+
+    fun startEditingEnvironmentVariable(
+        variable: EnvironmentVariableMetadata,
+        currentValue: String?,
+    ) {
+        variableEditorState.value = VariableEditorState(
+            secretId = variable.secretId,
+            variable = variable,
+            currentValue = currentValue,
+            name = variable.name,
+            value = currentValue.orEmpty(),
+            valueEdited = false,
+            sensitive = variable.sensitive,
+            notes = variable.notes,
+        )
+    }
+
+    fun updateVariableEditor(state: VariableEditorState?) {
+        variableEditorState.value = state
     }
 
     suspend fun createSecret(name: String, description: String): CreateSecretResult =

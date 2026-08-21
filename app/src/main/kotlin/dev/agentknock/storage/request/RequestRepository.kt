@@ -718,7 +718,10 @@ internal class RequestRepository(
                         details = listOfNotNull(
                             RequestNotificationDetail("Client", clientName),
                             secretUse.reason?.takeIf(String::isNotBlank)?.let {
-                                RequestNotificationDetail("Reason", renderSingleLineText(it))
+                                RequestNotificationDetail(
+                                    "Reason reported by client",
+                                    renderSingleLineText(it),
+                                )
                             },
                             RequestNotificationDetail("Command", command),
                             RequestNotificationDetail("Secrets", secretNames),

@@ -38,6 +38,7 @@ import androidx.compose.material.icons.outlined.Edit
 import androidx.compose.material.icons.outlined.Check
 import androidx.compose.material.icons.outlined.Close
 import androidx.compose.material.icons.outlined.ErrorOutline
+import androidx.compose.material.icons.outlined.NotificationsOff
 import androidx.compose.material.icons.outlined.Refresh
 import androidx.compose.material.icons.outlined.Settings
 import androidx.compose.material.icons.outlined.Visibility
@@ -82,6 +83,7 @@ import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.semantics.contentDescription
 import androidx.compose.ui.semantics.CustomAccessibilityAction
 import androidx.compose.ui.semantics.customActions
+import androidx.compose.ui.semantics.selected
 import androidx.compose.ui.semantics.semantics
 import androidx.compose.ui.semantics.stateDescription
 import androidx.compose.ui.text.font.FontFamily
@@ -103,6 +105,7 @@ import dev.agentknock.storage.request.SecretUseDecisionResult
 import dev.agentknock.storage.request.SecretUseRequestDetails
 import dev.agentknock.storage.request.SecretUseRequestState
 import dev.agentknock.storage.request.InboxRequestDetails
+import dev.agentknock.storage.request.InboxRequestKind
 import dev.agentknock.storage.request.InboxRequestState
 import dev.agentknock.storage.request.InboxRequestSummary
 import dev.agentknock.storage.request.PairingDecisionResult
@@ -123,6 +126,7 @@ import kotlinx.coroutines.launch
 internal fun RequestsScreen(
     authenticate: (String, () -> Unit, (String) -> Unit) -> Unit,
     onOpenSettings: () -> Unit,
+    notificationsEnabled: Boolean,
     onTopLevelChanged: (Boolean) -> Unit,
     viewModel: RequestsViewModel = viewModel(),
 ) {
@@ -180,12 +184,14 @@ internal fun RequestsScreen(
                 Row(Modifier.fillMaxSize()) {
                     RequestList(
                         requests = requests,
+                        selectedRequestId = selection,
                         identity = configuration?.active,
                         syncing = syncing,
                         syncProblem = lastSyncResult.problemMessage(),
                         onRefresh = viewModel::refresh,
                         onShowSyncProblem = ::report,
                         onOpenSettings = onOpenSettings,
+                        notificationsEnabled = notificationsEnabled,
                         onOpen = viewModel::selectRequest,
                         onApprove = ::approve,
                         onReject = ::reject,
@@ -209,12 +215,14 @@ internal fun RequestsScreen(
             } else if (selection == null) {
                 RequestList(
                     requests = requests,
+                    selectedRequestId = selection,
                     identity = configuration?.active,
                     syncing = syncing,
                     syncProblem = lastSyncResult.problemMessage(),
                     onRefresh = viewModel::refresh,
                     onShowSyncProblem = ::report,
                     onOpenSettings = onOpenSettings,
+                    notificationsEnabled = notificationsEnabled,
                     onOpen = viewModel::selectRequest,
                     onApprove = ::approve,
                     onReject = ::reject,
@@ -321,12 +329,14 @@ private fun EmptyRequestSelection(modifier: Modifier = Modifier) {
 @Composable
 private fun RequestList(
     requests: List<InboxRequestSummary>,
+    selectedRequestId: Long?,
     identity: DeviceIdentity?,
     syncing: Boolean,
     syncProblem: String?,
     onRefresh: () -> Unit,
     onShowSyncProblem: (String) -> Unit,
     onOpenSettings: () -> Unit,
+    notificationsEnabled: Boolean,
     onOpen: (Long) -> Unit,
     onApprove: (InboxRequestSummary) -> Unit,
     onReject: (InboxRequestSummary) -> Unit,
@@ -352,6 +362,14 @@ private fun RequestList(
         TopAppBar(
             title = { Text("Requests") },
             actions = {
+                if (!notificationsEnabled) {
+                    IconButton(onClick = onOpenSettings) {
+                        Icon(
+                            Icons.Outlined.NotificationsOff,
+                            contentDescription = "Notifications disabled",
+                        )
+                    }
+                }
                 syncProblem?.let { problem ->
                     IconButton(onClick = { onShowSyncProblem(problem) }) {
                         Icon(
@@ -426,6 +444,7 @@ private fun RequestList(
                 itemsIndexed(requests, key = { _, request -> request.id }) { _, request ->
                     RequestRow(
                         request = request,
+                        selected = request.id == selectedRequestId,
                         onClick = { onOpen(request.id) },
                         onApprove = { onApprove(request) },
                         onReject = { onReject(request) },
@@ -439,12 +458,14 @@ private fun RequestList(
 @Composable
 private fun RequestRow(
     request: InboxRequestSummary,
+    selected: Boolean,
     onClick: () -> Unit,
     onApprove: () -> Unit,
     onReject: () -> Unit,
 ) {
     val canApprove = request.secretUseState == SecretUseRequestState.APPROVAL_PENDING
     val canReject = request.canReject()
+    val rejectLabel = if (request.kind == InboxRequestKind.SECRET_USE) "Deny once" else "Reject"
     val swipeState = rememberSwipeToDismissBoxState(
         positionalThreshold = { distance -> distance * 0.65f },
     )
@@ -462,6 +483,7 @@ private fun RequestRow(
             .fillMaxWidth()
             .clip(MaterialTheme.shapes.large)
             .semantics {
+                this.selected = selected
                 customActions = buildList {
                     if (canApprove) {
                         add(CustomAccessibilityAction("Approve once") {
@@ -470,7 +492,7 @@ private fun RequestRow(
                         })
                     }
                     if (canReject) {
-                        add(CustomAccessibilityAction("Reject") {
+                        add(CustomAccessibilityAction(rejectLabel) {
                             onReject()
                             true
                         })
@@ -507,28 +529,32 @@ private fun RequestRow(
                             if (approving) Icons.Outlined.Check else Icons.Outlined.Close,
                             contentDescription = null,
                         )
-                        Text(if (approving) "Approve once" else "Reject")
+                        Text(if (approving) "Approve once" else rejectLabel)
                     }
                 }
             }
         },
     ) {
-        RequestRowContent(request, onClick)
+        RequestRowContent(request, selected, onClick)
     }
 }
 
 @Composable
-private fun RequestRowContent(request: InboxRequestSummary, onClick: () -> Unit) {
+private fun RequestRowContent(
+    request: InboxRequestSummary,
+    selected: Boolean,
+    onClick: () -> Unit,
+) {
     val rejected = request.wasRejected()
     val actionRequired = request.state == InboxRequestState.ACTION_REQUIRED
-    val containerColor = if (rejected) {
-        MaterialTheme.colorScheme.surfaceContainer
-    } else {
-        MaterialTheme.colorScheme.surfaceContainerLow
+    val containerColor = when {
+        selected -> MaterialTheme.colorScheme.secondaryContainer
+        rejected -> MaterialTheme.colorScheme.surfaceContainer
+        else -> MaterialTheme.colorScheme.surfaceContainerLow
     }
     Surface(
         color = containerColor,
-        contentColor = if (rejected) {
+        contentColor = if (rejected && !selected) {
             MaterialTheme.colorScheme.onSurfaceVariant
         } else {
             MaterialTheme.colorScheme.onSurface
@@ -630,15 +656,17 @@ private fun PairingDetail(
                 pairing.pairingState.label(),
                 pairing.pairingState.isError() ||
                     (pairing.pairingState == PairingState.RECEIVING && pairing.error != null),
+                attention = request.state == InboxRequestState.ACTION_REQUIRED,
+                subdued = pairing.pairingState == PairingState.REJECTED,
             )
-            InformationRow("Client", pairing.clientName)
+            InformationRow("Client-reported name", pairing.clientName)
             val reported = listOfNotNull(
                 pairing.hostname,
                 pairing.platform?.let(::formatPlatformName),
                 pairing.architecture,
             ).joinToString(" · ")
             if (reported.isNotEmpty()) {
-                InformationRow("Reported device", reported)
+                InformationRow("Client-reported host", reported)
             }
             InformationRow("Received", formatTimestamp(request.receivedAt))
             pairing.decidedAt?.let {
@@ -652,7 +680,10 @@ private fun PairingDetail(
         when (pairing.pairingState) {
             PairingState.SAS_VERIFICATION_PENDING -> {
                 Text("Which code is shown by the client?", style = MaterialTheme.typography.titleLarge)
-                Text("Choose the exact same code. A wrong choice rejects the pairing.")
+                Text(
+                    "Choose the exact same code to accept this client. " +
+                        "A wrong choice rejects the pairing.",
+                )
                 pairing.sasOptions.forEachIndexed { index, sas ->
                     FilledTonalButton(
                         onClick = { onChooseSas(index) },
@@ -677,7 +708,11 @@ private fun PairingDetail(
                 "Pairing completed",
                 "Access was granted to this client.",
             )
-            PairingState.REJECTED -> Notice("Pairing rejected", "No access was granted.", true)
+            PairingState.REJECTED -> Notice(
+                "Pairing rejected",
+                "No access was granted.",
+                subdued = true,
+            )
             PairingState.RECEIVING -> if (pairing.error == null) {
                 Notice("Receiving pairing", "The request is still being verified.")
             } else {
@@ -759,7 +794,13 @@ private fun SecretUseDetail(
         },
     ) {
         InformationSurface {
-            StatusLine(secretUse.statusLabel(), secretUse.isError())
+            StatusLine(
+                secretUse.statusLabel(),
+                secretUse.isError(),
+                attention = secretUse.state == SecretUseRequestState.APPROVAL_PENDING,
+                subdued = secretUse.decision == SecretUseDecision.DENIED ||
+                    secretUse.completionResult == SecretUseCompletionResult.DENIED,
+            )
             ClientIdentity(secretUse.clientName)
             SecretIdentities(secretUse.secrets)
             val environmentVariableCount = secretUse.secretDetails.sumOf {
@@ -834,7 +875,10 @@ private fun SecretUseDetail(
         }
 
         if (secretUse.secretDetails.isNotEmpty()) {
-            Disclosure("Secret details") {
+            Disclosure(
+                title = "Secret details",
+                initiallyExpanded = secretUse.state == SecretUseRequestState.APPROVAL_PENDING,
+            ) {
                 secretUse.secretDetails.forEach { secret -> SecretSummary(secret) }
                 Text(
                     "Values are never shown in a request.",
@@ -960,6 +1004,8 @@ private fun SecretUploadDetail(
             StatusLine(
                 upload.state.label(),
                 upload.state == SecretUploadRequestState.VERIFICATION_FAILED,
+                attention = upload.state == SecretUploadRequestState.REVIEW_PENDING,
+                subdued = upload.state == SecretUploadRequestState.REJECTED,
             )
             Row(verticalAlignment = Alignment.CenterVertically) {
                 Text(
@@ -978,17 +1024,13 @@ private fun SecretUploadDetail(
                     }
                 }
             }
-            Text("Environment variables", style = MaterialTheme.typography.titleMedium)
+            InformationRow("Type", "Environment variables")
             ClientIdentity(upload.clientName)
-            Text(
-                "Received ${formatTimestamp(request.receivedAt)}",
-                style = MaterialTheme.typography.bodySmall,
-                color = MaterialTheme.colorScheme.onSurfaceVariant,
-            )
+            InformationRow("Received", formatTimestamp(request.receivedAt))
             upload.description?.takeIf(String::isNotBlank)?.let {
                 Column(verticalArrangement = Arrangement.spacedBy(2.dp)) {
                     Text(
-                        "Description",
+                        "Description reported by client",
                         style = MaterialTheme.typography.labelMedium,
                         color = MaterialTheme.colorScheme.onSurfaceVariant,
                     )
@@ -1088,11 +1130,21 @@ private fun SecretUploadDetail(
                         modifier = Modifier.fillMaxWidth(),
                         verticalAlignment = Alignment.CenterVertically,
                     ) {
-                        Text(
-                            "Sensitive",
-                            style = MaterialTheme.typography.labelMedium,
+                        Column(
                             modifier = Modifier.weight(1f),
-                        )
+                            verticalArrangement = Arrangement.spacedBy(2.dp),
+                        ) {
+                            Text("Sensitive", style = MaterialTheme.typography.labelMedium)
+                            Text(
+                                if (variable.sensitive) {
+                                    "Authentication required to view after saving"
+                                } else {
+                                    "Visible without authentication after saving"
+                                },
+                                style = MaterialTheme.typography.bodySmall,
+                                color = MaterialTheme.colorScheme.onSurfaceVariant,
+                            )
+                        }
                         Switch(
                             checked = variable.sensitive,
                             enabled = upload.state == SecretUploadRequestState.REVIEW_PENDING,
@@ -1193,6 +1245,17 @@ private fun SecretUploadDetail(
             upload.approvedName?.takeIf { it != upload.uploadedName }?.let {
                 DetailValue("Uploaded name", upload.uploadedName)
             }
+            if (upload.state == SecretUploadRequestState.APPROVED) {
+                val name = upload.approvedName ?: upload.uploadedName
+                Notice(
+                    "Upload approved",
+                    when (upload.mode) {
+                        SecretUploadMode.CREATE -> "$name was created."
+                        SecretUploadMode.UPDATE -> "$name was updated."
+                        SecretUploadMode.REPLACE -> "$name was replaced."
+                    },
+                )
+            }
             upload.error?.let { Notice("Upload could not be verified", it, true) }
         }
 
@@ -1232,41 +1295,55 @@ private fun SecretUploadDetail(
 
 @Composable
 private fun SecretUseOutcome(secretUse: SecretUseRequestDetails) {
-    val (title, detail, error) = when (secretUse.state) {
-        SecretUseRequestState.WAITING_FOR_COMPLETION -> Triple(
-            if (secretUse.decision == SecretUseDecision.APPROVED) "Approved" else "Denied",
-            "Waiting for the client to finish.",
-            secretUse.decision == SecretUseDecision.DENIED,
+    val outcome = when (secretUse.state) {
+        SecretUseRequestState.WAITING_FOR_COMPLETION -> OutcomeNotice(
+            title = if (secretUse.decision == SecretUseDecision.APPROVED) "Approved" else "Denied",
+            detail = "Waiting for the client to finish.",
+            subdued = secretUse.decision == SecretUseDecision.DENIED,
         )
         SecretUseRequestState.COMPLETED -> when (secretUse.completionResult) {
-            SecretUseCompletionResult.APPROVED -> Triple("Delivered", "The client received the secret values.", false)
+            SecretUseCompletionResult.APPROVED -> OutcomeNotice(
+                "Delivered",
+                "The client received the secret values.",
+            )
             SecretUseCompletionResult.DENIED -> if (
                 secretUse.completionReason == "INVALID_REQUEST"
             ) {
-                Triple(
+                OutcomeNotice(
                     "Request rejected",
                     secretUse.completionMessage ?: "The request was invalid.",
-                    true,
+                    error = true,
                 )
             } else {
-                Triple(
+                OutcomeNotice(
                     "Denied",
                     secretUse.completionMessage ?: "No values were released.",
-                    false,
+                    subdued = true,
                 )
             }
-            SecretUseCompletionResult.ABORTED -> Triple("Aborted", secretUse.completionMessage ?: "The client stopped this request.", false)
-            null -> Triple("Completed", "The request is complete.", false)
+            SecretUseCompletionResult.ABORTED -> OutcomeNotice(
+                "Aborted",
+                secretUse.completionMessage ?: "The client stopped this request.",
+                subdued = true,
+            )
+            null -> OutcomeNotice("Completed", "The request is complete.")
         }
-        SecretUseRequestState.VERIFICATION_FAILED -> Triple(
+        SecretUseRequestState.VERIFICATION_FAILED -> OutcomeNotice(
             "Could not verify request",
             secretUse.error ?: "The cryptographic message was invalid.",
-            true,
+            error = true,
         )
         SecretUseRequestState.APPROVAL_PENDING -> return
     }
-    Notice(title, detail, error)
+    Notice(outcome.title, outcome.detail, outcome.error, outcome.subdued)
 }
+
+private data class OutcomeNotice(
+    val title: String,
+    val detail: String,
+    val error: Boolean = false,
+    val subdued: Boolean = false,
+)
 
 @Composable
 private fun SecretSummary(secret: SecretMetadata) {
@@ -1327,8 +1404,12 @@ private fun DetailPage(
 }
 
 @Composable
-private fun Disclosure(title: String, content: @Composable () -> Unit) {
-    var expanded by remember { mutableStateOf(false) }
+private fun Disclosure(
+    title: String,
+    initiallyExpanded: Boolean = false,
+    content: @Composable () -> Unit,
+) {
+    var expanded by remember(initiallyExpanded) { mutableStateOf(initiallyExpanded) }
     Surface(
         color = MaterialTheme.colorScheme.surfaceContainerLow,
         shape = MaterialTheme.shapes.large,
@@ -1365,11 +1446,19 @@ private fun Disclosure(title: String, content: @Composable () -> Unit) {
 }
 
 @Composable
-private fun Notice(title: String, detail: String, error: Boolean = false) {
+private fun Notice(
+    title: String,
+    detail: String,
+    error: Boolean = false,
+    subdued: Boolean = false,
+) {
     Card(
         colors = CardDefaults.cardColors(
-            containerColor = if (error) MaterialTheme.colorScheme.errorContainer
-            else MaterialTheme.colorScheme.secondaryContainer,
+            containerColor = when {
+                error -> MaterialTheme.colorScheme.errorContainer
+                subdued -> MaterialTheme.colorScheme.surfaceContainerHighest
+                else -> MaterialTheme.colorScheme.secondaryContainer
+            },
         ),
         shape = MaterialTheme.shapes.large,
     ) {
@@ -1381,17 +1470,24 @@ private fun Notice(title: String, detail: String, error: Boolean = false) {
 }
 
 @Composable
-private fun StatusLine(label: String, error: Boolean = false) {
+private fun StatusLine(
+    label: String,
+    error: Boolean = false,
+    attention: Boolean = false,
+    subdued: Boolean = false,
+) {
     Surface(
-        color = if (error) {
-            MaterialTheme.colorScheme.errorContainer
-        } else {
-            MaterialTheme.colorScheme.secondaryContainer
+        color = when {
+            error -> MaterialTheme.colorScheme.errorContainer
+            attention -> MaterialTheme.colorScheme.primary
+            subdued -> MaterialTheme.colorScheme.surfaceContainerHighest
+            else -> MaterialTheme.colorScheme.secondaryContainer
         },
-        contentColor = if (error) {
-            MaterialTheme.colorScheme.onErrorContainer
-        } else {
-            MaterialTheme.colorScheme.onSecondaryContainer
+        contentColor = when {
+            error -> MaterialTheme.colorScheme.onErrorContainer
+            attention -> MaterialTheme.colorScheme.onPrimary
+            subdued -> MaterialTheme.colorScheme.onSurfaceVariant
+            else -> MaterialTheme.colorScheme.onSecondaryContainer
         },
         shape = RoundedCornerShape(100.dp),
     ) {
@@ -1407,8 +1503,8 @@ private fun StatusLine(label: String, error: Boolean = false) {
 private fun RequestStatusBadge(request: InboxRequestSummary) {
     val error = request.pairingState?.isError() == true ||
         request.secretUseState == SecretUseRequestState.VERIFICATION_FAILED ||
-        request.secretUploadState == SecretUploadRequestState.VERIFICATION_FAILED ||
-        request.wasRejected()
+        request.secretUploadState == SecretUploadRequestState.VERIFICATION_FAILED
+    val rejected = request.wasRejected()
     val actionRequired = request.state == InboxRequestState.ACTION_REQUIRED
     val accepted = request.wasAccepted()
     Surface(
@@ -1416,12 +1512,14 @@ private fun RequestStatusBadge(request: InboxRequestSummary) {
             error -> MaterialTheme.colorScheme.errorContainer
             actionRequired -> MaterialTheme.colorScheme.primary
             accepted -> MaterialTheme.colorScheme.secondaryContainer
+            rejected -> MaterialTheme.colorScheme.surfaceContainerHighest
             else -> MaterialTheme.colorScheme.surfaceContainerHighest
         },
         contentColor = when {
             error -> MaterialTheme.colorScheme.onErrorContainer
             actionRequired -> MaterialTheme.colorScheme.onPrimary
             accepted -> MaterialTheme.colorScheme.onSecondaryContainer
+            rejected -> MaterialTheme.colorScheme.onSurfaceVariant
             else -> MaterialTheme.colorScheme.onSurfaceVariant
         },
         shape = RoundedCornerShape(100.dp),

@@ -22,9 +22,10 @@ internal data class RequestNavigation(
 
 class MainActivity : FragmentActivity() {
     private val requestNavigation = MutableStateFlow(RequestNavigation())
+    private val notificationStateGeneration = MutableStateFlow(0L)
     private val notificationPermissionRequestLauncher = registerForActivityResult(
         ActivityResultContracts.RequestPermission(),
-    ) {}
+    ) { notificationStateGeneration.value += 1 }
 
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
@@ -39,10 +40,16 @@ class MainActivity : FragmentActivity() {
                 AgentknockScreen(
                     authenticate = authenticator::authenticate,
                     requestNavigation = requestNavigation,
+                    notificationStateGeneration = notificationStateGeneration,
                     requestNotificationPermission = ::requestNotificationPermission,
                 )
             }
         }
+    }
+
+    override fun onResume() {
+        super.onResume()
+        notificationStateGeneration.value += 1
     }
 
     private fun requestNotificationPermission() {

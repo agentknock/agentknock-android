@@ -1,1 +1,1 @@
-Refines the app-wide Material 3 hierarchy, request review screens, secret and client details, settings, accessibility, and large-text scrolling.
+Polishes request decisions, status hierarchy, notifications, responsive list-detail selection, and rotation-safe editing.

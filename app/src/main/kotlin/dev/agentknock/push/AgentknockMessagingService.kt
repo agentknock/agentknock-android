@@ -248,6 +248,13 @@ internal object RequestNotifications {
                 },
                 PendingIntent.FLAG_UPDATE_CURRENT or PendingIntent.FLAG_IMMUTABLE,
             )
+            val publicVersion = Notification.Builder(context, CHANNEL_ID)
+                .setSmallIcon(R.drawable.ic_launcher_foreground)
+                .setContentTitle(context.getString(R.string.app_name))
+                .setContentText(context.getString(R.string.request_waiting))
+                .setContentIntent(openRequest)
+                .setCategory(Notification.CATEGORY_MESSAGE)
+                .build()
             val builder = Notification.Builder(context, CHANNEL_ID)
                 .setSmallIcon(R.drawable.ic_launcher_foreground)
                 .setContentTitle(request.title)
@@ -257,7 +264,8 @@ internal object RequestNotifications {
                 .setAutoCancel(true)
                 .setOnlyAlertOnce(true)
                 .setCategory(Notification.CATEGORY_MESSAGE)
-                .setVisibility(Notification.VISIBILITY_PUBLIC)
+                .setVisibility(Notification.VISIBILITY_PRIVATE)
+                .setPublicVersion(publicVersion)
             if (request.secretUseDecisionAvailable) {
                 builder.addAction(decisionAction(context, request.requestId, DENY_DECISION, "Deny once"))
                 builder.addAction(
