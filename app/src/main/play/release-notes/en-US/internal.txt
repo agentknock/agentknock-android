@@ -1,1 +1,1 @@
-Restores compatibility with current client software metadata and prevents authenticated protocol failures from hanging.
+Dark-mode visual review build, validated against current Google and Pixel Material interfaces.
