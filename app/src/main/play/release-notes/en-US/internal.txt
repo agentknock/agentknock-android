@@ -1,1 +1,1 @@
-Separates encryption keys for secret values and device state, and lays the foundation for future vault recovery. This development update resets local Agentknock data; set up the device and pair clients again.
+Refines the app-wide Material 3 hierarchy, request review screens, secret and client details, settings, accessibility, and large-text scrolling.

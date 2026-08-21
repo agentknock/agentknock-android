@@ -1,11 +1,18 @@
 package dev.agentknock.ui.theme
 
+import android.os.Build
 import androidx.compose.foundation.isSystemInDarkTheme
+import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material3.MaterialTheme
+import androidx.compose.material3.Shapes
 import androidx.compose.material3.darkColorScheme
+import androidx.compose.material3.dynamicDarkColorScheme
+import androidx.compose.material3.dynamicLightColorScheme
 import androidx.compose.material3.lightColorScheme
 import androidx.compose.runtime.Composable
+import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.graphics.Color
+import androidx.compose.ui.unit.dp
 
 private val LightColors = lightColorScheme(
     primary = Color(0xFF006A68),
@@ -57,10 +64,10 @@ private val DarkColors = darkColorScheme(
     surface = Color(0xFF191C1C),
     onSurface = Color(0xFFE0E3E2),
     surfaceContainerLowest = Color(0xFF0E1110),
-    surfaceContainerLow = Color(0xFF191C1C),
-    surfaceContainer = Color(0xFF1D2020),
-    surfaceContainerHigh = Color(0xFF272B2A),
-    surfaceContainerHighest = Color(0xFF323535),
+    surfaceContainerLow = Color(0xFF1D2020),
+    surfaceContainer = Color(0xFF222625),
+    surfaceContainerHigh = Color(0xFF2B2F2E),
+    surfaceContainerHighest = Color(0xFF363A39),
     surfaceVariant = Color(0xFF3F4948),
     onSurfaceVariant = Color(0xFFBEC9C7),
     outline = Color(0xFF899391),
@@ -71,13 +78,30 @@ private val DarkColors = darkColorScheme(
     onErrorContainer = Color(0xFFFFDAD6),
 )
 
+private val AppShapes = Shapes(
+    extraSmall = RoundedCornerShape(8.dp),
+    small = RoundedCornerShape(12.dp),
+    medium = RoundedCornerShape(16.dp),
+    large = RoundedCornerShape(20.dp),
+    extraLarge = RoundedCornerShape(28.dp),
+)
+
 @Composable
 fun AgentknockTheme(
     darkTheme: Boolean = isSystemInDarkTheme(),
     content: @Composable () -> Unit,
 ) {
+    val colorScheme = if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.S) {
+        val context = LocalContext.current
+        if (darkTheme) dynamicDarkColorScheme(context) else dynamicLightColorScheme(context)
+    } else if (darkTheme) {
+        DarkColors
+    } else {
+        LightColors
+    }
     MaterialTheme(
-        colorScheme = if (darkTheme) DarkColors else LightColors,
+        colorScheme = colorScheme,
+        shapes = AppShapes,
         content = content,
     )
 }

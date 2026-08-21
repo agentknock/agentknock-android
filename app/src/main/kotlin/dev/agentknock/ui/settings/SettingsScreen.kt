@@ -21,11 +21,13 @@ import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.BoxWithConstraints
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.Row
+import androidx.compose.foundation.layout.PaddingValues
 import androidx.compose.foundation.layout.Spacer
 import androidx.compose.foundation.layout.WindowInsets
 import androidx.compose.foundation.layout.fillMaxHeight
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
+import androidx.compose.foundation.layout.heightIn
 import androidx.compose.foundation.layout.imePadding
 import androidx.compose.foundation.layout.navigationBars
 import androidx.compose.foundation.layout.padding
@@ -107,6 +109,7 @@ import androidx.lifecycle.viewmodel.compose.viewModel
 import dev.agentknock.BuildConfig
 import dev.agentknock.push.RequestNotifications
 import dev.agentknock.presentation.formatTimestamp
+import dev.agentknock.ui.components.TonalIcon
 import dev.agentknock.storage.FactoryResetResult
 import dev.agentknock.storage.crypto.EncryptionKeyBacking
 import dev.agentknock.storage.crypto.VaultKeyPurpose
@@ -341,7 +344,10 @@ private fun SettingsOverview(
     val notificationsEnabled = RequestNotifications.areEnabled(context)
     Column(modifier) {
         PageTopBar("Settings", onBack)
-        LazyColumn {
+        LazyColumn(
+            contentPadding = PaddingValues(start = 16.dp, end = 16.dp, top = 4.dp, bottom = 16.dp),
+            verticalArrangement = Arrangement.spacedBy(8.dp),
+        ) {
             item {
                 val pairingSummary = when {
                     pairing == null -> "Setup incomplete"
@@ -390,7 +396,6 @@ private fun SettingsOverview(
                     Icons.Outlined.Info,
                     "About",
                     "Version ${BuildConfig.VERSION_NAME}",
-                    showDivider = false,
                 ) { onOpen(SettingsPage.ABOUT) }
             }
         }
@@ -402,17 +407,24 @@ private fun SettingsRow(
     icon: ImageVector,
     title: String,
     summary: String,
-    showDivider: Boolean = true,
     onClick: () -> Unit,
 ) {
-    ListItem(
-        headlineContent = { Text(title) },
-        supportingContent = { if (summary.isNotBlank()) Text(summary) },
-        leadingContent = { Icon(icon, contentDescription = null) },
-        trailingContent = { Icon(Icons.Outlined.ChevronRight, contentDescription = null) },
-        modifier = Modifier.clickable(onClick = onClick),
-    )
-    if (showDivider) HorizontalDivider()
+    Surface(
+        color = MaterialTheme.colorScheme.surfaceContainerLow,
+        shape = MaterialTheme.shapes.large,
+        onClick = onClick,
+        modifier = Modifier.fillMaxWidth(),
+    ) {
+        ListItem(
+            headlineContent = { Text(title) },
+            supportingContent = { if (summary.isNotBlank()) Text(summary) },
+            leadingContent = { TonalIcon(icon, contentDescription = null) },
+            trailingContent = { Icon(Icons.Outlined.ChevronRight, contentDescription = null) },
+            colors = ListItemDefaults.colors(
+                containerColor = androidx.compose.ui.graphics.Color.Transparent,
+            ),
+        )
+    }
 }
 
 @Composable
@@ -558,6 +570,7 @@ private fun DeviceAndPairing(
             Row(
                 Modifier
                     .fillMaxWidth()
+                    .heightIn(min = 48.dp)
                     .clickable { technicalExpanded = !technicalExpanded }
                     .semantics {
                         stateDescription = if (technicalExpanded) "Expanded" else "Collapsed"
@@ -819,89 +832,50 @@ private fun DataAndHistory(
     var confirmClear by remember { mutableStateOf(false) }
     Column(modifier) {
         PageTopBar("Data & history", onBack)
-        Column(Modifier.verticalScroll(rememberScrollState())) {
+        Column(
+            Modifier.verticalScroll(rememberScrollState()).padding(16.dp),
+            verticalArrangement = Arrangement.spacedBy(8.dp),
+        ) {
             SettingsRow(
                 Icons.Outlined.History,
                 "Audit log",
                 "${counts.auditEvents.countLabel("event")} · kept for one year",
                 onClick = onAudit,
             )
-            ListItem(
-                headlineContent = { Text("On this device") },
-                supportingContent = {
-                    Text(
-                        listOf(
-                            counts.secrets.countLabel("secret"),
-                            counts.variables.countLabel("environment variable"),
-                            counts.clients.countLabel("client"),
-                            counts.requests.countLabel("request"),
-                        ).joinToString(" · "),
-                    )
-                },
-                leadingContent = { Icon(Icons.Outlined.Storage, contentDescription = null) },
+            SettingsInformationRow(
+                icon = Icons.Outlined.Storage,
+                title = "On this device",
+                summary = listOf(
+                    counts.secrets.countLabel("secret"),
+                    counts.variables.countLabel("environment variable"),
+                    counts.clients.countLabel("client"),
+                    counts.requests.countLabel("request"),
+                ).joinToString(" · "),
             )
-            HorizontalDivider()
-            ListItem(
-                headlineContent = { Text("Android backup and transfer") },
-                supportingContent = {
-                    Text(
-                        "Secrets, clients, request history, audit events, and encrypted values are included. Device-bound keys cannot be restored on another device.",
-                    )
-                },
-                leadingContent = { Icon(Icons.Outlined.Backup, contentDescription = null) },
+            SettingsInformationRow(
+                icon = Icons.Outlined.Backup,
+                title = "Android backup and transfer",
+                summary = "Secrets, clients, request history, audit events, and encrypted values " +
+                    "are included. Device-bound keys cannot be restored on another device.",
             )
-            HorizontalDivider()
-            ListItem(
-                headlineContent = {
-                    Text(
-                        "Clear completed request history",
-                        color = if (counts.requests > 0) {
-                            MaterialTheme.colorScheme.primary
-                        } else {
-                            MaterialTheme.colorScheme.onSurface.copy(alpha = 0.38f)
-                        },
-                    )
+            SettingsActionRow(
+                icon = Icons.Outlined.DeleteSweep,
+                title = "Clear completed request history",
+                summary = if (counts.requests == 0) {
+                    "No request history to clear"
+                } else {
+                    "Pending requests and audit events are kept"
                 },
-                supportingContent = {
-                    Text(
-                        if (counts.requests == 0) {
-                            "No request history to clear"
-                        } else {
-                            "Pending requests and audit events are kept"
-                        },
-                    )
-                },
-                leadingContent = {
-                    Icon(
-                        Icons.Outlined.DeleteSweep,
-                        contentDescription = null,
-                        tint = if (counts.requests > 0) {
-                            MaterialTheme.colorScheme.primary
-                        } else {
-                            MaterialTheme.colorScheme.onSurface.copy(alpha = 0.38f)
-                        },
-                    )
-                },
-                modifier = Modifier.clickable(enabled = counts.requests > 0) {
-                    confirmClear = true
-                },
+                enabled = counts.requests > 0,
+                onClick = { confirmClear = true },
             )
-            HorizontalDivider(Modifier.padding(top = 24.dp))
-            ListItem(
-                headlineContent = {
-                    Text("Factory reset Agentknock", color = MaterialTheme.colorScheme.error)
-                },
-                supportingContent = {
-                    Text("Erase this Agentknock device identity, secrets, clients, and history")
-                },
-                leadingContent = {
-                    Icon(
-                        Icons.Outlined.DeleteForever,
-                        contentDescription = null,
-                        tint = MaterialTheme.colorScheme.error,
-                    )
-                },
-                modifier = Modifier.clickable(onClick = onFactoryReset),
+            Spacer(Modifier.size(8.dp))
+            SettingsActionRow(
+                icon = Icons.Outlined.DeleteForever,
+                title = "Factory reset Agentknock",
+                summary = "Erase this Agentknock device identity, secrets, clients, and history",
+                destructive = true,
+                onClick = onFactoryReset,
             )
         }
     }
@@ -912,6 +886,62 @@ private fun DataAndHistory(
             text = { Text("Pending requests, paired clients, secrets, and the audit log are not removed.") },
             confirmButton = { TextButton(onClick = { onClearRequests(); confirmClear = false }) { Text("Clear") } },
             dismissButton = { TextButton(onClick = { confirmClear = false }) { Text("Cancel") } },
+        )
+    }
+}
+
+@Composable
+private fun SettingsInformationRow(
+    icon: ImageVector,
+    title: String,
+    summary: String,
+) {
+    Surface(
+        color = MaterialTheme.colorScheme.surfaceContainerLow,
+        shape = MaterialTheme.shapes.large,
+        modifier = Modifier.fillMaxWidth(),
+    ) {
+        ListItem(
+            headlineContent = { Text(title) },
+            supportingContent = { Text(summary) },
+            leadingContent = { TonalIcon(icon, contentDescription = null) },
+            colors = ListItemDefaults.colors(
+                containerColor = androidx.compose.ui.graphics.Color.Transparent,
+            ),
+        )
+    }
+}
+
+@Composable
+private fun SettingsActionRow(
+    icon: ImageVector,
+    title: String,
+    summary: String,
+    enabled: Boolean = true,
+    destructive: Boolean = false,
+    onClick: () -> Unit,
+) {
+    val contentColor = when {
+        !enabled -> MaterialTheme.colorScheme.onSurface.copy(alpha = 0.38f)
+        destructive -> MaterialTheme.colorScheme.error
+        else -> MaterialTheme.colorScheme.primary
+    }
+    Surface(
+        color = MaterialTheme.colorScheme.surfaceContainerLow,
+        shape = MaterialTheme.shapes.large,
+        onClick = onClick,
+        enabled = enabled,
+        modifier = Modifier.fillMaxWidth(),
+    ) {
+        ListItem(
+            headlineContent = { Text(title, color = contentColor) },
+            supportingContent = { Text(summary) },
+            leadingContent = {
+                Icon(icon, contentDescription = null, tint = contentColor)
+            },
+            colors = ListItemDefaults.colors(
+                containerColor = androidx.compose.ui.graphics.Color.Transparent,
+            ),
         )
     }
 }

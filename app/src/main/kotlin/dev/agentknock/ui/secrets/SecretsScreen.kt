@@ -20,6 +20,7 @@ import androidx.compose.foundation.layout.BoxWithConstraints
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.FlowRow
 import androidx.compose.foundation.layout.Row
+import androidx.compose.foundation.layout.PaddingValues
 import androidx.compose.foundation.layout.Spacer
 import androidx.compose.foundation.layout.WindowInsets
 import androidx.compose.foundation.layout.fillMaxHeight
@@ -102,6 +103,9 @@ import androidx.lifecycle.Lifecycle
 import androidx.lifecycle.LifecycleEventObserver
 import dev.agentknock.R
 import dev.agentknock.presentation.formatTimestamp
+import dev.agentknock.ui.components.InformationRow
+import dev.agentknock.ui.components.InformationSurface
+import dev.agentknock.ui.components.TonalIcon
 import dev.agentknock.storage.secret.CreateEnvironmentVariableResult
 import dev.agentknock.storage.secret.CreateSecretResult
 import dev.agentknock.storage.secret.EnvironmentVariableMetadata
@@ -541,7 +545,6 @@ private fun SecretList(
                 }
             },
         )
-        HorizontalDivider()
         if (secrets.isEmpty()) {
             EmptyMessage(
                 title = stringResource(R.string.no_secrets),
@@ -549,53 +552,58 @@ private fun SecretList(
                 modifier = Modifier.fillMaxSize(),
             )
         } else {
-            LazyColumn(Modifier.fillMaxSize()) {
-                itemsIndexed(secrets, key = { _, secret -> secret.id }) { index, secret ->
+            LazyColumn(
+                modifier = Modifier.fillMaxSize(),
+                contentPadding = PaddingValues(start = 16.dp, end = 16.dp, top = 4.dp, bottom = 16.dp),
+                verticalArrangement = Arrangement.spacedBy(8.dp),
+            ) {
+                items(secrets, key = SecretSummary::id) { secret ->
                     val selected = secret.id == selectedSecretId
-                    ListItem(
-                        headlineContent = {
-                            Text(
-                                secret.name,
-                                maxLines = 1,
-                                overflow = TextOverflow.Ellipsis,
-                            )
+                    Surface(
+                        color = if (selected) {
+                            MaterialTheme.colorScheme.secondaryContainer
+                        } else {
+                            MaterialTheme.colorScheme.surfaceContainerLow
                         },
-                        supportingContent = {
-                            Column(verticalArrangement = Arrangement.spacedBy(2.dp)) {
-                                if (secret.description.isNotBlank()) {
+                        shape = MaterialTheme.shapes.large,
+                        onClick = { onSelect(secret.id) },
+                        modifier = Modifier.fillMaxWidth().semantics { this.selected = selected },
+                    ) {
+                        ListItem(
+                            headlineContent = {
+                                Text(
+                                    secret.name,
+                                    maxLines = 1,
+                                    overflow = TextOverflow.Ellipsis,
+                                )
+                            },
+                            supportingContent = {
+                                Column(verticalArrangement = Arrangement.spacedBy(2.dp)) {
+                                    if (secret.description.isNotBlank()) {
+                                        Text(
+                                            secret.description,
+                                            maxLines = 2,
+                                            overflow = TextOverflow.Ellipsis,
+                                        )
+                                    }
                                     Text(
-                                        secret.description,
-                                        maxLines = 2,
-                                        overflow = TextOverflow.Ellipsis,
+                                        "${secret.type.displayName()} " +
+                                            "(${secret.environmentVariableCount})",
+                                        style = MaterialTheme.typography.labelMedium,
                                     )
                                 }
-                                Text(
-                                    "${secret.type.displayName()} " +
-                                        "(${secret.environmentVariableCount})",
-                                    style = MaterialTheme.typography.labelMedium,
-                                )
-                            }
-                        },
-                        colors = ListItemDefaults.colors(
-                            containerColor = if (selected) {
-                                MaterialTheme.colorScheme.secondaryContainer
-                            } else {
-                                MaterialTheme.colorScheme.surface
                             },
-                        ),
-                        trailingContent = {
-                            Icon(
-                                Icons.AutoMirrored.Outlined.NavigateNext,
-                                contentDescription = null,
-                            )
-                        },
-                        modifier = Modifier
-                            .fillMaxWidth()
-                            .clickable { onSelect(secret.id) }
-                            .semantics { this.selected = selected },
-                    )
-                    if (index < secrets.lastIndex) {
-                        HorizontalDivider(Modifier.padding(start = 20.dp))
+                            leadingContent = {
+                                TonalIcon(Icons.Outlined.Lock, contentDescription = null)
+                            },
+                            colors = ListItemDefaults.colors(containerColor = androidx.compose.ui.graphics.Color.Transparent),
+                            trailingContent = {
+                                Icon(
+                                    Icons.AutoMirrored.Outlined.NavigateNext,
+                                    contentDescription = null,
+                                )
+                            },
+                        )
                     }
                 }
             }
@@ -662,65 +670,55 @@ private fun SecretDetail(
                 }
             },
         )
-        Column(
-            modifier = Modifier
-                .fillMaxWidth()
-                .padding(horizontal = 20.dp, vertical = 12.dp),
-            verticalArrangement = Arrangement.spacedBy(4.dp),
+        LazyColumn(
+            modifier = Modifier.fillMaxSize(),
+            contentPadding = PaddingValues(
+                start = 20.dp,
+                end = 20.dp,
+                top = 8.dp,
+                bottom = 20.dp,
+            ),
+            verticalArrangement = Arrangement.spacedBy(12.dp),
         ) {
-            if (secret.description.isNotBlank()) {
-                Text(
-                    secret.description,
-                    style = MaterialTheme.typography.bodyLarge,
-                    color = MaterialTheme.colorScheme.onSurfaceVariant,
-                )
+            item {
+                InformationSurface {
+                    if (secret.description.isNotBlank()) {
+                        Text(
+                            secret.description,
+                            style = MaterialTheme.typography.bodyLarge,
+                        )
+                    }
+                    InformationRow(stringResource(R.string.secret_type), secret.type.displayName())
+                }
             }
-            Text(
-                stringResource(R.string.secret_type),
-                style = MaterialTheme.typography.labelSmall,
-                color = MaterialTheme.colorScheme.onSurfaceVariant,
-            )
-            Text(
-                secret.type.displayName(),
-                style = MaterialTheme.typography.titleMedium,
-            )
-        }
-        HorizontalDivider()
-        FlowRow(
-            modifier = Modifier
-                .fillMaxWidth()
-                .padding(20.dp),
-            horizontalArrangement = Arrangement.SpaceBetween,
-            itemVerticalAlignment = Alignment.CenterVertically,
-            verticalArrangement = Arrangement.spacedBy(8.dp),
-            maxItemsInEachRow = if (fontScale >= 1.5f) 1 else Int.MAX_VALUE,
-        ) {
-            Text(
-                "Environment variables",
-                style = MaterialTheme.typography.titleLarge,
-            )
-            FilledTonalButton(onClick = onAddVariable) {
-                Icon(Icons.Outlined.Add, contentDescription = null)
-                Spacer(Modifier.width(6.dp))
-                Text(stringResource(R.string.add_variable))
+            item {
+                FlowRow(
+                    modifier = Modifier.fillMaxWidth(),
+                    horizontalArrangement = Arrangement.SpaceBetween,
+                    itemVerticalAlignment = Alignment.CenterVertically,
+                    verticalArrangement = Arrangement.spacedBy(8.dp),
+                    maxItemsInEachRow = if (fontScale >= 1.5f) 1 else Int.MAX_VALUE,
+                ) {
+                    Text(
+                        "Environment variables",
+                        style = MaterialTheme.typography.titleLarge,
+                    )
+                    FilledTonalButton(onClick = onAddVariable) {
+                        Icon(Icons.Outlined.Add, contentDescription = null)
+                        Spacer(Modifier.width(6.dp))
+                        Text(stringResource(R.string.add_variable))
+                    }
+                }
             }
-        }
-        if (secret.environmentVariables.isEmpty()) {
-            EmptyMessage(
-                title = stringResource(R.string.no_variables),
-                description = stringResource(R.string.no_variables_description),
-                modifier = Modifier.fillMaxSize(),
-            )
-        } else {
-            LazyColumn(
-                modifier = Modifier.fillMaxSize(),
-                contentPadding = androidx.compose.foundation.layout.PaddingValues(
-                    start = 20.dp,
-                    end = 20.dp,
-                    bottom = 20.dp,
-                ),
-                verticalArrangement = Arrangement.spacedBy(12.dp),
-            ) {
+            if (secret.environmentVariables.isEmpty()) {
+                item {
+                    EmptyMessage(
+                        title = stringResource(R.string.no_variables),
+                        description = stringResource(R.string.no_variables_description),
+                        modifier = Modifier.fillMaxWidth().padding(vertical = 48.dp),
+                    )
+                }
+            } else {
                 items(secret.environmentVariables, key = EnvironmentVariableMetadata::id) { variable ->
                     EnvironmentVariableCard(
                         variable = variable,
@@ -732,20 +730,9 @@ private fun SecretDetail(
                     )
                 }
                 item {
-                    Column(
-                        modifier = Modifier.padding(top = 8.dp, bottom = 4.dp),
-                        verticalArrangement = Arrangement.spacedBy(2.dp),
-                    ) {
-                        Text(
-                            stringResource(R.string.created, formatTimestamp(secret.createdAt)),
-                            style = MaterialTheme.typography.labelSmall,
-                            color = MaterialTheme.colorScheme.onSurfaceVariant,
-                        )
-                        Text(
-                            stringResource(R.string.updated, formatTimestamp(secret.updatedAt)),
-                            style = MaterialTheme.typography.labelSmall,
-                            color = MaterialTheme.colorScheme.onSurfaceVariant,
-                        )
+                    InformationSurface(modifier = Modifier.padding(top = 8.dp)) {
+                        InformationRow("Created", formatTimestamp(secret.createdAt))
+                        InformationRow("Updated", formatTimestamp(secret.updatedAt))
                     }
                 }
             }
@@ -783,7 +770,7 @@ private fun EnvironmentVariableCard(
     val displayedValue = if (variable.sensitive) revealedValue else publicValue
     Surface(
         color = MaterialTheme.colorScheme.surfaceContainerLow,
-        shape = RoundedCornerShape(12.dp),
+        shape = MaterialTheme.shapes.medium,
         tonalElevation = 1.dp,
     ) {
         Column(

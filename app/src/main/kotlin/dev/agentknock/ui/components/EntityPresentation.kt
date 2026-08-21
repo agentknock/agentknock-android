@@ -34,6 +34,7 @@ internal fun ClientIdentity(
             Icons.Outlined.Computer,
             contentDescription = null,
             tint = MaterialTheme.colorScheme.onSurfaceVariant,
+            modifier = Modifier.size(20.dp),
         )
         Text(
             name,
@@ -82,12 +83,12 @@ internal fun SecretIdentity(
         shape = MaterialTheme.shapes.small,
     ) {
         Row(
-            modifier = Modifier.padding(horizontal = 9.dp, vertical = 5.dp),
+            modifier = Modifier.padding(horizontal = 8.dp, vertical = 4.dp),
             horizontalArrangement = Arrangement.spacedBy(5.dp),
             verticalAlignment = Alignment.CenterVertically,
         ) {
-            Icon(Icons.Outlined.Key, contentDescription = null, modifier = Modifier.size(16.dp))
-            Text(name, style = MaterialTheme.typography.labelLarge)
+            Icon(Icons.Outlined.Key, contentDescription = null, modifier = Modifier.size(14.dp))
+            Text(name, style = MaterialTheme.typography.labelMedium)
         }
     }
 }

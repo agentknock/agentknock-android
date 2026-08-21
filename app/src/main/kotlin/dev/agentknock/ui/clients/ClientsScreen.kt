@@ -12,6 +12,7 @@ import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.BoxWithConstraints
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.Row
+import androidx.compose.foundation.layout.PaddingValues
 import androidx.compose.foundation.layout.Spacer
 import androidx.compose.foundation.layout.WindowInsets
 import androidx.compose.foundation.layout.fillMaxHeight
@@ -43,6 +44,7 @@ import androidx.compose.material3.HorizontalDivider
 import androidx.compose.material3.Icon
 import androidx.compose.material3.IconButton
 import androidx.compose.material3.ListItem
+import androidx.compose.material3.ListItemDefaults
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.OutlinedButton
 import androidx.compose.material3.OutlinedTextField
@@ -76,6 +78,9 @@ import dev.agentknock.storage.request.ClientChangeResult
 import dev.agentknock.storage.request.ClientDetails
 import dev.agentknock.storage.request.ClientSummary
 import dev.agentknock.storage.vault.DeviceIdentity
+import dev.agentknock.ui.components.InformationRow
+import dev.agentknock.ui.components.InformationSurface
+import dev.agentknock.ui.components.TonalIcon
 import kotlinx.coroutines.launch
 
 @Composable
@@ -273,41 +278,57 @@ private fun ClientList(
                 }
             }
         } else {
-            LazyColumn(Modifier.fillMaxSize()) {
-                itemsIndexed(clients, key = { _, client -> client.clientId }) { index, client ->
-                    ListItem(
-                        headlineContent = { Text(client.name) },
-                        supportingContent = {
-                            val hostname = client.hostname
-                                ?.takeUnless { it.equals(client.name, ignoreCase = true) }
-                            val platform = client.platform?.let(::formatPlatformName)
-                            val machine = when {
-                                hostname != null && platform != null -> "$platform on $hostname"
-                                hostname != null -> hostname
-                                platform != null -> platform
-                                else -> ""
-                            }
-                            if (machine.isNotEmpty()) Text(machine)
-                        },
-                        leadingContent = { Icon(Icons.Outlined.Computer, contentDescription = null) },
-                        trailingContent = {
-                            Row(
-                                horizontalArrangement = Arrangement.spacedBy(8.dp),
-                                verticalAlignment = Alignment.CenterVertically,
-                            ) {
-                                client.visibleState()?.let {
-                                    Text(it, color = stateColor(client.state))
+            LazyColumn(
+                modifier = Modifier.fillMaxSize(),
+                contentPadding = PaddingValues(start = 16.dp, end = 16.dp, top = 4.dp, bottom = 16.dp),
+                verticalArrangement = Arrangement.spacedBy(8.dp),
+            ) {
+                itemsIndexed(clients, key = { _, client -> client.clientId }) { _, client ->
+                    Surface(
+                        color = MaterialTheme.colorScheme.surfaceContainerLow,
+                        shape = MaterialTheme.shapes.large,
+                        onClick = { onOpen(client.clientId) },
+                        modifier = Modifier.fillMaxWidth(),
+                    ) {
+                        ListItem(
+                            headlineContent = { Text(client.name) },
+                            supportingContent = {
+                                val hostname = client.hostname
+                                    ?.takeUnless { it.equals(client.name, ignoreCase = true) }
+                                val platform = client.platform?.let(::formatPlatformName)
+                                val machine = when {
+                                    hostname != null && platform != null -> "$platform on $hostname"
+                                    hostname != null -> hostname
+                                    platform != null -> platform
+                                    else -> ""
                                 }
-                                Icon(
-                                    Icons.AutoMirrored.Outlined.NavigateNext,
-                                    contentDescription = null,
-                                )
-                            }
-                        },
-                        modifier = Modifier.clickable { onOpen(client.clientId) },
-                    )
-                    if (index < clients.lastIndex) {
-                        HorizontalDivider(Modifier.padding(start = 72.dp))
+                                if (machine.isNotEmpty()) Text(machine)
+                            },
+                            leadingContent = {
+                                TonalIcon(Icons.Outlined.Computer, contentDescription = null)
+                            },
+                            trailingContent = {
+                                Row(
+                                    horizontalArrangement = Arrangement.spacedBy(8.dp),
+                                    verticalAlignment = Alignment.CenterVertically,
+                                ) {
+                                    client.visibleState()?.let {
+                                        Text(
+                                            it,
+                                            style = MaterialTheme.typography.labelMedium,
+                                            color = stateColor(client.state),
+                                        )
+                                    }
+                                    Icon(
+                                        Icons.AutoMirrored.Outlined.NavigateNext,
+                                        contentDescription = null,
+                                    )
+                                }
+                            },
+                            colors = ListItemDefaults.colors(
+                                containerColor = androidx.compose.ui.graphics.Color.Transparent,
+                            ),
+                        )
                     }
                 }
             }
@@ -355,17 +376,16 @@ private fun ClientDetail(
         Column(
             Modifier.fillMaxSize().verticalScroll(rememberScrollState())
                 .padding(horizontal = 20.dp, vertical = 12.dp),
-            verticalArrangement = Arrangement.spacedBy(20.dp),
+            verticalArrangement = Arrangement.spacedBy(16.dp),
         ) {
             val pending = client.desiredState?.takeIf { it != client.state }
-            ClientStateBadge(client.state, pending)
-            Text(
-                client.state.explanation(),
-                color = MaterialTheme.colorScheme.onSurfaceVariant,
-            )
+            InformationSurface {
+                ClientStateBadge(client.state, pending)
+                Text(client.state.explanation())
+            }
 
-            Text("Pairing", style = MaterialTheme.typography.titleMedium)
-            Column(verticalArrangement = Arrangement.spacedBy(12.dp)) {
+            InformationSurface {
+                Text("Pairing", style = MaterialTheme.typography.titleMedium)
                 client.pairedAt?.let {
                     ClientField("Paired", formatTimestamp(it))
                 }
@@ -375,9 +395,6 @@ private fun ClientDetail(
                     monospace = true,
                     onCopy = { copy("Client ID", client.clientId) },
                 )
-            }
-
-            Column(verticalArrangement = Arrangement.spacedBy(8.dp)) {
                 when (client.state) {
                     RelayClientState.ACTIVE -> OutlinedButton(
                         onClick = { confirmation = RelayClientState.SUSPENDED },
@@ -414,13 +431,12 @@ private fun ClientDetail(
                 }
             }
 
-            HorizontalDivider()
-            Text("Reported information", style = MaterialTheme.typography.titleMedium)
-            Text(
-                "Supplied by the client when it paired.",
-                color = MaterialTheme.colorScheme.onSurfaceVariant,
-            )
-            Column(verticalArrangement = Arrangement.spacedBy(12.dp)) {
+            InformationSurface {
+                Text("Reported information", style = MaterialTheme.typography.titleMedium)
+                Text(
+                    "Supplied by the client when it paired.",
+                    color = MaterialTheme.colorScheme.onSurfaceVariant,
+                )
                 ClientField("Hostname", client.hostname)
                 ClientField("Platform", client.platform?.let(::formatPlatformName))
                 ClientField("Architecture", client.architecture)
@@ -434,22 +450,24 @@ private fun ClientDetail(
                 )
             }
             if (client.state != RelayClientState.REVOKED) {
-                HorizontalDivider()
-                Text(
-                    "Revoking is permanent. This client must be paired again before it can reconnect.",
-                    color = MaterialTheme.colorScheme.onSurfaceVariant,
-                )
-                OutlinedButton(
-                    onClick = { confirmation = RelayClientState.REVOKED },
-                    modifier = Modifier.fillMaxWidth(),
-                    colors = ButtonDefaults.outlinedButtonColors(
-                        contentColor = MaterialTheme.colorScheme.error,
-                    ),
-                    border = BorderStroke(1.dp, MaterialTheme.colorScheme.error),
-                ) {
-                    Icon(Icons.Outlined.Block, contentDescription = null)
-                    Spacer(Modifier.width(8.dp))
-                    Text("Revoke client")
+                InformationSurface {
+                    Text("Remove access", style = MaterialTheme.typography.titleMedium)
+                    Text(
+                        "Revoking is permanent. This client must be paired again before it can reconnect.",
+                        color = MaterialTheme.colorScheme.onSurfaceVariant,
+                    )
+                    OutlinedButton(
+                        onClick = { confirmation = RelayClientState.REVOKED },
+                        modifier = Modifier.fillMaxWidth(),
+                        colors = ButtonDefaults.outlinedButtonColors(
+                            contentColor = MaterialTheme.colorScheme.error,
+                        ),
+                        border = BorderStroke(1.dp, MaterialTheme.colorScheme.error),
+                    ) {
+                        Icon(Icons.Outlined.Block, contentDescription = null)
+                        Spacer(Modifier.width(8.dp))
+                        Text("Revoke client")
+                    }
                 }
             }
         }
@@ -520,26 +538,18 @@ private fun ClientField(
     onCopy: (() -> Unit)? = null,
 ) {
     if (value.isNullOrBlank()) return
-    Row(
-        modifier = Modifier.fillMaxWidth(),
-        verticalAlignment = Alignment.CenterVertically,
-    ) {
-        Column(Modifier.weight(1f)) {
-            Text(
-                label,
-                style = MaterialTheme.typography.labelMedium,
-                color = MaterialTheme.colorScheme.onSurfaceVariant,
-            )
-            SelectionContainer {
-                Text(value, fontFamily = if (monospace) FontFamily.Monospace else null)
+    InformationRow(
+        label = label,
+        value = value,
+        monospace = monospace,
+        trailingContent = onCopy?.let { copy ->
+            {
+                IconButton(onClick = copy) {
+                    Icon(Icons.Outlined.ContentCopy, contentDescription = "Copy $label")
+                }
             }
-        }
-        onCopy?.let {
-            IconButton(onClick = it) {
-                Icon(Icons.Outlined.ContentCopy, contentDescription = "Copy $label")
-            }
-        }
-    }
+        },
+    )
 }
 
 @Composable

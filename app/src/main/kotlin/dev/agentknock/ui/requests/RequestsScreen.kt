@@ -7,12 +7,14 @@ import androidx.compose.foundation.BorderStroke
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.background
 import androidx.compose.foundation.shape.RoundedCornerShape
+import androidx.compose.ui.draw.clip
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.BoxWithConstraints
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.FlowRow
 import androidx.compose.foundation.layout.Row
+import androidx.compose.foundation.layout.PaddingValues
 import androidx.compose.foundation.layout.Spacer
 import androidx.compose.foundation.layout.WindowInsets
 import androidx.compose.foundation.layout.fillMaxHeight
@@ -45,6 +47,7 @@ import androidx.compose.material3.Button
 import androidx.compose.material3.Card
 import androidx.compose.material3.CardDefaults
 import androidx.compose.material3.CircularProgressIndicator
+import androidx.compose.material3.FilledTonalButton
 import androidx.compose.material3.HorizontalDivider
 import androidx.compose.material3.Icon
 import androidx.compose.material3.IconButton
@@ -77,7 +80,10 @@ import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.semantics.contentDescription
+import androidx.compose.ui.semantics.CustomAccessibilityAction
+import androidx.compose.ui.semantics.customActions
 import androidx.compose.ui.semantics.semantics
+import androidx.compose.ui.semantics.stateDescription
 import androidx.compose.ui.text.font.FontFamily
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
@@ -108,6 +114,8 @@ import dev.agentknock.storage.request.SecretUploadVariableValue
 import dev.agentknock.storage.request.RequestSyncResult
 import dev.agentknock.storage.vault.DeviceIdentity
 import dev.agentknock.ui.components.ClientIdentity
+import dev.agentknock.ui.components.InformationRow
+import dev.agentknock.ui.components.InformationSurface
 import dev.agentknock.ui.components.SecretIdentities
 import kotlinx.coroutines.launch
 
@@ -355,7 +363,12 @@ private fun RequestList(
                 }
                 IconButton(onClick = onRefresh, enabled = !syncing) {
                     if (syncing) {
-                        CircularProgressIndicator(Modifier.size(20.dp), strokeWidth = 2.dp)
+                        CircularProgressIndicator(
+                            Modifier.size(20.dp).semantics {
+                                contentDescription = "Refreshing requests"
+                            },
+                            strokeWidth = 2.dp,
+                        )
                     } else {
                         Icon(Icons.Outlined.Refresh, contentDescription = "Refresh")
                     }
@@ -404,15 +417,19 @@ private fun RequestList(
                 }
             }
         } else {
-            LazyColumn(Modifier.fillMaxSize(), state = listState) {
-                itemsIndexed(requests, key = { _, request -> request.id }) { index, request ->
+            LazyColumn(
+                modifier = Modifier.fillMaxSize(),
+                state = listState,
+                contentPadding = PaddingValues(start = 16.dp, end = 16.dp, top = 4.dp, bottom = 16.dp),
+                verticalArrangement = Arrangement.spacedBy(8.dp),
+            ) {
+                itemsIndexed(requests, key = { _, request -> request.id }) { _, request ->
                     RequestRow(
                         request = request,
                         onClick = { onOpen(request.id) },
                         onApprove = { onApprove(request) },
                         onReject = { onReject(request) },
                     )
-                    if (index < requests.lastIndex) HorizontalDivider()
                 }
             }
         }
@@ -429,7 +446,7 @@ private fun RequestRow(
     val canApprove = request.secretUseState == SecretUseRequestState.APPROVAL_PENDING
     val canReject = request.canReject()
     val swipeState = rememberSwipeToDismissBoxState(
-        positionalThreshold = { distance -> distance * 0.3f },
+        positionalThreshold = { distance -> distance * 0.65f },
     )
     LaunchedEffect(swipeState.currentValue) {
         when (swipeState.currentValue) {
@@ -441,6 +458,25 @@ private fun RequestRow(
     }
     SwipeToDismissBox(
         state = swipeState,
+        modifier = Modifier
+            .fillMaxWidth()
+            .clip(MaterialTheme.shapes.large)
+            .semantics {
+                customActions = buildList {
+                    if (canApprove) {
+                        add(CustomAccessibilityAction("Approve once") {
+                            onApprove()
+                            true
+                        })
+                    }
+                    if (canReject) {
+                        add(CustomAccessibilityAction("Reject") {
+                            onReject()
+                            true
+                        })
+                    }
+                }
+            },
         enableDismissFromStartToEnd = canApprove,
         enableDismissFromEndToStart = canReject,
         backgroundContent = {
@@ -484,62 +520,75 @@ private fun RequestRow(
 @Composable
 private fun RequestRowContent(request: InboxRequestSummary, onClick: () -> Unit) {
     val rejected = request.wasRejected()
-    val containerColor = when {
-        request.state == InboxRequestState.ACTION_REQUIRED ->
-            MaterialTheme.colorScheme.primaryContainer
-        rejected -> MaterialTheme.colorScheme.surfaceVariant
-        else -> MaterialTheme.colorScheme.surface
+    val actionRequired = request.state == InboxRequestState.ACTION_REQUIRED
+    val containerColor = if (rejected) {
+        MaterialTheme.colorScheme.surfaceContainer
+    } else {
+        MaterialTheme.colorScheme.surfaceContainerLow
     }
     Surface(
         color = containerColor,
+        contentColor = if (rejected) {
+            MaterialTheme.colorScheme.onSurfaceVariant
+        } else {
+            MaterialTheme.colorScheme.onSurface
+        },
+        shape = MaterialTheme.shapes.large,
+        border = if (actionRequired) {
+            BorderStroke(1.dp, MaterialTheme.colorScheme.primary)
+        } else {
+            null
+        },
+        tonalElevation = if (actionRequired) 2.dp else 0.dp,
+        onClick = onClick,
         modifier = Modifier
-            .fillMaxWidth()
-            .clickable(onClick = onClick),
+            .fillMaxWidth(),
     ) {
         Column(
-            modifier = Modifier.fillMaxWidth().padding(horizontal = 16.dp, vertical = 12.dp),
-            verticalArrangement = Arrangement.spacedBy(8.dp),
+            modifier = Modifier.fillMaxWidth().padding(horizontal = 16.dp, vertical = 14.dp),
+            verticalArrangement = Arrangement.spacedBy(7.dp),
         ) {
             Row(
                 modifier = Modifier.fillMaxWidth(),
-                horizontalArrangement = Arrangement.spacedBy(12.dp),
-                verticalAlignment = Alignment.Top,
+                horizontalArrangement = Arrangement.spacedBy(8.dp),
+                verticalAlignment = Alignment.CenterVertically,
             ) {
-                Column(Modifier.weight(1f), verticalArrangement = Arrangement.spacedBy(2.dp)) {
-                    if (request.command != null) {
-                        Text(
-                            request.title,
-                            style = MaterialTheme.typography.labelMedium,
-                            color = MaterialTheme.colorScheme.onSurfaceVariant,
-                        )
-                    }
-                    Text(
-                        request.command?.let {
-                            renderShellCommand(it, request.arguments)
-                        } ?: request.title,
-                        style = MaterialTheme.typography.titleMedium,
-                        fontFamily = if (request.command != null) {
-                            FontFamily.Monospace
-                        } else {
-                            FontFamily.Default
-                        },
-                        maxLines = 2,
-                        overflow = TextOverflow.Ellipsis,
-                    )
-                    request.listSummary?.let {
-                        Text(
-                            it,
-                            style = MaterialTheme.typography.bodyMedium,
-                            color = MaterialTheme.colorScheme.onSurfaceVariant,
-                        )
-                    }
-                }
+                Text(
+                    request.title,
+                    style = if (request.command == null) {
+                        MaterialTheme.typography.titleMedium
+                    } else {
+                        MaterialTheme.typography.labelMedium
+                    },
+                    color = if (request.command == null) {
+                        Color.Unspecified
+                    } else {
+                        MaterialTheme.colorScheme.onSurfaceVariant
+                    },
+                    modifier = Modifier.weight(1f),
+                )
                 RequestStatusBadge(request)
                 Icon(
                     Icons.AutoMirrored.Outlined.NavigateNext,
                     contentDescription = null,
                     tint = MaterialTheme.colorScheme.onSurfaceVariant,
                     modifier = Modifier.padding(top = 2.dp),
+                )
+            }
+            request.command?.let {
+                Text(
+                    renderShellCommand(it, request.arguments),
+                    style = MaterialTheme.typography.titleMedium,
+                    fontFamily = FontFamily.Monospace,
+                    maxLines = 2,
+                    overflow = TextOverflow.Ellipsis,
+                )
+            }
+            request.listSummary?.let {
+                Text(
+                    it,
+                    style = MaterialTheme.typography.bodyMedium,
+                    color = MaterialTheme.colorScheme.onSurfaceVariant,
                 )
             }
             FlowRow(
@@ -557,7 +606,7 @@ private fun RequestRowContent(request: InboxRequestSummary, onClick: () -> Unit)
             }
             Text(
                 formatTimestamp(request.receivedAt),
-                style = MaterialTheme.typography.labelSmall,
+                style = MaterialTheme.typography.bodySmall,
                 color = MaterialTheme.colorScheme.onSurfaceVariant,
                 modifier = Modifier.align(Alignment.End),
             )
@@ -576,39 +625,28 @@ private fun PairingDetail(
 ) {
     val pairing = checkNotNull(request.pairing)
     DetailPage("Pairing", onBack, modifier, showBack = showBack) {
-        StatusLine(
-            pairing.pairingState.label(),
-            pairing.pairingState.isError() ||
-                (pairing.pairingState == PairingState.RECEIVING && pairing.error != null),
-        )
-        Text(
-            "Current client name",
-            style = MaterialTheme.typography.labelMedium,
-            color = MaterialTheme.colorScheme.onSurfaceVariant,
-        )
-        Text(
-            pairing.clientName,
-            style = MaterialTheme.typography.headlineSmall,
-        )
-        val reported = listOfNotNull(
-            pairing.hostname,
-            pairing.platform?.let(::formatPlatformName),
-            pairing.architecture,
-        ).joinToString(" · ")
-        if (reported.isNotEmpty()) {
-            Text(
-                "Reported by client at pairing",
-                style = MaterialTheme.typography.labelMedium,
-                color = MaterialTheme.colorScheme.onSurfaceVariant,
+        InformationSurface {
+            StatusLine(
+                pairing.pairingState.label(),
+                pairing.pairingState.isError() ||
+                    (pairing.pairingState == PairingState.RECEIVING && pairing.error != null),
             )
-            Text(reported, color = MaterialTheme.colorScheme.onSurfaceVariant)
-        }
-        DetailValue("Request received", formatTimestamp(request.receivedAt))
-        pairing.decidedAt?.let {
-            DetailValue("User decision", formatTimestamp(it))
-        }
-        request.completedAt?.let {
-            DetailValue("Pairing completed", formatTimestamp(it))
+            InformationRow("Client", pairing.clientName)
+            val reported = listOfNotNull(
+                pairing.hostname,
+                pairing.platform?.let(::formatPlatformName),
+                pairing.architecture,
+            ).joinToString(" · ")
+            if (reported.isNotEmpty()) {
+                InformationRow("Reported device", reported)
+            }
+            InformationRow("Received", formatTimestamp(request.receivedAt))
+            pairing.decidedAt?.let {
+                InformationRow("User decision", formatTimestamp(it))
+            }
+            request.completedAt?.let {
+                InformationRow("Completed", formatTimestamp(it))
+            }
         }
 
         when (pairing.pairingState) {
@@ -616,7 +654,10 @@ private fun PairingDetail(
                 Text("Which code is shown by the client?", style = MaterialTheme.typography.titleLarge)
                 Text("Choose the exact same code. A wrong choice rejects the pairing.")
                 pairing.sasOptions.forEachIndexed { index, sas ->
-                    Button(onClick = { onChooseSas(index) }, modifier = Modifier.fillMaxWidth()) {
+                    FilledTonalButton(
+                        onClick = { onChooseSas(index) },
+                        modifier = Modifier.fillMaxWidth(),
+                    ) {
                         Text(sas, fontFamily = FontFamily.Monospace)
                     }
                 }
@@ -717,16 +758,33 @@ private fun SecretUseDetail(
             null
         },
     ) {
-        StatusLine(secretUse.statusLabel(), secretUse.isError())
-        ClientIdentity(secretUse.clientName)
-        SecretIdentities(secretUse.secrets)
-        DetailValue("Received", formatTimestamp(request.receivedAt))
+        InformationSurface {
+            StatusLine(secretUse.statusLabel(), secretUse.isError())
+            ClientIdentity(secretUse.clientName)
+            SecretIdentities(secretUse.secrets)
+            val environmentVariableCount = secretUse.secretDetails.sumOf {
+                it.environmentVariableNames.size
+            }
+            if (environmentVariableCount > 0) {
+                Text(
+                    "$environmentVariableCount environment ${if (environmentVariableCount == 1) {
+                        "variable requested"
+                    } else {
+                        "variables requested"
+                    }}",
+                    style = MaterialTheme.typography.bodySmall,
+                    color = MaterialTheme.colorScheme.onSurfaceVariant,
+                )
+            }
+            InformationRow("Received", formatTimestamp(request.receivedAt))
+        }
 
         secretUse.reason?.takeIf(String::isNotBlank)?.let { reason ->
             Card(
                 colors = CardDefaults.cardColors(
                     containerColor = MaterialTheme.colorScheme.surfaceContainerLow,
                 ),
+                shape = MaterialTheme.shapes.large,
             ) {
                 Column(Modifier.padding(16.dp), verticalArrangement = Arrangement.spacedBy(4.dp)) {
                     Text("Reason reported by client", style = MaterialTheme.typography.labelLarge)
@@ -743,8 +801,7 @@ private fun SecretUseDetail(
         val renderedCommand = renderShellCommand(secretUse.command, secretUse.arguments)
         Surface(
             color = MaterialTheme.colorScheme.surfaceContainerLow,
-            shape = RoundedCornerShape(12.dp),
-            border = BorderStroke(1.dp, MaterialTheme.colorScheme.outlineVariant),
+            shape = MaterialTheme.shapes.large,
             modifier = Modifier.fillMaxWidth(),
         ) {
             Column(
@@ -848,28 +905,10 @@ private fun SecretUploadDetail(
         onDispose { lifecycle.removeObserver(observer) }
     }
     DetailPage(
-        title = "${upload.mode.titleLabel()} $approvedName",
+        title = "Secret upload",
         onBack = onBack,
         modifier = modifier,
         showBack = showBack,
-        titleContent = {
-            Row(verticalAlignment = Alignment.CenterVertically) {
-                Text(
-                    "${upload.mode.titleLabel()} $approvedName",
-                    modifier = Modifier.weight(1f),
-                    maxLines = 1,
-                    overflow = TextOverflow.Ellipsis,
-                )
-                if (
-                    upload.mode == SecretUploadMode.CREATE &&
-                    upload.state == SecretUploadRequestState.REVIEW_PENDING
-                ) {
-                    IconButton(onClick = { editingName = true }) {
-                        Icon(Icons.Outlined.Edit, contentDescription = "Rename secret")
-                    }
-                }
-            }
-        },
         bottomContent = if (upload.state == SecretUploadRequestState.REVIEW_PENDING) {
             {
                 val reviewedCount = upload.variables.count { reviewedVariableIds.contains(it.id) }
@@ -917,12 +956,45 @@ private fun SecretUploadDetail(
             null
         },
     ) {
-        StatusLine(upload.state.label(), upload.state == SecretUploadRequestState.VERIFICATION_FAILED)
-        DetailValue("Type", "Environment variables")
-        DetailValue("Client", upload.clientName)
-        DetailValue("Received", formatTimestamp(request.receivedAt))
-        upload.description?.takeIf(String::isNotBlank)?.let {
-            DetailValue("Description", it)
+        InformationSurface {
+            StatusLine(
+                upload.state.label(),
+                upload.state == SecretUploadRequestState.VERIFICATION_FAILED,
+            )
+            Row(verticalAlignment = Alignment.CenterVertically) {
+                Text(
+                    "${upload.mode.titleLabel()} $approvedName",
+                    style = MaterialTheme.typography.titleLarge,
+                    modifier = Modifier.weight(1f),
+                    maxLines = 2,
+                    overflow = TextOverflow.Ellipsis,
+                )
+                if (
+                    upload.mode == SecretUploadMode.CREATE &&
+                    upload.state == SecretUploadRequestState.REVIEW_PENDING
+                ) {
+                    IconButton(onClick = { editingName = true }) {
+                        Icon(Icons.Outlined.Edit, contentDescription = "Rename secret")
+                    }
+                }
+            }
+            Text("Environment variables", style = MaterialTheme.typography.titleMedium)
+            ClientIdentity(upload.clientName)
+            Text(
+                "Received ${formatTimestamp(request.receivedAt)}",
+                style = MaterialTheme.typography.bodySmall,
+                color = MaterialTheme.colorScheme.onSurfaceVariant,
+            )
+            upload.description?.takeIf(String::isNotBlank)?.let {
+                Column(verticalArrangement = Arrangement.spacedBy(2.dp)) {
+                    Text(
+                        "Description",
+                        style = MaterialTheme.typography.labelMedium,
+                        color = MaterialTheme.colorScheme.onSurfaceVariant,
+                    )
+                    Text(it)
+                }
+            }
         }
 
         if (upload.mode != SecretUploadMode.CREATE) {
@@ -950,12 +1022,13 @@ private fun SecretUploadDetail(
             } else {
                 "Uploaded environment variable names"
             },
-            style = MaterialTheme.typography.titleLarge,
+            style = MaterialTheme.typography.titleMedium,
         )
         if (upload.state == SecretUploadRequestState.REVIEW_PENDING) {
             Text(
                 "Review each value and choose whether it should require device authentication " +
                     "after saving.",
+                style = MaterialTheme.typography.bodyMedium,
                 color = MaterialTheme.colorScheme.onSurfaceVariant,
             )
         }
@@ -973,7 +1046,7 @@ private fun SecretUploadDetail(
         if (upload.state == SecretUploadRequestState.REVIEW_PENDING) upload.variables.forEach { variable ->
             Surface(
                 color = MaterialTheme.colorScheme.surfaceContainerLow,
-                shape = RoundedCornerShape(12.dp),
+                shape = MaterialTheme.shapes.medium,
             ) {
                 Column(
                     Modifier.fillMaxWidth().padding(12.dp),
@@ -1256,19 +1329,38 @@ private fun DetailPage(
 @Composable
 private fun Disclosure(title: String, content: @Composable () -> Unit) {
     var expanded by remember { mutableStateOf(false) }
-    Column(verticalArrangement = Arrangement.spacedBy(10.dp)) {
-        Row(
-            Modifier.fillMaxWidth().clickable { expanded = !expanded },
-            horizontalArrangement = Arrangement.SpaceBetween,
-            verticalAlignment = Alignment.CenterVertically,
-        ) {
-            Text(title, style = MaterialTheme.typography.titleMedium)
-            Icon(
-                if (expanded) Icons.Outlined.ExpandLess else Icons.Outlined.ExpandMore,
-                contentDescription = null,
-            )
+    Surface(
+        color = MaterialTheme.colorScheme.surfaceContainerLow,
+        shape = MaterialTheme.shapes.large,
+        modifier = Modifier.fillMaxWidth(),
+    ) {
+        Column {
+            Row(
+                Modifier
+                    .fillMaxWidth()
+                    .clickable { expanded = !expanded }
+                    .semantics {
+                        stateDescription = if (expanded) "Expanded" else "Collapsed"
+                    }
+                    .padding(16.dp),
+                horizontalArrangement = Arrangement.SpaceBetween,
+                verticalAlignment = Alignment.CenterVertically,
+            ) {
+                Text(title, style = MaterialTheme.typography.titleMedium)
+                Icon(
+                    if (expanded) Icons.Outlined.ExpandLess else Icons.Outlined.ExpandMore,
+                    contentDescription = null,
+                )
+            }
+            if (expanded) {
+                Column(
+                    modifier = Modifier.padding(start = 16.dp, end = 16.dp, bottom = 16.dp),
+                    verticalArrangement = Arrangement.spacedBy(12.dp),
+                ) {
+                    content()
+                }
+            }
         }
-        if (expanded) content()
     }
 }
 
@@ -1279,6 +1371,7 @@ private fun Notice(title: String, detail: String, error: Boolean = false) {
             containerColor = if (error) MaterialTheme.colorScheme.errorContainer
             else MaterialTheme.colorScheme.secondaryContainer,
         ),
+        shape = MaterialTheme.shapes.large,
     ) {
         Column(Modifier.fillMaxWidth().padding(16.dp), verticalArrangement = Arrangement.spacedBy(4.dp)) {
             Text(title, style = MaterialTheme.typography.titleMedium)
