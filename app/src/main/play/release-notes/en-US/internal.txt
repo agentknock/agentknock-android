@@ -1,1 +1,1 @@
-Improves clarity and polish across requests, secrets, clients, and settings, with safer secret handling and clearer request notifications.
+Separates encryption keys for secret values and device state, and lays the foundation for future vault recovery. This development update resets local Agentknock data; set up the device and pair clients again.
