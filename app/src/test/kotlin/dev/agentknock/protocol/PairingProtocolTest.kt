@@ -93,6 +93,7 @@ class PairingProtocolTest {
         assertEquals(1_543_953_892L, established.sas)
         assertEquals("0015 4395 3892", protocol.formatSas(established.sas))
         val metadata = protocol.decodeClientMetadata(established.applicationPlaintext)
+        assertEquals(testClientSoftware(), metadata.clientSoftware)
         assertEquals("survo", metadata.hostname)
         assertEquals("linux", metadata.platform)
         assertEquals("x86_64", metadata.architecture)
@@ -159,7 +160,8 @@ class PairingProtocolTest {
             CLIENT_ID.ulidBytes(),
         )
         val requestPlaintext =
-            """{"cli_version":"0.1.0","method":"PairingFinish"}""".encodeToByteArray()
+            """{${testClientSoftwareFields()},"method":"PairingFinish"}"""
+                .encodeToByteArray()
         val request = json.parseToJsonElement(
             """{"version":"agentknock-v1","key":"${BASE64.encodeToString(sender.encapsulation)}","ciphertext":"${BASE64.encodeToString(sender.seal(EMPTY, requestPlaintext))}"}""",
         )
@@ -174,14 +176,14 @@ class PairingProtocolTest {
             request = request,
         )
 
-        assertEquals("0.1.0", prepared.cliVersion)
         assertEquals(
             "{\"result\":\"ACCEPTED\"}",
             openResponse(sender, prepared.response).decodeToString(),
         )
 
         val completionPlaintext =
-            """{"cli_version":"0.1.0","result":"ACCEPTED"}""".encodeToByteArray()
+            """{${testClientSoftwareFields()},"result":"ACCEPTED"}"""
+                .encodeToByteArray()
         val completion = json.parseToJsonElement(
             """{"ciphertext":"${BASE64.encodeToString(sender.seal(EMPTY, completionPlaintext))}"}""",
         )
@@ -218,7 +220,7 @@ class PairingProtocolTest {
             CLIENT_ID.ulidBytes(),
         )
         val requestPlaintext =
-            """{"cli_version":"0.1.0","method":"SecretUse","secrets":["test"],"operation":{"type":"exec","command":"env","arguments":[],"working_directory":"/tmp","stdin":"NULL_DEVICE","stdout":"TERMINAL","stderr":"TERMINAL"},"launcher_chain":[]}"""
+            """{${testClientSoftwareFields()},"method":"SecretUse","secrets":["test"],"operation":{"type":"exec","command":"env","arguments":[],"working_directory":"/tmp","stdin":"NULL_DEVICE","stdout":"TERMINAL","stderr":"TERMINAL"},"launcher_chain":[]}"""
                 .encodeToByteArray()
         val request = json.parseToJsonElement(
             """{"version":"agentknock-v1","key":"${BASE64.encodeToString(requestSender.encapsulation)}","ciphertext":"${BASE64.encodeToString(requestSender.seal(EMPTY, requestPlaintext))}","rotation_key":"${BASE64.encodeToString(rotationSender.encapsulation)}"}""",
@@ -253,7 +255,8 @@ class PairingProtocolTest {
         assertArrayEquals(responsePlaintext, openResponse(requestSender, response))
 
         val completionPlaintext =
-            """{"cli_version":"0.1.0","result":"APPROVED"}""".encodeToByteArray()
+            """{${testClientSoftwareFields()},"result":"APPROVED"}"""
+                .encodeToByteArray()
         val completion = json.parseToJsonElement(
             """{"ciphertext":"${BASE64.encodeToString(requestSender.seal(EMPTY, completionPlaintext))}"}""",
         )
@@ -575,7 +578,7 @@ class PairingProtocolTest {
     }
 
     private fun pairingMetadata(): ByteArray = json.parseToJsonElement(
-        """{"cli_version":"0.1.0","platform":"linux","architecture":"x86_64","hostname":"survo","machine_id":"machine","os_version":"NixOS"}""",
+        """{${testClientSoftwareFields()},"platform":"linux","architecture":"x86_64","hostname":"survo","machine_id":"machine","os_version":"NixOS"}""",
     ).toString().encodeToByteArray()
 
     private fun baseProtocolInfo(): ByteArray =

@@ -121,7 +121,7 @@ internal data class PairingEntity(
     @ColumnInfo(name = "correct_sas_index")
     val correctSasIndex: Int?,
     @ColumnInfo(name = "cli_version")
-    val cliVersion: String?,
+    val clientSoftwareJson: String?,
     @ColumnInfo(name = "platform")
     val platform: String?,
     @ColumnInfo(name = "architecture")
@@ -278,7 +278,7 @@ internal data class SecretUseRequestEntity(
     @ColumnInfo(name = "state")
     val state: String,
     @ColumnInfo(name = "cli_version")
-    val cliVersion: String,
+    val clientSoftwareJson: String,
     @ColumnInfo(name = "secrets_json")
     val secretsJson: String,
     @ColumnInfo(name = "secret_details_json")
@@ -373,7 +373,7 @@ internal data class SecretListRequestEntity(
     @ColumnInfo(name = "state")
     val state: String,
     @ColumnInfo(name = "cli_version")
-    val cliVersion: String,
+    val clientSoftwareJson: String,
     @ColumnInfo(name = "secrets_json")
     val secretsJson: String,
     @ColumnInfo(name = "error")
@@ -422,7 +422,7 @@ internal data class SecretUploadRequestEntity(
     @ColumnInfo(name = "state")
     val state: String,
     @ColumnInfo(name = "cli_version")
-    val cliVersion: String,
+    val clientSoftwareJson: String,
     @ColumnInfo(name = "mode")
     val mode: String,
     @ColumnInfo(name = "uploaded_name")

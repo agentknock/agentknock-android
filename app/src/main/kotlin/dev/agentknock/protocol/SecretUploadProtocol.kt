@@ -1,6 +1,5 @@
 package dev.agentknock.protocol
 
-import kotlinx.serialization.SerialName
 import kotlinx.serialization.Serializable
 import kotlinx.serialization.encodeToString
 import kotlinx.serialization.json.Json
@@ -16,7 +15,7 @@ internal enum class SecretUploadMode(val wireName: String) {
 }
 
 internal data class SecretUploadRequestMessage(
-    val cliVersion: String,
+    val clientSoftware: ClientSoftware,
     val mode: SecretUploadMode,
     val name: String,
     val descriptionProvided: Boolean,
@@ -25,7 +24,7 @@ internal data class SecretUploadRequestMessage(
 )
 
 internal data class SecretUploadCompletion(
-    val cliVersion: String,
+    val clientSoftware: ClientSoftware,
     val result: String,
     val message: String?,
 )
@@ -34,6 +33,7 @@ internal class SecretUploadProtocol(
     private val json: Json = Json { ignoreUnknownKeys = true },
 ) {
     fun decodeRequest(plaintext: ByteArray): SecretUploadRequestMessage {
+        val clientSoftware = json.decodeClientSoftware(plaintext)
         val root = json.parseToJsonElement(plaintext.decodeToString()).jsonObject
         require(root.requiredString("method") == METHOD) { "Unexpected request method" }
         val secret = root.getValue("secret").jsonObject
@@ -44,7 +44,7 @@ internal class SecretUploadProtocol(
             value.jsonObject.requiredString("value")
         }
         return SecretUploadRequestMessage(
-            cliVersion = root.requiredString("cli_version"),
+            clientSoftware = clientSoftware,
             mode = SecretUploadMode.entries.singleOrNull {
                 it.wireName == root.requiredString("mode")
             } ?: error("Unsupported secret upload mode"),
@@ -64,6 +64,7 @@ internal class SecretUploadProtocol(
     ).encodeToByteArray()
 
     fun decodeCompletion(plaintext: ByteArray): SecretUploadCompletion {
+        val clientSoftware = json.decodeClientSoftware(plaintext)
         val completion = json.decodeFromString<SecretUploadCompletionWire>(
             plaintext.decodeToString(),
         )
@@ -71,7 +72,7 @@ internal class SecretUploadProtocol(
             "Unsupported secret upload completion result"
         }
         return SecretUploadCompletion(
-            cliVersion = completion.cliVersion,
+            clientSoftware = clientSoftware,
             result = completion.result,
             message = completion.message,
         )
@@ -108,7 +109,6 @@ private data class SecretUploadResultWire(
 
 @Serializable
 private data class SecretUploadCompletionWire(
-    @SerialName("cli_version") val cliVersion: String,
     val result: String,
     val message: String? = null,
 )

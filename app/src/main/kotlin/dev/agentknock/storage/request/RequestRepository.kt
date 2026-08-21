@@ -1,10 +1,12 @@
 package dev.agentknock.storage.request
 
 import dev.agentknock.protocol.SecretUseCompletion
+import dev.agentknock.protocol.ClientSoftware
 import dev.agentknock.protocol.SecretUseDenialReason
 import dev.agentknock.protocol.SecretUseProtocol
 import dev.agentknock.protocol.SecretUseRequestMessage
 import dev.agentknock.protocol.OpenedPairedRequest
+import dev.agentknock.protocol.PairedRequestErrorCode
 import dev.agentknock.protocol.PairedRequestKeySource
 import dev.agentknock.protocol.PairedRequestProtocol
 import dev.agentknock.protocol.PairingProtocol
@@ -177,7 +179,7 @@ internal data class PairingRequestDetails(
     val pairingAddress: String,
     val clientId: String,
     val sasOptions: List<String>,
-    val cliVersion: String?,
+    val clientSoftware: ClientSoftware?,
     val platform: String?,
     val architecture: String?,
     val hostname: String?,
@@ -209,7 +211,7 @@ internal data class SecretListRequestDetails(
     val architecture: String?,
     val machineId: String?,
     val osVersion: String?,
-    val cliVersion: String,
+    val clientSoftware: ClientSoftware?,
     val error: String?,
 )
 
@@ -241,7 +243,7 @@ internal data class SecretUseRequestDetails(
     val architecture: String?,
     val machineId: String?,
     val osVersion: String?,
-    val cliVersion: String,
+    val clientSoftware: ClientSoftware?,
     val error: String?,
     val decidedAt: Long?,
 )
@@ -262,6 +264,7 @@ internal data class SecretUploadRequestDetails(
     val removedVariables: List<String>,
     val clientName: String,
     val clientId: String,
+    val clientSoftware: ClientSoftware?,
     val error: String?,
     val decidedAt: Long?,
 )
@@ -298,7 +301,7 @@ internal data class ClientDetails(
     val architecture: String?,
     val osVersion: String?,
     val machineId: String?,
-    val cliVersion: String?,
+    val clientSoftware: ClientSoftware?,
     val state: RelayClientState,
     val desiredState: RelayClientState?,
     val pairedAt: Long?,
@@ -547,7 +550,7 @@ internal class RequestRepository(
                         it.sasOption1,
                         it.sasOption2,
                     ).map(pairingProtocol::formatSas),
-                    cliVersion = it.cliVersion,
+                    clientSoftware = it.clientSoftwareJson?.let(::decodeClientSoftware),
                     platform = it.platform,
                     architecture = it.architecture,
                     hostname = it.hostname,
@@ -586,7 +589,7 @@ internal class RequestRepository(
                     architecture = it.architecture,
                     machineId = it.machineId,
                     osVersion = it.osVersion,
-                    cliVersion = it.cliVersion,
+                    clientSoftware = decodeClientSoftware(it.clientSoftwareJson),
                     error = it.error,
                     decidedAt = it.decidedAt,
                 )
@@ -602,7 +605,7 @@ internal class RequestRepository(
                     architecture = it.architecture,
                     machineId = it.machineId,
                     osVersion = it.osVersion,
-                    cliVersion = it.cliVersion,
+                    clientSoftware = decodeClientSoftware(it.clientSoftwareJson),
                     error = it.error,
                 )
             },
@@ -623,6 +626,7 @@ internal class RequestRepository(
                     removedVariables = decodeStringList(it.removedVariablesJson),
                     clientName = it.clientName,
                     clientId = it.clientId,
+                    clientSoftware = decodeClientSoftware(it.clientSoftwareJson),
                     error = it.error,
                     decidedAt = it.decidedAt,
                 )
@@ -675,7 +679,7 @@ internal class RequestRepository(
                     architecture = it.architecture,
                     osVersion = it.osVersion,
                     machineId = it.machineId,
-                    cliVersion = it.cliVersion,
+                    clientSoftware = it.clientSoftwareJson?.let(::decodeClientSoftware),
                     state = it.relayClientState?.toRelayClientState() ?: RelayClientState.PENDING,
                     desiredState = it.desiredRelayClientState?.toRelayClientState(),
                     pairedAt = it.completedAt,
@@ -1806,13 +1810,6 @@ internal class RequestRepository(
                 request = requestPayload,
             )
         }.getOrNull() ?: return null
-        val method = runCatching { pairedRequestProtocol.method(opened.plaintext) }.getOrNull()
-        if (
-            pairingState != PairingState.ACTIVE &&
-            method != PairedRequestProtocol.FINISH_PAIRING_METHOD
-        ) {
-            return null
-        }
         val acceptedSecrets = acceptedRequestSecrets(
             pairing = pairing,
             relayRequestId = message.requestId,
@@ -1820,18 +1817,37 @@ internal class RequestRepository(
             currentClientPsk = clientPsk,
             now = now,
         )
-        if (method == null) {
-            return recordUnsupportedPairedRequest(
-                pairing,
-                message.requestId,
-                requestPayload,
-                acceptedSecrets.withoutRotationUnless(pairingState == PairingState.ACTIVE),
-                now,
-            )
-        }
+        val method = runCatching { pairedRequestProtocol.method(opened.plaintext) }.getOrNull()
         val storedSecrets = acceptedSecrets.withoutRotationUnless(
             pairingState == PairingState.ACTIVE,
         )
+        if (method == null) {
+            return rejectAuthenticatedRequest(
+                pairing = pairing,
+                relayRequestId = message.requestId,
+                requestPayload = requestPayload,
+                opened = opened,
+                acceptedSecrets = storedSecrets,
+                credentials = credentials,
+                code = PairedRequestErrorCode.INVALID_REQUEST,
+                now = now,
+            )
+        }
+        if (
+            pairingState != PairingState.ACTIVE &&
+            method != PairedRequestProtocol.FINISH_PAIRING_METHOD
+        ) {
+            return rejectAuthenticatedRequest(
+                pairing = pairing,
+                relayRequestId = message.requestId,
+                requestPayload = requestPayload,
+                opened = opened,
+                acceptedSecrets = storedSecrets,
+                credentials = credentials,
+                code = PairedRequestErrorCode.INVALID_STATE,
+                now = now,
+            )
+        }
         val processed = if (method == SecretUseProtocol.METHOD) {
             processSecretUseRequest(
                 pairing = pairing,
@@ -1878,14 +1894,26 @@ internal class RequestRepository(
                 acceptedSecrets = storedSecrets,
             )
         } else {
-            null
+            return rejectAuthenticatedRequest(
+                pairing = pairing,
+                relayRequestId = message.requestId,
+                requestPayload = requestPayload,
+                opened = opened,
+                acceptedSecrets = storedSecrets,
+                credentials = credentials,
+                code = PairedRequestErrorCode.UNSUPPORTED_METHOD,
+                now = now,
+            )
         }
-        return processed ?: recordUnsupportedPairedRequest(
-            pairing,
-            message.requestId,
-            requestPayload,
-            storedSecrets,
-            now,
+        return processed ?: rejectAuthenticatedRequest(
+            pairing = pairing,
+            relayRequestId = message.requestId,
+            requestPayload = requestPayload,
+            opened = opened,
+            acceptedSecrets = storedSecrets,
+            credentials = credentials,
+            code = PairedRequestErrorCode.INVALID_REQUEST,
+            now = now,
         )
     }
 
@@ -2173,7 +2201,7 @@ internal class RequestRepository(
                 } else {
                     SecretUploadRequestState.REJECTED.storedName
                 },
-                cliVersion = contents.cliVersion,
+                clientSoftwareJson = encodeClientSoftware(contents.clientSoftware),
                 mode = contents.mode.wireName,
                 uploadedName = contents.name,
                 approvedName = null,
@@ -2268,13 +2296,28 @@ internal class RequestRepository(
         return ProcessedRelayMessage(response)
     }
 
-    private suspend fun recordUnsupportedPairedRequest(
+    private suspend fun rejectAuthenticatedRequest(
         pairing: PairingEntity,
         relayRequestId: String,
         requestPayload: JsonElement,
+        opened: OpenedPairedRequest,
         acceptedSecrets: AcceptedRequestSecrets,
+        credentials: RelayDeviceCredentials,
+        code: PairedRequestErrorCode,
         now: Long,
     ): ProcessedRelayMessage {
+        val response = runCatching {
+            pairingProtocol.sealPairedResponse(
+                deviceId = pairing.deviceId,
+                requestId = relayRequestId,
+                clientId = pairing.clientId,
+                clientPsk = opened.clientPsk,
+                devicePrivateKey = credentials.devicePrivateKey,
+                devicePublicKey = credentials.devicePublicKey,
+                request = requestPayload,
+                plaintext = pairedRequestProtocol.errorResponse(code),
+            )
+        }.getOrNull() ?: return ProcessedRelayMessage()
         dao.insertHiddenPairedRequest(
             request = InboxRequestEntity(
                 relayRequestId = relayRequestId,
@@ -2283,7 +2326,7 @@ internal class RequestRepository(
                 state = InboxRequestState.COMPLETED.storedName,
                 listed = false,
                 requestJson = requestPayload.toString(),
-                responseJson = null,
+                responseJson = response.toString(),
                 completionJson = null,
                 receivedAt = now,
                 updatedAt = now,
@@ -2299,13 +2342,14 @@ internal class RequestRepository(
         audit.record(
             AuditRecord(
                 category = AuditCategory.VERIFICATION,
-                title = "Authenticated request was not understood",
+                title = "Authenticated request rejected",
+                detail = code.wireName,
                 outcome = AuditOutcome.REJECTED,
                 clientId = pairing.clientId,
                 relayRequestId = relayRequestId,
             ),
         )
-        return ProcessedRelayMessage()
+        return ProcessedRelayMessage(response)
     }
 
     private suspend fun startPairing(
@@ -2365,7 +2409,7 @@ internal class RequestRepository(
                 sasOption1 = null,
                 sasOption2 = null,
                 correctSasIndex = null,
-                cliVersion = null,
+                clientSoftwareJson = null,
                 platform = null,
                 architecture = null,
                 hostname = null,
@@ -2407,7 +2451,7 @@ internal class RequestRepository(
         machineId = pairing.machineId,
         osVersion = pairing.osVersion,
         state = SecretUseRequestState.APPROVAL_PENDING.storedName,
-        cliVersion = contents.cliVersion,
+        clientSoftwareJson = encodeClientSoftware(contents.clientSoftware),
         secretsJson = encodeStringList(contents.secrets),
         secretDetailsJson = json.encodeToString(description.secrets),
         missingSecretsJson = encodeStringList(description.missingSecrets),
@@ -2449,7 +2493,7 @@ internal class RequestRepository(
         machineId = pairing.machineId,
         osVersion = pairing.osVersion,
         state = SecretListRequestState.WAITING_FOR_COMPLETION.storedName,
-        cliVersion = contents.cliVersion,
+        clientSoftwareJson = encodeClientSoftware(contents.clientSoftware),
         secretsJson = json.encodeToString(secretMetadata),
         error = null,
         createdAt = now,
@@ -2510,7 +2554,7 @@ internal class RequestRepository(
                 sasOption1 = choices.values[1],
                 sasOption2 = choices.values[2],
                 correctSasIndex = choices.correctIndex,
-                cliVersion = metadata?.cliVersion,
+                clientSoftwareJson = metadata?.clientSoftware?.let(::encodeClientSoftware),
                 platform = metadata?.platform,
                 architecture = metadata?.architecture,
                 hostname = metadata?.hostname,
@@ -2697,7 +2741,9 @@ internal class RequestRepository(
             )
         }.getOrNull() ?: return null
         val decoded = runCatching { secretListProtocol.decodeCompletion(plaintext) }
-        val valid = decoded.getOrNull() == secretListRequest.cliVersion
+        val valid = decoded.getOrNull() == decodeClientSoftware(
+            secretListRequest.clientSoftwareJson,
+        )
         val now = currentTimeMillis()
         dao.updateSecretListRequest(
             request = request.copy(
@@ -2761,7 +2807,8 @@ internal class RequestRepository(
         }.getOrNull() ?: return null
         val decoded = runCatching { secretUploadProtocol.decodeCompletion(plaintext) }
         val result = decoded.getOrNull()
-        val valid = result?.cliVersion == upload.cliVersion &&
+        val valid = result != null &&
+            result.clientSoftware == decodeClientSoftware(upload.clientSoftwareJson) &&
             result.result == upload.transportResult &&
             result.message == upload.transportMessage
         val now = currentTimeMillis()
@@ -2928,7 +2975,10 @@ internal class RequestRepository(
         val decoded = runCatching { secretUseProtocol.decodeCompletion(plaintext) }
         val now = currentTimeMillis()
         val completionResult = decoded.getOrNull()
-        val valid = when (completionResult) {
+        val softwareMatches = completionResult?.clientSoftware == decodeClientSoftware(
+            secretUseRequest.clientSoftwareJson,
+        )
+        val valid = softwareMatches && when (completionResult) {
             is SecretUseCompletion.Approved -> {
                 secretUseRequest.decision == SecretUseDecision.APPROVED.storedName
             }
@@ -3392,6 +3442,11 @@ internal class RequestRepository(
 
     private fun decodeStringList(value: String): List<String> =
         json.decodeFromString(STRING_LIST_SERIALIZER, value)
+
+    private fun encodeClientSoftware(value: ClientSoftware): String = json.encodeToString(value)
+
+    private fun decodeClientSoftware(value: String): ClientSoftware? =
+        runCatching { json.decodeFromString<ClientSoftware>(value) }.getOrNull()
 
     private companion object {
         const val CLIENT_PSK_BYTES = 32

@@ -98,6 +98,7 @@ import dev.agentknock.protocol.SecretUploadMode
 import dev.agentknock.presentation.formatTimestamp
 import dev.agentknock.presentation.formatPlatformName
 import dev.agentknock.presentation.renderShellCommand
+import dev.agentknock.presentation.renderSoftware
 import dev.agentknock.storage.secret.SecretMetadata
 import dev.agentknock.storage.request.SecretUseCompletionResult
 import dev.agentknock.storage.request.SecretUseDecision
@@ -743,7 +744,12 @@ private fun PairingDetail(
         Disclosure("Technical details") {
             DetailValue("Pairing address", pairing.pairingAddress, true)
             pairing.osVersion?.let { DetailValue("OS version", it) }
-            pairing.cliVersion?.let { DetailValue("CLI version", it) }
+            pairing.clientSoftware?.let { software ->
+                DetailValue("Client software", renderSoftware(software.application))
+                if (software.library != software.application) {
+                    DetailValue("Agentknock library", renderSoftware(software.library))
+                }
+            }
             pairing.machineId?.let { DetailValue("Machine ID reported by client", it, true) }
             DetailValue("Client ID", pairing.clientId, true)
             DetailValue("Request ID", request.relayRequestId, true)
@@ -910,7 +916,12 @@ private fun SecretUseDetail(
             secretUse.hostname?.takeIf { it != secretUse.clientName }
                 ?.let { DetailValue("Hostname reported by client", it) }
             secretUse.osVersion?.let { DetailValue("OS version", it) }
-            DetailValue("CLI version", secretUse.cliVersion)
+            secretUse.clientSoftware?.let { software ->
+                DetailValue("Client software", renderSoftware(software.application))
+                if (software.library != software.application) {
+                    DetailValue("Agentknock library", renderSoftware(software.library))
+                }
+            }
             secretUse.machineId?.let { DetailValue("Machine ID reported by client", it, true) }
             DetailValue("Client ID", secretUse.clientId, true)
             DetailValue("Request ID", request.relayRequestId, true)
@@ -1260,6 +1271,12 @@ private fun SecretUploadDetail(
         }
 
         Disclosure("Technical details") {
+            upload.clientSoftware?.let { software ->
+                DetailValue("Client software", renderSoftware(software.application))
+                if (software.library != software.application) {
+                    DetailValue("Agentknock library", renderSoftware(software.library))
+                }
+            }
             DetailValue("Client ID", upload.clientId, true)
             DetailValue("Request ID", request.relayRequestId, true)
         }

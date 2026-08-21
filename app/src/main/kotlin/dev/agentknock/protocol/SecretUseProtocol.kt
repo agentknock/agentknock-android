@@ -5,7 +5,7 @@ import kotlinx.serialization.Serializable
 import kotlinx.serialization.json.Json
 
 internal data class SecretUseRequestMessage(
-    val cliVersion: String,
+    val clientSoftware: ClientSoftware,
     val secrets: List<String>,
     val reason: String?,
     val operation: SecretUseExecOperation,
@@ -37,18 +37,18 @@ internal enum class SecretUseDenialReason(val wireName: String) {
 }
 
 internal sealed interface SecretUseCompletion {
-    val cliVersion: String
+    val clientSoftware: ClientSoftware
 
-    data class Approved(override val cliVersion: String) : SecretUseCompletion
+    data class Approved(override val clientSoftware: ClientSoftware) : SecretUseCompletion
 
     data class Denied(
-        override val cliVersion: String,
+        override val clientSoftware: ClientSoftware,
         val reason: String,
         val message: String,
     ) : SecretUseCompletion
 
     data class Aborted(
-        override val cliVersion: String,
+        override val clientSoftware: ClientSoftware,
         val reason: String,
         val message: String,
     ) : SecretUseCompletion
@@ -58,13 +58,14 @@ internal class SecretUseProtocol(
     private val json: Json = Json { ignoreUnknownKeys = true },
 ) {
     fun decodeRequest(plaintext: ByteArray): SecretUseRequestMessage {
+        val clientSoftware = json.decodeClientSoftware(plaintext)
         val request = json.decodeFromString<SecretUseRequestWire>(plaintext.decodeToString())
         require(request.method == METHOD) { "Unexpected request method" }
         require(request.secrets.isNotEmpty()) { "Secret use request has no secrets" }
         require(request.secrets.none(String::isEmpty)) { "Secret use request has an empty secret" }
         require(request.operation.type == EXEC_OPERATION_TYPE) { "Unsupported operation type" }
         return SecretUseRequestMessage(
-            cliVersion = request.cliVersion,
+            clientSoftware = clientSoftware,
             secrets = request.secrets,
             reason = request.reason,
             operation = SecretUseExecOperation(
@@ -109,18 +110,19 @@ internal class SecretUseProtocol(
         ).encodeToByteArray()
 
     fun decodeCompletion(plaintext: ByteArray): SecretUseCompletion {
+        val clientSoftware = json.decodeClientSoftware(plaintext)
         val completion = json.decodeFromString<SecretUseCompletionWire>(
             plaintext.decodeToString(),
         )
         return when (completion.result) {
-            RESULT_APPROVED -> SecretUseCompletion.Approved(completion.cliVersion)
+            RESULT_APPROVED -> SecretUseCompletion.Approved(clientSoftware)
             RESULT_DENIED -> SecretUseCompletion.Denied(
-                cliVersion = completion.cliVersion,
+                clientSoftware = clientSoftware,
                 reason = requireNotNull(completion.reason) { "Denied completion has no reason" },
                 message = requireNotNull(completion.message) { "Denied completion has no message" },
             )
             RESULT_ABORTED -> SecretUseCompletion.Aborted(
-                cliVersion = completion.cliVersion,
+                clientSoftware = clientSoftware,
                 reason = requireNotNull(completion.reason) { "Aborted completion has no reason" },
                 message = requireNotNull(completion.message) { "Aborted completion has no message" },
             )
@@ -140,7 +142,6 @@ internal class SecretUseProtocol(
 
 @Serializable
 private data class SecretUseRequestWire(
-    @SerialName("cli_version") val cliVersion: String,
     val method: String,
     val secrets: List<String>,
     val reason: String? = null,
@@ -182,7 +183,6 @@ private data class SecretUseResponseEnvironmentVariableWire(val value: String)
 
 @Serializable
 private data class SecretUseCompletionWire(
-    @SerialName("cli_version") val cliVersion: String,
     val result: String,
     val reason: String? = null,
     val message: String? = null,

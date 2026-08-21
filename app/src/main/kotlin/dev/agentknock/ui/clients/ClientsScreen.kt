@@ -75,6 +75,7 @@ import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import androidx.lifecycle.viewmodel.compose.viewModel
 import dev.agentknock.presentation.formatTimestamp
 import dev.agentknock.presentation.formatPlatformName
+import dev.agentknock.presentation.renderSoftware
 import dev.agentknock.relay.RelayClientState
 import dev.agentknock.storage.request.ClientChangeResult
 import dev.agentknock.storage.request.ClientDetails
@@ -453,7 +454,12 @@ private fun ClientDetail(
                 ClientField("Platform", client.platform?.let(::formatPlatformName))
                 ClientField("Architecture", client.architecture)
                 ClientField("Operating system", client.osVersion)
-                ClientField("CLI version", client.cliVersion)
+                client.clientSoftware?.let { software ->
+                    ClientField("Client software", renderSoftware(software.application))
+                    if (software.library != software.application) {
+                        ClientField("Agentknock library", renderSoftware(software.library))
+                    }
+                }
                 ClientField(
                     "Machine ID",
                     client.machineId,

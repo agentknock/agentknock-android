@@ -1,1 +1,1 @@
-Polishes request decisions, status hierarchy, notifications, responsive list-detail selection, and rotation-safe editing.
+Restores compatibility with current client software metadata and prevents authenticated protocol failures from hanging.

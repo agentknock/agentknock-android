@@ -1,10 +1,9 @@
 package dev.agentknock.protocol
 
-import kotlinx.serialization.SerialName
 import kotlinx.serialization.Serializable
 import kotlinx.serialization.json.Json
 
-internal data class SecretListRequestMessage(val cliVersion: String)
+internal data class SecretListRequestMessage(val clientSoftware: ClientSoftware)
 
 internal data class SecretListSecret(
     val description: String,
@@ -15,9 +14,10 @@ internal class SecretListProtocol(
     private val json: Json = Json { ignoreUnknownKeys = true },
 ) {
     fun decodeRequest(plaintext: ByteArray): SecretListRequestMessage {
+        val clientSoftware = json.decodeClientSoftware(plaintext)
         val request = json.decodeFromString<SecretListRequestWire>(plaintext.decodeToString())
         require(request.method == METHOD) { "Unexpected request method" }
-        return SecretListRequestMessage(request.cliVersion)
+        return SecretListRequestMessage(clientSoftware)
     }
 
     fun response(secrets: Map<String, SecretListSecret>): ByteArray = json.encodeToString(
@@ -33,8 +33,8 @@ internal class SecretListProtocol(
         ),
     ).encodeToByteArray()
 
-    fun decodeCompletion(plaintext: ByteArray): String =
-        json.decodeFromString<SecretListCompletionWire>(plaintext.decodeToString()).cliVersion
+    fun decodeCompletion(plaintext: ByteArray): ClientSoftware =
+        json.decodeClientSoftware(plaintext)
 
     companion object {
         const val METHOD = "SecretList"
@@ -44,7 +44,6 @@ internal class SecretListProtocol(
 
 @Serializable
 private data class SecretListRequestWire(
-    @SerialName("cli_version") val cliVersion: String,
     val method: String,
 )
 
@@ -58,9 +57,4 @@ private data class SecretListSecretWire(
     val description: String? = null,
     val type: String,
     val variables: List<String>,
-)
-
-@Serializable
-private data class SecretListCompletionWire(
-    @SerialName("cli_version") val cliVersion: String,
 )

@@ -11,15 +11,16 @@ class SecretListProtocolTest {
     @Test
     fun `decodes the cli list request and empty completion`() {
         assertEquals(
-            SecretListRequestMessage("0.1.0"),
+            SecretListRequestMessage(testClientSoftware()),
             protocol.decodeRequest(
-                """{"cli_version":"0.1.0","method":"SecretList"}""".encodeToByteArray(),
+                """{${testClientSoftwareFields()},"method":"SecretList"}"""
+                    .encodeToByteArray(),
             ),
         )
         assertEquals(
-            "0.1.0",
+            testClientSoftware(),
             protocol.decodeCompletion(
-                """{"cli_version":"0.1.0"}""".encodeToByteArray(),
+                """{${testClientSoftwareFields()}}""".encodeToByteArray(),
             ),
         )
     }

@@ -9,17 +9,18 @@ class PairingRemoveProtocolTest {
     @Test
     fun `decodes removal request and completion`() {
         assertEquals(
-            "0.2.0",
+            testClientSoftware("0.2.0", "0.1.0"),
             protocol.decodeRequest(
-                """{"cli_version":"0.2.0","method":"PairingRemove"}"""
+                """{${testClientSoftwareFields("0.2.0", "0.1.0")},"method":"PairingRemove"}"""
                     .encodeToByteArray(),
             ),
         )
         assertEquals("{}", protocol.response().decodeToString())
         assertEquals(
-            "0.2.0",
+            testClientSoftware("0.2.0", "0.1.0"),
             protocol.decodeCompletion(
-                """{"cli_version":"0.2.0"}""".encodeToByteArray(),
+                """{${testClientSoftwareFields("0.2.0", "0.1.0")}}"""
+                    .encodeToByteArray(),
             ),
         )
     }

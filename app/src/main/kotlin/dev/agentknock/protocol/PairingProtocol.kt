@@ -23,7 +23,7 @@ import org.bouncycastle.crypto.params.HKDFParameters
 import org.bouncycastle.crypto.params.KeyParameter
 
 internal data class PairingClientMetadata(
-    val cliVersion: String,
+    val clientSoftware: ClientSoftware,
     val platform: String,
     val architecture: String,
     val hostname: String?,
@@ -44,7 +44,6 @@ internal data class SasChoices(
 
 internal data class PreparedFinishResponse(
     val response: JsonElement,
-    val cliVersion: String,
 )
 
 internal data class OpenedPairedRequest(
@@ -153,12 +152,13 @@ internal class PairingProtocol(
     }
 
     fun decodeClientMetadata(applicationPlaintext: ByteArray): PairingClientMetadata {
+        val clientSoftware = json.decodeClientSoftware(applicationPlaintext)
         val contents = json.decodeFromString(
             PairingMetadata.serializer(),
             applicationPlaintext.decodeToString(),
         )
         return PairingClientMetadata(
-            cliVersion = contents.cliVersion,
+            clientSoftware = clientSoftware,
             platform = contents.platform,
             architecture = contents.architecture,
             hostname = contents.hostname,
@@ -206,6 +206,7 @@ internal class PairingProtocol(
             FinishRequest.serializer(),
             opened.plaintext.decodeToString(),
         )
+        json.decodeClientSoftware(opened.plaintext)
         require(contents.method == FINISH_PAIRING_METHOD) { "Unexpected pairing method" }
         val responsePlaintext = json.encodeToString(
             FinishResult.serializer(),
@@ -222,7 +223,6 @@ internal class PairingProtocol(
                 request = request,
                 plaintext = responsePlaintext,
             ),
-            cliVersion = contents.cliVersion,
         )
     }
 
@@ -247,12 +247,17 @@ internal class PairingProtocol(
             completion = completion,
         )
         val result = json.decodeFromString(FinishCompletion.serializer(), plaintext.decodeToString())
+        json.decodeClientSoftware(plaintext)
         require(result.result == RESULT_ACCEPTED) { "Client did not accept pairing" }
     }
 
-    fun finishCompletionAccepted(plaintext: ByteArray): Boolean =
-        json.decodeFromString(FinishCompletion.serializer(), plaintext.decodeToString()).result ==
-            RESULT_ACCEPTED
+    fun finishCompletionAccepted(plaintext: ByteArray): Boolean {
+        json.decodeClientSoftware(plaintext)
+        return json.decodeFromString(
+            FinishCompletion.serializer(),
+            plaintext.decodeToString(),
+        ).result == RESULT_ACCEPTED
+    }
 
     fun openPairedRequest(
         deviceId: String,
@@ -651,7 +656,6 @@ private data class PairingCompletion(
 
 @Serializable
 private data class PairingMetadata(
-    @SerialName("cli_version") val cliVersion: String,
     val platform: String,
     val architecture: String,
     val hostname: String? = null,
@@ -668,7 +672,6 @@ private data class EncryptedRequestCore(
 
 @Serializable
 private data class FinishRequest(
-    @SerialName("cli_version") val cliVersion: String,
     val method: String,
 )
 
@@ -686,6 +689,5 @@ private data class EncryptedCompletion(val ciphertext: String)
 
 @Serializable
 private data class FinishCompletion(
-    @SerialName("cli_version") val cliVersion: String,
     val result: String,
 )

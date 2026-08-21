@@ -14,7 +14,7 @@ class SecretUseProtocolTest {
         val request = protocol.decodeRequest(
             """
             {
-              "cli_version":"0.1.0",
+              ${testClientSoftwareFields("0.2.0", "0.1.0")},
               "method":"SecretUse",
               "secrets":["aws-read-only","common"],
               "reason":"Inspect production logs",
@@ -35,7 +35,7 @@ class SecretUseProtocolTest {
             """.trimIndent().encodeToByteArray(),
         )
 
-        assertEquals("0.1.0", request.cliVersion)
+        assertEquals(testClientSoftware("0.2.0", "0.1.0"), request.clientSoftware)
         assertEquals(listOf("aws-read-only", "common"), request.secrets)
         assertEquals("Inspect production logs", request.reason)
         assertEquals("aws", request.operation.command)
@@ -86,20 +86,25 @@ class SecretUseProtocolTest {
     @Test
     fun `decodes all cli completion variants`() {
         assertEquals(
-            SecretUseCompletion.Approved("0.1.0"),
+            SecretUseCompletion.Approved(testClientSoftware("0.2.0", "0.1.0")),
             protocol.decodeCompletion(
-                """{"cli_version":"0.1.0","result":"APPROVED"}""".encodeToByteArray(),
+                """{${testClientSoftwareFields("0.2.0", "0.1.0")},"result":"APPROVED"}"""
+                    .encodeToByteArray(),
             ),
         )
         assertEquals(
-            SecretUseCompletion.Denied("0.1.0", "USER_DENIED", "Denied on device."),
+            SecretUseCompletion.Denied(
+                testClientSoftware("0.2.0", "0.1.0"),
+                "USER_DENIED",
+                "Denied on device.",
+            ),
             protocol.decodeCompletion(
-                """{"cli_version":"0.1.0","result":"DENIED","reason":"USER_DENIED","message":"Denied on device."}"""
+                """{${testClientSoftwareFields("0.2.0", "0.1.0")},"result":"DENIED","reason":"USER_DENIED","message":"Denied on device."}"""
                     .encodeToByteArray(),
             ),
         )
         val aborted = protocol.decodeCompletion(
-            """{"cli_version":"0.1.0","result":"ABORTED","reason":"CANCELLED","message":"Cancelled by user."}"""
+            """{${testClientSoftwareFields("0.2.0", "0.1.0")},"result":"ABORTED","reason":"CANCELLED","message":"Cancelled by user."}"""
                 .encodeToByteArray(),
         )
         check(aborted is SecretUseCompletion.Aborted)
@@ -107,7 +112,7 @@ class SecretUseProtocolTest {
         assertEquals("Cancelled by user.", aborted.message)
         assertNull(
             protocol.decodeRequest(
-                """{"cli_version":"0.1.0","method":"SecretUse","secrets":["test"],"operation":{"type":"exec","command":"env","arguments":[],"working_directory":"/tmp","executable_path":"/bin/env","executable_mode":"BINARY","stdin":"TERMINAL","stdout":"TERMINAL","stderr":"TERMINAL"},"launcher_chain":[]}"""
+                """{${testClientSoftwareFields("0.2.0", "0.1.0")},"method":"SecretUse","secrets":["test"],"operation":{"type":"exec","command":"env","arguments":[],"working_directory":"/tmp","executable_path":"/bin/env","executable_mode":"BINARY","stdin":"TERMINAL","stdout":"TERMINAL","stderr":"TERMINAL"},"launcher_chain":[]}"""
                     .encodeToByteArray(),
             ).reason,
         )

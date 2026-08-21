@@ -16,7 +16,7 @@ class SecretUploadProtocolTest {
         val request = protocol.decodeRequest(
             """
             {
-              "cli_version":"0.2.0",
+              ${testClientSoftwareFields("0.2.0", "0.1.0")},
               "method":"SecretUpload",
               "mode":"UPDATE",
               "secret":{
@@ -32,7 +32,7 @@ class SecretUploadProtocolTest {
             """.trimIndent().encodeToByteArray(),
         )
 
-        assertEquals("0.2.0", request.cliVersion)
+        assertEquals(testClientSoftware("0.2.0", "0.1.0"), request.clientSoftware)
         assertEquals(SecretUploadMode.UPDATE, request.mode)
         assertEquals("aws-read-only", request.name)
         assertTrue(request.descriptionProvided)
@@ -48,7 +48,7 @@ class SecretUploadProtocolTest {
         val request = protocol.decodeRequest(
             """
             {
-              "cli_version":"0.2.0",
+              ${testClientSoftwareFields("0.2.0", "0.1.0")},
               "method":"SecretUpload",
               "mode":"CREATE",
               "secret":{"name":"new","type":"environment","variables":{}}
@@ -65,7 +65,7 @@ class SecretUploadProtocolTest {
         val request = protocol.decodeRequest(
             """
             {
-              "cli_version":"0.2.0",
+              ${testClientSoftwareFields("0.2.0", "0.1.0")},
               "method":"SecretUpload",
               "mode":"UPDATE",
               "secret":{
@@ -85,9 +85,9 @@ class SecretUploadProtocolTest {
     @Test
     fun `rejects non-string fields instead of coercing them`() {
         val invalidRequests = listOf(
-            """{"cli_version":2,"method":"SecretUpload","mode":"CREATE","secret":{"name":"new","type":"environment","variables":{}}}""",
-            """{"cli_version":"0.2.0","method":"SecretUpload","mode":"CREATE","secret":{"name":"new","type":"environment","variables":{"TOKEN":{"value":false}}}}""",
-            """{"cli_version":"0.2.0","method":"SecretUpload","mode":"CREATE","secret":{"name":"new","description":3,"type":"environment","variables":{}}}""",
+            """{"app_info":{"name":"agentknock","version":2},"lib_info":{"name":"agentknock","version":"0.1.0"},"method":"SecretUpload","mode":"CREATE","secret":{"name":"new","type":"environment","variables":{}}}""",
+            """{${testClientSoftwareFields("0.2.0", "0.1.0")},"method":"SecretUpload","mode":"CREATE","secret":{"name":"new","type":"environment","variables":{"TOKEN":{"value":false}}}}""",
+            """{${testClientSoftwareFields("0.2.0", "0.1.0")},"method":"SecretUpload","mode":"CREATE","secret":{"name":"new","description":3,"type":"environment","variables":{}}}""",
         )
 
         invalidRequests.forEach { request ->
@@ -117,9 +117,13 @@ class SecretUploadProtocolTest {
     @Test
     fun `decodes the echoed completion`() {
         assertEquals(
-            SecretUploadCompletion("0.2.0", "RECEIVED", null),
+            SecretUploadCompletion(
+                testClientSoftware("0.2.0", "0.1.0"),
+                "RECEIVED",
+                null,
+            ),
             protocol.decodeCompletion(
-                """{"cli_version":"0.2.0","result":"RECEIVED"}"""
+                """{${testClientSoftwareFields("0.2.0", "0.1.0")},"result":"RECEIVED"}"""
                     .encodeToByteArray(),
             ),
         )
