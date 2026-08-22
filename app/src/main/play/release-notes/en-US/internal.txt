@@ -1,1 +1,1 @@
-Dark-mode visual review build, validated against current Google and Pixel Material interfaces.
+Adds approval rules with standing and request-derived temporary scopes, exact or token-prefix command matching, per-secret decisions, rule activity, and automatic approval or denial.

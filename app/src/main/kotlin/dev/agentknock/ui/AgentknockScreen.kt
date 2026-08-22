@@ -12,6 +12,7 @@ import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.outlined.Computer
 import androidx.compose.material.icons.outlined.Inbox
 import androidx.compose.material.icons.outlined.Key
+import androidx.compose.material.icons.automirrored.outlined.Rule
 import androidx.compose.material3.Badge
 import androidx.compose.material3.BadgedBox
 import androidx.compose.material3.Icon
@@ -45,6 +46,8 @@ import dev.agentknock.ui.secrets.SecretsScreen
 import dev.agentknock.ui.requests.RequestsScreen
 import dev.agentknock.ui.requests.RequestsViewModel
 import dev.agentknock.ui.settings.SettingsScreen
+import dev.agentknock.ui.rules.RulesScreen
+import dev.agentknock.ui.rules.RulesViewModel
 import dev.agentknock.ui.device.DeviceSetupScreen
 import dev.agentknock.ui.device.DeviceSetupViewModel
 import dev.agentknock.push.RequestNotifications
@@ -63,6 +66,7 @@ internal fun AgentknockScreen(
     requestNotificationPermission: () -> Unit,
     deviceSetupViewModel: DeviceSetupViewModel = viewModel(),
     requestsViewModel: RequestsViewModel = viewModel(),
+    rulesViewModel: RulesViewModel = viewModel(),
 ) {
     val configuration by deviceSetupViewModel.configuration.collectAsStateWithLifecycle()
     var section by rememberSaveable { mutableStateOf(MainSection.REQUESTS) }
@@ -146,6 +150,8 @@ internal fun AgentknockScreen(
                         notificationsEnabled = notificationsEnabled,
                         onTopLevelChanged = { showNavigation = true },
                         requestsViewModel = requestsViewModel,
+                        rulesViewModel = rulesViewModel,
+                        onSelectSection = { section = it },
                         modifier = Modifier.weight(1f),
                     )
                 }
@@ -169,6 +175,8 @@ internal fun AgentknockScreen(
                         notificationsEnabled = notificationsEnabled,
                         onTopLevelChanged = { showNavigation = it },
                         requestsViewModel = requestsViewModel,
+                        rulesViewModel = rulesViewModel,
+                        onSelectSection = { section = it },
                         modifier = Modifier.fillMaxSize().padding(padding),
                     )
                 }
@@ -208,6 +216,8 @@ private fun MainContent(
     notificationsEnabled: Boolean,
     onTopLevelChanged: (Boolean) -> Unit,
     requestsViewModel: RequestsViewModel,
+    rulesViewModel: RulesViewModel,
+    onSelectSection: (MainSection) -> Unit,
     modifier: Modifier = Modifier,
 ) {
     Box(modifier) {
@@ -218,6 +228,10 @@ private fun MainContent(
                 notificationsEnabled = notificationsEnabled,
                 viewModel = requestsViewModel,
                 onTopLevelChanged = onTopLevelChanged,
+                onCreateRule = { requestId ->
+                    rulesViewModel.startRuleFromRequest(requestId)
+                    onSelectSection(MainSection.RULES)
+                },
             )
             MainSection.SECRETS -> SecretsScreen(
                 authenticate = authenticate,
@@ -228,6 +242,16 @@ private fun MainContent(
                 onOpenSettings = onOpenSettings,
                 onTopLevelChanged = onTopLevelChanged,
                 authenticate = authenticate,
+            )
+            MainSection.RULES -> RulesScreen(
+                authenticate = authenticate,
+                onOpenSettings = onOpenSettings,
+                onOpenRequest = { requestId ->
+                    requestsViewModel.selectRequest(requestId)
+                    onSelectSection(MainSection.REQUESTS)
+                },
+                onTopLevelChanged = onTopLevelChanged,
+                viewModel = rulesViewModel,
             )
         }
     }
@@ -277,6 +301,7 @@ private fun MainSectionIcon(section: MainSection, actionRequiredCount: Int) {
                 MainSection.REQUESTS -> Icons.Outlined.Inbox
                 MainSection.SECRETS -> Icons.Outlined.Key
                 MainSection.CLIENTS -> Icons.Outlined.Computer
+                MainSection.RULES -> Icons.AutoMirrored.Outlined.Rule
             },
             contentDescription = null,
         )
@@ -299,10 +324,12 @@ private fun MainSection.label(): String = when (this) {
     MainSection.REQUESTS -> stringResource(R.string.requests)
     MainSection.SECRETS -> stringResource(R.string.secrets)
     MainSection.CLIENTS -> "Clients"
+    MainSection.RULES -> "Rules"
 }
 
 private enum class MainSection {
     REQUESTS,
     SECRETS,
     CLIENTS,
+    RULES,
 }

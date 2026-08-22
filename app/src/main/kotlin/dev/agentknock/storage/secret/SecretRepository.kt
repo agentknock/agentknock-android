@@ -136,6 +136,11 @@ internal data class RequestedSecretDescription(
     val missingSecrets: List<String>,
 )
 
+internal data class SecretIdentity(
+    val id: String,
+    val name: String,
+)
+
 internal data class SecretValues(
     val description: String,
     val environment: Map<String, String>,
@@ -216,6 +221,13 @@ internal class SecretRepository(
                 createdAt = secret.createdAt,
                 updatedAt = secret.updatedAt,
             )
+        }
+    }
+
+    suspend fun identitiesForNames(names: List<String>): List<SecretIdentity> {
+        val byName = dao.getSecretsByName(names.distinct()).associateBy(SecretEntity::name)
+        return names.distinct().mapNotNull { name ->
+            byName[name]?.let { secret -> SecretIdentity(secret.id, secret.name) }
         }
     }
 

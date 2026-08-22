@@ -44,6 +44,11 @@ import dev.agentknock.storage.secret.ApplyEnvironmentSecretUploadResult
 import dev.agentknock.storage.secret.EnvironmentSecretUpload
 import dev.agentknock.storage.secret.EnvironmentSecretUploadResult
 import dev.agentknock.storage.secret.SecretRepository
+import dev.agentknock.storage.rule.ApprovalRuleAction
+import dev.agentknock.storage.rule.ApprovalRuleEvaluation
+import dev.agentknock.storage.rule.ApprovalRuleRepository
+import dev.agentknock.storage.rule.ApprovalRuleRequest
+import dev.agentknock.storage.rule.RequestedSecretIdentity
 import dev.agentknock.storage.audit.AuditCategory
 import dev.agentknock.storage.audit.AuditOutcome
 import dev.agentknock.storage.audit.AuditRecord
@@ -62,6 +67,7 @@ import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.asStateFlow
 import kotlinx.coroutines.flow.combine
 import kotlinx.coroutines.flow.map
+import kotlinx.coroutines.flow.first
 import kotlinx.coroutines.selects.select
 import kotlinx.coroutines.sync.Mutex
 import kotlinx.coroutines.sync.withLock
@@ -169,6 +175,7 @@ internal data class InboxRequestSummary(
     val listSummary: String?,
     val command: String?,
     val arguments: List<String>,
+    val matchedRuleIds: Set<String>,
     val receivedAt: Long,
     val completedAt: Long?,
 )
@@ -218,6 +225,8 @@ internal data class SecretListRequestDetails(
 internal data class SecretUseRequestDetails(
     val state: SecretUseRequestState,
     val decision: SecretUseDecision?,
+    val decisionSource: String?,
+    val ruleEvaluation: ApprovalRuleEvaluation?,
     val completionResult: SecretUseCompletionResult?,
     val completionReason: String?,
     val completionMessage: String?,
@@ -394,6 +403,7 @@ internal class RequestRepository(
     private val dao: RequestDao,
     private val deviceCredentials: RelayDeviceCredentialSource,
     private val secrets: SecretRepository,
+    private val approvalRules: ApprovalRuleRepository? = null,
     private val relay: RelayDeviceClient,
     private val keyManager: VaultKeyManager,
     private val encryption: AesGcmEncryption,
@@ -452,6 +462,7 @@ internal class RequestRepository(
                         listSummary = null,
                         command = null,
                         arguments = emptyList(),
+                        matchedRuleIds = emptySet(),
                         receivedAt = request.receivedAt,
                         completedAt = request.completedAt,
                     )
@@ -477,6 +488,10 @@ internal class RequestRepository(
                         listSummary = null,
                         command = secretUse.command,
                         arguments = decodeStringList(secretUse.argumentsJson),
+                        matchedRuleIds = secretUse.ruleEvaluationJson
+                            ?.let(::decodeRuleEvaluation)
+                            ?.matchedRuleIds
+                            .orEmpty(),
                         receivedAt = request.receivedAt,
                         completedAt = request.completedAt,
                     )
@@ -501,6 +516,7 @@ internal class RequestRepository(
                         listSummary = upload.listSummary(),
                         command = null,
                         arguments = emptyList(),
+                        matchedRuleIds = emptySet(),
                         receivedAt = request.receivedAt,
                         completedAt = request.completedAt,
                     )
@@ -564,6 +580,8 @@ internal class RequestRepository(
                 SecretUseRequestDetails(
                     state = it.state.toSecretUseRequestState(),
                     decision = it.decision?.toSecretUseDecision(),
+                    decisionSource = it.decisionSource,
+                    ruleEvaluation = it.ruleEvaluationJson?.let(::decodeRuleEvaluation),
                     completionResult = it.completionResult?.toSecretUseCompletionResult(),
                     completionReason = it.completionReason,
                     completionMessage = it.completionMessage,
@@ -641,6 +659,8 @@ internal class RequestRepository(
             ),
         )
     }
+
+    suspend fun getRequestDetails(id: Long): InboxRequestDetails? = observeRequest(id).first()
 
     fun observeClients(): Flow<List<ClientSummary>> = dao.observePairings().map { pairings ->
         pairings
@@ -1488,6 +1508,7 @@ internal class RequestRepository(
             secretUseRequest = secretUseRequest.copy(
                 state = SecretUseRequestState.WAITING_FOR_COMPLETION.storedName,
                 decision = decision.storedName,
+                decisionSource = DECISION_SOURCE_USER,
                 updatedAt = now,
                 decidedAt = now,
             ),
@@ -1930,8 +1951,51 @@ internal class RequestRepository(
             secretUseProtocol.decodeRequest(opened.plaintext)
         }.getOrNull() ?: return null
         val description = secrets.describeRequestedSecrets(contents.secrets)
-        val automaticDenial = automaticSecretUseDenial(contents.secrets)
-        val response = if (automaticDenial != null) {
+        val requestedSecrets = secrets.requestedSecrets(contents.secrets)
+        val automaticDenial = automaticSecretUseDenial(requestedSecrets)
+        val ruleEvaluation = if (
+            automaticDenial == null && approvalRules != null
+        ) {
+            val identities = secrets.identitiesForNames(contents.secrets).map { secret ->
+                RequestedSecretIdentity(secret.id, secret.name)
+            }
+            if (identities.size == contents.secrets.distinct().size) {
+                approvalRules.evaluate(
+                    ApprovalRuleRequest(
+                        clientId = pairing.clientId,
+                        secrets = identities,
+                        command = listOf(contents.operation.command) + contents.operation.arguments,
+                        executablePath = contents.operation.executablePath,
+                        executableHash = contents.operation.executableHash,
+                        workingDirectory = contents.operation.workingDirectory,
+                    ),
+                )
+            } else {
+                null
+            }
+        } else {
+            null
+        }
+        val ruleDenial = ruleEvaluation
+            ?.takeIf { it.action == ApprovalRuleAction.DENY }
+            ?.let {
+                SecretUseDenialReason.POLICY_DENIED to
+                    "An approval rule denied access to a requested secret."
+            }
+        val denial = automaticDenial ?: ruleDenial
+        val responsePlaintext = when {
+            denial != null -> secretUseProtocol.deniedResponse(denial.first, denial.second)
+            ruleEvaluation?.action == ApprovalRuleAction.APPROVE -> {
+                val available = requestedSecrets as RequestedSecretsResult.Available
+                secretUseProtocol.approvedResponse(
+                    available.secrets.mapValues { (_, secret) ->
+                        SecretUseResponseSecret(secret.description, secret.environment)
+                    },
+                )
+            }
+            else -> null
+        }
+        val response = if (responsePlaintext != null) {
             runCatching {
                 pairingProtocol.sealPairedResponse(
                     deviceId = pairing.deviceId,
@@ -1941,14 +2005,16 @@ internal class RequestRepository(
                     devicePrivateKey = credentials.devicePrivateKey,
                     devicePublicKey = credentials.devicePublicKey,
                     request = requestPayload,
-                    plaintext = secretUseProtocol.deniedResponse(
-                        automaticDenial.first,
-                        automaticDenial.second,
-                    ),
+                    plaintext = responsePlaintext,
                 )
             }.getOrNull() ?: return null
         } else {
             null
+        }
+        val automaticDecision = when {
+            denial != null -> SecretUseDecision.DENIED
+            ruleEvaluation?.action == ApprovalRuleAction.APPROVE -> SecretUseDecision.APPROVED
+            else -> null
         }
         val now = currentTimeMillis()
         dao.insertSecretUseRequest(
@@ -1956,7 +2022,7 @@ internal class RequestRepository(
                 relayRequestId = relayRequestId,
                 parentRequestId = null,
                 kind = RequestKind.SECRET_USE.storedName,
-                state = if (automaticDenial == null) {
+                state = if (response == null) {
                     InboxRequestState.ACTION_REQUIRED.storedName
                 } else {
                     InboxRequestState.WAITING.storedName
@@ -1978,14 +2044,25 @@ internal class RequestRepository(
                 description = description,
                 now = now,
             ).let { secretUseRequest ->
-                if (automaticDenial == null) {
-                    secretUseRequest
+                if (automaticDecision == null) {
+                    secretUseRequest.copy(
+                        ruleEvaluationJson = ruleEvaluation?.let { json.encodeToString(it) },
+                    )
                 } else {
                     secretUseRequest.copy(
                         state = SecretUseRequestState.WAITING_FOR_COMPLETION.storedName,
-                        decision = SecretUseDecision.DENIED.storedName,
-                        completionReason = automaticDenial.first.wireName,
-                        completionMessage = automaticDenial.second,
+                        decision = automaticDecision.storedName,
+                        decisionSource = if (
+                            ruleDenial != null ||
+                            ruleEvaluation?.action == ApprovalRuleAction.APPROVE
+                        ) {
+                            DECISION_SOURCE_RULE
+                        } else {
+                            null
+                        },
+                        ruleEvaluationJson = ruleEvaluation?.let { json.encodeToString(it) },
+                        completionReason = denial?.first?.wireName,
+                        completionMessage = denial?.second,
                         decidedAt = now,
                     )
                 }
@@ -1994,6 +2071,7 @@ internal class RequestRepository(
             currentPairingSecret = acceptedSecrets.currentPairingSecret,
             previousPairingSecret = acceptedSecrets.previousPairingSecret,
         )
+        ruleEvaluation?.let { approvalRules?.recordMatches(it) }
         audit.record(
             AuditRecord(
                 category = AuditCategory.SECRET_USE,
@@ -2004,13 +2082,22 @@ internal class RequestRepository(
                 relayRequestId = relayRequestId,
             ),
         )
-        if (automaticDenial != null) {
+        if (automaticDecision != null) {
             audit.record(
                 AuditRecord(
                     category = AuditCategory.SECRET_USE,
-                    title = "Secret use denied automatically",
-                    detail = automaticDenial.second,
-                    outcome = AuditOutcome.DENIED,
+                    title = when {
+                        automaticDecision == SecretUseDecision.APPROVED ->
+                            "Secret use approved by rule"
+                        ruleDenial != null -> "Secret use denied by rule"
+                        else -> "Secret use rejected automatically"
+                    },
+                    detail = denial?.second ?: contents.secrets.joinToString(),
+                    outcome = when {
+                        automaticDecision == SecretUseDecision.APPROVED -> AuditOutcome.APPROVED
+                        ruleDenial != null -> AuditOutcome.DENIED
+                        else -> AuditOutcome.REJECTED
+                    },
                     clientId = pairing.clientId,
                     relayRequestId = relayRequestId,
                 ),
@@ -2020,10 +2107,8 @@ internal class RequestRepository(
     }
 
     private suspend fun automaticSecretUseDenial(
-        secretNames: List<String>,
-    ): Pair<SecretUseDenialReason, String>? = when (
-        val result = secrets.requestedSecrets(secretNames)
-    ) {
+        result: RequestedSecretsResult,
+    ): Pair<SecretUseDenialReason, String>? = when (result) {
         is RequestedSecretsResult.Available -> null
         is RequestedSecretsResult.MissingSecrets ->
             SecretUseDenialReason.INVALID_REQUEST to
@@ -2467,6 +2552,8 @@ internal class RequestRepository(
         stderrKind = contents.operation.stderr,
         launcherChainJson = encodeStringList(contents.launcherChain),
         decision = null,
+        decisionSource = null,
+        ruleEvaluationJson = null,
         completionResult = null,
         completionReason = null,
         completionMessage = null,
@@ -3443,6 +3530,9 @@ internal class RequestRepository(
     private fun decodeStringList(value: String): List<String> =
         json.decodeFromString(STRING_LIST_SERIALIZER, value)
 
+    private fun decodeRuleEvaluation(value: String): ApprovalRuleEvaluation? =
+        runCatching { json.decodeFromString<ApprovalRuleEvaluation>(value) }.getOrNull()
+
     private fun encodeClientSoftware(value: ClientSoftware): String = json.encodeToString(value)
 
     private fun decodeClientSoftware(value: String): ClientSoftware? =
@@ -3452,6 +3542,8 @@ internal class RequestRepository(
         const val CLIENT_PSK_BYTES = 32
         const val IDEMPOTENCY_RETENTION_MILLIS = 25 * 60 * 60 * 1_000L
         const val SECRET_USE_DENIAL_MESSAGE = "Denied on device."
+        const val DECISION_SOURCE_USER = "user"
+        const val DECISION_SOURCE_RULE = "rule"
         val STRING_LIST_SERIALIZER = ListSerializer(String.serializer())
     }
 }

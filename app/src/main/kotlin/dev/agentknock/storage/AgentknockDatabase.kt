@@ -20,6 +20,8 @@ import dev.agentknock.storage.request.SecretUploadRequestEntity
 import dev.agentknock.storage.request.SecretUploadVariableEntity
 import dev.agentknock.storage.request.RequestDao
 import dev.agentknock.storage.request.RequestSecretEntity
+import dev.agentknock.storage.rule.ApprovalRuleDao
+import dev.agentknock.storage.rule.ApprovalRuleEntity
 import dev.agentknock.storage.vault.VaultDao
 import dev.agentknock.storage.vault.DeviceIdentityEntity
 import dev.agentknock.storage.vault.VaultSecretEntity
@@ -40,8 +42,9 @@ import dev.agentknock.storage.vault.VaultSecretEntity
         SecretUploadRequestEntity::class,
         SecretUploadVariableEntity::class,
         AuditEventEntity::class,
+        ApprovalRuleEntity::class,
     ],
-    version = 5,
+    version = 6,
     exportSchema = true,
 )
 internal abstract class AgentknockDatabase : RoomDatabase() {
@@ -54,6 +57,8 @@ internal abstract class AgentknockDatabase : RoomDatabase() {
     abstract fun requestDao(): RequestDao
 
     abstract fun auditDao(): AuditDao
+
+    abstract fun approvalRuleDao(): ApprovalRuleDao
 
     companion object {
         const val NAME = "agentknock.db"

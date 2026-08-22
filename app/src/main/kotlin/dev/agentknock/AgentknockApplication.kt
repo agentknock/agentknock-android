@@ -19,6 +19,7 @@ import dev.agentknock.relay.HttpRelayDeviceManagementClient
 import dev.agentknock.relay.WebSocketRelayDeviceClient
 import dev.agentknock.storage.request.RequestRepository
 import dev.agentknock.storage.request.RequestConnectionManager
+import dev.agentknock.storage.rule.ApprovalRuleRepository
 import dev.agentknock.storage.vault.VaultRepository
 import dev.agentknock.storage.vault.DeviceManagementRepository
 import kotlinx.coroutines.CoroutineScope
@@ -90,10 +91,16 @@ internal class ApplicationContainer(application: Application) {
         audit = audit,
     )
 
+    val approvalRules = ApprovalRuleRepository(
+        dao = database.approvalRuleDao(),
+        audit = audit,
+    )
+
     val requests = RequestRepository(
         dao = database.requestDao(),
         deviceCredentials = vault,
         secrets = secrets,
+        approvalRules = approvalRules,
         relay = WebSocketRelayDeviceClient(httpClient),
         keyManager = vaultKeyManager,
         encryption = encryption,

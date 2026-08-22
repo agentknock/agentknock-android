@@ -115,10 +115,10 @@ Names do not need redundant type prefixes:
 - A secret detail uses the secret name as its title, for example
   **aws-read-only**, with its type shown as supporting information rather than
   **Secret: aws-read-only**.
-- A policy detail uses the policy name as its title. A request or audit event
+- An approval rule's detail screen uses the rule name as its title. A request or audit event
   without a user-assigned name uses a concise type or operation title.
 - Inside another object's detail, a role label such as **Client**, **Secret**,
-  or **Policy** precedes a linked name when the relationship would otherwise be
+  or **Rule** precedes a linked name when the relationship would otherwise be
   ambiguous.
 - IDs, timestamps with distinct meanings, reported-versus-authoritative data,
   commands, paths, and security state are explicitly labeled. A familiar name
@@ -143,8 +143,10 @@ an everyday task. The primary destinations should therefore be:
    and history.
 2. **Secrets** — typed capabilities that clients can request.
 3. **Clients** — active, suspended, and previously paired CLI installations.
+4. **Rules** — approval rules that can approve, deny, or ask the user about
+   matching secret use requests.
 
-Settings remains a secondary destination rather than a fourth primary domain.
+Settings remains a secondary destination rather than a primary domain.
 Device and pairing management belongs there and is linked contextually from
 pairing empty states. The navigation hierarchy stays the same across phone and
 tablet layouts even when its visual presentation adapts.
@@ -173,9 +175,9 @@ Main application
 ├── Clients
 │   └── Client detail
 │       └── Reauthorization flow
-├── Approval policies (from Automation or context)
-│   ├── Policy detail
-│   └── Create or edit policy
+├── Rules
+│   ├── Approval rule detail
+│   └── Create or edit approval rule
 └── Settings
     ├── Device & pairing
     ├── Notifications
@@ -191,9 +193,9 @@ Main application
     └── About, privacy, and licenses
 ```
 
-Approval policies are reachable both from **Settings > Automation** and from
-the secret, client, and request they affect. They are a domain workflow,
-not merely a collection of switches.
+Approval rules are a primary destination and are also linked from the secret,
+client, and request they affect. Automation settings control their overall
+behavior without duplicating the rule-management workflow.
 
 ### Application-wide exceptional state
 
@@ -230,7 +232,7 @@ claim a cause that the public protocol cannot establish.
 
 ### Phone and tablet behavior
 
-Requests, Secrets, Clients, the Audit log, and policy management are
+Requests, Secrets, Clients, Rules, and the Audit log are
 list-detail flows:
 
 - Compact windows show either list or detail, with normal back navigation.
@@ -343,7 +345,7 @@ screens in recovery mode rather than introducing another recovery editor.
 **Surface:** Primary destination and list screen.
 
 **Purpose:** Be both the application home and the authoritative, durable inbox
-and history for operations that require a user decision or policy evaluation.
+and history for operations that require a user decision or rule evaluation.
 
 Purely read-only or automatically handled operations do not appear here merely
 because they arrived from a client. Secret-list operations, automatic
@@ -372,7 +374,7 @@ A secret use row also shows the complete shell command and a compact
 secret-name summary when they fit, such as one name plus a count of additional
 secrets. It never shows values. A secret upload row shows its mode and secret
 name. A completed row may show a compact automatic-decision marker; the full
-decision source, policy version, and delivery state belong to detail. The
+decision source, rule version, and delivery state belong to detail. The
 request label makes redundant **Request:** and **Client:** prefixes
 unnecessary.
 
@@ -408,9 +410,9 @@ Every request detail starts with:
   hostname when known;
 - received time and any current expiry or response deadline;
 - a short type-appropriate lifecycle timeline that distinguishes receipt,
-  review or policy evaluation, the resulting action, and any confirmation still
+  review or rule evaluation, the resulting action, and any confirmation still
   expected;
-- decision source when applicable and, for a policy, its name and version;
+- decision source when applicable and, for an approval rule, its name and version;
 - any safe failure reason;
 - the relay request ID and client ID under technical details; and
 - **Delete from history** only for terminal requests.
@@ -421,7 +423,7 @@ Lifecycle and decision information is supporting content. **Request ID**,
 **Client ID**, decided/completed/last-updated timestamps, versions, and
 cryptographic diagnostics remain under Technical details.
 
-Deletion removes the local history entry, not secrets, policies, or an active
+Deletion removes the local history entry, not secrets, approval rules, or an active
 client. Active or unsettled requests cannot be deleted. Existing audit-log
 events about the request remain and show that the detailed request record is no
 longer available.
@@ -497,8 +499,8 @@ requested capabilities without revealing confidential material.
   operation.
 - Reported client identity: friendly name and hostname.
 - Request timing and any expiry or cancellation state.
-- The decision mode: manual, matching device-held policy, or later remote
-  reviewer under a named policy.
+- The decision mode: manual, matching device-held approval rule, or later remote
+  reviewer under a named rule.
 
 A supporting **Execution details** section shows working directory, executable
 path and mode, SHA-256 identity when reported, standard-stream kinds, and
@@ -510,38 +512,29 @@ actions.
 Manual pending state always provides:
 
 1. **Deny once** — deny only this request.
-2. **Approve once** — approve only this request without creating a policy.
+2. **Approve once** — approve only this request without creating an approval rule.
 
-When the client has reported the executable identity required for safe reuse,
-it also provides:
+3. **Approve for a while** — open a temporary-rule editor copied from this
+   request. The user chooses an exact command or a token prefix, selects where
+   that prefix ends by touching the command or an argument, and reviews the
+   duration and any additional executable or folder checks before one final
+   create-and-approve action.
 
-3. **Approve this command with these arguments for 4 hours** — approve this
-   request and create a temporary policy for the exact client, requested
-   secret set, command, and ordered argument vector.
-4. **Approve this command with any arguments for 4 hours** — approve this
-   request and create a temporary policy for the exact client, requested
-   secret set, and command while leaving the argument vector unrestricted.
-
-The reusable actions are unavailable when the request lacks a resolved
-executable path or executable hash. The screen explains that one-time approval
-is still possible but Agentknock cannot safely recognize the same executable
-for later requests.
-
-The four-hour duration is an editable default. Either temporary-policy action
-opens the policy editor defined in A-03, prefilled with the selected argument
-mode. The user can change the duration and review the exact expiry and scope
-before one final save-and-approve action. The unrestricted argument choice is
-visually distinguished as broader. No prefix, pattern, partial-argument, or
-indefinite matching mode is offered initially.
+The temporary rule uses a four-hour editable default. It applies independently
+to each selected secret rather than matching the requested set as one opaque
+value. A prefix is a prefix of the structured command-and-argument vector, not
+of rendered text; it can therefore express scopes such as `gh issue` without
+turning into a shell pattern. An exact command requires the entire vector to
+match. There is no wildcard or substring mode.
 
 Every approving action revalidates the request and every secret's type,
 configuration, contents, and availability before responding. If anything
 changed since the screen was rendered, the decision stops and the updated
-details must be reviewed again. Creating the temporary policy and recording
-the current decision must not produce a duplicate or broader policy if delivery
-is retried. The current request records the user as its decision source and
-links the newly created policy; only later matching requests identify that
-policy as their automatic decision source.
+details must be reviewed again. Creating the temporary rule and recording
+the current decision must not produce a duplicate or broader rule if delivery
+is retried. The temporary rule is not enabled until the current approval
+succeeds. The current request records the user as its decision source; only
+later matching requests identify the rule as their automatic decision source.
 
 Terminal states must separately report:
 
@@ -550,11 +543,11 @@ Terminal states must separately report:
 - denied and client confirmation state;
 - cancelled or expired before a response;
 - invalid request or cryptographic verification failure; and
-- an automatic decision, including the exact policy/reviewer version.
+- an automatic decision, including the exact rule or reviewer version.
 
-Additional policy detail, if offered, remains within that editor. There is no
+Additional rule detail, if offered, remains within that editor. There is no
 second unnamed confirmation screen, and the editor never creates or widens a
-policy without authenticated review.
+rule without authenticated review.
 
 The title is **Secret use**. **Requested secrets**, **Client**, **Command**,
 **Working directory**, and **Reason reported by client** are labeled because
@@ -634,19 +627,19 @@ events without creating a request row.
 **Surface:** List screen under Data and history.
 
 **Purpose:** Present a chronological record of security-relevant client,
-device, user, and policy activity.
+device, user, and rule activity.
 
 Record at least:
 
 - Secret-list operations and their outcomes;
-- request receipt, user or policy decision, response, expiry, cancellation,
+- request receipt, user or rule decision, response, expiry, cancellation,
   and delivery confirmation;
 - Secret upload receipt, approval, rejection, and validation failure;
 - pairing activation, rejection, failure, and client-initiated unpairing;
 - client rename, requested and confirmed suspension or resumption,
   reauthorization, and revocation;
 - pairing-address claim and replacement, and pausing or resuming new pairings;
-- Secret, environment variable, SSH key, issuer configuration, and policy creation,
+- Secret, environment variable, SSH key, issuer configuration, and rule creation,
   change, replacement, and deletion;
 - device setup, recovery, and protected-key availability changes; and
 - security-relevant authentication, cryptographic, and protocol failures.
@@ -681,7 +674,7 @@ separate screen.
 - actor and decision source;
 - stable IDs and friendly-name snapshots for affected objects;
 - safe before-and-after summaries for local management changes;
-- related request, client, secret, or policy links when those records still
+- related request, client, secret, or rule links when those records still
   exist;
 - delivery or client-confirmation state when applicable;
 - a sanitized failure category; and
@@ -821,8 +814,8 @@ Each row directly shows:
   role, or abbreviated SSH fingerprint.
 
 Description, complete provided environment variable names, delivery mechanism,
-created and updated times, last request and outcome, active policies, and any
-high-value classification belong to secret detail. A compact policy or
+created and updated times, last request and outcome, active approval rules, and
+any high-value classification belong to secret detail. A compact rule or
 high-value marker may appear in the row only when it changes how the user
 should interpret the secret.
 
@@ -868,7 +861,7 @@ Every secret detail shows:
 - availability and any type-specific configuration error;
 - its public delivery contract and, where applicable, the fixed environment
   variables it provides;
-- active policies that reference the secret; and
+- active approval rules that reference the secret; and
 - recent authorization requests and audit events filtered to this secret,
   linking to their normal details.
 
@@ -879,7 +872,7 @@ exposed or retained merely because a request completed.
 Secret actions are **Edit**, **Rename**, and **Delete**, plus type-specific
 actions such as replacing stored material or testing issuer configuration.
 Renaming changes the CLI-facing handle but preserves the stable internal ID,
-policies, and history. Deleting makes future requests by that name fail;
+approval rules, and history. Deleting makes future requests by that name fail;
 history retains the secret name, type, and request metadata, never values.
 
 Saving, renaming, and deleting are security-sensitive management actions and
@@ -1017,7 +1010,7 @@ Each row directly shows:
 - last activity time.
 
 A pending-request indicator appears when nonzero because it requires attention.
-Paired time, full platform information, active-policy count, and exact request
+Paired time, full platform information, active rule count, and exact request
 counts belong to client detail. Rows use **my laptop**, not **Client: my
 laptop**.
 
@@ -1045,7 +1038,7 @@ request detail rather than becoming half-created client rows.
   operation, and last seen times when available;
 - continuity-key rotation status in user language: healthy, stale,
   reauthorization required, or competing copy detected;
-- active approval policies for this client;
+- active approval rules for this client;
 - authorization requests and audit events filtered to this client; and
 - an explanation that reported machine information is not independent host
   attestation.
@@ -1056,7 +1049,7 @@ Actions:
 - **Suspend** or **Resume**;
 - **Reauthorize** when stale or after a copied-state warning;
 - **Revoke client**; and
-- **View approval policies** when policies are available.
+- **View approval rules** when rules are available.
 
 The client remains **Suspending**, **Resuming**, or **Revoking** until the relay
 confirms the requested state. These transitions survive leaving the screen or
@@ -1073,17 +1066,17 @@ Revocation is authoritative and permanent for that pairing: future requests
 fail, outstanding exchanges and delayed responses are terminated, the CLI must
 pair as a new client, and local history remains.
 
-A competing-copy warning automatically suspends policies for that client
+A competing-copy warning automatically suspends approval rules for that client
 until the user explicitly reauthorizes or revokes it.
 
 The friendly name is the screen title. State and any security warning are
 primary. **Reported hostname**, **Platform**, **Architecture**, **OS version**,
 and **Machine ID** remain explicitly labeled because they are client-reported
 attributes, while **Client ID** and CLI/protocol versions belong under
-Technical details. Related policies, Requests, and Audit events are named
+Technical details. Related approval rules, Requests, and Audit events are named
 sections rather than fields competing with the client identity. **View approval
-policies** opens the existing policy list filtered to this client; it does not
-create a client-specific policy screen.
+rules** opens the existing rule list filtered to this client; it does not
+create a client-specific rule screen.
 
 ### C-03 — Client reauthorization
 
@@ -1100,7 +1093,7 @@ state or a competing-copy warning.
 - why reauthorization is required and what evidence the user must compare or
   confirm once that protocol is defined;
 - progress and any expiry while reauthorization is incomplete;
-- the effect on suspended approval policies; and
+- the effect on suspended approval rules; and
 - **Cancel**, **Reauthorize**, and **Revoke client** only in the states where
   each action is valid.
 
@@ -1110,119 +1103,117 @@ transcript state remain secondary. Until a concrete verification contract
 exists, the UI must not substitute a generic confirmation that treats reported
 machine metadata as proof.
 
-## Approval policies and automation
+## Approval rules and automation
 
-Automatic approval is a later product capability, but its screen boundaries
-should be reserved now so that it does not become a loose collection of toggles.
+Approval rules are a product capability with their own screens rather than a
+loose collection of settings toggles.
 
-### A-01 — Approval policy list
+### A-01 — Approval rule list
 
-**Surface:** List screen reached from Automation and contextual policy links.
+**Surface:** Primary list screen reached from **Rules** and contextual links.
 
-**Purpose:** Inspect and stop reusable device-held authorization.
+**Purpose:** Inspect and stop reusable device-held request decisions.
 
 **Show:**
 
-- master state: automatic approvals enabled or paused;
-- each policy's name as primary text, enabled/paused/expired status, concise
-  client/secret scope, and expiry;
-- prominent warnings for policies suspended by client competition,
+- each rule's name as primary text, enabled/paused/expired status, decision,
+  concise client/secret scope, and expiry;
+- prominent warnings for rules suspended by client competition,
   unavailable secret material, invalid issuer configuration, or subscription
   entitlement; and
 - a link to every automatic decision through normal request history.
 
 Last match, recent match count, complete executable scope, and version belong to
-policy detail. A row uses the policy name without a **Policy:** prefix.
+rule detail. A row uses the rule name without a **Rule:** prefix.
 
-The initial creation path starts from a pending secret use request so the
-app can capture and show a concrete scope. A global **Pause automatic
-approvals** action is fast and reversible; it does not delete policy
-definitions.
+Standing rules can be created directly from this screen. Temporary rules start
+from a pending secret use request so the app can copy machine-reported fields
+without asking a person to type them. Rules can be paused individually without
+deleting their definitions; unmatched requests still require a user decision.
 
-### A-02 — Policy detail
+### A-02 — Approval rule detail
 
-**Surface:** Detail screen for one policy.
+**Surface:** Detail screen for one approval rule.
 
 **Show:**
 
-- policy name, stable identifier, and current version;
+- rule name and stable identifier;
 - enabled, paused, expired, or blocked state and reason;
 - exact client selector;
-- exact secret or secret-set selector and how secret configuration changes
-  affect matching;
-- original command name, resolved executable path, and executable-content
-  identity used to recognize the same command version;
-- argument mode: exact ordered arguments or any arguments;
+- one or more exact secret selectors;
+- one structured command-and-argument vector, matched exactly or as a token
+  prefix;
+- optional resolved executable path and executable-content identity, and
+  optional working directory, when captured from a request;
 - start, expiry, created, updated, and last-used times;
-- whether matching requests are approved deterministically, sent to a remote
-  reviewer, or escalated for manual review;
-- high-value secret restrictions;
+- action for matching requests: **Approve**, **Ask me**, **Deny**, or **Ask
+  AI**;
 - automatic decision count and recent matching requests; and
-- what request data a remote reviewer may see, if applicable.
+- what request data the AI reviewer may see, if applicable.
 
-Actions: **Pause/enable**, **Edit**, **Revoke**, and **View matching activity**.
-Revoke prevents future matches but cannot retract material already delivered
+Actions: **Pause/enable**, **Edit**, **Delete**, and **View matching activity**.
+Deleting prevents future matches but cannot retract material already delivered
 or operations already completed.
 
 **View matching activity** opens the existing request list filtered to this
-policy rather than a separate activity screen.
+rule rather than a separate activity screen.
 
-The policy name is the screen title and current status is primary. **Client**,
-**Secrets**, **Command**, **Arguments**, **Decision mode**, and **Expires** are
-labeled scope fields. Stable identifier, version, exact hash, and timestamps
-other than expiry and last use remain under Technical details or a secondary
-history section.
+The rule name is the screen title and current status is primary. **Client**,
+**Secrets**, **Command**, **Decision**, and **Expires** are labeled scope fields.
+Stable identifier, exact hash, and timestamps other than expiry and last use
+remain under Technical details or a secondary history section.
 
-### A-03 — Create or edit a temporary policy
+### A-03 — Create or edit an approval rule
 
-**Surface:** Policy editor screen opened from a pending secret use request
-or an existing policy detail.
+**Surface:** Approval rule editor opened from the rule list, a pending secret use
+request, or an existing rule detail.
 
 **Show and require review of:**
 
-- a generated, editable user-visible policy name;
-- the one exact client copied from the request;
-- the exact secret set and whether authorization-relevant changes to a
-  selected secret require manual review;
-- the original command name, resolved executable path, and SHA-256 executable
-  identity copied from the request;
-- argument mode: the exact ordered argument vector copied from the request, or
-  any arguments;
-- an editable duration defaulting to four hours and the resulting absolute
-  expiry time;
-- decision mode;
-- what happens when a field does not match: manual review or deny; and
-- a final natural-language summary with representative matching and
-  non-matching examples.
+- a generated, editable user-visible rule name;
+- one exact client;
+- one or more exact secrets, each evaluated independently;
+- one structured command-and-argument vector, matched exactly or as a token
+  prefix;
+- for a request-derived rule, optional resolved executable identity and working
+  directory checks copied from the request rather than typed by the user;
+- for a request-derived rule, an editable duration defaulting to four hours;
+- action on a match: **Approve**, **Ask me**, **Deny**, or **Ask AI**; and
+- a final natural-language summary of the effective scope.
 
-The exact-arguments comparison operates on the structured ordered argument
-vector, not a rendered shell command. **Any arguments** removes only that
-comparison; it does not broaden the client, secret set, original command name,
-resolved executable path, or executable contents. A different order of the
-same requested secret names still represents the same set. Launcher-chain
-information remains visible as client-reported context but does not broaden or
-narrow the initial policy match. A secret change with authorization
-consequences fails policy matching and returns the request to manual review.
+Command comparison operates on the structured ordered token vector, not a
+rendered shell command. Executable names are not reduced to basenames. A
+prefix must include the command token and may extend through one or more
+arguments. A manually created standing rule accepts a shell-readable command
+line and parses quoting without performing shell expansion. It does not expose
+fields such as executable hashes or working directories that a person would
+not reasonably type.
 
-A reusable policy cannot be created from a request that lacks the resolved
-executable path or SHA-256 identity. The normal UI can describe the hash as the
-same executable version; the exact value remains available in technical
-details.
+Each requested secret finds its own matching decision. **Deny** takes
+precedence over **Ask me**, which takes precedence over **Ask AI**, which takes
+precedence over **Approve**. A secret with no matching rule defaults to **Ask
+me**, and the least permissive result across all requested secrets decides the
+atomic request. Rule order therefore has no effect and rules are not manually
+reordered.
 
-The safe default is no policy. The editor must not offer selectors whose match
+Standing rules created from the Rules screen have no expiry. Temporary rules
+are created from a request. A different order of requested secret names does
+not alter per-secret evaluation. Renaming a secret retains its stable identity;
+deleting and recreating one does not inherit the old rule.
+
+The safe default is no rule. The editor must not offer selectors whose match
 semantics are not implemented and testable. A client or agent cannot create,
-widen, extend, or make a policy indefinite. **Deny once** and **Approve once**
-never create policy records.
+widen, extend, or make a rule indefinite. **Deny once** and **Approve once**
+never create rule records.
 
-Saving, widening, enabling, or extending a policy requires device
-authentication. The stored version increments whenever authorization-relevant
-fields change so history can identify the exact rule that acted.
+Saving, widening, enabling, or extending a rule requires device
+authentication. Pausing and deletion remain fast ways to stop future matches.
 
-The create flow uses a **New approval policy** title and a labeled **Name**
-field. Editing an existing policy uses its policy name as the title without a
-**Policy:** prefix.
+The create flow uses a **New approval rule** title and a labeled **Name**
+field. Editing an existing rule uses its rule name as the title without a
+**Rule:** prefix.
 
-### A-04 — Remote reviewer setup
+### A-04 — Automatic approvals setup
 
 **Surface:** Focused Automation setup screen; not a primary destination.
 
@@ -1230,18 +1221,19 @@ field. Editing an existing policy uses its policy name as the title without a
 
 **Show before enabling:**
 
-- the difference between device-held deterministic policy and remote LLM
-  review;
+- the difference between the deterministic **Approve** and **Deny** actions and
+  AI review through **Ask AI**;
 - exact request fields sent to the provider;
 - that no secret values, generated temporary credentials, private keys, or
   decryption keys are sent;
-- eligible policies and the fallback on timeout, provider failure, or
+- eligible rules and the fallback on timeout, provider failure, or
   uncertainty;
 - current subscription entitlement and expected usage limits; and
-- an explicit link to disable the reviewer without deleting policies.
+- an explicit link to disable the reviewer without deleting rules.
 
-The user chooses this trust mode deliberately. It must never appear to be a
-more convenient spelling of local automatic approval.
+The user chooses this trust mode deliberately. The UI makes clear that the AI
+reviewer may authorize a request without asking the user, while deterministic
+**Approve** rules do not involve AI.
 
 ## Settings and secondary screens
 
@@ -1257,7 +1249,7 @@ Rows show their current state in supporting text and open focused subscreens:
   accepted, or recovery required.
 - **Notifications** — enabled, disabled, or delivery setup needs attention.
 - **Security** — device protection and local-key status.
-- **Automation** — off, paused, or number of active policies.
+- **Automation** — off, paused, or number of active rules.
 - **Data and history** — backup, bounded request history, and audit log.
 - **Plan and billing** — Free, paid plan name, payment attention, or unavailable.
 - **Connection diagnostics** — connected, offline, or last error.
@@ -1287,7 +1279,7 @@ address, does not cancel an already admitted pairing request, and remains in
 effect until the user explicitly resumes it; there is no automatic timeout.
 
 Changing the pairing address affects only future pairings. Existing clients,
-secrets, policies, and history are unaffected. The current address remains in
+secrets, approval rules, and history are unaffected. The current address remains in
 use until the replacement has been claimed successfully, and an interrupted
 change remains resumable.
 
@@ -1343,7 +1335,7 @@ Pending secret use notifications initially provide **Deny once** and
   authenticated interaction from the notification, the action opens the exact
   request detail to finish approval.
 
-Creating a temporary policy remains an in-app action initially. Its broader
+Creating a temporary approval rule remains an in-app action initially. Its broader
 scope, argument mode, secret set, and editable expiry require the focused
 review surface. Dismissing a notification has no effect on its request, and a
 notification is removed or updated when the request resolves elsewhere.
@@ -1377,22 +1369,23 @@ supporting information rather than separate status cards for every mechanism.
 
 ### T-05 — Automation
 
-**Surface:** Settings sub-screen and entry point to the Policy list.
+**Surface:** Settings sub-screen for overall rule behavior.
 
 **Show:**
 
-- master automatic-approval state;
-- count of active, paused, expired, and blocked policies;
+- master rule-evaluation state;
+- count of active, paused, expired, and blocked rules;
 - default behavior for unmatched requests, which is manual review unless a
   future explicit deny mode is selected;
-- remote-reviewer state and provider-visible-data summary when applicable; and
-- link to the policy list.
+- automatic approvals state and provider-visible-data summary when applicable;
+  and
+- link to the **Rules** destination.
 
-The master control pauses evaluation. Policy creation and detailed scoping stay
-in the policy workflow rather than becoming nested preference rows.
+The master control pauses evaluation. Rule creation and detailed scoping stay
+in the rule workflow rather than becoming nested preference rows.
 
-The automatic-approval state and link to policies are primary. Counts and
-remote-reviewer details are supporting summaries and appear only when those
+The rule-evaluation state and link to **Rules** are primary. Counts and
+automatic approvals details are supporting summaries and appear only when those
 features exist.
 
 ### T-06 — Data and history
@@ -1403,7 +1396,7 @@ reset.
 **Show:**
 
 - local counts for secrets, environment variables, clients, requests, audit events, and
-  policies;
+  approval rules;
 - what Android backup/device transfer preserves: metadata and encrypted stored
   material, including Request history and the Audit log;
 - what it cannot preserve: device-bound private keys, so restored secret
@@ -1418,7 +1411,7 @@ reset.
 - **Factory reset Agentknock**, visually separated from ordinary data and
   history controls as an irreversible recovery and deletion action.
 
-Clearing history never deletes active clients, secrets, policies, or
+Clearing history never deletes active clients, secrets, approval rules, or
 unsettled Requests. It also does not delete Audit log events about pruned or
 manually deleted Requests. Individual audit events cannot be deleted; normal
 retention removes expired events, and Factory reset removes the log with
@@ -1445,7 +1438,7 @@ unavailable.
 
 - an unmistakable **This cannot be undone** warning;
 - every local category that will be erased: device identity and keys, secrets
-  and values, Clients, Requests, policies, Audit log, and settings;
+  and values, Clients, Requests, approval rules, Audit log, and settings;
 - the remote state Agentknock will attempt to delete: the relay device, client
   registrations, pending exchanges, and push registration;
 - that deletion removes live relay state while any limited infrastructure
@@ -1633,7 +1626,7 @@ navigation destinations:
 - clear completed request history;
 - change pairing address or discard an incomplete claim;
 - reveal/copy a sensitive value; and
-- create, widen, extend, enable, or revoke an approval policy.
+- create, widen, extend, enable, or revoke an approval rule.
 
 Confirmation copy names the affected object and consequence. Destructive
 buttons use the precise verb—**Revoke**, **Delete**, **Clear**, **Deny**—rather
@@ -1717,7 +1710,7 @@ detail:
    hostname is accepted automatically after correct SAS or whether naming is a
    required pairing step. It remains editable either way.
 3. **Client reauthorization contract.** Define the verification evidence,
-   protocol lifecycle, expiry, and effect on existing policies before the
+   protocol lifecycle, expiry, and effect on existing rules before the
    focused reauthorization screen is finalized. Reported machine metadata is
    not sufficient evidence by itself.
 4. **Secret type contracts.** Define the exact public metadata, fixed provided
@@ -1744,8 +1737,10 @@ detail:
    pseudonymous Agentknock device identity, and what restoration or
    multiple-device behavior is promised before the backend entitlement model
    is designed.
-11. **Remote reviewer trust mode.** Provider, visible fields, evaluation gates,
-   fallback behavior, and subscription economics remain later decisions.
+11. **Automatic approvals and the Ask AI label.** **Ask AI** is the provisional
+   rule-action label. Revisit it before release while defining the provider,
+   visible fields, evaluation gates, fallback behavior, and subscription
+   economics.
 
 ## External references
 

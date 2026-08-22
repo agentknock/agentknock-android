@@ -116,6 +116,7 @@ import dev.agentknock.storage.request.SecretUploadRequestDetails
 import dev.agentknock.storage.request.SecretUploadRequestState
 import dev.agentknock.storage.request.SecretUploadVariableValue
 import dev.agentknock.storage.request.RequestSyncResult
+import dev.agentknock.storage.rule.ApprovalRuleAction
 import dev.agentknock.storage.vault.DeviceIdentity
 import dev.agentknock.ui.components.ClientIdentity
 import dev.agentknock.ui.components.InformationRow
@@ -129,6 +130,7 @@ internal fun RequestsScreen(
     onOpenSettings: () -> Unit,
     notificationsEnabled: Boolean,
     onTopLevelChanged: (Boolean) -> Unit,
+    onCreateRule: (Long) -> Unit,
     viewModel: RequestsViewModel = viewModel(),
 ) {
     val requests by viewModel.requests.collectAsStateWithLifecycle()
@@ -209,6 +211,7 @@ internal fun RequestsScreen(
                             report = ::report,
                             onBack = { viewModel.selectRequest(null) },
                             showBack = false,
+                            onCreateRule = onCreateRule,
                             modifier = Modifier.weight(1f).fillMaxHeight(),
                         )
                     }
@@ -238,6 +241,7 @@ internal fun RequestsScreen(
                     report = ::report,
                     onBack = { viewModel.selectRequest(null) },
                     showBack = true,
+                    onCreateRule = onCreateRule,
                     modifier = Modifier.fillMaxSize(),
                 )
             }
@@ -253,6 +257,7 @@ private fun RequestDetail(
     report: (String) -> Unit,
     onBack: () -> Unit,
     showBack: Boolean,
+    onCreateRule: (Long) -> Unit,
     modifier: Modifier,
 ) {
     val scope = rememberCoroutineScope()
@@ -287,6 +292,7 @@ private fun RequestDetail(
                 )
             },
             onDeny = { scope.launch { report(viewModel.denySecretUseRequest(request.id).message()) } },
+            onCreateRule = { onCreateRule(request.id) },
             modifier = modifier,
         )
         request.secretUpload != null -> SecretUploadDetail(
@@ -764,6 +770,7 @@ private fun SecretUseDetail(
     showBack: Boolean,
     onApprove: () -> Unit,
     onDeny: () -> Unit,
+    onCreateRule: () -> Unit,
     modifier: Modifier,
 ) {
     val secretUse = checkNotNull(request.secretUse)
@@ -778,19 +785,31 @@ private fun SecretUseDetail(
                     color = MaterialTheme.colorScheme.surfaceContainerLow,
                     tonalElevation = 3.dp,
                 ) {
-                    Row(
+                    Column(
                         modifier = Modifier.fillMaxWidth().padding(12.dp),
-                        horizontalArrangement = Arrangement.spacedBy(10.dp),
+                        verticalArrangement = Arrangement.spacedBy(10.dp),
                     ) {
-                        OutlinedButton(onClick = onDeny, modifier = Modifier.weight(1f)) {
-                            Text("Deny once")
-                        }
-                        Button(
-                            onClick = onApprove,
-                            enabled = secretUse.missingSecrets.isEmpty(),
-                            modifier = Modifier.weight(1f),
+                        Row(
+                            modifier = Modifier.fillMaxWidth(),
+                            horizontalArrangement = Arrangement.spacedBy(10.dp),
                         ) {
-                            Text("Approve once")
+                            OutlinedButton(onClick = onDeny, modifier = Modifier.weight(1f)) {
+                                Text("Deny once")
+                            }
+                            Button(
+                                onClick = onApprove,
+                                enabled = secretUse.missingSecrets.isEmpty(),
+                                modifier = Modifier.weight(1f),
+                            ) {
+                                Text("Approve once")
+                            }
+                        }
+                        FilledTonalButton(
+                            onClick = onCreateRule,
+                            enabled = secretUse.missingSecrets.isEmpty(),
+                            modifier = Modifier.fillMaxWidth(),
+                        ) {
+                            Text("Approve for a while")
                         }
                     }
                 }
@@ -878,6 +897,24 @@ private fun SecretUseDetail(
                 secretUse.missingSecrets.joinToString(),
                 error = true,
             )
+        }
+
+        if (secretUse.state == SecretUseRequestState.APPROVAL_PENDING) {
+            when (secretUse.ruleEvaluation?.action) {
+                ApprovalRuleAction.ASK_ME -> Notice(
+                    "Your decision is required",
+                    if (secretUse.ruleEvaluation.matchedRuleIds.isEmpty()) {
+                        "No approval rule covers this request."
+                    } else {
+                        "An approval rule requires you to decide this request."
+                    },
+                )
+                ApprovalRuleAction.ASK_AI -> Notice(
+                    "Your decision is required",
+                    "Ask AI is not available yet, so this request needs your decision.",
+                )
+                else -> Unit
+            }
         }
 
         if (secretUse.secretDetails.isNotEmpty()) {
@@ -1312,16 +1349,21 @@ private fun SecretUploadDetail(
 
 @Composable
 private fun SecretUseOutcome(secretUse: SecretUseRequestDetails) {
+    val ruleDetail = if (secretUse.decisionSource == "rule") {
+        " An approval rule made this decision."
+    } else {
+        ""
+    }
     val outcome = when (secretUse.state) {
         SecretUseRequestState.WAITING_FOR_COMPLETION -> OutcomeNotice(
             title = if (secretUse.decision == SecretUseDecision.APPROVED) "Approved" else "Denied",
-            detail = "Waiting for the client to finish.",
+            detail = "Waiting for the client to finish.$ruleDetail",
             subdued = secretUse.decision == SecretUseDecision.DENIED,
         )
         SecretUseRequestState.COMPLETED -> when (secretUse.completionResult) {
             SecretUseCompletionResult.APPROVED -> OutcomeNotice(
                 "Delivered",
-                "The client received the secret values.",
+                "The client received the secret values.$ruleDetail",
             )
             SecretUseCompletionResult.DENIED -> if (
                 secretUse.completionReason == "INVALID_REQUEST"
@@ -1334,7 +1376,7 @@ private fun SecretUseOutcome(secretUse: SecretUseRequestDetails) {
             } else {
                 OutcomeNotice(
                     "Denied",
-                    secretUse.completionMessage ?: "No values were released.",
+                    (secretUse.completionMessage ?: "No values were released.") + ruleDetail,
                     subdued = true,
                 )
             }

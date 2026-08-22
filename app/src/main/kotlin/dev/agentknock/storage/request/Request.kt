@@ -309,6 +309,10 @@ internal data class SecretUseRequestEntity(
     val launcherChainJson: String,
     @ColumnInfo(name = "decision")
     val decision: String?,
+    @ColumnInfo(name = "decision_source")
+    val decisionSource: String?,
+    @ColumnInfo(name = "rule_evaluation_json")
+    val ruleEvaluationJson: String?,
     @ColumnInfo(name = "completion_result")
     val completionResult: String?,
     @ColumnInfo(name = "completion_reason")

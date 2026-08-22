@@ -12,6 +12,7 @@ internal enum class AuditCategory(val storedName: String) {
     SECRET("secret"),
     DEVICE("device"),
     VERIFICATION("verification"),
+    RULE("rule"),
 }
 
 internal enum class AuditOutcome(val storedName: String) {
