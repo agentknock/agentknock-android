@@ -89,9 +89,13 @@ internal class SettingsViewModel(application: Application) : AndroidViewModel(ap
 
     suspend fun clearCompletedRequests(): Int = container.requests.clearCompletedHistory()
 
-    suspend fun factoryReset(localOnly: Boolean): FactoryResetResult = if (localOnly) {
-        container.factoryReset.resetLocalOnly()
-    } else {
-        container.factoryReset.reset()
+    suspend fun factoryReset(localOnly: Boolean): FactoryResetResult {
+        val result = if (localOnly) {
+            container.factoryReset.resetLocalOnly()
+        } else {
+            container.factoryReset.reset()
+        }
+        if (result == FactoryResetResult.Reset) container.authentication.reset()
+        return result
     }
 }

@@ -63,6 +63,11 @@ internal class RequestsViewModel(application: Application) : AndroidViewModel(ap
         return repository.chooseSas(requestId, selectedIndex)
     }
 
+    suspend fun isMatchingPendingSas(requestId: Long, selectedIndex: Int): Boolean {
+        container.localStorage.await()
+        return repository.isMatchingPendingSas(requestId, selectedIndex)
+    }
+
     suspend fun rejectPairing(requestId: Long): PairingDecisionResult {
         container.localStorage.await()
         return repository.rejectPairing(requestId)

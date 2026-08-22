@@ -126,7 +126,7 @@ import kotlinx.coroutines.launch
 
 @Composable
 internal fun RequestsScreen(
-    authenticate: (String, () -> Unit, (String) -> Unit) -> Unit,
+    authorizeProtectedAction: (String, () -> Unit, (String) -> Unit) -> Unit,
     onOpenSettings: () -> Unit,
     notificationsEnabled: Boolean,
     onTopLevelChanged: (Boolean) -> Unit,
@@ -148,15 +148,9 @@ internal fun RequestsScreen(
 
     fun approve(request: InboxRequestSummary) {
         if (request.secretUseState != SecretUseRequestState.APPROVAL_PENDING) return
-        authenticate(
-            "Approve secret use",
-            {
-                scope.launch {
-                    report(viewModel.approveSecretUseRequest(request.id).message())
-                }
-            },
-            ::report,
-        )
+        scope.launch {
+            report(viewModel.approveSecretUseRequest(request.id).message())
+        }
     }
 
     fun reject(request: InboxRequestSummary) {
@@ -206,7 +200,7 @@ internal fun RequestsScreen(
                     } else {
                         RequestDetail(
                             request = selectedRequest,
-                            authenticate = authenticate,
+                            authorizeProtectedAction = authorizeProtectedAction,
                             viewModel = viewModel,
                             report = ::report,
                             onBack = { viewModel.selectRequest(null) },
@@ -236,7 +230,7 @@ internal fun RequestsScreen(
                 BackHandler { viewModel.selectRequest(null) }
                 RequestDetail(
                     request = selectedRequest,
-                    authenticate = authenticate,
+                    authorizeProtectedAction = authorizeProtectedAction,
                     viewModel = viewModel,
                     report = ::report,
                     onBack = { viewModel.selectRequest(null) },
@@ -252,7 +246,7 @@ internal fun RequestsScreen(
 @Composable
 private fun RequestDetail(
     request: InboxRequestDetails?,
-    authenticate: (String, () -> Unit, (String) -> Unit) -> Unit,
+    authorizeProtectedAction: (String, () -> Unit, (String) -> Unit) -> Unit,
     viewModel: RequestsViewModel,
     report: (String) -> Unit,
     onBack: () -> Unit,
@@ -271,7 +265,25 @@ private fun RequestDetail(
             onBack = onBack,
             showBack = showBack,
             onChooseSas = { choice ->
-                scope.launch { report(viewModel.chooseSas(request.id, choice).message()) }
+                if (choice == null) {
+                    scope.launch { report(viewModel.chooseSas(request.id, null).message()) }
+                } else {
+                    scope.launch {
+                        if (viewModel.isMatchingPendingSas(request.id, choice)) {
+                            authorizeProtectedAction(
+                                "Accept ${request.pairing.clientName}",
+                                {
+                                    scope.launch {
+                                        report(viewModel.chooseSas(request.id, choice).message())
+                                    }
+                                },
+                                report,
+                            )
+                        } else {
+                            report(viewModel.chooseSas(request.id, choice).message())
+                        }
+                    }
+                }
             },
             onReject = { scope.launch { report(viewModel.rejectPairing(request.id).message()) } },
             modifier = modifier,
@@ -281,15 +293,9 @@ private fun RequestDetail(
             onBack = onBack,
             showBack = showBack,
             onApprove = {
-                authenticate(
-                    "Approve secret use",
-                    {
-                        scope.launch {
-                            report(viewModel.approveSecretUseRequest(request.id).message())
-                        }
-                    },
-                    report,
-                )
+                scope.launch {
+                    report(viewModel.approveSecretUseRequest(request.id).message())
+                }
             },
             onDeny = { scope.launch { report(viewModel.denySecretUseRequest(request.id).message()) } },
             onCreateRule = { onCreateRule(request.id) },
@@ -300,18 +306,12 @@ private fun RequestDetail(
             onBack = onBack,
             showBack = showBack,
             onApprove = { name ->
-                authenticate(
-                    "Approve secret upload",
-                    {
-                        scope.launch {
-                            report(viewModel.approveSecretUpload(request.id, name).message())
-                        }
-                    },
-                    report,
-                )
+                scope.launch {
+                    report(viewModel.approveSecretUpload(request.id, name).message())
+                }
             },
             onReject = { scope.launch { report(viewModel.rejectSecretUpload(request.id).message()) } },
-            authenticate = authenticate,
+            authorizeProtectedAction = authorizeProtectedAction,
             onReveal = { variableId -> viewModel.readSecretUploadVariable(request.id, variableId) },
             onSensitivityChange = { variableId, sensitive ->
                 viewModel.setSecretUploadVariableSensitivity(request.id, variableId, sensitive)
@@ -973,7 +973,7 @@ private fun SecretUploadDetail(
     showBack: Boolean,
     onApprove: (String) -> Unit,
     onReject: () -> Unit,
-    authenticate: (String, () -> Unit, (String) -> Unit) -> Unit,
+    authorizeProtectedAction: (String, () -> Unit, (String) -> Unit) -> Unit,
     onReveal: suspend (String) -> SecretUploadVariableValue,
     onSensitivityChange: suspend (String, Boolean) -> Boolean,
     report: (String) -> Unit,
@@ -1197,10 +1197,21 @@ private fun SecretUploadDetail(
                             checked = variable.sensitive,
                             enabled = upload.state == SecretUploadRequestState.REVIEW_PENDING,
                             onCheckedChange = { sensitive ->
-                                scope.launch {
-                                    if (!onSensitivityChange(variable.id, sensitive)) {
-                                        report("Sensitivity could not be changed")
+                                val change: () -> Unit = {
+                                    scope.launch {
+                                        if (!onSensitivityChange(variable.id, sensitive)) {
+                                            report("Sensitivity could not be changed")
+                                        }
                                     }
+                                }
+                                if (sensitive) {
+                                    change()
+                                } else {
+                                    authorizeProtectedAction(
+                                        "Mark ${variable.name} non-sensitive",
+                                        change,
+                                        report,
+                                    )
                                 }
                             },
                             modifier = Modifier.semantics {
@@ -1241,11 +1252,11 @@ private fun SecretUploadDetail(
                                             }
                                         }
                                     }
-                                    if (variable.sensitive) {
-                                        authenticate("Show uploaded value", reveal, report)
-                                    } else {
-                                        reveal()
-                                    }
+                                    authorizeProtectedAction(
+                                        "Show uploaded value",
+                                        reveal,
+                                        report,
+                                    )
                                 },
                             ) {
                                 Icon(

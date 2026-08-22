@@ -2,4 +2,5 @@
 <full-backup-content>
     <include domain="database" path="agentknock.db" />
     <include domain="database" path="agentknock.db-wal" />
+    <include domain="sharedpref" path="agentknock_authentication.xml" />
 </full-backup-content>

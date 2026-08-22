@@ -50,7 +50,6 @@
     <string name="delete_secret_question">Delete %1$s?</string>
     <string name="delete_secret_explanation">This permanently deletes the secret and all its stored environment variable values.</string>
     <string name="delete">Delete</string>
-    <string name="confirm_delete_secret">Confirm deleting secret</string>
     <string name="secret_deleted">Secret deleted</string>
     <string name="environment_variables">Environment variables</string>
     <string name="new_environment_variable">New environment variable</string>
@@ -58,7 +57,7 @@
     <string name="variable_name">Environment variable name</string>
     <string name="variable_value">Value</string>
     <string name="notes_optional">Notes (optional)</string>
-    <string name="sensitive_explanation">Require device authentication before revealing, copying, or editing this value.</string>
+    <string name="sensitive_explanation">Hide this value by default. Device authentication follows your choice in Security settings.</string>
     <string name="replace_unavailable_value">The stored value cannot be decrypted on this device. Enter a replacement to use this environment variable again.</string>
     <string name="save_variable">Save environment variable</string>
     <string name="create_variable">Create environment variable</string>
@@ -68,10 +67,9 @@
     <string name="stored_value_unavailable">The stored value is unavailable. Enter a replacement before changing its name or sensitivity.</string>
     <string name="stored_value_corrupted">The stored value is corrupted. Enter a replacement.</string>
     <string name="stored_value_unsupported">The stored value uses an unsupported encryption format. Enter a replacement.</string>
-    <string name="confirm_save_variable">Confirm saving environment variable</string>
+    <string name="confirm_mark_variable_non_sensitive">Mark %1$s non-sensitive</string>
     <string name="delete_variable_question">Delete %1$s?</string>
     <string name="delete_variable_explanation">This permanently deletes this environment variable\'s stored value and metadata from the secret.</string>
-    <string name="confirm_delete_variable">Confirm deleting environment variable</string>
     <string name="variable_deleted">Environment variable deleted</string>
     <string name="reveal_sensitive_value">Reveal %1$s</string>
     <string name="edit_sensitive_value">Edit %1$s</string>
@@ -94,7 +92,6 @@
     <string name="pairing_address_unchanged">This is already your pairing address</string>
     <string name="claim_pairing_address">Claim address</string>
     <string name="another_suggestion">Another suggestion</string>
-    <string name="confirm_claim_pairing_address">Confirm claiming pairing address</string>
     <string name="pairing_address_claimed">Pairing address claimed</string>
     <string name="pairing_address_claim_incomplete">Claim not completed</string>
     <string name="pairing_address_claim_incomplete_explanation">The identity is saved on this device. Retry to continue with the same keys and device token.</string>
@@ -103,7 +100,6 @@
     <string name="retry">Retry</string>
     <string name="choose_another_address">Choose another</string>
     <string name="discard">Discard</string>
-    <string name="confirm_discard_claim">Confirm discarding incomplete claim</string>
     <string name="change_pairing_address">Change pairing address</string>
     <string name="change_pairing_address_question">Change the pairing address?</string>
     <string name="change_pairing_address_explanation">The new address will be used for future pairings. Existing clients, secrets, and history are unaffected. The current address remains active if the claim fails.</string>

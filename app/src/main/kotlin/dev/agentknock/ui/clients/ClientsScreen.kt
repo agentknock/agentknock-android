@@ -90,7 +90,6 @@ import kotlinx.coroutines.launch
 internal fun ClientsScreen(
     onOpenSettings: () -> Unit,
     onTopLevelChanged: (Boolean) -> Unit,
-    authenticate: (String, () -> Unit, (String) -> Unit) -> Unit,
     viewModel: ClientsViewModel = viewModel(),
 ) {
     val clients by viewModel.clients.collectAsStateWithLifecycle()
@@ -129,7 +128,6 @@ internal fun ClientsScreen(
                     } else {
                         ClientSelectionDetail(
                             client = selectedClient,
-                            authenticate = authenticate,
                             viewModel = viewModel,
                             report = ::report,
                             onBack = { viewModel.selectClient(null) },
@@ -151,7 +149,6 @@ internal fun ClientsScreen(
                 BackHandler { viewModel.selectClient(null) }
                 ClientSelectionDetail(
                     client = selectedClient,
-                    authenticate = authenticate,
                     viewModel = viewModel,
                     report = ::report,
                     onBack = { viewModel.selectClient(null) },
@@ -166,7 +163,6 @@ internal fun ClientsScreen(
 @Composable
 private fun ClientSelectionDetail(
     client: ClientDetails?,
-    authenticate: (String, () -> Unit, (String) -> Unit) -> Unit,
     viewModel: ClientsViewModel,
     report: (String) -> Unit,
     onBack: () -> Unit,
@@ -183,43 +179,31 @@ private fun ClientSelectionDetail(
         onBack = onBack,
         showBack = showBack,
         onRename = { name ->
-            authenticate(
-                "Rename client",
-                {
-                    scope.launch {
-                        val result = viewModel.rename(client.clientId, name.trim())
-                        report(
-                            if (result == ClientChangeResult.CHANGED) {
-                                "Client renamed"
-                            } else {
-                                "Client is no longer available"
-                            },
-                        )
-                    }
-                },
-                report,
-            )
+            scope.launch {
+                val result = viewModel.rename(client.clientId, name.trim())
+                report(
+                    if (result == ClientChangeResult.CHANGED) {
+                        "Client renamed"
+                    } else {
+                        "Client is no longer available"
+                    },
+                )
+            }
         },
         onSetState = { state ->
-            authenticate(
-                "${state.actionLabel()} client",
-                {
-                    scope.launch {
-                        val result = viewModel.setState(client.clientId, state)
-                        if (result == ClientChangeResult.CHANGED && state == RelayClientState.REVOKED) {
-                            viewModel.selectClient(null)
-                        }
-                        report(
-                            if (result == ClientChangeResult.CHANGED) {
-                                state.successMessage()
-                            } else {
-                                "Client state could not be changed"
-                            },
-                        )
-                    }
-                },
-                report,
-            )
+            scope.launch {
+                val result = viewModel.setState(client.clientId, state)
+                if (result == ClientChangeResult.CHANGED && state == RelayClientState.REVOKED) {
+                    viewModel.selectClient(null)
+                }
+                report(
+                    if (result == ClientChangeResult.CHANGED) {
+                        state.successMessage()
+                    } else {
+                        "Client state could not be changed"
+                    },
+                )
+            }
         },
         report = report,
         modifier = modifier,
@@ -410,7 +394,7 @@ private fun ClientDetail(
                 )
                 when (client.state) {
                     RelayClientState.ACTIVE -> OutlinedButton(
-                        onClick = { confirmation = RelayClientState.SUSPENDED },
+                        onClick = { onSetState(RelayClientState.SUSPENDED) },
                         modifier = Modifier.fillMaxWidth(),
                     ) {
                         Icon(Icons.Outlined.PauseCircle, contentDescription = null)
@@ -418,7 +402,7 @@ private fun ClientDetail(
                         Text("Suspend client")
                     }
                     RelayClientState.SUSPENDED -> Button(
-                        onClick = { confirmation = RelayClientState.ACTIVE },
+                        onClick = { onSetState(RelayClientState.ACTIVE) },
                         modifier = Modifier.fillMaxWidth(),
                     ) {
                         Icon(Icons.Outlined.PlayCircle, contentDescription = null)
@@ -521,18 +505,12 @@ private fun ClientDetail(
     }
 
     confirmation?.let { target ->
-        val destructive = target == RelayClientState.REVOKED
         AlertDialog(
             onDismissRequest = { confirmation = null },
             title = { Text("${target.actionLabel()} ${client.name}?") },
             text = {
                 Text(
-                    when (target) {
-                        RelayClientState.ACTIVE -> "This client can make requests again."
-                        RelayClientState.SUSPENDED -> "The client keeps its identity but cannot connect until resumed."
-                        RelayClientState.REVOKED -> "This is permanent. The client must pair again."
-                        RelayClientState.PENDING -> ""
-                    },
+                    "This is permanent. The client must pair again.",
                 )
             },
             confirmButton = {
@@ -540,7 +518,7 @@ private fun ClientDetail(
                     onSetState(target)
                     confirmation = null
                 }) {
-                    Text(target.actionLabel(), color = if (destructive) MaterialTheme.colorScheme.error else MaterialTheme.colorScheme.primary)
+                    Text(target.actionLabel(), color = MaterialTheme.colorScheme.error)
                 }
             },
             dismissButton = { TextButton(onClick = { confirmation = null }) { Text("Cancel") } },

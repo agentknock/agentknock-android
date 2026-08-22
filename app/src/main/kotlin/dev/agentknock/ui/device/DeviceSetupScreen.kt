@@ -65,11 +65,6 @@ import kotlinx.coroutines.launch
 @Composable
 internal fun DeviceSetupScreen(
     configuration: DeviceConfiguration,
-    authenticate: (
-        title: String,
-        onSuccess: () -> Unit,
-        onError: (String) -> Unit,
-    ) -> Unit,
     onDone: (() -> Unit)?,
     changeAddressInitially: Boolean = false,
     onDeviceClaimed: () -> Unit,
@@ -95,12 +90,8 @@ internal fun DeviceSetupScreen(
         scope.launch { snackbar.showSnackbar(message) }
     }
 
-    fun authenticateThen(title: String, action: suspend () -> Unit) {
-        authenticate(title, { scope.launch { action() } }, ::report)
-    }
-
     fun performClaim() {
-        authenticateThen(resources.getString(R.string.confirm_claim_pairing_address)) {
+        scope.launch {
             editing = false
             val result = viewModel.stageAndClaim(address)
             reportClaimResult(result, resources::getString, ::report)
@@ -164,7 +155,7 @@ internal fun DeviceSetupScreen(
                         result = lastResult,
                         claiming = claiming,
                         onRetry = {
-                            authenticateThen(resources.getString(R.string.confirm_claim_pairing_address)) {
+                            scope.launch {
                                 val result = viewModel.retryClaim()
                                 reportClaimResult(
                                     result,
@@ -184,7 +175,7 @@ internal fun DeviceSetupScreen(
                         },
                         onDiscard = active?.let {
                             {
-                                authenticateThen(resources.getString(R.string.confirm_discard_claim)) {
+                                scope.launch {
                                     viewModel.discardCandidate()
                                 }
                             }

@@ -22,6 +22,7 @@ import dev.agentknock.storage.request.RequestConnectionManager
 import dev.agentknock.storage.rule.ApprovalRuleRepository
 import dev.agentknock.storage.vault.VaultRepository
 import dev.agentknock.storage.vault.DeviceManagementRepository
+import dev.agentknock.ui.auth.AuthenticationSession
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.CoroutineStart
 import kotlinx.coroutines.Dispatchers
@@ -44,6 +45,7 @@ class AgentknockApplication : Application() {
 }
 
 internal class ApplicationContainer(application: Application) {
+    val authentication = AuthenticationSession(application)
     private val database = AgentknockDatabase.create(application)
     private val encryptionKeyStore = AndroidEncryptionKeyStore(application.packageManager)
     val vaultKeyManager = VaultKeyManager(

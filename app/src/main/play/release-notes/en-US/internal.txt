@@ -1,1 +1,1 @@
-Adds approval rules with standing and request-derived temporary scopes, exact or token-prefix command matching, per-secret decisions, rule activity, and automatic approval or denial.
+Adds configurable device authentication: rely on the device lock, protect sensitive values and pairing, or lock Agentknock whenever its foreground session ends.

@@ -74,6 +74,7 @@ import androidx.compose.material3.ListItemDefaults
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.OutlinedButton
 import androidx.compose.material3.OutlinedTextField
+import androidx.compose.material3.RadioButton
 import androidx.compose.material3.Scaffold
 import androidx.compose.material3.SnackbarHost
 import androidx.compose.material3.SnackbarHostState
@@ -113,6 +114,7 @@ import dev.agentknock.presentation.formatTimestamp
 import dev.agentknock.ui.components.InformationRow
 import dev.agentknock.ui.components.InformationSurface
 import dev.agentknock.ui.components.TonalIcon
+import dev.agentknock.ui.auth.DeviceAuthenticationMode
 import dev.agentknock.storage.FactoryResetResult
 import dev.agentknock.storage.crypto.EncryptionKeyBacking
 import dev.agentknock.storage.crypto.VaultKeyPurpose
@@ -141,7 +143,8 @@ private enum class SettingsPage {
 internal fun SettingsScreen(
     onClose: () -> Unit,
     onChangeAddress: () -> Unit,
-    authenticate: (String, () -> Unit, (String) -> Unit) -> Unit,
+    authenticationMode: DeviceAuthenticationMode,
+    onAuthenticationModeChange: (DeviceAuthenticationMode, (String) -> Unit) -> Unit,
     notificationStateGeneration: Long,
     requestNotificationPermission: () -> Unit,
     viewModel: SettingsViewModel = viewModel(),
@@ -188,6 +191,7 @@ internal fun SettingsScreen(
                     syncResult = syncResult,
                     pushState = pushState?.wireName,
                     protection = vaultProtection,
+                    authenticationMode = authenticationMode,
                     modifier = modifier,
                 )
                 SettingsPage.DEVICE -> DeviceAndPairing(
@@ -195,17 +199,11 @@ internal fun SettingsScreen(
                     onBack = ::back,
                     onChangeAddress = onChangeAddress,
                     onSetPairingEnabled = { enabled ->
-                        authenticate(
-                            if (enabled) "Resume new pairings" else "Pause new pairings",
-                            {
-                                scope.launch {
-                                    snackbar.showSnackbar(
-                                        viewModel.setPairingEnabled(enabled).message(enabled),
-                                    )
-                                }
-                            },
-                            { scope.launch { snackbar.showSnackbar(it) } },
-                        )
+                        scope.launch {
+                            snackbar.showSnackbar(
+                                viewModel.setPairingEnabled(enabled).message(enabled),
+                            )
+                        }
                     },
                     report = { scope.launch { snackbar.showSnackbar(it) } },
                     modifier = modifier,
@@ -219,6 +217,12 @@ internal fun SettingsScreen(
                 )
                 SettingsPage.SECURITY -> SecuritySettings(
                     protection = vaultProtection,
+                    authenticationMode = authenticationMode,
+                    onAuthenticationModeChange = { mode ->
+                        onAuthenticationModeChange(mode) {
+                            scope.launch { snackbar.showSnackbar(it) }
+                        }
+                    },
                     onBack = ::back,
                     modifier = modifier,
                 )
@@ -246,7 +250,6 @@ internal fun SettingsScreen(
                 )
                 SettingsPage.FACTORY_RESET -> FactoryReset(
                     onBack = ::back,
-                    authenticate = authenticate,
                     reset = viewModel::factoryReset,
                     report = { scope.launch { snackbar.showSnackbar(it) } },
                     modifier = modifier,
@@ -345,6 +348,7 @@ private fun SettingsOverview(
     syncResult: RequestSyncResult?,
     pushState: String?,
     protection: VaultProtection?,
+    authenticationMode: DeviceAuthenticationMode,
     modifier: Modifier,
 ) {
     val context = LocalContext.current
@@ -379,7 +383,7 @@ private fun SettingsOverview(
                 SettingsRow(
                     Icons.Outlined.Security,
                     "Security",
-                    protection.overviewDescription(),
+                    "${protection.overviewDescription()} · ${authenticationMode.overviewLabel()}",
                 ) { onOpen(SettingsPage.SECURITY) }
             }
             item {
@@ -443,7 +447,6 @@ private fun DeviceAndPairing(
     report: (String) -> Unit,
     modifier: Modifier,
 ) {
-    var confirmPairingChange by remember { mutableStateOf(false) }
     var technicalExpanded by remember { mutableStateOf(false) }
     val context = LocalContext.current
     val pairingCommand = identity?.let { "agentknock pairing start ${it.address}" }
@@ -509,7 +512,7 @@ private fun DeviceAndPairing(
                     .toggleable(
                         value = identity.pairingEnabled,
                         role = Role.Switch,
-                        onValueChange = { confirmPairingChange = true },
+                        onValueChange = onSetPairingEnabled,
                     ),
             ) {
                 ListItem(
@@ -596,28 +599,6 @@ private fun DeviceAndPairing(
             }
         }
     }
-    if (confirmPairingChange && identity != null) {
-        AlertDialog(
-            onDismissRequest = { confirmPairingChange = false },
-            title = { Text(if (identity.pairingEnabled) "Pause new pairings?" else "Resume new pairings?") },
-            text = {
-                Text(
-                    if (identity.pairingEnabled) {
-                        "New clients will not be able to start pairing. A pairing request already shown in Requests is unaffected."
-                    } else {
-                        "New clients will be able to start pairing again. A pairing request already shown in Requests is unaffected."
-                    },
-                )
-            },
-            confirmButton = {
-                TextButton(onClick = {
-                    onSetPairingEnabled(!identity.pairingEnabled)
-                    confirmPairingChange = false
-                }) { Text(if (identity.pairingEnabled) "Pause" else "Resume") }
-            },
-            dismissButton = { TextButton(onClick = { confirmPairingChange = false }) { Text("Cancel") } },
-        )
-    }
 }
 
 @Composable
@@ -675,7 +656,7 @@ private fun NotificationsSettings(
                 },
             )
             Text(
-                "Secret use notifications can include Approve once and Deny once actions. Approving requires the device to be unlocked; on older Android versions, Agentknock opens the request for authenticated review.",
+                "Secret use notifications can include Approve once and Deny once actions. Approving requires the device to be unlocked; on older Android versions, Agentknock opens the request for review.",
             )
             Text(
                 "Android controls notification sounds and how much content is visible on the lock screen.",
@@ -710,6 +691,8 @@ private fun NotificationsSettings(
 @Composable
 private fun SecuritySettings(
     protection: VaultProtection?,
+    authenticationMode: DeviceAuthenticationMode,
+    onAuthenticationModeChange: (DeviceAuthenticationMode) -> Unit,
     onBack: () -> Unit,
     modifier: Modifier,
 ) {
@@ -781,12 +764,77 @@ private fun SecuritySettings(
                 "Device authentication",
                 if (deviceSecure) "Secure screen lock configured" else "No secure screen lock configured",
             )
+            Text("Require device authentication", style = MaterialTheme.typography.titleMedium)
+            Column(verticalArrangement = Arrangement.spacedBy(8.dp)) {
+                DeviceAuthenticationMode.entries.forEach { mode ->
+                    AuthenticationModeOption(
+                        mode = mode,
+                        selected = mode == authenticationMode,
+                        onSelect = { onAuthenticationModeChange(mode) },
+                    )
+                }
+            }
             Text(
-                "Sensitive values require device authentication before they are revealed, copied, or edited.",
+                "This controls Agentknock's interface. Background synchronization and automatic approval rules continue while the app is locked.",
                 color = MaterialTheme.colorScheme.onSurfaceVariant,
             )
         }
     }
+}
+
+@Composable
+private fun AuthenticationModeOption(
+    mode: DeviceAuthenticationMode,
+    selected: Boolean,
+    onSelect: () -> Unit,
+) {
+    Surface(
+        color = if (selected) {
+            MaterialTheme.colorScheme.secondaryContainer
+        } else {
+            MaterialTheme.colorScheme.surfaceContainerLow
+        },
+        shape = MaterialTheme.shapes.large,
+        onClick = onSelect,
+        modifier = Modifier.fillMaxWidth().semantics { this.selected = selected },
+    ) {
+        Row(
+            modifier = Modifier.padding(horizontal = 12.dp, vertical = 10.dp),
+            horizontalArrangement = Arrangement.spacedBy(8.dp),
+            verticalAlignment = Alignment.CenterVertically,
+        ) {
+            RadioButton(selected = selected, onClick = null)
+            Column(Modifier.weight(1f), verticalArrangement = Arrangement.spacedBy(2.dp)) {
+                Text(mode.displayLabel(), style = MaterialTheme.typography.titleSmall)
+                Text(
+                    mode.explanation(),
+                    style = MaterialTheme.typography.bodyMedium,
+                    color = MaterialTheme.colorScheme.onSurfaceVariant,
+                )
+            }
+        }
+    }
+}
+
+private fun DeviceAuthenticationMode.displayLabel(): String = when (this) {
+    DeviceAuthenticationMode.DEVICE_LOCK -> "Rely on device lock"
+    DeviceAuthenticationMode.SENSITIVE_VALUES_AND_PAIRING -> "Sensitive values and pairing"
+    DeviceAuthenticationMode.APP_LOCK -> "Lock Agentknock"
+}
+
+private fun DeviceAuthenticationMode.overviewLabel(): String = when (this) {
+    DeviceAuthenticationMode.DEVICE_LOCK -> "Device lock"
+    DeviceAuthenticationMode.SENSITIVE_VALUES_AND_PAIRING -> "Protected values and pairing"
+    DeviceAuthenticationMode.APP_LOCK -> "App lock"
+}
+
+private fun DeviceAuthenticationMode.explanation(): String = when (this) {
+    DeviceAuthenticationMode.DEVICE_LOCK ->
+        "No additional Agentknock prompts. Review and destructive confirmations still apply."
+    DeviceAuthenticationMode.SENSITIVE_VALUES_AND_PAIRING ->
+        "Authenticate before showing, copying, or editing sensitive values, weakening their protection, or accepting a new client."
+    DeviceAuthenticationMode.APP_LOCK ->
+        "Authenticate before any Agentknock content is shown. One unlock lasts for the foreground session."
 }
 
 private fun VaultProtection?.description(purpose: VaultKeyPurpose): String = when (this) {
@@ -1135,7 +1183,6 @@ private fun AuditOutcomeBadge(outcome: AuditOutcome) {
 @Composable
 private fun FactoryReset(
     onBack: () -> Unit,
-    authenticate: (String, () -> Unit, (String) -> Unit) -> Unit,
     reset: suspend (Boolean) -> FactoryResetResult,
     report: (String) -> Unit,
     modifier: Modifier,
@@ -1146,39 +1193,33 @@ private fun FactoryReset(
     val scope = rememberCoroutineScope()
 
     fun start(localOnly: Boolean) {
-        authenticate(
-            "Factory reset Agentknock",
-            {
-                scope.launch {
-                    working = true
-                    when (val result = reset(localOnly)) {
-                        FactoryResetResult.Reset -> Unit
-                        FactoryResetResult.NoDevice -> {
-                            allowLocalOnly = true
-                            report("The relay device could not be found. Nothing was erased.")
-                        }
-                        is FactoryResetResult.RemoteRejected -> {
-                            allowLocalOnly = true
-                            report("The relay rejected deletion. Nothing was erased.")
-                        }
-                        is FactoryResetResult.RemoteUnavailable -> {
-                            allowLocalOnly = true
-                            report("The relay is unavailable. Nothing was erased.")
-                        }
-                        FactoryResetResult.InvalidRemoteResponse -> {
-                            allowLocalOnly = true
-                            report("Relay deletion could not be confirmed. Nothing was erased.")
-                        }
-                        FactoryResetResult.DeviceCredentialsUnavailable -> {
-                            allowLocalOnly = true
-                            report("Relay authentication is unavailable. Nothing was erased.")
-                        }
-                    }
-                    working = false
+        scope.launch {
+            working = true
+            when (val result = reset(localOnly)) {
+                FactoryResetResult.Reset -> Unit
+                FactoryResetResult.NoDevice -> {
+                    allowLocalOnly = true
+                    report("The relay device could not be found. Nothing was erased.")
                 }
-            },
-            report,
-        )
+                is FactoryResetResult.RemoteRejected -> {
+                    allowLocalOnly = true
+                    report("The relay rejected deletion. Nothing was erased.")
+                }
+                is FactoryResetResult.RemoteUnavailable -> {
+                    allowLocalOnly = true
+                    report("The relay is unavailable. Nothing was erased.")
+                }
+                FactoryResetResult.InvalidRemoteResponse -> {
+                    allowLocalOnly = true
+                    report("Relay deletion could not be confirmed. Nothing was erased.")
+                }
+                FactoryResetResult.DeviceCredentialsUnavailable -> {
+                    allowLocalOnly = true
+                    report("Relay authentication is unavailable. Nothing was erased.")
+                }
+            }
+            working = false
+        }
     }
 
     Column(modifier) {
@@ -1223,7 +1264,6 @@ private fun FactoryReset(
                     keyboardType = KeyboardType.Ascii,
                 ),
             )
-            Text("You will then confirm with your device screen lock.")
             Button(
                 onClick = { start(false) },
                 enabled = phrase == "RESET AGENTKNOCK" && !working,

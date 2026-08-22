@@ -1349,6 +1349,13 @@ internal class RequestRepository(
             }
         }
 
+    suspend fun isMatchingPendingSas(requestId: Long, selectedIndex: Int): Boolean =
+        operationMutex.withLock {
+            val pairing = dao.getPairing(requestId) ?: return@withLock false
+            pairing.state == PairingState.SAS_VERIFICATION_PENDING.storedName &&
+                selectedIndex == pairing.correctSasIndex
+        }
+
     suspend fun rejectPairing(requestId: Long): PairingDecisionResult = operationMutex.withLock {
         val request = dao.getRequestById(requestId) ?: return PairingDecisionResult.NOT_FOUND
         val pairing = dao.getPairing(requestId) ?: return PairingDecisionResult.NOT_FOUND

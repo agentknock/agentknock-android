@@ -35,10 +35,12 @@ class MainActivity : FragmentActivity() {
         enableEdgeToEdge()
         handleIntent(intent)
         val authenticator = DeviceAuthenticator(this)
+        val authentication = (application as AgentknockApplication).container.authentication
         setContent {
             AgentknockTheme {
                 AgentknockScreen(
                     authenticate = authenticator::authenticate,
+                    authentication = authentication,
                     requestNavigation = requestNavigation,
                     notificationStateGeneration = notificationStateGeneration,
                     requestNotificationPermission = ::requestNotificationPermission,
@@ -50,6 +52,16 @@ class MainActivity : FragmentActivity() {
     override fun onResume() {
         super.onResume()
         notificationStateGeneration.value += 1
+    }
+
+    override fun onStart() {
+        super.onStart()
+        (application as AgentknockApplication).container.authentication.onForeground()
+    }
+
+    override fun onStop() {
+        (application as AgentknockApplication).container.authentication.onBackground()
+        super.onStop()
     }
 
     private fun requestNotificationPermission() {

@@ -141,7 +141,7 @@ internal data class VariableEditorState(
 
 @Composable
 internal fun SecretsScreen(
-    authenticate: (
+    authorizeProtectedAction: (
         title: String,
         onSuccess: () -> Unit,
         onError: (String) -> Unit,
@@ -196,8 +196,8 @@ internal fun SecretsScreen(
         scope.launch { snackbar.showSnackbar(message) }
     }
 
-    fun afterAuthentication(title: String, action: suspend () -> Unit) {
-        authenticate(
+    fun afterProtection(title: String, action: suspend () -> Unit) {
+        authorizeProtectedAction(
             title,
             { scope.launch { action() } },
             ::report,
@@ -232,7 +232,7 @@ internal fun SecretsScreen(
             }
         }
         if (variable.sensitive) {
-            authenticate(
+            authorizeProtectedAction(
                 resources.getString(R.string.reveal_sensitive_value, variable.name),
                 action,
                 ::report,
@@ -260,7 +260,7 @@ internal fun SecretsScreen(
             }
         }
         if (variable.sensitive) {
-            authenticate(
+            authorizeProtectedAction(
                 resources.getString(R.string.copy_sensitive_value, variable.name),
                 action,
                 ::report,
@@ -283,7 +283,7 @@ internal fun SecretsScreen(
             }
         }
         if (variable.sensitive) {
-            authenticate(
+            authorizeProtectedAction(
                 resources.getString(R.string.edit_sensitive_value, variable.name),
                 action,
                 ::report,
@@ -394,7 +394,7 @@ internal fun SecretsScreen(
             onEditorChange = viewModel::updateSecretEditor,
             onDismiss = { viewModel.updateSecretEditor(null) },
             onSave = { name, description ->
-                afterAuthentication("Confirm saving secret") {
+                scope.launch {
                     val error = if (editor.secret == null) {
                         when (
                             val result = viewModel.createSecret(name, description)
@@ -441,7 +441,7 @@ internal fun SecretsScreen(
                 { variablePendingDeletion = it }
             },
             onSave = { name, value, sensitive, notes, replaceValue ->
-                afterAuthentication(resources.getString(R.string.confirm_save_variable)) {
+                val save: suspend () -> Unit = {
                     val error = if (editor.variable == null) {
                         when (
                             viewModel.createEnvironmentVariable(
@@ -497,6 +497,15 @@ internal fun SecretsScreen(
                     }
                     error?.let(::report)
                 }
+                val weakensProtection = !sensitive && editor.variable?.sensitive != false
+                if (weakensProtection) {
+                    afterProtection(
+                        resources.getString(R.string.confirm_mark_variable_non_sensitive, name),
+                        save,
+                    )
+                } else {
+                    scope.launch { save() }
+                }
             },
             snackbar = snackbar,
         )
@@ -509,7 +518,7 @@ internal fun SecretsScreen(
             onDismiss = { secretPendingDeletion = null },
             onDelete = {
                 secretPendingDeletion = null
-                afterAuthentication(resources.getString(R.string.confirm_delete_secret)) {
+                scope.launch {
                     if (viewModel.deleteSecret(secret.id)) {
                         report(resources.getString(R.string.secret_deleted))
                     } else {
@@ -527,7 +536,7 @@ internal fun SecretsScreen(
             onDismiss = { variablePendingDeletion = null },
             onDelete = {
                 variablePendingDeletion = null
-                afterAuthentication(resources.getString(R.string.confirm_delete_variable)) {
+                scope.launch {
                     if (viewModel.deleteEnvironmentVariable(variable.id)) {
                         viewModel.updateVariableEditor(null)
                         revealedValues -= variable.id

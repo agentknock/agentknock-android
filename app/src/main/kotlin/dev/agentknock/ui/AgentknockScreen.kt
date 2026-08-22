@@ -2,16 +2,20 @@ package dev.agentknock.ui
 
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.BoxWithConstraints
+import androidx.compose.foundation.layout.Column
+import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.WindowInsets
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.navigationBars
 import androidx.compose.foundation.layout.padding
+import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.layout.windowInsetsPadding
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.outlined.Computer
 import androidx.compose.material.icons.outlined.Inbox
 import androidx.compose.material.icons.outlined.Key
+import androidx.compose.material.icons.outlined.Lock
 import androidx.compose.material.icons.automirrored.outlined.Rule
 import androidx.compose.material3.Badge
 import androidx.compose.material3.BadgedBox
@@ -23,8 +27,11 @@ import androidx.compose.material3.NavigationRail
 import androidx.compose.material3.NavigationRailItem
 import androidx.compose.material3.AlertDialog
 import androidx.compose.material3.Scaffold
+import androidx.compose.material3.Surface
+import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.Text
 import androidx.compose.material3.TextButton
+import androidx.compose.material3.Button
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.getValue
@@ -50,6 +57,8 @@ import dev.agentknock.ui.rules.RulesScreen
 import dev.agentknock.ui.rules.RulesViewModel
 import dev.agentknock.ui.device.DeviceSetupScreen
 import dev.agentknock.ui.device.DeviceSetupViewModel
+import dev.agentknock.ui.auth.AuthenticationSession
+import dev.agentknock.ui.auth.DeviceAuthenticationMode
 import dev.agentknock.push.RequestNotifications
 import dev.agentknock.storage.request.InboxRequestState
 import kotlinx.coroutines.flow.StateFlow
@@ -61,6 +70,7 @@ internal fun AgentknockScreen(
         onSuccess: () -> Unit,
         onError: (String) -> Unit,
     ) -> Unit,
+    authentication: AuthenticationSession,
     requestNavigation: StateFlow<RequestNavigation>,
     notificationStateGeneration: StateFlow<Long>,
     requestNotificationPermission: () -> Unit,
@@ -68,6 +78,8 @@ internal fun AgentknockScreen(
     requestsViewModel: RequestsViewModel = viewModel(),
     rulesViewModel: RulesViewModel = viewModel(),
 ) {
+    val authenticationMode by authentication.mode.collectAsStateWithLifecycle()
+    val sessionAuthenticated by authentication.authenticated.collectAsStateWithLifecycle()
     val configuration by deviceSetupViewModel.configuration.collectAsStateWithLifecycle()
     var section by rememberSaveable { mutableStateOf(MainSection.REQUESTS) }
     var showSettings by rememberSaveable { mutableStateOf(false) }
@@ -86,6 +98,14 @@ internal fun AgentknockScreen(
     }
     val current = configuration
 
+    fun authorizeProtectedAction(
+        title: String,
+        onSuccess: () -> Unit,
+        onError: (String) -> Unit,
+    ) {
+        authentication.authorizeProtectedAction(title, authenticate, onSuccess, onError)
+    }
+
     LaunchedEffect(requestNavigationTarget) {
         if (requestNavigationTarget.generation > 0) {
             section = MainSection.REQUESTS
@@ -96,12 +116,22 @@ internal fun AgentknockScreen(
     }
 
     when {
+        authenticationMode == DeviceAuthenticationMode.APP_LOCK && !sessionAuthenticated ->
+            AgentknockLockedScreen(
+                onUnlock = { onSuccess, onError ->
+                    authentication.authorizeProtectedAction(
+                        "Unlock Agentknock",
+                        authenticate,
+                        onSuccess,
+                        onError,
+                    )
+                },
+            )
         current == null -> Box(Modifier.fillMaxSize(), contentAlignment = Alignment.Center) {
             CircularProgressIndicator()
         }
         current.active == null || !current.active.credentialsAvailable -> DeviceSetupScreen(
             configuration = current,
-            authenticate = authenticate,
             onDone = current.active?.takeIf { it.credentialsAvailable }?.let {
                 { section = MainSection.REQUESTS }
             },
@@ -110,7 +140,6 @@ internal fun AgentknockScreen(
         )
         showAddressEditor -> DeviceSetupScreen(
             configuration = current,
-            authenticate = authenticate,
             onDone = {
                 showAddressEditor = false
                 showSettings = true
@@ -125,7 +154,10 @@ internal fun AgentknockScreen(
                 showSettings = false
                 showAddressEditor = true
             },
-            authenticate = authenticate,
+            authenticationMode = authenticationMode,
+            onAuthenticationModeChange = { mode, onError ->
+                authentication.changeMode(mode, authenticate, onError)
+            },
             notificationStateGeneration = notificationRefreshGeneration,
             requestNotificationPermission = requestNotificationPermission,
         )
@@ -145,7 +177,7 @@ internal fun AgentknockScreen(
                     }
                     MainContent(
                         section = section,
-                        authenticate = authenticate,
+                        authorizeProtectedAction = ::authorizeProtectedAction,
                         onOpenSettings = { showSettings = true },
                         notificationsEnabled = notificationsEnabled,
                         onTopLevelChanged = { showNavigation = true },
@@ -170,7 +202,7 @@ internal fun AgentknockScreen(
                 ) { padding ->
                     MainContent(
                         section = section,
-                        authenticate = authenticate,
+                        authorizeProtectedAction = ::authorizeProtectedAction,
                         onOpenSettings = { showSettings = true },
                         notificationsEnabled = notificationsEnabled,
                         onTopLevelChanged = { showNavigation = it },
@@ -184,7 +216,10 @@ internal fun AgentknockScreen(
         }
     }
 
-    if (offerNotifications) {
+    if (
+        offerNotifications &&
+        (authenticationMode != DeviceAuthenticationMode.APP_LOCK || sessionAuthenticated)
+    ) {
         AlertDialog(
             onDismissRequest = { offerNotifications = false },
             title = { Text("Stay informed about requests?") },
@@ -209,9 +244,51 @@ internal fun AgentknockScreen(
 }
 
 @Composable
+private fun AgentknockLockedScreen(
+    onUnlock: (onSuccess: () -> Unit, onError: (String) -> Unit) -> Unit,
+) {
+    var error by remember { mutableStateOf<String?>(null) }
+    Surface(
+        modifier = Modifier.fillMaxSize(),
+        color = MaterialTheme.colorScheme.background,
+    ) {
+        Column(
+            modifier = Modifier.fillMaxSize().padding(32.dp),
+            horizontalAlignment = Alignment.CenterHorizontally,
+            verticalArrangement = Arrangement.Center,
+        ) {
+            Icon(
+                Icons.Outlined.Lock,
+                contentDescription = null,
+                tint = MaterialTheme.colorScheme.primary,
+                modifier = Modifier.size(48.dp),
+            )
+            Text(
+                "Agentknock is locked",
+                style = MaterialTheme.typography.headlineSmall,
+                modifier = Modifier.padding(top = 16.dp),
+            )
+            error?.let {
+                Text(
+                    it,
+                    color = MaterialTheme.colorScheme.error,
+                    modifier = Modifier.padding(top = 8.dp),
+                )
+            }
+            Button(
+                onClick = { onUnlock({ error = null }, { error = it }) },
+                modifier = Modifier.padding(top = 20.dp),
+            ) {
+                Text("Unlock Agentknock")
+            }
+        }
+    }
+}
+
+@Composable
 private fun MainContent(
     section: MainSection,
-    authenticate: (String, () -> Unit, (String) -> Unit) -> Unit,
+    authorizeProtectedAction: (String, () -> Unit, (String) -> Unit) -> Unit,
     onOpenSettings: () -> Unit,
     notificationsEnabled: Boolean,
     onTopLevelChanged: (Boolean) -> Unit,
@@ -223,7 +300,7 @@ private fun MainContent(
     Box(modifier) {
         when (section) {
             MainSection.REQUESTS -> RequestsScreen(
-                authenticate = authenticate,
+                authorizeProtectedAction = authorizeProtectedAction,
                 onOpenSettings = onOpenSettings,
                 notificationsEnabled = notificationsEnabled,
                 viewModel = requestsViewModel,
@@ -234,17 +311,15 @@ private fun MainContent(
                 },
             )
             MainSection.SECRETS -> SecretsScreen(
-                authenticate = authenticate,
+                authorizeProtectedAction = authorizeProtectedAction,
                 onOpenSettings = onOpenSettings,
                 onTopLevelChanged = onTopLevelChanged,
             )
             MainSection.CLIENTS -> ClientsScreen(
                 onOpenSettings = onOpenSettings,
                 onTopLevelChanged = onTopLevelChanged,
-                authenticate = authenticate,
             )
             MainSection.RULES -> RulesScreen(
-                authenticate = authenticate,
                 onOpenSettings = onOpenSettings,
                 onOpenRequest = { requestId ->
                     requestsViewModel.selectRequest(requestId)

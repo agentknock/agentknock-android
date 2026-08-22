@@ -3,9 +3,11 @@
     <cloud-backup>
         <include domain="database" path="agentknock.db" />
         <include domain="database" path="agentknock.db-wal" />
+        <include domain="sharedpref" path="agentknock_authentication.xml" />
     </cloud-backup>
     <device-transfer>
         <include domain="database" path="agentknock.db" />
         <include domain="database" path="agentknock.db-wal" />
+        <include domain="sharedpref" path="agentknock_authentication.xml" />
     </device-transfer>
 </data-extraction-rules>

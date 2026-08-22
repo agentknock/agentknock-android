@@ -88,7 +88,6 @@ import kotlinx.coroutines.launch
 
 @Composable
 internal fun RulesScreen(
-    authenticate: (String, () -> Unit, (String) -> Unit) -> Unit,
     onOpenSettings: () -> Unit,
     onOpenRequest: (Long) -> Unit,
     onTopLevelChanged: (Boolean) -> Unit,
@@ -111,23 +110,12 @@ internal fun RulesScreen(
     }
 
     fun save() {
-        val title = if (editor?.origin == RuleEditorOrigin.REQUEST) {
-            "Approve and create rule"
-        } else {
-            "Save approval rule"
+        scope.launch {
+            when (val result = viewModel.saveEditor()) {
+                is RuleOperationResult.Saved -> report(result.message)
+                is RuleOperationResult.Failed -> report(result.message)
+            }
         }
-        authenticate(
-            title,
-            {
-                scope.launch {
-                    when (val result = viewModel.saveEditor()) {
-                        is RuleOperationResult.Saved -> report(result.message)
-                        is RuleOperationResult.Failed -> report(result.message)
-                    }
-                }
-            },
-            ::report,
-        )
     }
 
     fun setEnabled(rule: ApprovalRule, enabled: Boolean) {
@@ -142,7 +130,7 @@ internal fun RulesScreen(
                 )
             }
         }
-        if (enabled) authenticate("Enable approval rule", action, ::report) else action()
+        action()
     }
 
     val topLevel = selection == null && editor == null && !loadingEditor
@@ -188,18 +176,12 @@ internal fun RulesScreen(
                             setEnabled(checkNotNull(selectedRule), enabled)
                         },
                         onRenew = {
-                            authenticate(
-                                "Renew approval rule",
-                                {
-                                    scope.launch {
-                                        when (val result = viewModel.renew(it, 4)) {
-                                            is RuleOperationResult.Saved -> report(result.message)
-                                            is RuleOperationResult.Failed -> report(result.message)
-                                        }
-                                    }
-                                },
-                                ::report,
-                            )
+                            scope.launch {
+                                when (val result = viewModel.renew(it, 4)) {
+                                    is RuleOperationResult.Saved -> report(result.message)
+                                    is RuleOperationResult.Failed -> report(result.message)
+                                }
+                            }
                         },
                         onDelete = { pendingDeletion = selectedRule },
                         onOpenRequest = onOpenRequest,
