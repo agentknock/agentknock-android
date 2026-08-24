@@ -1,1 +1,1 @@
-Adds more breathing room around the Agentknock mark in Android launcher icons.
+Secret uploads can now be approved without revealing every uploaded value first.

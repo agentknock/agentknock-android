@@ -1026,7 +1026,6 @@ private fun SecretUploadDetail(
     }
     var editingName by remember { mutableStateOf(false) }
     var revealedValues by remember(request.id) { mutableStateOf<Map<String, String>>(emptyMap()) }
-    var reviewedVariableIds by remember(request.id) { mutableStateOf<Set<String>>(emptySet()) }
     val scope = rememberCoroutineScope()
     val lifecycle = LocalLifecycleOwner.current.lifecycle
 
@@ -1044,7 +1043,6 @@ private fun SecretUploadDetail(
         showBack = showBack,
         bottomContent = if (upload.state == SecretUploadRequestState.REVIEW_PENDING) {
             {
-                val reviewedCount = upload.variables.count { reviewedVariableIds.contains(it.id) }
                 Surface(
                     color = MaterialTheme.colorScheme.surfaceContainerLow,
                     tonalElevation = 3.dp,
@@ -1053,16 +1051,6 @@ private fun SecretUploadDetail(
                         Modifier.fillMaxWidth().padding(12.dp),
                         verticalArrangement = Arrangement.spacedBy(8.dp),
                     ) {
-                        Text(
-                            if (reviewedCount == upload.variables.size) {
-                                "All uploaded values have been reviewed"
-                            } else {
-                                "$reviewedCount of ${upload.variables.size} values reviewed · " +
-                                    "reveal each value to enable approval"
-                            },
-                            style = MaterialTheme.typography.labelMedium,
-                            color = MaterialTheme.colorScheme.onSurfaceVariant,
-                        )
                         Row(
                             modifier = Modifier.fillMaxWidth(),
                             horizontalArrangement = Arrangement.spacedBy(10.dp),
@@ -1079,8 +1067,7 @@ private fun SecretUploadDetail(
                             }
                             Button(
                                 onClick = { onApprove(approvedName.trim()) },
-                                enabled = approvedName.isNotBlank() &&
-                                    reviewedCount == upload.variables.size,
+                                enabled = approvedName.isNotBlank(),
                                 modifier = Modifier.weight(1f),
                                 colors = ButtonDefaults.buttonColors(
                                     containerColor = MaterialTheme.agentknockColors.success,
@@ -1165,8 +1152,8 @@ private fun SecretUploadDetail(
         )
         if (upload.state == SecretUploadRequestState.REVIEW_PENDING) {
             Text(
-                "Review each value and choose whether it should require device authentication " +
-                    "after saving.",
+                "Values are hidden by default. You can reveal them and choose whether each " +
+                    "should require device authentication after saving.",
                 style = MaterialTheme.typography.bodyMedium,
                 color = MaterialTheme.colorScheme.onSurfaceVariant,
             )
@@ -1192,7 +1179,6 @@ private fun SecretUploadDetail(
                     verticalArrangement = Arrangement.spacedBy(8.dp),
                 ) {
                     val value = revealedValues[variable.id]
-                    val reviewed = reviewedVariableIds.contains(variable.id)
                     val changeLabel = when {
                         variable.name in upload.addedVariables -> "New"
                         variable.name in upload.changedVariables -> "Updated"
@@ -1288,7 +1274,6 @@ private fun SecretUploadDetail(
                                                 is SecretUploadVariableValue.Available -> {
                                                     revealedValues = revealedValues +
                                                         (variable.id to result.value)
-                                                    reviewedVariableIds = reviewedVariableIds + variable.id
                                                 }
                                                 SecretUploadVariableValue.NotFound ->
                                                     report("This environment variable is no longer available")
@@ -1327,24 +1312,6 @@ private fun SecretUploadDetail(
                         ),
                         modifier = Modifier.fillMaxWidth(),
                     )
-                    if (reviewed) {
-                        Row(
-                            horizontalArrangement = Arrangement.spacedBy(6.dp),
-                            verticalAlignment = Alignment.CenterVertically,
-                        ) {
-                            Icon(
-                                Icons.Outlined.Check,
-                                contentDescription = null,
-                                modifier = Modifier.size(16.dp),
-                                tint = MaterialTheme.agentknockColors.success,
-                            )
-                            Text(
-                                "Reviewed",
-                                style = MaterialTheme.typography.labelMedium,
-                                color = MaterialTheme.agentknockColors.success,
-                            )
-                        }
-                    }
                 }
             }
         }
