@@ -1,1 +1,1 @@
-Introduces the Agentknock door-knocker identity and a consistent semantic color system for pending requests, approvals, denials, errors, and notifications.
+Adds more breathing room around the Agentknock mark in Android launcher icons.
