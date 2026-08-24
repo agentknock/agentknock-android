@@ -66,7 +66,6 @@ internal abstract class AgentknockDatabase : RoomDatabase() {
         fun create(context: Context): AgentknockDatabase =
             Room.databaseBuilder(context, AgentknockDatabase::class.java, NAME)
                 .setJournalMode(JournalMode.WRITE_AHEAD_LOGGING)
-                .fallbackToDestructiveMigration(dropAllTables = true)
                 .build()
     }
 }

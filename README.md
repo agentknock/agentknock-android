@@ -29,6 +29,11 @@ internal testing track:
 
 1. Increment `agentknockVersionCode` in `app/build.gradle.kts`.
 2. Update `app/src/main/play/release-notes/en-US/internal.txt`.
-3. Run `./publish-internal`.
+3. If the Room schema changed, add the next linear migration and its migration
+   test before publishing.
+4. Run `./publish-internal`.
 
 The release name is derived from the application version and version code.
+Room schema 6 is the compatibility baseline. Published schemas from version 6
+onward are retained permanently, and published builds must never use a
+destructive migration fallback.
