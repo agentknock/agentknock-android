@@ -84,6 +84,7 @@ import dev.agentknock.storage.vault.DeviceIdentity
 import dev.agentknock.ui.components.InformationRow
 import dev.agentknock.ui.components.InformationSurface
 import dev.agentknock.ui.components.TonalIcon
+import dev.agentknock.ui.theme.agentknockColors
 import kotlinx.coroutines.launch
 
 @Composable
@@ -462,9 +463,9 @@ private fun ClientDetail(
                         onClick = { confirmation = RelayClientState.REVOKED },
                         modifier = Modifier.fillMaxWidth(),
                         colors = ButtonDefaults.outlinedButtonColors(
-                            contentColor = MaterialTheme.colorScheme.error,
+                            contentColor = MaterialTheme.agentknockColors.danger,
                         ),
-                        border = BorderStroke(1.dp, MaterialTheme.colorScheme.error),
+                        border = BorderStroke(1.dp, MaterialTheme.agentknockColors.danger),
                     ) {
                         Icon(Icons.Outlined.Block, contentDescription = null)
                         Spacer(Modifier.width(8.dp))
@@ -518,7 +519,7 @@ private fun ClientDetail(
                     onSetState(target)
                     confirmation = null
                 }) {
-                    Text(target.actionLabel(), color = MaterialTheme.colorScheme.error)
+                    Text(target.actionLabel(), color = MaterialTheme.agentknockColors.danger)
                 }
             },
             dismissButton = { TextButton(onClick = { confirmation = null }) { Text("Cancel") } },
@@ -554,12 +555,12 @@ private fun ClientStateBadge(state: RelayClientState, pending: RelayClientState?
         ?: state.stateLabel()
     Surface(
         color = if (state == RelayClientState.REVOKED) {
-            MaterialTheme.colorScheme.errorContainer
+            MaterialTheme.agentknockColors.dangerContainer
         } else {
             MaterialTheme.colorScheme.surfaceContainerHighest
         },
         contentColor = if (state == RelayClientState.REVOKED) {
-            MaterialTheme.colorScheme.onErrorContainer
+            MaterialTheme.agentknockColors.onDangerContainer
         } else {
             stateColor(state)
         },
@@ -580,10 +581,10 @@ private fun ClientSummary.visibleState(): String? {
 
 @Composable
 private fun stateColor(state: RelayClientState) = when (state) {
-    RelayClientState.ACTIVE -> MaterialTheme.colorScheme.primary
-    RelayClientState.PENDING -> MaterialTheme.colorScheme.tertiary
+    RelayClientState.ACTIVE -> MaterialTheme.agentknockColors.success
+    RelayClientState.PENDING -> MaterialTheme.agentknockColors.attentionAccent
     RelayClientState.SUSPENDED -> MaterialTheme.colorScheme.tertiary
-    RelayClientState.REVOKED -> MaterialTheme.colorScheme.error
+    RelayClientState.REVOKED -> MaterialTheme.agentknockColors.danger
 }
 
 private fun RelayClientState.stateLabel(): String = when (this) {

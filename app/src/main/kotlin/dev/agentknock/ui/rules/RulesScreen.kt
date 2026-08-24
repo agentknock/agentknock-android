@@ -30,10 +30,12 @@ import androidx.compose.material.icons.outlined.Edit
 import androidx.compose.material.icons.outlined.Settings
 import androidx.compose.material3.AlertDialog
 import androidx.compose.material3.Button
+import androidx.compose.material3.ButtonDefaults
 import androidx.compose.material3.Card
 import androidx.compose.material3.CardDefaults
 import androidx.compose.material3.CircularProgressIndicator
 import androidx.compose.material3.FilterChip
+import androidx.compose.material3.FilterChipDefaults
 import androidx.compose.material3.FloatingActionButton
 import androidx.compose.material3.HorizontalDivider
 import androidx.compose.material3.Icon
@@ -84,6 +86,7 @@ import dev.agentknock.ui.components.ClientIdentity
 import dev.agentknock.ui.components.InformationRow
 import dev.agentknock.ui.components.InformationSurface
 import dev.agentknock.ui.components.SecretIdentities
+import dev.agentknock.ui.theme.agentknockColors
 import kotlinx.coroutines.launch
 
 @Composable
@@ -599,6 +602,14 @@ private fun RuleEditor(
                     onClick = onSave,
                     enabled = canSave,
                     modifier = Modifier.fillMaxWidth().padding(12.dp),
+                    colors = if (requestDerived) {
+                        ButtonDefaults.buttonColors(
+                            containerColor = MaterialTheme.agentknockColors.success,
+                            contentColor = MaterialTheme.agentknockColors.onSuccess,
+                        )
+                    } else {
+                        ButtonDefaults.buttonColors()
+                    },
                 ) {
                     Text(if (requestDerived) "Create rule and approve" else "Save rule")
                 }
@@ -784,7 +795,25 @@ private fun RuleEditor(
                 Text("Summary", style = MaterialTheme.typography.titleMedium)
                 Card(
                     colors = CardDefaults.cardColors(
-                        containerColor = MaterialTheme.colorScheme.secondaryContainer,
+                        containerColor = when (editor.action) {
+                            ApprovalRuleAction.APPROVE ->
+                                MaterialTheme.agentknockColors.successContainer
+                            ApprovalRuleAction.ASK_ME ->
+                                MaterialTheme.agentknockColors.attentionContainer
+                            ApprovalRuleAction.DENY ->
+                                MaterialTheme.agentknockColors.dangerContainer
+                            ApprovalRuleAction.ASK_AI ->
+                                MaterialTheme.colorScheme.surfaceContainerHigh
+                        },
+                        contentColor = when (editor.action) {
+                            ApprovalRuleAction.APPROVE ->
+                                MaterialTheme.agentknockColors.onSuccessContainer
+                            ApprovalRuleAction.ASK_ME ->
+                                MaterialTheme.agentknockColors.onAttentionContainer
+                            ApprovalRuleAction.DENY ->
+                                MaterialTheme.agentknockColors.onDangerContainer
+                            ApprovalRuleAction.ASK_AI -> MaterialTheme.colorScheme.onSurface
+                        },
                     ),
                     shape = MaterialTheme.shapes.large,
                 ) {
@@ -915,6 +944,27 @@ private fun ActionSelector(
                 enabled = action != ApprovalRuleAction.ASK_AI,
                 onClick = { onSelect(action) },
                 label = { Text(action.label()) },
+                colors = FilterChipDefaults.filterChipColors(
+                    selectedContainerColor = when (action) {
+                        ApprovalRuleAction.APPROVE ->
+                            MaterialTheme.agentknockColors.successContainer
+                        ApprovalRuleAction.ASK_ME ->
+                            MaterialTheme.agentknockColors.attentionContainer
+                        ApprovalRuleAction.DENY ->
+                            MaterialTheme.agentknockColors.dangerContainer
+                        ApprovalRuleAction.ASK_AI ->
+                            MaterialTheme.colorScheme.surfaceContainerHighest
+                    },
+                    selectedLabelColor = when (action) {
+                        ApprovalRuleAction.APPROVE ->
+                            MaterialTheme.agentknockColors.onSuccessContainer
+                        ApprovalRuleAction.ASK_ME ->
+                            MaterialTheme.agentknockColors.onAttentionContainer
+                        ApprovalRuleAction.DENY ->
+                            MaterialTheme.agentknockColors.onDangerContainer
+                        ApprovalRuleAction.ASK_AI -> MaterialTheme.colorScheme.onSurfaceVariant
+                    },
+                ),
             )
         }
     }

@@ -60,6 +60,7 @@ import dev.agentknock.protocol.DeviceProtocol
 import dev.agentknock.storage.vault.ClaimPairingAddressResult
 import dev.agentknock.storage.vault.DeviceConfiguration
 import dev.agentknock.storage.vault.DeviceIdentity
+import dev.agentknock.ui.theme.agentknockColors
 import kotlinx.coroutines.launch
 
 @Composable
@@ -238,9 +239,14 @@ private fun ActiveDeviceCard(identity: DeviceIdentity) {
     Card(
         colors = CardDefaults.cardColors(
             containerColor = if (identity.credentialsAvailable) {
-                MaterialTheme.colorScheme.primaryContainer
+                MaterialTheme.agentknockColors.successContainer
             } else {
-                MaterialTheme.colorScheme.errorContainer
+                MaterialTheme.agentknockColors.dangerContainer
+            },
+            contentColor = if (identity.credentialsAvailable) {
+                MaterialTheme.agentknockColors.onSuccessContainer
+            } else {
+                MaterialTheme.agentknockColors.onDangerContainer
             },
         ),
     ) {
@@ -269,7 +275,8 @@ private fun ActiveDeviceCard(identity: DeviceIdentity) {
 private fun WarningCard(title: String, message: String) {
     Card(
         colors = CardDefaults.cardColors(
-            containerColor = MaterialTheme.colorScheme.errorContainer,
+            containerColor = MaterialTheme.agentknockColors.dangerContainer,
+            contentColor = MaterialTheme.agentknockColors.onDangerContainer,
         ),
     ) {
         Column(

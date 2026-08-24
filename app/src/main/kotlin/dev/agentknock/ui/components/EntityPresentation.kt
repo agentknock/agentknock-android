@@ -19,6 +19,7 @@ import androidx.compose.ui.semantics.contentDescription
 import androidx.compose.ui.semantics.clearAndSetSemantics
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
+import dev.agentknock.ui.theme.agentknockColors
 
 @Composable
 internal fun ClientIdentity(
@@ -71,12 +72,12 @@ internal fun SecretIdentity(
             contentDescription = if (unavailable) "Unavailable secret $name" else "Secret $name"
         },
         color = if (unavailable) {
-            MaterialTheme.colorScheme.errorContainer
+            MaterialTheme.agentknockColors.dangerContainer
         } else {
             MaterialTheme.colorScheme.tertiaryContainer
         },
         contentColor = if (unavailable) {
-            MaterialTheme.colorScheme.onErrorContainer
+            MaterialTheme.agentknockColors.onDangerContainer
         } else {
             MaterialTheme.colorScheme.onTertiaryContainer
         },

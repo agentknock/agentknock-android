@@ -45,6 +45,7 @@ import androidx.compose.material.icons.outlined.Visibility
 import androidx.compose.material.icons.outlined.VisibilityOff
 import androidx.compose.material3.AlertDialog
 import androidx.compose.material3.Button
+import androidx.compose.material3.ButtonDefaults
 import androidx.compose.material3.Card
 import androidx.compose.material3.CardDefaults
 import androidx.compose.material3.CircularProgressIndicator
@@ -122,6 +123,7 @@ import dev.agentknock.ui.components.ClientIdentity
 import dev.agentknock.ui.components.InformationRow
 import dev.agentknock.ui.components.InformationSurface
 import dev.agentknock.ui.components.SecretIdentities
+import dev.agentknock.ui.theme.agentknockColors
 import kotlinx.coroutines.launch
 
 @Composable
@@ -511,19 +513,21 @@ private fun RequestRow(
         backgroundContent = {
             val direction = swipeState.dismissDirection
             val approving = direction == SwipeToDismissBoxValue.StartToEnd
+            val semanticColors = MaterialTheme.agentknockColors
+            val backgroundColor = when (direction) {
+                SwipeToDismissBoxValue.StartToEnd -> semanticColors.successContainer
+                SwipeToDismissBoxValue.EndToStart -> semanticColors.dangerContainer
+                SwipeToDismissBoxValue.Settled -> MaterialTheme.colorScheme.surfaceVariant
+            }
+            val contentColor = when (direction) {
+                SwipeToDismissBoxValue.StartToEnd -> semanticColors.onSuccessContainer
+                SwipeToDismissBoxValue.EndToStart -> semanticColors.onDangerContainer
+                SwipeToDismissBoxValue.Settled -> MaterialTheme.colorScheme.onSurfaceVariant
+            }
             Box(
                 modifier = Modifier
                     .fillMaxSize()
-                    .background(
-                        when (direction) {
-                            SwipeToDismissBoxValue.StartToEnd ->
-                                MaterialTheme.colorScheme.primaryContainer
-                            SwipeToDismissBoxValue.EndToStart ->
-                                MaterialTheme.colorScheme.errorContainer
-                            SwipeToDismissBoxValue.Settled ->
-                                MaterialTheme.colorScheme.surfaceVariant
-                        },
-                    )
+                    .background(backgroundColor)
                     .padding(horizontal = 24.dp),
                 contentAlignment = if (approving) Alignment.CenterStart else Alignment.CenterEnd,
             ) {
@@ -535,8 +539,9 @@ private fun RequestRow(
                         Icon(
                             if (approving) Icons.Outlined.Check else Icons.Outlined.Close,
                             contentDescription = null,
+                            tint = contentColor,
                         )
-                        Text(if (approving) "Approve once" else rejectLabel)
+                        Text(if (approving) "Approve once" else rejectLabel, color = contentColor)
                     }
                 }
             }
@@ -554,21 +559,23 @@ private fun RequestRowContent(
 ) {
     val rejected = request.wasRejected()
     val actionRequired = request.state == InboxRequestState.ACTION_REQUIRED
+    val semanticColors = MaterialTheme.agentknockColors
     val containerColor = when {
+        actionRequired -> semanticColors.attentionContainer
         selected -> MaterialTheme.colorScheme.secondaryContainer
         rejected -> MaterialTheme.colorScheme.surfaceContainer
         else -> MaterialTheme.colorScheme.surfaceContainerLow
     }
     Surface(
         color = containerColor,
-        contentColor = if (rejected && !selected) {
-            MaterialTheme.colorScheme.onSurfaceVariant
-        } else {
-            MaterialTheme.colorScheme.onSurface
+        contentColor = when {
+            actionRequired -> semanticColors.onAttentionContainer
+            rejected && !selected -> MaterialTheme.colorScheme.onSurfaceVariant
+            else -> MaterialTheme.colorScheme.onSurface
         },
         shape = MaterialTheme.shapes.large,
         border = if (actionRequired) {
-            BorderStroke(1.dp, MaterialTheme.colorScheme.primary)
+            BorderStroke(1.dp, semanticColors.attentionAccent)
         } else {
             null
         },
@@ -699,40 +706,54 @@ private fun PairingDetail(
                         Text(sas, fontFamily = FontFamily.Monospace)
                     }
                 }
-                OutlinedButton(onClick = { onChooseSas(null) }, modifier = Modifier.fillMaxWidth()) {
+                OutlinedButton(
+                    onClick = { onChooseSas(null) },
+                    modifier = Modifier.fillMaxWidth(),
+                    colors = ButtonDefaults.outlinedButtonColors(
+                        contentColor = MaterialTheme.agentknockColors.danger,
+                    ),
+                    border = BorderStroke(1.dp, MaterialTheme.agentknockColors.danger),
+                ) {
                     Text("None of the above")
                 }
             }
             PairingState.WAITING_FOR_FINISH -> Notice(
                 "Code verified",
                 "The client must run agentknock pairing finish to activate this pairing.",
+                NoticeTone.SUCCESS,
             )
             PairingState.RELAY_ACTIVATION_PENDING -> Notice(
                 "Activating pairing",
                 "Waiting for the relay to apply the client state.",
+                NoticeTone.ATTENTION,
             )
             PairingState.ACTIVE -> Notice(
                 "Pairing completed",
                 "Access was granted to this client.",
+                NoticeTone.SUCCESS,
             )
             PairingState.REJECTED -> Notice(
                 "Pairing rejected",
                 "No access was granted.",
-                subdued = true,
+                NoticeTone.SUBDUED,
             )
             PairingState.RECEIVING -> if (pairing.error == null) {
-                Notice("Receiving pairing", "The request is still being verified.")
+                Notice(
+                    "Receiving pairing",
+                    "The request is still being verified.",
+                    NoticeTone.ATTENTION,
+                )
             } else {
                 Notice(
                     "Pairing message rejected",
                     "${pairing.error} Waiting for a valid completion, or you can reject this pairing.",
-                    true,
+                    NoticeTone.DANGER,
                 )
             }
             PairingState.VERIFICATION_FAILED -> Notice(
                 "Pairing could not be verified",
                 pairing.error ?: "The cryptographic message was invalid.",
-                true,
+                NoticeTone.DANGER,
             )
         }
         if (
@@ -743,7 +764,14 @@ private fun PairingDetail(
                 PairingState.WAITING_FOR_FINISH,
             )
         ) {
-            OutlinedButton(onClick = onReject, modifier = Modifier.fillMaxWidth()) {
+            OutlinedButton(
+                onClick = onReject,
+                modifier = Modifier.fillMaxWidth(),
+                colors = ButtonDefaults.outlinedButtonColors(
+                    contentColor = MaterialTheme.agentknockColors.danger,
+                ),
+                border = BorderStroke(1.dp, MaterialTheme.agentknockColors.danger),
+            ) {
                 Text("Reject pairing")
             }
         }
@@ -793,13 +821,24 @@ private fun SecretUseDetail(
                             modifier = Modifier.fillMaxWidth(),
                             horizontalArrangement = Arrangement.spacedBy(10.dp),
                         ) {
-                            OutlinedButton(onClick = onDeny, modifier = Modifier.weight(1f)) {
+                            OutlinedButton(
+                                onClick = onDeny,
+                                modifier = Modifier.weight(1f),
+                                colors = ButtonDefaults.outlinedButtonColors(
+                                    contentColor = MaterialTheme.agentknockColors.danger,
+                                ),
+                                border = BorderStroke(1.dp, MaterialTheme.agentknockColors.danger),
+                            ) {
                                 Text("Deny once")
                             }
                             Button(
                                 onClick = onApprove,
                                 enabled = secretUse.missingSecrets.isEmpty(),
                                 modifier = Modifier.weight(1f),
+                                colors = ButtonDefaults.buttonColors(
+                                    containerColor = MaterialTheme.agentknockColors.success,
+                                    contentColor = MaterialTheme.agentknockColors.onSuccess,
+                                ),
                             ) {
                                 Text("Approve once")
                             }
@@ -895,7 +934,7 @@ private fun SecretUseDetail(
             Notice(
                 "Secrets are unavailable",
                 secretUse.missingSecrets.joinToString(),
-                error = true,
+                NoticeTone.DANGER,
             )
         }
 
@@ -908,10 +947,12 @@ private fun SecretUseDetail(
                     } else {
                         "An approval rule requires you to decide this request."
                     },
+                    NoticeTone.ATTENTION,
                 )
                 ApprovalRuleAction.ASK_AI -> Notice(
                     "Your decision is required",
                     "Ask AI is not available yet, so this request needs your decision.",
+                    NoticeTone.ATTENTION,
                 )
                 else -> Unit
             }
@@ -1029,6 +1070,10 @@ private fun SecretUploadDetail(
                             OutlinedButton(
                                 onClick = onReject,
                                 modifier = Modifier.weight(1f),
+                                colors = ButtonDefaults.outlinedButtonColors(
+                                    contentColor = MaterialTheme.agentknockColors.danger,
+                                ),
+                                border = BorderStroke(1.dp, MaterialTheme.agentknockColors.danger),
                             ) {
                                 Text("Reject")
                             }
@@ -1037,6 +1082,10 @@ private fun SecretUploadDetail(
                                 enabled = approvedName.isNotBlank() &&
                                     reviewedCount == upload.variables.size,
                                 modifier = Modifier.weight(1f),
+                                colors = ButtonDefaults.buttonColors(
+                                    containerColor = MaterialTheme.agentknockColors.success,
+                                    contentColor = MaterialTheme.agentknockColors.onSuccess,
+                                ),
                             ) {
                                 Text("Approve")
                             }
@@ -1287,12 +1336,12 @@ private fun SecretUploadDetail(
                                 Icons.Outlined.Check,
                                 contentDescription = null,
                                 modifier = Modifier.size(16.dp),
-                                tint = MaterialTheme.colorScheme.primary,
+                                tint = MaterialTheme.agentknockColors.success,
                             )
                             Text(
                                 "Reviewed",
                                 style = MaterialTheme.typography.labelMedium,
-                                color = MaterialTheme.colorScheme.primary,
+                                color = MaterialTheme.agentknockColors.success,
                             )
                         }
                     }
@@ -1313,9 +1362,12 @@ private fun SecretUploadDetail(
                         SecretUploadMode.UPDATE -> "$name was updated."
                         SecretUploadMode.REPLACE -> "$name was replaced."
                     },
+                    NoticeTone.SUCCESS,
                 )
             }
-            upload.error?.let { Notice("Upload could not be verified", it, true) }
+            upload.error?.let {
+                Notice("Upload could not be verified", it, NoticeTone.DANGER)
+            }
         }
 
         Disclosure("Technical details") {
@@ -1369,12 +1421,17 @@ private fun SecretUseOutcome(secretUse: SecretUseRequestDetails) {
         SecretUseRequestState.WAITING_FOR_COMPLETION -> OutcomeNotice(
             title = if (secretUse.decision == SecretUseDecision.APPROVED) "Approved" else "Denied",
             detail = "Waiting for the client to finish.$ruleDetail",
-            subdued = secretUse.decision == SecretUseDecision.DENIED,
+            tone = if (secretUse.decision == SecretUseDecision.APPROVED) {
+                NoticeTone.SUCCESS
+            } else {
+                NoticeTone.SUBDUED
+            },
         )
         SecretUseRequestState.COMPLETED -> when (secretUse.completionResult) {
             SecretUseCompletionResult.APPROVED -> OutcomeNotice(
                 "Delivered",
                 "The client received the secret values.$ruleDetail",
+                NoticeTone.SUCCESS,
             )
             SecretUseCompletionResult.DENIED -> if (
                 secretUse.completionReason == "INVALID_REQUEST"
@@ -1382,37 +1439,36 @@ private fun SecretUseOutcome(secretUse: SecretUseRequestDetails) {
                 OutcomeNotice(
                     "Request rejected",
                     secretUse.completionMessage ?: "The request was invalid.",
-                    error = true,
+                    NoticeTone.DANGER,
                 )
             } else {
                 OutcomeNotice(
                     "Denied",
                     (secretUse.completionMessage ?: "No values were released.") + ruleDetail,
-                    subdued = true,
+                    NoticeTone.SUBDUED,
                 )
             }
             SecretUseCompletionResult.ABORTED -> OutcomeNotice(
                 "Aborted",
                 secretUse.completionMessage ?: "The client stopped this request.",
-                subdued = true,
+                NoticeTone.SUBDUED,
             )
             null -> OutcomeNotice("Completed", "The request is complete.")
         }
         SecretUseRequestState.VERIFICATION_FAILED -> OutcomeNotice(
             "Could not verify request",
             secretUse.error ?: "The cryptographic message was invalid.",
-            error = true,
+            NoticeTone.DANGER,
         )
         SecretUseRequestState.APPROVAL_PENDING -> return
     }
-    Notice(outcome.title, outcome.detail, outcome.error, outcome.subdued)
+    Notice(outcome.title, outcome.detail, outcome.tone)
 }
 
 private data class OutcomeNotice(
     val title: String,
     val detail: String,
-    val error: Boolean = false,
-    val subdued: Boolean = false,
+    val tone: NoticeTone = NoticeTone.NEUTRAL,
 )
 
 @Composable
@@ -1519,15 +1575,24 @@ private fun Disclosure(
 private fun Notice(
     title: String,
     detail: String,
-    error: Boolean = false,
-    subdued: Boolean = false,
+    tone: NoticeTone = NoticeTone.NEUTRAL,
 ) {
+    val semanticColors = MaterialTheme.agentknockColors
     Card(
         colors = CardDefaults.cardColors(
-            containerColor = when {
-                error -> MaterialTheme.colorScheme.errorContainer
-                subdued -> MaterialTheme.colorScheme.surfaceContainerHighest
-                else -> MaterialTheme.colorScheme.secondaryContainer
+            containerColor = when (tone) {
+                NoticeTone.NEUTRAL -> MaterialTheme.colorScheme.surfaceContainerLow
+                NoticeTone.ATTENTION -> semanticColors.attentionContainer
+                NoticeTone.SUCCESS -> semanticColors.successContainer
+                NoticeTone.DANGER -> semanticColors.dangerContainer
+                NoticeTone.SUBDUED -> MaterialTheme.colorScheme.surfaceContainerHighest
+            },
+            contentColor = when (tone) {
+                NoticeTone.NEUTRAL -> MaterialTheme.colorScheme.onSurface
+                NoticeTone.ATTENTION -> semanticColors.onAttentionContainer
+                NoticeTone.SUCCESS -> semanticColors.onSuccessContainer
+                NoticeTone.DANGER -> semanticColors.onDangerContainer
+                NoticeTone.SUBDUED -> MaterialTheme.colorScheme.onSurfaceVariant
             },
         ),
         shape = MaterialTheme.shapes.large,
@@ -1546,18 +1611,19 @@ private fun StatusLine(
     attention: Boolean = false,
     subdued: Boolean = false,
 ) {
+    val semanticColors = MaterialTheme.agentknockColors
     Surface(
         color = when {
-            error -> MaterialTheme.colorScheme.errorContainer
-            attention -> MaterialTheme.colorScheme.primary
+            error -> semanticColors.dangerContainer
+            attention -> semanticColors.attentionContainer
             subdued -> MaterialTheme.colorScheme.surfaceContainerHighest
-            else -> MaterialTheme.colorScheme.secondaryContainer
+            else -> semanticColors.successContainer
         },
         contentColor = when {
-            error -> MaterialTheme.colorScheme.onErrorContainer
-            attention -> MaterialTheme.colorScheme.onPrimary
+            error -> semanticColors.onDangerContainer
+            attention -> semanticColors.onAttentionContainer
             subdued -> MaterialTheme.colorScheme.onSurfaceVariant
-            else -> MaterialTheme.colorScheme.onSecondaryContainer
+            else -> semanticColors.onSuccessContainer
         },
         shape = RoundedCornerShape(100.dp),
     ) {
@@ -1577,18 +1643,19 @@ private fun RequestStatusBadge(request: InboxRequestSummary) {
     val rejected = request.wasRejected()
     val actionRequired = request.state == InboxRequestState.ACTION_REQUIRED
     val accepted = request.wasAccepted()
+    val semanticColors = MaterialTheme.agentknockColors
     Surface(
         color = when {
-            error -> MaterialTheme.colorScheme.errorContainer
-            actionRequired -> MaterialTheme.colorScheme.primary
-            accepted -> MaterialTheme.colorScheme.secondaryContainer
+            error -> semanticColors.dangerContainer
+            actionRequired -> semanticColors.attentionContainer
+            accepted -> semanticColors.successContainer
             rejected -> MaterialTheme.colorScheme.surfaceContainerHighest
             else -> MaterialTheme.colorScheme.surfaceContainerHighest
         },
         contentColor = when {
-            error -> MaterialTheme.colorScheme.onErrorContainer
-            actionRequired -> MaterialTheme.colorScheme.onPrimary
-            accepted -> MaterialTheme.colorScheme.onSecondaryContainer
+            error -> semanticColors.onDangerContainer
+            actionRequired -> semanticColors.onAttentionContainer
+            accepted -> semanticColors.onSuccessContainer
             rejected -> MaterialTheme.colorScheme.onSurfaceVariant
             else -> MaterialTheme.colorScheme.onSurfaceVariant
         },
@@ -1615,8 +1682,20 @@ private fun DetailValue(label: String, value: String, monospace: Boolean = false
 @Composable
 private fun MissingDetail(onBack: () -> Unit, showBack: Boolean, modifier: Modifier) {
     DetailPage("Request", onBack, modifier, showBack = showBack) {
-        Notice("Request unavailable", "This request has no displayable details.", true)
+        Notice(
+            "Request unavailable",
+            "This request has no displayable details.",
+            NoticeTone.DANGER,
+        )
     }
+}
+
+private enum class NoticeTone {
+    NEUTRAL,
+    ATTENTION,
+    SUCCESS,
+    DANGER,
+    SUBDUED,
 }
 
 private fun InboxRequestSummary.statusLabel(): String = when {

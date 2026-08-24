@@ -1,7 +1,8 @@
 # Agentknock for Android
 
-Agentknock stores developer secrets on an Android device and approves their use
-by paired clients. The app is built with Kotlin and Jetpack Compose.
+Developer secrets on your phone, provided only to approved commands.
+
+The app is built with Kotlin and Jetpack Compose.
 
 ## Development
 

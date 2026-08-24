@@ -114,6 +114,7 @@ import dev.agentknock.presentation.formatTimestamp
 import dev.agentknock.ui.components.InformationRow
 import dev.agentknock.ui.components.InformationSurface
 import dev.agentknock.ui.components.TonalIcon
+import dev.agentknock.ui.theme.agentknockColors
 import dev.agentknock.ui.auth.DeviceAuthenticationMode
 import dev.agentknock.storage.FactoryResetResult
 import dev.agentknock.storage.crypto.EncryptionKeyBacking
@@ -621,14 +622,14 @@ private fun NotificationsSettings(
         ) {
             Surface(
                 color = if (notificationsEnabled) {
-                    MaterialTheme.colorScheme.secondaryContainer
+                    MaterialTheme.agentknockColors.successContainer
                 } else {
-                    MaterialTheme.colorScheme.errorContainer
+                    MaterialTheme.agentknockColors.attentionContainer
                 },
                 contentColor = if (notificationsEnabled) {
-                    MaterialTheme.colorScheme.onSecondaryContainer
+                    MaterialTheme.agentknockColors.onSuccessContainer
                 } else {
-                    MaterialTheme.colorScheme.onErrorContainer
+                    MaterialTheme.agentknockColors.onAttentionContainer
                 },
                 shape = RoundedCornerShape(12.dp),
                 modifier = Modifier.fillMaxWidth(),
@@ -714,14 +715,14 @@ private fun SecuritySettings(
         ) {
             Surface(
                 color = when {
-                    hardwareBacked -> MaterialTheme.colorScheme.secondaryContainer
-                    protectionKnown -> MaterialTheme.colorScheme.tertiaryContainer
-                    else -> MaterialTheme.colorScheme.errorContainer
+                    hardwareBacked -> MaterialTheme.agentknockColors.successContainer
+                    protectionKnown -> MaterialTheme.agentknockColors.attentionContainer
+                    else -> MaterialTheme.agentknockColors.dangerContainer
                 },
                 contentColor = when {
-                    hardwareBacked -> MaterialTheme.colorScheme.onSecondaryContainer
-                    protectionKnown -> MaterialTheme.colorScheme.onTertiaryContainer
-                    else -> MaterialTheme.colorScheme.onErrorContainer
+                    hardwareBacked -> MaterialTheme.agentknockColors.onSuccessContainer
+                    protectionKnown -> MaterialTheme.agentknockColors.onAttentionContainer
+                    else -> MaterialTheme.agentknockColors.onDangerContainer
                 },
                 shape = RoundedCornerShape(12.dp),
                 modifier = Modifier.fillMaxWidth(),
@@ -981,7 +982,7 @@ private fun SettingsActionRow(
 ) {
     val contentColor = when {
         !enabled -> MaterialTheme.colorScheme.onSurface.copy(alpha = 0.38f)
-        destructive -> MaterialTheme.colorScheme.error
+        destructive -> MaterialTheme.agentknockColors.danger
         else -> MaterialTheme.colorScheme.primary
     }
     Surface(
@@ -1159,14 +1160,14 @@ private fun AuditOutcomeBadge(outcome: AuditOutcome) {
         outcome == AuditOutcome.CHANGED
     Surface(
         color = when {
-            failed -> MaterialTheme.colorScheme.errorContainer
-            positive -> MaterialTheme.colorScheme.secondaryContainer
+            failed -> MaterialTheme.agentknockColors.dangerContainer
+            positive -> MaterialTheme.agentknockColors.successContainer
             rejected -> MaterialTheme.colorScheme.surfaceContainerHighest
             else -> MaterialTheme.colorScheme.surfaceContainerHighest
         },
         contentColor = when {
-            failed -> MaterialTheme.colorScheme.onErrorContainer
-            positive -> MaterialTheme.colorScheme.onSecondaryContainer
+            failed -> MaterialTheme.agentknockColors.onDangerContainer
+            positive -> MaterialTheme.agentknockColors.onSuccessContainer
             rejected -> MaterialTheme.colorScheme.onSurfaceVariant
             else -> MaterialTheme.colorScheme.onSurfaceVariant
         },
@@ -1313,14 +1314,14 @@ private fun Diagnostics(
         ) {
             Surface(
                 color = if (healthy) {
-                    MaterialTheme.colorScheme.secondaryContainer
+                    MaterialTheme.agentknockColors.successContainer
                 } else {
-                    MaterialTheme.colorScheme.errorContainer
+                    MaterialTheme.agentknockColors.dangerContainer
                 },
                 contentColor = if (healthy) {
-                    MaterialTheme.colorScheme.onSecondaryContainer
+                    MaterialTheme.agentknockColors.onSuccessContainer
                 } else {
-                    MaterialTheme.colorScheme.onErrorContainer
+                    MaterialTheme.agentknockColors.onDangerContainer
                 },
                 shape = RoundedCornerShape(12.dp),
                 modifier = Modifier.fillMaxWidth(),

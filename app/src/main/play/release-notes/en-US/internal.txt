@@ -1,1 +1,1 @@
-Adds configurable device authentication: rely on the device lock, protect sensitive values and pairing, or lock Agentknock whenever its foreground session ends.
+Introduces the Agentknock door-knocker identity and a consistent semantic color system for pending requests, approvals, denials, errors, and notifications.
