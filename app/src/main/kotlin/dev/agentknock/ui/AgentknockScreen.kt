@@ -405,6 +405,6 @@ private fun MainSection.label(): String = when (this) {
 private enum class MainSection {
     REQUESTS,
     SECRETS,
-    CLIENTS,
     RULES,
+    CLIENTS,
 }
