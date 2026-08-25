@@ -80,22 +80,32 @@ import dev.agentknock.relay.RelayClientState
 import dev.agentknock.storage.request.ClientChangeResult
 import dev.agentknock.storage.request.ClientDetails
 import dev.agentknock.storage.request.ClientSummary
+import dev.agentknock.storage.request.InboxRequestDetails
+import dev.agentknock.storage.request.InboxRequestState
+import dev.agentknock.storage.request.InboxRequestSummary
+import dev.agentknock.storage.request.PairingState
 import dev.agentknock.storage.vault.DeviceIdentity
 import dev.agentknock.ui.components.InformationRow
 import dev.agentknock.ui.components.InformationSurface
 import dev.agentknock.ui.components.TonalIcon
+import dev.agentknock.ui.requests.PairingRequestDetail
+import dev.agentknock.ui.requests.message
 import dev.agentknock.ui.theme.agentknockColors
 import kotlinx.coroutines.launch
 
 @Composable
 internal fun ClientsScreen(
+    authorizeProtectedAction: (String, () -> Unit, (String) -> Unit) -> Unit,
     onOpenSettings: () -> Unit,
     onTopLevelChanged: (Boolean) -> Unit,
     viewModel: ClientsViewModel = viewModel(),
 ) {
     val clients by viewModel.clients.collectAsStateWithLifecycle()
+    val pendingPairings by viewModel.pendingPairings.collectAsStateWithLifecycle()
     val selection by viewModel.selection.collectAsStateWithLifecycle()
+    val pairingSelection by viewModel.pairingSelection.collectAsStateWithLifecycle()
     val selectedClient by viewModel.selectedClient.collectAsStateWithLifecycle()
+    val selectedPairing by viewModel.selectedPairing.collectAsStateWithLifecycle()
     val configuration by viewModel.configuration.collectAsStateWithLifecycle()
     val snackbar = remember { SnackbarHostState() }
     val scope = rememberCoroutineScope()
@@ -104,28 +114,56 @@ internal fun ClientsScreen(
         scope.launch { snackbar.showSnackbar(message) }
     }
 
+    LaunchedEffect(pairingSelection, selectedPairing?.pairing?.pairingState) {
+        val pairing = selectedPairing?.pairing ?: return@LaunchedEffect
+        if (pairingSelection != null) {
+            when (pairing.pairingState) {
+                PairingState.ACTIVE -> {
+                    viewModel.selectPairing(null)
+                    viewModel.selectClient(pairing.clientId)
+                }
+                PairingState.REJECTED -> viewModel.selectPairing(null)
+                else -> Unit
+            }
+        }
+    }
+
     Scaffold(
         snackbarHost = { SnackbarHost(snackbar) },
         contentWindowInsets = WindowInsets(0, 0, 0, 0),
     ) { padding ->
         BoxWithConstraints(Modifier.fillMaxSize().padding(padding)) {
             val twoPane = maxWidth >= 840.dp
-            LaunchedEffect(selection, twoPane) {
-                onTopLevelChanged(twoPane || selection == null)
+            val hasSelection = selection != null || pairingSelection != null
+            LaunchedEffect(hasSelection, twoPane) {
+                onTopLevelChanged(twoPane || !hasSelection)
             }
             if (twoPane) {
                 Row(Modifier.fillMaxSize()) {
                     ClientList(
                         clients = clients,
+                        pendingPairings = pendingPairings,
                         selectedClientId = selection,
+                        selectedPairingRequestId = pairingSelection,
                         identity = configuration?.active,
                         onOpen = viewModel::selectClient,
+                        onOpenPairing = viewModel::selectPairing,
                         onOpenSettings = onOpenSettings,
                         modifier = Modifier.width(340.dp).fillMaxHeight(),
                     )
                     VerticalDivider()
-                    if (selection == null) {
+                    if (!hasSelection) {
                         EmptyClientSelection(Modifier.weight(1f).fillMaxHeight())
+                    } else if (pairingSelection != null) {
+                        PairingSelectionDetail(
+                            request = selectedPairing,
+                            authorizeProtectedAction = authorizeProtectedAction,
+                            viewModel = viewModel,
+                            report = ::report,
+                            onBack = { viewModel.selectPairing(null) },
+                            showBack = false,
+                            modifier = Modifier.weight(1f).fillMaxHeight(),
+                        )
                     } else {
                         ClientSelectionDetail(
                             client = selectedClient,
@@ -137,13 +175,27 @@ internal fun ClientsScreen(
                         )
                     }
                 }
-            } else if (selection == null) {
+            } else if (!hasSelection) {
                 ClientList(
                     clients = clients,
+                    pendingPairings = pendingPairings,
                     selectedClientId = selection,
+                    selectedPairingRequestId = pairingSelection,
                     identity = configuration?.active,
                     onOpen = viewModel::selectClient,
+                    onOpenPairing = viewModel::selectPairing,
                     onOpenSettings = onOpenSettings,
+                    modifier = Modifier.fillMaxSize(),
+                )
+            } else if (pairingSelection != null) {
+                BackHandler { viewModel.selectPairing(null) }
+                PairingSelectionDetail(
+                    request = selectedPairing,
+                    authorizeProtectedAction = authorizeProtectedAction,
+                    viewModel = viewModel,
+                    report = ::report,
+                    onBack = { viewModel.selectPairing(null) },
+                    showBack = true,
                     modifier = Modifier.fillMaxSize(),
                 )
             } else {
@@ -159,6 +211,56 @@ internal fun ClientsScreen(
             }
         }
     }
+}
+
+@Composable
+private fun PairingSelectionDetail(
+    request: InboxRequestDetails?,
+    authorizeProtectedAction: (String, () -> Unit, (String) -> Unit) -> Unit,
+    viewModel: ClientsViewModel,
+    report: (String) -> Unit,
+    onBack: () -> Unit,
+    showBack: Boolean,
+    modifier: Modifier,
+) {
+    val scope = rememberCoroutineScope()
+    if (request?.pairing == null) {
+        Box(modifier, contentAlignment = Alignment.Center) { CircularProgressIndicator() }
+        return
+    }
+    PairingRequestDetail(
+        request = request,
+        onBack = onBack,
+        showBack = showBack,
+        onChooseSas = { choice ->
+            if (choice == null) {
+                scope.launch { report(viewModel.chooseSas(request.id, null).message()) }
+            } else {
+                scope.launch {
+                    if (viewModel.isMatchingPendingSas(request.id, choice)) {
+                        authorizeProtectedAction(
+                            "Accept ${request.pairing.clientName}",
+                            {
+                                scope.launch {
+                                    report(viewModel.chooseSas(request.id, choice).message())
+                                }
+                            },
+                            report,
+                        )
+                    } else {
+                        report(viewModel.chooseSas(request.id, choice).message())
+                    }
+                }
+            }
+        },
+        onReject = {
+            scope.launch {
+                report(viewModel.rejectPairing(request.id).message())
+                viewModel.selectPairing(null)
+            }
+        },
+        modifier = modifier,
+    )
 }
 
 @Composable
@@ -224,9 +326,12 @@ private fun EmptyClientSelection(modifier: Modifier = Modifier) {
 @Composable
 private fun ClientList(
     clients: List<ClientSummary>,
+    pendingPairings: List<InboxRequestSummary>,
     selectedClientId: String?,
+    selectedPairingRequestId: Long?,
     identity: DeviceIdentity?,
     onOpen: (String) -> Unit,
+    onOpenPairing: (Long) -> Unit,
     onOpenSettings: () -> Unit,
     modifier: Modifier = Modifier,
 ) {
@@ -239,7 +344,7 @@ private fun ClientList(
                 }
             },
         )
-        if (clients.isEmpty()) {
+        if (clients.isEmpty() && pendingPairings.isEmpty()) {
             Box(Modifier.fillMaxSize(), contentAlignment = Alignment.Center) {
                 Column(
                     horizontalAlignment = Alignment.CenterHorizontally,
@@ -248,7 +353,7 @@ private fun ClientList(
                 ) {
                     Text("No paired clients", style = MaterialTheme.typography.titleLarge)
                     Text(
-                        "Pairing requests will appear in Requests.",
+                        "Pairing requests will appear here.",
                         color = MaterialTheme.colorScheme.onSurfaceVariant,
                     )
                     identity?.let {
@@ -274,6 +379,40 @@ private fun ClientList(
                 contentPadding = PaddingValues(start = 16.dp, end = 16.dp, top = 4.dp, bottom = 16.dp),
                 verticalArrangement = Arrangement.spacedBy(8.dp),
             ) {
+                if (pendingPairings.isNotEmpty()) {
+                    item(key = "pairing_requests_heading") {
+                        SectionHeading(
+                            title = "Pairing requests",
+                            count = pendingPairings.size,
+                        )
+                    }
+                    itemsIndexed(
+                        pendingPairings,
+                        key = { _, request -> "pairing_${request.id}" },
+                    ) { _, request ->
+                        PendingPairingRow(
+                            request = request,
+                            selected = request.id == selectedPairingRequestId,
+                            onClick = { onOpenPairing(request.id) },
+                        )
+                    }
+                    item(key = "paired_clients_heading") {
+                        SectionHeading(
+                            title = "Paired clients",
+                            count = clients.size,
+                            modifier = Modifier.padding(top = 10.dp),
+                        )
+                    }
+                }
+                if (clients.isEmpty()) {
+                    item(key = "no_paired_clients") {
+                        Text(
+                            "No clients have finished pairing yet.",
+                            color = MaterialTheme.colorScheme.onSurfaceVariant,
+                            modifier = Modifier.padding(horizontal = 4.dp, vertical = 8.dp),
+                        )
+                    }
+                }
                 itemsIndexed(clients, key = { _, client -> client.clientId }) { _, client ->
                     val selected = client.clientId == selectedClientId
                     Surface(
@@ -331,6 +470,107 @@ private fun ClientList(
                 }
             }
         }
+    }
+}
+
+@Composable
+private fun PendingPairingRow(
+    request: InboxRequestSummary,
+    selected: Boolean,
+    onClick: () -> Unit,
+) {
+    val pairingState = checkNotNull(request.pairingState)
+    val actionRequired = request.state == InboxRequestState.ACTION_REQUIRED
+    val colors = MaterialTheme.agentknockColors
+    val containerColor = when {
+        actionRequired -> colors.attentionContainer
+        selected -> MaterialTheme.colorScheme.secondaryContainer
+        else -> MaterialTheme.colorScheme.surfaceContainerLow
+    }
+    val contentColor = if (actionRequired) {
+        colors.onAttentionContainer
+    } else {
+        MaterialTheme.colorScheme.onSurface
+    }
+    Surface(
+        color = containerColor,
+        contentColor = contentColor,
+        shape = MaterialTheme.shapes.large,
+        border = if (actionRequired) BorderStroke(1.dp, colors.attentionAccent) else null,
+        onClick = onClick,
+        modifier = Modifier.fillMaxWidth().semantics { this.selected = selected },
+    ) {
+        ListItem(
+            headlineContent = {
+                Text(request.clientName, maxLines = 1, overflow = TextOverflow.Ellipsis)
+            },
+            supportingContent = {
+                Text(
+                    pairingState.pairingListDescription(),
+                    maxLines = 2,
+                    overflow = TextOverflow.Ellipsis,
+                )
+            },
+            leadingContent = { TonalIcon(Icons.Outlined.Computer, contentDescription = null) },
+            trailingContent = {
+                Row(
+                    horizontalArrangement = Arrangement.spacedBy(6.dp),
+                    verticalAlignment = Alignment.CenterVertically,
+                ) {
+                    Text(
+                        pairingState.pairingListStatus(),
+                        style = MaterialTheme.typography.labelMedium,
+                    )
+                    Icon(Icons.AutoMirrored.Outlined.NavigateNext, contentDescription = null)
+                }
+            },
+            colors = ListItemDefaults.colors(
+                containerColor = androidx.compose.ui.graphics.Color.Transparent,
+                headlineColor = contentColor,
+                supportingColor = contentColor.copy(alpha = 0.78f),
+                trailingIconColor = contentColor,
+            ),
+        )
+    }
+}
+
+private fun PairingState.pairingListStatus(): String = when (this) {
+    PairingState.RECEIVING -> "Starting"
+    PairingState.SAS_VERIFICATION_PENDING -> "Review"
+    PairingState.RELAY_ACTIVATION_PENDING -> "Activating"
+    PairingState.WAITING_FOR_FINISH -> "Waiting"
+    PairingState.VERIFICATION_FAILED -> "Problem"
+    PairingState.REJECTED -> "Rejected"
+    PairingState.ACTIVE -> "Paired"
+}
+
+private fun PairingState.pairingListDescription(): String = when (this) {
+    PairingState.RECEIVING -> "Waiting for the secure exchange"
+    PairingState.SAS_VERIFICATION_PENDING -> "Compare the security code"
+    PairingState.RELAY_ACTIVATION_PENDING -> "Applying the pairing"
+    PairingState.WAITING_FOR_FINISH -> "Code verified; waiting for the client"
+    PairingState.VERIFICATION_FAILED -> "Open to review or reject"
+    PairingState.REJECTED -> "Pairing rejected"
+    PairingState.ACTIVE -> "Pairing complete"
+}
+
+@Composable
+private fun SectionHeading(
+    title: String,
+    count: Int,
+    modifier: Modifier = Modifier,
+) {
+    Row(
+        modifier = modifier.fillMaxWidth().padding(horizontal = 4.dp, vertical = 4.dp),
+        horizontalArrangement = Arrangement.spacedBy(8.dp),
+        verticalAlignment = Alignment.CenterVertically,
+    ) {
+        Text(title, style = MaterialTheme.typography.titleSmall)
+        Text(
+            count.toString(),
+            style = MaterialTheme.typography.labelMedium,
+            color = MaterialTheme.colorScheme.onSurfaceVariant,
+        )
     }
 }
 

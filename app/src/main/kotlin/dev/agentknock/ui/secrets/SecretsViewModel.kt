@@ -4,6 +4,10 @@ import android.app.Application
 import androidx.lifecycle.AndroidViewModel
 import androidx.lifecycle.viewModelScope
 import dev.agentknock.AgentknockApplication
+import dev.agentknock.storage.request.InboxRequestDetails
+import dev.agentknock.storage.request.InboxRequestSummary
+import dev.agentknock.storage.request.SecretUploadDecisionResult
+import dev.agentknock.storage.request.SecretUploadVariableValue
 import dev.agentknock.storage.secret.CreateEnvironmentVariableResult
 import dev.agentknock.storage.secret.CreateSecretResult
 import dev.agentknock.storage.secret.EnvironmentVariableMetadata
@@ -12,23 +16,29 @@ import dev.agentknock.storage.secret.SecretDetails
 import dev.agentknock.storage.secret.SecretSummary
 import dev.agentknock.storage.secret.SaveEnvironmentVariableResult
 import dev.agentknock.storage.secret.SaveSecretResult
+import dev.agentknock.ui.pendingSecretUploads
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.SharingStarted
 import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.asStateFlow
 import kotlinx.coroutines.flow.flatMapLatest
 import kotlinx.coroutines.flow.flowOf
+import kotlinx.coroutines.flow.map
 import kotlinx.coroutines.flow.stateIn
 import kotlinx.coroutines.ExperimentalCoroutinesApi
 
 @OptIn(ExperimentalCoroutinesApi::class)
 internal class SecretsViewModel(application: Application) : AndroidViewModel(application) {
-    private val repository = (application as AgentknockApplication).container.secrets
+    private val container = (application as AgentknockApplication).container
+    private val repository = container.secrets
+    private val requests = container.requests
     private val selectedSecretId = MutableStateFlow<String?>(null)
+    private val selectedUploadRequestId = MutableStateFlow<Long?>(null)
     private val secretEditorState = MutableStateFlow<SecretEditorState?>(null)
     private val variableEditorState = MutableStateFlow<VariableEditorState?>(null)
 
     val selection: StateFlow<String?> = selectedSecretId.asStateFlow()
+    val uploadSelection: StateFlow<Long?> = selectedUploadRequestId.asStateFlow()
     val secretEditor: StateFlow<SecretEditorState?> = secretEditorState.asStateFlow()
     val variableEditor: StateFlow<VariableEditorState?> = variableEditorState.asStateFlow()
 
@@ -37,6 +47,22 @@ internal class SecretsViewModel(application: Application) : AndroidViewModel(app
         started = SharingStarted.Eagerly,
         initialValue = emptyList(),
     )
+
+    val pendingUploads: StateFlow<List<InboxRequestSummary>> = requests.observeRequests()
+        .map(List<InboxRequestSummary>::pendingSecretUploads)
+        .stateIn(
+            scope = viewModelScope,
+            started = SharingStarted.Eagerly,
+            initialValue = emptyList(),
+        )
+
+    val selectedUpload: StateFlow<InboxRequestDetails?> = selectedUploadRequestId
+        .flatMapLatest { id -> id?.let(requests::observeRequest) ?: flowOf(null) }
+        .stateIn(
+            scope = viewModelScope,
+            started = SharingStarted.Eagerly,
+            initialValue = null,
+        )
 
     val selectedSecret: StateFlow<SecretDetails?> = selectedSecretId
         .flatMapLatest { id -> id?.let(repository::observeSecret) ?: flowOf(null) }
@@ -47,10 +73,21 @@ internal class SecretsViewModel(application: Application) : AndroidViewModel(app
         )
 
     fun selectSecret(id: String?) {
+        if (id != null) selectedUploadRequestId.value = null
         selectedSecretId.value = id
     }
 
+    fun selectUpload(requestId: Long?) {
+        if (requestId != null) {
+            selectedSecretId.value = null
+            secretEditorState.value = null
+            variableEditorState.value = null
+        }
+        selectedUploadRequestId.value = requestId
+    }
+
     fun startNewSecret() {
+        selectedUploadRequestId.value = null
         secretEditorState.value = SecretEditorState(
             secret = null,
             name = "",
@@ -151,4 +188,34 @@ internal class SecretsViewModel(application: Application) : AndroidViewModel(app
 
     suspend fun readEnvironmentVariableValue(id: String): EnvironmentVariableValue =
         repository.readEnvironmentVariableValue(id)
+
+    suspend fun approveSecretUpload(
+        requestId: Long,
+        approvedName: String,
+    ): SecretUploadDecisionResult {
+        container.localStorage.await()
+        return requests.approveSecretUpload(requestId, approvedName)
+    }
+
+    suspend fun rejectSecretUpload(requestId: Long): SecretUploadDecisionResult {
+        container.localStorage.await()
+        return requests.rejectSecretUpload(requestId)
+    }
+
+    suspend fun readSecretUploadVariable(
+        requestId: Long,
+        variableId: String,
+    ): SecretUploadVariableValue {
+        container.localStorage.await()
+        return requests.readSecretUploadVariable(requestId, variableId)
+    }
+
+    suspend fun setSecretUploadVariableSensitivity(
+        requestId: Long,
+        variableId: String,
+        sensitive: Boolean,
+    ): Boolean {
+        container.localStorage.await()
+        return requests.setSecretUploadVariableSensitivity(requestId, variableId, sensitive)
+    }
 }

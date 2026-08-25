@@ -1,1 +1,1 @@
-Secret uploads can now be approved without revealing every uploaded value first.
+Requests now focuses on secret use. Pairing reviews live in Clients, secret uploads live in Secrets, and notifications open the relevant screen.

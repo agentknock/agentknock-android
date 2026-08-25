@@ -116,6 +116,13 @@ import dev.agentknock.storage.secret.SecretDetails
 import dev.agentknock.storage.secret.SecretSummary
 import dev.agentknock.storage.secret.SaveEnvironmentVariableResult
 import dev.agentknock.storage.secret.SaveSecretResult
+import dev.agentknock.storage.request.InboxRequestDetails
+import dev.agentknock.storage.request.InboxRequestSummary
+import dev.agentknock.storage.request.InboxRequestState
+import dev.agentknock.storage.request.SecretUploadRequestState
+import dev.agentknock.ui.requests.SecretUploadRequestDetail
+import dev.agentknock.ui.requests.message
+import dev.agentknock.ui.theme.agentknockColors
 import kotlinx.coroutines.launch
 import java.util.UUID
 
@@ -151,8 +158,11 @@ internal fun SecretsScreen(
     viewModel: SecretsViewModel = viewModel(),
 ) {
     val secrets by viewModel.secrets.collectAsStateWithLifecycle()
+    val pendingUploads by viewModel.pendingUploads.collectAsStateWithLifecycle()
     val selection by viewModel.selection.collectAsStateWithLifecycle()
+    val uploadSelection by viewModel.uploadSelection.collectAsStateWithLifecycle()
     val selectedSecret by viewModel.selectedSecret.collectAsStateWithLifecycle()
+    val selectedUpload by viewModel.selectedUpload.collectAsStateWithLifecycle()
     val secretEditor by viewModel.secretEditor.collectAsStateWithLifecycle()
     val variableEditor by viewModel.variableEditor.collectAsStateWithLifecycle()
     val scope = rememberCoroutineScope()
@@ -188,8 +198,19 @@ internal fun SecretsScreen(
         }
     }
 
-    LaunchedEffect(selection) {
+    LaunchedEffect(selection, uploadSelection) {
         revealedValues = emptyMap()
+    }
+
+    LaunchedEffect(uploadSelection, selectedUpload?.secretUpload?.state) {
+        if (
+            uploadSelection != null &&
+            selectedUpload?.secretUpload?.state?.let {
+                it != SecretUploadRequestState.REVIEW_PENDING
+            } == true
+        ) {
+            viewModel.selectUpload(null)
+        }
     }
 
     fun report(message: String) {
@@ -304,9 +325,10 @@ internal fun SecretsScreen(
         ) {
             val twoPane = maxWidth >= twoPaneWidth
             val secret = selectedSecret
-            LaunchedEffect(selection, secretEditor, variableEditor, twoPane) {
+            val hasSelection = selection != null || uploadSelection != null
+            LaunchedEffect(hasSelection, secretEditor, variableEditor, twoPane) {
                 onTopLevelChanged(
-                    (twoPane || selection == null) &&
+                    (twoPane || !hasSelection) &&
                         secretEditor == null &&
                         variableEditor == null,
                 )
@@ -315,8 +337,11 @@ internal fun SecretsScreen(
                 Row(Modifier.fillMaxSize()) {
                     SecretList(
                         secrets = secrets,
+                        pendingUploads = pendingUploads,
                         selectedSecretId = selection,
+                        selectedUploadRequestId = uploadSelection,
                         onSelect = viewModel::selectSecret,
+                        onSelectUpload = viewModel::selectUpload,
                         onCreate = viewModel::startNewSecret,
                         onOpenSettings = onOpenSettings,
                         modifier = Modifier
@@ -324,8 +349,18 @@ internal fun SecretsScreen(
                             .fillMaxHeight(),
                     )
                     VerticalDivider()
-                    if (selection == null) {
+                    if (!hasSelection) {
                         EmptySecretSelection(Modifier.weight(1f).fillMaxHeight())
+                    } else if (uploadSelection != null) {
+                        SecretUploadSelectionDetail(
+                            request = selectedUpload,
+                            authorizeProtectedAction = authorizeProtectedAction,
+                            viewModel = viewModel,
+                            report = ::report,
+                            onBack = { viewModel.selectUpload(null) },
+                            showBack = false,
+                            modifier = Modifier.weight(1f).fillMaxHeight(),
+                        )
                     } else if (secret == null) {
                         Loading(Modifier.weight(1f).fillMaxHeight())
                     } else {
@@ -351,13 +386,27 @@ internal fun SecretsScreen(
                         )
                     }
                 }
-            } else if (selection == null) {
+            } else if (!hasSelection) {
                 SecretList(
                     secrets = secrets,
+                    pendingUploads = pendingUploads,
                     selectedSecretId = null,
+                    selectedUploadRequestId = null,
                     onSelect = viewModel::selectSecret,
+                    onSelectUpload = viewModel::selectUpload,
                     onCreate = viewModel::startNewSecret,
                     onOpenSettings = onOpenSettings,
+                    modifier = Modifier.fillMaxSize(),
+                )
+            } else if (uploadSelection != null) {
+                BackHandler { viewModel.selectUpload(null) }
+                SecretUploadSelectionDetail(
+                    request = selectedUpload,
+                    authorizeProtectedAction = authorizeProtectedAction,
+                    viewModel = viewModel,
+                    report = ::report,
+                    onBack = { viewModel.selectUpload(null) },
+                    showBack = true,
                     modifier = Modifier.fillMaxSize(),
                 )
             } else if (secret == null) {
@@ -551,10 +600,56 @@ internal fun SecretsScreen(
 }
 
 @Composable
+private fun SecretUploadSelectionDetail(
+    request: InboxRequestDetails?,
+    authorizeProtectedAction: (String, () -> Unit, (String) -> Unit) -> Unit,
+    viewModel: SecretsViewModel,
+    report: (String) -> Unit,
+    onBack: () -> Unit,
+    showBack: Boolean,
+    modifier: Modifier,
+) {
+    val scope = rememberCoroutineScope()
+    if (request?.secretUpload == null) {
+        Loading(modifier)
+        return
+    }
+    SecretUploadRequestDetail(
+        request = request,
+        onBack = onBack,
+        showBack = showBack,
+        onApprove = { name ->
+            scope.launch {
+                report(viewModel.approveSecretUpload(request.id, name).message())
+                viewModel.selectUpload(null)
+            }
+        },
+        onReject = {
+            scope.launch {
+                report(viewModel.rejectSecretUpload(request.id).message())
+                viewModel.selectUpload(null)
+            }
+        },
+        authorizeProtectedAction = authorizeProtectedAction,
+        onReveal = { variableId ->
+            viewModel.readSecretUploadVariable(request.id, variableId)
+        },
+        onSensitivityChange = { variableId, sensitive ->
+            viewModel.setSecretUploadVariableSensitivity(request.id, variableId, sensitive)
+        },
+        report = report,
+        modifier = modifier,
+    )
+}
+
+@Composable
 private fun SecretList(
     secrets: List<SecretSummary>,
+    pendingUploads: List<InboxRequestSummary>,
     selectedSecretId: String?,
+    selectedUploadRequestId: Long?,
     onSelect: (String) -> Unit,
+    onSelectUpload: (Long) -> Unit,
     onCreate: () -> Unit,
     onOpenSettings: () -> Unit,
     modifier: Modifier = Modifier,
@@ -574,7 +669,7 @@ private fun SecretList(
                 }
             },
         )
-        if (secrets.isEmpty()) {
+        if (secrets.isEmpty() && pendingUploads.isEmpty()) {
             EmptyMessage(
                 title = stringResource(R.string.no_secrets),
                 description = stringResource(R.string.no_secrets_description),
@@ -586,6 +681,40 @@ private fun SecretList(
                 contentPadding = PaddingValues(start = 16.dp, end = 16.dp, top = 4.dp, bottom = 16.dp),
                 verticalArrangement = Arrangement.spacedBy(8.dp),
             ) {
+                if (pendingUploads.isNotEmpty()) {
+                    item(key = "incoming_uploads_heading") {
+                        SecretListSectionHeading(
+                            title = "Incoming uploads",
+                            count = pendingUploads.size,
+                        )
+                    }
+                    items(
+                        pendingUploads,
+                        key = { request -> "upload_${request.id}" },
+                    ) { request ->
+                        PendingSecretUploadRow(
+                            request = request,
+                            selected = request.id == selectedUploadRequestId,
+                            onClick = { onSelectUpload(request.id) },
+                        )
+                    }
+                    item(key = "stored_secrets_heading") {
+                        SecretListSectionHeading(
+                            title = "Stored secrets",
+                            count = secrets.size,
+                            modifier = Modifier.padding(top = 10.dp),
+                        )
+                    }
+                }
+                if (secrets.isEmpty()) {
+                    item(key = "no_stored_secrets") {
+                        Text(
+                            "No secrets are stored yet.",
+                            color = MaterialTheme.colorScheme.onSurfaceVariant,
+                            modifier = Modifier.padding(horizontal = 4.dp, vertical = 8.dp),
+                        )
+                    }
+                }
                 items(secrets, key = SecretSummary::id) { secret ->
                     val selected = secret.id == selectedSecretId
                     Surface(
@@ -637,6 +766,94 @@ private fun SecretList(
                 }
             }
         }
+    }
+}
+
+@Composable
+private fun PendingSecretUploadRow(
+    request: InboxRequestSummary,
+    selected: Boolean,
+    onClick: () -> Unit,
+) {
+    val actionRequired = request.state == InboxRequestState.ACTION_REQUIRED
+    val colors = MaterialTheme.agentknockColors
+    val containerColor = when {
+        actionRequired -> colors.attentionContainer
+        selected -> MaterialTheme.colorScheme.secondaryContainer
+        else -> MaterialTheme.colorScheme.surfaceContainerLow
+    }
+    val contentColor = if (actionRequired) {
+        colors.onAttentionContainer
+    } else {
+        MaterialTheme.colorScheme.onSurface
+    }
+    val secretName = request.secretNames.singleOrNull() ?: "Unnamed secret"
+    Surface(
+        color = containerColor,
+        contentColor = contentColor,
+        shape = MaterialTheme.shapes.large,
+        border = if (actionRequired) BorderStroke(1.dp, colors.attentionAccent) else null,
+        onClick = onClick,
+        modifier = Modifier.fillMaxWidth().semantics { this.selected = selected },
+    ) {
+        ListItem(
+            headlineContent = {
+                Text(secretName, maxLines = 1, overflow = TextOverflow.Ellipsis)
+            },
+            supportingContent = {
+                Column(verticalArrangement = Arrangement.spacedBy(2.dp)) {
+                    Text(
+                        listOfNotNull(request.title, request.listSummary)
+                            .filter(String::isNotBlank)
+                            .joinToString(" · "),
+                        maxLines = 1,
+                        overflow = TextOverflow.Ellipsis,
+                    )
+                    Text(
+                        "From ${request.clientName} · ${formatTimestamp(request.receivedAt)}",
+                        style = MaterialTheme.typography.bodySmall,
+                        maxLines = 1,
+                        overflow = TextOverflow.Ellipsis,
+                    )
+                }
+            },
+            leadingContent = { TonalIcon(Icons.Outlined.Lock, contentDescription = null) },
+            trailingContent = {
+                Row(
+                    horizontalArrangement = Arrangement.spacedBy(6.dp),
+                    verticalAlignment = Alignment.CenterVertically,
+                ) {
+                    Text("Review", style = MaterialTheme.typography.labelMedium)
+                    Icon(Icons.AutoMirrored.Outlined.NavigateNext, contentDescription = null)
+                }
+            },
+            colors = ListItemDefaults.colors(
+                containerColor = androidx.compose.ui.graphics.Color.Transparent,
+                headlineColor = contentColor,
+                supportingColor = contentColor.copy(alpha = 0.78f),
+                trailingIconColor = contentColor,
+            ),
+        )
+    }
+}
+
+@Composable
+private fun SecretListSectionHeading(
+    title: String,
+    count: Int,
+    modifier: Modifier = Modifier,
+) {
+    Row(
+        modifier = modifier.fillMaxWidth().padding(horizontal = 4.dp, vertical = 4.dp),
+        horizontalArrangement = Arrangement.spacedBy(8.dp),
+        verticalAlignment = Alignment.CenterVertically,
+    ) {
+        Text(title, style = MaterialTheme.typography.titleSmall)
+        Text(
+            count.toString(),
+            style = MaterialTheme.typography.labelMedium,
+            color = MaterialTheme.colorScheme.onSurfaceVariant,
+        )
     }
 }
 

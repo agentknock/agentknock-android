@@ -8,7 +8,11 @@ import dev.agentknock.relay.RelayClientState
 import dev.agentknock.storage.request.ClientChangeResult
 import dev.agentknock.storage.request.ClientDetails
 import dev.agentknock.storage.request.ClientSummary
+import dev.agentknock.storage.request.InboxRequestDetails
+import dev.agentknock.storage.request.InboxRequestSummary
+import dev.agentknock.storage.request.PairingDecisionResult
 import dev.agentknock.storage.vault.DeviceConfiguration
+import dev.agentknock.ui.pendingPairings
 import kotlinx.coroutines.ExperimentalCoroutinesApi
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.SharingStarted
@@ -16,6 +20,7 @@ import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.asStateFlow
 import kotlinx.coroutines.flow.flatMapLatest
 import kotlinx.coroutines.flow.flowOf
+import kotlinx.coroutines.flow.map
 import kotlinx.coroutines.flow.stateIn
 
 @OptIn(ExperimentalCoroutinesApi::class)
@@ -23,6 +28,7 @@ internal class ClientsViewModel(application: Application) : AndroidViewModel(app
     private val container = (application as AgentknockApplication).container
     private val repository = container.requests
     private val selectedClientId = MutableStateFlow<String?>(null)
+    private val selectedPairingRequestId = MutableStateFlow<Long?>(null)
 
     val clients: StateFlow<List<ClientSummary>> = repository.observeClients().stateIn(
         scope = viewModelScope,
@@ -30,6 +36,7 @@ internal class ClientsViewModel(application: Application) : AndroidViewModel(app
         initialValue = emptyList(),
     )
     val selection: StateFlow<String?> = selectedClientId.asStateFlow()
+    val pairingSelection: StateFlow<Long?> = selectedPairingRequestId.asStateFlow()
     val selectedClient: StateFlow<ClientDetails?> = selectedClientId.flatMapLatest { id ->
         id?.let(repository::observeClient) ?: flowOf(null)
     }.stateIn(
@@ -37,6 +44,20 @@ internal class ClientsViewModel(application: Application) : AndroidViewModel(app
         started = SharingStarted.Eagerly,
         initialValue = null,
     )
+    val pendingPairings: StateFlow<List<InboxRequestSummary>> = repository.observeRequests()
+        .map(List<InboxRequestSummary>::pendingPairings)
+        .stateIn(
+            scope = viewModelScope,
+            started = SharingStarted.Eagerly,
+            initialValue = emptyList(),
+        )
+    val selectedPairing: StateFlow<InboxRequestDetails?> = selectedPairingRequestId
+        .flatMapLatest { id -> id?.let(repository::observeRequest) ?: flowOf(null) }
+        .stateIn(
+            scope = viewModelScope,
+            started = SharingStarted.Eagerly,
+            initialValue = null,
+        )
     val configuration: StateFlow<DeviceConfiguration?> = container.vault.observeConfiguration()
         .stateIn(
             scope = viewModelScope,
@@ -45,7 +66,13 @@ internal class ClientsViewModel(application: Application) : AndroidViewModel(app
         )
 
     fun selectClient(clientId: String?) {
+        if (clientId != null) selectedPairingRequestId.value = null
         selectedClientId.value = clientId
+    }
+
+    fun selectPairing(requestId: Long?) {
+        if (requestId != null) selectedClientId.value = null
+        selectedPairingRequestId.value = requestId
     }
 
     suspend fun rename(clientId: String, name: String): ClientChangeResult =
@@ -53,4 +80,19 @@ internal class ClientsViewModel(application: Application) : AndroidViewModel(app
 
     suspend fun setState(clientId: String, state: RelayClientState): ClientChangeResult =
         repository.setClientState(clientId, state)
+
+    suspend fun chooseSas(requestId: Long, selectedIndex: Int?): PairingDecisionResult {
+        container.localStorage.await()
+        return repository.chooseSas(requestId, selectedIndex)
+    }
+
+    suspend fun isMatchingPendingSas(requestId: Long, selectedIndex: Int): Boolean {
+        container.localStorage.await()
+        return repository.isMatchingPendingSas(requestId, selectedIndex)
+    }
+
+    suspend fun rejectPairing(requestId: Long): PairingDecisionResult {
+        container.localStorage.await()
+        return repository.rejectPairing(requestId)
+    }
 }

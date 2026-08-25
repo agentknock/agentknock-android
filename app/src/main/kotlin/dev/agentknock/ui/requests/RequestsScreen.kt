@@ -107,7 +107,6 @@ import dev.agentknock.storage.request.SecretUseDecisionResult
 import dev.agentknock.storage.request.SecretUseRequestDetails
 import dev.agentknock.storage.request.SecretUseRequestState
 import dev.agentknock.storage.request.InboxRequestDetails
-import dev.agentknock.storage.request.InboxRequestKind
 import dev.agentknock.storage.request.InboxRequestState
 import dev.agentknock.storage.request.InboxRequestSummary
 import dev.agentknock.storage.request.PairingDecisionResult
@@ -118,7 +117,6 @@ import dev.agentknock.storage.request.SecretUploadRequestState
 import dev.agentknock.storage.request.SecretUploadVariableValue
 import dev.agentknock.storage.request.RequestSyncResult
 import dev.agentknock.storage.rule.ApprovalRuleAction
-import dev.agentknock.storage.vault.DeviceIdentity
 import dev.agentknock.ui.components.ClientIdentity
 import dev.agentknock.ui.components.InformationRow
 import dev.agentknock.ui.components.InformationSurface
@@ -128,7 +126,6 @@ import kotlinx.coroutines.launch
 
 @Composable
 internal fun RequestsScreen(
-    authorizeProtectedAction: (String, () -> Unit, (String) -> Unit) -> Unit,
     onOpenSettings: () -> Unit,
     notificationsEnabled: Boolean,
     onTopLevelChanged: (Boolean) -> Unit,
@@ -140,7 +137,6 @@ internal fun RequestsScreen(
     val selectedRequest by viewModel.selectedRequest.collectAsStateWithLifecycle()
     val syncing by viewModel.syncing.collectAsStateWithLifecycle()
     val lastSyncResult by viewModel.lastSyncResult.collectAsStateWithLifecycle()
-    val configuration by viewModel.configuration.collectAsStateWithLifecycle()
     val snackbar = remember { SnackbarHostState() }
     val scope = rememberCoroutineScope()
 
@@ -156,17 +152,9 @@ internal fun RequestsScreen(
     }
 
     fun reject(request: InboxRequestSummary) {
+        if (request.secretUseState != SecretUseRequestState.APPROVAL_PENDING) return
         scope.launch {
-            val message = when {
-                request.pairingState?.canReject() == true ->
-                    viewModel.rejectPairing(request.id).message()
-                request.secretUseState == SecretUseRequestState.APPROVAL_PENDING ->
-                    viewModel.denySecretUseRequest(request.id).message()
-                request.secretUploadState == SecretUploadRequestState.REVIEW_PENDING ->
-                    viewModel.rejectSecretUpload(request.id).message()
-                else -> return@launch
-            }
-            report(message)
+            report(viewModel.denySecretUseRequest(request.id).message())
         }
     }
 
@@ -184,7 +172,6 @@ internal fun RequestsScreen(
                     RequestList(
                         requests = requests,
                         selectedRequestId = selection,
-                        identity = configuration?.active,
                         syncing = syncing,
                         syncProblem = lastSyncResult.problemMessage(),
                         onRefresh = viewModel::refresh,
@@ -202,7 +189,6 @@ internal fun RequestsScreen(
                     } else {
                         RequestDetail(
                             request = selectedRequest,
-                            authorizeProtectedAction = authorizeProtectedAction,
                             viewModel = viewModel,
                             report = ::report,
                             onBack = { viewModel.selectRequest(null) },
@@ -216,7 +202,6 @@ internal fun RequestsScreen(
                 RequestList(
                     requests = requests,
                     selectedRequestId = selection,
-                    identity = configuration?.active,
                     syncing = syncing,
                     syncProblem = lastSyncResult.problemMessage(),
                     onRefresh = viewModel::refresh,
@@ -232,7 +217,6 @@ internal fun RequestsScreen(
                 BackHandler { viewModel.selectRequest(null) }
                 RequestDetail(
                     request = selectedRequest,
-                    authorizeProtectedAction = authorizeProtectedAction,
                     viewModel = viewModel,
                     report = ::report,
                     onBack = { viewModel.selectRequest(null) },
@@ -248,7 +232,6 @@ internal fun RequestsScreen(
 @Composable
 private fun RequestDetail(
     request: InboxRequestDetails?,
-    authorizeProtectedAction: (String, () -> Unit, (String) -> Unit) -> Unit,
     viewModel: RequestsViewModel,
     report: (String) -> Unit,
     onBack: () -> Unit,
@@ -261,36 +244,8 @@ private fun RequestDetail(
         Box(modifier, contentAlignment = Alignment.Center) { CircularProgressIndicator() }
         return
     }
-    when {
-        request.pairing != null -> PairingDetail(
-            request = request,
-            onBack = onBack,
-            showBack = showBack,
-            onChooseSas = { choice ->
-                if (choice == null) {
-                    scope.launch { report(viewModel.chooseSas(request.id, null).message()) }
-                } else {
-                    scope.launch {
-                        if (viewModel.isMatchingPendingSas(request.id, choice)) {
-                            authorizeProtectedAction(
-                                "Accept ${request.pairing.clientName}",
-                                {
-                                    scope.launch {
-                                        report(viewModel.chooseSas(request.id, choice).message())
-                                    }
-                                },
-                                report,
-                            )
-                        } else {
-                            report(viewModel.chooseSas(request.id, choice).message())
-                        }
-                    }
-                }
-            },
-            onReject = { scope.launch { report(viewModel.rejectPairing(request.id).message()) } },
-            modifier = modifier,
-        )
-        request.secretUse != null -> SecretUseDetail(
+    if (request.secretUse != null) {
+        SecretUseDetail(
             request = request,
             onBack = onBack,
             showBack = showBack,
@@ -303,25 +258,8 @@ private fun RequestDetail(
             onCreateRule = { onCreateRule(request.id) },
             modifier = modifier,
         )
-        request.secretUpload != null -> SecretUploadDetail(
-            request = request,
-            onBack = onBack,
-            showBack = showBack,
-            onApprove = { name ->
-                scope.launch {
-                    report(viewModel.approveSecretUpload(request.id, name).message())
-                }
-            },
-            onReject = { scope.launch { report(viewModel.rejectSecretUpload(request.id).message()) } },
-            authorizeProtectedAction = authorizeProtectedAction,
-            onReveal = { variableId -> viewModel.readSecretUploadVariable(request.id, variableId) },
-            onSensitivityChange = { variableId, sensitive ->
-                viewModel.setSecretUploadVariableSensitivity(request.id, variableId, sensitive)
-            },
-            report = report,
-            modifier = modifier,
-        )
-        else -> MissingDetail(onBack = onBack, showBack = showBack, modifier = modifier)
+    } else {
+        MissingDetail(onBack = onBack, showBack = showBack, modifier = modifier)
     }
 }
 
@@ -339,7 +277,6 @@ private fun EmptyRequestSelection(modifier: Modifier = Modifier) {
 private fun RequestList(
     requests: List<InboxRequestSummary>,
     selectedRequestId: Long?,
-    identity: DeviceIdentity?,
     syncing: Boolean,
     syncProblem: String?,
     onRefresh: () -> Unit,
@@ -412,35 +349,11 @@ private fun RequestList(
                     modifier = Modifier.padding(horizontal = 28.dp),
                     verticalArrangement = Arrangement.spacedBy(10.dp),
                 ) {
-                    Text("No requests", style = MaterialTheme.typography.titleLarge)
+                    Text("No secret requests", style = MaterialTheme.typography.titleLarge)
                     Text(
-                        "Requests that need review will appear here.",
+                        "Requests to use your secrets will appear here.",
                         color = MaterialTheme.colorScheme.onSurfaceVariant,
                     )
-                    identity?.let {
-                        Text(
-                            if (it.pairingEnabled) {
-                                "New pairings are accepted at"
-                            } else {
-                                "New pairings are paused for"
-                            },
-                            style = MaterialTheme.typography.labelLarge,
-                            color = MaterialTheme.colorScheme.onSurfaceVariant,
-                            modifier = Modifier.padding(top = 12.dp),
-                        )
-                        SelectionContainer {
-                            Text(it.address, fontFamily = FontFamily.Monospace)
-                        }
-                        if (it.pairingEnabled) {
-                            SelectionContainer {
-                                Text(
-                                    "agentknock pairing start ${it.address}",
-                                    style = MaterialTheme.typography.bodySmall,
-                                    fontFamily = FontFamily.Monospace,
-                                )
-                            }
-                        }
-                    }
                 }
             }
         } else {
@@ -474,7 +387,7 @@ private fun RequestRow(
 ) {
     val canApprove = request.secretUseState == SecretUseRequestState.APPROVAL_PENDING
     val canReject = request.canReject()
-    val rejectLabel = if (request.kind == InboxRequestKind.SECRET_USE) "Deny once" else "Reject"
+    val rejectLabel = "Deny once"
     val swipeState = rememberSwipeToDismissBoxState(
         positionalThreshold = { distance -> distance * 0.65f },
     )
@@ -655,7 +568,7 @@ private fun RequestRowContent(
 }
 
 @Composable
-private fun PairingDetail(
+internal fun PairingRequestDetail(
     request: InboxRequestDetails,
     onBack: () -> Unit,
     showBack: Boolean,
@@ -1008,7 +921,7 @@ private fun SecretUseDetail(
 }
 
 @Composable
-private fun SecretUploadDetail(
+internal fun SecretUploadRequestDetail(
     request: InboxRequestDetails,
     onBack: () -> Unit,
     showBack: Boolean,
@@ -1604,9 +1517,7 @@ private fun StatusLine(
 
 @Composable
 private fun RequestStatusBadge(request: InboxRequestSummary) {
-    val error = request.pairingState?.isError() == true ||
-        request.secretUseState == SecretUseRequestState.VERIFICATION_FAILED ||
-        request.secretUploadState == SecretUploadRequestState.VERIFICATION_FAILED
+    val error = request.secretUseState == SecretUseRequestState.VERIFICATION_FAILED
     val rejected = request.wasRejected()
     val actionRequired = request.state == InboxRequestState.ACTION_REQUIRED
     val accepted = request.wasAccepted()
@@ -1666,40 +1577,25 @@ private enum class NoticeTone {
 }
 
 private fun InboxRequestSummary.statusLabel(): String = when {
-    pairingState != null -> pairingState.label()
     secretUseState != null -> secretUseStatusLabel(
         secretUseState,
         secretUseResult,
         secretUseCompletionReason,
     )
-    secretUploadState != null -> secretUploadState.label()
     state == InboxRequestState.ACTION_REQUIRED -> "Action required"
     state == InboxRequestState.WAITING -> "Waiting"
     else -> "Completed"
 }
 
 private fun InboxRequestSummary.canReject(): Boolean =
-    pairingState?.canReject() == true ||
-        secretUseState == SecretUseRequestState.APPROVAL_PENDING ||
-        secretUploadState == SecretUploadRequestState.REVIEW_PENDING
-
-private fun PairingState.canReject(): Boolean = this in setOf(
-    PairingState.RECEIVING,
-    PairingState.SAS_VERIFICATION_PENDING,
-    PairingState.RELAY_ACTIVATION_PENDING,
-    PairingState.WAITING_FOR_FINISH,
-)
+    secretUseState == SecretUseRequestState.APPROVAL_PENDING
 
 private fun InboxRequestSummary.wasRejected(): Boolean =
-    pairingState == PairingState.REJECTED ||
-        secretUseDecision == SecretUseDecision.DENIED ||
-        secretUseResult == SecretUseCompletionResult.DENIED ||
-        secretUploadState == SecretUploadRequestState.REJECTED
+    secretUseDecision == SecretUseDecision.DENIED ||
+        secretUseResult == SecretUseCompletionResult.DENIED
 
 private fun InboxRequestSummary.wasAccepted(): Boolean =
-    pairingState == PairingState.ACTIVE ||
-        secretUseResult == SecretUseCompletionResult.APPROVED ||
-        secretUploadState == SecretUploadRequestState.APPROVED
+    secretUseResult == SecretUseCompletionResult.APPROVED
 
 private fun InboxRequestSummary.isInvalidSecretUse(): Boolean =
     secretUseCompletionReason == "INVALID_REQUEST"
@@ -1758,7 +1654,7 @@ private fun SecretUploadMode.titleLabel(): String = when (this) {
     SecretUploadMode.UPDATE -> "Update"
 }
 
-private fun PairingDecisionResult.message(): String = when (this) {
+internal fun PairingDecisionResult.message(): String = when (this) {
     PairingDecisionResult.VERIFIED -> "Pairing code verified"
     PairingDecisionResult.REJECTED -> "Pairing rejected"
     PairingDecisionResult.NOT_PENDING -> "This pairing no longer needs a decision"
@@ -1779,7 +1675,7 @@ private fun SecretUseDecisionResult.message(): String = when (this) {
     SecretUseDecisionResult.PairingUnavailable -> "The paired client is unavailable"
 }
 
-private fun SecretUploadDecisionResult.message(): String = when (this) {
+internal fun SecretUploadDecisionResult.message(): String = when (this) {
     is SecretUploadDecisionResult.Approved -> "Secret upload approved"
     SecretUploadDecisionResult.Rejected -> "Secret upload rejected"
     SecretUploadDecisionResult.NotPending -> "This upload no longer needs a decision"

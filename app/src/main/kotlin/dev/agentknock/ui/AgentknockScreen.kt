@@ -49,7 +49,9 @@ import androidx.lifecycle.viewmodel.compose.viewModel
 import dev.agentknock.R
 import dev.agentknock.RequestNavigation
 import dev.agentknock.ui.clients.ClientsScreen
+import dev.agentknock.ui.clients.ClientsViewModel
 import dev.agentknock.ui.secrets.SecretsScreen
+import dev.agentknock.ui.secrets.SecretsViewModel
 import dev.agentknock.ui.requests.RequestsScreen
 import dev.agentknock.ui.requests.RequestsViewModel
 import dev.agentknock.ui.settings.SettingsScreen
@@ -60,7 +62,7 @@ import dev.agentknock.ui.device.DeviceSetupViewModel
 import dev.agentknock.ui.auth.AuthenticationSession
 import dev.agentknock.ui.auth.DeviceAuthenticationMode
 import dev.agentknock.push.RequestNotifications
-import dev.agentknock.storage.request.InboxRequestState
+import dev.agentknock.storage.request.InboxRequestKind
 import kotlinx.coroutines.flow.StateFlow
 
 @Composable
@@ -76,6 +78,8 @@ internal fun AgentknockScreen(
     requestNotificationPermission: () -> Unit,
     deviceSetupViewModel: DeviceSetupViewModel = viewModel(),
     requestsViewModel: RequestsViewModel = viewModel(),
+    secretsViewModel: SecretsViewModel = viewModel(),
+    clientsViewModel: ClientsViewModel = viewModel(),
     rulesViewModel: RulesViewModel = viewModel(),
 ) {
     val authenticationMode by authentication.mode.collectAsStateWithLifecycle()
@@ -86,15 +90,21 @@ internal fun AgentknockScreen(
     var showAddressEditor by rememberSaveable { mutableStateOf(false) }
     var showNavigation by rememberSaveable { mutableStateOf(true) }
     var offerNotifications by rememberSaveable { mutableStateOf(false) }
+    var handledNavigationGeneration by rememberSaveable { mutableStateOf(0L) }
     val requestNavigationTarget by requestNavigation.collectAsStateWithLifecycle()
     val notificationRefreshGeneration by notificationStateGeneration.collectAsStateWithLifecycle()
-    val requestSummaries by requestsViewModel.requests.collectAsStateWithLifecycle()
+    val requestSummaries by requestsViewModel.allRequests.collectAsStateWithLifecycle()
     val context = LocalContext.current
     val notificationsEnabled = remember(notificationRefreshGeneration) {
         RequestNotifications.areEnabled(context)
     }
-    val actionRequiredCount = requestSummaries.count {
-        it.state == InboxRequestState.ACTION_REQUIRED
+    val actionRequiredCounts = MainSection.entries.associateWith { section ->
+        when (section) {
+            MainSection.REQUESTS -> requestSummaries.actionRequiredCount(InboxRequestKind.SECRET_USE)
+            MainSection.SECRETS -> requestSummaries.actionRequiredCount(InboxRequestKind.SECRET_UPLOAD)
+            MainSection.CLIENTS -> requestSummaries.actionRequiredCount(InboxRequestKind.PAIRING)
+            MainSection.RULES -> 0
+        }
     }
     val current = configuration
 
@@ -106,12 +116,31 @@ internal fun AgentknockScreen(
         authentication.authorizeProtectedAction(title, authenticate, onSuccess, onError)
     }
 
-    LaunchedEffect(requestNavigationTarget) {
-        if (requestNavigationTarget.generation > 0) {
-            section = MainSection.REQUESTS
+    LaunchedEffect(requestNavigationTarget, requestSummaries) {
+        if (
+            requestNavigationTarget.generation > handledNavigationGeneration &&
+            requestNavigationTarget.generation > 0
+        ) {
+            val requestId = requestNavigationTarget.requestId
+            val targetSection = if (requestId == null) {
+                MainSection.REQUESTS
+            } else {
+                when (requestSummaries.firstOrNull { it.id == requestId }?.kind ?: return@LaunchedEffect) {
+                    InboxRequestKind.SECRET_USE -> MainSection.REQUESTS
+                    InboxRequestKind.SECRET_UPLOAD -> MainSection.SECRETS
+                    InboxRequestKind.PAIRING -> MainSection.CLIENTS
+                }
+            }
+            section = targetSection
             showSettings = false
             showAddressEditor = false
-            requestsViewModel.selectRequest(requestNavigationTarget.requestId)
+            when (targetSection) {
+                MainSection.REQUESTS -> requestsViewModel.selectRequest(requestId)
+                MainSection.SECRETS -> secretsViewModel.selectUpload(requestId)
+                MainSection.CLIENTS -> clientsViewModel.selectPairing(requestId)
+                MainSection.RULES -> Unit
+            }
+            handledNavigationGeneration = requestNavigationTarget.generation
         }
     }
 
@@ -171,7 +200,7 @@ internal fun AgentknockScreen(
                     if (showNavigation) {
                         MainNavigationRail(
                             section = section,
-                            actionRequiredCount = actionRequiredCount,
+                            actionRequiredCounts = actionRequiredCounts,
                             onSelect = { section = it },
                         )
                     }
@@ -182,6 +211,8 @@ internal fun AgentknockScreen(
                         notificationsEnabled = notificationsEnabled,
                         onTopLevelChanged = { showNavigation = true },
                         requestsViewModel = requestsViewModel,
+                        secretsViewModel = secretsViewModel,
+                        clientsViewModel = clientsViewModel,
                         rulesViewModel = rulesViewModel,
                         onSelectSection = { section = it },
                         modifier = Modifier.weight(1f),
@@ -194,7 +225,7 @@ internal fun AgentknockScreen(
                         if (showNavigation) {
                             MainNavigationBar(
                                 section = section,
-                                actionRequiredCount = actionRequiredCount,
+                                actionRequiredCounts = actionRequiredCounts,
                                 onSelect = { section = it },
                             )
                         }
@@ -207,6 +238,8 @@ internal fun AgentknockScreen(
                         notificationsEnabled = notificationsEnabled,
                         onTopLevelChanged = { showNavigation = it },
                         requestsViewModel = requestsViewModel,
+                        secretsViewModel = secretsViewModel,
+                        clientsViewModel = clientsViewModel,
                         rulesViewModel = rulesViewModel,
                         onSelectSection = { section = it },
                         modifier = Modifier.fillMaxSize().padding(padding),
@@ -293,6 +326,8 @@ private fun MainContent(
     notificationsEnabled: Boolean,
     onTopLevelChanged: (Boolean) -> Unit,
     requestsViewModel: RequestsViewModel,
+    secretsViewModel: SecretsViewModel,
+    clientsViewModel: ClientsViewModel,
     rulesViewModel: RulesViewModel,
     onSelectSection: (MainSection) -> Unit,
     modifier: Modifier = Modifier,
@@ -300,7 +335,6 @@ private fun MainContent(
     Box(modifier) {
         when (section) {
             MainSection.REQUESTS -> RequestsScreen(
-                authorizeProtectedAction = authorizeProtectedAction,
                 onOpenSettings = onOpenSettings,
                 notificationsEnabled = notificationsEnabled,
                 viewModel = requestsViewModel,
@@ -314,10 +348,13 @@ private fun MainContent(
                 authorizeProtectedAction = authorizeProtectedAction,
                 onOpenSettings = onOpenSettings,
                 onTopLevelChanged = onTopLevelChanged,
+                viewModel = secretsViewModel,
             )
             MainSection.CLIENTS -> ClientsScreen(
+                authorizeProtectedAction = authorizeProtectedAction,
                 onOpenSettings = onOpenSettings,
                 onTopLevelChanged = onTopLevelChanged,
+                viewModel = clientsViewModel,
             )
             MainSection.RULES -> RulesScreen(
                 onOpenSettings = onOpenSettings,
@@ -335,7 +372,7 @@ private fun MainContent(
 @Composable
 private fun MainNavigationBar(
     section: MainSection,
-    actionRequiredCount: Int,
+    actionRequiredCounts: Map<MainSection, Int>,
     onSelect: (MainSection) -> Unit,
 ) {
     NavigationBar {
@@ -343,7 +380,7 @@ private fun MainNavigationBar(
             NavigationBarItem(
                 selected = section == item,
                 onClick = { onSelect(item) },
-                icon = { MainSectionIcon(item, actionRequiredCount) },
+                icon = { MainSectionIcon(item, actionRequiredCounts[item] ?: 0) },
                 label = { Text(item.label()) },
             )
         }
@@ -353,7 +390,7 @@ private fun MainNavigationBar(
 @Composable
 private fun MainNavigationRail(
     section: MainSection,
-    actionRequiredCount: Int,
+    actionRequiredCounts: Map<MainSection, Int>,
     onSelect: (MainSection) -> Unit,
 ) {
     NavigationRail {
@@ -361,7 +398,7 @@ private fun MainNavigationRail(
             NavigationRailItem(
                 selected = section == item,
                 onClick = { onSelect(item) },
-                icon = { MainSectionIcon(item, actionRequiredCount) },
+                icon = { MainSectionIcon(item, actionRequiredCounts[item] ?: 0) },
                 label = { Text(item.label()) },
             )
         }
@@ -381,7 +418,7 @@ private fun MainSectionIcon(section: MainSection, actionRequiredCount: Int) {
             contentDescription = null,
         )
     }
-    if (section == MainSection.REQUESTS && actionRequiredCount > 0) {
+    if (actionRequiredCount > 0) {
         BadgedBox(
             badge = {
                 Badge {

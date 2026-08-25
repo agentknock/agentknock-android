@@ -510,7 +510,13 @@ internal class RequestRepository(
                         secretUseCompletionReason = null,
                         secretListState = null,
                         secretUploadState = upload.state.toSecretUploadRequestState(),
-                        title = "Secret upload",
+                        title = when (
+                            SecretUploadMode.entries.single { it.wireName == upload.mode }
+                        ) {
+                            SecretUploadMode.CREATE -> "Create"
+                            SecretUploadMode.REPLACE -> "Replace"
+                            SecretUploadMode.UPDATE -> "Update"
+                        },
                         clientName = pairing?.friendlyName ?: pairing?.hostname ?: "Unknown client",
                         secretNames = listOf(upload.uploadedName),
                         listSummary = upload.listSummary(),

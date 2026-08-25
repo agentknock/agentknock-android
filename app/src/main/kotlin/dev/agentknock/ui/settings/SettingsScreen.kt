@@ -235,7 +235,7 @@ internal fun SettingsScreen(
                     onClearRequests = {
                         scope.launch {
                             val removed = viewModel.clearCompletedRequests()
-                            snackbar.showSnackbar("Cleared $removed completed requests")
+                            snackbar.showSnackbar("Cleared $removed completed workflows")
                         }
                     },
                     modifier = modifier,
@@ -392,7 +392,7 @@ private fun SettingsOverview(
                     Icons.Outlined.History,
                     "Data & history",
                     "${counts.secrets.countLabel("secret")} · " +
-                        "${counts.requests.countLabel("request")} · " +
+                        "${counts.requests.countLabel("workflow")} · " +
                         "${counts.auditEvents.countLabel("audit event")}",
                 ) { onOpen(SettingsPage.DATA) }
             }
@@ -541,7 +541,7 @@ private fun DeviceAndPairing(
             if (identity.pairingEnabled) {
                 Text("Pair a client", style = MaterialTheme.typography.titleMedium)
                 Text(
-                    "Run this command on the machine you want to pair. Review the request in Requests before starting another pairing.",
+                    "Run this command on the machine you want to pair. Review the pairing in Clients before starting another one.",
                     color = MaterialTheme.colorScheme.onSurfaceVariant,
                 )
                 Surface(
@@ -908,22 +908,22 @@ private fun DataAndHistory(
                     counts.secrets.countLabel("secret"),
                     counts.variables.countLabel("environment variable"),
                     counts.clients.countLabel("client"),
-                    counts.requests.countLabel("request"),
+                    counts.requests.countLabel("workflow"),
                 ).joinToString(" · "),
             )
             SettingsInformationRow(
                 icon = Icons.Outlined.Backup,
                 title = "Android backup and transfer",
-                summary = "Secrets, clients, request history, audit events, and encrypted values " +
+                summary = "Secrets, clients, workflow history, audit events, and encrypted values " +
                     "are included. Device-bound keys cannot be restored on another device.",
             )
             SettingsActionRow(
                 icon = Icons.Outlined.DeleteSweep,
-                title = "Clear completed request history",
+                title = "Clear completed workflow history",
                 summary = if (counts.requests == 0) {
-                    "No request history to clear"
+                    "No workflow history to clear"
                 } else {
-                    "Pending requests and audit events are kept"
+                    "Pending workflows and audit events are kept"
                 },
                 enabled = counts.requests > 0,
                 onClick = { confirmClear = true },
@@ -941,8 +941,8 @@ private fun DataAndHistory(
     if (confirmClear) {
         AlertDialog(
             onDismissRequest = { confirmClear = false },
-            title = { Text("Clear completed requests?") },
-            text = { Text("Pending requests, paired clients, secrets, and the audit log are not removed.") },
+            title = { Text("Clear completed workflows?") },
+            text = { Text("Pending workflows, paired clients, secrets, and the audit log are not removed.") },
             confirmButton = { TextButton(onClick = { onClearRequests(); confirmClear = false }) { Text("Clear") } },
             dismissButton = { TextButton(onClick = { confirmClear = false }) { Text("Cancel") } },
         )
