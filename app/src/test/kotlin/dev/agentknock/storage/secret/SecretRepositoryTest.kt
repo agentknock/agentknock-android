@@ -264,6 +264,7 @@ class SecretRepositoryTest {
 
         val description = fixture.repository.describeRequestedSecrets(listOf("first", "second"))
         assertEquals(emptyList<String>(), description.missingSecrets)
+        assertTrue(description.containsSensitiveMaterial)
         assertEquals(
             listOf("FIRST_REGION", "SHARED_TOKEN"),
             description.secrets.first().environmentVariableNames,
@@ -316,6 +317,56 @@ class SecretRepositoryTest {
         assertEquals(
             RequestedSecretsResult.MissingSecrets(listOf("missing")),
             fixture.repository.requestedSecrets(listOf("missing")),
+        )
+    }
+
+    @Test
+    fun `only sensitive environment values require approval`() = runTest {
+        val fixture = Fixture()
+        val public = fixture.createSecret("public-context")
+        fixture.createVariable(public, "AWS_REGION", "eu-north-1", false)
+        val sensitive = fixture.createSecret("credentials")
+        fixture.createVariable(sensitive, "AWS_TOKEN", "secret", true)
+        val key = fixture.repository.generateSshKey("git@example")
+        fixture.repository.createSshSecret("git-signing", "", key)
+
+        assertFalse(
+            fixture.repository.describeRequestedSecrets(listOf("public-context"))
+                .containsSensitiveMaterial,
+        )
+        assertFalse(
+            fixture.repository.describeRequestedSecrets(listOf("git-signing"))
+                .containsSensitiveMaterial,
+        )
+        assertTrue(
+            fixture.repository.describeRequestedSecrets(listOf("public-context", "credentials"))
+                .containsSensitiveMaterial,
+        )
+    }
+
+    @Test
+    fun `SSH signing requires the same public key approved for the invocation`() = runTest {
+        val fixture = Fixture()
+        val first = fixture.repository.generateSshKey("first@example")
+        val created = fixture.repository.createSshSecret("git-signing", "", first)
+        check(created is CreateSecretResult.Created)
+
+        val signed = fixture.repository.signGitMessage(
+            secretName = "git-signing",
+            expectedPublicKey = first.publicKeyLine,
+            message = "commit object".encodeToByteArray(),
+        )
+        assertTrue(signed is GitSignatureResult.Signed)
+
+        val second = fixture.repository.generateSshKey("second@example")
+        fixture.repository.replaceSshKey(created.id, second)
+        assertEquals(
+            GitSignatureResult.KeyChanged,
+            fixture.repository.signGitMessage(
+                secretName = "git-signing",
+                expectedPublicKey = first.publicKeyLine,
+                message = "commit object".encodeToByteArray(),
+            ),
         )
     }
 

@@ -123,4 +123,59 @@ class AgentknockMigrationTest {
             }
         }
     }
+
+    @Test
+    fun migration7To8PreservesSecretUseAndAddsCorrelatedSigningRequests() = runTest {
+        helper.createDatabase(7).use { database ->
+            database.execSQL(
+                "INSERT INTO inbox_requests " +
+                    "(id, relay_request_id, parent_request_id, kind, state, listed, request_json, " +
+                    "received_at, updated_at) VALUES " +
+                    "(20, 'invocation-1', NULL, 'secret_use', 'completed', 1, '{}', 1, 2)",
+            )
+            database.execSQL(
+                "INSERT INTO secret_use_requests " +
+                    "(request_id, pairing_request_id, client_id, client_name, pairing_address, " +
+                    "state, cli_version, secrets_json, secret_details_json, " +
+                    "missing_secrets_json, command, arguments_json, working_directory, " +
+                    "executable_path, executable_mode, stdin_kind, stdout_kind, stderr_kind, " +
+                    "launcher_chain_json, created_at, updated_at) VALUES " +
+                    "(20, NULL, 'client-1', 'Laptop', 'three-word-address', 'completed', " +
+                    "'{\"app_info\":{\"name\":\"agentknock\",\"version\":\"1\"}," +
+                    "\"lib_info\":{\"name\":\"agentknock\",\"version\":\"1\"}}', " +
+                    "'[\"git-signing\"]', '[]', '[]', 'git', '[]', '/work', '/bin/git', " +
+                    "'BINARY', 'TERMINAL', 'TERMINAL', 'TERMINAL', '[]', 1, 2)",
+            )
+        }
+
+        helper.runMigrationsAndValidate(8, listOf(MIGRATION_7_8)).use { database ->
+            database.prepare(
+                "SELECT invocation_token_hash, contains_sensitive_material " +
+                    "FROM secret_use_requests WHERE request_id = 20",
+            ).use { statement ->
+                assertTrue(statement.step())
+                assertTrue(statement.isNull(0))
+                assertEquals(1, statement.getLong(1))
+            }
+            database.execSQL(
+                "INSERT INTO inbox_requests " +
+                    "(id, relay_request_id, parent_request_id, kind, state, listed, request_json, " +
+                    "received_at, updated_at) VALUES " +
+                    "(21, 'signature-1', 20, 'git_sign', 'action_required', 1, '{}', 3, 3)",
+            )
+            database.execSQL(
+                "INSERT INTO git_sign_requests " +
+                    "(request_id, state, secret_name, message, created_at, updated_at) " +
+                    "VALUES (21, 'approval_pending', 'git-signing', X'0102', 3, 3)",
+            )
+            database.prepare(
+                "SELECT secret_name, message FROM git_sign_requests " +
+                    "WHERE request_id = 21",
+            ).use { statement ->
+                assertTrue(statement.step())
+                assertEquals("git-signing", statement.getText(0))
+                assertArrayEquals(byteArrayOf(1, 2), statement.getBlob(1))
+            }
+        }
+    }
 }

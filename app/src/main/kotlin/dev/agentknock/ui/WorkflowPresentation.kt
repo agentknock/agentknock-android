@@ -6,8 +6,8 @@ import dev.agentknock.storage.request.InboxRequestSummary
 import dev.agentknock.storage.request.PairingState
 import dev.agentknock.storage.request.SecretUploadRequestState
 
-internal fun List<InboxRequestSummary>.secretUseHistory(): List<InboxRequestSummary> =
-    filter { it.kind == InboxRequestKind.SECRET_USE }
+internal fun List<InboxRequestSummary>.requestHistory(): List<InboxRequestSummary> =
+    filter { it.kind == InboxRequestKind.SECRET_USE || it.kind == InboxRequestKind.GIT_SIGN }
 
 internal fun List<InboxRequestSummary>.pendingPairings(): List<InboxRequestSummary> =
     filter { summary ->
@@ -20,8 +20,8 @@ internal fun List<InboxRequestSummary>.pendingSecretUploads(): List<InboxRequest
             summary.secretUploadState == SecretUploadRequestState.REVIEW_PENDING
     }
 
-internal fun List<InboxRequestSummary>.actionRequiredCount(kind: InboxRequestKind): Int =
-    count { it.kind == kind && it.state == InboxRequestState.ACTION_REQUIRED }
+internal fun List<InboxRequestSummary>.actionRequiredCount(vararg kinds: InboxRequestKind): Int =
+    count { it.kind in kinds && it.state == InboxRequestState.ACTION_REQUIRED }
 
 private val pendingPairingStates = setOf(
     PairingState.RECEIVING,

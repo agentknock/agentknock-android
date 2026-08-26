@@ -2,7 +2,7 @@
 <resources>
     <string name="app_name">Agentknock</string>
     <string name="request_notification_channel">Requests</string>
-    <string name="request_notification_channel_description">Pairing, secret use, and secret upload requests waiting for review</string>
+    <string name="request_notification_channel_description">Pairing, secret use, signing, and secret upload requests waiting for review</string>
     <string name="request_waiting">Request waiting</string>
     <string name="secrets">Secrets</string>
     <string name="new_secret">New secret</string>

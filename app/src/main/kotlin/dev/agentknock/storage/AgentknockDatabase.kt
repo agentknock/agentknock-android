@@ -14,6 +14,7 @@ import dev.agentknock.storage.secret.SecretEntity
 import dev.agentknock.storage.secret.SshKeyEntity
 import dev.agentknock.storage.request.InboxRequestEntity
 import dev.agentknock.storage.request.SecretUseRequestEntity
+import dev.agentknock.storage.request.GitSignRequestEntity
 import dev.agentknock.storage.request.PairingEntity
 import dev.agentknock.storage.request.PairingSecretEntity
 import dev.agentknock.storage.request.SecretListRequestEntity
@@ -41,6 +42,7 @@ import dev.agentknock.storage.vault.VaultSecretEntity
         PairingSecretEntity::class,
         RequestSecretEntity::class,
         SecretUseRequestEntity::class,
+        GitSignRequestEntity::class,
         SecretListRequestEntity::class,
         SecretUploadRequestEntity::class,
         SecretUploadEnvironmentVariableEntity::class,
@@ -48,7 +50,7 @@ import dev.agentknock.storage.vault.VaultSecretEntity
         AuditEventEntity::class,
         ApprovalRuleEntity::class,
     ],
-    version = 7,
+    version = 8,
     exportSchema = true,
 )
 internal abstract class AgentknockDatabase : RoomDatabase() {
@@ -70,7 +72,7 @@ internal abstract class AgentknockDatabase : RoomDatabase() {
         fun create(context: Context): AgentknockDatabase =
             Room.databaseBuilder(context, AgentknockDatabase::class.java, NAME)
                 .setJournalMode(JournalMode.WRITE_AHEAD_LOGGING)
-                .addMigrations(MIGRATION_6_7)
+                .addMigrations(MIGRATION_6_7, MIGRATION_7_8)
                 .build()
     }
 }

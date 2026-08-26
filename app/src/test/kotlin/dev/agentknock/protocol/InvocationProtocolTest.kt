@@ -2,20 +2,22 @@ package dev.agentknock.protocol
 
 import kotlinx.serialization.json.Json
 import org.junit.Assert.assertEquals
+import org.junit.Assert.assertArrayEquals
 import org.junit.Assert.assertNull
 import org.junit.Test
 
-class SecretUseProtocolTest {
-    private val protocol = SecretUseProtocol()
+class InvocationProtocolTest {
+    private val protocol = InvocationProtocol()
     private val json = Json
 
     @Test
-    fun `decodes the cli secret use request shape`() {
+    fun `decodes the cli invocation request shape`() {
         val request = protocol.decodeRequest(
             """
             {
               ${testClientSoftwareFields("0.2.0", "0.1.0")},
-              "method":"SecretUse",
+              "method":"Invocation",
+              "invocation_token":"AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA=",
               "secrets":["aws-read-only","common"],
               "reason":"Inspect production logs",
               "operation":{
@@ -36,6 +38,7 @@ class SecretUseProtocolTest {
         )
 
         assertEquals(testClientSoftware("0.2.0", "0.1.0"), request.clientSoftware)
+        assertArrayEquals(ByteArray(32), request.invocationToken)
         assertEquals(listOf("aws-read-only", "common"), request.secrets)
         assertEquals("Inspect production logs", request.reason)
         assertEquals("aws", request.operation.command)
@@ -59,7 +62,7 @@ class SecretUseProtocolTest {
             json.parseToJsonElement(
                 protocol.approvedResponse(
                     mapOf(
-                        "aws-read-only" to SecretUseResponseSecret.Environment(
+                        "aws-read-only" to InvocationResponseSecret.Environment(
                             description = "",
                             environment = linkedMapOf(
                                 "AWS_REGION" to "eu-west-1",
@@ -77,7 +80,7 @@ class SecretUseProtocolTest {
             json.parseToJsonElement(
                 protocol.approvedResponse(
                     mapOf(
-                        "production-ssh" to SecretUseResponseSecret.Ssh(
+                        "production-ssh" to InvocationResponseSecret.Ssh(
                             description = "",
                             publicKey = "ssh-ed25519 AAAA example@host",
                         ),
@@ -91,7 +94,7 @@ class SecretUseProtocolTest {
             ),
             json.parseToJsonElement(
                 protocol.deniedResponse(
-                    SecretUseDenialReason.USER_DENIED,
+                    InvocationDenialReason.USER_DENIED,
                     "Denied on device.",
                 ).decodeToString(),
             ),
@@ -101,14 +104,14 @@ class SecretUseProtocolTest {
     @Test
     fun `decodes all cli completion variants`() {
         assertEquals(
-            SecretUseCompletion.Approved(testClientSoftware("0.2.0", "0.1.0")),
+            InvocationCompletion.Approved(testClientSoftware("0.2.0", "0.1.0")),
             protocol.decodeCompletion(
                 """{${testClientSoftwareFields("0.2.0", "0.1.0")},"result":"APPROVED"}"""
                     .encodeToByteArray(),
             ),
         )
         assertEquals(
-            SecretUseCompletion.Denied(
+            InvocationCompletion.Denied(
                 testClientSoftware("0.2.0", "0.1.0"),
                 "USER_DENIED",
                 "Denied on device.",
@@ -122,12 +125,12 @@ class SecretUseProtocolTest {
             """{${testClientSoftwareFields("0.2.0", "0.1.0")},"result":"ABORTED","reason":"CANCELLED","message":"Cancelled by user."}"""
                 .encodeToByteArray(),
         )
-        check(aborted is SecretUseCompletion.Aborted)
+        check(aborted is InvocationCompletion.Aborted)
         assertEquals("CANCELLED", aborted.reason)
         assertEquals("Cancelled by user.", aborted.message)
         assertNull(
             protocol.decodeRequest(
-                """{${testClientSoftwareFields("0.2.0", "0.1.0")},"method":"SecretUse","secrets":["test"],"operation":{"type":"exec","command":"env","arguments":[],"working_directory":"/tmp","executable_path":"/bin/env","executable_mode":"BINARY","stdin":"TERMINAL","stdout":"TERMINAL","stderr":"TERMINAL"},"launcher_chain":[]}"""
+                """{${testClientSoftwareFields("0.2.0", "0.1.0")},"method":"Invocation","invocation_token":"AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA=","secrets":["test"],"operation":{"type":"exec","command":"env","arguments":[],"working_directory":"/tmp","executable_path":"/bin/env","executable_mode":"BINARY","stdin":"TERMINAL","stdout":"TERMINAL","stderr":"TERMINAL"},"launcher_chain":[]}"""
                     .encodeToByteArray(),
             ).reason,
         )

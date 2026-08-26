@@ -15,6 +15,7 @@ import dev.agentknock.storage.audit.NoOpAuditSink
 import dev.agentknock.protocol.SecretUploadMode
 import java.util.UUID
 import java.util.Base64
+import java.security.MessageDigest
 import kotlinx.coroutines.CoroutineDispatcher
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.flow.Flow
@@ -191,6 +192,7 @@ internal data class SecretMetadata(
 internal data class RequestedSecretDescription(
     val secrets: List<SecretMetadata>,
     val missingSecrets: List<String>,
+    val containsSensitiveMaterial: Boolean,
 )
 
 internal data class SecretIdentity(
@@ -228,6 +230,22 @@ internal sealed interface RequestedSecretsResult {
     data object SecretCorrupted : RequestedSecretsResult
 
     data object UnsupportedEncryption : RequestedSecretsResult
+}
+
+internal sealed interface GitSignatureResult {
+    data class Signed(val signature: String) : GitSignatureResult
+
+    data object NotFound : GitSignatureResult
+
+    data object WrongType : GitSignatureResult
+
+    data object KeyChanged : GitSignatureResult
+
+    data object SecretUnavailable : GitSignatureResult
+
+    data object SecretCorrupted : GitSignatureResult
+
+    data object UnsupportedEncryption : GitSignatureResult
 }
 
 internal interface RequestedSecretSource {
@@ -914,6 +932,7 @@ internal class SecretRepository(
                 }
             },
             missingSecrets = requestedNames.filterNot(secretByName::containsKey),
+            containsSensitiveMaterial = variables.any(EnvironmentVariableEntity::sensitive),
         )
     }
 
@@ -976,35 +995,50 @@ internal class SecretRepository(
                 SSH_SECRET_TYPE -> {
                     val row = sshKeysBySecret[secret.id]
                         ?: return RequestedSecretsResult.SecretCorrupted
-                    val privateKey = when (val decrypted = decryptSshKey(row)) {
-                        is DecryptionResult.Plaintext -> decrypted.value
-                        DecryptionResult.KeyUnavailable -> {
-                            return RequestedSecretsResult.SecretUnavailable
-                        }
-                        DecryptionResult.AuthenticationFailed -> {
-                            return RequestedSecretsResult.SecretCorrupted
-                        }
-                        DecryptionResult.UnsupportedFormat -> {
-                            return RequestedSecretsResult.UnsupportedEncryption
-                        }
-                    }
-                    val validated = runCatching {
-                        sshKeys.fromStored(
-                            row.algorithm,
-                            privateKey,
-                            row.publicKey,
-                            row.comment,
-                        )
-                    }.getOrElse { return RequestedSecretsResult.SecretCorrupted }
+                    val rendered = runCatching { publicKey(row) }
+                        .getOrElse { return RequestedSecretsResult.SecretCorrupted }
                     SecretValues.Ssh(
                         description = secret.description,
-                        publicKey = publicKey(validated).line,
+                        publicKey = rendered.line,
                     )
                 }
                 else -> return RequestedSecretsResult.UnsupportedSecretType
             }
         }
         return RequestedSecretsResult.Available(values)
+    }
+
+    suspend fun signGitMessage(
+        secretName: String,
+        expectedPublicKey: String,
+        message: ByteArray,
+    ): GitSignatureResult {
+        val secret = dao.getSecretsByName(listOf(secretName)).singleOrNull()
+            ?: return GitSignatureResult.NotFound
+        if (secret.type != SSH_SECRET_TYPE) return GitSignatureResult.WrongType
+        val row = dao.getSshKey(secret.id) ?: return GitSignatureResult.SecretCorrupted
+        val currentPublic = runCatching { publicKey(row) }
+            .getOrElse { return GitSignatureResult.SecretCorrupted }
+        val expectedPublic = runCatching { sshKeys.importOpenSshPublicKey(expectedPublicKey) }
+            .getOrElse { return GitSignatureResult.SecretCorrupted }
+        if (!MessageDigest.isEqual(currentPublic.blob(), expectedPublic.blob())) {
+            return GitSignatureResult.KeyChanged
+        }
+        val privateKey = when (val decrypted = decryptSshKey(row)) {
+            is DecryptionResult.Plaintext -> decrypted.value
+            DecryptionResult.KeyUnavailable -> return GitSignatureResult.SecretUnavailable
+            DecryptionResult.AuthenticationFailed -> return GitSignatureResult.SecretCorrupted
+            DecryptionResult.UnsupportedFormat -> return GitSignatureResult.UnsupportedEncryption
+        }
+        val key = runCatching {
+            sshKeys.fromStored(row.algorithm, privateKey, row.publicKey, row.comment)
+        }.getOrElse { return GitSignatureResult.SecretCorrupted }
+        val signature = runCatching {
+            withContext(cryptographyDispatcher) {
+                sshKeys.signGitSignature(key, message)
+            }
+        }.getOrElse { return GitSignatureResult.SecretCorrupted }
+        return GitSignatureResult.Signed(signature)
     }
 
     private suspend fun encrypt(

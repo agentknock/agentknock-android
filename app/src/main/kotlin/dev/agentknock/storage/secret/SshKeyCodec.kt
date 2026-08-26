@@ -8,6 +8,7 @@ import java.security.MessageDigest
 import java.security.SecureRandom
 import java.util.Base64
 import org.bouncycastle.crypto.params.Ed25519PrivateKeyParameters
+import org.bouncycastle.crypto.signers.Ed25519Signer
 
 internal enum class SshKeyAlgorithm(
     val storedName: String,
@@ -135,6 +136,79 @@ internal class SshKeyCodec(
         return SshPublicKey(parsedAlgorithm, publicKey.copyOf(), comment)
     }
 
+    fun importOpenSshPublicKey(value: String): SshPublicKey {
+        val fields = value.trim().split(Regex("\\s+"), limit = 3)
+        require(fields.size >= 2) { "Invalid OpenSSH public key" }
+        val algorithm = requireNotNull(SshKeyAlgorithm.fromPublicName(fields[0])) {
+            "Unsupported SSH public key algorithm"
+        }
+        val blob = runCatching { Base64.getDecoder().decode(fields[1]) }
+            .getOrElse { throw IllegalArgumentException("Invalid OpenSSH public key", it) }
+        val parsed = DataInputStream(ByteArrayInputStream(blob)).use { input ->
+            require(input.readSshString() == algorithm.publicName) {
+                "OpenSSH public key algorithm does not match its blob"
+            }
+            val publicKey = input.readSshBytes()
+            require(input.available() == 0) { "Unexpected data after the OpenSSH public key" }
+            publicKey(algorithm.storedName, publicKey, fields.getOrElse(2) { "" })
+        }
+        require(MessageDigest.isEqual(parsed.blob(), blob)) { "Invalid OpenSSH public key" }
+        return parsed
+    }
+
+    fun signGitSignature(
+        privateKey: SshPrivateKey,
+        message: ByteArray,
+    ): String {
+        val validated = fromStored(
+            privateKey.algorithm.storedName,
+            privateKey.privateKey,
+            privateKey.publicKey,
+            privateKey.comment,
+        )
+        val hashAlgorithm = SSHSIG_HASH_ALGORITHM
+        val messageHash = MessageDigest.getInstance("SHA-512").digest(message)
+        val signedData = ByteArrayOutputStream().use { bytes ->
+            DataOutputStream(bytes).use { output ->
+                output.write(SSHSIG_MAGIC)
+                output.writeSshString(GIT_SSHSIG_NAMESPACE.encodeToByteArray())
+                output.writeSshString(byteArrayOf())
+                output.writeSshString(hashAlgorithm.encodeToByteArray())
+                output.writeSshString(messageHash)
+            }
+            bytes.toByteArray()
+        }
+        val signer = Ed25519Signer().apply {
+            init(true, Ed25519PrivateKeyParameters(validated.privateKey))
+            update(signedData, 0, signedData.size)
+        }
+        val signature = signer.generateSignature()
+        val signatureBlob = ByteArrayOutputStream().use { bytes ->
+            DataOutputStream(bytes).use { output ->
+                output.writeSshString(validated.algorithm.publicName.encodeToByteArray())
+                output.writeSshString(signature)
+            }
+            bytes.toByteArray()
+        }
+        val gitSignature = ByteArrayOutputStream().use { bytes ->
+            DataOutputStream(bytes).use { output ->
+                output.write(SSHSIG_MAGIC)
+                output.writeInt(SSHSIG_VERSION)
+                output.writeSshString(
+                    SshPublicKey(validated.algorithm, validated.publicKey, "").blob(),
+                )
+                output.writeSshString(GIT_SSHSIG_NAMESPACE.encodeToByteArray())
+                output.writeSshString(byteArrayOf())
+                output.writeSshString(hashAlgorithm.encodeToByteArray())
+                output.writeSshString(signatureBlob)
+            }
+            bytes.toByteArray()
+        }
+        val armored = Base64.getMimeEncoder(76, "\n".encodeToByteArray())
+            .encodeToString(gitSignature)
+        return "$SSHSIG_PEM_BEGIN\n$armored\n$SSHSIG_PEM_END\n"
+    }
+
     private fun parseEd25519PrivateBlock(
         privateBlock: ByteArray,
         outerPublicBlob: ByteArray,
@@ -208,6 +282,11 @@ internal class SshKeyCodec(
 
     private fun DataInputStream.readUnsignedInt(): Long = readInt().toLong() and 0xffff_ffffL
 
+    private fun DataOutputStream.writeSshString(value: ByteArray) {
+        writeInt(value.size)
+        write(value)
+    }
+
     private companion object {
         val OPENSSH_MAGIC = "openssh-key-v1\u0000".encodeToByteArray()
         const val NONE = "none"
@@ -216,5 +295,11 @@ internal class SshKeyCodec(
         const val ED25519_PRIVATE_KEY_BYTES = 32
         const val ED25519_PUBLIC_KEY_BYTES = 32
         const val ED25519_PRIVATE_AND_PUBLIC_BYTES = 64
+        val SSHSIG_MAGIC = "SSHSIG".encodeToByteArray()
+        const val SSHSIG_VERSION = 1
+        const val SSHSIG_HASH_ALGORITHM = "sha512"
+        const val GIT_SSHSIG_NAMESPACE = "git"
+        const val SSHSIG_PEM_BEGIN = "-----BEGIN SSH SIGNATURE-----"
+        const val SSHSIG_PEM_END = "-----END SSH SIGNATURE-----"
     }
 }

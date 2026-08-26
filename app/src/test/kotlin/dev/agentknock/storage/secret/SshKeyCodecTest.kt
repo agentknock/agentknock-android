@@ -1,6 +1,12 @@
 package dev.agentknock.storage.secret
 
+import java.io.ByteArrayInputStream
+import java.io.DataInputStream
+import java.security.MessageDigest
 import java.util.Base64
+import org.bouncycastle.crypto.params.Ed25519PublicKeyParameters
+import org.bouncycastle.crypto.signers.Ed25519Signer
+import org.junit.Assert.assertArrayEquals
 import org.junit.Assert.assertEquals
 import org.junit.Assert.assertFalse
 import org.junit.Assert.assertThrows
@@ -77,6 +83,55 @@ class SshKeyCodecTest {
         }
         assertEquals("Encrypted SSH private keys are not supported", error.message)
     }
+
+    @Test
+    fun `creates a valid OpenSSH SSHSIG envelope over the exact message`() {
+        val key = codec.importOpenSshPrivateKey(TEST_PRIVATE_KEY)
+        val message = "tree 1234\n\nSign this exact change\n".encodeToByteArray()
+
+        val armored = codec.signGitSignature(key, message)
+
+        assertTrue(armored.startsWith("-----BEGIN SSH SIGNATURE-----\n"))
+        assertTrue(armored.endsWith("-----END SSH SIGNATURE-----\n"))
+        val body = armored.lines().drop(1).dropLast(2).joinToString("")
+        val input = DataInputStream(ByteArrayInputStream(Base64.getDecoder().decode(body)))
+        assertArrayEquals("SSHSIG".encodeToByteArray(), ByteArray(6).also(input::readFully))
+        assertEquals(1, input.readInt())
+        assertArrayEquals(codec.importOpenSshPublicKey(TEST_PUBLIC_KEY).blob(), input.readSshBytes())
+        assertEquals("git", input.readSshString())
+        assertArrayEquals(byteArrayOf(), input.readSshBytes())
+        assertEquals("sha512", input.readSshString())
+        val signatureBlob = DataInputStream(ByteArrayInputStream(input.readSshBytes()))
+        assertEquals("ssh-ed25519", signatureBlob.readSshString())
+        val signature = signatureBlob.readSshBytes()
+        assertEquals(0, signatureBlob.available())
+        assertEquals(0, input.available())
+
+        val signedData = buildList<Byte> {
+            addAll("SSHSIG".encodeToByteArray().toList())
+            addAll(sshString("git".encodeToByteArray()).toList())
+            addAll(sshString(byteArrayOf()).toList())
+            addAll(sshString("sha512".encodeToByteArray()).toList())
+            addAll(sshString(MessageDigest.getInstance("SHA-512").digest(message)).toList())
+        }.toByteArray()
+        val verifier = Ed25519Signer().apply {
+            init(false, Ed25519PublicKeyParameters(key.publicKey))
+            update(signedData, 0, signedData.size)
+        }
+        assertTrue(verifier.verifySignature(signature))
+    }
+
+    private fun DataInputStream.readSshBytes(): ByteArray =
+        ByteArray(readInt()).also(::readFully)
+
+    private fun DataInputStream.readSshString(): String = readSshBytes().decodeToString()
+
+    private fun sshString(value: ByteArray): ByteArray = byteArrayOf(
+        (value.size ushr 24).toByte(),
+        (value.size ushr 16).toByte(),
+        (value.size ushr 8).toByte(),
+        value.size.toByte(),
+    ) + value
 
     companion object {
         private val TEST_PRIVATE_KEY = """

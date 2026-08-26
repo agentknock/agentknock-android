@@ -1,0 +1,124 @@
+package dev.agentknock.protocol
+
+import java.util.Base64
+import kotlinx.serialization.SerialName
+import kotlinx.serialization.Serializable
+import kotlinx.serialization.encodeToString
+import kotlinx.serialization.json.Json
+
+internal data class GitSignRequestMessage(
+    val clientSoftware: ClientSoftware,
+    val invocationId: String,
+    val invocationToken: ByteArray,
+    val secret: String,
+    val message: ByteArray,
+)
+
+internal sealed interface GitSignCompletion {
+    val clientSoftware: ClientSoftware
+
+    data class Approved(override val clientSoftware: ClientSoftware) : GitSignCompletion
+
+    data class Denied(
+        override val clientSoftware: ClientSoftware,
+        val reason: String,
+        val message: String,
+    ) : GitSignCompletion
+
+    data class Aborted(
+        override val clientSoftware: ClientSoftware,
+        val reason: String,
+        val message: String,
+    ) : GitSignCompletion
+}
+
+internal class GitSignProtocol(
+    private val json: Json = Json { ignoreUnknownKeys = true },
+) {
+    fun decodeRequest(plaintext: ByteArray): GitSignRequestMessage {
+        val clientSoftware = json.decodeClientSoftware(plaintext)
+        val request = json.decodeFromString<GitSignRequestWire>(plaintext.decodeToString())
+        require(request.method == METHOD) { "Unexpected request method" }
+        require(request.invocationId.isNotEmpty()) { "Git signing invocation ID is empty" }
+        require(request.secret.isNotEmpty()) { "Git signing secret name is empty" }
+        return GitSignRequestMessage(
+            clientSoftware = clientSoftware,
+            invocationId = request.invocationId,
+            invocationToken = decodeBase64(request.invocationToken, "invocation token").also {
+                require(it.size == INVOCATION_TOKEN_BYTES) {
+                    "Invocation token must be $INVOCATION_TOKEN_BYTES bytes"
+                }
+            },
+            secret = request.secret,
+            message = decodeBase64(request.message, "Git signing message"),
+        )
+    }
+
+    fun approvedResponse(signature: String): ByteArray = json.encodeToString(
+        GitSignResultWire.serializer(),
+        GitSignResultWire(result = RESULT_APPROVED, signature = signature),
+    ).encodeToByteArray()
+
+    fun deniedResponse(reason: InvocationDenialReason, message: String): ByteArray =
+        json.encodeToString(
+            GitSignResultWire.serializer(),
+            GitSignResultWire(
+                result = RESULT_DENIED,
+                reason = reason.wireName,
+                message = message,
+            ),
+        ).encodeToByteArray()
+
+    fun decodeCompletion(plaintext: ByteArray): GitSignCompletion {
+        val clientSoftware = json.decodeClientSoftware(plaintext)
+        val completion = json.decodeFromString<GitSignResultWire>(plaintext.decodeToString())
+        return when (completion.result) {
+            RESULT_APPROVED -> {
+                require(completion.signature == null) {
+                    "Approved Git signing completion contains a signature"
+                }
+                GitSignCompletion.Approved(clientSoftware)
+            }
+            RESULT_DENIED -> GitSignCompletion.Denied(
+                clientSoftware = clientSoftware,
+                reason = requireNotNull(completion.reason) { "Denied completion has no reason" },
+                message = requireNotNull(completion.message) { "Denied completion has no message" },
+            )
+            RESULT_ABORTED -> GitSignCompletion.Aborted(
+                clientSoftware = clientSoftware,
+                reason = requireNotNull(completion.reason) { "Aborted completion has no reason" },
+                message = requireNotNull(completion.message) { "Aborted completion has no message" },
+            )
+            else -> error("Unsupported Git signing completion result")
+        }
+    }
+
+    private fun decodeBase64(value: String, field: String): ByteArray = runCatching {
+        Base64.getDecoder().decode(value)
+    }.getOrElse { throw IllegalArgumentException("Invalid $field", it) }
+
+    companion object {
+        const val METHOD = "GitSign"
+        private const val INVOCATION_TOKEN_BYTES = 32
+        private const val RESULT_APPROVED = "APPROVED"
+        private const val RESULT_DENIED = "DENIED"
+        private const val RESULT_ABORTED = "ABORTED"
+    }
+}
+
+@Serializable
+private data class GitSignRequestWire(
+    val method: String,
+    @SerialName("invocation_id") val invocationId: String,
+    @SerialName("invocation_token") val invocationToken: String,
+    val secret: String,
+    val message: String,
+)
+
+@Serializable
+private data class GitSignResultWire(
+    val result: String,
+    val signature: String? = null,
+    val reason: String? = null,
+    val message: String? = null,
+)

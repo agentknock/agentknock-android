@@ -1,1 +1,1 @@
-Add Plan and billing with live subscription status and secure review-code activation links for AI review access.
+Add Git commit signing with SSH keys while private keys stay on your phone. Align command requests with the latest Invocation and GitSign protocol.

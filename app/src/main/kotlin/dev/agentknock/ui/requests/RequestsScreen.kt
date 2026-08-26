@@ -101,11 +101,15 @@ import dev.agentknock.presentation.formatPlatformName
 import dev.agentknock.presentation.renderShellCommand
 import dev.agentknock.presentation.renderSoftware
 import dev.agentknock.storage.secret.SecretMetadata
-import dev.agentknock.storage.request.SecretUseCompletionResult
+import dev.agentknock.storage.request.InvocationCompletionResult
 import dev.agentknock.storage.request.SecretUseDecision
 import dev.agentknock.storage.request.SecretUseDecisionResult
 import dev.agentknock.storage.request.SecretUseRequestDetails
 import dev.agentknock.storage.request.SecretUseRequestState
+import dev.agentknock.storage.request.GitSignCompletionResult
+import dev.agentknock.storage.request.GitSignDecisionResult
+import dev.agentknock.storage.request.GitSignRequestDetails
+import dev.agentknock.storage.request.GitSignRequestState
 import dev.agentknock.storage.request.InboxRequestDetails
 import dev.agentknock.storage.request.InboxRequestState
 import dev.agentknock.storage.request.InboxRequestSummary
@@ -145,16 +149,28 @@ internal fun RequestsScreen(
     }
 
     fun approve(request: InboxRequestSummary) {
-        if (request.secretUseState != SecretUseRequestState.APPROVAL_PENDING) return
         scope.launch {
-            report(viewModel.approveSecretUseRequest(request.id).message())
+            when {
+                request.secretUseState == SecretUseRequestState.APPROVAL_PENDING -> {
+                    report(viewModel.approveSecretUseRequest(request.id).message())
+                }
+                request.gitSignState == GitSignRequestState.APPROVAL_PENDING -> {
+                    report(viewModel.approveGitSignRequest(request.id).message())
+                }
+            }
         }
     }
 
     fun reject(request: InboxRequestSummary) {
-        if (request.secretUseState != SecretUseRequestState.APPROVAL_PENDING) return
         scope.launch {
-            report(viewModel.denySecretUseRequest(request.id).message())
+            when {
+                request.secretUseState == SecretUseRequestState.APPROVAL_PENDING -> {
+                    report(viewModel.denySecretUseRequest(request.id).message())
+                }
+                request.gitSignState == GitSignRequestState.APPROVAL_PENDING -> {
+                    report(viewModel.denyGitSignRequest(request.id).message())
+                }
+            }
         }
     }
 
@@ -256,6 +272,19 @@ private fun RequestDetail(
             },
             onDeny = { scope.launch { report(viewModel.denySecretUseRequest(request.id).message()) } },
             onCreateRule = { onCreateRule(request.id) },
+            modifier = modifier,
+        )
+    } else if (request.gitSign != null) {
+        GitSignDetail(
+            request = request,
+            onBack = onBack,
+            showBack = showBack,
+            onApprove = {
+                scope.launch { report(viewModel.approveGitSignRequest(request.id).message()) }
+            },
+            onDeny = {
+                scope.launch { report(viewModel.denyGitSignRequest(request.id).message()) }
+            },
             modifier = modifier,
         )
     } else {
@@ -385,7 +414,8 @@ private fun RequestRow(
     onApprove: () -> Unit,
     onReject: () -> Unit,
 ) {
-    val canApprove = request.secretUseState == SecretUseRequestState.APPROVAL_PENDING
+    val canApprove = request.secretUseState == SecretUseRequestState.APPROVAL_PENDING ||
+        request.gitSignState == GitSignRequestState.APPROVAL_PENDING
     val canReject = request.canReject()
     val rejectLabel = "Deny once"
     val swipeState = rememberSwipeToDismissBoxState(
@@ -553,7 +583,7 @@ private fun RequestRowContent(
                 if (request.secretNames.isNotEmpty()) {
                     SecretIdentities(
                         request.secretNames,
-                        unavailable = request.isInvalidSecretUse(),
+                        unavailable = request.hasInvalidSecretReference(),
                     )
                 }
             }
@@ -776,7 +806,7 @@ private fun SecretUseDetail(
                 secretUse.isError(),
                 attention = secretUse.state == SecretUseRequestState.APPROVAL_PENDING,
                 subdued = secretUse.decision == SecretUseDecision.DENIED ||
-                    secretUse.completionResult == SecretUseCompletionResult.DENIED,
+                    secretUse.completionResult == InvocationCompletionResult.DENIED,
             )
             ClientIdentity(secretUse.clientName)
             SecretIdentities(secretUse.secrets)
@@ -850,7 +880,7 @@ private fun SecretUseDetail(
 
         if (
             secretUse.missingSecrets.isNotEmpty() &&
-            secretUse.completionResult != SecretUseCompletionResult.DENIED
+            secretUse.completionResult != InvocationCompletionResult.DENIED
         ) {
             Notice(
                 "Secrets are unavailable",
@@ -924,6 +954,170 @@ private fun SecretUseDetail(
             secretUse.machineId?.let { DetailValue("Machine ID reported by client", it, true) }
             DetailValue("Client ID", secretUse.clientId, true)
             DetailValue("Request ID", request.relayRequestId, true)
+        }
+    }
+}
+
+@Composable
+private fun GitSignDetail(
+    request: InboxRequestDetails,
+    onBack: () -> Unit,
+    showBack: Boolean,
+    onApprove: () -> Unit,
+    onDeny: () -> Unit,
+    modifier: Modifier,
+) {
+    val signing = checkNotNull(request.gitSign)
+    val pending = signing.state == GitSignRequestState.APPROVAL_PENDING
+    val title = "Git signature"
+    val exactContent = signing.message.displayForApproval()
+    val gitCommitMessage = exactContent.substringAfter("\n\n", missingDelimiterValue = "")
+        .trimEnd()
+        .takeIf(String::isNotEmpty)
+    DetailPage(
+        title = title,
+        onBack = onBack,
+        modifier = modifier,
+        showBack = showBack,
+        bottomContent = if (pending) {
+            {
+                Surface(
+                    color = MaterialTheme.colorScheme.surfaceContainerLow,
+                    tonalElevation = 3.dp,
+                ) {
+                    Row(
+                        modifier = Modifier.fillMaxWidth().padding(12.dp),
+                        horizontalArrangement = Arrangement.spacedBy(10.dp),
+                    ) {
+                        OutlinedButton(
+                            onClick = onDeny,
+                            modifier = Modifier.weight(1f),
+                            colors = ButtonDefaults.outlinedButtonColors(
+                                contentColor = MaterialTheme.agentknockColors.danger,
+                            ),
+                            border = BorderStroke(1.dp, MaterialTheme.agentknockColors.danger),
+                        ) {
+                            Text("Deny")
+                        }
+                        Button(
+                            onClick = onApprove,
+                            modifier = Modifier.weight(1f),
+                            colors = ButtonDefaults.buttonColors(
+                                containerColor = MaterialTheme.agentknockColors.success,
+                                contentColor = MaterialTheme.agentknockColors.onSuccess,
+                            ),
+                        ) {
+                            Text("Sign")
+                        }
+                    }
+                }
+            }
+        } else {
+            null
+        },
+    ) {
+        InformationSurface {
+            StatusLine(
+                signing.statusLabel(),
+                error = signing.state == GitSignRequestState.VERIFICATION_FAILED,
+                attention = pending,
+                subdued = signing.decision == SecretUseDecision.DENIED ||
+                    signing.completionResult == GitSignCompletionResult.DENIED,
+            )
+            ClientIdentity(signing.clientName)
+            SecretIdentities(listOf(signing.secretName))
+            InformationRow("Received", formatTimestamp(request.receivedAt))
+        }
+
+        gitCommitMessage?.let { message ->
+            Surface(
+                color = if (pending) {
+                    MaterialTheme.agentknockColors.attentionContainer
+                } else {
+                    MaterialTheme.colorScheme.surfaceContainerLow
+                },
+                contentColor = if (pending) {
+                    MaterialTheme.agentknockColors.onAttentionContainer
+                } else {
+                    MaterialTheme.colorScheme.onSurface
+                },
+                shape = MaterialTheme.shapes.large,
+                modifier = Modifier.fillMaxWidth(),
+            ) {
+                Column(
+                    Modifier.padding(16.dp),
+                    verticalArrangement = Arrangement.spacedBy(8.dp),
+                ) {
+                    Text("Commit message", style = MaterialTheme.typography.labelLarge)
+                    SelectionContainer {
+                        Text(message, style = MaterialTheme.typography.titleMedium)
+                    }
+                }
+            }
+        }
+
+        Surface(
+            color = MaterialTheme.colorScheme.surfaceContainerLow,
+            shape = MaterialTheme.shapes.large,
+            modifier = Modifier.fillMaxWidth(),
+        ) {
+            Column(
+                Modifier.padding(16.dp),
+                verticalArrangement = Arrangement.spacedBy(8.dp),
+            ) {
+                Text("Triggered by", style = MaterialTheme.typography.labelLarge)
+                SelectionContainer {
+                    Text(
+                        renderShellCommand(signing.command, signing.arguments),
+                        fontFamily = FontFamily.Monospace,
+                    )
+                }
+                signing.reason?.takeIf(String::isNotBlank)?.let {
+                    Text(
+                        it,
+                        style = MaterialTheme.typography.bodyMedium,
+                        color = MaterialTheme.colorScheme.onSurfaceVariant,
+                    )
+                }
+            }
+        }
+
+        Disclosure(
+            title = if (gitCommitMessage == null) "Content to sign" else "Exact content to sign",
+            initiallyExpanded = gitCommitMessage == null,
+        ) {
+            if (gitCommitMessage != null) {
+                Text(
+                    "The complete Git commit object that will be signed.",
+                    style = MaterialTheme.typography.bodySmall,
+                    color = MaterialTheme.colorScheme.onSurfaceVariant,
+                )
+            }
+            SelectionContainer {
+                Text(exactContent, fontFamily = FontFamily.Monospace)
+            }
+        }
+
+        if (pending) {
+            Text(
+                "Signing uses the private key on this device. The private key is never sent to the client.",
+                style = MaterialTheme.typography.bodySmall,
+                color = MaterialTheme.colorScheme.onSurfaceVariant,
+            )
+        } else {
+            GitSignOutcome(signing)
+        }
+
+        Disclosure("Technical details") {
+            signing.clientSoftware?.let { software ->
+                DetailValue("Client software", renderSoftware(software.application))
+                if (software.library != software.application) {
+                    DetailValue("Agentknock library", renderSoftware(software.library))
+                }
+            }
+            DetailValue("Client ID", signing.clientId, true)
+            DetailValue("Invocation request ID", signing.invocationRequestId, true)
+            DetailValue("Signing request ID", request.relayRequestId, true)
         }
     }
 }
@@ -1394,12 +1588,12 @@ private fun SecretUseOutcome(secretUse: SecretUseRequestDetails) {
             },
         )
         SecretUseRequestState.COMPLETED -> when (secretUse.completionResult) {
-            SecretUseCompletionResult.APPROVED -> OutcomeNotice(
+            InvocationCompletionResult.APPROVED -> OutcomeNotice(
                 "Delivered",
                 "The client received the secret values.$ruleDetail",
                 NoticeTone.SUCCESS,
             )
-            SecretUseCompletionResult.DENIED -> if (
+            InvocationCompletionResult.DENIED -> if (
                 secretUse.completionReason == "INVALID_REQUEST"
             ) {
                 OutcomeNotice(
@@ -1414,7 +1608,7 @@ private fun SecretUseOutcome(secretUse: SecretUseRequestDetails) {
                     NoticeTone.SUBDUED,
                 )
             }
-            SecretUseCompletionResult.ABORTED -> OutcomeNotice(
+            InvocationCompletionResult.ABORTED -> OutcomeNotice(
                 "Aborted",
                 secretUse.completionMessage ?: "The client stopped this request.",
                 NoticeTone.SUBDUED,
@@ -1615,7 +1809,8 @@ private fun StatusLine(
 
 @Composable
 private fun RequestStatusBadge(request: InboxRequestSummary) {
-    val error = request.secretUseState == SecretUseRequestState.VERIFICATION_FAILED
+    val error = request.secretUseState == SecretUseRequestState.VERIFICATION_FAILED ||
+        request.gitSignState == GitSignRequestState.VERIFICATION_FAILED
     val rejected = request.wasRejected()
     val actionRequired = request.state == InboxRequestState.ACTION_REQUIRED
     val accepted = request.wasAccepted()
@@ -1680,23 +1875,114 @@ private fun InboxRequestSummary.statusLabel(): String = when {
         secretUseResult,
         secretUseCompletionReason,
     )
+    gitSignState != null -> gitSignStatusLabel(
+        gitSignState,
+        gitSignResult,
+        gitSignCompletionReason,
+    )
     state == InboxRequestState.ACTION_REQUIRED -> "Action required"
     state == InboxRequestState.WAITING -> "Waiting"
     else -> "Completed"
 }
 
 private fun InboxRequestSummary.canReject(): Boolean =
-    secretUseState == SecretUseRequestState.APPROVAL_PENDING
+    secretUseState == SecretUseRequestState.APPROVAL_PENDING ||
+        gitSignState == GitSignRequestState.APPROVAL_PENDING
 
 private fun InboxRequestSummary.wasRejected(): Boolean =
     secretUseDecision == SecretUseDecision.DENIED ||
-        secretUseResult == SecretUseCompletionResult.DENIED
+        secretUseResult == InvocationCompletionResult.DENIED ||
+        gitSignDecision == SecretUseDecision.DENIED ||
+        gitSignResult == GitSignCompletionResult.DENIED
 
 private fun InboxRequestSummary.wasAccepted(): Boolean =
-    secretUseResult == SecretUseCompletionResult.APPROVED
+    secretUseResult == InvocationCompletionResult.APPROVED ||
+        gitSignResult == GitSignCompletionResult.APPROVED
 
-private fun InboxRequestSummary.isInvalidSecretUse(): Boolean =
-    secretUseCompletionReason == "INVALID_REQUEST"
+private fun InboxRequestSummary.hasInvalidSecretReference(): Boolean =
+    secretUseCompletionReason == "INVALID_REQUEST" ||
+        gitSignCompletionReason == "INVALID_REQUEST"
+
+private fun GitSignRequestDetails.statusLabel(): String = gitSignStatusLabel(
+    state,
+    completionResult,
+    completionReason,
+)
+
+private fun gitSignStatusLabel(
+    state: GitSignRequestState,
+    result: GitSignCompletionResult?,
+    completionReason: String?,
+): String = when (state) {
+    GitSignRequestState.APPROVAL_PENDING -> "Action required"
+    GitSignRequestState.WAITING_FOR_COMPLETION -> "Waiting for client"
+    GitSignRequestState.VERIFICATION_FAILED -> "Verification failed"
+    GitSignRequestState.COMPLETED -> when (result) {
+        GitSignCompletionResult.APPROVED -> "Signed"
+        GitSignCompletionResult.DENIED -> if (completionReason == "INVALID_REQUEST") {
+            "Invalid request"
+        } else {
+            "Denied"
+        }
+        GitSignCompletionResult.ABORTED -> "Aborted"
+        null -> "Completed"
+    }
+}
+
+@Composable
+private fun GitSignOutcome(signing: GitSignRequestDetails) {
+    when {
+        signing.state == GitSignRequestState.VERIFICATION_FAILED -> Notice(
+            "Signature could not be confirmed",
+            signing.error ?: "The client confirmation was invalid.",
+            NoticeTone.DANGER,
+        )
+        signing.completionResult == GitSignCompletionResult.APPROVED -> Notice(
+            "Content signed",
+            "The signature was delivered to the client.",
+            NoticeTone.SUCCESS,
+        )
+        signing.completionResult == GitSignCompletionResult.DENIED -> Notice(
+            if (signing.completionReason == "INVALID_REQUEST") {
+                "Invalid request"
+            } else {
+                "Signature denied"
+            },
+            signing.completionMessage ?: "No signature was created.",
+            NoticeTone.SUBDUED,
+        )
+        signing.completionResult == GitSignCompletionResult.ABORTED -> Notice(
+            "Request ended",
+            signing.completionMessage ?: "The client ended the signing request.",
+            NoticeTone.NEUTRAL,
+        )
+        signing.state == GitSignRequestState.WAITING_FOR_COMPLETION &&
+            signing.decision == SecretUseDecision.APPROVED -> Notice(
+            "Signature sent",
+            "Waiting for the client to confirm receipt.",
+            NoticeTone.SUCCESS,
+        )
+        signing.state == GitSignRequestState.WAITING_FOR_COMPLETION -> Notice(
+            "Signature denied",
+            signing.completionMessage ?: "Waiting for the client to confirm the denial.",
+            NoticeTone.SUBDUED,
+        )
+    }
+}
+
+private fun ByteArray.displayForApproval(): String {
+    val text = runCatching { decodeToString(throwOnInvalidSequence = true) }.getOrNull()
+    if (text != null && text.all { character ->
+            character == '\n' || character == '\r' || character == '\t' ||
+                !character.isISOControl()
+        }
+    ) {
+        return text
+    }
+    return toList().chunked(16).joinToString("\n") { row ->
+        row.joinToString(" ") { byte -> "%02x".format(byte.toInt() and 0xff) }
+    }
+}
 
 private fun PairingState.label(): String = when (this) {
     PairingState.RECEIVING -> "Receiving"
@@ -1718,20 +2004,20 @@ private fun SecretUseRequestDetails.statusLabel(): String = secretUseStatusLabel
 
 private fun secretUseStatusLabel(
     state: SecretUseRequestState,
-    result: SecretUseCompletionResult?,
+    result: InvocationCompletionResult?,
     completionReason: String?,
 ): String = when (state) {
     SecretUseRequestState.APPROVAL_PENDING -> "Action required"
     SecretUseRequestState.WAITING_FOR_COMPLETION -> "Waiting for client"
     SecretUseRequestState.VERIFICATION_FAILED -> "Verification failed"
     SecretUseRequestState.COMPLETED -> when (result) {
-        SecretUseCompletionResult.APPROVED -> "Delivered"
-        SecretUseCompletionResult.DENIED -> if (completionReason == "INVALID_REQUEST") {
+        InvocationCompletionResult.APPROVED -> "Delivered"
+        InvocationCompletionResult.DENIED -> if (completionReason == "INVALID_REQUEST") {
             "Invalid request"
         } else {
             "Denied"
         }
-        SecretUseCompletionResult.ABORTED -> "Aborted"
+        InvocationCompletionResult.ABORTED -> "Aborted"
         null -> "Completed"
     }
 }
@@ -1772,6 +2058,20 @@ private fun SecretUseDecisionResult.message(): String = when (this) {
     SecretUseDecisionResult.SecretCorrupted -> "A secret value could not be authenticated"
     SecretUseDecisionResult.UnsupportedEncryption -> "A secret value uses unsupported encryption"
     SecretUseDecisionResult.PairingUnavailable -> "The paired client is unavailable"
+}
+
+private fun GitSignDecisionResult.message(): String = when (this) {
+    GitSignDecisionResult.Decided -> "Decision saved"
+    GitSignDecisionResult.NotPending -> "This signing request no longer needs a decision"
+    GitSignDecisionResult.NotFound -> "Signing request is no longer available"
+    GitSignDecisionResult.InvocationUnavailable -> "The original command request is unavailable"
+    GitSignDecisionResult.PairingUnavailable -> "The paired client is unavailable"
+    GitSignDecisionResult.KeyChanged ->
+        "The SSH key changed or was renamed after the command began; start the command again"
+    GitSignDecisionResult.SecretUnavailable -> "The SSH private key is unavailable on this device"
+    GitSignDecisionResult.SecretCorrupted -> "The SSH private key could not be authenticated"
+    GitSignDecisionResult.UnsupportedEncryption ->
+        "The SSH private key uses unsupported encryption"
 }
 
 internal fun SecretUploadDecisionResult.message(): String = when (this) {

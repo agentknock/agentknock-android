@@ -201,7 +201,7 @@ class PairingProtocolTest {
     }
 
     @Test
-    fun `opens a rotated secret use request and its response and completion`() {
+    fun `opens a rotated invocation request and its response and completion`() {
         val oldClientPsk = ByteArray(32) { (it + 1).toByte() }
         val rotationSender = pskHpke.SetupPSKS(
             pskHpke.deserializePublicKey(devicePublicKey),
@@ -220,7 +220,7 @@ class PairingProtocolTest {
             CLIENT_ID.ulidBytes(),
         )
         val requestPlaintext =
-            """{${testClientSoftwareFields()},"method":"SecretUse","secrets":["test"],"operation":{"type":"exec","command":"env","arguments":[],"working_directory":"/tmp","stdin":"NULL_DEVICE","stdout":"TERMINAL","stderr":"TERMINAL"},"launcher_chain":[]}"""
+            """{${testClientSoftwareFields()},"method":"Invocation","secrets":["test"],"operation":{"type":"exec","command":"env","arguments":[],"working_directory":"/tmp","stdin":"NULL_DEVICE","stdout":"TERMINAL","stderr":"TERMINAL"},"launcher_chain":[]}"""
                 .encodeToByteArray()
         val request = json.parseToJsonElement(
             """{"version":"agentknock-v1","key":"${BASE64.encodeToString(requestSender.encapsulation)}","ciphertext":"${BASE64.encodeToString(requestSender.seal(EMPTY, requestPlaintext))}","rotation_key":"${BASE64.encodeToString(rotationSender.encapsulation)}"}""",

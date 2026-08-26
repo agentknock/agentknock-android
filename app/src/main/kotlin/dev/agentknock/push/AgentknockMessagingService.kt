@@ -269,7 +269,7 @@ internal object RequestNotifications {
                 .setCategory(Notification.CATEGORY_MESSAGE)
                 .setVisibility(Notification.VISIBILITY_PRIVATE)
                 .setPublicVersion(publicVersion)
-            if (request.secretUseDecisionAvailable) {
+            if (request.decisionAvailable) {
                 builder.addAction(decisionAction(context, request.requestId, DENY_DECISION, "Deny once"))
                 builder.addAction(
                     decisionAction(context, request.requestId, APPROVE_DECISION, "Approve once"),
@@ -358,9 +358,9 @@ class RequestNotificationActionReceiver : BroadcastReceiver() {
                 application.container.localStorage.await()
                 when (decision) {
                     RequestNotifications.APPROVE_DECISION ->
-                        application.container.requests.approveSecretUseRequest(requestId)
+                        application.container.requests.approvePendingRequest(requestId)
                     RequestNotifications.DENY_DECISION ->
-                        application.container.requests.denySecretUseRequest(requestId)
+                        application.container.requests.denyPendingRequest(requestId)
                     else -> return@launch
                 }
                 RequestNotifications.showRequests(

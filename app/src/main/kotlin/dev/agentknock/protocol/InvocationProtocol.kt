@@ -7,16 +7,18 @@ import kotlinx.serialization.json.Json
 import kotlinx.serialization.json.JsonObject
 import kotlinx.serialization.json.buildJsonObject
 import kotlinx.serialization.json.put
+import java.util.Base64
 
-internal data class SecretUseRequestMessage(
+internal data class InvocationRequestMessage(
     val clientSoftware: ClientSoftware,
+    val invocationToken: ByteArray,
     val secrets: List<String>,
     val reason: String?,
-    val operation: SecretUseExecOperation,
+    val operation: InvocationExecOperation,
     val launcherChain: List<String>,
 )
 
-internal data class SecretUseExecOperation(
+internal data class InvocationExecOperation(
     val command: String,
     val arguments: List<String>,
     val workingDirectory: String,
@@ -28,60 +30,67 @@ internal data class SecretUseExecOperation(
     val stderr: String,
 )
 
-internal sealed interface SecretUseResponseSecret {
+internal sealed interface InvocationResponseSecret {
     val description: String
 
     data class Environment(
         override val description: String,
         val environment: Map<String, String>,
-    ) : SecretUseResponseSecret
+    ) : InvocationResponseSecret
 
     data class Ssh(
         override val description: String,
         val publicKey: String,
-    ) : SecretUseResponseSecret
+    ) : InvocationResponseSecret
 }
 
-internal enum class SecretUseDenialReason(val wireName: String) {
+internal enum class InvocationDenialReason(val wireName: String) {
     USER_DENIED("USER_DENIED"),
     POLICY_DENIED("POLICY_DENIED"),
     INVALID_REQUEST("INVALID_REQUEST"),
     OTHER("OTHER"),
 }
 
-internal sealed interface SecretUseCompletion {
+internal sealed interface InvocationCompletion {
     val clientSoftware: ClientSoftware
 
-    data class Approved(override val clientSoftware: ClientSoftware) : SecretUseCompletion
+    data class Approved(override val clientSoftware: ClientSoftware) : InvocationCompletion
 
     data class Denied(
         override val clientSoftware: ClientSoftware,
         val reason: String,
         val message: String,
-    ) : SecretUseCompletion
+    ) : InvocationCompletion
 
     data class Aborted(
         override val clientSoftware: ClientSoftware,
         val reason: String,
         val message: String,
-    ) : SecretUseCompletion
+    ) : InvocationCompletion
 }
 
-internal class SecretUseProtocol(
+internal class InvocationProtocol(
     private val json: Json = Json { ignoreUnknownKeys = true },
 ) {
-    fun decodeRequest(plaintext: ByteArray): SecretUseRequestMessage {
+    fun decodeRequest(plaintext: ByteArray): InvocationRequestMessage {
         val clientSoftware = json.decodeClientSoftware(plaintext)
-        val request = json.decodeFromString<SecretUseRequestWire>(plaintext.decodeToString())
+        val request = json.decodeFromString<InvocationRequestWire>(plaintext.decodeToString())
         require(request.method == METHOD) { "Unexpected request method" }
         require(request.secrets.isNotEmpty()) { "Secret use request has no secrets" }
         require(request.secrets.none(String::isEmpty)) { "Secret use request has an empty secret" }
         require(request.operation.type == EXEC_OPERATION_TYPE) { "Unsupported operation type" }
-        return SecretUseRequestMessage(
+        val invocationToken = runCatching {
+            Base64.getDecoder().decode(request.invocationToken)
+        }.getOrElse { throw IllegalArgumentException("Invalid invocation token", it) }
+        require(invocationToken.size == INVOCATION_TOKEN_BYTES) {
+            "Invocation token must be $INVOCATION_TOKEN_BYTES bytes"
+        }
+        return InvocationRequestMessage(
             clientSoftware = clientSoftware,
+            invocationToken = invocationToken,
             secrets = request.secrets,
             reason = request.reason,
-            operation = SecretUseExecOperation(
+            operation = InvocationExecOperation(
                 command = request.operation.command,
                 arguments = request.operation.arguments,
                 workingDirectory = request.operation.workingDirectory,
@@ -96,7 +105,7 @@ internal class SecretUseProtocol(
         )
     }
 
-    fun approvedResponse(secrets: Map<String, SecretUseResponseSecret>): ByteArray =
+    fun approvedResponse(secrets: Map<String, InvocationResponseSecret>): ByteArray =
         json.encodeToString(
             JsonObject.serializer(),
             buildJsonObject {
@@ -112,51 +121,52 @@ internal class SecretUseProtocol(
             },
         ).encodeToByteArray()
 
-    fun deniedResponse(reason: SecretUseDenialReason, message: String): ByteArray =
+    fun deniedResponse(reason: InvocationDenialReason, message: String): ByteArray =
         json.encodeToString(
-            SecretUseResponseWire.serializer(),
-            SecretUseResponseWire(
+            InvocationResponseWire.serializer(),
+            InvocationResponseWire(
                 result = RESULT_DENIED,
                 reason = reason.wireName,
                 message = message,
             ),
         ).encodeToByteArray()
 
-    fun decodeCompletion(plaintext: ByteArray): SecretUseCompletion {
+    fun decodeCompletion(plaintext: ByteArray): InvocationCompletion {
         val clientSoftware = json.decodeClientSoftware(plaintext)
-        val completion = json.decodeFromString<SecretUseCompletionWire>(
+        val completion = json.decodeFromString<InvocationCompletionWire>(
             plaintext.decodeToString(),
         )
         return when (completion.result) {
-            RESULT_APPROVED -> SecretUseCompletion.Approved(clientSoftware)
-            RESULT_DENIED -> SecretUseCompletion.Denied(
+            RESULT_APPROVED -> InvocationCompletion.Approved(clientSoftware)
+            RESULT_DENIED -> InvocationCompletion.Denied(
                 clientSoftware = clientSoftware,
                 reason = requireNotNull(completion.reason) { "Denied completion has no reason" },
                 message = requireNotNull(completion.message) { "Denied completion has no message" },
             )
-            RESULT_ABORTED -> SecretUseCompletion.Aborted(
+            RESULT_ABORTED -> InvocationCompletion.Aborted(
                 clientSoftware = clientSoftware,
                 reason = requireNotNull(completion.reason) { "Aborted completion has no reason" },
                 message = requireNotNull(completion.message) { "Aborted completion has no message" },
             )
-            else -> error("Unsupported secret use completion result")
+            else -> error("Unsupported invocation completion result")
         }
     }
 
     companion object {
-        const val METHOD = "SecretUse"
+        const val METHOD = "Invocation"
         private const val TYPE_ENVIRONMENT = "environment"
         private const val TYPE_SSH = "ssh"
         private const val EXEC_OPERATION_TYPE = "exec"
         private const val RESULT_APPROVED = "APPROVED"
         private const val RESULT_DENIED = "DENIED"
         private const val RESULT_ABORTED = "ABORTED"
+        private const val INVOCATION_TOKEN_BYTES = 32
     }
 
-    private fun SecretUseResponseSecret.toWire(): JsonObject = buildJsonObject {
+    private fun InvocationResponseSecret.toWire(): JsonObject = buildJsonObject {
         if (description.isNotEmpty()) put("description", description)
         when (this@toWire) {
-            is SecretUseResponseSecret.Environment -> {
+            is InvocationResponseSecret.Environment -> {
                 put("type", TYPE_ENVIRONMENT)
                 put(
                     "variables",
@@ -167,7 +177,7 @@ internal class SecretUseProtocol(
                     },
                 )
             }
-            is SecretUseResponseSecret.Ssh -> {
+            is InvocationResponseSecret.Ssh -> {
                 put("type", TYPE_SSH)
                 put("public_key", publicKey)
             }
@@ -176,16 +186,17 @@ internal class SecretUseProtocol(
 }
 
 @Serializable
-private data class SecretUseRequestWire(
+private data class InvocationRequestWire(
     val method: String,
     val secrets: List<String>,
     val reason: String? = null,
-    val operation: SecretUseOperationWire,
+    val operation: InvocationOperationWire,
     @SerialName("launcher_chain") val launcherChain: List<String>,
+    @SerialName("invocation_token") val invocationToken: String,
 )
 
 @Serializable
-private data class SecretUseOperationWire(
+private data class InvocationOperationWire(
     val type: String,
     val command: String,
     val arguments: List<String>,
@@ -199,14 +210,14 @@ private data class SecretUseOperationWire(
 )
 
 @Serializable
-private data class SecretUseResponseWire(
+private data class InvocationResponseWire(
     val result: String,
     val reason: String? = null,
     val message: String? = null,
 )
 
 @Serializable
-private data class SecretUseCompletionWire(
+private data class InvocationCompletionWire(
     val result: String,
     val reason: String? = null,
     val message: String? = null,

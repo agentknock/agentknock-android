@@ -31,9 +31,10 @@ class WorkflowPresentationTest {
                 InboxRequestKind.SECRET_USE,
                 secretUse = SecretUseRequestState.COMPLETED,
             ),
+            summary(7, InboxRequestKind.GIT_SIGN),
         )
 
-        assertEquals(listOf(6L), requests.secretUseHistory().map { it.id })
+        assertEquals(listOf(6L, 7L), requests.requestHistory().map { it.id })
         assertEquals(listOf(1L, 3L), requests.pendingPairings().map { it.id })
         assertEquals(listOf(4L), requests.pendingSecretUploads().map { it.id })
     }
@@ -65,11 +66,20 @@ class WorkflowPresentationTest {
                 state = InboxRequestState.COMPLETED,
                 secretUse = SecretUseRequestState.COMPLETED,
             ),
+            summary(
+                5,
+                InboxRequestKind.GIT_SIGN,
+                state = InboxRequestState.ACTION_REQUIRED,
+            ),
         )
 
         assertEquals(1, requests.actionRequiredCount(InboxRequestKind.PAIRING))
         assertEquals(1, requests.actionRequiredCount(InboxRequestKind.SECRET_UPLOAD))
         assertEquals(1, requests.actionRequiredCount(InboxRequestKind.SECRET_USE))
+        assertEquals(
+            2,
+            requests.actionRequiredCount(InboxRequestKind.SECRET_USE, InboxRequestKind.GIT_SIGN),
+        )
     }
 
     private fun summary(

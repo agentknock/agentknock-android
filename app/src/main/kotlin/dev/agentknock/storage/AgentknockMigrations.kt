@@ -173,3 +173,38 @@ internal val MIGRATION_6_7 = Migration(6, 7) { connection ->
             "ON `secret_upload_ssh_keys` (`encryption_key_id`)",
     )
 }
+
+internal val MIGRATION_7_8 = Migration(7, 8) { connection ->
+    connection.execSQL(
+        "ALTER TABLE `secret_use_requests` ADD COLUMN `invocation_token_hash` BLOB",
+    )
+    connection.execSQL(
+        "ALTER TABLE `secret_use_requests` ADD COLUMN " +
+            "`contains_sensitive_material` INTEGER NOT NULL DEFAULT 1",
+    )
+    connection.execSQL(
+        """
+        CREATE TABLE IF NOT EXISTS `git_sign_requests` (
+            `request_id` INTEGER NOT NULL,
+            `state` TEXT NOT NULL,
+            `secret_name` TEXT NOT NULL,
+            `message` BLOB NOT NULL,
+            `decision` TEXT,
+            `completion_result` TEXT,
+            `completion_reason` TEXT,
+            `completion_message` TEXT,
+            `error` TEXT,
+            `created_at` INTEGER NOT NULL,
+            `updated_at` INTEGER NOT NULL,
+            `decided_at` INTEGER,
+            `completed_at` INTEGER,
+            PRIMARY KEY(`request_id`),
+            FOREIGN KEY(`request_id`) REFERENCES `inbox_requests`(`id`) ON UPDATE NO ACTION ON DELETE CASCADE
+        )
+        """.trimIndent(),
+    )
+    connection.execSQL(
+        "CREATE INDEX IF NOT EXISTS `index_git_sign_requests_state` " +
+            "ON `git_sign_requests` (`state`)",
+    )
+}

@@ -6,6 +6,7 @@ import kotlinx.coroutines.flow.map
 internal enum class AuditCategory(val storedName: String) {
     PAIRING("pairing"),
     SECRET_USE("secret_use"),
+    GIT_SIGN("git_sign"),
     SECRET_LIST("secret_list"),
     SECRET_UPLOAD("secret_upload"),
     CLIENT("client"),

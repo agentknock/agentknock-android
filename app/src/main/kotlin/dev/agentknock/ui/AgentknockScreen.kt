@@ -108,7 +108,10 @@ internal fun AgentknockScreen(
     }
     val actionRequiredCounts = MainSection.entries.associateWith { section ->
         when (section) {
-            MainSection.REQUESTS -> requestSummaries.actionRequiredCount(InboxRequestKind.SECRET_USE)
+            MainSection.REQUESTS -> requestSummaries.actionRequiredCount(
+                InboxRequestKind.SECRET_USE,
+                InboxRequestKind.GIT_SIGN,
+            )
             MainSection.SECRETS -> requestSummaries.actionRequiredCount(InboxRequestKind.SECRET_UPLOAD)
             MainSection.CLIENTS -> requestSummaries.actionRequiredCount(InboxRequestKind.PAIRING)
             MainSection.RULES -> 0
@@ -135,6 +138,7 @@ internal fun AgentknockScreen(
             } else {
                 when (requestSummaries.firstOrNull { it.id == requestId }?.kind ?: return@LaunchedEffect) {
                     InboxRequestKind.SECRET_USE -> MainSection.REQUESTS
+                    InboxRequestKind.GIT_SIGN -> MainSection.REQUESTS
                     InboxRequestKind.SECRET_UPLOAD -> MainSection.SECRETS
                     InboxRequestKind.PAIRING -> MainSection.CLIENTS
                 }
@@ -295,7 +299,7 @@ internal fun AgentknockScreen(
             title = { Text("Stay informed about requests?") },
             text = {
                 Text(
-                    "Agentknock can notify you when a pairing, secret upload, or secret use request needs attention. You control notification privacy in Android settings.",
+                    "Agentknock can notify you when a pairing, secret upload, secret use, or signing request needs attention. You control notification privacy in Android settings.",
                 )
             },
             confirmButton = {

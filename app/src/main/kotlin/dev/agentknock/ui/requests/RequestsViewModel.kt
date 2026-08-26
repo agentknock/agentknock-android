@@ -8,7 +8,8 @@ import dev.agentknock.storage.request.SecretUseDecisionResult
 import dev.agentknock.storage.request.InboxRequestDetails
 import dev.agentknock.storage.request.InboxRequestSummary
 import dev.agentknock.storage.request.RequestSyncResult
-import dev.agentknock.ui.secretUseHistory
+import dev.agentknock.storage.request.GitSignDecisionResult
+import dev.agentknock.ui.requestHistory
 import kotlinx.coroutines.ExperimentalCoroutinesApi
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.SharingStarted
@@ -32,7 +33,7 @@ internal class RequestsViewModel(application: Application) : AndroidViewModel(ap
         initialValue = emptyList(),
     )
     val requests: StateFlow<List<InboxRequestSummary>> = allRequests
-        .map(List<InboxRequestSummary>::secretUseHistory)
+        .map(List<InboxRequestSummary>::requestHistory)
         .stateIn(
             scope = viewModelScope,
             started = SharingStarted.Eagerly,
@@ -64,6 +65,16 @@ internal class RequestsViewModel(application: Application) : AndroidViewModel(ap
     suspend fun denySecretUseRequest(requestId: Long): SecretUseDecisionResult {
         container.localStorage.await()
         return repository.denySecretUseRequest(requestId)
+    }
+
+    suspend fun approveGitSignRequest(requestId: Long): GitSignDecisionResult {
+        container.localStorage.await()
+        return repository.approveGitSignRequest(requestId)
+    }
+
+    suspend fun denyGitSignRequest(requestId: Long): GitSignDecisionResult {
+        container.localStorage.await()
+        return repository.denyGitSignRequest(requestId)
     }
 
 }

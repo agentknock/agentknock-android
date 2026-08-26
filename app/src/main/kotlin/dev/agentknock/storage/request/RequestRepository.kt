@@ -1,10 +1,13 @@
 package dev.agentknock.storage.request
 
-import dev.agentknock.protocol.SecretUseCompletion
+import dev.agentknock.protocol.InvocationCompletion
 import dev.agentknock.protocol.ClientSoftware
-import dev.agentknock.protocol.SecretUseDenialReason
-import dev.agentknock.protocol.SecretUseProtocol
-import dev.agentknock.protocol.SecretUseRequestMessage
+import dev.agentknock.protocol.InvocationDenialReason
+import dev.agentknock.protocol.InvocationProtocol
+import dev.agentknock.protocol.InvocationRequestMessage
+import dev.agentknock.protocol.GitSignCompletion
+import dev.agentknock.protocol.GitSignProtocol
+import dev.agentknock.protocol.GitSignRequestMessage
 import dev.agentknock.protocol.OpenedPairedRequest
 import dev.agentknock.protocol.PairedRequestErrorCode
 import dev.agentknock.protocol.PairedRequestKeySource
@@ -37,7 +40,7 @@ import dev.agentknock.storage.crypto.EncryptionBinding
 import dev.agentknock.storage.crypto.EncryptionLocation
 import dev.agentknock.storage.crypto.VaultKeyManager
 import dev.agentknock.storage.crypto.VaultKeyPurpose
-import dev.agentknock.protocol.SecretUseResponseSecret
+import dev.agentknock.protocol.InvocationResponseSecret
 import dev.agentknock.storage.secret.RequestedSecretsResult
 import dev.agentknock.storage.secret.SecretMetadata
 import dev.agentknock.storage.secret.SecretValues
@@ -50,6 +53,7 @@ import dev.agentknock.storage.secret.SshKeyCodec
 import dev.agentknock.storage.secret.SshPrivateKey
 import dev.agentknock.storage.secret.SshSecretUpload
 import dev.agentknock.storage.secret.SshSecretUploadResult
+import dev.agentknock.storage.secret.GitSignatureResult
 import dev.agentknock.storage.secret.SSH_PRIVATE_KEY_FORMAT
 import dev.agentknock.storage.secret.ENVIRONMENT_SECRET_TYPE
 import dev.agentknock.storage.secret.SSH_SECRET_TYPE
@@ -69,6 +73,7 @@ import dev.agentknock.storage.vault.RelayDeviceCredentialsResult
 import dev.agentknock.storage.vault.RelayDeviceCredentialSource
 import java.util.UUID
 import java.util.Base64
+import java.security.MessageDigest
 import kotlinx.coroutines.CoroutineDispatcher
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.channels.Channel
@@ -134,6 +139,7 @@ internal enum class PairingState(val storedName: String) {
 internal enum class InboxRequestKind {
     PAIRING,
     SECRET_USE,
+    GIT_SIGN,
     SECRET_UPLOAD,
 }
 
@@ -149,7 +155,20 @@ internal enum class SecretUseDecision(val storedName: String) {
     DENIED("denied"),
 }
 
-internal enum class SecretUseCompletionResult(val storedName: String) {
+internal enum class InvocationCompletionResult(val storedName: String) {
+    APPROVED("approved"),
+    DENIED("denied"),
+    ABORTED("aborted"),
+}
+
+internal enum class GitSignRequestState(val storedName: String) {
+    APPROVAL_PENDING("approval_pending"),
+    WAITING_FOR_COMPLETION("waiting_for_completion"),
+    COMPLETED("completed"),
+    VERIFICATION_FAILED("verification_failed"),
+}
+
+internal enum class GitSignCompletionResult(val storedName: String) {
     APPROVED("approved"),
     DENIED("denied"),
     ABORTED("aborted"),
@@ -200,7 +219,7 @@ internal data class InboxRequestSummary(
     val pairingState: PairingState?,
     val secretUseState: SecretUseRequestState?,
     val secretUseDecision: SecretUseDecision?,
-    val secretUseResult: SecretUseCompletionResult?,
+    val secretUseResult: InvocationCompletionResult?,
     val secretUseCompletionReason: String?,
     val secretListState: SecretListRequestState?,
     val secretUploadState: SecretUploadRequestState?,
@@ -213,6 +232,10 @@ internal data class InboxRequestSummary(
     val matchedRuleIds: Set<String>,
     val receivedAt: Long,
     val completedAt: Long?,
+    val gitSignState: GitSignRequestState? = null,
+    val gitSignDecision: SecretUseDecision? = null,
+    val gitSignResult: GitSignCompletionResult? = null,
+    val gitSignCompletionReason: String? = null,
 )
 
 internal data class PairingRequestDetails(
@@ -234,6 +257,7 @@ internal data class PairingRequestDetails(
 internal data class InboxRequestDetails(
     val id: Long,
     val relayRequestId: String,
+    val parentRequestId: Long?,
     val state: InboxRequestState,
     val receivedAt: Long,
     val completedAt: Long?,
@@ -241,6 +265,26 @@ internal data class InboxRequestDetails(
     val secretUse: SecretUseRequestDetails?,
     val secretList: SecretListRequestDetails?,
     val secretUpload: SecretUploadRequestDetails?,
+    val gitSign: GitSignRequestDetails? = null,
+)
+
+internal data class GitSignRequestDetails(
+    val state: GitSignRequestState,
+    val decision: SecretUseDecision?,
+    val completionResult: GitSignCompletionResult?,
+    val completionReason: String?,
+    val completionMessage: String?,
+    val secretName: String,
+    val message: ByteArray,
+    val invocationRequestId: String,
+    val command: String,
+    val arguments: List<String>,
+    val reason: String?,
+    val clientId: String,
+    val clientName: String,
+    val clientSoftware: ClientSoftware?,
+    val error: String?,
+    val decidedAt: Long?,
 )
 
 internal data class SecretListRequestDetails(
@@ -262,7 +306,7 @@ internal data class SecretUseRequestDetails(
     val decision: SecretUseDecision?,
     val decisionSource: String?,
     val ruleEvaluation: ApprovalRuleEvaluation?,
-    val completionResult: SecretUseCompletionResult?,
+    val completionResult: InvocationCompletionResult?,
     val completionReason: String?,
     val completionMessage: String?,
     val secrets: List<String>,
@@ -361,7 +405,7 @@ internal data class RequestNotification(
     val title: String,
     val summary: String,
     val details: List<RequestNotificationDetail>,
-    val secretUseDecisionAvailable: Boolean,
+    val decisionAvailable: Boolean,
 )
 
 internal data class RequestNotificationDetail(
@@ -435,6 +479,18 @@ internal sealed interface SecretUploadDecisionResult {
     data object UnsupportedEncryption : SecretUploadDecisionResult
 }
 
+internal sealed interface GitSignDecisionResult {
+    data object Decided : GitSignDecisionResult
+    data object NotPending : GitSignDecisionResult
+    data object NotFound : GitSignDecisionResult
+    data object InvocationUnavailable : GitSignDecisionResult
+    data object PairingUnavailable : GitSignDecisionResult
+    data object KeyChanged : GitSignDecisionResult
+    data object SecretUnavailable : GitSignDecisionResult
+    data object SecretCorrupted : GitSignDecisionResult
+    data object UnsupportedEncryption : GitSignDecisionResult
+}
+
 internal enum class ClientChangeResult {
     CHANGED,
     NOT_FOUND,
@@ -454,7 +510,8 @@ internal class RequestRepository(
     private val requestPushRegistration: () -> Unit = {},
     private val pairingProtocol: PairingProtocol = PairingProtocol(),
     private val pairedRequestProtocol: PairedRequestProtocol = PairedRequestProtocol(),
-    private val secretUseProtocol: SecretUseProtocol = SecretUseProtocol(),
+    private val invocationProtocol: InvocationProtocol = InvocationProtocol(),
+    private val gitSignProtocol: GitSignProtocol = GitSignProtocol(),
     private val secretListProtocol: SecretListProtocol = SecretListProtocol(),
     private val secretUploadProtocol: SecretUploadProtocol = SecretUploadProtocol(),
     private val pairingRemoveProtocol: PairingRemoveProtocol = PairingRemoveProtocol(),
@@ -475,11 +532,13 @@ internal class RequestRepository(
         dao.observeListedRequests(),
         dao.observePairings(),
         dao.observeSecretUseRequests(),
+        dao.observeGitSignRequests(),
         dao.observeSecretUploadRequests(),
-    ) { requests, pairings, secretUseRequests, secretUploadRequests ->
+    ) { requests, pairings, secretUseRequests, gitSignRequests, secretUploadRequests ->
         val pairingByRequest = pairings.associateBy(PairingEntity::requestId)
         val pairingByClient = pairings.associateBy(PairingEntity::clientId)
         val secretUseByRequest = secretUseRequests.associateBy(SecretUseRequestEntity::requestId)
+        val gitSignByRequest = gitSignRequests.associateBy(GitSignRequestEntity::requestId)
         val secretUploadByRequest = secretUploadRequests.associateBy(
             SecretUploadRequestEntity::requestId,
         )
@@ -521,7 +580,7 @@ internal class RequestRepository(
                         secretUseState = secretUse.state.toSecretUseRequestState(),
                         secretUseDecision = secretUse.decision?.toSecretUseDecision(),
                         secretUseResult = secretUse.completionResult
-                            ?.toSecretUseCompletionResult(),
+                            ?.toInvocationCompletionResult(),
                         secretUseCompletionReason = secretUse.completionReason,
                         secretListState = null,
                         secretUploadState = null,
@@ -537,6 +596,36 @@ internal class RequestRepository(
                             .orEmpty(),
                         receivedAt = request.receivedAt,
                         completedAt = request.completedAt,
+                    )
+                }
+                RequestKind.GIT_SIGN.storedName -> {
+                    val gitSign = gitSignByRequest[request.id] ?: return@mapNotNull null
+                    val invocation = request.parentRequestId?.let(secretUseByRequest::get)
+                        ?: return@mapNotNull null
+                    InboxRequestSummary(
+                        id = request.id,
+                        kind = InboxRequestKind.GIT_SIGN,
+                        state = request.state.toInboxRequestState(),
+                        pairingState = null,
+                        secretUseState = null,
+                        secretUseDecision = null,
+                        secretUseResult = null,
+                        secretUseCompletionReason = null,
+                        secretListState = null,
+                        secretUploadState = null,
+                        title = "Git signature",
+                        clientName = invocation.clientName,
+                        secretNames = listOf(gitSign.secretName),
+                        listSummary = null,
+                        command = invocation.command,
+                        arguments = decodeStringList(invocation.argumentsJson),
+                        matchedRuleIds = emptySet(),
+                        receivedAt = request.receivedAt,
+                        completedAt = request.completedAt,
+                        gitSignState = gitSign.state.toGitSignRequestState(),
+                        gitSignDecision = gitSign.decision?.toSecretUseDecision(),
+                        gitSignResult = gitSign.completionResult?.toGitSignCompletionResult(),
+                        gitSignCompletionReason = gitSign.completionReason,
                     )
                 }
                 RequestKind.SECRET_UPLOAD.storedName -> {
@@ -604,6 +693,7 @@ internal class RequestRepository(
         InboxRequestDetails(
             id = request.id,
             relayRequestId = request.relayRequestId,
+            parentRequestId = request.parentRequestId,
             state = request.state.toInboxRequestState(),
             receivedAt = request.receivedAt,
             completedAt = request.completedAt,
@@ -634,7 +724,7 @@ internal class RequestRepository(
                     decision = it.decision?.toSecretUseDecision(),
                     decisionSource = it.decisionSource,
                     ruleEvaluation = it.ruleEvaluationJson?.let(::decodeRuleEvaluation),
-                    completionResult = it.completionResult?.toSecretUseCompletionResult(),
+                    completionResult = it.completionResult?.toInvocationCompletionResult(),
                     completionReason = it.completionReason,
                     completionMessage = it.completionMessage,
                     secrets = decodeStringList(it.secretsJson),
@@ -717,6 +807,32 @@ internal class RequestRepository(
             ),
         )
     }.combine(dao.observeSecretUploadSshKey(id)) { details, _ -> details }
+        .combine(dao.observeGitSignRequest(id)) { details, gitSign ->
+            if (details == null || gitSign == null) return@combine details
+            val parentId = details.parentRequestId ?: return@combine details
+            val invocation = dao.getSecretUseRequest(parentId) ?: return@combine details
+            val invocationRequest = dao.getRequestById(parentId) ?: return@combine details
+            details.copy(
+                gitSign = GitSignRequestDetails(
+                    state = gitSign.state.toGitSignRequestState(),
+                    decision = gitSign.decision?.toSecretUseDecision(),
+                    completionResult = gitSign.completionResult?.toGitSignCompletionResult(),
+                    completionReason = gitSign.completionReason,
+                    completionMessage = gitSign.completionMessage,
+                    secretName = gitSign.secretName,
+                    message = gitSign.message,
+                    invocationRequestId = invocationRequest.relayRequestId,
+                    command = invocation.command,
+                    arguments = decodeStringList(invocation.argumentsJson),
+                    reason = invocation.reason,
+                    clientId = invocation.clientId,
+                    clientName = invocation.clientName,
+                    clientSoftware = decodeClientSoftware(invocation.clientSoftwareJson),
+                    error = gitSign.error,
+                    decidedAt = gitSign.decidedAt,
+                ),
+            )
+        }
 
     suspend fun getRequestDetails(id: Long): InboxRequestDetails? = observeRequest(id).first()
 
@@ -808,7 +924,40 @@ internal class RequestRepository(
                             RequestNotificationDetail("Command", command),
                             RequestNotificationDetail("Secrets", secretNames),
                         ),
-                        secretUseDecisionAvailable = true,
+                        decisionAvailable = true,
+                    )
+                }
+                RequestKind.GIT_SIGN.storedName -> {
+                    val gitSign = dao.getGitSignRequest(request.id) ?: return@mapNotNull null
+                    if (gitSign.state != GitSignRequestState.APPROVAL_PENDING.storedName) {
+                        return@mapNotNull null
+                    }
+                    val parentId = request.parentRequestId ?: return@mapNotNull null
+                    val invocation = dao.getSecretUseRequest(parentId) ?: return@mapNotNull null
+                    val command = renderShellCommand(
+                        invocation.command,
+                        decodeStringList(invocation.argumentsJson),
+                    )
+                    val clientName = renderSingleLineText(invocation.clientName)
+                    RequestNotification(
+                        requestId = request.id,
+                        title = "Git signature requested",
+                        summary = "$clientName requests a signature",
+                        details = listOf(
+                            RequestNotificationDetail("Client", clientName),
+                            RequestNotificationDetail("Command", command),
+                            RequestNotificationDetail(
+                                "SSH key",
+                                renderSingleLineText(gitSign.secretName),
+                            ),
+                            RequestNotificationDetail(
+                                "Content",
+                                renderSingleLineText(
+                                    gitSign.message.decodeToString(throwOnInvalidSequence = false),
+                                ),
+                            ),
+                        ),
+                        decisionAvailable = true,
                     )
                 }
                 RequestKind.PAIRING.storedName -> {
@@ -831,7 +980,7 @@ internal class RequestRepository(
                                 "The pairing message could not be verified."
                             else -> "Open Agentknock to review this pairing."
                         })),
-                        secretUseDecisionAvailable = false,
+                        decisionAvailable = false,
                     )
                 }
                 RequestKind.SECRET_UPLOAD.storedName -> {
@@ -878,12 +1027,26 @@ internal class RequestRepository(
                                 ),
                             )
                         },
-                        secretUseDecisionAvailable = false,
+                        decisionAvailable = false,
                     )
                 }
                 else -> null
             }
         }
+
+    suspend fun approvePendingRequest(requestId: Long) {
+        when (dao.getRequestById(requestId)?.kind) {
+            RequestKind.SECRET_USE.storedName -> approveSecretUseRequest(requestId)
+            RequestKind.GIT_SIGN.storedName -> approveGitSignRequest(requestId)
+        }
+    }
+
+    suspend fun denyPendingRequest(requestId: Long) {
+        when (dao.getRequestById(requestId)?.kind) {
+            RequestKind.SECRET_USE.storedName -> denySecretUseRequest(requestId)
+            RequestKind.GIT_SIGN.storedName -> denyGitSignRequest(requestId)
+        }
+    }
 
     fun requestSync() {
         pendingChanges.trySend(Unit)
@@ -1299,6 +1462,22 @@ internal class RequestRepository(
                     ),
                 )
             }
+            RequestKind.GIT_SIGN.storedName -> {
+                val gitSign = dao.getGitSignRequest(request.id) ?: return
+                dao.updateGitSignRequest(
+                    request.copy(
+                        state = InboxRequestState.COMPLETED.storedName,
+                        updatedAt = now,
+                        completedAt = now,
+                    ),
+                    gitSign.copy(
+                        state = GitSignRequestState.VERIFICATION_FAILED.storedName,
+                        error = message,
+                        updatedAt = now,
+                        completedAt = now,
+                    ),
+                )
+            }
             RequestKind.SECRET_LIST.storedName -> {
                 val secretList = dao.getSecretListRequest(request.id) ?: return
                 dao.updateSecretListRequest(
@@ -1483,7 +1662,9 @@ internal class RequestRepository(
             val storedMissingSecrets = decodeStringList(secretUseRequest.missingSecretsJson)
             if (
                 latestDescription.secrets != storedSecrets ||
-                latestDescription.missingSecrets != storedMissingSecrets
+                latestDescription.missingSecrets != storedMissingSecrets ||
+                latestDescription.containsSensitiveMaterial !=
+                secretUseRequest.containsSensitiveMaterial
             ) {
                 val now = currentTimeMillis()
                 dao.updateSecretUseRequest(
@@ -1491,6 +1672,7 @@ internal class RequestRepository(
                     secretUseRequest = secretUseRequest.copy(
                         secretDetailsJson = json.encodeToString(latestDescription.secrets),
                         missingSecretsJson = encodeStringList(latestDescription.missingSecrets),
+                        containsSensitiveMaterial = latestDescription.containsSensitiveMaterial,
                         updatedAt = now,
                     ),
                 )
@@ -1530,7 +1712,7 @@ internal class RequestRepository(
                 request = request,
                 secretUseRequest = secretUseRequest,
                 decision = SecretUseDecision.APPROVED,
-                responsePlaintext = secretUseProtocol.approvedResponse(responseSecrets),
+                responsePlaintext = invocationProtocol.approvedResponse(responseSecrets),
             )
         }.also { result ->
             if (result == SecretUseDecisionResult.Decided) requestSync()
@@ -1549,8 +1731,8 @@ internal class RequestRepository(
                 request = request,
                 secretUseRequest = secretUseRequest,
                 decision = SecretUseDecision.DENIED,
-                responsePlaintext = secretUseProtocol.deniedResponse(
-                    SecretUseDenialReason.USER_DENIED,
+                responsePlaintext = invocationProtocol.deniedResponse(
+                    InvocationDenialReason.USER_DENIED,
                     SECRET_USE_DENIAL_MESSAGE,
                 ),
             )
@@ -1622,6 +1804,155 @@ internal class RequestRepository(
             ),
         )
         return SecretUseDecisionResult.Decided
+    }
+
+    suspend fun approveGitSignRequest(requestId: Long): GitSignDecisionResult =
+        operationMutex.withLock {
+            val request = dao.getRequestById(requestId) ?: return GitSignDecisionResult.NotFound
+            val gitSign = dao.getGitSignRequest(requestId)
+                ?: return GitSignDecisionResult.NotFound
+            if (gitSign.state != GitSignRequestState.APPROVAL_PENDING.storedName) {
+                return GitSignDecisionResult.NotPending
+            }
+            val invocationId = request.parentRequestId
+                ?: return GitSignDecisionResult.InvocationUnavailable
+            val invocation = dao.getSecretUseRequest(invocationId)
+                ?: return GitSignDecisionResult.InvocationUnavailable
+            val expectedPublicKey = json.decodeFromString<List<SecretMetadata>>(
+                invocation.secretDetailsJson,
+            ).singleOrNull { secret ->
+                secret.name == gitSign.secretName && secret.type == SSH_SECRET_TYPE
+            }?.sshPublicKey ?: return GitSignDecisionResult.InvocationUnavailable
+            val signature = when (
+                val result = secrets.signGitMessage(
+                    secretName = gitSign.secretName,
+                    expectedPublicKey = expectedPublicKey,
+                    message = gitSign.message,
+                )
+            ) {
+                is GitSignatureResult.Signed -> result.signature
+                GitSignatureResult.NotFound,
+                GitSignatureResult.WrongType,
+                GitSignatureResult.KeyChanged,
+                -> return GitSignDecisionResult.KeyChanged
+                GitSignatureResult.SecretUnavailable -> {
+                    return GitSignDecisionResult.SecretUnavailable
+                }
+                GitSignatureResult.UnsupportedEncryption -> {
+                    return GitSignDecisionResult.UnsupportedEncryption
+                }
+                GitSignatureResult.SecretCorrupted,
+                -> return GitSignDecisionResult.SecretCorrupted
+            }
+            decideGitSignRequest(
+                request = request,
+                gitSign = gitSign,
+                invocation = invocation,
+                decision = SecretUseDecision.APPROVED,
+                responsePlaintext = gitSignProtocol.approvedResponse(signature),
+            )
+        }.also { result ->
+            if (result == GitSignDecisionResult.Decided) requestSync()
+        }
+
+    suspend fun denyGitSignRequest(requestId: Long): GitSignDecisionResult =
+        operationMutex.withLock {
+            val request = dao.getRequestById(requestId) ?: return GitSignDecisionResult.NotFound
+            val gitSign = dao.getGitSignRequest(requestId)
+                ?: return GitSignDecisionResult.NotFound
+            if (gitSign.state != GitSignRequestState.APPROVAL_PENDING.storedName) {
+                return GitSignDecisionResult.NotPending
+            }
+            val invocation = request.parentRequestId?.let { dao.getSecretUseRequest(it) }
+                ?: return GitSignDecisionResult.InvocationUnavailable
+            decideGitSignRequest(
+                request = request,
+                gitSign = gitSign,
+                invocation = invocation,
+                decision = SecretUseDecision.DENIED,
+                responsePlaintext = gitSignProtocol.deniedResponse(
+                    InvocationDenialReason.USER_DENIED,
+                    GIT_SIGN_DENIAL_MESSAGE,
+                ),
+            )
+        }.also { result ->
+            if (result == GitSignDecisionResult.Decided) requestSync()
+        }
+
+    private suspend fun decideGitSignRequest(
+        request: InboxRequestEntity,
+        gitSign: GitSignRequestEntity,
+        invocation: SecretUseRequestEntity,
+        decision: SecretUseDecision,
+        responsePlaintext: ByteArray,
+    ): GitSignDecisionResult {
+        val pairingRequestId = invocation.pairingRequestId
+            ?: return GitSignDecisionResult.PairingUnavailable
+        val pairing = dao.getPairing(pairingRequestId)
+            ?: return GitSignDecisionResult.PairingUnavailable
+        if (pairing.state != PairingState.ACTIVE.storedName) {
+            return GitSignDecisionResult.PairingUnavailable
+        }
+        val credentials = credentialsForPairing(pairing)
+            ?: return GitSignDecisionResult.PairingUnavailable
+        val clientPsk = decryptRequestPsk(request, pairing)
+            ?: return GitSignDecisionResult.PairingUnavailable
+        val response = runCatching {
+            pairingProtocol.sealPairedResponse(
+                deviceId = pairing.deviceId,
+                requestId = request.relayRequestId,
+                clientId = pairing.clientId,
+                clientPsk = clientPsk,
+                devicePrivateKey = credentials.devicePrivateKey,
+                devicePublicKey = credentials.devicePublicKey,
+                request = json.parseToJsonElement(request.requestJson),
+                plaintext = responsePlaintext,
+            )
+        }.getOrNull() ?: return GitSignDecisionResult.PairingUnavailable
+        val now = currentTimeMillis()
+        dao.updateGitSignRequest(
+            request = request.copy(
+                state = InboxRequestState.WAITING.storedName,
+                responseJson = response.toString(),
+                responseAcknowledgedAt = null,
+                updatedAt = now,
+            ),
+            gitSignRequest = gitSign.copy(
+                state = GitSignRequestState.WAITING_FOR_COMPLETION.storedName,
+                decision = decision.storedName,
+                completionReason = if (decision == SecretUseDecision.DENIED) {
+                    InvocationDenialReason.USER_DENIED.wireName
+                } else {
+                    null
+                },
+                completionMessage = if (decision == SecretUseDecision.DENIED) {
+                    GIT_SIGN_DENIAL_MESSAGE
+                } else {
+                    null
+                },
+                updatedAt = now,
+                decidedAt = now,
+            ),
+        )
+        audit.record(
+            AuditRecord(
+                category = AuditCategory.GIT_SIGN,
+                title = if (decision == SecretUseDecision.APPROVED) {
+                    "SSH signature approved"
+                } else {
+                    "SSH signature denied"
+                },
+                detail = gitSign.secretName,
+                outcome = if (decision == SecretUseDecision.APPROVED) {
+                    AuditOutcome.APPROVED
+                } else {
+                    AuditOutcome.DENIED
+                },
+                clientId = invocation.clientId,
+                relayRequestId = request.relayRequestId,
+            ),
+        )
+        return GitSignDecisionResult.Decided
     }
 
     private suspend fun processRequest(
@@ -1987,8 +2318,17 @@ internal class RequestRepository(
                 now = now,
             )
         }
-        val processed = if (method == SecretUseProtocol.METHOD) {
-            processSecretUseRequest(
+        val processed = if (method == InvocationProtocol.METHOD) {
+            processInvocationRequest(
+                pairing = pairing,
+                relayRequestId = message.requestId,
+                requestPayload = requestPayload,
+                opened = opened,
+                acceptedSecrets = storedSecrets,
+                credentials = credentials,
+            )
+        } else if (method == GitSignProtocol.METHOD) {
+            processGitSignRequest(
                 pairing = pairing,
                 relayRequestId = message.requestId,
                 requestPayload = requestPayload,
@@ -2056,7 +2396,7 @@ internal class RequestRepository(
         )
     }
 
-    private suspend fun processSecretUseRequest(
+    private suspend fun processInvocationRequest(
         pairing: PairingEntity,
         relayRequestId: String,
         requestPayload: JsonElement,
@@ -2066,13 +2406,13 @@ internal class RequestRepository(
     ): ProcessedRelayMessage? {
         if (pairing.state != PairingState.ACTIVE.storedName) return null
         val contents = runCatching {
-            secretUseProtocol.decodeRequest(opened.plaintext)
+            invocationProtocol.decodeRequest(opened.plaintext)
         }.getOrNull() ?: return null
         val description = secrets.describeRequestedSecrets(contents.secrets)
         val requestedSecrets = secrets.requestedSecrets(contents.secrets)
         val automaticDenial = automaticSecretUseDenial(requestedSecrets)
         val ruleEvaluation = if (
-            automaticDenial == null && approvalRules != null
+            automaticDenial == null && description.containsSensitiveMaterial && approvalRules != null
         ) {
             val identities = secrets.identitiesForNames(contents.secrets).map { secret ->
                 RequestedSecretIdentity(secret.id, secret.name)
@@ -2097,18 +2437,24 @@ internal class RequestRepository(
         val ruleDenial = ruleEvaluation
             ?.takeIf { it.action == ApprovalRuleAction.DENY }
             ?.let {
-                SecretUseDenialReason.POLICY_DENIED to
+                InvocationDenialReason.POLICY_DENIED to
                     "An approval rule denied access to a requested secret."
             }
         val denial = automaticDenial ?: ruleDenial
         val responsePlaintext = when {
-            denial != null -> secretUseProtocol.deniedResponse(denial.first, denial.second)
+            denial != null -> invocationProtocol.deniedResponse(denial.first, denial.second)
             ruleEvaluation?.action == ApprovalRuleAction.APPROVE -> {
                 val available = requestedSecrets as RequestedSecretsResult.Available
-                secretUseProtocol.approvedResponse(
+                invocationProtocol.approvedResponse(
                     available.secrets.mapValues { (_, secret) ->
                         secret.toResponseSecret()
                     },
+                )
+            }
+            !description.containsSensitiveMaterial -> {
+                val available = requestedSecrets as RequestedSecretsResult.Available
+                invocationProtocol.approvedResponse(
+                    available.secrets.mapValues { (_, secret) -> secret.toResponseSecret() },
                 )
             }
             else -> null
@@ -2132,6 +2478,7 @@ internal class RequestRepository(
         val automaticDecision = when {
             denial != null -> SecretUseDecision.DENIED
             ruleEvaluation?.action == ApprovalRuleAction.APPROVE -> SecretUseDecision.APPROVED
+            !description.containsSensitiveMaterial -> SecretUseDecision.APPROVED
             else -> null
         }
         val now = currentTimeMillis()
@@ -2175,6 +2522,8 @@ internal class RequestRepository(
                             ruleEvaluation?.action == ApprovalRuleAction.APPROVE
                         ) {
                             DECISION_SOURCE_RULE
+                        } else if (!description.containsSensitiveMaterial) {
+                            DECISION_SOURCE_NON_SENSITIVE
                         } else {
                             null
                         },
@@ -2206,7 +2555,11 @@ internal class RequestRepository(
                     category = AuditCategory.SECRET_USE,
                     title = when {
                         automaticDecision == SecretUseDecision.APPROVED ->
-                            "Secret use approved by rule"
+                            if (description.containsSensitiveMaterial) {
+                                "Secret use approved by rule"
+                            } else {
+                                "Non-sensitive secret use delivered"
+                            }
                         ruleDenial != null -> "Secret use denied by rule"
                         else -> "Secret use rejected automatically"
                     },
@@ -2224,30 +2577,149 @@ internal class RequestRepository(
         return ProcessedRelayMessage(response)
     }
 
+    private suspend fun processGitSignRequest(
+        pairing: PairingEntity,
+        relayRequestId: String,
+        requestPayload: JsonElement,
+        opened: OpenedPairedRequest,
+        acceptedSecrets: AcceptedRequestSecrets,
+        credentials: RelayDeviceCredentials,
+    ): ProcessedRelayMessage? {
+        if (pairing.state != PairingState.ACTIVE.storedName) return null
+        val contents = runCatching { gitSignProtocol.decodeRequest(opened.plaintext) }
+            .getOrNull() ?: return null
+        val invocationRequest = dao.getRequestByRelayId(contents.invocationId) ?: return null
+        if (invocationRequest.kind != RequestKind.SECRET_USE.storedName) return null
+        val invocation = dao.getSecretUseRequest(invocationRequest.id) ?: return null
+        val expectedTokenHash = invocation.invocationTokenHash ?: return null
+        if (
+            invocation.pairingRequestId != pairing.requestId ||
+            invocation.clientId != pairing.clientId ||
+            invocation.decision != SecretUseDecision.APPROVED.storedName ||
+            decodeClientSoftware(invocation.clientSoftwareJson) != contents.clientSoftware ||
+            !MessageDigest.isEqual(
+                expectedTokenHash,
+                invocationTokenHash(contents.invocationToken),
+            )
+        ) {
+            return null
+        }
+        val sshMetadata = json.decodeFromString<List<SecretMetadata>>(
+            invocation.secretDetailsJson,
+        ).singleOrNull { secret ->
+            secret.name == contents.secret &&
+                secret.type == SSH_SECRET_TYPE &&
+                secret.sshPublicKey != null
+        }
+        val denial = if (sshMetadata == null) {
+            InvocationDenialReason.INVALID_REQUEST to
+                "The SSH signing request does not match its invocation."
+        } else {
+            null
+        }
+        val responsePlaintext = denial?.let { (reason, message) ->
+            gitSignProtocol.deniedResponse(reason, message)
+        }
+        val response = responsePlaintext?.let { plaintext ->
+            runCatching {
+                pairingProtocol.sealPairedResponse(
+                    deviceId = pairing.deviceId,
+                    requestId = relayRequestId,
+                    clientId = pairing.clientId,
+                    clientPsk = opened.clientPsk,
+                    devicePrivateKey = credentials.devicePrivateKey,
+                    devicePublicKey = credentials.devicePublicKey,
+                    request = requestPayload,
+                    plaintext = plaintext,
+                )
+            }.getOrNull() ?: return null
+        }
+        val now = currentTimeMillis()
+        dao.insertGitSignRequest(
+            request = InboxRequestEntity(
+                relayRequestId = relayRequestId,
+                parentRequestId = invocationRequest.id,
+                kind = RequestKind.GIT_SIGN.storedName,
+                state = if (response == null) {
+                    InboxRequestState.ACTION_REQUIRED.storedName
+                } else {
+                    InboxRequestState.WAITING.storedName
+                },
+                listed = true,
+                requestJson = requestPayload.toString(),
+                responseJson = response?.toString(),
+                completionJson = null,
+                receivedAt = now,
+                updatedAt = now,
+                completedAt = null,
+                requestAcknowledgedAt = null,
+                responseAcknowledgedAt = null,
+                completionAcknowledgedAt = null,
+            ),
+            gitSignRequest = GitSignRequestEntity(
+                requestId = 0,
+                state = if (denial == null) {
+                    GitSignRequestState.APPROVAL_PENDING.storedName
+                } else {
+                    GitSignRequestState.WAITING_FOR_COMPLETION.storedName
+                },
+                secretName = contents.secret,
+                message = contents.message,
+                decision = denial?.let { SecretUseDecision.DENIED.storedName },
+                completionResult = null,
+                completionReason = denial?.first?.wireName,
+                completionMessage = denial?.second,
+                error = null,
+                createdAt = now,
+                updatedAt = now,
+                decidedAt = denial?.let { now },
+                completedAt = null,
+            ),
+            requestSecret = acceptedSecrets.requestSecret,
+            currentPairingSecret = acceptedSecrets.currentPairingSecret,
+            previousPairingSecret = acceptedSecrets.previousPairingSecret,
+        )
+        audit.record(
+            AuditRecord(
+                category = AuditCategory.GIT_SIGN,
+                title = if (denial == null) {
+                    "Git signature requested"
+                } else {
+                    "Git signature rejected automatically"
+                },
+                detail = contents.secret,
+                outcome = if (denial == null) AuditOutcome.RECEIVED else AuditOutcome.REJECTED,
+                clientId = pairing.clientId,
+                relayRequestId = relayRequestId,
+            ),
+        )
+        return ProcessedRelayMessage(response)
+    }
+
     private suspend fun automaticSecretUseDenial(
         result: RequestedSecretsResult,
-    ): Pair<SecretUseDenialReason, String>? = when (result) {
+    ): Pair<InvocationDenialReason, String>? = when (result) {
         is RequestedSecretsResult.Available -> null
         is RequestedSecretsResult.MissingSecrets ->
-            SecretUseDenialReason.INVALID_REQUEST to
+            InvocationDenialReason.INVALID_REQUEST to
                 "Missing secrets: ${result.names.joinToString()}"
         is RequestedSecretsResult.ConflictingVariable ->
-            SecretUseDenialReason.INVALID_REQUEST to
+            InvocationDenialReason.INVALID_REQUEST to
                 "Requested secrets provide conflicting values for the environment variable ${result.name}."
         RequestedSecretsResult.MultipleSshKeys ->
-            SecretUseDenialReason.INVALID_REQUEST to
+            InvocationDenialReason.INVALID_REQUEST to
                 "A request can use at most one SSH key."
         RequestedSecretsResult.UnsupportedSecretType ->
-            SecretUseDenialReason.INVALID_REQUEST to
+            InvocationDenialReason.INVALID_REQUEST to
                 "A requested secret type is unsupported."
         RequestedSecretsResult.SecretUnavailable ->
-            SecretUseDenialReason.OTHER to
+            InvocationDenialReason.OTHER to
                 "A requested secret value is unavailable on this device."
         RequestedSecretsResult.SecretCorrupted ->
-            SecretUseDenialReason.OTHER to
+            InvocationDenialReason.OTHER to
                 "A requested secret value could not be authenticated."
         RequestedSecretsResult.UnsupportedEncryption ->
-            SecretUseDenialReason.OTHER to
+            InvocationDenialReason.OTHER to
                 "A requested secret value uses an unsupported encryption format."
     }
 
@@ -2720,7 +3192,7 @@ internal class RequestRepository(
 
     private fun secretUseRequestEntity(
         pairing: PairingEntity,
-        contents: SecretUseRequestMessage,
+        contents: InvocationRequestMessage,
         description: RequestedSecretDescription,
         now: Long,
     ) = SecretUseRequestEntity(
@@ -2735,6 +3207,8 @@ internal class RequestRepository(
         machineId = pairing.machineId,
         osVersion = pairing.osVersion,
         state = SecretUseRequestState.APPROVAL_PENDING.storedName,
+        invocationTokenHash = invocationTokenHash(contents.invocationToken),
+        containsSensitiveMaterial = description.containsSensitiveMaterial,
         clientSoftwareJson = encodeClientSoftware(contents.clientSoftware),
         secretsJson = encodeStringList(contents.secrets),
         secretDetailsJson = json.encodeToString(description.secrets),
@@ -2949,7 +3423,10 @@ internal class RequestRepository(
                 processFinishCompletion(activeCredentials, request, completion)
             }
             RequestKind.SECRET_USE.storedName -> {
-                processSecretUseCompletion(activeCredentials, request, completion)
+                processInvocationCompletion(activeCredentials, request, completion)
+            }
+            RequestKind.GIT_SIGN.storedName -> {
+                processGitSignCompletion(activeCredentials, request, completion)
             }
             RequestKind.SECRET_LIST.storedName -> {
                 processSecretListCompletion(activeCredentials, request, completion)
@@ -3230,7 +3707,7 @@ internal class RequestRepository(
         requestSync()
     }
 
-    private suspend fun processSecretUseCompletion(
+    private suspend fun processInvocationCompletion(
         activeCredentials: RelayDeviceCredentials,
         request: InboxRequestEntity,
         completion: JsonElement,
@@ -3258,29 +3735,29 @@ internal class RequestRepository(
                 completion = completion,
             )
         }.getOrNull() ?: return null
-        val decoded = runCatching { secretUseProtocol.decodeCompletion(plaintext) }
+        val decoded = runCatching { invocationProtocol.decodeCompletion(plaintext) }
         val now = currentTimeMillis()
         val completionResult = decoded.getOrNull()
         val softwareMatches = completionResult?.clientSoftware == decodeClientSoftware(
             secretUseRequest.clientSoftwareJson,
         )
         val valid = softwareMatches && when (completionResult) {
-            is SecretUseCompletion.Approved -> {
+            is InvocationCompletion.Approved -> {
                 secretUseRequest.decision == SecretUseDecision.APPROVED.storedName
             }
-            is SecretUseCompletion.Denied -> {
+            is InvocationCompletion.Denied -> {
                 if (secretUseRequest.decision != SecretUseDecision.DENIED.storedName) {
                     false
                 } else {
                     val expectedReason = secretUseRequest.completionReason
-                        ?: SecretUseDenialReason.USER_DENIED.wireName
+                        ?: InvocationDenialReason.USER_DENIED.wireName
                     val expectedMessage = secretUseRequest.completionMessage
                         ?: SECRET_USE_DENIAL_MESSAGE
                     completionResult.reason == expectedReason &&
                         completionResult.message == expectedMessage
                 }
             }
-            is SecretUseCompletion.Aborted -> true
+            is InvocationCompletion.Aborted -> true
             null -> false
         }
         dao.updateSecretUseRequest(
@@ -3298,25 +3775,25 @@ internal class RequestRepository(
                     SecretUseRequestState.VERIFICATION_FAILED.storedName
                 },
                 completionResult = when (completionResult) {
-                    is SecretUseCompletion.Approved -> {
-                        SecretUseCompletionResult.APPROVED.storedName
+                    is InvocationCompletion.Approved -> {
+                        InvocationCompletionResult.APPROVED.storedName
                     }
-                    is SecretUseCompletion.Denied -> {
-                        SecretUseCompletionResult.DENIED.storedName
+                    is InvocationCompletion.Denied -> {
+                        InvocationCompletionResult.DENIED.storedName
                     }
-                    is SecretUseCompletion.Aborted -> {
-                        SecretUseCompletionResult.ABORTED.storedName
+                    is InvocationCompletion.Aborted -> {
+                        InvocationCompletionResult.ABORTED.storedName
                     }
                     null -> null
                 },
                 completionReason = when (completionResult) {
-                    is SecretUseCompletion.Denied -> completionResult.reason
-                    is SecretUseCompletion.Aborted -> completionResult.reason
+                    is InvocationCompletion.Denied -> completionResult.reason
+                    is InvocationCompletion.Aborted -> completionResult.reason
                     else -> null
                 },
                 completionMessage = when (completionResult) {
-                    is SecretUseCompletion.Denied -> completionResult.message
-                    is SecretUseCompletion.Aborted -> completionResult.message
+                    is InvocationCompletion.Denied -> completionResult.message
+                    is InvocationCompletion.Aborted -> completionResult.message
                     else -> null
                 },
                 error = if (valid) {
@@ -3334,17 +3811,133 @@ internal class RequestRepository(
                 category = if (valid) AuditCategory.SECRET_USE else AuditCategory.VERIFICATION,
                 title = when {
                     !valid -> "Secret use confirmation failed"
-                    completionResult is SecretUseCompletion.Approved -> "Secret use delivered"
-                    completionResult is SecretUseCompletion.Denied -> "Secret use denial confirmed"
+                    completionResult is InvocationCompletion.Approved -> "Secret use delivered"
+                    completionResult is InvocationCompletion.Denied -> "Secret use denial confirmed"
                     else -> "Secret use aborted"
                 },
                 detail = decodeStringList(secretUseRequest.secretsJson).joinToString(),
                 outcome = when {
                     !valid -> AuditOutcome.FAILED
-                    completionResult is SecretUseCompletion.Denied -> AuditOutcome.DENIED
+                    completionResult is InvocationCompletion.Denied -> AuditOutcome.DENIED
                     else -> AuditOutcome.COMPLETED
                 },
                 clientId = secretUseRequest.clientId,
+                relayRequestId = request.relayRequestId,
+            ),
+        )
+        return ProcessedRelayMessage()
+    }
+
+    private suspend fun processGitSignCompletion(
+        activeCredentials: RelayDeviceCredentials,
+        request: InboxRequestEntity,
+        completion: JsonElement,
+    ): ProcessedRelayMessage? {
+        val gitSign = dao.getGitSignRequest(request.id) ?: return null
+        if (
+            gitSign.state == GitSignRequestState.COMPLETED.storedName ||
+            gitSign.state == GitSignRequestState.VERIFICATION_FAILED.storedName
+        ) {
+            return ProcessedRelayMessage()
+        }
+        val invocationId = request.parentRequestId ?: return null
+        val invocation = dao.getSecretUseRequest(invocationId) ?: return null
+        val pairingRequestId = invocation.pairingRequestId ?: return null
+        val pairing = dao.getPairing(pairingRequestId) ?: return null
+        val credentials = credentialsFor(pairing, activeCredentials) ?: return null
+        val clientPsk = decryptRequestPsk(request, pairing) ?: return null
+        val plaintext = runCatching {
+            pairingProtocol.openPairedCompletion(
+                deviceId = pairing.deviceId,
+                requestId = request.relayRequestId,
+                clientId = pairing.clientId,
+                clientPsk = clientPsk,
+                devicePrivateKey = credentials.devicePrivateKey,
+                devicePublicKey = credentials.devicePublicKey,
+                request = json.parseToJsonElement(request.requestJson),
+                completion = completion,
+            )
+        }.getOrNull() ?: return null
+        val decoded = runCatching { gitSignProtocol.decodeCompletion(plaintext) }
+        val completionResult = decoded.getOrNull()
+        val softwareMatches = completionResult?.clientSoftware == decodeClientSoftware(
+            invocation.clientSoftwareJson,
+        )
+        val valid = softwareMatches && when (completionResult) {
+            is GitSignCompletion.Approved -> {
+                gitSign.decision == SecretUseDecision.APPROVED.storedName
+            }
+            is GitSignCompletion.Denied -> {
+                if (gitSign.decision != SecretUseDecision.DENIED.storedName) {
+                    false
+                } else {
+                    completionResult.reason == (
+                        gitSign.completionReason ?: InvocationDenialReason.USER_DENIED.wireName
+                    ) && completionResult.message == (
+                        gitSign.completionMessage ?: GIT_SIGN_DENIAL_MESSAGE
+                    )
+                }
+            }
+            is GitSignCompletion.Aborted -> true
+            null -> false
+        }
+        val now = currentTimeMillis()
+        dao.updateGitSignRequest(
+            request = request.copy(
+                state = InboxRequestState.COMPLETED.storedName,
+                completionJson = completion.toString(),
+                responseAcknowledgedAt = request.responseAcknowledgedAt ?: now,
+                updatedAt = now,
+                completedAt = now,
+            ),
+            gitSignRequest = gitSign.copy(
+                state = if (valid) {
+                    GitSignRequestState.COMPLETED.storedName
+                } else {
+                    GitSignRequestState.VERIFICATION_FAILED.storedName
+                },
+                completionResult = when (completionResult) {
+                    is GitSignCompletion.Approved -> GitSignCompletionResult.APPROVED.storedName
+                    is GitSignCompletion.Denied -> GitSignCompletionResult.DENIED.storedName
+                    is GitSignCompletion.Aborted -> GitSignCompletionResult.ABORTED.storedName
+                    null -> null
+                },
+                completionReason = when (completionResult) {
+                    is GitSignCompletion.Denied -> completionResult.reason
+                    is GitSignCompletion.Aborted -> completionResult.reason
+                    else -> null
+                },
+                completionMessage = when (completionResult) {
+                    is GitSignCompletion.Denied -> completionResult.message
+                    is GitSignCompletion.Aborted -> completionResult.message
+                    else -> null
+                },
+                error = if (valid) {
+                    null
+                } else {
+                    decoded.exceptionOrNull()?.message
+                        ?: "Git signing completion did not match the device decision."
+                },
+                updatedAt = now,
+                completedAt = now,
+            ),
+        )
+        audit.record(
+            AuditRecord(
+                category = if (valid) AuditCategory.GIT_SIGN else AuditCategory.VERIFICATION,
+                title = when {
+                    !valid -> "Git signature confirmation failed"
+                    completionResult is GitSignCompletion.Approved -> "Git signature delivered"
+                    completionResult is GitSignCompletion.Denied -> "Git signature denial confirmed"
+                    else -> "Git signature request aborted"
+                },
+                detail = gitSign.secretName,
+                outcome = when {
+                    !valid -> AuditOutcome.FAILED
+                    completionResult is GitSignCompletion.Denied -> AuditOutcome.DENIED
+                    else -> AuditOutcome.COMPLETED
+                },
+                clientId = invocation.clientId,
                 relayRequestId = request.relayRequestId,
             ),
         )
@@ -3432,6 +4025,12 @@ internal class RequestRepository(
             }
             RequestKind.SECRET_USE.storedName -> {
                 dao.getSecretUseRequest(request.id)?.pairingRequestId?.let { dao.getPairing(it) }
+            }
+            RequestKind.GIT_SIGN.storedName -> {
+                request.parentRequestId
+                    ?.let { dao.getSecretUseRequest(it) }
+                    ?.pairingRequestId
+                    ?.let { dao.getPairing(it) }
             }
             RequestKind.SECRET_LIST.storedName -> {
                 dao.getSecretListRequest(request.id)?.pairingRequestId?.let { dao.getPairing(it) }
@@ -3811,8 +4410,14 @@ internal class RequestRepository(
     private fun String.toSecretUseDecision(): SecretUseDecision =
         checkNotNull(SecretUseDecision.entries.find { it.storedName == this })
 
-    private fun String.toSecretUseCompletionResult(): SecretUseCompletionResult =
-        checkNotNull(SecretUseCompletionResult.entries.find { it.storedName == this })
+    private fun String.toInvocationCompletionResult(): InvocationCompletionResult =
+        checkNotNull(InvocationCompletionResult.entries.find { it.storedName == this })
+
+    private fun String.toGitSignRequestState(): GitSignRequestState =
+        checkNotNull(GitSignRequestState.entries.find { it.storedName == this })
+
+    private fun String.toGitSignCompletionResult(): GitSignCompletionResult =
+        checkNotNull(GitSignCompletionResult.entries.find { it.storedName == this })
 
     private fun String.toSecretListRequestState(): SecretListRequestState =
         checkNotNull(SecretListRequestState.entries.find { it.storedName == this })
@@ -3829,12 +4434,15 @@ internal class RequestRepository(
     private fun decodeUploadSummary(value: String): SecretUploadSummarySnapshot =
         json.decodeFromString(value)
 
-    private fun SecretValues.toResponseSecret(): SecretUseResponseSecret = when (this) {
-        is SecretValues.Environment -> SecretUseResponseSecret.Environment(
+    private fun invocationTokenHash(token: ByteArray): ByteArray =
+        MessageDigest.getInstance("SHA-256").digest(token)
+
+    private fun SecretValues.toResponseSecret(): InvocationResponseSecret = when (this) {
+        is SecretValues.Environment -> InvocationResponseSecret.Environment(
             description,
             environment,
         )
-        is SecretValues.Ssh -> SecretUseResponseSecret.Ssh(description, publicKey)
+        is SecretValues.Ssh -> InvocationResponseSecret.Ssh(description, publicKey)
     }
 
     private fun decodeRuleEvaluation(value: String): ApprovalRuleEvaluation? =
@@ -3849,8 +4457,10 @@ internal class RequestRepository(
         const val CLIENT_PSK_BYTES = 32
         const val IDEMPOTENCY_RETENTION_MILLIS = 25 * 60 * 60 * 1_000L
         const val SECRET_USE_DENIAL_MESSAGE = "Denied on device."
+        const val GIT_SIGN_DENIAL_MESSAGE = "Git signature denied on device."
         const val DECISION_SOURCE_USER = "user"
         const val DECISION_SOURCE_RULE = "rule"
+        const val DECISION_SOURCE_NON_SENSITIVE = "non_sensitive"
         val STRING_LIST_SERIALIZER = ListSerializer(String.serializer())
     }
 }
@@ -3859,6 +4469,7 @@ private enum class RequestKind(val storedName: String) {
     PAIRING("pairing"),
     PAIRING_FINISH("pairing_finish"),
     SECRET_USE("secret_use"),
+    GIT_SIGN("git_sign"),
     SECRET_LIST("secret_list"),
     SECRET_UPLOAD("secret_upload"),
     PAIRING_REMOVE("pairing_remove"),

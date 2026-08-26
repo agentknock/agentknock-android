@@ -277,6 +277,10 @@ internal data class SecretUseRequestEntity(
     val osVersion: String?,
     @ColumnInfo(name = "state")
     val state: String,
+    @ColumnInfo(name = "invocation_token_hash")
+    val invocationTokenHash: ByteArray?,
+    @ColumnInfo(name = "contains_sensitive_material", defaultValue = "1")
+    val containsSensitiveMaterial: Boolean,
     @ColumnInfo(name = "cli_version")
     val clientSoftwareJson: String,
     @ColumnInfo(name = "secrets_json")
@@ -313,6 +317,49 @@ internal data class SecretUseRequestEntity(
     val decisionSource: String?,
     @ColumnInfo(name = "rule_evaluation_json")
     val ruleEvaluationJson: String?,
+    @ColumnInfo(name = "completion_result")
+    val completionResult: String?,
+    @ColumnInfo(name = "completion_reason")
+    val completionReason: String?,
+    @ColumnInfo(name = "completion_message")
+    val completionMessage: String?,
+    @ColumnInfo(name = "error")
+    val error: String?,
+    @ColumnInfo(name = "created_at")
+    val createdAt: Long,
+    @ColumnInfo(name = "updated_at")
+    val updatedAt: Long,
+    @ColumnInfo(name = "decided_at")
+    val decidedAt: Long?,
+    @ColumnInfo(name = "completed_at")
+    val completedAt: Long?,
+)
+
+@Entity(
+    tableName = "git_sign_requests",
+    foreignKeys = [
+        ForeignKey(
+            entity = InboxRequestEntity::class,
+            parentColumns = ["id"],
+            childColumns = ["request_id"],
+            onDelete = ForeignKey.CASCADE,
+            onUpdate = ForeignKey.NO_ACTION,
+        ),
+    ],
+    indices = [Index(value = ["state"])],
+)
+internal data class GitSignRequestEntity(
+    @PrimaryKey
+    @ColumnInfo(name = "request_id")
+    val requestId: Long,
+    @ColumnInfo(name = "state")
+    val state: String,
+    @ColumnInfo(name = "secret_name")
+    val secretName: String,
+    @ColumnInfo(name = "message")
+    val message: ByteArray,
+    @ColumnInfo(name = "decision")
+    val decision: String?,
     @ColumnInfo(name = "completion_result")
     val completionResult: String?,
     @ColumnInfo(name = "completion_reason")
@@ -560,6 +607,9 @@ internal interface RequestDao {
     @Query("SELECT * FROM secret_use_requests ORDER BY request_id DESC")
     fun observeSecretUseRequests(): Flow<List<SecretUseRequestEntity>>
 
+    @Query("SELECT * FROM git_sign_requests ORDER BY request_id DESC")
+    fun observeGitSignRequests(): Flow<List<GitSignRequestEntity>>
+
     @Query("SELECT * FROM secret_list_requests ORDER BY request_id DESC")
     fun observeSecretListRequests(): Flow<List<SecretListRequestEntity>>
 
@@ -574,6 +624,9 @@ internal interface RequestDao {
 
     @Query("SELECT * FROM secret_use_requests WHERE request_id = :requestId")
     fun observeSecretUseRequest(requestId: Long): Flow<SecretUseRequestEntity?>
+
+    @Query("SELECT * FROM git_sign_requests WHERE request_id = :requestId")
+    fun observeGitSignRequest(requestId: Long): Flow<GitSignRequestEntity?>
 
     @Query("SELECT * FROM secret_list_requests WHERE request_id = :requestId")
     fun observeSecretListRequest(requestId: Long): Flow<SecretListRequestEntity?>
@@ -608,6 +661,9 @@ internal interface RequestDao {
 
     @Query("SELECT * FROM secret_use_requests WHERE request_id = :requestId")
     suspend fun getSecretUseRequest(requestId: Long): SecretUseRequestEntity?
+
+    @Query("SELECT * FROM git_sign_requests WHERE request_id = :requestId")
+    suspend fun getGitSignRequest(requestId: Long): GitSignRequestEntity?
 
     @Query("SELECT * FROM secret_list_requests WHERE request_id = :requestId")
     suspend fun getSecretListRequest(requestId: Long): SecretListRequestEntity?
@@ -667,6 +723,9 @@ internal interface RequestDao {
     suspend fun insertSecretUseRequestRow(request: SecretUseRequestEntity)
 
     @Insert
+    suspend fun insertGitSignRequestRow(request: GitSignRequestEntity)
+
+    @Insert
     suspend fun insertSecretListRequestRow(request: SecretListRequestEntity)
 
     @Insert
@@ -694,6 +753,9 @@ internal interface RequestDao {
 
     @Update
     suspend fun updateSecretUseRequestRow(request: SecretUseRequestEntity): Int
+
+    @Update
+    suspend fun updateGitSignRequestRow(request: GitSignRequestEntity): Int
 
     @Update
     suspend fun updateSecretListRequestRow(request: SecretListRequestEntity): Int
@@ -864,6 +926,21 @@ internal interface RequestDao {
     }
 
     @Transaction
+    suspend fun insertGitSignRequest(
+        request: InboxRequestEntity,
+        gitSignRequest: GitSignRequestEntity,
+        requestSecret: RequestSecretEntity,
+        currentPairingSecret: PairingSecretEntity?,
+        previousPairingSecret: PairingSecretEntity?,
+    ): Long {
+        val requestId = insertRequest(request)
+        insertGitSignRequestRow(gitSignRequest.copy(requestId = requestId))
+        storeAcceptedSecrets(requestId, requestSecret, currentPairingSecret, previousPairingSecret)
+        trimCompletedHistory()
+        return requestId
+    }
+
+    @Transaction
     suspend fun insertSecretListRequest(
         request: InboxRequestEntity,
         secretListRequest: SecretListRequestEntity,
@@ -972,6 +1049,16 @@ internal interface RequestDao {
     ) {
         check(updateRequest(request) == 1)
         check(updateSecretUseRequestRow(secretUseRequest) == 1)
+        trimCompletedHistory()
+    }
+
+    @Transaction
+    suspend fun updateGitSignRequest(
+        request: InboxRequestEntity,
+        gitSignRequest: GitSignRequestEntity,
+    ) {
+        check(updateRequest(request) == 1)
+        check(updateGitSignRequestRow(gitSignRequest) == 1)
         trimCompletedHistory()
     }
 

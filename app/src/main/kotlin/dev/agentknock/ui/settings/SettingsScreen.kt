@@ -689,7 +689,7 @@ private fun NotificationsSettings(
                 },
             )
             Text(
-                "Secret use notifications can include Approve once and Deny once actions. Approving requires the device to be unlocked; on older Android versions, Agentknock opens the request for review.",
+                "Secret use and signing notifications can include approval and denial actions. Approving requires the device to be unlocked; on older Android versions, Agentknock opens the request for review.",
             )
             Text(
                 "Android controls notification sounds and how much content is visible on the lock screen.",
