@@ -20,8 +20,14 @@ internal data class SecretUploadRequestMessage(
     val name: String,
     val descriptionProvided: Boolean,
     val description: String?,
-    val variables: Map<String, String>,
+    val contents: SecretUploadContents,
 )
+
+internal sealed interface SecretUploadContents {
+    data class Environment(val variables: Map<String, String>) : SecretUploadContents
+
+    data class Ssh(val privateKey: String?) : SecretUploadContents
+}
 
 internal data class SecretUploadCompletion(
     val clientSoftware: ClientSoftware,
@@ -37,11 +43,14 @@ internal class SecretUploadProtocol(
         val root = json.parseToJsonElement(plaintext.decodeToString()).jsonObject
         require(root.requiredString("method") == METHOD) { "Unexpected request method" }
         val secret = root.getValue("secret").jsonObject
-        require(secret.requiredString("type") == TYPE_ENVIRONMENT) {
-            "Unsupported secret type"
-        }
-        val variables = secret.getValue("variables").jsonObject.mapValues { (_, value) ->
-            value.jsonObject.requiredString("value")
+        val contents = when (secret.requiredString("type")) {
+            TYPE_ENVIRONMENT -> SecretUploadContents.Environment(
+                secret.getValue("variables").jsonObject.mapValues { (_, value) ->
+                    value.jsonObject.requiredString("value")
+                },
+            )
+            TYPE_SSH -> SecretUploadContents.Ssh(secret.optionalString("private_key"))
+            else -> error("Unsupported secret type")
         }
         return SecretUploadRequestMessage(
             clientSoftware = clientSoftware,
@@ -51,7 +60,7 @@ internal class SecretUploadProtocol(
             name = secret.requiredString("name"),
             descriptionProvided = "description" in secret,
             description = secret.optionalString("description"),
-            variables = variables,
+            contents = contents,
         )
     }
 
@@ -98,6 +107,7 @@ internal class SecretUploadProtocol(
         const val RESULT_RECEIVED = "RECEIVED"
         const val RESULT_REJECTED = "REJECTED"
         private const val TYPE_ENVIRONMENT = "environment"
+        private const val TYPE_SSH = "ssh"
     }
 }
 

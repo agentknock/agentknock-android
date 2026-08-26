@@ -59,12 +59,27 @@ class SecretUseProtocolTest {
             json.parseToJsonElement(
                 protocol.approvedResponse(
                     mapOf(
-                        "aws-read-only" to SecretUseResponseSecret(
+                        "aws-read-only" to SecretUseResponseSecret.Environment(
                             description = "",
                             environment = linkedMapOf(
                                 "AWS_REGION" to "eu-west-1",
                                 "TOKEN" to "secret",
                             ),
+                        ),
+                    ),
+                ).decodeToString(),
+            ),
+        )
+        assertEquals(
+            json.parseToJsonElement(
+                """{"result":"APPROVED","secrets":{"production-ssh":{"type":"ssh","public_key":"ssh-ed25519 AAAA example@host"}}}""",
+            ),
+            json.parseToJsonElement(
+                protocol.approvedResponse(
+                    mapOf(
+                        "production-ssh" to SecretUseResponseSecret.Ssh(
+                            description = "",
+                            publicKey = "ssh-ed25519 AAAA example@host",
                         ),
                     ),
                 ).decodeToString(),

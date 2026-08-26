@@ -85,6 +85,50 @@ internal data class EnvironmentVariableEntity(
     val valueUpdatedAt: Long,
 )
 
+@Entity(
+    tableName = "ssh_keys",
+    foreignKeys = [
+        ForeignKey(
+            entity = SecretEntity::class,
+            parentColumns = ["id"],
+            childColumns = ["secret_id"],
+            onDelete = ForeignKey.CASCADE,
+            onUpdate = ForeignKey.NO_ACTION,
+        ),
+        ForeignKey(
+            entity = VaultKeyEntity::class,
+            parentColumns = ["id"],
+            childColumns = ["encryption_key_id"],
+            onDelete = ForeignKey.RESTRICT,
+            onUpdate = ForeignKey.NO_ACTION,
+        ),
+    ],
+    indices = [Index(value = ["encryption_key_id"])],
+)
+internal data class SshKeyEntity(
+    @PrimaryKey
+    @ColumnInfo(name = "secret_id")
+    val secretId: String,
+    @ColumnInfo(name = "algorithm")
+    val algorithm: String,
+    @ColumnInfo(name = "public_key")
+    val publicKey: ByteArray,
+    @ColumnInfo(name = "comment")
+    val comment: String,
+    @ColumnInfo(name = "private_key_format")
+    val privateKeyFormat: String,
+    @ColumnInfo(name = "encryption_format")
+    val encryptionFormat: Int,
+    @ColumnInfo(name = "encryption_key_id")
+    val encryptionKeyId: String,
+    @ColumnInfo(name = "nonce")
+    val nonce: ByteArray,
+    @ColumnInfo(name = "ciphertext")
+    val ciphertext: ByteArray,
+    @ColumnInfo(name = "material_updated_at")
+    val materialUpdatedAt: Long,
+)
+
 internal data class SecretSummaryRow(
     @ColumnInfo(name = "id")
     val id: String,
@@ -100,6 +144,16 @@ internal data class SecretSummaryRow(
     val updatedAt: Long,
     @ColumnInfo(name = "environment_variable_count")
     val environmentVariableCount: Int,
+    @ColumnInfo(name = "ssh_algorithm")
+    val sshAlgorithm: String? = null,
+    @ColumnInfo(name = "ssh_public_key")
+    val sshPublicKey: ByteArray? = null,
+    @ColumnInfo(name = "ssh_comment")
+    val sshComment: String? = null,
+    @ColumnInfo(name = "ssh_encryption_key_id")
+    val sshEncryptionKeyId: String? = null,
+    @ColumnInfo(name = "ssh_material_updated_at")
+    val sshMaterialUpdatedAt: Long? = null,
 )
 
 internal data class EnvironmentVariableMetadataRow(
@@ -123,6 +177,21 @@ internal data class EnvironmentVariableMetadataRow(
     val valueUpdatedAt: Long,
 )
 
+internal data class SshKeyMetadataRow(
+    @ColumnInfo(name = "secret_id")
+    val secretId: String,
+    @ColumnInfo(name = "algorithm")
+    val algorithm: String,
+    @ColumnInfo(name = "public_key")
+    val publicKey: ByteArray,
+    @ColumnInfo(name = "comment")
+    val comment: String,
+    @ColumnInfo(name = "encryption_key_id")
+    val encryptionKeyId: String,
+    @ColumnInfo(name = "material_updated_at")
+    val materialUpdatedAt: Long,
+)
+
 @Dao
 internal interface SecretDao {
     @Query(
@@ -133,9 +202,15 @@ internal interface SecretDao {
                secrets.type,
                secrets.created_at,
                secrets.updated_at,
-               count(environment_variables.id) AS environment_variable_count
+               count(environment_variables.id) AS environment_variable_count,
+               ssh_keys.algorithm AS ssh_algorithm,
+               ssh_keys.public_key AS ssh_public_key,
+               ssh_keys.comment AS ssh_comment,
+               ssh_keys.encryption_key_id AS ssh_encryption_key_id,
+               ssh_keys.material_updated_at AS ssh_material_updated_at
         FROM secrets
         LEFT JOIN environment_variables ON environment_variables.secret_id = secrets.id
+        LEFT JOIN ssh_keys ON ssh_keys.secret_id = secrets.id
         GROUP BY secrets.id
         ORDER BY secrets.name COLLATE NOCASE, secrets.id
         """,
@@ -165,11 +240,28 @@ internal interface SecretDao {
         secretId: String,
     ): Flow<List<EnvironmentVariableMetadataRow>>
 
+    @Query(
+        """
+        SELECT secret_id,
+               algorithm,
+               public_key,
+               comment,
+               encryption_key_id,
+               material_updated_at
+        FROM ssh_keys
+        WHERE secret_id = :secretId
+        """,
+    )
+    fun observeSshKey(secretId: String): Flow<SshKeyMetadataRow?>
+
     @Query("SELECT * FROM secrets WHERE id = :id")
     suspend fun getSecret(id: String): SecretEntity?
 
     @Query("SELECT * FROM environment_variables WHERE id = :id")
     suspend fun getEnvironmentVariable(id: String): EnvironmentVariableEntity?
+
+    @Query("SELECT * FROM ssh_keys WHERE secret_id = :secretId")
+    suspend fun getSshKey(secretId: String): SshKeyEntity?
 
     @Query("SELECT * FROM secrets ORDER BY name COLLATE NOCASE, id")
     suspend fun getSecrets(): List<SecretEntity>
@@ -184,6 +276,9 @@ internal interface SecretDao {
     suspend fun getEnvironmentVariablesForSecrets(
         secretIds: List<String>,
     ): List<EnvironmentVariableEntity>
+
+    @Query("SELECT * FROM ssh_keys WHERE secret_id IN (:secretIds)")
+    suspend fun getSshKeysForSecrets(secretIds: List<String>): List<SshKeyEntity>
 
     @Query("SELECT EXISTS(SELECT 1 FROM secrets WHERE name = :name AND id != :excludingId)")
     suspend fun secretNameInUse(name: String, excludingId: String): Boolean
@@ -220,6 +315,12 @@ internal interface SecretDao {
 
     @Delete
     suspend fun deleteEnvironmentVariableRow(variable: EnvironmentVariableEntity)
+
+    @Insert
+    suspend fun insertSshKeyRow(key: SshKeyEntity)
+
+    @Update
+    suspend fun updateSshKeyRow(key: SshKeyEntity): Int
 
     @Query("UPDATE secrets SET updated_at = :updatedAt WHERE id = :secretId")
     suspend fun touchSecret(secretId: String, updatedAt: Long)
@@ -279,5 +380,32 @@ internal interface SecretDao {
                 check(updateEnvironmentVariableRow(variable) == 1)
             }
         }
+    }
+
+    @Transaction
+    suspend fun insertSshSecret(secret: SecretEntity, key: SshKeyEntity) {
+        insertSecret(secret)
+        insertSshKeyRow(key)
+    }
+
+    @Transaction
+    suspend fun applySshSecret(secret: SecretEntity, key: SshKeyEntity) {
+        if (getSecret(secret.id) == null) {
+            insertSecret(secret)
+            insertSshKeyRow(key)
+        } else {
+            check(updateSecret(secret) == 1)
+            if (getSshKey(secret.id) == null) {
+                insertSshKeyRow(key)
+            } else {
+                check(updateSshKeyRow(key) == 1)
+            }
+        }
+    }
+
+    @Transaction
+    suspend fun updateSshKey(key: SshKeyEntity, secretUpdatedAt: Long) {
+        check(updateSshKeyRow(key) == 1)
+        touchSecret(key.secretId, secretUpdatedAt)
     }
 }

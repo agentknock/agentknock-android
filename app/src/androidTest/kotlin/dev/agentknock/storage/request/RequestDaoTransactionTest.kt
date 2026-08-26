@@ -236,11 +236,7 @@ class RequestDaoTransactionTest {
                 descriptionProvided = false,
                 description = null,
                 secretType = "environment",
-                variableNamesJson = "[\"TOKEN\"]",
-                addedVariablesJson = "[\"TOKEN\"]",
-                changedVariablesJson = "[]",
-                unchangedVariablesJson = "[]",
-                removedVariablesJson = "[]",
+                summaryJson = "{\"type\":\"environment\",\"variableNames\":[\"TOKEN\"]}",
                 error = null,
                 transportResult = "RECEIVED",
                 transportMessage = null,
@@ -249,8 +245,8 @@ class RequestDaoTransactionTest {
                 decidedAt = null,
                 transportCompletedAt = null,
             ),
-            variables = listOf(
-                SecretUploadVariableEntity(
+            environmentVariables = listOf(
+                SecretUploadEnvironmentVariableEntity(
                     id = "upload-variable",
                     requestId = 0,
                     name = "TOKEN",
@@ -262,11 +258,12 @@ class RequestDaoTransactionTest {
                     createdAt = 1,
                 ),
             ),
+            sshKey = null,
             requestSecret = requestSecret(),
             currentPairingSecret = null,
             previousPairingSecret = null,
         )
-        assertEquals(1, dao.getSecretUploadVariables(requestId).size)
+        assertEquals(1, dao.getSecretUploadEnvironmentVariables(requestId).size)
 
         val request = checkNotNull(dao.getRequestById(requestId))
         val upload = checkNotNull(dao.getSecretUploadRequest(requestId))
@@ -276,10 +273,10 @@ class RequestDaoTransactionTest {
             discardUploadedValues = true,
         )
 
-        assertTrue(dao.getSecretUploadVariables(requestId).isEmpty())
+        assertTrue(dao.getSecretUploadEnvironmentVariables(requestId).isEmpty())
         assertEquals(
-            "[\"TOKEN\"]",
-            dao.getSecretUploadRequest(requestId)?.variableNamesJson,
+            "{\"type\":\"environment\",\"variableNames\":[\"TOKEN\"]}",
+            dao.getSecretUploadRequest(requestId)?.summaryJson,
         )
     }
 

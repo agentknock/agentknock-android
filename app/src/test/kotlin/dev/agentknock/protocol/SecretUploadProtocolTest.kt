@@ -37,9 +37,10 @@ class SecretUploadProtocolTest {
         assertEquals("aws-read-only", request.name)
         assertTrue(request.descriptionProvided)
         assertEquals("Production read access", request.description)
+        val contents = request.contents as SecretUploadContents.Environment
         assertEquals(
             mapOf("AWS_REGION" to "eu-north-1", "AWS_TOKEN" to "secret"),
-            request.variables,
+            contents.variables,
         )
     }
 
@@ -58,6 +59,29 @@ class SecretUploadProtocolTest {
 
         assertFalse(request.descriptionProvided)
         assertNull(request.description)
+    }
+
+    @Test
+    fun `decodes an SSH private key upload without treating it as environment data`() {
+        val request = protocol.decodeRequest(
+            """
+            {
+              ${testClientSoftwareFields("0.2.0", "0.1.0")},
+              "method":"SecretUpload",
+              "mode":"CREATE",
+              "secret":{
+                "name":"production-ssh",
+                "type":"ssh",
+                "private_key":"-----BEGIN OPENSSH PRIVATE KEY-----\nexample\n-----END OPENSSH PRIVATE KEY-----"
+              }
+            }
+            """.trimIndent().encodeToByteArray(),
+        )
+
+        assertEquals(
+            "-----BEGIN OPENSSH PRIVATE KEY-----\nexample\n-----END OPENSSH PRIVATE KEY-----",
+            (request.contents as SecretUploadContents.Ssh).privateKey,
+        )
     }
 
     @Test

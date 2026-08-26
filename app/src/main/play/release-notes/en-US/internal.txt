@@ -1,1 +1,1 @@
-Requests now focuses on secret use. Pairing reviews live in Clients, secret uploads live in Secrets, and notifications open the relevant screen.
+Add Ed25519 SSH key secrets: generate or import keys, review uploads, copy public keys, and provide public keys to approved requests.

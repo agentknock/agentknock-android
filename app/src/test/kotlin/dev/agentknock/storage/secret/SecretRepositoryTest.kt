@@ -20,6 +20,97 @@ import org.junit.Test
 
 class SecretRepositoryTest {
     @Test
+    fun `stores an SSH private key encrypted and returns only its public key`() = runTest {
+        val fixture = Fixture()
+        val key = fixture.repository.generateSshKey("test@example")
+        val created = fixture.repository.createSshSecret(
+            name = "production-ssh",
+            description = "Production host access",
+            privateKey = key,
+        )
+        check(created is CreateSecretResult.Created)
+
+        val stored = fixture.dao.sshKeys.value.single()
+        assertFalse(stored.ciphertext.contentEquals(key.privateKey))
+        assertEquals(key.publicKey.toList(), stored.publicKey.toList())
+
+        val details = checkNotNull(fixture.repository.observeSecret(created.id).first())
+        assertEquals(SSH_SECRET_TYPE, details.type)
+        assertEquals(key.publicKeyLine, details.sshKey?.publicKey)
+        assertEquals(key.fingerprint, details.sshKey?.fingerprint)
+
+        val requested = fixture.repository.requestedSecrets(listOf("production-ssh"))
+        check(requested is RequestedSecretsResult.Available)
+        assertEquals(
+            SecretValues.Ssh("Production host access", key.publicKeyLine),
+            requested.secrets.getValue("production-ssh"),
+        )
+        assertEquals(
+            SecretMetadata(
+                name = "production-ssh",
+                description = "Production host access",
+                type = SSH_SECRET_TYPE,
+                sshPublicKey = key.publicKeyLine,
+            ),
+            fixture.repository.listSecretsForClient().single(),
+        )
+    }
+
+    @Test
+    fun `SSH uploads create and replace one stable secret identity`() = runTest {
+        val fixture = Fixture()
+        val firstKey = fixture.repository.generateSshKey("first@example")
+        val create = SshSecretUpload(
+            mode = SecretUploadMode.CREATE,
+            name = "client-suggested-name",
+            descriptionProvided = true,
+            description = "Production host access",
+            privateKey = firstKey,
+        )
+        check(fixture.repository.describeSshSecretUpload(create) is SshSecretUploadResult.Valid)
+        val created = fixture.repository.applySshSecretUpload(create, "production-ssh")
+        check(created is ApplySshSecretUploadResult.Applied)
+
+        val before = fixture.dao.sshKeys.value.single()
+        val secondKey = fixture.repository.generateSshKey("second@example")
+        val replace = fixture.repository.applySshSecretUpload(
+            SshSecretUpload(
+                mode = SecretUploadMode.REPLACE,
+                name = "production-ssh",
+                descriptionProvided = false,
+                description = null,
+                privateKey = secondKey,
+            ),
+            approvedName = "ignored-for-existing-secret",
+        )
+        check(replace is ApplySshSecretUploadResult.Applied)
+
+        assertEquals(created.secretId, replace.secretId)
+        assertEquals(created.secretId, fixture.dao.secrets.value.single().id)
+        assertFalse(before.publicKey.contentEquals(fixture.dao.sshKeys.value.single().publicKey))
+        assertEquals(secondKey.publicKeyLine, fixture.repository.listSecretsForClient().single().sshPublicKey)
+    }
+
+    @Test
+    fun `a request may combine environment secrets with one SSH key but not two`() = runTest {
+        val fixture = Fixture()
+        fixture.createSecret("environment")
+        repeat(2) { index ->
+            val key = fixture.repository.generateSshKey("key-$index@example")
+            fixture.repository.createSshSecret("ssh-$index", "", key)
+        }
+
+        assertTrue(
+            fixture.repository.requestedSecrets(listOf("environment", "ssh-0"))
+                is RequestedSecretsResult.Available,
+        )
+        assertEquals(
+            RequestedSecretsResult.MultipleSshKeys,
+            fixture.repository.requestedSecrets(listOf("ssh-0", "ssh-1")),
+        )
+    }
+
+    @Test
     fun `stores one encrypted row for each secret environment variable`() = runTest {
         val fixture = Fixture()
         val secretId = fixture.createSecret("aws-read-only")
@@ -182,11 +273,14 @@ class SecretRepositoryTest {
         check(result is RequestedSecretsResult.Available)
         assertEquals(
             mapOf(
-                "first" to SecretValues(
+                "first" to SecretValues.Environment(
                     "",
                     mapOf("FIRST_REGION" to "eu-west-1", "SHARED_TOKEN" to "same-value"),
                 ),
-                "second" to SecretValues("", mapOf("SHARED_TOKEN" to "same-value")),
+                "second" to SecretValues.Environment(
+                    "",
+                    mapOf("SHARED_TOKEN" to "same-value"),
+                ),
             ),
             result.secrets,
         )
@@ -346,7 +440,7 @@ class SecretRepositoryTest {
         )
 
         suspend fun createSecret(name: String): String {
-            val result = repository.createSecret(name, "")
+            val result = repository.createEnvironmentSecret(name, "")
             check(result is CreateSecretResult.Created)
             return result.id
         }
@@ -375,6 +469,7 @@ class SecretRepositoryTest {
 private class FakeSecretDao : SecretDao {
     val secrets = MutableStateFlow<List<SecretEntity>>(emptyList())
     val variables = MutableStateFlow<List<EnvironmentVariableEntity>>(emptyList())
+    val sshKeys = MutableStateFlow<List<SshKeyEntity>>(emptyList())
 
     override fun observeSecrets(): Flow<List<SecretSummaryRow>> = combine(
         secrets,
@@ -399,6 +494,20 @@ private class FakeSecretDao : SecretDao {
 
     override fun observeSecret(id: String): Flow<SecretEntity?> =
         secrets.map { all -> all.find { it.id == id } }
+
+    override fun observeSshKey(secretId: String): Flow<SshKeyMetadataRow?> =
+        sshKeys.map { all ->
+            all.find { it.secretId == secretId }?.let { key ->
+                SshKeyMetadataRow(
+                    secretId = key.secretId,
+                    algorithm = key.algorithm,
+                    publicKey = key.publicKey,
+                    comment = key.comment,
+                    encryptionKeyId = key.encryptionKeyId,
+                    materialUpdatedAt = key.materialUpdatedAt,
+                )
+            }
+        }
 
     override fun observeEnvironmentVariables(
         secretId: String,
@@ -425,6 +534,9 @@ private class FakeSecretDao : SecretDao {
     override suspend fun getEnvironmentVariable(id: String): EnvironmentVariableEntity? =
         variables.value.find { it.id == id }
 
+    override suspend fun getSshKey(secretId: String): SshKeyEntity? =
+        sshKeys.value.find { it.secretId == secretId }
+
     override suspend fun getSecrets(): List<SecretEntity> = secrets.value
         .sortedWith(compareBy(String.CASE_INSENSITIVE_ORDER, SecretEntity::name))
 
@@ -440,6 +552,9 @@ private class FakeSecretDao : SecretDao {
     override suspend fun getEnvironmentVariablesForSecrets(
         secretIds: List<String>,
     ): List<EnvironmentVariableEntity> = variables.value.filter { it.secretId in secretIds }
+
+    override suspend fun getSshKeysForSecrets(secretIds: List<String>): List<SshKeyEntity> =
+        sshKeys.value.filter { it.secretId in secretIds }
 
     override suspend fun secretNameInUse(name: String, excludingId: String): Boolean =
         secrets.value.any { it.name == name && it.id != excludingId }
@@ -466,6 +581,18 @@ private class FakeSecretDao : SecretDao {
     override suspend fun deleteSecret(secret: SecretEntity) {
         secrets.value = secrets.value.filterNot { it.id == secret.id }
         variables.value = variables.value.filterNot { it.secretId == secret.id }
+        sshKeys.value = sshKeys.value.filterNot { it.secretId == secret.id }
+    }
+
+    override suspend fun insertSshKeyRow(key: SshKeyEntity) {
+        check(sshKeys.value.none { it.secretId == key.secretId })
+        sshKeys.value += key
+    }
+
+    override suspend fun updateSshKeyRow(key: SshKeyEntity): Int {
+        if (sshKeys.value.none { it.secretId == key.secretId }) return 0
+        sshKeys.value = sshKeys.value.map { if (it.secretId == key.secretId) key else it }
+        return 1
     }
 
     override suspend fun insertEnvironmentVariableRow(variable: EnvironmentVariableEntity) {

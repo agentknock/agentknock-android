@@ -439,16 +439,8 @@ internal data class SecretUploadRequestEntity(
     val description: String?,
     @ColumnInfo(name = "secret_type")
     val secretType: String,
-    @ColumnInfo(name = "variable_names_json")
-    val variableNamesJson: String,
-    @ColumnInfo(name = "added_variables_json")
-    val addedVariablesJson: String,
-    @ColumnInfo(name = "changed_variables_json")
-    val changedVariablesJson: String,
-    @ColumnInfo(name = "unchanged_variables_json")
-    val unchangedVariablesJson: String,
-    @ColumnInfo(name = "removed_variables_json")
-    val removedVariablesJson: String,
+    @ColumnInfo(name = "summary_json")
+    val summaryJson: String,
     @ColumnInfo(name = "error")
     val error: String?,
     @ColumnInfo(name = "transport_result")
@@ -466,7 +458,7 @@ internal data class SecretUploadRequestEntity(
 )
 
 @Entity(
-    tableName = "secret_upload_variables",
+    tableName = "secret_upload_environment_variables",
     foreignKeys = [
         ForeignKey(
             entity = SecretUploadRequestEntity::class,
@@ -488,7 +480,7 @@ internal data class SecretUploadRequestEntity(
         Index(value = ["encryption_key_id"]),
     ],
 )
-internal data class SecretUploadVariableEntity(
+internal data class SecretUploadEnvironmentVariableEntity(
     @PrimaryKey
     @ColumnInfo(name = "id")
     val id: String,
@@ -498,6 +490,50 @@ internal data class SecretUploadVariableEntity(
     val name: String,
     @ColumnInfo(name = "sensitive")
     val sensitive: Boolean,
+    @ColumnInfo(name = "encryption_format")
+    val encryptionFormat: Int,
+    @ColumnInfo(name = "encryption_key_id")
+    val encryptionKeyId: String,
+    @ColumnInfo(name = "nonce")
+    val nonce: ByteArray,
+    @ColumnInfo(name = "ciphertext")
+    val ciphertext: ByteArray,
+    @ColumnInfo(name = "created_at")
+    val createdAt: Long,
+)
+
+@Entity(
+    tableName = "secret_upload_ssh_keys",
+    foreignKeys = [
+        ForeignKey(
+            entity = SecretUploadRequestEntity::class,
+            parentColumns = ["request_id"],
+            childColumns = ["request_id"],
+            onDelete = ForeignKey.CASCADE,
+            onUpdate = ForeignKey.NO_ACTION,
+        ),
+        ForeignKey(
+            entity = VaultKeyEntity::class,
+            parentColumns = ["id"],
+            childColumns = ["encryption_key_id"],
+            onDelete = ForeignKey.RESTRICT,
+            onUpdate = ForeignKey.NO_ACTION,
+        ),
+    ],
+    indices = [Index(value = ["encryption_key_id"])],
+)
+internal data class SecretUploadSshKeyEntity(
+    @PrimaryKey
+    @ColumnInfo(name = "request_id")
+    val requestId: Long,
+    @ColumnInfo(name = "algorithm")
+    val algorithm: String,
+    @ColumnInfo(name = "public_key")
+    val publicKey: ByteArray,
+    @ColumnInfo(name = "comment")
+    val comment: String,
+    @ColumnInfo(name = "private_key_format")
+    val privateKeyFormat: String,
     @ColumnInfo(name = "encryption_format")
     val encryptionFormat: Int,
     @ColumnInfo(name = "encryption_key_id")
@@ -545,8 +581,15 @@ internal interface RequestDao {
     @Query("SELECT * FROM secret_upload_requests WHERE request_id = :requestId")
     fun observeSecretUploadRequest(requestId: Long): Flow<SecretUploadRequestEntity?>
 
-    @Query("SELECT * FROM secret_upload_variables WHERE request_id = :requestId ORDER BY name")
-    fun observeSecretUploadVariables(requestId: Long): Flow<List<SecretUploadVariableEntity>>
+    @Query(
+        "SELECT * FROM secret_upload_environment_variables WHERE request_id = :requestId ORDER BY name",
+    )
+    fun observeSecretUploadEnvironmentVariables(
+        requestId: Long,
+    ): Flow<List<SecretUploadEnvironmentVariableEntity>>
+
+    @Query("SELECT * FROM secret_upload_ssh_keys WHERE request_id = :requestId")
+    fun observeSecretUploadSshKey(requestId: Long): Flow<SecretUploadSshKeyEntity?>
 
     @Query("SELECT * FROM pairings WHERE client_id = :clientId")
     fun observePairingByClientId(clientId: String): Flow<PairingEntity?>
@@ -572,8 +615,15 @@ internal interface RequestDao {
     @Query("SELECT * FROM secret_upload_requests WHERE request_id = :requestId")
     suspend fun getSecretUploadRequest(requestId: Long): SecretUploadRequestEntity?
 
-    @Query("SELECT * FROM secret_upload_variables WHERE request_id = :requestId ORDER BY name")
-    suspend fun getSecretUploadVariables(requestId: Long): List<SecretUploadVariableEntity>
+    @Query(
+        "SELECT * FROM secret_upload_environment_variables WHERE request_id = :requestId ORDER BY name",
+    )
+    suspend fun getSecretUploadEnvironmentVariables(
+        requestId: Long,
+    ): List<SecretUploadEnvironmentVariableEntity>
+
+    @Query("SELECT * FROM secret_upload_ssh_keys WHERE request_id = :requestId")
+    suspend fun getSecretUploadSshKey(requestId: Long): SecretUploadSshKeyEntity?
 
     @Query("SELECT * FROM pairings ORDER BY request_id")
     suspend fun getPairings(): List<PairingEntity>
@@ -623,7 +673,12 @@ internal interface RequestDao {
     suspend fun insertSecretUploadRequestRow(request: SecretUploadRequestEntity)
 
     @Insert
-    suspend fun insertSecretUploadVariables(variables: List<SecretUploadVariableEntity>)
+    suspend fun insertSecretUploadEnvironmentVariables(
+        variables: List<SecretUploadEnvironmentVariableEntity>,
+    )
+
+    @Insert
+    suspend fun insertSecretUploadSshKey(key: SecretUploadSshKeyEntity)
 
     @Upsert
     suspend fun upsertPairingSecret(secret: PairingSecretEntity)
@@ -647,7 +702,9 @@ internal interface RequestDao {
     suspend fun updateSecretUploadRequestRow(request: SecretUploadRequestEntity): Int
 
     @Update
-    suspend fun updateSecretUploadVariable(variable: SecretUploadVariableEntity): Int
+    suspend fun updateSecretUploadEnvironmentVariable(
+        variable: SecretUploadEnvironmentVariableEntity,
+    ): Int
 
     @Query("DELETE FROM pairing_secrets WHERE pairing_request_id = :pairingRequestId AND kind = :kind")
     suspend fun deletePairingSecret(pairingRequestId: Long, kind: String): Int
@@ -655,18 +712,35 @@ internal interface RequestDao {
     @Query("DELETE FROM pairing_secrets WHERE pairing_request_id = :pairingRequestId")
     suspend fun deletePairingSecrets(pairingRequestId: Long): Int
 
-    @Query("DELETE FROM secret_upload_variables WHERE request_id = :requestId")
-    suspend fun deleteSecretUploadVariables(requestId: Long): Int
+    @Query("DELETE FROM secret_upload_environment_variables WHERE request_id = :requestId")
+    suspend fun deleteSecretUploadEnvironmentVariables(requestId: Long): Int
+
+    @Query("DELETE FROM secret_upload_ssh_keys WHERE request_id = :requestId")
+    suspend fun deleteSecretUploadSshKey(requestId: Long): Int
 
     @Query(
         """
-        DELETE FROM secret_upload_variables
+        DELETE FROM secret_upload_environment_variables
         WHERE request_id IN (
             SELECT request_id FROM secret_upload_requests WHERE state != 'review_pending'
         )
         """,
     )
-    suspend fun discardDecidedSecretUploadValues(): Int
+    suspend fun discardDecidedSecretUploadEnvironmentValues(): Int
+
+    @Query(
+        """
+        DELETE FROM secret_upload_ssh_keys
+        WHERE request_id IN (
+            SELECT request_id FROM secret_upload_requests WHERE state != 'review_pending'
+        )
+        """,
+    )
+    suspend fun discardDecidedSecretUploadSshKeys(): Int
+
+    @Transaction
+    suspend fun discardDecidedSecretUploadValues(): Int =
+        discardDecidedSecretUploadEnvironmentValues() + discardDecidedSecretUploadSshKeys()
 
     @Transaction
     suspend fun revokePairing(pairing: PairingEntity) {
@@ -808,16 +882,20 @@ internal interface RequestDao {
     suspend fun insertSecretUploadRequest(
         request: InboxRequestEntity,
         secretUpload: SecretUploadRequestEntity,
-        variables: List<SecretUploadVariableEntity>,
+        environmentVariables: List<SecretUploadEnvironmentVariableEntity>,
+        sshKey: SecretUploadSshKeyEntity?,
         requestSecret: RequestSecretEntity,
         currentPairingSecret: PairingSecretEntity?,
         previousPairingSecret: PairingSecretEntity?,
     ): Long {
         val requestId = insertRequest(request)
         insertSecretUploadRequestRow(secretUpload.copy(requestId = requestId))
-        if (variables.isNotEmpty()) {
-            insertSecretUploadVariables(variables.map { it.copy(requestId = requestId) })
+        if (environmentVariables.isNotEmpty()) {
+            insertSecretUploadEnvironmentVariables(
+                environmentVariables.map { it.copy(requestId = requestId) },
+            )
         }
+        sshKey?.let { insertSecretUploadSshKey(it.copy(requestId = requestId)) }
         storeAcceptedSecrets(requestId, requestSecret, currentPairingSecret, previousPairingSecret)
         trimCompletedHistory()
         return requestId
@@ -915,7 +993,10 @@ internal interface RequestDao {
     ) {
         check(updateRequest(request) == 1)
         check(updateSecretUploadRequestRow(secretUpload) == 1)
-        if (discardUploadedValues) deleteSecretUploadVariables(request.id)
+        if (discardUploadedValues) {
+            deleteSecretUploadEnvironmentVariables(request.id)
+            deleteSecretUploadSshKey(request.id)
+        }
         trimCompletedHistory()
     }
 

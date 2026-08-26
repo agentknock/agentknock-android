@@ -11,13 +11,15 @@ import dev.agentknock.storage.crypto.VaultKeyEntity
 import dev.agentknock.storage.secret.EnvironmentVariableEntity
 import dev.agentknock.storage.secret.SecretDao
 import dev.agentknock.storage.secret.SecretEntity
+import dev.agentknock.storage.secret.SshKeyEntity
 import dev.agentknock.storage.request.InboxRequestEntity
 import dev.agentknock.storage.request.SecretUseRequestEntity
 import dev.agentknock.storage.request.PairingEntity
 import dev.agentknock.storage.request.PairingSecretEntity
 import dev.agentknock.storage.request.SecretListRequestEntity
 import dev.agentknock.storage.request.SecretUploadRequestEntity
-import dev.agentknock.storage.request.SecretUploadVariableEntity
+import dev.agentknock.storage.request.SecretUploadEnvironmentVariableEntity
+import dev.agentknock.storage.request.SecretUploadSshKeyEntity
 import dev.agentknock.storage.request.RequestDao
 import dev.agentknock.storage.request.RequestSecretEntity
 import dev.agentknock.storage.rule.ApprovalRuleDao
@@ -31,6 +33,7 @@ import dev.agentknock.storage.vault.VaultSecretEntity
         VaultKeyEntity::class,
         SecretEntity::class,
         EnvironmentVariableEntity::class,
+        SshKeyEntity::class,
         DeviceIdentityEntity::class,
         VaultSecretEntity::class,
         InboxRequestEntity::class,
@@ -40,11 +43,12 @@ import dev.agentknock.storage.vault.VaultSecretEntity
         SecretUseRequestEntity::class,
         SecretListRequestEntity::class,
         SecretUploadRequestEntity::class,
-        SecretUploadVariableEntity::class,
+        SecretUploadEnvironmentVariableEntity::class,
+        SecretUploadSshKeyEntity::class,
         AuditEventEntity::class,
         ApprovalRuleEntity::class,
     ],
-    version = 6,
+    version = 7,
     exportSchema = true,
 )
 internal abstract class AgentknockDatabase : RoomDatabase() {
@@ -66,6 +70,7 @@ internal abstract class AgentknockDatabase : RoomDatabase() {
         fun create(context: Context): AgentknockDatabase =
             Room.databaseBuilder(context, AgentknockDatabase::class.java, NAME)
                 .setJournalMode(JournalMode.WRITE_AHEAD_LOGGING)
+                .addMigrations(MIGRATION_6_7)
                 .build()
     }
 }

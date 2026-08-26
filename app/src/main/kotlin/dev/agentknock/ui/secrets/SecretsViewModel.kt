@@ -14,6 +14,8 @@ import dev.agentknock.storage.secret.EnvironmentVariableMetadata
 import dev.agentknock.storage.secret.EnvironmentVariableValue
 import dev.agentknock.storage.secret.SecretDetails
 import dev.agentknock.storage.secret.SecretSummary
+import dev.agentknock.storage.secret.SshPrivateKey
+import dev.agentknock.storage.secret.SaveSshSecretResult
 import dev.agentknock.storage.secret.SaveEnvironmentVariableResult
 import dev.agentknock.storage.secret.SaveSecretResult
 import dev.agentknock.ui.pendingSecretUploads
@@ -36,11 +38,13 @@ internal class SecretsViewModel(application: Application) : AndroidViewModel(app
     private val selectedUploadRequestId = MutableStateFlow<Long?>(null)
     private val secretEditorState = MutableStateFlow<SecretEditorState?>(null)
     private val variableEditorState = MutableStateFlow<VariableEditorState?>(null)
+    private val sshKeyEditorState = MutableStateFlow<SshKeyEditorState?>(null)
 
     val selection: StateFlow<String?> = selectedSecretId.asStateFlow()
     val uploadSelection: StateFlow<Long?> = selectedUploadRequestId.asStateFlow()
     val secretEditor: StateFlow<SecretEditorState?> = secretEditorState.asStateFlow()
     val variableEditor: StateFlow<VariableEditorState?> = variableEditorState.asStateFlow()
+    val sshKeyEditor: StateFlow<SshKeyEditorState?> = sshKeyEditorState.asStateFlow()
 
     val secrets: StateFlow<List<SecretSummary>> = repository.observeSecrets().stateIn(
         scope = viewModelScope,
@@ -92,6 +96,7 @@ internal class SecretsViewModel(application: Application) : AndroidViewModel(app
             secret = null,
             name = "",
             description = "",
+            type = dev.agentknock.storage.secret.ENVIRONMENT_SECRET_TYPE,
         )
     }
 
@@ -100,11 +105,30 @@ internal class SecretsViewModel(application: Application) : AndroidViewModel(app
             secret = secret,
             name = secret.name,
             description = secret.description,
+            type = secret.type,
         )
     }
 
     fun updateSecretEditor(state: SecretEditorState?) {
         secretEditorState.value = state
+    }
+
+    fun startReplacingSshKey(secret: SecretDetails) {
+        val key = checkNotNull(secret.sshKey)
+        sshKeyEditorState.value = SshKeyEditorState(
+            secretId = secret.id,
+            secretName = secret.name,
+            currentKey = key,
+            inputMode = SshKeyInputMode.GENERATE,
+            privateKeyText = "",
+            comment = key.comment,
+            preparedKey = null,
+            error = null,
+        )
+    }
+
+    fun updateSshKeyEditor(state: SshKeyEditorState?) {
+        sshKeyEditorState.value = state
     }
 
     fun startNewEnvironmentVariable(secretId: String) {
@@ -141,7 +165,25 @@ internal class SecretsViewModel(application: Application) : AndroidViewModel(app
     }
 
     suspend fun createSecret(name: String, description: String): CreateSecretResult =
-        repository.createSecret(name, description)
+        repository.createEnvironmentSecret(name, description)
+
+    suspend fun createSshSecret(
+        name: String,
+        description: String,
+        privateKey: SshPrivateKey,
+    ): CreateSecretResult = repository.createSshSecret(name, description, privateKey)
+
+    suspend fun generateSshKey(comment: String): SshPrivateKey =
+        repository.generateSshKey(comment)
+
+    suspend fun importSshKey(value: String): SshPrivateKey =
+        repository.importSshKey(value)
+
+    suspend fun replaceSshKey(id: String, privateKey: SshPrivateKey): SaveSshSecretResult =
+        repository.replaceSshKey(id, privateKey)
+
+    suspend fun saveSshComment(id: String, comment: String): SaveSshSecretResult =
+        repository.saveSshComment(id, comment)
 
     suspend fun saveSecret(
         id: String,

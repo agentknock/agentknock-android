@@ -315,6 +315,7 @@ internal class RulesViewModel(application: Application) : AndroidViewModel(appli
         is SecretUseDecisionResult.MissingSecrets -> "Missing secrets: ${names.joinToString()}"
         is SecretUseDecisionResult.ConflictingVariable ->
             "The requested secrets conflict on $name."
+        is SecretUseDecisionResult.Invalid -> message
         SecretUseDecisionResult.SecretUnavailable -> "A requested secret is unavailable."
         SecretUseDecisionResult.SecretCorrupted -> "A requested secret is corrupted."
         SecretUseDecisionResult.UnsupportedEncryption ->

@@ -14,6 +14,7 @@ import dev.agentknock.storage.audit.AuditSink
 import dev.agentknock.storage.audit.NoOpAuditSink
 import dev.agentknock.protocol.SecretUploadMode
 import java.util.UUID
+import java.util.Base64
 import kotlinx.coroutines.CoroutineDispatcher
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.flow.Flow
@@ -22,12 +23,17 @@ import kotlinx.coroutines.flow.map
 import kotlinx.coroutines.withContext
 import kotlinx.serialization.Serializable
 
+internal const val ENVIRONMENT_SECRET_TYPE = "environment"
+internal const val SSH_SECRET_TYPE = "ssh"
+internal const val SSH_PRIVATE_KEY_FORMAT = "ed25519_seed"
+
 internal data class SecretSummary(
     val id: String,
     val name: String,
     val description: String,
     val type: String,
     val environmentVariableCount: Int,
+    val sshKey: SshKeyMetadata?,
     val createdAt: Long,
     val updatedAt: Long,
 )
@@ -38,8 +44,18 @@ internal data class SecretDetails(
     val description: String,
     val type: String,
     val environmentVariables: List<EnvironmentVariableMetadata>,
+    val sshKey: SshKeyMetadata?,
     val createdAt: Long,
     val updatedAt: Long,
+)
+
+internal data class SshKeyMetadata(
+    val algorithm: String,
+    val publicKey: String,
+    val fingerprint: String,
+    val comment: String,
+    val privateKeyAvailable: Boolean,
+    val materialUpdatedAt: Long,
 )
 
 internal data class EnvironmentVariableMetadata(
@@ -70,6 +86,16 @@ internal sealed interface CreateSecretResult {
     data class Created(val id: String) : CreateSecretResult
 
     data object NameInUse : CreateSecretResult
+}
+
+internal sealed interface SaveSshSecretResult {
+    data class Saved(val id: String) : SaveSshSecretResult
+
+    data object NameInUse : SaveSshSecretResult
+
+    data object NotFound : SaveSshSecretResult
+
+    data object WrongType : SaveSshSecretResult
 }
 
 internal enum class SaveSecretResult {
@@ -104,6 +130,14 @@ internal data class EnvironmentSecretUpload(
     val variableSensitivity: Map<String, Boolean> = emptyMap(),
 )
 
+internal data class SshSecretUpload(
+    val mode: SecretUploadMode,
+    val name: String,
+    val descriptionProvided: Boolean,
+    val description: String?,
+    val privateKey: SshPrivateKey?,
+)
+
 internal data class EnvironmentSecretUploadSummary(
     val existingSecretId: String?,
     val addedVariables: List<String>,
@@ -124,11 +158,34 @@ internal sealed interface ApplyEnvironmentSecretUploadResult {
     data class Invalid(val message: String) : ApplyEnvironmentSecretUploadResult
 }
 
+internal data class SshSecretUploadSummary(
+    val existingSecretId: String?,
+    val publicKey: String?,
+    val fingerprint: String?,
+    val previousPublicKey: String?,
+    val previousFingerprint: String?,
+    val keyChanged: Boolean,
+)
+
+internal sealed interface SshSecretUploadResult {
+    data class Valid(val summary: SshSecretUploadSummary) : SshSecretUploadResult
+
+    data class Invalid(val message: String) : SshSecretUploadResult
+}
+
+internal sealed interface ApplySshSecretUploadResult {
+    data class Applied(val secretId: String) : ApplySshSecretUploadResult
+
+    data class Invalid(val message: String) : ApplySshSecretUploadResult
+}
+
 @Serializable
 internal data class SecretMetadata(
     val name: String,
     val description: String,
-    val environmentVariableNames: List<String>,
+    val type: String = ENVIRONMENT_SECRET_TYPE,
+    val environmentVariableNames: List<String> = emptyList(),
+    val sshPublicKey: String? = null,
 )
 
 internal data class RequestedSecretDescription(
@@ -141,10 +198,19 @@ internal data class SecretIdentity(
     val name: String,
 )
 
-internal data class SecretValues(
-    val description: String,
-    val environment: Map<String, String>,
-)
+internal sealed interface SecretValues {
+    val description: String
+
+    data class Environment(
+        override val description: String,
+        val environment: Map<String, String>,
+    ) : SecretValues
+
+    data class Ssh(
+        override val description: String,
+        val publicKey: String,
+    ) : SecretValues
+}
 
 internal sealed interface RequestedSecretsResult {
     data class Available(val secrets: Map<String, SecretValues>) : RequestedSecretsResult
@@ -152,6 +218,10 @@ internal sealed interface RequestedSecretsResult {
     data class MissingSecrets(val names: List<String>) : RequestedSecretsResult
 
     data class ConflictingVariable(val name: String) : RequestedSecretsResult
+
+    data object MultipleSshKeys : RequestedSecretsResult
+
+    data object UnsupportedSecretType : RequestedSecretsResult
 
     data object SecretUnavailable : RequestedSecretsResult
 
@@ -173,6 +243,7 @@ internal class SecretRepository(
     private val keyManager: VaultKeyManager,
     private val encryption: AesGcmEncryption,
     private val audit: AuditSink = NoOpAuditSink,
+    private val sshKeys: SshKeyCodec = SshKeyCodec(),
     private val newId: () -> String = { UUID.randomUUID().toString() },
     private val currentTimeMillis: () -> Long = System::currentTimeMillis,
     private val cryptographyDispatcher: CoroutineDispatcher = Dispatchers.IO,
@@ -185,6 +256,23 @@ internal class SecretRepository(
                 description = row.description,
                 type = row.type,
                 environmentVariableCount = row.environmentVariableCount,
+                sshKey = row.sshAlgorithm?.let { algorithm ->
+                    val publicKey = checkNotNull(row.sshPublicKey)
+                    val comment = checkNotNull(row.sshComment)
+                    val rendered = sshKeys.publicKey(algorithm, publicKey, comment)
+                    SshKeyMetadata(
+                        algorithm = rendered.algorithm.storedName,
+                        publicKey = rendered.line,
+                        fingerprint = rendered.fingerprint,
+                        comment = rendered.comment,
+                        privateKeyAvailable = if (row.sshEncryptionKeyId == null) {
+                            false
+                        } else {
+                            keyManager.keyAvailable(row.sshEncryptionKeyId)
+                        },
+                        materialUpdatedAt = checkNotNull(row.sshMaterialUpdatedAt),
+                    )
+                },
                 createdAt = row.createdAt,
                 updatedAt = row.updatedAt,
             )
@@ -194,7 +282,8 @@ internal class SecretRepository(
     fun observeSecret(id: String): Flow<SecretDetails?> = combine(
         dao.observeSecret(id),
         dao.observeEnvironmentVariables(id),
-    ) { secret, variables ->
+        dao.observeSshKey(id),
+    ) { secret, variables, sshKey ->
         secret?.let {
             val availability = variables
                 .map(EnvironmentVariableMetadataRow::encryptionKeyId)
@@ -218,6 +307,17 @@ internal class SecretRepository(
                         valueUpdatedAt = variable.valueUpdatedAt,
                     )
                 },
+                sshKey = sshKey?.let { key ->
+                    val rendered = sshKeys.publicKey(key.algorithm, key.publicKey, key.comment)
+                    SshKeyMetadata(
+                        algorithm = rendered.algorithm.storedName,
+                        publicKey = rendered.line,
+                        fingerprint = rendered.fingerprint,
+                        comment = rendered.comment,
+                        privateKeyAvailable = keyManager.keyAvailable(key.encryptionKeyId),
+                        materialUpdatedAt = key.materialUpdatedAt,
+                    )
+                },
                 createdAt = secret.createdAt,
                 updatedAt = secret.updatedAt,
             )
@@ -231,7 +331,13 @@ internal class SecretRepository(
         }
     }
 
-    suspend fun createSecret(name: String, description: String): CreateSecretResult {
+    suspend fun generateSshKey(comment: String): SshPrivateKey =
+        withContext(cryptographyDispatcher) { sshKeys.generateEd25519(comment.trim()) }
+
+    suspend fun importSshKey(value: String): SshPrivateKey =
+        withContext(cryptographyDispatcher) { sshKeys.importOpenSshPrivateKey(value) }
+
+    suspend fun createEnvironmentSecret(name: String, description: String): CreateSecretResult {
         validateSecretName(name)
         if (dao.secretNameInUse(name, excludingId = "")) return CreateSecretResult.NameInUse
         val id = newId()
@@ -241,6 +347,7 @@ internal class SecretRepository(
                 id = id,
                 name = name,
                 description = description,
+                type = ENVIRONMENT_SECRET_TYPE,
                 createdAt = now,
                 updatedAt = now,
             ),
@@ -254,6 +361,78 @@ internal class SecretRepository(
             ),
         )
         return CreateSecretResult.Created(id)
+    }
+
+    suspend fun createSshSecret(
+        name: String,
+        description: String,
+        privateKey: SshPrivateKey,
+    ): CreateSecretResult {
+        validateSecretName(name)
+        validateSshPrivateKey(privateKey)
+        if (dao.secretNameInUse(name, excludingId = "")) return CreateSecretResult.NameInUse
+        val id = newId()
+        val now = currentTimeMillis()
+        val secret = SecretEntity(
+            id = id,
+            name = name,
+            description = description,
+            type = SSH_SECRET_TYPE,
+            createdAt = now,
+            updatedAt = now,
+        )
+        dao.insertSshSecret(secret, sshKeyEntity(id, privateKey, now))
+        audit.record(
+            AuditRecord(
+                category = AuditCategory.SECRET,
+                title = "SSH key created",
+                detail = name,
+                outcome = AuditOutcome.CHANGED,
+            ),
+        )
+        return CreateSecretResult.Created(id)
+    }
+
+    suspend fun replaceSshKey(id: String, privateKey: SshPrivateKey): SaveSshSecretResult {
+        validateSshPrivateKey(privateKey)
+        val secret = dao.getSecret(id) ?: return SaveSshSecretResult.NotFound
+        if (secret.type != SSH_SECRET_TYPE) return SaveSshSecretResult.WrongType
+        dao.getSshKey(id) ?: return SaveSshSecretResult.NotFound
+        val now = currentTimeMillis()
+        dao.updateSshKey(
+            sshKeyEntity(id, privateKey, now).copy(materialUpdatedAt = now),
+            secretUpdatedAt = now,
+        )
+        audit.record(
+            AuditRecord(
+                category = AuditCategory.SECRET,
+                title = "SSH key replaced",
+                detail = secret.name,
+                outcome = AuditOutcome.CHANGED,
+            ),
+        )
+        return SaveSshSecretResult.Saved(id)
+    }
+
+    suspend fun saveSshComment(id: String, comment: String): SaveSshSecretResult {
+        val trimmed = comment.trim()
+        val secret = dao.getSecret(id) ?: return SaveSshSecretResult.NotFound
+        if (secret.type != SSH_SECRET_TYPE) return SaveSshSecretResult.WrongType
+        val key = dao.getSshKey(id) ?: return SaveSshSecretResult.NotFound
+        runCatching { sshKeys.publicKey(key.algorithm, key.publicKey, trimmed) }
+            .getOrElse { throw IllegalArgumentException(it.message, it) }
+        if (key.comment == trimmed) return SaveSshSecretResult.Saved(id)
+        val now = currentTimeMillis()
+        dao.updateSshKey(key.copy(comment = trimmed), secretUpdatedAt = now)
+        audit.record(
+            AuditRecord(
+                category = AuditCategory.SECRET,
+                title = "SSH public-key comment updated",
+                detail = secret.name,
+                outcome = AuditOutcome.CHANGED,
+            ),
+        )
+        return SaveSshSecretResult.Saved(id)
     }
 
     suspend fun saveSecret(id: String, name: String, description: String): SaveSecretResult {
@@ -555,17 +734,135 @@ internal class SecretRepository(
         return ApplyEnvironmentSecretUploadResult.Applied(secretId)
     }
 
+    suspend fun describeSshSecretUpload(upload: SshSecretUpload): SshSecretUploadResult {
+        val invalid = runCatching {
+            validateSecretName(upload.name)
+            upload.privateKey?.let(::validateSshPrivateKey)
+            require(
+                upload.mode == SecretUploadMode.UPDATE || upload.privateKey != null,
+            ) { "An SSH key is required for this upload mode." }
+            require(upload.descriptionProvided || upload.privateKey != null) {
+                "The SSH key update contains no changes."
+            }
+        }.exceptionOrNull()?.message
+        if (invalid != null) return SshSecretUploadResult.Invalid(invalid)
+
+        val existing = dao.getSecretsByName(listOf(upload.name)).singleOrNull()
+        when (upload.mode) {
+            SecretUploadMode.CREATE -> if (existing != null) {
+                return SshSecretUploadResult.Invalid(
+                    "A secret named ${upload.name} already exists.",
+                )
+            }
+            SecretUploadMode.REPLACE,
+            SecretUploadMode.UPDATE,
+            -> {
+                if (existing == null) {
+                    return SshSecretUploadResult.Invalid(
+                        "The target secret ${upload.name} does not exist.",
+                    )
+                }
+                if (existing.type != SSH_SECRET_TYPE) {
+                    return SshSecretUploadResult.Invalid(
+                        "The target secret has a different type.",
+                    )
+                }
+            }
+        }
+        val existingKey = existing?.let { dao.getSshKey(it.id) }
+        if (existing != null && existingKey == null) {
+            return SshSecretUploadResult.Invalid("The target SSH key is incomplete.")
+        }
+        val proposedPublic = upload.privateKey?.let(::publicKey)
+        val previousPublic = existingKey?.let(::publicKey)
+        return SshSecretUploadResult.Valid(
+            SshSecretUploadSummary(
+                existingSecretId = existing?.id,
+                publicKey = proposedPublic?.line,
+                fingerprint = proposedPublic?.fingerprint,
+                previousPublicKey = previousPublic?.line,
+                previousFingerprint = previousPublic?.fingerprint,
+                keyChanged = proposedPublic != null && (
+                    previousPublic == null ||
+                        proposedPublic.algorithm != previousPublic.algorithm ||
+                        !proposedPublic.publicKey.contentEquals(previousPublic.publicKey)
+                    ),
+            ),
+        )
+    }
+
+    suspend fun applySshSecretUpload(
+        upload: SshSecretUpload,
+        approvedName: String,
+    ): ApplySshSecretUploadResult {
+        val validation = describeSshSecretUpload(upload)
+        if (validation is SshSecretUploadResult.Invalid) {
+            return ApplySshSecretUploadResult.Invalid(validation.message)
+        }
+        validateSecretName(approvedName)
+        val summary = (validation as SshSecretUploadResult.Valid).summary
+        val existing = summary.existingSecretId?.let { dao.getSecret(it) }
+        if (
+            upload.mode == SecretUploadMode.CREATE &&
+            dao.secretNameInUse(approvedName, excludingId = "")
+        ) {
+            return ApplySshSecretUploadResult.Invalid(
+                "A secret named $approvedName already exists.",
+            )
+        }
+        val now = currentTimeMillis()
+        val secretId = existing?.id ?: newId()
+        val secret = SecretEntity(
+            id = secretId,
+            name = if (upload.mode == SecretUploadMode.CREATE) approvedName else upload.name,
+            description = when {
+                upload.descriptionProvided -> upload.description.orEmpty()
+                upload.mode == SecretUploadMode.UPDATE -> existing?.description.orEmpty()
+                else -> ""
+            },
+            type = SSH_SECRET_TYPE,
+            createdAt = existing?.createdAt ?: now,
+            updatedAt = now,
+        )
+        val currentKey = existing?.let { dao.getSshKey(it.id) }
+        val key = upload.privateKey?.let {
+            sshKeyEntity(
+                secretId,
+                it,
+                if (summary.keyChanged) now else currentKey?.materialUpdatedAt ?: now,
+            )
+        } ?: currentKey
+            ?: return ApplySshSecretUploadResult.Invalid("The SSH key is missing.")
+        dao.applySshSecret(secret, key)
+        return ApplySshSecretUploadResult.Applied(secretId)
+    }
+
     override suspend fun listSecretsForClient(): List<SecretMetadata> {
         val variablesBySecret = dao.getEnvironmentVariables()
             .groupBy(EnvironmentVariableEntity::secretId)
-        return dao.getSecrets().map { secret ->
-            SecretMetadata(
+        val secrets = dao.getSecrets()
+        val sshKeysBySecret = dao.getSshKeysForSecrets(secrets.map(SecretEntity::id))
+            .associateBy(SshKeyEntity::secretId)
+        return secrets.mapNotNull { secret ->
+            when (secret.type) {
+                ENVIRONMENT_SECRET_TYPE -> SecretMetadata(
                     name = secret.name,
                     description = secret.description,
-                environmentVariableNames = variablesBySecret[secret.id]
-                    .orEmpty()
-                    .map(EnvironmentVariableEntity::name),
-            )
+                    type = ENVIRONMENT_SECRET_TYPE,
+                    environmentVariableNames = variablesBySecret[secret.id]
+                        .orEmpty()
+                        .map(EnvironmentVariableEntity::name),
+                )
+                SSH_SECRET_TYPE -> sshKeysBySecret[secret.id]?.let { key ->
+                    SecretMetadata(
+                        name = secret.name,
+                        description = secret.description,
+                        type = SSH_SECRET_TYPE,
+                        sshPublicKey = publicKey(key).line,
+                    )
+                }
+                else -> null
+            }
         }
     }
 
@@ -585,17 +882,35 @@ internal class SecretRepository(
             dao.getEnvironmentVariablesForSecrets(secrets.map(SecretEntity::id))
         }
         val variablesBySecret = variables.groupBy(EnvironmentVariableEntity::secretId)
+        val sshKeysBySecret = if (secrets.isEmpty()) {
+            emptyMap()
+        } else {
+            dao.getSshKeysForSecrets(secrets.map(SecretEntity::id))
+                .associateBy(SshKeyEntity::secretId)
+        }
         return RequestedSecretDescription(
             secrets = requestedNames.mapNotNull { name ->
                 secretByName[name]?.let { secret ->
-                    SecretMetadata(
-                        name = secret.name,
-                        description = secret.description,
-                        environmentVariableNames = variablesBySecret[secret.id]
-                            .orEmpty()
-                            .map(EnvironmentVariableEntity::name)
-                            .sorted(),
-                    )
+                    when (secret.type) {
+                        ENVIRONMENT_SECRET_TYPE -> SecretMetadata(
+                            name = secret.name,
+                            description = secret.description,
+                            type = ENVIRONMENT_SECRET_TYPE,
+                            environmentVariableNames = variablesBySecret[secret.id]
+                                .orEmpty()
+                                .map(EnvironmentVariableEntity::name)
+                                .sorted(),
+                        )
+                        SSH_SECRET_TYPE -> sshKeysBySecret[secret.id]?.let { key ->
+                            SecretMetadata(
+                                name = secret.name,
+                                description = secret.description,
+                                type = SSH_SECRET_TYPE,
+                                sshPublicKey = publicKey(key).line,
+                            )
+                        }
+                        else -> null
+                    }
                 }
             },
             missingSecrets = requestedNames.filterNot(secretByName::containsKey),
@@ -611,6 +926,13 @@ internal class SecretRepository(
         val secretByName = secrets.associateBy(SecretEntity::name)
         val missing = requestedNames.filterNot(secretByName::containsKey)
         if (missing.isNotEmpty()) return RequestedSecretsResult.MissingSecrets(missing)
+
+        if (secrets.count { it.type == SSH_SECRET_TYPE } > 1) {
+            return RequestedSecretsResult.MultipleSshKeys
+        }
+        if (secrets.any { it.type != ENVIRONMENT_SECRET_TYPE && it.type != SSH_SECRET_TYPE }) {
+            return RequestedSecretsResult.UnsupportedSecretType
+        }
 
         val variables = dao.getEnvironmentVariablesForSecrets(secrets.map(SecretEntity::id))
         val combinedEnvironment = sortedMapOf<String, String>()
@@ -640,15 +962,49 @@ internal class SecretRepository(
                 return RequestedSecretsResult.ConflictingVariable(variable.name)
             }
         }
-        return RequestedSecretsResult.Available(
-            requestedNames.associateWith { name ->
-                val secret = secretByName.getValue(name)
-                SecretValues(
+        val sshKeysBySecret = dao.getSshKeysForSecrets(
+            secrets.filter { it.type == SSH_SECRET_TYPE }.map(SecretEntity::id),
+        ).associateBy(SshKeyEntity::secretId)
+        val values = linkedMapOf<String, SecretValues>()
+        for (name in requestedNames) {
+            val secret = secretByName.getValue(name)
+            values[name] = when (secret.type) {
+                ENVIRONMENT_SECRET_TYPE -> SecretValues.Environment(
                     description = secret.description,
                     environment = secretEnvironments.getValue(secret.id),
                 )
-            },
-        )
+                SSH_SECRET_TYPE -> {
+                    val row = sshKeysBySecret[secret.id]
+                        ?: return RequestedSecretsResult.SecretCorrupted
+                    val privateKey = when (val decrypted = decryptSshKey(row)) {
+                        is DecryptionResult.Plaintext -> decrypted.value
+                        DecryptionResult.KeyUnavailable -> {
+                            return RequestedSecretsResult.SecretUnavailable
+                        }
+                        DecryptionResult.AuthenticationFailed -> {
+                            return RequestedSecretsResult.SecretCorrupted
+                        }
+                        DecryptionResult.UnsupportedFormat -> {
+                            return RequestedSecretsResult.UnsupportedEncryption
+                        }
+                    }
+                    val validated = runCatching {
+                        sshKeys.fromStored(
+                            row.algorithm,
+                            privateKey,
+                            row.publicKey,
+                            row.comment,
+                        )
+                    }.getOrElse { return RequestedSecretsResult.SecretCorrupted }
+                    SecretValues.Ssh(
+                        description = secret.description,
+                        publicKey = publicKey(validated).line,
+                    )
+                }
+                else -> return RequestedSecretsResult.UnsupportedSecretType
+            }
+        }
+        return RequestedSecretsResult.Available(values)
     }
 
     private suspend fun encrypt(
@@ -685,6 +1041,84 @@ internal class SecretRepository(
                 ),
             )
         }
+
+    private suspend fun sshKeyEntity(
+        secretId: String,
+        privateKey: SshPrivateKey,
+        materialUpdatedAt: Long,
+    ): SshKeyEntity {
+        val key = keyManager.activeKey(VaultKeyPurpose.SECRET_VALUES)
+        val encrypted = withContext(cryptographyDispatcher) {
+            encryption.encrypt(
+                keyId = key.id,
+                location = sshKeyLocation(
+                    secretId = secretId,
+                    algorithm = privateKey.algorithm.storedName,
+                    publicKey = privateKey.publicKey,
+                ),
+                plaintext = privateKey.privateKey,
+            )
+        }
+        return SshKeyEntity(
+            secretId = secretId,
+            algorithm = privateKey.algorithm.storedName,
+            publicKey = privateKey.publicKey.copyOf(),
+            comment = privateKey.comment,
+            privateKeyFormat = SSH_PRIVATE_KEY_FORMAT,
+            encryptionFormat = encrypted.formatVersion,
+            encryptionKeyId = encrypted.keyId,
+            nonce = encrypted.nonce,
+            ciphertext = encrypted.ciphertext,
+            materialUpdatedAt = materialUpdatedAt,
+        )
+    }
+
+    private suspend fun decryptSshKey(key: SshKeyEntity): DecryptionResult {
+        if (key.privateKeyFormat != SSH_PRIVATE_KEY_FORMAT) {
+            return DecryptionResult.UnsupportedFormat
+        }
+        return withContext(cryptographyDispatcher) {
+            encryption.decrypt(
+                encrypted = EncryptedValue(
+                    formatVersion = key.encryptionFormat,
+                    keyId = key.encryptionKeyId,
+                    nonce = key.nonce,
+                    ciphertext = key.ciphertext,
+                ),
+                location = sshKeyLocation(key.secretId, key.algorithm, key.publicKey),
+            )
+        }
+    }
+
+    private fun publicKey(key: SshKeyEntity): SshPublicKey =
+        sshKeys.publicKey(key.algorithm, key.publicKey, key.comment)
+
+    private fun publicKey(key: SshPrivateKey): SshPublicKey =
+        SshPublicKey(key.algorithm, key.publicKey, key.comment)
+
+    private fun validateSshPrivateKey(key: SshPrivateKey) {
+        sshKeys.fromStored(
+            key.algorithm.storedName,
+            key.privateKey,
+            key.publicKey,
+            key.comment,
+        )
+    }
+
+    private fun sshKeyLocation(
+        secretId: String,
+        algorithm: String,
+        publicKey: ByteArray,
+    ) = EncryptionLocation(
+        recordType = "ssh_key",
+        recordId = secretId,
+        fieldName = "private_key",
+        bindings = listOf(
+            EncryptionBinding("algorithm", algorithm),
+            EncryptionBinding("private_key_format", SSH_PRIVATE_KEY_FORMAT),
+            EncryptionBinding("public_key", Base64.getEncoder().encodeToString(publicKey)),
+        ),
+    )
 
     private fun DecryptionResult.toEnvironmentVariableValue(): EnvironmentVariableValue = when (this) {
         is DecryptionResult.Plaintext -> try {
@@ -739,6 +1173,5 @@ internal class SecretRepository(
 
     private companion object {
         val ENVIRONMENT_VARIABLE_NAME = Regex("[A-Za-z_][A-Za-z0-9_]*")
-        const val ENVIRONMENT_SECRET_TYPE = "environment"
     }
 }

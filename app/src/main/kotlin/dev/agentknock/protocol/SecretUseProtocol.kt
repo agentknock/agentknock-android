@@ -2,7 +2,11 @@ package dev.agentknock.protocol
 
 import kotlinx.serialization.SerialName
 import kotlinx.serialization.Serializable
+import kotlinx.serialization.encodeToString
 import kotlinx.serialization.json.Json
+import kotlinx.serialization.json.JsonObject
+import kotlinx.serialization.json.buildJsonObject
+import kotlinx.serialization.json.put
 
 internal data class SecretUseRequestMessage(
     val clientSoftware: ClientSoftware,
@@ -24,10 +28,19 @@ internal data class SecretUseExecOperation(
     val stderr: String,
 )
 
-internal data class SecretUseResponseSecret(
-    val description: String,
-    val environment: Map<String, String>,
-)
+internal sealed interface SecretUseResponseSecret {
+    val description: String
+
+    data class Environment(
+        override val description: String,
+        val environment: Map<String, String>,
+    ) : SecretUseResponseSecret
+
+    data class Ssh(
+        override val description: String,
+        val publicKey: String,
+    ) : SecretUseResponseSecret
+}
 
 internal enum class SecretUseDenialReason(val wireName: String) {
     USER_DENIED("USER_DENIED"),
@@ -83,21 +96,21 @@ internal class SecretUseProtocol(
         )
     }
 
-    fun approvedResponse(secrets: Map<String, SecretUseResponseSecret>): ByteArray = json.encodeToString(
-        SecretUseResponseWire.serializer(),
-        SecretUseResponseWire(
-            result = RESULT_APPROVED,
-            secrets = secrets.mapValues { (_, secret) ->
-                SecretUseResponseSecretWire(
-                    description = secret.description.ifEmpty { null },
-                    type = TYPE_ENVIRONMENT,
-                    variables = secret.environment.mapValues { (_, value) ->
-                        SecretUseResponseEnvironmentVariableWire(value)
+    fun approvedResponse(secrets: Map<String, SecretUseResponseSecret>): ByteArray =
+        json.encodeToString(
+            JsonObject.serializer(),
+            buildJsonObject {
+                put("result", RESULT_APPROVED)
+                put(
+                    "secrets",
+                    buildJsonObject {
+                        secrets.toSortedMap().forEach { (name, secret) ->
+                            put(name, secret.toWire())
+                        }
                     },
                 )
             },
-        ),
-    ).encodeToByteArray()
+        ).encodeToByteArray()
 
     fun deniedResponse(reason: SecretUseDenialReason, message: String): ByteArray =
         json.encodeToString(
@@ -132,11 +145,33 @@ internal class SecretUseProtocol(
 
     companion object {
         const val METHOD = "SecretUse"
-        private const val EXEC_OPERATION_TYPE = "exec"
         private const val TYPE_ENVIRONMENT = "environment"
+        private const val TYPE_SSH = "ssh"
+        private const val EXEC_OPERATION_TYPE = "exec"
         private const val RESULT_APPROVED = "APPROVED"
         private const val RESULT_DENIED = "DENIED"
         private const val RESULT_ABORTED = "ABORTED"
+    }
+
+    private fun SecretUseResponseSecret.toWire(): JsonObject = buildJsonObject {
+        if (description.isNotEmpty()) put("description", description)
+        when (this@toWire) {
+            is SecretUseResponseSecret.Environment -> {
+                put("type", TYPE_ENVIRONMENT)
+                put(
+                    "variables",
+                    buildJsonObject {
+                        environment.toSortedMap().forEach { (name, value) ->
+                            put(name, buildJsonObject { put("value", value) })
+                        }
+                    },
+                )
+            }
+            is SecretUseResponseSecret.Ssh -> {
+                put("type", TYPE_SSH)
+                put("public_key", publicKey)
+            }
+        }
     }
 }
 
@@ -166,20 +201,9 @@ private data class SecretUseOperationWire(
 @Serializable
 private data class SecretUseResponseWire(
     val result: String,
-    val secrets: Map<String, SecretUseResponseSecretWire>? = null,
     val reason: String? = null,
     val message: String? = null,
 )
-
-@Serializable
-private data class SecretUseResponseSecretWire(
-    val description: String? = null,
-    val type: String,
-    val variables: Map<String, SecretUseResponseEnvironmentVariableWire>,
-)
-
-@Serializable
-private data class SecretUseResponseEnvironmentVariableWire(val value: String)
 
 @Serializable
 private data class SecretUseCompletionWire(

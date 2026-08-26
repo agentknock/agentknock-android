@@ -794,6 +794,14 @@ private fun SecretUseDetail(
                     color = MaterialTheme.colorScheme.onSurfaceVariant,
                 )
             }
+            val sshKeyCount = secretUse.secretDetails.count { it.type == "ssh" }
+            if (sshKeyCount > 0) {
+                Text(
+                    "$sshKeyCount SSH ${if (sshKeyCount == 1) "key" else "keys"} requested",
+                    style = MaterialTheme.typography.bodySmall,
+                    color = MaterialTheme.colorScheme.onSurfaceVariant,
+                )
+            }
             InformationRow("Received", formatTimestamp(request.receivedAt))
         }
 
@@ -878,7 +886,7 @@ private fun SecretUseDetail(
             ) {
                 secretUse.secretDetails.forEach { secret -> SecretSummary(secret) }
                 Text(
-                    "Values are never shown in a request.",
+                    "Private keys and environment-variable values are never shown in a request.",
                     style = MaterialTheme.typography.bodySmall,
                     color = MaterialTheme.colorScheme.onSurfaceVariant,
                 )
@@ -1021,7 +1029,10 @@ internal fun SecretUploadRequestDetail(
                     }
                 }
             }
-            InformationRow("Type", "Environment variables")
+            InformationRow(
+                "Type",
+                if (upload.secretType == "ssh") "SSH key" else "Environment variables",
+            )
             ClientIdentity(upload.clientName)
             InformationRow("Received", formatTimestamp(request.receivedAt))
             upload.description?.takeIf(String::isNotBlank)?.let {
@@ -1036,6 +1047,9 @@ internal fun SecretUploadRequestDetail(
             }
         }
 
+        if (upload.secretType == "ssh") {
+            SshKeyUploadDetails(upload)
+        } else {
         if (upload.mode != SecretUploadMode.CREATE) {
             Card(
                 colors = CardDefaults.cardColors(
@@ -1228,6 +1242,7 @@ internal fun SecretUploadRequestDetail(
                 }
             }
         }
+        }
 
         if (upload.state != SecretUploadRequestState.REVIEW_PENDING) {
             upload.approvedName?.takeIf { it != upload.uploadedName }?.let {
@@ -1288,6 +1303,77 @@ internal fun SecretUploadRequestDetail(
             },
         )
     }
+}
+
+@Composable
+private fun SshKeyUploadDetails(upload: SecretUploadRequestDetails) {
+    if (upload.mode != SecretUploadMode.CREATE) {
+        Card(
+            colors = CardDefaults.cardColors(
+                containerColor = MaterialTheme.colorScheme.secondaryContainer,
+            ),
+        ) {
+            Column(
+                Modifier.fillMaxWidth().padding(16.dp),
+                verticalArrangement = Arrangement.spacedBy(8.dp),
+            ) {
+                Text("Changes to the existing SSH key", style = MaterialTheme.typography.titleMedium)
+                if (upload.keyChanged) {
+                    upload.previousFingerprint?.let { DetailValue("Current fingerprint", it, true) }
+                    upload.fingerprint?.let { DetailValue("New fingerprint", it, true) }
+                } else if (upload.publicKey != upload.previousPublicKey) {
+                    Text(
+                        "The public-key comment will change; the key material is unchanged.",
+                        color = MaterialTheme.colorScheme.onSurfaceVariant,
+                    )
+                } else {
+                    Text(
+                        "The key material is unchanged.",
+                        color = MaterialTheme.colorScheme.onSurfaceVariant,
+                    )
+                }
+            }
+        }
+    }
+    upload.publicKey?.let { publicKey ->
+        Surface(
+            color = MaterialTheme.colorScheme.surfaceContainerLow,
+            shape = MaterialTheme.shapes.medium,
+        ) {
+            Column(
+                Modifier.fillMaxWidth().padding(16.dp),
+                verticalArrangement = Arrangement.spacedBy(10.dp),
+            ) {
+                Text(
+                    if (upload.keyChanged || upload.mode == SecretUploadMode.CREATE) {
+                        "Incoming public key"
+                    } else {
+                        "Public key"
+                    },
+                    style = MaterialTheme.typography.titleMedium,
+                )
+                DetailValue("Algorithm", "Ed25519")
+                upload.fingerprint?.let { DetailValue("Fingerprint", it, true) }
+                Column(verticalArrangement = Arrangement.spacedBy(3.dp)) {
+                    Text(
+                        "OpenSSH public key",
+                        style = MaterialTheme.typography.labelMedium,
+                        color = MaterialTheme.colorScheme.onSurfaceVariant,
+                    )
+                    SelectionContainer {
+                        Text(
+                            publicKey,
+                            fontFamily = FontFamily.Monospace,
+                            style = MaterialTheme.typography.bodySmall,
+                        )
+                    }
+                }
+            }
+        }
+    } ?: Text(
+        "No replacement key was included.",
+        color = MaterialTheme.colorScheme.onSurfaceVariant,
+    )
 }
 
 @Composable
@@ -1358,8 +1444,20 @@ private fun SecretSummary(secret: SecretMetadata) {
         if (secret.description.isNotBlank()) {
             Text(secret.description, color = MaterialTheme.colorScheme.onSurfaceVariant)
         }
+        Text(
+            if (secret.type == "ssh") "SSH key" else "Environment variables",
+            style = MaterialTheme.typography.labelMedium,
+            color = MaterialTheme.colorScheme.onSurfaceVariant,
+        )
         SelectionContainer {
-            Text(secret.environmentVariableNames.joinToString("\n"), fontFamily = FontFamily.Monospace)
+            Text(
+                if (secret.type == "ssh") {
+                    secret.sshPublicKey.orEmpty()
+                } else {
+                    secret.environmentVariableNames.joinToString("\n")
+                },
+                fontFamily = FontFamily.Monospace,
+            )
         }
     }
 }
@@ -1669,6 +1767,7 @@ private fun SecretUseDecisionResult.message(): String = when (this) {
     is SecretUseDecisionResult.MissingSecrets -> "Missing secrets: ${names.joinToString()}"
     is SecretUseDecisionResult.ConflictingVariable ->
         "Conflicting environment variable: $name"
+    is SecretUseDecisionResult.Invalid -> message
     SecretUseDecisionResult.SecretUnavailable -> "A secret value is unavailable on this device"
     SecretUseDecisionResult.SecretCorrupted -> "A secret value could not be authenticated"
     SecretUseDecisionResult.UnsupportedEncryption -> "A secret value uses unsupported encryption"

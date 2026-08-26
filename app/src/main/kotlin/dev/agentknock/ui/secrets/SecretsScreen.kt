@@ -43,6 +43,7 @@ import androidx.compose.material3.CircularProgressIndicator
 import androidx.compose.material3.DropdownMenu
 import androidx.compose.material3.DropdownMenuItem
 import androidx.compose.material3.FilledTonalButton
+import androidx.compose.material3.FilterChip
 import androidx.compose.material3.HorizontalDivider
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.automirrored.outlined.ArrowBack
@@ -116,6 +117,11 @@ import dev.agentknock.storage.secret.SecretDetails
 import dev.agentknock.storage.secret.SecretSummary
 import dev.agentknock.storage.secret.SaveEnvironmentVariableResult
 import dev.agentknock.storage.secret.SaveSecretResult
+import dev.agentknock.storage.secret.SaveSshSecretResult
+import dev.agentknock.storage.secret.SshKeyMetadata
+import dev.agentknock.storage.secret.SshPrivateKey
+import dev.agentknock.storage.secret.ENVIRONMENT_SECRET_TYPE
+import dev.agentknock.storage.secret.SSH_SECRET_TYPE
 import dev.agentknock.storage.request.InboxRequestDetails
 import dev.agentknock.storage.request.InboxRequestSummary
 import dev.agentknock.storage.request.InboxRequestState
@@ -133,6 +139,25 @@ internal data class SecretEditorState(
     val secret: SecretDetails?,
     val name: String,
     val description: String,
+    val type: String,
+    val sshInputMode: SshKeyInputMode = SshKeyInputMode.GENERATE,
+    val sshPrivateKeyText: String = "",
+    val sshComment: String = "",
+    val preparedSshKey: SshPrivateKey? = null,
+    val sshError: String? = null,
+)
+
+internal enum class SshKeyInputMode { GENERATE, IMPORT }
+
+internal data class SshKeyEditorState(
+    val secretId: String,
+    val secretName: String,
+    val currentKey: SshKeyMetadata,
+    val inputMode: SshKeyInputMode,
+    val privateKeyText: String,
+    val comment: String,
+    val preparedKey: SshPrivateKey?,
+    val error: String?,
 )
 
 internal data class VariableEditorState(
@@ -165,6 +190,7 @@ internal fun SecretsScreen(
     val selectedUpload by viewModel.selectedUpload.collectAsStateWithLifecycle()
     val secretEditor by viewModel.secretEditor.collectAsStateWithLifecycle()
     val variableEditor by viewModel.variableEditor.collectAsStateWithLifecycle()
+    val sshKeyEditor by viewModel.sshKeyEditor.collectAsStateWithLifecycle()
     val scope = rememberCoroutineScope()
     val snackbar = remember { SnackbarHostState() }
     val context = LocalContext.current
@@ -180,6 +206,15 @@ internal fun SecretsScreen(
             val editor = viewModel.variableEditor.value
             if (editor?.variable?.sensitive == true || editor?.sensitive == true) {
                 viewModel.updateVariableEditor(null)
+            }
+            if (viewModel.sshKeyEditor.value != null) {
+                viewModel.updateSshKeyEditor(null)
+            }
+            val secretEditor = viewModel.secretEditor.value
+            if (secretEditor?.sshPrivateKeyText?.isNotEmpty() == true ||
+                secretEditor?.preparedSshKey != null
+            ) {
+                viewModel.updateSecretEditor(null)
             }
         }
         val observer = LifecycleEventObserver { _, event ->
@@ -314,6 +349,12 @@ internal fun SecretsScreen(
         }
     }
 
+    fun copyPublicKey(secret: SecretDetails) {
+        val publicKey = secret.sshKey?.publicKey ?: return
+        copyToClipboard(context, secret.name, publicKey, sensitive = false)
+        report("Public key copied")
+    }
+
     Scaffold(
         snackbarHost = { SnackbarHost(snackbar) },
         contentWindowInsets = WindowInsets(0, 0, 0, 0),
@@ -326,11 +367,12 @@ internal fun SecretsScreen(
             val twoPane = maxWidth >= twoPaneWidth
             val secret = selectedSecret
             val hasSelection = selection != null || uploadSelection != null
-            LaunchedEffect(hasSelection, secretEditor, variableEditor, twoPane) {
+            LaunchedEffect(hasSelection, secretEditor, variableEditor, sshKeyEditor, twoPane) {
                 onTopLevelChanged(
                     (twoPane || !hasSelection) &&
                         secretEditor == null &&
-                        variableEditor == null,
+                        variableEditor == null &&
+                        sshKeyEditor == null,
                 )
             }
             if (twoPane) {
@@ -378,6 +420,16 @@ internal fun SecretsScreen(
                             onAddVariable = {
                                 viewModel.startNewEnvironmentVariable(secret.id)
                             },
+                            onReplaceSshKey = { viewModel.startReplacingSshKey(secret) },
+                            onSaveSshComment = { comment ->
+                                scope.launch {
+                                    when (viewModel.saveSshComment(secret.id, comment)) {
+                                        is SaveSshSecretResult.Saved -> report("Public-key comment updated")
+                                        else -> report("Public-key comment could not be updated")
+                                    }
+                                }
+                            },
+                            onCopyPublicKey = { copyPublicKey(secret) },
                             onEditVariable = ::edit,
                             onReveal = ::reveal,
                             onReadValue = ::readValue,
@@ -427,6 +479,16 @@ internal fun SecretsScreen(
                     onAddVariable = {
                         viewModel.startNewEnvironmentVariable(secret.id)
                     },
+                    onReplaceSshKey = { viewModel.startReplacingSshKey(secret) },
+                    onSaveSshComment = { comment ->
+                        scope.launch {
+                            when (viewModel.saveSshComment(secret.id, comment)) {
+                                is SaveSshSecretResult.Saved -> report("Public-key comment updated")
+                                else -> report("Public-key comment could not be updated")
+                            }
+                        }
+                    },
+                    onCopyPublicKey = { copyPublicKey(secret) },
                     onEditVariable = ::edit,
                     onReveal = ::reveal,
                     onReadValue = ::readValue,
@@ -442,11 +504,40 @@ internal fun SecretsScreen(
             editor = editor,
             onEditorChange = viewModel::updateSecretEditor,
             onDismiss = { viewModel.updateSecretEditor(null) },
+            onPrepareSshKey = {
+                scope.launch {
+                    runCatching {
+                        when (editor.sshInputMode) {
+                            SshKeyInputMode.GENERATE -> viewModel.generateSshKey(editor.sshComment)
+                            SshKeyInputMode.IMPORT -> viewModel.importSshKey(editor.sshPrivateKeyText)
+                        }
+                    }.onSuccess { key ->
+                        viewModel.updateSecretEditor(
+                            editor.copy(preparedSshKey = key, sshError = null),
+                        )
+                    }.onFailure { error ->
+                        viewModel.updateSecretEditor(
+                            editor.copy(
+                                preparedSshKey = null,
+                                sshError = error.message ?: "The private key is not valid",
+                            ),
+                        )
+                    }
+                }
+            },
             onSave = { name, description ->
                 scope.launch {
                     val error = if (editor.secret == null) {
                         when (
-                            val result = viewModel.createSecret(name, description)
+                            val result = if (editor.type == SSH_SECRET_TYPE) {
+                                viewModel.createSshSecret(
+                                    name,
+                                    description,
+                                    checkNotNull(editor.preparedSshKey),
+                                )
+                            } else {
+                                viewModel.createSecret(name, description)
+                            }
                         ) {
                             is CreateSecretResult.Created -> {
                                 viewModel.updateSecretEditor(null)
@@ -474,6 +565,49 @@ internal fun SecretsScreen(
                         }
                     }
                     error?.let(::report)
+                }
+            },
+            snackbar = snackbar,
+        )
+    }
+
+    sshKeyEditor?.let { editor ->
+        SshKeyEditorScreen(
+            editor = editor,
+            onEditorChange = viewModel::updateSshKeyEditor,
+            onDismiss = { viewModel.updateSshKeyEditor(null) },
+            onPrepare = {
+                scope.launch {
+                    runCatching {
+                        when (editor.inputMode) {
+                            SshKeyInputMode.GENERATE -> viewModel.generateSshKey(editor.comment)
+                            SshKeyInputMode.IMPORT -> viewModel.importSshKey(editor.privateKeyText)
+                        }
+                    }.onSuccess { key ->
+                        viewModel.updateSshKeyEditor(
+                            editor.copy(preparedKey = key, error = null),
+                        )
+                    }.onFailure { error ->
+                        viewModel.updateSshKeyEditor(
+                            editor.copy(
+                                preparedKey = null,
+                                error = error.message ?: "The private key is not valid",
+                            ),
+                        )
+                    }
+                }
+            },
+            onReplace = {
+                scope.launch {
+                    when (
+                        viewModel.replaceSshKey(editor.secretId, checkNotNull(editor.preparedKey))
+                    ) {
+                        is SaveSshSecretResult.Saved -> {
+                            viewModel.updateSshKeyEditor(null)
+                            report("SSH key replaced")
+                        }
+                        else -> report("SSH key could not be replaced")
+                    }
                 }
             },
             snackbar = snackbar,
@@ -745,9 +879,19 @@ private fun SecretList(
                                         )
                                     }
                                     Text(
-                                        "${secret.type.displayName()} " +
-                                            "(${secret.environmentVariableCount})",
+                                        if (secret.type == SSH_SECRET_TYPE) {
+                                            secret.sshKey?.fingerprint ?: "SSH key unavailable"
+                                        } else {
+                                            "${secret.environmentVariableCount} environment " +
+                                                if (secret.environmentVariableCount == 1) {
+                                                    "variable"
+                                                } else {
+                                                    "variables"
+                                                }
+                                        },
                                         style = MaterialTheme.typography.labelMedium,
+                                        maxLines = 1,
+                                        overflow = TextOverflow.Ellipsis,
                                     )
                                 }
                             },
@@ -866,6 +1010,9 @@ private fun SecretDetail(
     onEditSecret: () -> Unit,
     onDeleteSecret: () -> Unit,
     onAddVariable: () -> Unit,
+    onReplaceSshKey: () -> Unit,
+    onSaveSshComment: (String) -> Unit,
+    onCopyPublicKey: () -> Unit,
     onEditVariable: (EnvironmentVariableMetadata) -> Unit,
     onReveal: (EnvironmentVariableMetadata) -> Unit,
     onReadValue: suspend (EnvironmentVariableMetadata) -> String?,
@@ -873,6 +1020,10 @@ private fun SecretDetail(
     modifier: Modifier = Modifier,
 ) {
     var menuExpanded by remember(secret.id) { mutableStateOf(false) }
+    var editingSshComment by remember(secret.id) { mutableStateOf(false) }
+    var sshComment by remember(secret.id, secret.sshKey?.comment) {
+        mutableStateOf(secret.sshKey?.comment.orEmpty())
+    }
     val fontScale = LocalDensity.current.fontScale
     Column(modifier) {
         TopAppBar(
@@ -937,49 +1088,167 @@ private fun SecretDetail(
                     InformationRow(stringResource(R.string.secret_type), secret.type.displayName())
                 }
             }
-            item {
-                FlowRow(
-                    modifier = Modifier.fillMaxWidth(),
-                    horizontalArrangement = Arrangement.SpaceBetween,
-                    itemVerticalAlignment = Alignment.CenterVertically,
-                    verticalArrangement = Arrangement.spacedBy(8.dp),
-                    maxItemsInEachRow = if (fontScale >= 1.5f) 1 else Int.MAX_VALUE,
-                ) {
-                    Text(
-                        "Environment variables",
-                        style = MaterialTheme.typography.titleLarge,
-                    )
-                    FilledTonalButton(onClick = onAddVariable) {
-                        Icon(Icons.Outlined.Add, contentDescription = null)
-                        Spacer(Modifier.width(6.dp))
-                        Text(stringResource(R.string.add_variable))
+            if (secret.type == ENVIRONMENT_SECRET_TYPE) {
+                item {
+                    FlowRow(
+                        modifier = Modifier.fillMaxWidth(),
+                        horizontalArrangement = Arrangement.SpaceBetween,
+                        itemVerticalAlignment = Alignment.CenterVertically,
+                        verticalArrangement = Arrangement.spacedBy(8.dp),
+                        maxItemsInEachRow = if (fontScale >= 1.5f) 1 else Int.MAX_VALUE,
+                    ) {
+                        Text("Environment variables", style = MaterialTheme.typography.titleLarge)
+                        FilledTonalButton(onClick = onAddVariable) {
+                            Icon(Icons.Outlined.Add, contentDescription = null)
+                            Spacer(Modifier.width(6.dp))
+                            Text(stringResource(R.string.add_variable))
+                        }
                     }
                 }
-            }
-            if (secret.environmentVariables.isEmpty()) {
-                item {
+                if (secret.environmentVariables.isEmpty()) {
+                    item {
+                        EmptyMessage(
+                            title = stringResource(R.string.no_variables),
+                            description = stringResource(R.string.no_variables_description),
+                            modifier = Modifier.fillMaxWidth().padding(vertical = 48.dp),
+                        )
+                    }
+                } else {
+                    items(
+                        secret.environmentVariables,
+                        key = EnvironmentVariableMetadata::id,
+                    ) { variable ->
+                        EnvironmentVariableCard(
+                            variable = variable,
+                            revealedValue = revealedValues[variable.id],
+                            onReveal = { onReveal(variable) },
+                            onReadValue = { onReadValue(variable) },
+                            onCopy = { onCopy(variable) },
+                            onEdit = { onEditVariable(variable) },
+                        )
+                    }
+                }
+            } else {
+                secret.sshKey?.let { key ->
+                    item {
+                        Text("Public key", style = MaterialTheme.typography.titleLarge)
+                    }
+                    item {
+                        SshPublicKeyCard(
+                            key = key,
+                            onCopy = onCopyPublicKey,
+                            onEditComment = { editingSshComment = true },
+                            onReplace = onReplaceSshKey,
+                        )
+                    }
+                } ?: item {
                     EmptyMessage(
-                        title = stringResource(R.string.no_variables),
-                        description = stringResource(R.string.no_variables_description),
+                        title = "SSH key unavailable",
+                        description = "The encrypted private key could not be recovered on this device.",
                         modifier = Modifier.fillMaxWidth().padding(vertical = 48.dp),
                     )
                 }
-            } else {
-                items(secret.environmentVariables, key = EnvironmentVariableMetadata::id) { variable ->
-                    EnvironmentVariableCard(
-                        variable = variable,
-                        revealedValue = revealedValues[variable.id],
-                        onReveal = { onReveal(variable) },
-                        onReadValue = { onReadValue(variable) },
-                        onCopy = { onCopy(variable) },
-                        onEdit = { onEditVariable(variable) },
+            }
+            item {
+                InformationSurface(modifier = Modifier.padding(top = 8.dp)) {
+                    InformationRow("Created", formatTimestamp(secret.createdAt))
+                    InformationRow("Updated", formatTimestamp(secret.updatedAt))
+                }
+            }
+        }
+    }
+    if (editingSshComment) {
+        AlertDialog(
+            onDismissRequest = { editingSshComment = false },
+            title = { Text("Edit public-key comment") },
+            text = {
+                OutlinedTextField(
+                    value = sshComment,
+                    onValueChange = { sshComment = it },
+                    label = { Text("Comment (optional)") },
+                    singleLine = true,
+                    modifier = Modifier.fillMaxWidth(),
+                )
+            },
+            dismissButton = {
+                TextButton(onClick = { editingSshComment = false }) { Text("Cancel") }
+            },
+            confirmButton = {
+                TextButton(
+                    onClick = {
+                        editingSshComment = false
+                        onSaveSshComment(sshComment)
+                    },
+                ) { Text("Save") }
+            },
+        )
+    }
+}
+
+@Composable
+private fun SshPublicKeyCard(
+    key: SshKeyMetadata,
+    onCopy: () -> Unit,
+    onEditComment: () -> Unit,
+    onReplace: () -> Unit,
+) {
+    Surface(
+        color = MaterialTheme.colorScheme.surfaceContainerLow,
+        shape = MaterialTheme.shapes.medium,
+        tonalElevation = 1.dp,
+    ) {
+        Column(
+            Modifier.fillMaxWidth().padding(16.dp),
+            verticalArrangement = Arrangement.spacedBy(12.dp),
+        ) {
+            InformationRow("Algorithm", "Ed25519")
+            InformationRow("Fingerprint", key.fingerprint)
+            Row(
+                modifier = Modifier.fillMaxWidth(),
+                verticalAlignment = Alignment.CenterVertically,
+            ) {
+                Column(Modifier.weight(1f)) {
+                    Text(
+                        "Comment",
+                        style = MaterialTheme.typography.labelMedium,
+                        color = MaterialTheme.colorScheme.onSurfaceVariant,
+                    )
+                    Text(key.comment.ifBlank { "No comment" })
+                }
+                IconButton(onClick = onEditComment) {
+                    Icon(Icons.Outlined.Edit, contentDescription = "Edit public-key comment")
+                }
+            }
+            Column(verticalArrangement = Arrangement.spacedBy(4.dp)) {
+                Text(
+                    "OpenSSH public key",
+                    style = MaterialTheme.typography.labelMedium,
+                    color = MaterialTheme.colorScheme.onSurfaceVariant,
+                )
+                SelectionContainer {
+                    Text(
+                        key.publicKey,
+                        fontFamily = FontFamily.Monospace,
+                        style = MaterialTheme.typography.bodySmall,
                     )
                 }
-                item {
-                    InformationSurface(modifier = Modifier.padding(top = 8.dp)) {
-                        InformationRow("Created", formatTimestamp(secret.createdAt))
-                        InformationRow("Updated", formatTimestamp(secret.updatedAt))
-                    }
+            }
+            if (!key.privateKeyAvailable) {
+                Text(
+                    "Private key unavailable",
+                    color = MaterialTheme.colorScheme.error,
+                    style = MaterialTheme.typography.bodyMedium,
+                )
+            }
+            Row(
+                modifier = Modifier.fillMaxWidth(),
+                horizontalArrangement = Arrangement.spacedBy(8.dp, Alignment.End),
+            ) {
+                TextButton(onClick = onReplace) { Text("Replace key") }
+                FilledTonalButton(onClick = onCopy) {
+                    Icon(Icons.Outlined.ContentCopy, contentDescription = null)
+                    Spacer(Modifier.width(6.dp))
+                    Text("Copy public key")
                 }
             }
         }
@@ -1144,6 +1413,7 @@ private fun SecretEditorScreen(
     editor: SecretEditorState,
     onEditorChange: (SecretEditorState) -> Unit,
     onDismiss: () -> Unit,
+    onPrepareSshKey: () -> Unit,
     onSave: (name: String, description: String) -> Unit,
     snackbar: SnackbarHostState,
 ) {
@@ -1153,7 +1423,10 @@ private fun SecretEditorScreen(
     var validationError by rememberSaveable(secret?.id) { mutableStateOf<Int?>(null) }
     var confirmDiscard by rememberSaveable(secret?.id) { mutableStateOf(false) }
     val dirty = if (secret == null) {
-        name.isNotEmpty() || description.isNotEmpty()
+        name.isNotEmpty() || description.isNotEmpty() ||
+            editor.type != ENVIRONMENT_SECRET_TYPE ||
+            editor.sshPrivateKeyText.isNotEmpty() || editor.sshComment.isNotEmpty() ||
+            editor.preparedSshKey != null
     } else {
         name != secret.name || description != secret.description
     }
@@ -1189,32 +1462,40 @@ private fun SecretEditorScreen(
                 .padding(20.dp),
             verticalArrangement = Arrangement.spacedBy(18.dp),
         ) {
-            Surface(
-                color = MaterialTheme.colorScheme.surfaceContainerLow,
-                shape = RoundedCornerShape(12.dp),
-                modifier = Modifier.fillMaxWidth(),
-            ) {
-                Column(
-                    modifier = Modifier.padding(14.dp),
-                    verticalArrangement = Arrangement.spacedBy(3.dp),
-                ) {
-                    Text(
-                        stringResource(R.string.secret_type),
-                        style = MaterialTheme.typography.labelMedium,
-                        color = MaterialTheme.colorScheme.onSurfaceVariant,
-                    )
-                    Text(
-                        stringResource(R.string.environment_variables),
-                        style = MaterialTheme.typography.titleMedium,
-                    )
-                    if (secret == null) {
-                        Text(
-                            stringResource(R.string.secret_type_immutable) + " " +
-                                stringResource(R.string.secret_variables_after_creation),
-                            style = MaterialTheme.typography.bodySmall,
-                            color = MaterialTheme.colorScheme.onSurfaceVariant,
+            if (secret == null) {
+                Column(verticalArrangement = Arrangement.spacedBy(8.dp)) {
+                    Text("Secret type", style = MaterialTheme.typography.titleMedium)
+                    Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+                        FilterChip(
+                            selected = editor.type == ENVIRONMENT_SECRET_TYPE,
+                            onClick = {
+                                onEditorChange(
+                                    editor.copy(
+                                        type = ENVIRONMENT_SECRET_TYPE,
+                                        preparedSshKey = null,
+                                        sshError = null,
+                                    ),
+                                )
+                            },
+                            label = { Text("Environment variables") },
+                        )
+                        FilterChip(
+                            selected = editor.type == SSH_SECRET_TYPE,
+                            onClick = {
+                                onEditorChange(editor.copy(type = SSH_SECRET_TYPE, sshError = null))
+                            },
+                            label = { Text("SSH key") },
                         )
                     }
+                    Text(
+                        "A secret's type cannot be changed after it is created.",
+                        style = MaterialTheme.typography.bodySmall,
+                        color = MaterialTheme.colorScheme.onSurfaceVariant,
+                    )
+                }
+            } else {
+                InformationSurface {
+                    InformationRow("Type", editor.type.displayName())
                 }
             }
             OutlinedTextField(
@@ -1244,6 +1525,43 @@ private fun SecretEditorScreen(
                 minLines = 2,
                 modifier = Modifier.fillMaxWidth(),
             )
+            if (secret == null && editor.type == SSH_SECRET_TYPE) {
+                SshKeyInput(
+                    mode = editor.sshInputMode,
+                    privateKeyText = editor.sshPrivateKeyText,
+                    comment = editor.sshComment,
+                    preparedKey = editor.preparedSshKey,
+                    error = editor.sshError,
+                    onModeChange = { mode ->
+                        onEditorChange(
+                            editor.copy(
+                                sshInputMode = mode,
+                                preparedSshKey = null,
+                                sshError = null,
+                            ),
+                        )
+                    },
+                    onPrivateKeyChange = { value ->
+                        onEditorChange(
+                            editor.copy(
+                                sshPrivateKeyText = value,
+                                preparedSshKey = null,
+                                sshError = null,
+                            ),
+                        )
+                    },
+                    onCommentChange = { value ->
+                        onEditorChange(
+                            editor.copy(
+                                sshComment = value,
+                                preparedSshKey = null,
+                                sshError = null,
+                            ),
+                        )
+                    },
+                    onPrepare = onPrepareSshKey,
+                )
+            }
             Button(
                 onClick = {
                     validationError = when {
@@ -1253,7 +1571,8 @@ private fun SecretEditorScreen(
                     }
                     if (validationError == null) onSave(name, description)
                 },
-                enabled = name.isNotBlank() && (
+                enabled = name.isNotBlank() &&
+                    (editor.type != SSH_SECRET_TYPE || editor.preparedSshKey != null) && (
                     secret == null ||
                         name != secret.name ||
                         description != secret.description
@@ -1274,6 +1593,189 @@ private fun SecretEditorScreen(
                     color = MaterialTheme.colorScheme.onSurfaceVariant,
                 )
             }
+        }
+    }
+    if (confirmDiscard) {
+        DiscardChangesDialog(
+            onDismiss = { confirmDiscard = false },
+            onDiscard = onDismiss,
+        )
+    }
+}
+
+@Composable
+private fun SshKeyInput(
+    mode: SshKeyInputMode,
+    privateKeyText: String,
+    comment: String,
+    preparedKey: SshPrivateKey?,
+    error: String?,
+    onModeChange: (SshKeyInputMode) -> Unit,
+    onPrivateKeyChange: (String) -> Unit,
+    onCommentChange: (String) -> Unit,
+    onPrepare: () -> Unit,
+) {
+    Column(verticalArrangement = Arrangement.spacedBy(12.dp)) {
+        Text("Key material", style = MaterialTheme.typography.titleMedium)
+        Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+            FilterChip(
+                selected = mode == SshKeyInputMode.GENERATE,
+                onClick = { onModeChange(SshKeyInputMode.GENERATE) },
+                label = { Text("Generate") },
+            )
+            FilterChip(
+                selected = mode == SshKeyInputMode.IMPORT,
+                onClick = { onModeChange(SshKeyInputMode.IMPORT) },
+                label = { Text("Import") },
+            )
+        }
+        if (mode == SshKeyInputMode.GENERATE) {
+            Text(
+                "Generate a new Ed25519 key on this device.",
+                color = MaterialTheme.colorScheme.onSurfaceVariant,
+            )
+            OutlinedTextField(
+                value = comment,
+                onValueChange = onCommentChange,
+                label = { Text("Public-key comment (optional)") },
+                singleLine = true,
+                modifier = Modifier.fillMaxWidth(),
+            )
+        } else {
+            Text(
+                "Paste an unencrypted OpenSSH Ed25519 private key. Encrypted keys must be " +
+                    "decrypted before import.",
+                color = MaterialTheme.colorScheme.onSurfaceVariant,
+            )
+            OutlinedTextField(
+                value = privateKeyText,
+                onValueChange = onPrivateKeyChange,
+                label = { Text("OpenSSH private key") },
+                minLines = 6,
+                maxLines = 12,
+                textStyle = MaterialTheme.typography.bodySmall.copy(fontFamily = FontFamily.Monospace),
+                modifier = Modifier.fillMaxWidth(),
+            )
+        }
+        if (preparedKey == null) {
+            FilledTonalButton(
+                onClick = onPrepare,
+                enabled = mode == SshKeyInputMode.GENERATE || privateKeyText.isNotBlank(),
+                modifier = Modifier.fillMaxWidth(),
+            ) {
+                Text(if (mode == SshKeyInputMode.GENERATE) "Generate and review" else "Review key")
+            }
+        } else {
+            SshKeyPreview(preparedKey)
+        }
+        error?.let {
+            Text(
+                it,
+                color = MaterialTheme.colorScheme.error,
+                style = MaterialTheme.typography.bodySmall,
+            )
+        }
+    }
+}
+
+@Composable
+private fun SshKeyPreview(key: SshPrivateKey) {
+    InformationSurface {
+        Text("Ready to save", style = MaterialTheme.typography.titleMedium)
+        InformationRow("Algorithm", "Ed25519")
+        InformationRow("Fingerprint", key.fingerprint)
+        if (key.comment.isNotBlank()) InformationRow("Comment", key.comment)
+        Column(verticalArrangement = Arrangement.spacedBy(3.dp)) {
+            Text(
+                "OpenSSH public key",
+                style = MaterialTheme.typography.labelMedium,
+                color = MaterialTheme.colorScheme.onSurfaceVariant,
+            )
+            SelectionContainer {
+                Text(
+                    key.publicKeyLine,
+                    style = MaterialTheme.typography.bodySmall,
+                    fontFamily = FontFamily.Monospace,
+                )
+            }
+        }
+    }
+}
+
+@Composable
+private fun SshKeyEditorScreen(
+    editor: SshKeyEditorState,
+    onEditorChange: (SshKeyEditorState) -> Unit,
+    onDismiss: () -> Unit,
+    onPrepare: () -> Unit,
+    onReplace: () -> Unit,
+    snackbar: SnackbarHostState,
+) {
+    var confirmDiscard by rememberSaveable(editor.secretId) { mutableStateOf(false) }
+    val dirty = editor.privateKeyText.isNotEmpty() || editor.preparedKey != null ||
+        editor.comment != editor.currentKey.comment
+    fun requestDismiss() {
+        if (dirty) confirmDiscard = true else onDismiss()
+    }
+    BackHandler(onBack = ::requestDismiss)
+    Scaffold(
+        topBar = {
+            TopAppBar(
+                title = { Text("Replace SSH key") },
+                navigationIcon = {
+                    IconButton(onClick = ::requestDismiss) {
+                        Icon(
+                            Icons.AutoMirrored.Outlined.ArrowBack,
+                            contentDescription = stringResource(R.string.back),
+                        )
+                    }
+                },
+            )
+        },
+        snackbarHost = { SnackbarHost(snackbar) },
+    ) { padding ->
+        Column(
+            Modifier.fillMaxSize().padding(padding).verticalScroll(rememberScrollState())
+                .padding(20.dp),
+            verticalArrangement = Arrangement.spacedBy(18.dp),
+        ) {
+            InformationSurface {
+                Text(editor.secretName, style = MaterialTheme.typography.titleMedium)
+                InformationRow("Current fingerprint", editor.currentKey.fingerprint)
+                Text(
+                    "Replacing the private key changes the public key while keeping the secret's " +
+                        "name and request references.",
+                    color = MaterialTheme.colorScheme.onSurfaceVariant,
+                )
+            }
+            SshKeyInput(
+                mode = editor.inputMode,
+                privateKeyText = editor.privateKeyText,
+                comment = editor.comment,
+                preparedKey = editor.preparedKey,
+                error = editor.error,
+                onModeChange = { mode ->
+                    onEditorChange(
+                        editor.copy(inputMode = mode, preparedKey = null, error = null),
+                    )
+                },
+                onPrivateKeyChange = { value ->
+                    onEditorChange(
+                        editor.copy(privateKeyText = value, preparedKey = null, error = null),
+                    )
+                },
+                onCommentChange = { value ->
+                    onEditorChange(
+                        editor.copy(comment = value, preparedKey = null, error = null),
+                    )
+                },
+                onPrepare = onPrepare,
+            )
+            Button(
+                onClick = onReplace,
+                enabled = editor.preparedKey != null,
+                modifier = Modifier.fillMaxWidth(),
+            ) { Text("Replace key") }
         }
     }
     if (confirmDiscard) {
@@ -1627,6 +2129,7 @@ private fun Loading(modifier: Modifier = Modifier) {
 
 private fun String.displayName(): String = when (this) {
     "environment" -> "Environment variables"
+    "ssh" -> "SSH key"
     else -> this
 }
 
