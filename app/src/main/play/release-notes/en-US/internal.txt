@@ -1,1 +1,1 @@
-Add Ed25519 SSH key secrets: generate or import keys, review uploads, copy public keys, and provide public keys to approved requests.
+Add Plan and billing with live subscription status and secure review-code activation links for AI review access.

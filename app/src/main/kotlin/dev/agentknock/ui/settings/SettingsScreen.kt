@@ -62,6 +62,7 @@ import androidx.compose.material.icons.outlined.Refresh
 import androidx.compose.material.icons.outlined.Security
 import androidx.compose.material.icons.outlined.Smartphone
 import androidx.compose.material.icons.outlined.Storage
+import androidx.compose.material.icons.outlined.WorkspacePremium
 import androidx.compose.material3.AlertDialog
 import androidx.compose.material3.Button
 import androidx.compose.material3.ButtonDefaults
@@ -85,6 +86,7 @@ import androidx.compose.material3.TextButton
 import androidx.compose.material3.TopAppBar
 import androidx.compose.material3.VerticalDivider
 import androidx.compose.runtime.Composable
+import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
@@ -137,6 +139,7 @@ private enum class SettingsPage {
     AUDIT,
     FACTORY_RESET,
     DIAGNOSTICS,
+    PLAN,
     ABOUT,
 }
 
@@ -148,6 +151,9 @@ internal fun SettingsScreen(
     onAuthenticationModeChange: (DeviceAuthenticationMode, (String) -> Unit) -> Unit,
     notificationStateGeneration: Long,
     requestNotificationPermission: () -> Unit,
+    openPlanInitially: Boolean,
+    onPlanOpened: () -> Unit,
+    subscriptionViewModel: SubscriptionViewModel,
     viewModel: SettingsViewModel = viewModel(),
 ) {
     var page by rememberSaveable { mutableStateOf(SettingsPage.OVERVIEW) }
@@ -160,8 +166,19 @@ internal fun SettingsScreen(
     val syncResult by viewModel.lastSyncResult.collectAsStateWithLifecycle()
     val pushState by viewModel.pushRegistrationState.collectAsStateWithLifecycle()
     val vaultProtection by viewModel.vaultProtection.collectAsStateWithLifecycle()
+    val subscriptionState by subscriptionViewModel.state.collectAsStateWithLifecycle()
     val snackbar = remember { SnackbarHostState() }
     val scope = rememberCoroutineScope()
+
+    LaunchedEffect(subscriptionViewModel) {
+        subscriptionViewModel.refresh()
+    }
+    LaunchedEffect(openPlanInitially) {
+        if (openPlanInitially) {
+            page = SettingsPage.PLAN
+            onPlanOpened()
+        }
+    }
 
     fun back() {
         when (page) {
@@ -193,6 +210,7 @@ internal fun SettingsScreen(
                     pushState = pushState?.wireName,
                     protection = vaultProtection,
                     authenticationMode = authenticationMode,
+                    subscription = subscriptionState,
                     modifier = modifier,
                 )
                 SettingsPage.DEVICE -> DeviceAndPairing(
@@ -261,6 +279,12 @@ internal fun SettingsScreen(
                     onBack = ::back,
                     onReconnect = viewModel::reconnect,
                     report = { scope.launch { snackbar.showSnackbar(it) } },
+                    modifier = modifier,
+                )
+                SettingsPage.PLAN -> PlanAndBillingScreen(
+                    state = subscriptionState,
+                    onBack = ::back,
+                    onRefresh = subscriptionViewModel::refresh,
                     modifier = modifier,
                 )
                 SettingsPage.ABOUT -> About(
@@ -350,6 +374,7 @@ private fun SettingsOverview(
     pushState: String?,
     protection: VaultProtection?,
     authenticationMode: DeviceAuthenticationMode,
+    subscription: SubscriptionUiState,
     modifier: Modifier,
 ) {
     val context = LocalContext.current
@@ -395,6 +420,13 @@ private fun SettingsOverview(
                         "${counts.requests.countLabel("workflow")} · " +
                         "${counts.auditEvents.countLabel("audit event")}",
                 ) { onOpen(SettingsPage.DATA) }
+            }
+            item {
+                SettingsRow(
+                    Icons.Outlined.WorkspacePremium,
+                    "Plan and billing",
+                    subscription.overviewLabel(),
+                ) { onOpen(SettingsPage.PLAN) }
             }
             item {
                 val status = when (syncResult) {

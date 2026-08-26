@@ -15,6 +15,7 @@ import dev.agentknock.storage.crypto.VaultKeyManager
 import dev.agentknock.storage.secret.SecretRepository
 import dev.agentknock.relay.HttpRelayClaimClient
 import dev.agentknock.relay.HttpRelayPushRegistrationClient
+import dev.agentknock.relay.HttpRelaySubscriptionClient
 import dev.agentknock.relay.HttpRelayDeviceManagementClient
 import dev.agentknock.relay.WebSocketRelayDeviceClient
 import dev.agentknock.storage.request.RequestRepository
@@ -22,6 +23,7 @@ import dev.agentknock.storage.request.RequestConnectionManager
 import dev.agentknock.storage.rule.ApprovalRuleRepository
 import dev.agentknock.storage.vault.VaultRepository
 import dev.agentknock.storage.vault.DeviceManagementRepository
+import dev.agentknock.subscription.SubscriptionRepository
 import dev.agentknock.ui.auth.AuthenticationSession
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.CoroutineStart
@@ -84,6 +86,11 @@ internal class ApplicationContainer(application: Application) {
     val pushRegistration = PushRegistrationRepository(
         deviceCredentials = vault,
         relay = HttpRelayPushRegistrationClient(httpClient),
+    )
+
+    val subscription = SubscriptionRepository(
+        deviceCredentials = vault,
+        relay = HttpRelaySubscriptionClient(httpClient),
     )
 
     val deviceManagement = DeviceManagementRepository(

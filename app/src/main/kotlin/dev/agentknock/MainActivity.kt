@@ -10,18 +10,27 @@ import androidx.activity.compose.setContent
 import androidx.activity.enableEdgeToEdge
 import androidx.fragment.app.FragmentActivity
 import dev.agentknock.push.RequestNotifications
+import dev.agentknock.subscription.SubscriptionRedemptionLink
 import dev.agentknock.ui.AgentknockScreen
 import dev.agentknock.ui.auth.DeviceAuthenticator
 import dev.agentknock.ui.theme.AgentknockTheme
 import kotlinx.coroutines.flow.MutableStateFlow
+import kotlinx.coroutines.flow.update
 
 internal data class RequestNavigation(
     val generation: Long = 0,
     val requestId: Long? = null,
 )
 
+internal data class SubscriptionNavigation(
+    val generation: Long = 0,
+    val redemptionToken: String? = null,
+    val invalidLink: Boolean = false,
+)
+
 class MainActivity : FragmentActivity() {
     private val requestNavigation = MutableStateFlow(RequestNavigation())
+    private val subscriptionNavigation = MutableStateFlow(SubscriptionNavigation())
     private val notificationStateGeneration = MutableStateFlow(0L)
     private val notificationPermissionRequestLauncher = registerForActivityResult(
         ActivityResultContracts.RequestPermission(),
@@ -42,6 +51,8 @@ class MainActivity : FragmentActivity() {
                     authenticate = authenticator::authenticate,
                     authentication = authentication,
                     requestNavigation = requestNavigation,
+                    subscriptionNavigation = subscriptionNavigation,
+                    consumeSubscriptionNavigation = ::consumeSubscriptionNavigation,
                     notificationStateGeneration = notificationStateGeneration,
                     requestNotificationPermission = ::requestNotificationPermission,
                 )
@@ -81,6 +92,33 @@ class MainActivity : FragmentActivity() {
     }
 
     private fun handleIntent(intent: Intent) {
+        if (intent.action == Intent.ACTION_VIEW) {
+            val recognized = when (val link = SubscriptionRedemptionLink.parse(intent.dataString)) {
+                is SubscriptionRedemptionLink.Valid -> {
+                    subscriptionNavigation.update {
+                        SubscriptionNavigation(
+                            generation = it.generation + 1,
+                            redemptionToken = link.token,
+                        )
+                    }
+                    true
+                }
+                SubscriptionRedemptionLink.Invalid -> {
+                    subscriptionNavigation.update {
+                        SubscriptionNavigation(
+                            generation = it.generation + 1,
+                            invalidLink = true,
+                        )
+                    }
+                    true
+                }
+                SubscriptionRedemptionLink.Unrelated -> false
+            }
+            if (recognized) {
+                intent.action = null
+                intent.data = null
+            }
+        }
         if (
             intent.action == RequestNotifications.OPEN_REQUESTS_ACTION ||
             intent.action == RequestNotifications.OPEN_REQUEST_ACTION
@@ -91,6 +129,16 @@ class MainActivity : FragmentActivity() {
                     .takeIf { it >= 0 },
             )
             intent.action = null
+        }
+    }
+
+    private fun consumeSubscriptionNavigation(generation: Long) {
+        subscriptionNavigation.update { current ->
+            if (current.generation == generation) {
+                current.copy(redemptionToken = null, invalidLink = false)
+            } else {
+                current
+            }
         }
     }
 }

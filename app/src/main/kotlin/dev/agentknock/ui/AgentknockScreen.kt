@@ -48,6 +48,7 @@ import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import androidx.lifecycle.viewmodel.compose.viewModel
 import dev.agentknock.R
 import dev.agentknock.RequestNavigation
+import dev.agentknock.SubscriptionNavigation
 import dev.agentknock.ui.clients.ClientsScreen
 import dev.agentknock.ui.clients.ClientsViewModel
 import dev.agentknock.ui.secrets.SecretsScreen
@@ -55,6 +56,7 @@ import dev.agentknock.ui.secrets.SecretsViewModel
 import dev.agentknock.ui.requests.RequestsScreen
 import dev.agentknock.ui.requests.RequestsViewModel
 import dev.agentknock.ui.settings.SettingsScreen
+import dev.agentknock.ui.settings.SubscriptionViewModel
 import dev.agentknock.ui.rules.RulesScreen
 import dev.agentknock.ui.rules.RulesViewModel
 import dev.agentknock.ui.device.DeviceSetupScreen
@@ -74,6 +76,8 @@ internal fun AgentknockScreen(
     ) -> Unit,
     authentication: AuthenticationSession,
     requestNavigation: StateFlow<RequestNavigation>,
+    subscriptionNavigation: StateFlow<SubscriptionNavigation>,
+    consumeSubscriptionNavigation: (Long) -> Unit,
     notificationStateGeneration: StateFlow<Long>,
     requestNotificationPermission: () -> Unit,
     deviceSetupViewModel: DeviceSetupViewModel = viewModel(),
@@ -81,6 +85,7 @@ internal fun AgentknockScreen(
     secretsViewModel: SecretsViewModel = viewModel(),
     clientsViewModel: ClientsViewModel = viewModel(),
     rulesViewModel: RulesViewModel = viewModel(),
+    subscriptionViewModel: SubscriptionViewModel = viewModel(),
 ) {
     val authenticationMode by authentication.mode.collectAsStateWithLifecycle()
     val sessionAuthenticated by authentication.authenticated.collectAsStateWithLifecycle()
@@ -88,10 +93,13 @@ internal fun AgentknockScreen(
     var section by rememberSaveable { mutableStateOf(MainSection.REQUESTS) }
     var showSettings by rememberSaveable { mutableStateOf(false) }
     var showAddressEditor by rememberSaveable { mutableStateOf(false) }
+    var openPlanInitially by remember { mutableStateOf(false) }
     var showNavigation by rememberSaveable { mutableStateOf(true) }
     var offerNotifications by rememberSaveable { mutableStateOf(false) }
     var handledNavigationGeneration by rememberSaveable { mutableStateOf(0L) }
+    var handledSubscriptionGeneration by rememberSaveable { mutableStateOf(0L) }
     val requestNavigationTarget by requestNavigation.collectAsStateWithLifecycle()
+    val subscriptionNavigationTarget by subscriptionNavigation.collectAsStateWithLifecycle()
     val notificationRefreshGeneration by notificationStateGeneration.collectAsStateWithLifecycle()
     val requestSummaries by requestsViewModel.allRequests.collectAsStateWithLifecycle()
     val context = LocalContext.current
@@ -144,6 +152,32 @@ internal fun AgentknockScreen(
         }
     }
 
+    LaunchedEffect(
+        subscriptionNavigationTarget,
+        current,
+        authenticationMode,
+        sessionAuthenticated,
+    ) {
+        if (
+            subscriptionNavigationTarget.generation > handledSubscriptionGeneration &&
+            subscriptionNavigationTarget.generation > 0 &&
+            current?.active?.credentialsAvailable == true &&
+            (authenticationMode != DeviceAuthenticationMode.APP_LOCK || sessionAuthenticated)
+        ) {
+            showSettings = true
+            showAddressEditor = false
+            openPlanInitially = true
+            val redemptionToken = subscriptionNavigationTarget.redemptionToken
+            when {
+                subscriptionNavigationTarget.invalidLink -> subscriptionViewModel.reportInvalidLink()
+                redemptionToken != null -> subscriptionViewModel.redeem(redemptionToken)
+                else -> return@LaunchedEffect
+            }
+            handledSubscriptionGeneration = subscriptionNavigationTarget.generation
+            consumeSubscriptionNavigation(subscriptionNavigationTarget.generation)
+        }
+    }
+
     when {
         authenticationMode == DeviceAuthenticationMode.APP_LOCK && !sessionAuthenticated ->
             AgentknockLockedScreen(
@@ -189,6 +223,9 @@ internal fun AgentknockScreen(
             },
             notificationStateGeneration = notificationRefreshGeneration,
             requestNotificationPermission = requestNotificationPermission,
+            openPlanInitially = openPlanInitially,
+            onPlanOpened = { openPlanInitially = false },
+            subscriptionViewModel = subscriptionViewModel,
         )
         else -> BoxWithConstraints(Modifier.fillMaxSize()) {
             val useNavigationRail = maxWidth >= 600.dp
