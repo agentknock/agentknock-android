@@ -269,6 +269,16 @@ class SecretRepositoryTest {
             listOf("FIRST_REGION", "SHARED_TOKEN"),
             description.secrets.first().environmentVariableNames,
         )
+        assertEquals(listOf("first", "second"), description.reviewMetadata.map { it.name })
+        assertEquals(
+            listOf(
+                "FIRST_REGION" to false,
+                "SHARED_TOKEN" to true,
+            ),
+            description.reviewMetadata.first().environmentVariables.map { variable ->
+                variable.name to variable.sensitive
+            },
+        )
 
         val result = fixture.repository.requestedSecrets(listOf("first", "second"))
         check(result is RequestedSecretsResult.Available)
@@ -402,6 +412,8 @@ class SecretRepositoryTest {
     fun `replace uploads preserve environment variable sensitivity and notes`() = runTest {
         val fixture = Fixture()
         val secretId = fixture.createSecret("aws-read-only")
+        fixture.repository.saveApprovalMode(secretId, SecretApprovalMode.ASK_AI)
+        fixture.repository.saveInstructions(secretId, "Permit read-only AWS operations.")
         val region = fixture.repository.createEnvironmentVariable(
             secretId = secretId,
             name = "AWS_REGION",
@@ -434,7 +446,54 @@ class SecretRepositoryTest {
         assertFalse(updatedRegion.sensitive)
         assertEquals("Safe to display", updatedRegion.notes)
         assertTrue(secret.environmentVariables.single { it.name == "AWS_ACCESS_KEY_ID" }.sensitive)
+        assertEquals(SecretApprovalMode.ASK_AI, secret.approvalMode)
+        assertEquals("Permit read-only AWS operations.", secret.instructions)
     }
+
+    @Test
+    fun `client approval override changes the effective mode without replacing the default`() =
+        runTest {
+            val fixture = Fixture()
+            val secretId = fixture.createSecret("github")
+
+            assertEquals(
+                SaveSecretResult.SAVED,
+                fixture.repository.saveApprovalMode(secretId, SecretApprovalMode.ASK_AI),
+            )
+            assertEquals(
+                SaveSecretResult.SAVED,
+                fixture.repository.saveInstructions(
+                    secretId,
+                    "Allow issue triage but never publish a release.",
+                ),
+            )
+            assertEquals(
+                SaveSecretResult.SAVED,
+                fixture.repository.setClientApprovalOverride(
+                    secretId,
+                    "workstation",
+                    SecretApprovalMode.APPROVE,
+                ),
+            )
+
+            val overridden = fixture.repository
+                .approvalPoliciesForNames(listOf("github"), "workstation")
+                .single()
+            assertEquals(SecretApprovalMode.APPROVE, overridden.mode)
+            assertEquals(SecretApprovalMode.ASK_AI, overridden.defaultMode)
+            assertTrue(overridden.overridden)
+            assertEquals(
+                "Allow issue triage but never publish a release.",
+                overridden.instructions,
+            )
+
+            fixture.repository.setClientApprovalOverride(secretId, "workstation", null)
+            val inherited = fixture.repository
+                .approvalPoliciesForNames(listOf("github"), "workstation")
+                .single()
+            assertEquals(SecretApprovalMode.ASK_AI, inherited.mode)
+            assertFalse(inherited.overridden)
+        }
 
     @Test
     fun `update uploads leave omitted environment variables untouched`() = runTest {
@@ -521,6 +580,8 @@ private class FakeSecretDao : SecretDao {
     val secrets = MutableStateFlow<List<SecretEntity>>(emptyList())
     val variables = MutableStateFlow<List<EnvironmentVariableEntity>>(emptyList())
     val sshKeys = MutableStateFlow<List<SshKeyEntity>>(emptyList())
+    val approvalOverrides =
+        MutableStateFlow<List<SecretClientApprovalOverrideEntity>>(emptyList())
 
     override fun observeSecrets(): Flow<List<SecretSummaryRow>> = combine(
         secrets,
@@ -545,6 +606,12 @@ private class FakeSecretDao : SecretDao {
 
     override fun observeSecret(id: String): Flow<SecretEntity?> =
         secrets.map { all -> all.find { it.id == id } }
+
+    override fun observeClientApprovalOverrides(
+        secretId: String,
+    ): Flow<List<SecretClientApprovalOverrideEntity>> = approvalOverrides.map { all ->
+        all.filter { it.secretId == secretId }.sortedBy { it.clientId }
+    }
 
     override fun observeSshKey(secretId: String): Flow<SshKeyMetadataRow?> =
         sshKeys.map { all ->
@@ -600,6 +667,13 @@ private class FakeSecretDao : SecretDao {
     override suspend fun getSecretsByName(names: List<String>): List<SecretEntity> =
         secrets.value.filter { it.name in names }
 
+    override suspend fun getClientApprovalOverrides(
+        clientId: String,
+        secretIds: List<String>,
+    ): List<SecretClientApprovalOverrideEntity> = approvalOverrides.value.filter {
+        it.clientId == clientId && it.secretId in secretIds
+    }
+
     override suspend fun getEnvironmentVariablesForSecrets(
         secretIds: List<String>,
     ): List<EnvironmentVariableEntity> = variables.value.filter { it.secretId in secretIds }
@@ -629,10 +703,27 @@ private class FakeSecretDao : SecretDao {
         return 1
     }
 
+    override suspend fun upsertClientApprovalOverride(
+        override: SecretClientApprovalOverrideEntity,
+    ) {
+        approvalOverrides.value = approvalOverrides.value.filterNot {
+            it.secretId == override.secretId && it.clientId == override.clientId
+        } + override
+    }
+
+    override suspend fun deleteClientApprovalOverride(secretId: String, clientId: String): Int {
+        val before = approvalOverrides.value.size
+        approvalOverrides.value = approvalOverrides.value.filterNot {
+            it.secretId == secretId && it.clientId == clientId
+        }
+        return before - approvalOverrides.value.size
+    }
+
     override suspend fun deleteSecret(secret: SecretEntity) {
         secrets.value = secrets.value.filterNot { it.id == secret.id }
         variables.value = variables.value.filterNot { it.secretId == secret.id }
         sshKeys.value = sshKeys.value.filterNot { it.secretId == secret.id }
+        approvalOverrides.value = approvalOverrides.value.filterNot { it.secretId == secret.id }
     }
 
     override suspend fun insertSshKeyRow(key: SshKeyEntity) {

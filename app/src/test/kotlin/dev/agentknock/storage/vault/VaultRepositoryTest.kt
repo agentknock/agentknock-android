@@ -328,6 +328,18 @@ private class FakeVaultDao : VaultDao {
         return 1
     }
 
+    override suspend fun updateActiveInstructions(activeRole: String, instructions: String): Int {
+        if (identities.value.none { it.role == activeRole }) return 0
+        identities.value = identities.value.map { identity ->
+            if (identity.role == activeRole) {
+                identity.copy(instructions = instructions)
+            } else {
+                identity
+            }
+        }
+        return 1
+    }
+
     override suspend fun updatePairingEnabled(
         identityId: String,
         enabled: Boolean,

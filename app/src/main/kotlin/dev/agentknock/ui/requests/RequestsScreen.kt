@@ -121,6 +121,8 @@ import dev.agentknock.storage.request.SecretUploadRequestState
 import dev.agentknock.storage.request.SecretUploadVariableValue
 import dev.agentknock.storage.request.RequestSyncResult
 import dev.agentknock.storage.rule.ApprovalRuleAction
+import dev.agentknock.storage.rule.AiReviewDecision
+import dev.agentknock.storage.rule.AiReviewFailure
 import dev.agentknock.ui.components.ClientIdentity
 import dev.agentknock.ui.components.InformationRow
 import dev.agentknock.ui.components.InformationSurface
@@ -900,11 +902,31 @@ private fun SecretUseDetail(
                     },
                     NoticeTone.ATTENTION,
                 )
-                ApprovalRuleAction.ASK_AI -> Notice(
-                    "Your decision is required",
-                    "Ask AI is not available yet, so this request needs your decision.",
-                    NoticeTone.ATTENTION,
-                )
+                ApprovalRuleAction.ASK_AI -> {
+                    val review = secretUse.ruleEvaluation.aiReview
+                    when {
+                        review?.decision == AiReviewDecision.ASK_USER -> Notice(
+                            "AI review needs your decision",
+                            review.explanation ?: "The reviewer could not decide safely.",
+                            NoticeTone.ATTENTION,
+                        )
+                        review?.failure == AiReviewFailure.SUBSCRIPTION_REQUIRED -> Notice(
+                            "AI review requires a subscription",
+                            "Decide this request yourself, or activate AI review in Plan and billing.",
+                            NoticeTone.ATTENTION,
+                        )
+                        review?.failure != null -> Notice(
+                            "AI review unavailable",
+                            "The request was left for you to decide.",
+                            NoticeTone.ATTENTION,
+                        )
+                        else -> Notice(
+                            "AI review is pending",
+                            "You can wait for the reviewer or decide this request yourself.",
+                            NoticeTone.ATTENTION,
+                        )
+                    }
+                }
                 else -> Unit
             }
         }
@@ -1572,10 +1594,13 @@ private fun SshKeyUploadDetails(upload: SecretUploadRequestDetails) {
 
 @Composable
 private fun SecretUseOutcome(secretUse: SecretUseRequestDetails) {
-    val ruleDetail = if (secretUse.decisionSource == "rule") {
-        " An approval rule made this decision."
-    } else {
-        ""
+    val ruleDetail = when (secretUse.decisionSource) {
+        "rule" -> " An approval rule made this decision."
+        "policy" -> " Approval settings made this decision."
+        "ai" -> secretUse.ruleEvaluation?.aiReview?.explanation?.let { explanation ->
+            " AI review made this decision: $explanation"
+        } ?: " AI review made this decision."
+        else -> ""
     }
     val outcome = when (secretUse.state) {
         SecretUseRequestState.WAITING_FOR_COMPLETION -> OutcomeNotice(

@@ -157,6 +157,7 @@ internal data class ApprovalRule(
 internal data class RequestedSecretIdentity(
     val id: String,
     val name: String,
+    val defaultAction: ApprovalRuleAction = ApprovalRuleAction.ASK_ME,
 )
 
 internal data class ApprovalRuleRequest(
@@ -178,10 +179,35 @@ internal data class SecretRuleEvaluation(
 )
 
 @Serializable
+internal enum class AiReviewDecision {
+    APPROVE,
+    DENY,
+    ASK_USER,
+}
+
+@Serializable
+internal enum class AiReviewFailure {
+    SUBSCRIPTION_REQUIRED,
+    RELAY_REJECTED,
+    UNAVAILABLE,
+    INVALID_RESPONSE,
+}
+
+@Serializable
+internal data class AiReview(
+    val decision: AiReviewDecision? = null,
+    val explanation: String? = null,
+    val failure: AiReviewFailure? = null,
+    val httpStatus: Int? = null,
+    val errorCode: String? = null,
+)
+
+@Serializable
 internal data class ApprovalRuleEvaluation(
     val action: ApprovalRuleAction,
     val secrets: List<SecretRuleEvaluation>,
     val invalidRuleData: Boolean = false,
+    val aiReview: AiReview? = null,
 ) {
     val matchedRuleIds: Set<String>
         get() = secrets.flatMapTo(linkedSetOf()) { it.matchedRuleIds }
@@ -203,8 +229,12 @@ internal object ApprovalRuleEvaluator {
         }
         val secretEvaluations = request.secrets.map { secret ->
             val matching = eligibleRules.filter { secret.id in it.secretIds }
-            val action = matching.minByOrNull { it.action.precedence }?.action
-                ?: ApprovalRuleAction.ASK_ME
+            val action = if (secret.defaultAction == ApprovalRuleAction.DENY) {
+                ApprovalRuleAction.DENY
+            } else {
+                matching.minByOrNull { it.action.precedence }?.action
+                    ?: secret.defaultAction
+            }
             SecretRuleEvaluation(
                 secretId = secret.id,
                 secretName = secret.name,

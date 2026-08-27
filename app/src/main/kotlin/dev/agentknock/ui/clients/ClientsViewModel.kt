@@ -78,6 +78,9 @@ internal class ClientsViewModel(application: Application) : AndroidViewModel(app
     suspend fun rename(clientId: String, name: String): ClientChangeResult =
         repository.renameClient(clientId, name)
 
+    suspend fun saveInstructions(clientId: String, instructions: String): ClientChangeResult =
+        repository.saveClientInstructions(clientId, instructions)
+
     suspend fun setState(clientId: String, state: RelayClientState): ClientChangeResult =
         repository.setClientState(clientId, state)
 

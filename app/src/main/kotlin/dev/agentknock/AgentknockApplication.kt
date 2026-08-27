@@ -14,6 +14,7 @@ import dev.agentknock.storage.crypto.AndroidEncryptionKeyStore
 import dev.agentknock.storage.crypto.VaultKeyManager
 import dev.agentknock.storage.secret.SecretRepository
 import dev.agentknock.relay.HttpRelayClaimClient
+import dev.agentknock.relay.HttpRelayApprovalReviewClient
 import dev.agentknock.relay.HttpRelayPushRegistrationClient
 import dev.agentknock.relay.HttpRelaySubscriptionClient
 import dev.agentknock.relay.HttpRelayDeviceManagementClient
@@ -110,6 +111,12 @@ internal class ApplicationContainer(application: Application) {
         deviceCredentials = vault,
         secrets = secrets,
         approvalRules = approvalRules,
+        approvalReviewer = HttpRelayApprovalReviewClient(
+            httpClient.newBuilder()
+                .readTimeout(45, TimeUnit.SECONDS)
+                .callTimeout(60, TimeUnit.SECONDS)
+                .build(),
+        ),
         relay = WebSocketRelayDeviceClient(httpClient),
         keyManager = vaultKeyManager,
         encryption = encryption,

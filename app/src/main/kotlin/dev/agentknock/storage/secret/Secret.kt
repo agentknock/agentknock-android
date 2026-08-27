@@ -7,11 +7,13 @@ import androidx.room3.Entity
 import androidx.room3.ForeignKey
 import androidx.room3.Index
 import androidx.room3.Insert
+import androidx.room3.OnConflictStrategy
 import androidx.room3.PrimaryKey
 import androidx.room3.Query
 import androidx.room3.Transaction
 import androidx.room3.Update
 import dev.agentknock.storage.crypto.VaultKeyEntity
+import dev.agentknock.storage.request.PairingEntity
 import kotlinx.coroutines.flow.Flow
 
 @Entity(
@@ -32,6 +34,40 @@ internal data class SecretEntity(
     val createdAt: Long,
     @ColumnInfo(name = "updated_at")
     val updatedAt: Long,
+    @ColumnInfo(name = "approval_mode")
+    val approvalMode: String = "ask_me",
+    @ColumnInfo(name = "instructions")
+    val instructions: String = "",
+)
+
+@Entity(
+    tableName = "secret_client_approval_overrides",
+    primaryKeys = ["secret_id", "client_id"],
+    foreignKeys = [
+        ForeignKey(
+            entity = SecretEntity::class,
+            parentColumns = ["id"],
+            childColumns = ["secret_id"],
+            onDelete = ForeignKey.CASCADE,
+            onUpdate = ForeignKey.NO_ACTION,
+        ),
+        ForeignKey(
+            entity = PairingEntity::class,
+            parentColumns = ["client_id"],
+            childColumns = ["client_id"],
+            onDelete = ForeignKey.CASCADE,
+            onUpdate = ForeignKey.NO_ACTION,
+        ),
+    ],
+    indices = [Index(value = ["client_id"])],
+)
+internal data class SecretClientApprovalOverrideEntity(
+    @ColumnInfo(name = "secret_id")
+    val secretId: String,
+    @ColumnInfo(name = "client_id")
+    val clientId: String,
+    @ColumnInfo(name = "approval_mode")
+    val approvalMode: String,
 )
 
 @Entity(
@@ -221,6 +257,14 @@ internal interface SecretDao {
     fun observeSecret(id: String): Flow<SecretEntity?>
 
     @Query(
+        "SELECT * FROM secret_client_approval_overrides " +
+            "WHERE secret_id = :secretId ORDER BY client_id",
+    )
+    fun observeClientApprovalOverrides(
+        secretId: String,
+    ): Flow<List<SecretClientApprovalOverrideEntity>>
+
+    @Query(
         """
         SELECT id,
                secret_id,
@@ -272,6 +316,15 @@ internal interface SecretDao {
     @Query("SELECT * FROM secrets WHERE name IN (:names)")
     suspend fun getSecretsByName(names: List<String>): List<SecretEntity>
 
+    @Query(
+        "SELECT * FROM secret_client_approval_overrides " +
+            "WHERE client_id = :clientId AND secret_id IN (:secretIds)",
+    )
+    suspend fun getClientApprovalOverrides(
+        clientId: String,
+        secretIds: List<String>,
+    ): List<SecretClientApprovalOverrideEntity>
+
     @Query("SELECT * FROM environment_variables WHERE secret_id IN (:secretIds)")
     suspend fun getEnvironmentVariablesForSecrets(
         secretIds: List<String>,
@@ -303,6 +356,15 @@ internal interface SecretDao {
 
     @Update
     suspend fun updateSecret(secret: SecretEntity): Int
+
+    @Insert(onConflict = OnConflictStrategy.REPLACE)
+    suspend fun upsertClientApprovalOverride(override: SecretClientApprovalOverrideEntity)
+
+    @Query(
+        "DELETE FROM secret_client_approval_overrides " +
+            "WHERE secret_id = :secretId AND client_id = :clientId",
+    )
+    suspend fun deleteClientApprovalOverride(secretId: String, clientId: String): Int
 
     @Delete
     suspend fun deleteSecret(secret: SecretEntity)

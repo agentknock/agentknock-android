@@ -100,6 +100,7 @@ internal fun RulesScreen(
     val clients by viewModel.clients.collectAsStateWithLifecycle()
     val secrets by viewModel.secrets.collectAsStateWithLifecycle()
     val requests by viewModel.requests.collectAsStateWithLifecycle()
+    val instructions by viewModel.instructions.collectAsStateWithLifecycle()
     val selection by viewModel.selection.collectAsStateWithLifecycle()
     val selectedRule by viewModel.selectedRule.collectAsStateWithLifecycle()
     val editor by viewModel.editor.collectAsStateWithLifecycle()
@@ -196,10 +197,22 @@ internal fun RulesScreen(
                 rules = rules,
                 clients = clients,
                 secrets = secrets,
+                instructions = instructions,
                 onOpen = viewModel::selectRule,
                 onSetEnabled = ::setEnabled,
                 onAdd = viewModel::startManualRule,
                 onOpenSettings = onOpenSettings,
+                onSaveInstructions = { value ->
+                    scope.launch {
+                        report(
+                            if (viewModel.saveInstructions(value)) {
+                                "Instructions updated"
+                            } else {
+                                "Instructions could not be updated"
+                            },
+                        )
+                    }
+                },
                 modifier = Modifier.fillMaxSize().padding(padding),
             )
         }
@@ -240,13 +253,17 @@ private fun RuleList(
     rules: List<ApprovalRule>,
     clients: List<ClientSummary>,
     secrets: List<SecretSummary>,
+    instructions: String,
     onOpen: (String) -> Unit,
     onSetEnabled: (ApprovalRule, Boolean) -> Unit,
     onAdd: () -> Unit,
     onOpenSettings: () -> Unit,
+    onSaveInstructions: (String) -> Unit,
     modifier: Modifier = Modifier,
 ) {
     val now = System.currentTimeMillis()
+    var editingInstructions by remember { mutableStateOf(false) }
+    var instructionText by remember(instructions) { mutableStateOf(instructions) }
     Scaffold(
         modifier = modifier,
         topBar = {
@@ -268,34 +285,63 @@ private fun RuleList(
         },
         contentWindowInsets = WindowInsets(0, 0, 0, 0),
     ) { padding ->
-        if (rules.isEmpty()) {
-            Box(
-                Modifier.fillMaxSize().padding(padding).padding(32.dp),
-                contentAlignment = Alignment.Center,
-            ) {
-                Column(
-                    horizontalAlignment = Alignment.CenterHorizontally,
-                    verticalArrangement = Arrangement.spacedBy(12.dp),
+        LazyColumn(
+            modifier = Modifier.fillMaxSize().padding(padding),
+            contentPadding = PaddingValues(bottom = 96.dp),
+        ) {
+            item {
+                InformationSurface(
+                    modifier = Modifier.padding(horizontal = 20.dp, vertical = 8.dp),
                 ) {
-                    Icon(
-                        Icons.AutoMirrored.Outlined.Rule,
-                        contentDescription = null,
-                        modifier = Modifier.size(40.dp),
-                        tint = MaterialTheme.colorScheme.onSurfaceVariant,
-                    )
-                    Text("No approval rules", style = MaterialTheme.typography.titleMedium)
+                    Row(
+                        modifier = Modifier.fillMaxWidth(),
+                        verticalAlignment = Alignment.CenterVertically,
+                    ) {
+                        Text(
+                            "AI review instructions",
+                            style = MaterialTheme.typography.titleMedium,
+                            modifier = Modifier.weight(1f),
+                        )
+                        IconButton(onClick = { editingInstructions = true }) {
+                            Icon(Icons.Outlined.Edit, contentDescription = "Edit instructions")
+                        }
+                    }
                     Text(
-                        "Add a standing rule here, or create a temporary rule while approving a request.",
-                        color = MaterialTheme.colorScheme.onSurfaceVariant,
+                        instructions.ifBlank { "No general instructions for AI review." },
+                        color = if (instructions.isBlank()) {
+                            MaterialTheme.colorScheme.onSurfaceVariant
+                        } else {
+                            MaterialTheme.colorScheme.onSurface
+                        },
                     )
-                    Button(onClick = onAdd) { Text("Add rule") }
                 }
             }
-        } else {
-            LazyColumn(
-                modifier = Modifier.fillMaxSize().padding(padding),
-                contentPadding = PaddingValues(bottom = 96.dp),
-            ) {
+            if (rules.isEmpty()) {
+                item {
+                    Box(
+                        Modifier.fillMaxWidth().padding(48.dp),
+                        contentAlignment = Alignment.Center,
+                    ) {
+                        Column(
+                            horizontalAlignment = Alignment.CenterHorizontally,
+                            verticalArrangement = Arrangement.spacedBy(12.dp),
+                        ) {
+                            Icon(
+                                Icons.AutoMirrored.Outlined.Rule,
+                                contentDescription = null,
+                                modifier = Modifier.size(40.dp),
+                                tint = MaterialTheme.colorScheme.onSurfaceVariant,
+                            )
+                            Text("No approval rules", style = MaterialTheme.typography.titleMedium)
+                            Text(
+                                "Add a standing rule here, or create one while approving a request.",
+                                color = MaterialTheme.colorScheme.onSurfaceVariant,
+                            )
+                            Button(onClick = onAdd) { Text("Add rule") }
+                        }
+                    }
+                }
+            } else {
                 items(rules, key = ApprovalRule::id) { rule ->
                     RuleListItem(
                         rule = rule,
@@ -311,6 +357,36 @@ private fun RuleList(
                 }
             }
         }
+    }
+    if (editingInstructions) {
+        AlertDialog(
+            onDismissRequest = { editingInstructions = false },
+            title = { Text("AI review instructions") },
+            text = {
+                Column(verticalArrangement = Arrangement.spacedBy(12.dp)) {
+                    Text("These instructions apply to every AI review on this device.")
+                    OutlinedTextField(
+                        value = instructionText,
+                        onValueChange = { instructionText = it },
+                        label = { Text("Instructions") },
+                        minLines = 4,
+                        maxLines = 8,
+                        modifier = Modifier.fillMaxWidth(),
+                    )
+                }
+            },
+            confirmButton = {
+                TextButton(
+                    onClick = {
+                        editingInstructions = false
+                        onSaveInstructions(instructionText)
+                    },
+                ) { Text("Save") }
+            },
+            dismissButton = {
+                TextButton(onClick = { editingInstructions = false }) { Text("Cancel") }
+            },
+        )
     }
 }
 
@@ -574,7 +650,7 @@ private fun RuleEditor(
     val clientName = clients.firstOrNull { it.clientId == editor.clientId }?.name
         ?: if (requestDerived) "Requesting client" else "No client selected"
     val canSave = editor.clientId.isNotBlank() && editor.secretIds.isNotEmpty() &&
-        parsed is ParsedShellCommand.Valid && editor.action != ApprovalRuleAction.ASK_AI
+        parsed is ParsedShellCommand.Valid
 
     Scaffold(
         modifier = modifier,
@@ -766,11 +842,13 @@ private fun RuleEditor(
             if (!requestDerived) {
                 Text("Then", style = MaterialTheme.typography.titleMedium)
                 ActionSelector(editor.action) { onUpdate(editor.copy(action = it)) }
-                Text(
-                    "Ask AI rules are not available yet.",
-                    style = MaterialTheme.typography.bodySmall,
-                    color = MaterialTheme.colorScheme.onSurfaceVariant,
-                )
+                if (editor.action == ApprovalRuleAction.ASK_AI) {
+                    Text(
+                        "AI review requires an active subscription. If review is unavailable or uncertain, Agentknock asks you instead.",
+                        style = MaterialTheme.typography.bodySmall,
+                        color = MaterialTheme.colorScheme.onSurfaceVariant,
+                    )
+                }
             }
 
             if (requestDerived) {
@@ -941,7 +1019,6 @@ private fun ActionSelector(
         ).forEach { action ->
             FilterChip(
                 selected = selected == action,
-                enabled = action != ApprovalRuleAction.ASK_AI,
                 onClick = { onSelect(action) },
                 label = { Text(action.label()) },
                 colors = FilterChipDefaults.filterChipColors(

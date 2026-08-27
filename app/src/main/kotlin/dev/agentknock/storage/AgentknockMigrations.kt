@@ -208,3 +208,35 @@ internal val MIGRATION_7_8 = Migration(7, 8) { connection ->
             "ON `git_sign_requests` (`state`)",
     )
 }
+
+internal val MIGRATION_8_9 = Migration(8, 9) { connection ->
+    connection.execSQL(
+        "ALTER TABLE `secrets` ADD COLUMN " +
+            "`approval_mode` TEXT NOT NULL DEFAULT 'ask_me'",
+    )
+    connection.execSQL(
+        "ALTER TABLE `secrets` ADD COLUMN `instructions` TEXT NOT NULL DEFAULT ''",
+    )
+    connection.execSQL(
+        "ALTER TABLE `pairings` ADD COLUMN `instructions` TEXT NOT NULL DEFAULT ''",
+    )
+    connection.execSQL(
+        "ALTER TABLE `device_identities` ADD COLUMN `instructions` TEXT NOT NULL DEFAULT ''",
+    )
+    connection.execSQL(
+        """
+        CREATE TABLE IF NOT EXISTS `secret_client_approval_overrides` (
+            `secret_id` TEXT NOT NULL,
+            `client_id` TEXT NOT NULL,
+            `approval_mode` TEXT NOT NULL,
+            PRIMARY KEY(`secret_id`, `client_id`),
+            FOREIGN KEY(`secret_id`) REFERENCES `secrets`(`id`) ON UPDATE NO ACTION ON DELETE CASCADE,
+            FOREIGN KEY(`client_id`) REFERENCES `pairings`(`client_id`) ON UPDATE NO ACTION ON DELETE CASCADE
+        )
+        """.trimIndent(),
+    )
+    connection.execSQL(
+        "CREATE INDEX IF NOT EXISTS `index_secret_client_approval_overrides_client_id` " +
+            "ON `secret_client_approval_overrides` (`client_id`)",
+    )
+}

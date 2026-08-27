@@ -36,6 +36,7 @@ internal data class DeviceIdentity(
     val pairingEnabled: Boolean,
     val createdAt: Long,
     val claimedAt: Long?,
+    val instructions: String,
 )
 
 internal data class RelayDeviceCredentials(
@@ -46,6 +47,7 @@ internal data class RelayDeviceCredentials(
     val devicePublicKey: ByteArray,
     val devicePrivateKey: ByteArray,
     val deviceToken: String,
+    val instructions: String = "",
 )
 
 internal sealed interface RelayDeviceCredentialsResult {
@@ -161,6 +163,7 @@ internal class VaultRepository(
             createdAt = now,
             claimedAt = null,
             pairingEnabled = active?.pairingEnabled ?: true,
+            instructions = active?.instructions.orEmpty(),
         )
         val secrets = listOf(
             newSecret(
@@ -265,6 +268,25 @@ internal class VaultRepository(
         dao.deleteIdentity(DeviceIdentityRole.CANDIDATE.storedName)
     }
 
+    suspend fun saveInstructions(instructions: String): Boolean {
+        val normalized = instructions.trim()
+        val updated = dao.updateActiveInstructions(
+            activeRole = DeviceIdentityRole.ACTIVE.storedName,
+            instructions = normalized,
+        ) == 1
+        if (updated) {
+            audit.record(
+                AuditRecord(
+                    category = AuditCategory.RULE,
+                    title = "General AI review instructions changed",
+                    detail = "",
+                    outcome = AuditOutcome.CHANGED,
+                ),
+            )
+        }
+        return updated
+    }
+
     override suspend fun activeDeviceCredentials(): RelayDeviceCredentialsResult {
         val identity = dao.getIdentity(DeviceIdentityRole.ACTIVE.storedName)
             ?: return RelayDeviceCredentialsResult.Missing
@@ -323,6 +345,7 @@ internal class VaultRepository(
                 devicePublicKey = identity.devicePublicKey,
                 devicePrivateKey = privateKey,
                 deviceToken = DeviceProtocol.encodeDeviceToken(deviceToken),
+                instructions = identity.instructions,
             ),
         )
     }
@@ -458,6 +481,7 @@ internal class VaultRepository(
         createdAt = createdAt,
         claimedAt = claimedAt,
         pairingEnabled = pairingEnabled,
+        instructions = instructions,
     )
 
     private sealed interface SecretResult {

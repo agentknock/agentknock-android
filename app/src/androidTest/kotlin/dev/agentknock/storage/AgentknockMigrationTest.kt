@@ -178,4 +178,74 @@ class AgentknockMigrationTest {
             }
         }
     }
+
+    @Test
+    fun migration8To9PreservesSecretsAndClientsAndAddsApprovalSettings() = runTest {
+        helper.createDatabase(8).use { database ->
+            database.execSQL(
+                "INSERT INTO device_identities " +
+                    "(id, role, address, address_id, device_id, device_public_key, created_at, " +
+                    "claimed_at, pairing_enabled) VALUES " +
+                    "('identity-1', 'active', 'three-word-address', 'address-1', 'device-1', " +
+                    "X'0102', 1, 2, 1)",
+            )
+            database.execSQL(
+                "INSERT INTO secrets " +
+                    "(id, name, description, type, created_at, updated_at) " +
+                    "VALUES ('secret-1', 'aws-read-only', 'AWS access', 'environment', 1, 2)",
+            )
+            database.execSQL(
+                "INSERT INTO inbox_requests " +
+                    "(id, relay_request_id, parent_request_id, kind, state, listed, request_json, " +
+                    "received_at, updated_at) VALUES " +
+                    "(30, 'pairing-1', NULL, 'pairing', 'completed', 1, '{}', 3, 4)",
+            )
+            database.execSQL(
+                "INSERT INTO pairings " +
+                    "(request_id, device_identity_id, pairing_address, device_id, client_id, " +
+                    "device_random, state, created_at, updated_at) VALUES " +
+                    "(30, 'identity-1', 'three-word-address', 'device-1', 'client-1', " +
+                    "X'0102', 'completed', 3, 4)",
+            )
+        }
+
+        helper.runMigrationsAndValidate(9, listOf(MIGRATION_8_9)).use { database ->
+            database.prepare(
+                "SELECT name, approval_mode, instructions FROM secrets WHERE id = 'secret-1'",
+            ).use { statement ->
+                assertTrue(statement.step())
+                assertEquals("aws-read-only", statement.getText(0))
+                assertEquals("ask_me", statement.getText(1))
+                assertEquals("", statement.getText(2))
+            }
+            database.prepare(
+                "SELECT client_id, instructions FROM pairings WHERE request_id = 30",
+            ).use { statement ->
+                assertTrue(statement.step())
+                assertEquals("client-1", statement.getText(0))
+                assertEquals("", statement.getText(1))
+            }
+            database.prepare(
+                "SELECT address, device_id, instructions FROM device_identities " +
+                    "WHERE id = 'identity-1'",
+            ).use { statement ->
+                assertTrue(statement.step())
+                assertEquals("three-word-address", statement.getText(0))
+                assertEquals("device-1", statement.getText(1))
+                assertEquals("", statement.getText(2))
+            }
+            database.execSQL(
+                "INSERT INTO secret_client_approval_overrides " +
+                    "(secret_id, client_id, approval_mode) " +
+                    "VALUES ('secret-1', 'client-1', 'ask_ai')",
+            )
+            database.prepare(
+                "SELECT approval_mode FROM secret_client_approval_overrides " +
+                    "WHERE secret_id = 'secret-1' AND client_id = 'client-1'",
+            ).use { statement ->
+                assertTrue(statement.step())
+                assertEquals("ask_ai", statement.getText(0))
+            }
+        }
+    }
 }

@@ -1,10 +1,22 @@
 package dev.agentknock.storage.rule
 
+import kotlinx.serialization.json.Json
 import org.junit.Assert.assertEquals
+import org.junit.Assert.assertNull
 import org.junit.Assert.assertTrue
 import org.junit.Test
 
 class ApprovalRuleEvaluatorTest {
+    @Test
+    fun `stored evaluations from before AI review decode without migration`() {
+        val evaluation = Json.decodeFromString<ApprovalRuleEvaluation>(
+            """{"action":"ASK_AI","secrets":[],"invalidRuleData":false}""",
+        )
+
+        assertEquals(ApprovalRuleAction.ASK_AI, evaluation.action)
+        assertNull(evaluation.aiReview)
+    }
+
     @Test
     fun `a deny for one secret denies a request containing additional secrets`() {
         val evaluation = ApprovalRuleEvaluator.evaluate(
@@ -29,6 +41,31 @@ class ApprovalRuleEvaluatorTest {
         )
 
         assertEquals(ApprovalRuleAction.ASK_ME, evaluation.action)
+    }
+
+    @Test
+    fun `a secret default applies when no command rule matches`() {
+        val evaluation = ApprovalRuleEvaluator.evaluate(
+            rules = emptyList(),
+            request = request("gh", defaultAction = ApprovalRuleAction.ASK_AI),
+            now = NOW,
+        )
+
+        assertEquals(ApprovalRuleAction.ASK_AI, evaluation.action)
+        assertTrue(evaluation.matchedRuleIds.isEmpty())
+        assertTrue(evaluation.decisiveRuleIds.isEmpty())
+    }
+
+    @Test
+    fun `a deny default cannot be relaxed by a command rule`() {
+        val evaluation = ApprovalRuleEvaluator.evaluate(
+            rules = listOf(rule("approve-gh", ApprovalRuleAction.APPROVE, setOf("gh"))),
+            request = request("gh", defaultAction = ApprovalRuleAction.DENY),
+            now = NOW,
+        )
+
+        assertEquals(ApprovalRuleAction.DENY, evaluation.action)
+        assertTrue(evaluation.decisiveRuleIds.isEmpty())
     }
 
     @Test
@@ -236,9 +273,10 @@ class ApprovalRuleEvaluatorTest {
         command: List<String> = listOf("gh", "issue", "view", "234"),
         executableHash: String? = "hash",
         workingDirectory: String = "/work/project",
+        defaultAction: ApprovalRuleAction = ApprovalRuleAction.ASK_ME,
     ) = ApprovalRuleRequest(
         clientId = "client",
-        secrets = secrets.map { RequestedSecretIdentity(it, it) },
+        secrets = secrets.map { RequestedSecretIdentity(it, it, defaultAction) },
         command = command,
         executablePath = "/usr/bin/gh",
         executableHash = executableHash,

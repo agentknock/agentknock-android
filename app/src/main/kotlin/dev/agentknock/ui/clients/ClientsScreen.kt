@@ -308,6 +308,18 @@ private fun ClientSelectionDetail(
                 )
             }
         },
+        onSaveInstructions = { instructions ->
+            scope.launch {
+                val result = viewModel.saveInstructions(client.clientId, instructions)
+                report(
+                    if (result == ClientChangeResult.CHANGED) {
+                        "Instructions updated"
+                    } else {
+                        "Instructions could not be updated"
+                    },
+                )
+            }
+        },
         report = report,
         modifier = modifier,
     )
@@ -581,10 +593,15 @@ private fun ClientDetail(
     showBack: Boolean,
     onRename: (String) -> Unit,
     onSetState: (RelayClientState) -> Unit,
+    onSaveInstructions: (String) -> Unit,
     report: (String) -> Unit,
     modifier: Modifier = Modifier,
 ) {
     var showRename by remember { mutableStateOf(false) }
+    var showInstructions by remember { mutableStateOf(false) }
+    var instructions by remember(client.clientId, client.instructions) {
+        mutableStateOf(client.instructions)
+    }
     var confirmation by remember { mutableStateOf<RelayClientState?>(null) }
     val context = LocalContext.current
 
@@ -620,6 +637,30 @@ private fun ClientDetail(
             InformationSurface {
                 ClientStateBadge(client.state, pending)
                 Text(client.state.explanation())
+            }
+
+            InformationSurface {
+                Row(
+                    modifier = Modifier.fillMaxWidth(),
+                    verticalAlignment = Alignment.CenterVertically,
+                ) {
+                    Text(
+                        "Instructions",
+                        style = MaterialTheme.typography.titleMedium,
+                        modifier = Modifier.weight(1f),
+                    )
+                    IconButton(onClick = { showInstructions = true }) {
+                        Icon(Icons.Outlined.Edit, contentDescription = "Edit instructions")
+                    }
+                }
+                Text(
+                    client.instructions.ifBlank { "No instructions for AI review." },
+                    color = if (client.instructions.isBlank()) {
+                        MaterialTheme.colorScheme.onSurfaceVariant
+                    } else {
+                        MaterialTheme.colorScheme.onSurface
+                    },
+                )
             }
 
             InformationSurface {
@@ -742,6 +783,39 @@ private fun ClientDetail(
                 ) { Text("Save") }
             },
             dismissButton = { TextButton(onClick = { showRename = false }) { Text("Cancel") } },
+        )
+    }
+
+    if (showInstructions) {
+        AlertDialog(
+            onDismissRequest = { showInstructions = false },
+            title = { Text("Client instructions") },
+            text = {
+                Column(verticalArrangement = Arrangement.spacedBy(12.dp)) {
+                    Text(
+                        "Tell AI review what this client is used for and how much it should be trusted.",
+                    )
+                    OutlinedTextField(
+                        value = instructions,
+                        onValueChange = { instructions = it },
+                        label = { Text("Instructions") },
+                        minLines = 4,
+                        maxLines = 8,
+                        modifier = Modifier.fillMaxWidth(),
+                    )
+                }
+            },
+            confirmButton = {
+                TextButton(
+                    onClick = {
+                        showInstructions = false
+                        onSaveInstructions(instructions)
+                    },
+                ) { Text("Save") }
+            },
+            dismissButton = {
+                TextButton(onClick = { showInstructions = false }) { Text("Cancel") }
+            },
         )
     }
 

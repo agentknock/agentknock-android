@@ -24,6 +24,7 @@ import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.asStateFlow
 import kotlinx.coroutines.flow.flatMapLatest
 import kotlinx.coroutines.flow.flowOf
+import kotlinx.coroutines.flow.map
 import kotlinx.coroutines.flow.stateIn
 import kotlinx.coroutines.launch
 
@@ -88,6 +89,13 @@ internal class RulesViewModel(application: Application) : AndroidViewModel(appli
         started = SharingStarted.Eagerly,
         initialValue = emptyList(),
     )
+    val instructions: StateFlow<String> = container.vault.observeConfiguration()
+        .map { configuration -> configuration.active?.instructions.orEmpty() }
+        .stateIn(
+            scope = viewModelScope,
+            started = SharingStarted.Eagerly,
+            initialValue = "",
+        )
     val selection: StateFlow<String?> = selectedRuleId.asStateFlow()
     val selectedRule: StateFlow<ApprovalRule?> = selectedRuleId.flatMapLatest { id ->
         id?.let(repository::observeRule) ?: flowOf(null)
@@ -103,6 +111,9 @@ internal class RulesViewModel(application: Application) : AndroidViewModel(appli
         editorState.value = null
         selectedRuleId.value = id
     }
+
+    suspend fun saveInstructions(instructions: String): Boolean =
+        container.vault.saveInstructions(instructions)
 
     fun startManualRule() {
         selectedRuleId.value = null

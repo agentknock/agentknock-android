@@ -28,6 +28,35 @@ internal const val ENVIRONMENT_SECRET_TYPE = "environment"
 internal const val SSH_SECRET_TYPE = "ssh"
 internal const val SSH_PRIVATE_KEY_FORMAT = "ed25519_seed"
 
+internal enum class SecretApprovalMode(
+    val storedName: String,
+    val precedence: Int,
+) {
+    DENY("deny", 0),
+    ASK_ME("ask_me", 1),
+    ASK_AI("ask_ai", 2),
+    APPROVE("approve", 3),
+}
+
+internal fun String.toSecretApprovalMode(): SecretApprovalMode =
+    checkNotNull(SecretApprovalMode.entries.find { it.storedName == this }) {
+        "Unknown secret approval mode"
+    }
+
+internal data class SecretClientApprovalOverride(
+    val clientId: String,
+    val mode: SecretApprovalMode,
+)
+
+internal data class SecretApprovalPolicy(
+    val secretId: String,
+    val secretName: String,
+    val mode: SecretApprovalMode,
+    val defaultMode: SecretApprovalMode,
+    val overridden: Boolean,
+    val instructions: String,
+)
+
 internal data class SecretSummary(
     val id: String,
     val name: String,
@@ -46,6 +75,9 @@ internal data class SecretDetails(
     val type: String,
     val environmentVariables: List<EnvironmentVariableMetadata>,
     val sshKey: SshKeyMetadata?,
+    val approvalMode: SecretApprovalMode,
+    val instructions: String,
+    val clientApprovalOverrides: List<SecretClientApprovalOverride>,
     val createdAt: Long,
     val updatedAt: Long,
 )
@@ -191,8 +223,38 @@ internal data class SecretMetadata(
 
 internal data class RequestedSecretDescription(
     val secrets: List<SecretMetadata>,
+    val reviewMetadata: List<SecretReviewMetadata>,
     val missingSecrets: List<String>,
     val containsSensitiveMaterial: Boolean,
+)
+
+internal data class SecretReviewMetadata(
+    val id: String,
+    val name: String,
+    val description: String,
+    val type: String,
+    val instructions: String,
+    val environmentVariables: List<EnvironmentVariableReviewMetadata>,
+    val sshKey: SshKeyReviewMetadata?,
+    val createdAt: Long,
+    val updatedAt: Long,
+)
+
+internal data class EnvironmentVariableReviewMetadata(
+    val name: String,
+    val sensitive: Boolean,
+    val notes: String,
+    val createdAt: Long,
+    val updatedAt: Long,
+    val valueUpdatedAt: Long,
+)
+
+internal data class SshKeyReviewMetadata(
+    val algorithm: String,
+    val publicKey: String,
+    val fingerprint: String,
+    val comment: String,
+    val materialUpdatedAt: Long,
 )
 
 internal data class SecretIdentity(
@@ -301,7 +363,8 @@ internal class SecretRepository(
         dao.observeSecret(id),
         dao.observeEnvironmentVariables(id),
         dao.observeSshKey(id),
-    ) { secret, variables, sshKey ->
+        dao.observeClientApprovalOverrides(id),
+    ) { secret, variables, sshKey, overrides ->
         secret?.let {
             val availability = variables
                 .map(EnvironmentVariableMetadataRow::encryptionKeyId)
@@ -336,6 +399,14 @@ internal class SecretRepository(
                         materialUpdatedAt = key.materialUpdatedAt,
                     )
                 },
+                approvalMode = secret.approvalMode.toSecretApprovalMode(),
+                instructions = secret.instructions,
+                clientApprovalOverrides = overrides.map { override ->
+                    SecretClientApprovalOverride(
+                        clientId = override.clientId,
+                        mode = override.approvalMode.toSecretApprovalMode(),
+                    )
+                },
                 createdAt = secret.createdAt,
                 updatedAt = secret.updatedAt,
             )
@@ -347,6 +418,97 @@ internal class SecretRepository(
         return names.distinct().mapNotNull { name ->
             byName[name]?.let { secret -> SecretIdentity(secret.id, secret.name) }
         }
+    }
+
+    suspend fun approvalPoliciesForNames(
+        names: List<String>,
+        clientId: String,
+    ): List<SecretApprovalPolicy> {
+        val requestedNames = names.distinct()
+        val secrets = dao.getSecretsByName(requestedNames)
+        val overrides = dao.getClientApprovalOverrides(
+            clientId = clientId,
+            secretIds = secrets.map(SecretEntity::id),
+        ).associateBy(SecretClientApprovalOverrideEntity::secretId)
+        val byName = secrets.associateBy(SecretEntity::name)
+        return requestedNames.mapNotNull { name ->
+            byName[name]?.let { secret ->
+                val defaultMode = secret.approvalMode.toSecretApprovalMode()
+                val override = overrides[secret.id]
+                SecretApprovalPolicy(
+                    secretId = secret.id,
+                    secretName = secret.name,
+                    mode = override?.approvalMode?.toSecretApprovalMode() ?: defaultMode,
+                    defaultMode = defaultMode,
+                    overridden = override != null,
+                    instructions = secret.instructions,
+                )
+            }
+        }
+    }
+
+    suspend fun saveApprovalMode(id: String, mode: SecretApprovalMode): SaveSecretResult {
+        val secret = dao.getSecret(id) ?: return SaveSecretResult.NOT_FOUND
+        if (secret.approvalMode == mode.storedName) return SaveSecretResult.SAVED
+        dao.updateSecret(
+            secret.copy(approvalMode = mode.storedName, updatedAt = currentTimeMillis()),
+        )
+        audit.record(
+            AuditRecord(
+                category = AuditCategory.SECRET,
+                title = "Secret approval mode changed",
+                detail = secret.name,
+                outcome = AuditOutcome.CHANGED,
+            ),
+        )
+        return SaveSecretResult.SAVED
+    }
+
+    suspend fun saveInstructions(id: String, instructions: String): SaveSecretResult {
+        val secret = dao.getSecret(id) ?: return SaveSecretResult.NOT_FOUND
+        val normalized = instructions.trim()
+        if (secret.instructions == normalized) return SaveSecretResult.SAVED
+        dao.updateSecret(
+            secret.copy(instructions = normalized, updatedAt = currentTimeMillis()),
+        )
+        audit.record(
+            AuditRecord(
+                category = AuditCategory.SECRET,
+                title = "Secret instructions changed",
+                detail = secret.name,
+                outcome = AuditOutcome.CHANGED,
+            ),
+        )
+        return SaveSecretResult.SAVED
+    }
+
+    suspend fun setClientApprovalOverride(
+        secretId: String,
+        clientId: String,
+        mode: SecretApprovalMode?,
+    ): SaveSecretResult {
+        val secret = dao.getSecret(secretId) ?: return SaveSecretResult.NOT_FOUND
+        if (mode == null) {
+            dao.deleteClientApprovalOverride(secretId, clientId)
+        } else {
+            dao.upsertClientApprovalOverride(
+                SecretClientApprovalOverrideEntity(
+                    secretId = secretId,
+                    clientId = clientId,
+                    approvalMode = mode.storedName,
+                ),
+            )
+        }
+        audit.record(
+            AuditRecord(
+                category = AuditCategory.SECRET,
+                title = "Client approval override changed",
+                detail = secret.name,
+                outcome = AuditOutcome.CHANGED,
+                clientId = clientId,
+            ),
+        )
+        return SaveSecretResult.SAVED
     }
 
     suspend fun generateSshKey(comment: String): SshPrivateKey =
@@ -718,6 +880,8 @@ internal class SecretRepository(
             type = ENVIRONMENT_SECRET_TYPE,
             createdAt = existing?.createdAt ?: now,
             updatedAt = now,
+            approvalMode = existing?.approvalMode ?: SecretApprovalMode.ASK_ME.storedName,
+            instructions = existing?.instructions.orEmpty(),
         )
         val existingVariables = existing?.let {
             dao.getEnvironmentVariablesForSecrets(listOf(it.id)).associateBy { variable ->
@@ -841,6 +1005,8 @@ internal class SecretRepository(
             type = SSH_SECRET_TYPE,
             createdAt = existing?.createdAt ?: now,
             updatedAt = now,
+            approvalMode = existing?.approvalMode ?: SecretApprovalMode.ASK_ME.storedName,
+            instructions = existing?.instructions.orEmpty(),
         )
         val currentKey = existing?.let { dao.getSshKey(it.id) }
         val key = upload.privateKey?.let {
@@ -925,6 +1091,56 @@ internal class SecretRepository(
                                 description = secret.description,
                                 type = SSH_SECRET_TYPE,
                                 sshPublicKey = publicKey(key).line,
+                            )
+                        }
+                        else -> null
+                    }
+                }
+            },
+            reviewMetadata = requestedNames.mapNotNull { name ->
+                secretByName[name]?.let { secret ->
+                    when (secret.type) {
+                        ENVIRONMENT_SECRET_TYPE -> SecretReviewMetadata(
+                            id = secret.id,
+                            name = secret.name,
+                            description = secret.description,
+                            type = ENVIRONMENT_SECRET_TYPE,
+                            instructions = secret.instructions,
+                            environmentVariables = variablesBySecret[secret.id]
+                                .orEmpty()
+                                .sortedBy(EnvironmentVariableEntity::name)
+                                .map { variable ->
+                                    EnvironmentVariableReviewMetadata(
+                                        name = variable.name,
+                                        sensitive = variable.sensitive,
+                                        notes = variable.notes,
+                                        createdAt = variable.createdAt,
+                                        updatedAt = variable.updatedAt,
+                                        valueUpdatedAt = variable.valueUpdatedAt,
+                                    )
+                                },
+                            sshKey = null,
+                            createdAt = secret.createdAt,
+                            updatedAt = secret.updatedAt,
+                        )
+                        SSH_SECRET_TYPE -> sshKeysBySecret[secret.id]?.let { key ->
+                            val publicKey = publicKey(key)
+                            SecretReviewMetadata(
+                                id = secret.id,
+                                name = secret.name,
+                                description = secret.description,
+                                type = SSH_SECRET_TYPE,
+                                instructions = secret.instructions,
+                                environmentVariables = emptyList(),
+                                sshKey = SshKeyReviewMetadata(
+                                    algorithm = publicKey.algorithm.storedName,
+                                    publicKey = publicKey.line,
+                                    fingerprint = publicKey.fingerprint,
+                                    comment = publicKey.comment,
+                                    materialUpdatedAt = key.materialUpdatedAt,
+                                ),
+                                createdAt = secret.createdAt,
+                                updatedAt = secret.updatedAt,
                             )
                         }
                         else -> null

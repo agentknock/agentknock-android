@@ -39,6 +39,8 @@ internal data class DeviceIdentityEntity(
     val claimedAt: Long?,
     @ColumnInfo(name = "pairing_enabled")
     val pairingEnabled: Boolean = true,
+    @ColumnInfo(name = "instructions")
+    val instructions: String = "",
 )
 
 @Entity(
@@ -145,6 +147,9 @@ internal interface VaultDao {
         claimedAt: Long,
         activeRole: String,
     ): Int
+
+    @Query("UPDATE device_identities SET instructions = :instructions WHERE role = :activeRole")
+    suspend fun updateActiveInstructions(activeRole: String, instructions: String): Int
 
     @Query(
         """

@@ -142,6 +142,8 @@ internal data class PairingEntity(
     val decidedAt: Long?,
     @ColumnInfo(name = "completed_at")
     val completedAt: Long?,
+    @ColumnInfo(name = "instructions")
+    val instructions: String = "",
 )
 
 @Entity(

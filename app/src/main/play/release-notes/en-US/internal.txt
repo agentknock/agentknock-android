@@ -1,1 +1,1 @@
-Add Git commit signing with SSH keys while private keys stay on your phone. Align command requests with the latest Invocation and GitSign protocol.
+Add per-secret and per-client approval modes, scoped AI review instructions, and automatic AI review for protected operations.

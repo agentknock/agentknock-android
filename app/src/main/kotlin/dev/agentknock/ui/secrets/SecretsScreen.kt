@@ -62,6 +62,7 @@ import androidx.compose.material3.ListItem
 import androidx.compose.material3.ListItemDefaults
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.OutlinedTextField
+import androidx.compose.material3.RadioButton
 import androidx.compose.material3.Scaffold
 import androidx.compose.material3.SnackbarHost
 import androidx.compose.material3.SnackbarHostState
@@ -114,6 +115,7 @@ import dev.agentknock.storage.secret.CreateSecretResult
 import dev.agentknock.storage.secret.EnvironmentVariableMetadata
 import dev.agentknock.storage.secret.EnvironmentVariableValue
 import dev.agentknock.storage.secret.SecretDetails
+import dev.agentknock.storage.secret.SecretApprovalMode
 import dev.agentknock.storage.secret.SecretSummary
 import dev.agentknock.storage.secret.SaveEnvironmentVariableResult
 import dev.agentknock.storage.secret.SaveSecretResult
@@ -125,6 +127,7 @@ import dev.agentknock.storage.secret.SSH_SECRET_TYPE
 import dev.agentknock.storage.request.InboxRequestDetails
 import dev.agentknock.storage.request.InboxRequestSummary
 import dev.agentknock.storage.request.InboxRequestState
+import dev.agentknock.storage.request.ClientSummary
 import dev.agentknock.storage.request.SecretUploadRequestState
 import dev.agentknock.ui.requests.SecretUploadRequestDetail
 import dev.agentknock.ui.requests.message
@@ -183,6 +186,7 @@ internal fun SecretsScreen(
     viewModel: SecretsViewModel = viewModel(),
 ) {
     val secrets by viewModel.secrets.collectAsStateWithLifecycle()
+    val clients by viewModel.clients.collectAsStateWithLifecycle()
     val pendingUploads by viewModel.pendingUploads.collectAsStateWithLifecycle()
     val selection by viewModel.selection.collectAsStateWithLifecycle()
     val uploadSelection by viewModel.uploadSelection.collectAsStateWithLifecycle()
@@ -408,6 +412,7 @@ internal fun SecretsScreen(
                     } else {
                         SecretDetail(
                             secret = secret,
+                            clients = clients,
                             revealedValues = revealedValues,
                             showBack = false,
                             onBack = {},
@@ -434,6 +439,40 @@ internal fun SecretsScreen(
                             onReveal = ::reveal,
                             onReadValue = ::readValue,
                             onCopy = ::copy,
+                            onSetApprovalMode = { mode ->
+                                scope.launch {
+                                    val result = viewModel.saveApprovalMode(secret.id, mode)
+                                    report(if (result == SaveSecretResult.SAVED) {
+                                        "Default approval updated"
+                                    } else {
+                                        "Approval setting could not be updated"
+                                    })
+                                }
+                            },
+                            onSetClientApprovalOverride = { clientId, mode ->
+                                scope.launch {
+                                    val result = viewModel.setClientApprovalOverride(
+                                        secret.id,
+                                        clientId,
+                                        mode,
+                                    )
+                                    report(if (result == SaveSecretResult.SAVED) {
+                                        "Client approval updated"
+                                    } else {
+                                        "Client approval could not be updated"
+                                    })
+                                }
+                            },
+                            onSaveInstructions = { instructions ->
+                                scope.launch {
+                                    val result = viewModel.saveInstructions(secret.id, instructions)
+                                    report(if (result == SaveSecretResult.SAVED) {
+                                        "Instructions updated"
+                                    } else {
+                                        "Instructions could not be updated"
+                                    })
+                                }
+                            },
                             modifier = Modifier.weight(1f),
                         )
                     }
@@ -467,6 +506,7 @@ internal fun SecretsScreen(
                 BackHandler { viewModel.selectSecret(null) }
                 SecretDetail(
                     secret = secret,
+                    clients = clients,
                     revealedValues = revealedValues,
                     showBack = true,
                     onBack = { viewModel.selectSecret(null) },
@@ -493,6 +533,40 @@ internal fun SecretsScreen(
                     onReveal = ::reveal,
                     onReadValue = ::readValue,
                     onCopy = ::copy,
+                    onSetApprovalMode = { mode ->
+                        scope.launch {
+                            val result = viewModel.saveApprovalMode(secret.id, mode)
+                            report(if (result == SaveSecretResult.SAVED) {
+                                "Default approval updated"
+                            } else {
+                                "Approval setting could not be updated"
+                            })
+                        }
+                    },
+                    onSetClientApprovalOverride = { clientId, mode ->
+                        scope.launch {
+                            val result = viewModel.setClientApprovalOverride(
+                                secret.id,
+                                clientId,
+                                mode,
+                            )
+                            report(if (result == SaveSecretResult.SAVED) {
+                                "Client approval updated"
+                            } else {
+                                "Client approval could not be updated"
+                            })
+                        }
+                    },
+                    onSaveInstructions = { instructions ->
+                        scope.launch {
+                            val result = viewModel.saveInstructions(secret.id, instructions)
+                            report(if (result == SaveSecretResult.SAVED) {
+                                "Instructions updated"
+                            } else {
+                                "Instructions could not be updated"
+                            })
+                        }
+                    },
                     modifier = Modifier.fillMaxSize(),
                 )
             }
@@ -1004,6 +1078,7 @@ private fun SecretListSectionHeading(
 @Composable
 private fun SecretDetail(
     secret: SecretDetails,
+    clients: List<ClientSummary>,
     revealedValues: Map<String, String>,
     showBack: Boolean,
     onBack: () -> Unit,
@@ -1017,6 +1092,9 @@ private fun SecretDetail(
     onReveal: (EnvironmentVariableMetadata) -> Unit,
     onReadValue: suspend (EnvironmentVariableMetadata) -> String?,
     onCopy: (EnvironmentVariableMetadata) -> Unit,
+    onSetApprovalMode: (SecretApprovalMode) -> Unit,
+    onSetClientApprovalOverride: (String, SecretApprovalMode?) -> Unit,
+    onSaveInstructions: (String) -> Unit,
     modifier: Modifier = Modifier,
 ) {
     var menuExpanded by remember(secret.id) { mutableStateOf(false) }
@@ -1024,6 +1102,13 @@ private fun SecretDetail(
     var sshComment by remember(secret.id, secret.sshKey?.comment) {
         mutableStateOf(secret.sshKey?.comment.orEmpty())
     }
+    var editingDefaultApproval by remember(secret.id) { mutableStateOf(false) }
+    var editingClientApproval by remember(secret.id) { mutableStateOf<String?>(null) }
+    var editingInstructions by remember(secret.id) { mutableStateOf(false) }
+    var instructions by remember(secret.id, secret.instructions) {
+        mutableStateOf(secret.instructions)
+    }
+    val overrides = secret.clientApprovalOverrides.associateBy { it.clientId }
     val fontScale = LocalDensity.current.fontScale
     Column(modifier) {
         TopAppBar(
@@ -1086,6 +1171,62 @@ private fun SecretDetail(
                         )
                     }
                     InformationRow(stringResource(R.string.secret_type), secret.type.displayName())
+                }
+            }
+            item {
+                Text("Approval", style = MaterialTheme.typography.titleLarge)
+            }
+            item {
+                InformationSurface {
+                    Text(
+                        "Controls protected uses, such as providing sensitive values or using a private key.",
+                        color = MaterialTheme.colorScheme.onSurfaceVariant,
+                    )
+                    ApprovalSettingRow(
+                        title = "Default",
+                        value = secret.approvalMode.displayName(),
+                        onClick = { editingDefaultApproval = true },
+                    )
+                    if (clients.isNotEmpty()) {
+                        HorizontalDivider()
+                        Text("Clients", style = MaterialTheme.typography.titleMedium)
+                        clients.forEach { client ->
+                            val override = overrides[client.clientId]
+                            ApprovalSettingRow(
+                                title = client.name,
+                                value = override?.mode?.displayName()
+                                    ?: "Default · ${secret.approvalMode.displayName()}",
+                                onClick = { editingClientApproval = client.clientId },
+                            )
+                        }
+                    }
+                }
+            }
+            item {
+                InformationSurface {
+                    Row(
+                        modifier = Modifier.fillMaxWidth(),
+                        verticalAlignment = Alignment.CenterVertically,
+                    ) {
+                        Text(
+                            "Instructions",
+                            style = MaterialTheme.typography.titleMedium,
+                            modifier = Modifier.weight(1f),
+                        )
+                        IconButton(onClick = { editingInstructions = true }) {
+                            Icon(Icons.Outlined.Edit, contentDescription = "Edit instructions")
+                        }
+                    }
+                    Text(
+                        secret.instructions.ifBlank {
+                            "No instructions for AI review."
+                        },
+                        color = if (secret.instructions.isBlank()) {
+                            MaterialTheme.colorScheme.onSurfaceVariant
+                        } else {
+                            MaterialTheme.colorScheme.onSurface
+                        },
+                    )
                 }
             }
             if (secret.type == ENVIRONMENT_SECRET_TYPE) {
@@ -1183,6 +1324,147 @@ private fun SecretDetail(
             },
         )
     }
+    if (editingDefaultApproval) {
+        ApprovalModeDialog(
+            title = "Default approval",
+            selected = secret.approvalMode,
+            defaultMode = null,
+            onSelect = { mode ->
+                checkNotNull(mode)
+                editingDefaultApproval = false
+                onSetApprovalMode(mode)
+            },
+            onDismiss = { editingDefaultApproval = false },
+        )
+    }
+    editingClientApproval?.let { clientId ->
+        val client = clients.firstOrNull { it.clientId == clientId }
+        if (client != null) {
+            ApprovalModeDialog(
+                title = client.name,
+                selected = overrides[clientId]?.mode,
+                defaultMode = secret.approvalMode,
+                onSelect = { mode ->
+                    editingClientApproval = null
+                    onSetClientApprovalOverride(clientId, mode)
+                },
+                onDismiss = { editingClientApproval = null },
+            )
+        }
+    }
+    if (editingInstructions) {
+        AlertDialog(
+            onDismissRequest = { editingInstructions = false },
+            title = { Text("Secret instructions") },
+            text = {
+                Column(verticalArrangement = Arrangement.spacedBy(12.dp)) {
+                    Text(
+                        "Tell AI review what this secret may and may not be used for. Do not include secret values.",
+                    )
+                    OutlinedTextField(
+                        value = instructions,
+                        onValueChange = { instructions = it },
+                        label = { Text("Instructions") },
+                        minLines = 4,
+                        maxLines = 8,
+                        modifier = Modifier.fillMaxWidth(),
+                    )
+                }
+            },
+            dismissButton = {
+                TextButton(onClick = { editingInstructions = false }) { Text("Cancel") }
+            },
+            confirmButton = {
+                TextButton(
+                    onClick = {
+                        editingInstructions = false
+                        onSaveInstructions(instructions)
+                    },
+                ) { Text("Save") }
+            },
+        )
+    }
+}
+
+@Composable
+private fun ApprovalSettingRow(
+    title: String,
+    value: String,
+    onClick: () -> Unit,
+) {
+    Row(
+        modifier = Modifier.fillMaxWidth().clickable(onClick = onClick)
+            .padding(vertical = 8.dp),
+        horizontalArrangement = Arrangement.spacedBy(12.dp),
+        verticalAlignment = Alignment.CenterVertically,
+    ) {
+        Column(Modifier.weight(1f), verticalArrangement = Arrangement.spacedBy(2.dp)) {
+            Text(title, style = MaterialTheme.typography.bodyLarge)
+            Text(
+                value,
+                style = MaterialTheme.typography.bodyMedium,
+                color = MaterialTheme.colorScheme.onSurfaceVariant,
+            )
+        }
+        Icon(Icons.AutoMirrored.Outlined.NavigateNext, contentDescription = null)
+    }
+}
+
+@Composable
+private fun ApprovalModeDialog(
+    title: String,
+    selected: SecretApprovalMode?,
+    defaultMode: SecretApprovalMode?,
+    onSelect: (SecretApprovalMode?) -> Unit,
+    onDismiss: () -> Unit,
+) {
+    val options = buildList<Pair<SecretApprovalMode?, String>> {
+        if (defaultMode != null) add(null to "Use default · ${defaultMode.displayName()}")
+        SecretApprovalMode.entries.reversed().forEach { mode -> add(mode to mode.displayName()) }
+    }
+    AlertDialog(
+        onDismissRequest = onDismiss,
+        title = { Text(title) },
+        text = {
+            Column(Modifier.verticalScroll(rememberScrollState())) {
+                options.forEach { (mode, label) ->
+                    Row(
+                        modifier = Modifier.fillMaxWidth().clickable { onSelect(mode) }
+                            .padding(vertical = 6.dp),
+                        verticalAlignment = Alignment.CenterVertically,
+                    ) {
+                        RadioButton(selected = selected == mode, onClick = { onSelect(mode) })
+                        Column(Modifier.weight(1f)) {
+                            Text(label, style = MaterialTheme.typography.bodyLarge)
+                            mode?.let {
+                                Text(
+                                    it.description(),
+                                    style = MaterialTheme.typography.bodySmall,
+                                    color = MaterialTheme.colorScheme.onSurfaceVariant,
+                                )
+                            }
+                        }
+                    }
+                }
+            }
+        },
+        confirmButton = {},
+        dismissButton = { TextButton(onClick = onDismiss) { Text("Cancel") } },
+    )
+}
+
+private fun SecretApprovalMode.displayName(): String = when (this) {
+    SecretApprovalMode.APPROVE -> "Approve automatically"
+    SecretApprovalMode.ASK_AI -> "Ask AI"
+    SecretApprovalMode.ASK_ME -> "Ask every time"
+    SecretApprovalMode.DENY -> "Always deny"
+}
+
+private fun SecretApprovalMode.description(): String = when (this) {
+    SecretApprovalMode.APPROVE -> "Allow protected use without asking."
+    SecretApprovalMode.ASK_AI -> "AI may approve, deny, or ask you."
+    SecretApprovalMode.ASK_ME -> "Always require your decision."
+    SecretApprovalMode.DENY -> "Reject protected use without asking."
 }
 
 @Composable
@@ -1572,7 +1854,7 @@ private fun SecretEditorScreen(
                     if (validationError == null) onSave(name, description)
                 },
                 enabled = name.isNotBlank() &&
-                    (editor.type != SSH_SECRET_TYPE || editor.preparedSshKey != null) && (
+                    (secret != null || editor.type != SSH_SECRET_TYPE || editor.preparedSshKey != null) && (
                     secret == null ||
                         name != secret.name ||
                         description != secret.description

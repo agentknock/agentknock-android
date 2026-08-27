@@ -6,6 +6,7 @@ import androidx.lifecycle.viewModelScope
 import dev.agentknock.AgentknockApplication
 import dev.agentknock.storage.request.InboxRequestDetails
 import dev.agentknock.storage.request.InboxRequestSummary
+import dev.agentknock.storage.request.ClientSummary
 import dev.agentknock.storage.request.SecretUploadDecisionResult
 import dev.agentknock.storage.request.SecretUploadVariableValue
 import dev.agentknock.storage.secret.CreateEnvironmentVariableResult
@@ -14,6 +15,7 @@ import dev.agentknock.storage.secret.EnvironmentVariableMetadata
 import dev.agentknock.storage.secret.EnvironmentVariableValue
 import dev.agentknock.storage.secret.SecretDetails
 import dev.agentknock.storage.secret.SecretSummary
+import dev.agentknock.storage.secret.SecretApprovalMode
 import dev.agentknock.storage.secret.SshPrivateKey
 import dev.agentknock.storage.secret.SaveSshSecretResult
 import dev.agentknock.storage.secret.SaveEnvironmentVariableResult
@@ -47,6 +49,12 @@ internal class SecretsViewModel(application: Application) : AndroidViewModel(app
     val sshKeyEditor: StateFlow<SshKeyEditorState?> = sshKeyEditorState.asStateFlow()
 
     val secrets: StateFlow<List<SecretSummary>> = repository.observeSecrets().stateIn(
+        scope = viewModelScope,
+        started = SharingStarted.Eagerly,
+        initialValue = emptyList(),
+    )
+
+    val clients: StateFlow<List<ClientSummary>> = requests.observeClients().stateIn(
         scope = viewModelScope,
         started = SharingStarted.Eagerly,
         initialValue = emptyList(),
@@ -190,6 +198,20 @@ internal class SecretsViewModel(application: Application) : AndroidViewModel(app
         name: String,
         description: String,
     ): SaveSecretResult = repository.saveSecret(id, name, description)
+
+    suspend fun saveApprovalMode(
+        id: String,
+        mode: SecretApprovalMode,
+    ): SaveSecretResult = repository.saveApprovalMode(id, mode)
+
+    suspend fun saveInstructions(id: String, instructions: String): SaveSecretResult =
+        repository.saveInstructions(id, instructions)
+
+    suspend fun setClientApprovalOverride(
+        secretId: String,
+        clientId: String,
+        mode: SecretApprovalMode?,
+    ): SaveSecretResult = repository.setClientApprovalOverride(secretId, clientId, mode)
 
     suspend fun deleteSecret(id: String): Boolean {
         val deleted = repository.deleteSecret(id)
