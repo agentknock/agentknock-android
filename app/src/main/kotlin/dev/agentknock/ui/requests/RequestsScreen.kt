@@ -124,6 +124,7 @@ import dev.agentknock.storage.request.SecretUploadRequestState
 import dev.agentknock.storage.request.SecretUploadVariableValue
 import dev.agentknock.storage.request.RequestSyncResult
 import dev.agentknock.storage.rule.ApprovalRuleAction
+import dev.agentknock.storage.rule.AiReview
 import dev.agentknock.storage.rule.AiReviewDecision
 import dev.agentknock.storage.rule.AiReviewFailure
 import dev.agentknock.ui.components.ClientIdentity
@@ -905,31 +906,7 @@ private fun SecretUseDetail(
                     },
                     NoticeTone.ATTENTION,
                 )
-                ApprovalRuleAction.ASK_AI -> {
-                    val review = secretUse.ruleEvaluation.aiReview
-                    when {
-                        review?.decision == AiReviewDecision.ASK_USER -> Notice(
-                            "AI review needs your decision",
-                            review.explanation ?: "The reviewer could not decide safely.",
-                            NoticeTone.ATTENTION,
-                        )
-                        review?.failure == AiReviewFailure.SUBSCRIPTION_REQUIRED -> Notice(
-                            "AI review requires a subscription",
-                            "Decide this request yourself, or activate AI review in Plan and billing.",
-                            NoticeTone.ATTENTION,
-                        )
-                        review?.failure != null -> Notice(
-                            "AI review unavailable",
-                            "The request was left for you to decide.",
-                            NoticeTone.ATTENTION,
-                        )
-                        else -> Notice(
-                            "AI review is pending",
-                            "You can wait for the reviewer or decide this request yourself.",
-                            NoticeTone.ATTENTION,
-                        )
-                    }
-                }
+                ApprovalRuleAction.ASK_AI -> AiReviewNotice(secretUse.ruleEvaluation.aiReview)
                 else -> Unit
             }
         }
@@ -980,6 +957,32 @@ private fun SecretUseDetail(
             DetailValue("Client ID", secretUse.clientId, true)
             DetailValue("Request ID", request.relayRequestId, true)
         }
+    }
+}
+
+@Composable
+private fun AiReviewNotice(review: AiReview?) {
+    when {
+        review?.decision == AiReviewDecision.ASK_USER -> Notice(
+            "AI review asked you to decide",
+            review.explanation ?: "The reviewer could not decide safely.",
+            NoticeTone.ATTENTION,
+        )
+        review?.failure == AiReviewFailure.SUBSCRIPTION_REQUIRED -> Notice(
+            "AI review requires a subscription",
+            "Decide this request yourself, or activate AI review in Plan and billing.",
+            NoticeTone.ATTENTION,
+        )
+        review?.failure != null -> Notice(
+            "AI review unavailable",
+            "The request was left for you to decide.",
+            NoticeTone.ATTENTION,
+        )
+        else -> Notice(
+            "AI review is pending",
+            "You can wait for the reviewer or decide this request yourself.",
+            NoticeTone.ATTENTION,
+        )
     }
 }
 
@@ -1052,6 +1055,13 @@ private fun GitSignDetail(
             ClientIdentity(signing.clientName)
             SecretIdentities(listOf(signing.secretName))
             InformationRow("Received", formatTimestamp(request.receivedAt))
+        }
+
+        if (
+            pending &&
+            signing.ruleEvaluation?.action == ApprovalRuleAction.ASK_AI
+        ) {
+            AiReviewNotice(signing.ruleEvaluation.aiReview)
         }
 
         signing.repository?.takeIf(GitSignRepository::hasVisibleContext)?.let { repository ->

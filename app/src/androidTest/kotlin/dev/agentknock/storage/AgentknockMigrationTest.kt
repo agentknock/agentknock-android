@@ -265,6 +265,17 @@ class AgentknockMigrationTest {
                     "(41, 'signature-1', 40, 'git_sign', 'action_required', 1, '{}', 2, 2)",
             )
             database.execSQL(
+                "INSERT INTO secret_use_requests " +
+                    "(request_id, client_id, client_name, pairing_address, state, cli_version, " +
+                    "secrets_json, secret_details_json, missing_secrets_json, command, " +
+                    "arguments_json, working_directory, executable_path, executable_mode, " +
+                    "stdin_kind, stdout_kind, stderr_kind, launcher_chain_json, created_at, " +
+                    "updated_at) VALUES " +
+                    "(40, 'client-1', 'Laptop', 'three-word-address', 'waiting', '{}', " +
+                    "'[\"git-signing\"]', '[]', '[]', 'git', '[]', '/work', '/bin/git', " +
+                    "'BINARY', 'TERMINAL', 'PIPE', 'TERMINAL', '[]', 1, 1)",
+            )
+            database.execSQL(
                 "INSERT INTO git_sign_requests " +
                     "(request_id, state, secret_name, message, created_at, updated_at) " +
                     "VALUES (41, 'approval_pending', 'git-signing', X'0102', 2, 2)",
@@ -286,6 +297,41 @@ class AgentknockMigrationTest {
             ).use { statement ->
                 assertTrue(statement.step())
                 assertTrue(statement.isNull(0))
+            }
+        }
+    }
+
+    @Test
+    fun migration10To11PreservesGitSigningRequestsAndAddsRuleEvaluation() = runTest {
+        helper.createDatabase(10).use { database ->
+            database.execSQL(
+                "INSERT INTO inbox_requests " +
+                    "(id, relay_request_id, parent_request_id, kind, state, listed, " +
+                    "request_json, received_at, updated_at) VALUES " +
+                    "(50, 'signature-2', NULL, 'git_sign', 'action_required', 1, '{}', 3, 3)",
+            )
+            database.execSQL(
+                "INSERT INTO git_sign_requests " +
+                    "(request_id, state, secret_name, message, repository_json, created_at, " +
+                    "updated_at) VALUES " +
+                    "(50, 'approval_pending', 'release-signing', X'0304', " +
+                    "'{\"remote\":\"github.com/example/project\"}', 3, 3)",
+            )
+        }
+
+        helper.runMigrationsAndValidate(11, listOf(MIGRATION_10_11)).use { database ->
+            database.prepare(
+                "SELECT secret_name, message, repository_json, rule_evaluation_json " +
+                    "FROM git_sign_requests WHERE request_id = 50",
+            ).use { statement ->
+                assertTrue(statement.step())
+                assertEquals("release-signing", statement.getText(0))
+                assertArrayEquals(byteArrayOf(3, 4), statement.getBlob(1))
+                assertEquals(
+                    "{\"remote\":\"github.com/example/project\"}",
+                    statement.getText(2),
+                )
+                assertTrue(statement.isNull(3))
             }
         }
     }

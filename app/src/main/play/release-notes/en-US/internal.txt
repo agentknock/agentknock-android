@@ -1,1 +1,1 @@
-Clarify automatic approval context for Git signing and its parent invocation.
+Show the AI review explanation when Git signing needs your decision.

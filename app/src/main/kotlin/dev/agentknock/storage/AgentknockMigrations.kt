@@ -249,3 +249,9 @@ internal val MIGRATION_9_10 = Migration(9, 10) { connection ->
         "ALTER TABLE `git_sign_requests` ADD COLUMN `repository_json` TEXT",
     )
 }
+
+internal val MIGRATION_10_11 = Migration(10, 11) { connection ->
+    connection.execSQL(
+        "ALTER TABLE `git_sign_requests` ADD COLUMN `rule_evaluation_json` TEXT",
+    )
+}

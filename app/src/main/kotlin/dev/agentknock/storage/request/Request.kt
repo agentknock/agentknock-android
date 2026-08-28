@@ -364,6 +364,8 @@ internal data class GitSignRequestEntity(
     val message: ByteArray,
     @ColumnInfo(name = "repository_json")
     val repositoryJson: String?,
+    @ColumnInfo(name = "rule_evaluation_json")
+    val ruleEvaluationJson: String?,
     @ColumnInfo(name = "decision")
     val decision: String?,
     @ColumnInfo(name = "completion_result")

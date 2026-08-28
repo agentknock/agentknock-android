@@ -292,6 +292,7 @@ internal data class GitSignRequestDetails(
     val secretName: String,
     val message: ByteArray,
     val repository: GitSignRepository?,
+    val ruleEvaluation: ApprovalRuleEvaluation?,
     val invocationRequestId: String,
     val command: String,
     val arguments: List<String>,
@@ -842,6 +843,7 @@ internal class RequestRepository(
                     repository = gitSign.repositoryJson?.let {
                         runCatching { json.decodeFromString<GitSignRepository>(it) }.getOrNull()
                     },
+                    ruleEvaluation = gitSign.ruleEvaluationJson?.let(::decodeRuleEvaluation),
                     invocationRequestId = invocationRequest.relayRequestId,
                     command = invocation.command,
                     arguments = decodeStringList(invocation.argumentsJson),
@@ -2863,6 +2865,7 @@ internal class RequestRepository(
             secretName = contents.secret,
             message = contents.message,
             repositoryJson = contents.repository?.let { json.encodeToString(it) },
+            ruleEvaluationJson = initialEvaluation?.let { json.encodeToString(it) },
             decision = null,
             completionResult = null,
             completionReason = null,
@@ -2988,6 +2991,7 @@ internal class RequestRepository(
                 GitSignRequestState.WAITING_FOR_COMPLETION.storedName
             },
             decision = automaticDecision?.storedName,
+            ruleEvaluationJson = evaluation?.let { json.encodeToString(it) },
             completionReason = denial?.first?.wireName,
             completionMessage = denial?.second,
             updatedAt = decidedAt,
