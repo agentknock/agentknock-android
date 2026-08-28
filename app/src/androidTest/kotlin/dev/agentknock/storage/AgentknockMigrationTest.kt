@@ -248,4 +248,45 @@ class AgentknockMigrationTest {
             }
         }
     }
+
+    @Test
+    fun migration9To10PreservesGitSigningRequestsAndAddsRepositoryContext() = runTest {
+        helper.createDatabase(9).use { database ->
+            database.execSQL(
+                "INSERT INTO inbox_requests " +
+                    "(id, relay_request_id, parent_request_id, kind, state, listed, request_json, " +
+                    "received_at, updated_at) VALUES " +
+                    "(40, 'invocation-1', NULL, 'secret_use', 'waiting', 1, '{}', 1, 1)",
+            )
+            database.execSQL(
+                "INSERT INTO inbox_requests " +
+                    "(id, relay_request_id, parent_request_id, kind, state, listed, request_json, " +
+                    "received_at, updated_at) VALUES " +
+                    "(41, 'signature-1', 40, 'git_sign', 'action_required', 1, '{}', 2, 2)",
+            )
+            database.execSQL(
+                "INSERT INTO git_sign_requests " +
+                    "(request_id, state, secret_name, message, created_at, updated_at) " +
+                    "VALUES (41, 'approval_pending', 'git-signing', X'0102', 2, 2)",
+            )
+        }
+
+        helper.runMigrationsAndValidate(10, listOf(MIGRATION_9_10)).use { database ->
+            database.prepare(
+                "SELECT secret_name, message, repository_json FROM git_sign_requests " +
+                    "WHERE request_id = 41",
+            ).use { statement ->
+                assertTrue(statement.step())
+                assertEquals("git-signing", statement.getText(0))
+                assertArrayEquals(byteArrayOf(1, 2), statement.getBlob(1))
+                assertTrue(statement.isNull(2))
+            }
+            database.prepare(
+                "SELECT provided_secrets_json FROM secret_use_requests WHERE request_id = 40",
+            ).use { statement ->
+                assertTrue(statement.step())
+                assertTrue(statement.isNull(0))
+            }
+        }
+    }
 }

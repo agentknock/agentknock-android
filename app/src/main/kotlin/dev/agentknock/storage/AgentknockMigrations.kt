@@ -240,3 +240,12 @@ internal val MIGRATION_8_9 = Migration(8, 9) { connection ->
             "ON `secret_client_approval_overrides` (`client_id`)",
     )
 }
+
+internal val MIGRATION_9_10 = Migration(9, 10) { connection ->
+    connection.execSQL(
+        "ALTER TABLE `secret_use_requests` ADD COLUMN `provided_secrets_json` TEXT",
+    )
+    connection.execSQL(
+        "ALTER TABLE `git_sign_requests` ADD COLUMN `repository_json` TEXT",
+    )
+}

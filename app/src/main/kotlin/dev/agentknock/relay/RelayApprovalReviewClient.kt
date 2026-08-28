@@ -15,139 +15,107 @@ import okhttp3.RequestBody.Companion.toRequestBody
 
 @Serializable
 internal data class ApprovalReviewRequest(
-    @SerialName("context_version") val contextVersion: Int,
-    val policy: ApprovalReviewPolicy,
-    val action: ApprovalReviewAction,
+    val instructions: ApprovalReviewInstructions,
+    val facts: ApprovalReviewFacts,
+    val evidence: ApprovalReviewEvidence,
 )
 
 @Serializable
-internal data class ApprovalReviewPolicy(
-    val decision: String,
-    @SerialName("device_instructions") val deviceInstructions: String,
-    @SerialName("client_instructions") val clientInstructions: String,
-    @SerialName("secret_decisions") val secretDecisions: List<ApprovalReviewSecretDecision>,
-    @SerialName("matching_rules") val matchingRules: List<ApprovalReviewRule>,
+internal data class ApprovalReviewInstructions(
+    val general: String,
+    val client: String,
+    val secrets: Map<String, String>,
 )
 
 @Serializable
-internal data class ApprovalReviewSecretDecision(
-    @SerialName("secret_id") val secretId: String,
-    @SerialName("secret_name") val secretName: String,
-    val decision: String,
-    @SerialName("default_decision") val defaultDecision: String,
-    @SerialName("client_override") val clientOverride: Boolean,
-    val instructions: String,
-    @SerialName("matching_rule_ids") val matchingRuleIds: List<String>,
-    @SerialName("decisive_rule_ids") val decisiveRuleIds: List<String>,
+internal data class ApprovalReviewFacts(
+    val client: String,
+    val operation: ApprovalReviewOperationFacts,
+    val invocation: ApprovalReviewInvocationFacts? = null,
 )
 
 @Serializable
-internal data class ApprovalReviewRule(
-    val id: String,
-    val name: String,
-    val action: String,
-    @SerialName("secret_ids") val secretIds: List<String>,
-    @SerialName("secret_names") val secretNames: List<String>,
-    val command: List<String>,
-    @SerialName("command_match") val commandMatch: String,
-    @SerialName("executable_path") val executablePath: String?,
-    @SerialName("executable_sha256") val executableSha256: String?,
-    @SerialName("working_directory") val workingDirectory: String?,
-    @SerialName("created_at_unix_ms") val createdAtUnixMs: Long,
-    @SerialName("updated_at_unix_ms") val updatedAtUnixMs: Long,
-    @SerialName("expires_at_unix_ms") val expiresAtUnixMs: Long?,
-    @SerialName("last_matched_at_unix_ms") val lastMatchedAtUnixMs: Long?,
-    @SerialName("previous_match_count") val previousMatchCount: Long,
+internal sealed interface ApprovalReviewOperationFacts
+
+@Serializable
+@SerialName("invocation")
+internal data class ApprovalReviewInvocationOperationFacts(
+    val secrets: Map<String, ApprovalReviewSecretFacts>,
+) : ApprovalReviewOperationFacts
+
+@Serializable
+@SerialName("git_sign")
+internal data class ApprovalReviewGitSignOperationFacts(
+    val secret: String,
+) : ApprovalReviewOperationFacts
+
+@Serializable
+internal data class ApprovalReviewInvocationFacts(
+    val secrets: Map<String, ApprovalReviewSecretFacts>,
 )
 
 @Serializable
-internal data class ApprovalReviewAction(
-    @SerialName("request_id") val requestId: String,
-    @SerialName("requested_at_unix_ms") val requestedAtUnixMs: Long,
-    val reason: String?,
-    @SerialName("contains_sensitive_material") val containsSensitiveMaterial: Boolean,
-    val client: ApprovalReviewClient,
-    val secrets: List<ApprovalReviewSecret>,
-    val operation: ApprovalReviewOperation,
-    @SerialName("launcher_chain") val launcherChain: List<String>,
-    @SerialName("git_signing") val gitSigning: ApprovalReviewGitSigning? = null,
-)
+internal sealed interface ApprovalReviewSecretFacts
 
 @Serializable
-internal data class ApprovalReviewGitSigning(
-    @SerialName("secret_name") val secretName: String,
-    val namespace: String,
-    val message: String,
-    @SerialName("message_size_bytes") val messageSizeBytes: Int,
-)
-
-@Serializable
-internal data class ApprovalReviewClient(
-    val id: String,
-    val name: String,
-    val hostname: String?,
-    val platform: String?,
-    val architecture: String?,
-    @SerialName("machine_id") val machineId: String?,
-    @SerialName("os_version") val osVersion: String?,
-    val software: ApprovalReviewSoftware,
-)
-
-@Serializable
-internal data class ApprovalReviewSoftware(
-    val application: ApprovalReviewSoftwareComponent,
-    val library: ApprovalReviewSoftwareComponent,
-)
-
-@Serializable
-internal data class ApprovalReviewSoftwareComponent(
-    val name: String,
-    val version: String,
-)
-
-@Serializable
-internal data class ApprovalReviewSecret(
-    val id: String,
-    val name: String,
-    val description: String,
-    val type: String,
-    @SerialName("created_at_unix_ms") val createdAtUnixMs: Long,
-    @SerialName("updated_at_unix_ms") val updatedAtUnixMs: Long,
+@SerialName("environment")
+internal data class ApprovalReviewEnvironmentSecretFacts(
     @SerialName("environment_variables")
-    val environmentVariables: List<ApprovalReviewEnvironmentVariable>,
-    @SerialName("ssh_key") val sshKey: ApprovalReviewSshKey?,
+    val environmentVariables: Map<String, String?>,
+) : ApprovalReviewSecretFacts
+
+@Serializable
+@SerialName("ssh")
+internal data class ApprovalReviewSshSecretFacts(
+    val provides: String,
+) : ApprovalReviewSecretFacts
+
+@Serializable
+internal data class ApprovalReviewEvidence(
+    val invocation: ApprovalReviewInvocationEvidence,
+    val git: ApprovalReviewGitEvidence? = null,
 )
 
 @Serializable
-internal data class ApprovalReviewEnvironmentVariable(
-    val name: String,
-    val sensitive: Boolean,
-    val notes: String,
-    @SerialName("created_at_unix_ms") val createdAtUnixMs: Long,
-    @SerialName("updated_at_unix_ms") val updatedAtUnixMs: Long,
-    @SerialName("value_updated_at_unix_ms") val valueUpdatedAtUnixMs: Long,
+internal data class ApprovalReviewInvocationEvidence(
+    val reason: String? = null,
+    val command: ApprovalReviewCommandEvidence,
 )
 
 @Serializable
-internal data class ApprovalReviewSshKey(
-    val algorithm: String,
-    @SerialName("public_key") val publicKey: String,
-    val fingerprint: String,
-    val comment: String,
-    @SerialName("material_updated_at_unix_ms") val materialUpdatedAtUnixMs: Long,
-)
-
-@Serializable
-internal data class ApprovalReviewOperation(
-    val command: String,
-    val arguments: List<String>,
+internal data class ApprovalReviewCommandEvidence(
+    val argv: List<String>,
     @SerialName("working_directory") val workingDirectory: String,
-    @SerialName("executable_path") val executablePath: String,
-    @SerialName("executable_sha256") val executableSha256: String?,
-    @SerialName("executable_mode") val executableMode: String,
-    val stdin: String,
-    val stdout: String,
-    val stderr: String,
+    @SerialName("resolved_executable") val resolvedExecutable: String,
+    @SerialName("launcher_chain") val launcherChain: List<String>,
+)
+
+@Serializable
+internal data class ApprovalReviewGitEvidence(
+    @SerialName("signed_content") val signedContent: String,
+    val repository: ApprovalReviewGitRepositoryEvidence? = null,
+)
+
+@Serializable
+internal data class ApprovalReviewGitRepositoryEvidence(
+    val remote: String? = null,
+    val worktree: String? = null,
+    val head: ApprovalReviewGitHeadEvidence? = null,
+    @SerialName("changed_path_count") val changedPathCount: Long? = null,
+    @SerialName("changed_paths") val changedPaths: List<ApprovalReviewGitChangedPathEvidence>? = null,
+)
+
+@Serializable
+internal data class ApprovalReviewGitHeadEvidence(
+    val type: String,
+    val name: String? = null,
+    val upstream: String? = null,
+)
+
+@Serializable
+internal data class ApprovalReviewGitChangedPathEvidence(
+    val status: String,
+    val path: String,
 )
 
 internal enum class RelayApprovalReviewDecision {
@@ -184,7 +152,10 @@ internal interface RelayApprovalReviewClient {
 internal class HttpRelayApprovalReviewClient(
     private val client: OkHttpClient,
     private val relayUrl: String = "https://relay.agentknock.dev/",
-    private val json: Json = Json { ignoreUnknownKeys = true },
+    private val json: Json = Json {
+        ignoreUnknownKeys = true
+        explicitNulls = false
+    },
     private val dispatcher: CoroutineDispatcher = Dispatchers.IO,
 ) : RelayApprovalReviewClient {
     override suspend fun review(

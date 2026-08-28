@@ -21,7 +21,17 @@ class GitSignProtocolTest {
               "invocation_id":"01K00000000000000000000000",
               "invocation_token":"AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA=",
               "secret":"git-signing",
-              "message":"dHJlZSAxMjM0Cg=="
+              "message":"dHJlZSAxMjM0Cg==",
+              "repository":{
+                "remote":"github.com/example/project",
+                "worktree":"/home/example/project",
+                "head":{"type":"BRANCH","name":"main","upstream":"origin/main"},
+                "changed_path_count":2,
+                "changed_paths":[
+                  {"status":"MODIFIED","path":"src/main.rs"},
+                  {"status":"ADDED","path":"tests/example.rs"}
+                ]
+              }
             }
             """.trimIndent().encodeToByteArray(),
         )
@@ -31,6 +41,34 @@ class GitSignProtocolTest {
         assertArrayEquals(ByteArray(32), request.invocationToken)
         assertEquals("git-signing", request.secret)
         assertArrayEquals("tree 1234\n".encodeToByteArray(), request.message)
+        assertEquals(
+            GitSignRepository(
+                remote = "github.com/example/project",
+                worktree = "/home/example/project",
+                head = GitSignHead.Branch(name = "main", upstream = "origin/main"),
+                changedPathCount = 2,
+                changedPaths = listOf(
+                    GitSignChangedPath(GitSignChangeStatus.MODIFIED, "src/main.rs"),
+                    GitSignChangedPath(GitSignChangeStatus.ADDED, "tests/example.rs"),
+                ),
+            ),
+            request.repository,
+        )
+    }
+
+    @Test
+    fun `allows absent repository context and detached head`() {
+        val withoutRepository = protocol.decodeRequest(
+            """{${testClientSoftwareFields("0.2.0", "0.1.0")},"method":"GitSign","invocation_id":"01K00000000000000000000000","invocation_token":"AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA=","secret":"key","message":""}"""
+                .encodeToByteArray(),
+        )
+        assertEquals(null, withoutRepository.repository)
+
+        val detached = protocol.decodeRequest(
+            """{${testClientSoftwareFields("0.2.0", "0.1.0")},"method":"GitSign","invocation_id":"01K00000000000000000000000","invocation_token":"AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA=","secret":"key","message":"","repository":{"head":{"type":"DETACHED"}}}"""
+                .encodeToByteArray(),
+        )
+        assertEquals(GitSignHead.Detached, detached.repository?.head)
     }
 
     @Test

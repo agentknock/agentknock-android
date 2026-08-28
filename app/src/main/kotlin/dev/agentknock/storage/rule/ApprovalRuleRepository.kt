@@ -52,10 +52,6 @@ internal class ApprovalRuleRepository(
     suspend fun getRule(id: String): ApprovalRule? =
         dao.getRule(id)?.let { runCatching { it.toModel() }.getOrNull() }
 
-    suspend fun getRules(ids: Set<String>): List<ApprovalRule> = ids.mapNotNull { id ->
-        getRule(id)
-    }
-
     suspend fun create(
         input: ApprovalRuleInput,
         enabled: Boolean = true,

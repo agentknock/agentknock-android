@@ -1,1 +1,1 @@
-Add per-secret and per-client approval modes, scoped AI review instructions, and automatic AI review for protected operations.
+Improve automatic approval context and add repository details to Git signing requests.

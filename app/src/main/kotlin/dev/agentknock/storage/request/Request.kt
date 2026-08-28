@@ -289,6 +289,8 @@ internal data class SecretUseRequestEntity(
     val secretsJson: String,
     @ColumnInfo(name = "secret_details_json")
     val secretDetailsJson: String,
+    @ColumnInfo(name = "provided_secrets_json")
+    val providedSecretsJson: String?,
     @ColumnInfo(name = "missing_secrets_json")
     val missingSecretsJson: String,
     @ColumnInfo(name = "reason")
@@ -360,6 +362,8 @@ internal data class GitSignRequestEntity(
     val secretName: String,
     @ColumnInfo(name = "message")
     val message: ByteArray,
+    @ColumnInfo(name = "repository_json")
+    val repositoryJson: String?,
     @ColumnInfo(name = "decision")
     val decision: String?,
     @ColumnInfo(name = "completion_result")

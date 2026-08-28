@@ -12,7 +12,52 @@ internal data class GitSignRequestMessage(
     val invocationToken: ByteArray,
     val secret: String,
     val message: ByteArray,
+    val repository: GitSignRepository?,
 )
+
+@Serializable
+internal data class GitSignRepository(
+    val remote: String? = null,
+    val worktree: String? = null,
+    val head: GitSignHead? = null,
+    @SerialName("changed_path_count") val changedPathCount: Long? = null,
+    @SerialName("changed_paths") val changedPaths: List<GitSignChangedPath>? = null,
+)
+
+@Serializable
+internal sealed interface GitSignHead {
+    @Serializable
+    @SerialName("BRANCH")
+    data class Branch(
+        val name: String,
+        val upstream: String? = null,
+    ) : GitSignHead
+
+    @Serializable
+    @SerialName("DETACHED")
+    data object Detached : GitSignHead
+}
+
+@Serializable
+internal data class GitSignChangedPath(
+    val status: GitSignChangeStatus,
+    val path: String,
+)
+
+@Serializable
+internal enum class GitSignChangeStatus {
+    @SerialName("ADDED")
+    ADDED,
+
+    @SerialName("DELETED")
+    DELETED,
+
+    @SerialName("MODIFIED")
+    MODIFIED,
+
+    @SerialName("TYPE_CHANGED")
+    TYPE_CHANGED,
+}
 
 internal sealed interface GitSignCompletion {
     val clientSoftware: ClientSoftware
@@ -51,6 +96,7 @@ internal class GitSignProtocol(
             },
             secret = request.secret,
             message = decodeBase64(request.message, "Git signing message"),
+            repository = request.repository,
         )
     }
 
@@ -113,6 +159,7 @@ private data class GitSignRequestWire(
     @SerialName("invocation_token") val invocationToken: String,
     val secret: String,
     val message: String,
+    val repository: GitSignRepository? = null,
 )
 
 @Serializable

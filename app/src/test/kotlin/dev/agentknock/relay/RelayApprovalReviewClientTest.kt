@@ -4,6 +4,7 @@ import kotlinx.coroutines.ExperimentalCoroutinesApi
 import kotlinx.coroutines.test.UnconfinedTestDispatcher
 import kotlinx.coroutines.test.runTest
 import kotlinx.serialization.json.Json
+import kotlinx.serialization.json.JsonNull
 import kotlinx.serialization.json.jsonArray
 import kotlinx.serialization.json.jsonObject
 import kotlinx.serialization.json.jsonPrimitive
@@ -41,40 +42,44 @@ class RelayApprovalReviewClientTest {
             assertEquals("/v1/device/$DEVICE_ID/review", request.target)
             assertEquals("Bearer $DEVICE_TOKEN", request.headers["Authorization"])
             val body = Json.parseToJsonElement(checkNotNull(request.body).utf8()).jsonObject
-            assertEquals(1, body.getValue("context_version").jsonPrimitive.content.toInt())
             assertEquals(
-                "ask_ai",
-                body.getValue("policy").jsonObject.getValue("decision").jsonPrimitive.content,
+                setOf("instructions", "facts", "evidence"),
+                body.keys,
             )
-            val policy = body.getValue("policy").jsonObject
+            val instructions = body.getValue("instructions").jsonObject
             assertEquals(
                 "Protect production systems.",
-                policy.getValue("device_instructions").jsonPrimitive.content,
+                instructions.getValue("general").jsonPrimitive.content,
             )
             assertEquals(
                 "Use only for work on this repository.",
-                policy.getValue("client_instructions").jsonPrimitive.content,
+                instructions.getValue("client").jsonPrimitive.content,
             )
-            val secretDecision = policy.getValue("secret_decisions")
-                .jsonArray.single().jsonObject
-            assertEquals("ask_me", secretDecision.getValue("default_decision").jsonPrimitive.content)
-            assertEquals("true", secretDecision.getValue("client_override").jsonPrimitive.content)
             assertEquals(
                 "Allow reading issues but not publishing releases.",
-                secretDecision.getValue("instructions").jsonPrimitive.content,
+                instructions.getValue("secrets").jsonObject
+                    .getValue("github").jsonPrimitive.content,
             )
-            val action = body.getValue("action").jsonObject
-            assertEquals("git", action.getValue("client").jsonObject.getValue("name").jsonPrimitive.content)
+            val facts = body.getValue("facts").jsonObject
+            assertEquals("git", facts.getValue("client").jsonPrimitive.content)
+            val operation = facts.getValue("operation").jsonObject
+            assertEquals("invocation", operation.getValue("type").jsonPrimitive.content)
+            val secrets = operation.getValue("secrets").jsonObject
+            val github = secrets.getValue("github").jsonObject
+            assertEquals("environment", github.getValue("type").jsonPrimitive.content)
+            val variables = github.getValue("environment_variables").jsonObject
+            assertEquals(JsonNull, variables.getValue("GITHUB_TOKEN"))
             assertEquals(
-                "GITHUB_TOKEN",
-                action.getValue("secrets").jsonArray.single().jsonObject
-                    .getValue("environment_variables").jsonArray.single().jsonObject
-                    .getValue("name").jsonPrimitive.content,
+                "https://api.github.com",
+                variables.getValue("GITHUB_API_URL").jsonPrimitive.content,
             )
+            val evidence = body.getValue("evidence").jsonObject
+            assertEquals(setOf("invocation"), evidence.keys)
+            val invocation = evidence.getValue("invocation").jsonObject
             assertEquals(
                 "issue",
-                action.getValue("operation").jsonObject.getValue("arguments")
-                    .jsonArray.first().jsonPrimitive.content,
+                invocation.getValue("command").jsonObject.getValue("argv")
+                    .jsonArray[1].jsonPrimitive.content,
             )
         }
     }
@@ -174,94 +179,39 @@ class RelayApprovalReviewClientTest {
     )
 
     private fun reviewRequest() = ApprovalReviewRequest(
-        contextVersion = 1,
-        policy = ApprovalReviewPolicy(
-            decision = "ask_ai",
-            deviceInstructions = "Protect production systems.",
-            clientInstructions = "Use only for work on this repository.",
-            secretDecisions = listOf(
-                ApprovalReviewSecretDecision(
-                    secretId = "secret-id",
-                    secretName = "github",
-                    decision = "ask_ai",
-                    defaultDecision = "ask_me",
-                    clientOverride = true,
-                    instructions = "Allow reading issues but not publishing releases.",
-                    matchingRuleIds = listOf("rule-id"),
-                    decisiveRuleIds = listOf("rule-id"),
-                ),
+        instructions = ApprovalReviewInstructions(
+            general = "Protect production systems.",
+            client = "Use only for work on this repository.",
+            secrets = mapOf(
+                "github" to "Allow reading issues but not publishing releases.",
             ),
-            matchingRules = listOf(
-                ApprovalReviewRule(
-                    id = "rule-id",
-                    name = "Review GitHub issue commands",
-                    action = "ask_ai",
-                    secretIds = listOf("secret-id"),
-                    secretNames = listOf("github"),
-                    command = listOf("gh", "issue"),
-                    commandMatch = "prefix",
-                    executablePath = null,
-                    executableSha256 = null,
-                    workingDirectory = null,
-                    createdAtUnixMs = 1,
-                    updatedAtUnixMs = 1,
-                    expiresAtUnixMs = null,
-                    lastMatchedAtUnixMs = null,
-                    previousMatchCount = 0,
+        ),
+        facts = ApprovalReviewFacts(
+            client = "git",
+            operation = ApprovalReviewInvocationOperationFacts(
+                secrets = linkedMapOf(
+                    "github" to ApprovalReviewEnvironmentSecretFacts(
+                        environmentVariables = linkedMapOf(
+                            "GITHUB_TOKEN" to null,
+                            "GITHUB_API_URL" to "https://api.github.com",
+                        ),
+                    ),
+                    "git-signing" to ApprovalReviewSshSecretFacts(
+                        provides = "public_key",
+                    ),
                 ),
             ),
         ),
-        action = ApprovalReviewAction(
-            requestId = "01K2ENXDTW1P3XAR4J7V7C9D0J",
-            requestedAtUnixMs = 2,
-            reason = "Inspect an issue",
-            containsSensitiveMaterial = true,
-            client = ApprovalReviewClient(
-                id = "client-id",
-                name = "git",
-                hostname = "workstation",
-                platform = "linux",
-                architecture = "x86_64",
-                machineId = "machine-id",
-                osVersion = "NixOS",
-                software = ApprovalReviewSoftware(
-                    application = ApprovalReviewSoftwareComponent("agentknock", "0.1.0"),
-                    library = ApprovalReviewSoftwareComponent("agentknock", "0.1.0"),
+        evidence = ApprovalReviewEvidence(
+            invocation = ApprovalReviewInvocationEvidence(
+                reason = "Inspect an issue",
+                command = ApprovalReviewCommandEvidence(
+                    argv = listOf("gh", "issue", "view", "234"),
+                    workingDirectory = "/work/project",
+                    resolvedExecutable = "/run/current-system/sw/bin/gh",
+                    launcherChain = listOf("agentknock", "shell"),
                 ),
             ),
-            secrets = listOf(
-                ApprovalReviewSecret(
-                    id = "secret-id",
-                    name = "github",
-                    description = "GitHub credentials",
-                    type = "environment",
-                    createdAtUnixMs = 1,
-                    updatedAtUnixMs = 1,
-                    environmentVariables = listOf(
-                        ApprovalReviewEnvironmentVariable(
-                            name = "GITHUB_TOKEN",
-                            sensitive = true,
-                            notes = "Read-only token",
-                            createdAtUnixMs = 1,
-                            updatedAtUnixMs = 1,
-                            valueUpdatedAtUnixMs = 1,
-                        ),
-                    ),
-                    sshKey = null,
-                ),
-            ),
-            operation = ApprovalReviewOperation(
-                command = "gh",
-                arguments = listOf("issue", "view", "234"),
-                workingDirectory = "/work/project",
-                executablePath = "/run/current-system/sw/bin/gh",
-                executableSha256 = "sha256",
-                executableMode = "executable",
-                stdin = "terminal",
-                stdout = "terminal",
-                stderr = "terminal",
-            ),
-            launcherChain = listOf("agentknock", "shell"),
         ),
     )
 

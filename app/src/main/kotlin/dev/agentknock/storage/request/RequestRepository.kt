@@ -6,6 +6,7 @@ import dev.agentknock.protocol.InvocationDenialReason
 import dev.agentknock.protocol.InvocationProtocol
 import dev.agentknock.protocol.InvocationRequestMessage
 import dev.agentknock.protocol.GitSignCompletion
+import dev.agentknock.protocol.GitSignRepository
 import dev.agentknock.protocol.GitSignProtocol
 import dev.agentknock.protocol.GitSignRequestMessage
 import dev.agentknock.protocol.OpenedPairedRequest
@@ -25,7 +26,9 @@ import dev.agentknock.presentation.renderShellCommand
 import dev.agentknock.presentation.renderSingleLineText
 import dev.agentknock.review.approvalReviewRequest
 import dev.agentknock.review.approvalReviewGitSignRequest
+import dev.agentknock.review.approvalReviewSecretFacts
 import dev.agentknock.relay.ApprovalReviewRequest
+import dev.agentknock.relay.ApprovalReviewSecretFacts
 import dev.agentknock.relay.RelayClientState
 import dev.agentknock.relay.RelayApprovalReviewClient
 import dev.agentknock.relay.RelayApprovalReviewDecision
@@ -288,6 +291,7 @@ internal data class GitSignRequestDetails(
     val completionMessage: String?,
     val secretName: String,
     val message: ByteArray,
+    val repository: GitSignRepository?,
     val invocationRequestId: String,
     val command: String,
     val arguments: List<String>,
@@ -835,6 +839,9 @@ internal class RequestRepository(
                     completionMessage = gitSign.completionMessage,
                     secretName = gitSign.secretName,
                     message = gitSign.message,
+                    repository = gitSign.repositoryJson?.let {
+                        runCatching { json.decodeFromString<GitSignRepository>(it) }.getOrNull()
+                    },
                     invocationRequestId = invocationRequest.relayRequestId,
                     command = invocation.command,
                     arguments = decodeStringList(invocation.argumentsJson),
@@ -1693,12 +1700,10 @@ internal class RequestRepository(
                 )
                 return SecretUseDecisionResult.SecretsChanged
             }
-            val responseSecrets = when (
+            val availableSecrets = when (
                 val result = secrets.requestedSecrets(requestedSecrets)
             ) {
-                is RequestedSecretsResult.Available -> result.secrets.mapValues { (_, secret) ->
-                    secret.toResponseSecret()
-                }
+                is RequestedSecretsResult.Available -> result.secrets
                 is RequestedSecretsResult.MissingSecrets -> {
                     return SecretUseDecisionResult.MissingSecrets(result.names)
                 }
@@ -1727,7 +1732,12 @@ internal class RequestRepository(
                 request = request,
                 secretUseRequest = secretUseRequest,
                 decision = SecretUseDecision.APPROVED,
-                responsePlaintext = invocationProtocol.approvedResponse(responseSecrets),
+                responsePlaintext = invocationProtocol.approvedResponse(
+                    availableSecrets.mapValues { (_, secret) -> secret.toResponseSecret() },
+                ),
+                providedSecretsJson = json.encodeToString(
+                    approvalReviewSecretFacts(latestDescription, availableSecrets),
+                ),
             )
         }.also { result ->
             if (result == SecretUseDecisionResult.Decided) requestSync()
@@ -1750,6 +1760,7 @@ internal class RequestRepository(
                     InvocationDenialReason.USER_DENIED,
                     SECRET_USE_DENIAL_MESSAGE,
                 ),
+                providedSecretsJson = null,
             )
         }.also { result ->
             if (result == SecretUseDecisionResult.Decided) requestSync()
@@ -1760,7 +1771,11 @@ internal class RequestRepository(
         secretUseRequest: SecretUseRequestEntity,
         decision: SecretUseDecision,
         responsePlaintext: ByteArray,
+        providedSecretsJson: String?,
     ): SecretUseDecisionResult {
+        require(decision != SecretUseDecision.APPROVED || providedSecretsJson != null) {
+            "An approved invocation must record its provided secrets"
+        }
         val pairingRequestId = secretUseRequest.pairingRequestId
             ?: return SecretUseDecisionResult.PairingUnavailable
         val pairing = dao.getPairing(pairingRequestId)
@@ -1796,6 +1811,7 @@ internal class RequestRepository(
                 state = SecretUseRequestState.WAITING_FOR_COMPLETION.storedName,
                 decision = decision.storedName,
                 decisionSource = DECISION_SOURCE_USER,
+                providedSecretsJson = providedSecretsJson,
                 updatedAt = now,
                 decidedAt = now,
             ),
@@ -2521,16 +2537,19 @@ internal class RequestRepository(
         } else {
             null
         }
+        val availableSecrets = (requestedSecrets as? RequestedSecretsResult.Available)?.secrets
+        val providedSecretsJson = availableSecrets?.let { values ->
+            json.encodeToString(approvalReviewSecretFacts(description, values))
+        }
         val aiReview = if (initialRuleEvaluation?.action == ApprovalRuleAction.ASK_AI) {
             requestAiReview(
                 pairing = pairing,
-                relayRequestId = relayRequestId,
                 contents = contents,
                 description = description,
+                values = checkNotNull(availableSecrets),
                 evaluation = initialRuleEvaluation,
                 policies = approvalPolicies,
                 credentials = credentials,
-                requestedAt = now,
             )
         } else {
             null
@@ -2561,17 +2580,17 @@ internal class RequestRepository(
         val responsePlaintext = when {
             denial != null -> invocationProtocol.deniedResponse(denial.first, denial.second)
             ruleEvaluation?.action == ApprovalRuleAction.APPROVE || aiApproved -> {
-                val available = requestedSecrets as RequestedSecretsResult.Available
                 invocationProtocol.approvedResponse(
-                    available.secrets.mapValues { (_, secret) ->
+                    checkNotNull(availableSecrets).mapValues { (_, secret) ->
                         secret.toResponseSecret()
                     },
                 )
             }
             !description.containsSensitiveMaterial -> {
-                val available = requestedSecrets as RequestedSecretsResult.Available
                 invocationProtocol.approvedResponse(
-                    available.secrets.mapValues { (_, secret) -> secret.toResponseSecret() },
+                    checkNotNull(availableSecrets).mapValues { (_, secret) ->
+                        secret.toResponseSecret()
+                    },
                 )
             }
             else -> null
@@ -2636,6 +2655,11 @@ internal class RequestRepository(
                     null
                 },
                 ruleEvaluationJson = ruleEvaluation?.let { json.encodeToString(it) },
+                providedSecretsJson = if (automaticDecision == SecretUseDecision.APPROVED) {
+                    checkNotNull(providedSecretsJson)
+                } else {
+                    null
+                },
                 completionReason = denial?.first?.wireName,
                 completionMessage = denial?.second,
                 updatedAt = decidedAt,
@@ -2838,6 +2862,7 @@ internal class RequestRepository(
             state = GitSignRequestState.APPROVAL_PENDING.storedName,
             secretName = contents.secret,
             message = contents.message,
+            repositoryJson = contents.repository?.let { json.encodeToString(it) },
             decision = null,
             completionResult = null,
             completionReason = null,
@@ -2862,14 +2887,11 @@ internal class RequestRepository(
         val aiReview = if (initialEvaluation?.action == ApprovalRuleAction.ASK_AI) {
             requestGitSignAiReview(
                 pairing = pairing,
-                relayRequestId = relayRequestId,
                 contents = contents,
                 invocation = invocation,
-                description = description,
                 evaluation = initialEvaluation,
                 policies = approvalPolicies,
                 credentials = credentials,
-                requestedAt = now,
             )
         } else {
             null
@@ -3053,28 +3075,22 @@ internal class RequestRepository(
 
     private suspend fun requestAiReview(
         pairing: PairingEntity,
-        relayRequestId: String,
         contents: InvocationRequestMessage,
         description: RequestedSecretDescription,
+        values: Map<String, SecretValues>,
         evaluation: ApprovalRuleEvaluation,
         policies: List<SecretApprovalPolicy>,
         credentials: RelayDeviceCredentials,
-        requestedAt: Long,
     ): AiReview {
         val reviewer = approvalReviewer
             ?: return AiReview(failure = AiReviewFailure.UNAVAILABLE)
-        val ruleRepository = approvalRules
-            ?: return AiReview(failure = AiReviewFailure.UNAVAILABLE)
-        val rules = ruleRepository.getRules(evaluation.matchedRuleIds)
         val request = approvalReviewRequest(
             pairing = pairing,
-            relayRequestId = relayRequestId,
             contents = contents,
             description = description,
+            values = values,
             evaluation = evaluation,
             policies = policies,
-            rules = rules,
-            requestedAt = requestedAt,
             deviceInstructions = credentials.instructions,
         )
         return performAiReview(reviewer, credentials, request)
@@ -3082,30 +3098,42 @@ internal class RequestRepository(
 
     private suspend fun requestGitSignAiReview(
         pairing: PairingEntity,
-        relayRequestId: String,
         contents: GitSignRequestMessage,
         invocation: SecretUseRequestEntity,
-        description: RequestedSecretDescription,
         evaluation: ApprovalRuleEvaluation,
         policies: List<SecretApprovalPolicy>,
         credentials: RelayDeviceCredentials,
-        requestedAt: Long,
     ): AiReview {
         val reviewer = approvalReviewer
             ?: return AiReview(failure = AiReviewFailure.UNAVAILABLE)
-        val ruleRepository = approvalRules
-            ?: return AiReview(failure = AiReviewFailure.UNAVAILABLE)
-        val rules = ruleRepository.getRules(evaluation.matchedRuleIds)
+        if (contents.message.size > MAX_AI_REVIEW_GIT_CONTENT_BYTES) {
+            return AiReview(
+                decision = AiReviewDecision.ASK_USER,
+                explanation = "The exact Git signing content is too large for AI review.",
+            )
+        }
+        val signedContent = runCatching {
+            contents.message.decodeToString(throwOnInvalidSequence = true)
+        }.getOrNull() ?: return AiReview(
+            decision = AiReviewDecision.ASK_USER,
+            explanation = "The exact Git signing content is not valid UTF-8.",
+        )
+        val invocationSecrets = invocation.providedSecretsJson?.let { stored ->
+            runCatching {
+                json.decodeFromString<Map<String, ApprovalReviewSecretFacts>>(stored)
+            }.getOrNull()
+        } ?: return AiReview(
+            decision = AiReviewDecision.ASK_USER,
+            explanation = "The parent invocation context is unavailable.",
+        )
         val request = approvalReviewGitSignRequest(
             pairing = pairing,
-            relayRequestId = relayRequestId,
             contents = contents,
+            signedContent = signedContent,
             invocation = invocation,
-            description = description,
+            invocationSecrets = invocationSecrets,
             evaluation = evaluation,
             policies = policies,
-            rules = rules,
-            requestedAt = requestedAt,
             deviceInstructions = credentials.instructions,
         )
         return performAiReview(reviewer, credentials, request)
@@ -3639,6 +3667,7 @@ internal class RequestRepository(
         clientSoftwareJson = encodeClientSoftware(contents.clientSoftware),
         secretsJson = encodeStringList(contents.secrets),
         secretDetailsJson = json.encodeToString(description.secrets),
+        providedSecretsJson = null,
         missingSecretsJson = encodeStringList(description.missingSecrets),
         reason = contents.reason,
         command = contents.operation.command,
@@ -4885,6 +4914,7 @@ internal class RequestRepository(
         const val IDEMPOTENCY_RETENTION_MILLIS = 25 * 60 * 60 * 1_000L
         const val SECRET_USE_DENIAL_MESSAGE = "Denied on device."
         const val GIT_SIGN_DENIAL_MESSAGE = "Git signature denied on device."
+        const val MAX_AI_REVIEW_GIT_CONTENT_BYTES = 128 * 1024
         const val DECISION_SOURCE_USER = "user"
         const val DECISION_SOURCE_RULE = "rule"
         const val DECISION_SOURCE_POLICY = "policy"

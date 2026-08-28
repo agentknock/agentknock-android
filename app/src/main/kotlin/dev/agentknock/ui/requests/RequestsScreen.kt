@@ -96,6 +96,9 @@ import androidx.lifecycle.Lifecycle
 import androidx.lifecycle.LifecycleEventObserver
 import androidx.lifecycle.viewmodel.compose.viewModel
 import dev.agentknock.protocol.SecretUploadMode
+import dev.agentknock.protocol.GitSignChangeStatus
+import dev.agentknock.protocol.GitSignHead
+import dev.agentknock.protocol.GitSignRepository
 import dev.agentknock.presentation.formatTimestamp
 import dev.agentknock.presentation.formatPlatformName
 import dev.agentknock.presentation.renderShellCommand
@@ -1051,6 +1054,10 @@ private fun GitSignDetail(
             InformationRow("Received", formatTimestamp(request.receivedAt))
         }
 
+        signing.repository?.takeIf(GitSignRepository::hasVisibleContext)?.let { repository ->
+            GitRepositoryContext(repository)
+        }
+
         gitCommitMessage?.let { message ->
             Surface(
                 color = if (pending) {
@@ -1137,12 +1144,86 @@ private fun GitSignDetail(
                     DetailValue("Agentknock library", renderSoftware(software.library))
                 }
             }
+            signing.repository?.worktree?.let {
+                DetailValue("Worktree reported by client", it, true)
+            }
             DetailValue("Client ID", signing.clientId, true)
             DetailValue("Invocation request ID", signing.invocationRequestId, true)
             DetailValue("Signing request ID", request.relayRequestId, true)
         }
     }
 }
+
+@Composable
+private fun GitRepositoryContext(repository: GitSignRepository) {
+    Surface(
+        color = MaterialTheme.colorScheme.surfaceContainerLow,
+        shape = MaterialTheme.shapes.large,
+        modifier = Modifier.fillMaxWidth(),
+    ) {
+        Column(
+            Modifier.padding(16.dp),
+            verticalArrangement = Arrangement.spacedBy(8.dp),
+        ) {
+            Text("Repository", style = MaterialTheme.typography.labelLarge)
+            (repository.remote ?: repository.worktree)?.let {
+                SelectionContainer {
+                    Text(it, style = MaterialTheme.typography.titleMedium)
+                }
+            }
+            repository.head?.let { head ->
+                Text(
+                    when (head) {
+                        is GitSignHead.Branch -> buildString {
+                            append("Branch ")
+                            append(head.name)
+                            head.upstream?.let {
+                                append(" · upstream ")
+                                append(it)
+                            }
+                        }
+                        GitSignHead.Detached -> "Detached HEAD"
+                    },
+                    style = MaterialTheme.typography.bodyMedium,
+                    color = MaterialTheme.colorScheme.onSurfaceVariant,
+                )
+            }
+            repository.changedPathCount?.let { count ->
+                Text(
+                    if (count == 1L) "1 changed file" else "$count changed files",
+                    style = MaterialTheme.typography.bodyMedium,
+                    color = MaterialTheme.colorScheme.onSurfaceVariant,
+                )
+            }
+            repository.changedPaths?.takeIf { it.isNotEmpty() }?.forEach { path ->
+                Row(
+                    horizontalArrangement = Arrangement.spacedBy(10.dp),
+                    verticalAlignment = Alignment.Top,
+                ) {
+                    Text(
+                        when (path.status) {
+                            GitSignChangeStatus.ADDED -> "A"
+                            GitSignChangeStatus.DELETED -> "D"
+                            GitSignChangeStatus.MODIFIED -> "M"
+                            GitSignChangeStatus.TYPE_CHANGED -> "T"
+                        },
+                        modifier = Modifier.width(16.dp),
+                        style = MaterialTheme.typography.labelMedium,
+                        color = MaterialTheme.colorScheme.primary,
+                        fontFamily = FontFamily.Monospace,
+                    )
+                    SelectionContainer {
+                        Text(path.path, fontFamily = FontFamily.Monospace)
+                    }
+                }
+            }
+        }
+    }
+}
+
+private fun GitSignRepository.hasVisibleContext(): Boolean =
+    remote != null || worktree != null || head != null ||
+        changedPathCount != null || changedPaths != null
 
 @Composable
 internal fun SecretUploadRequestDetail(
