@@ -16,6 +16,7 @@ import dev.agentknock.storage.secret.EnvironmentVariableValue
 import dev.agentknock.storage.secret.SecretDetails
 import dev.agentknock.storage.secret.SecretSummary
 import dev.agentknock.storage.secret.SecretApprovalMode
+import dev.agentknock.storage.secret.TemporaryAccessOperation
 import dev.agentknock.storage.secret.SshPrivateKey
 import dev.agentknock.storage.secret.SaveSshSecretResult
 import dev.agentknock.storage.secret.SaveEnvironmentVariableResult
@@ -212,6 +213,12 @@ internal class SecretsViewModel(application: Application) : AndroidViewModel(app
         clientId: String,
         mode: SecretApprovalMode?,
     ): SaveSecretResult = repository.setClientApprovalOverride(secretId, clientId, mode)
+
+    suspend fun endTemporaryAccess(
+        secretId: String,
+        clientId: String,
+        operation: TemporaryAccessOperation,
+    ): Boolean = repository.endTemporaryAccess(secretId, clientId, operation)
 
     suspend fun deleteSecret(id: String): Boolean {
         val deleted = repository.deleteSecret(id)

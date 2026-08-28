@@ -20,6 +20,7 @@ import androidx.compose.foundation.layout.WindowInsets
 import androidx.compose.foundation.layout.fillMaxHeight
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
+import androidx.compose.foundation.layout.heightIn
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.layout.width
@@ -41,6 +42,7 @@ import androidx.compose.material.icons.outlined.ErrorOutline
 import androidx.compose.material.icons.outlined.NotificationsOff
 import androidx.compose.material.icons.outlined.Refresh
 import androidx.compose.material.icons.outlined.Settings
+import androidx.compose.material.icons.outlined.Schedule
 import androidx.compose.material.icons.outlined.Visibility
 import androidx.compose.material.icons.outlined.VisibilityOff
 import androidx.compose.material3.AlertDialog
@@ -124,9 +126,11 @@ import dev.agentknock.storage.request.SecretUploadRequestState
 import dev.agentknock.storage.request.SecretUploadVariableValue
 import dev.agentknock.storage.request.RequestSyncResult
 import dev.agentknock.storage.approval.ApprovalAction
+import dev.agentknock.storage.approval.ApprovalEvaluation
 import dev.agentknock.storage.approval.AiReview
 import dev.agentknock.storage.approval.AiReviewDecision
 import dev.agentknock.storage.approval.AiReviewFailure
+import dev.agentknock.storage.secret.TemporaryAccessOperation
 import dev.agentknock.ui.components.ClientIdentity
 import dev.agentknock.ui.components.InformationRow
 import dev.agentknock.ui.components.InformationSurface
@@ -273,6 +277,11 @@ private fun RequestDetail(
                 }
             },
             onDeny = { scope.launch { report(viewModel.denySecretUseRequest(request.id).message()) } },
+            onAllowTemporarily = {
+                scope.launch {
+                    report(viewModel.allowSecretUseTemporarily(request.id).message())
+                }
+            },
             modifier = modifier,
         )
     } else if (request.gitSign != null) {
@@ -285,6 +294,11 @@ private fun RequestDetail(
             },
             onDeny = {
                 scope.launch { report(viewModel.denyGitSignRequest(request.id).message()) }
+            },
+            onAllowTemporarily = {
+                scope.launch {
+                    report(viewModel.allowGitSignTemporarily(request.id).message())
+                }
             },
             modifier = modifier,
         )
@@ -415,9 +429,14 @@ private fun RequestRow(
     onApprove: () -> Unit,
     onReject: () -> Unit,
 ) {
-    val canApprove = request.secretUseState == SecretUseRequestState.APPROVAL_PENDING ||
-        request.gitSignState == GitSignRequestState.APPROVAL_PENDING
-    val canReject = request.canReject()
+    val canApprove = request.userDecisionAvailable && (
+        request.secretUseState == SecretUseRequestState.APPROVAL_PENDING ||
+            request.gitSignState == GitSignRequestState.APPROVAL_PENDING
+        )
+    val canReject = request.canReject() && (
+        request.userDecisionAvailable ||
+            request.secretUseState == null && request.gitSignState == null
+        )
     val rejectLabel = "Deny once"
     val swipeState = rememberSwipeToDismissBoxState(
         positionalThreshold = { distance -> distance * 0.65f },
@@ -502,7 +521,8 @@ private fun RequestRowContent(
     onClick: () -> Unit,
 ) {
     val rejected = request.wasRejected()
-    val actionRequired = request.state == InboxRequestState.ACTION_REQUIRED
+    val actionRequired = request.state == InboxRequestState.ACTION_REQUIRED &&
+        request.userDecisionAvailable
     val semanticColors = MaterialTheme.agentknockColors
     val containerColor = when {
         actionRequired -> semanticColors.attentionContainer
@@ -742,46 +762,40 @@ private fun SecretUseDetail(
     showBack: Boolean,
     onApprove: () -> Unit,
     onDeny: () -> Unit,
+    onAllowTemporarily: () -> Unit,
     modifier: Modifier,
 ) {
     val secretUse = checkNotNull(request.secretUse)
+    var confirmTemporaryAccess by remember(request.id) { mutableStateOf(false) }
+    val aiReviewInFlight = !request.userDecisionAvailable
+    val temporarySecretNames = secretUse.approvalEvaluation.temporaryGrantSecretNames(
+        aiReviewInFlight,
+    )
     DetailPage(
         title = "Secret use",
         onBack = onBack,
         modifier = modifier,
         showBack = showBack,
-        bottomContent = if (secretUse.state == SecretUseRequestState.APPROVAL_PENDING) {
+        bottomContent = if (
+            secretUse.state == SecretUseRequestState.APPROVAL_PENDING &&
+            request.userDecisionAvailable
+        ) {
             {
                 Surface(
                     color = MaterialTheme.colorScheme.surfaceContainerLow,
                     tonalElevation = 3.dp,
                 ) {
-                    Row(
-                        modifier = Modifier.fillMaxWidth().padding(12.dp),
-                        horizontalArrangement = Arrangement.spacedBy(10.dp),
-                    ) {
-                        OutlinedButton(
-                            onClick = onDeny,
-                            modifier = Modifier.weight(1f),
-                            colors = ButtonDefaults.outlinedButtonColors(
-                                contentColor = MaterialTheme.agentknockColors.danger,
-                            ),
-                            border = BorderStroke(1.dp, MaterialTheme.agentknockColors.danger),
-                        ) {
-                            Text("Deny")
-                        }
-                        Button(
-                            onClick = onApprove,
-                            enabled = secretUse.missingSecrets.isEmpty(),
-                            modifier = Modifier.weight(1f),
-                            colors = ButtonDefaults.buttonColors(
-                                containerColor = MaterialTheme.agentknockColors.success,
-                                contentColor = MaterialTheme.agentknockColors.onSuccess,
-                            ),
-                        ) {
-                            Text("Approve")
-                        }
-                    }
+                    RequestDecisionButtons(
+                        approveLabel = "Approve once",
+                        approveEnabled = secretUse.missingSecrets.isEmpty(),
+                        temporaryAccessAvailable = temporarySecretNames.isNotEmpty() &&
+                            secretUse.missingSecrets.isEmpty(),
+                        temporaryAccessPreferred = secretUse.approvalEvaluation
+                            .prefersTemporaryAccess(aiReviewInFlight),
+                        onDeny = onDeny,
+                        onApprove = onApprove,
+                        onAllowTemporarily = { confirmTemporaryAccess = true },
+                    )
                 }
             }
         } else {
@@ -790,10 +804,12 @@ private fun SecretUseDetail(
     ) {
         InformationSurface {
             StatusLine(
-                secretUse.statusLabel(),
+                if (aiReviewInFlight) "AI review in progress" else secretUse.statusLabel(),
                 secretUse.isError(),
-                attention = secretUse.state == SecretUseRequestState.APPROVAL_PENDING,
-                subdued = secretUse.decision == SecretUseDecision.DENIED ||
+                attention = secretUse.state == SecretUseRequestState.APPROVAL_PENDING &&
+                    request.userDecisionAvailable,
+                subdued = aiReviewInFlight ||
+                    secretUse.decision == SecretUseDecision.DENIED ||
                     secretUse.completionResult == InvocationCompletionResult.DENIED,
             )
             ClientIdentity(secretUse.clientName)
@@ -878,14 +894,36 @@ private fun SecretUseDetail(
         }
 
         if (secretUse.state == SecretUseRequestState.APPROVAL_PENDING) {
-            when (secretUse.approvalEvaluation?.action) {
-                ApprovalAction.ASK_ME -> Notice(
+            val evaluation = secretUse.approvalEvaluation
+            val asksEveryTime = evaluation?.secrets?.any {
+                it.action == ApprovalAction.ASK_ME && !it.temporaryAccessEligible
+            } == true
+            if (evaluation.prefersTemporaryAccess(aiReviewInFlight)) {
+                Notice(
+                    "Your decision is required",
+                    if (asksEveryTime) {
+                        "Approve everything once, or allow the eligible secrets for any command " +
+                            "from ${secretUse.clientName} for 4 hours. Other protected uses " +
+                            "are approved once."
+                    } else {
+                        "Approve once, or allow ${secretUse.clientName} to receive these protected " +
+                            "values for any command for 4 hours."
+                    },
+                    NoticeTone.ATTENTION,
+                )
+            }
+            if (asksEveryTime && !evaluation.prefersTemporaryAccess(aiReviewInFlight)) {
+                Notice(
                     "Your decision is required",
                     "At least one requested secret is set to Ask every time.",
                     NoticeTone.ATTENTION,
                 )
-                ApprovalAction.ASK_AI -> AiReviewNotice(secretUse.approvalEvaluation.aiReview)
-                else -> Unit
+            }
+            if (
+                evaluation?.aiReview != null ||
+                evaluation?.secrets?.any { it.action == ApprovalAction.ASK_AI } == true
+            ) {
+                AiReviewNotice(evaluation.aiReview, aiReviewInFlight)
             }
         }
 
@@ -936,11 +974,32 @@ private fun SecretUseDetail(
             DetailValue("Request ID", request.relayRequestId, true)
         }
     }
+    if (confirmTemporaryAccess) {
+        TemporaryAccessConfirmation(
+            clientName = secretUse.clientName,
+            secretNames = temporarySecretNames,
+            operation = TemporaryAccessOperation.INVOCATION,
+            approvesOtherUsesOnce = secretUse.approvalEvaluation
+                ?.secrets
+                ?.any { it.secretName !in temporarySecretNames && it.action != ApprovalAction.APPROVE }
+                == true,
+            onConfirm = {
+                confirmTemporaryAccess = false
+                onAllowTemporarily()
+            },
+            onDismiss = { confirmTemporaryAccess = false },
+        )
+    }
 }
 
 @Composable
-private fun AiReviewNotice(review: AiReview?) {
+private fun AiReviewNotice(review: AiReview?, reviewInFlight: Boolean) {
     when {
+        review?.decision == AiReviewDecision.APPROVE -> Notice(
+            "AI review approved its part",
+            review.explanation ?: "Another protected use still needs your decision.",
+            NoticeTone.SUCCESS,
+        )
         review?.decision == AiReviewDecision.ASK_USER -> Notice(
             "AI review asked you to decide",
             review.explanation ?: "The reviewer could not decide safely.",
@@ -956,13 +1015,182 @@ private fun AiReviewNotice(review: AiReview?) {
             "The request was left for you to decide.",
             NoticeTone.ATTENTION,
         )
+        reviewInFlight -> Unit
         else -> Notice(
-            "AI review is pending",
-            "You can wait for the reviewer or decide this request yourself.",
+            "AI review was interrupted",
+            "Decide this request yourself.",
             NoticeTone.ATTENTION,
         )
     }
 }
+
+@Composable
+private fun RequestDecisionButtons(
+    approveLabel: String,
+    approveEnabled: Boolean,
+    temporaryAccessAvailable: Boolean,
+    temporaryAccessPreferred: Boolean,
+    onDeny: () -> Unit,
+    onApprove: () -> Unit,
+    onAllowTemporarily: () -> Unit,
+) {
+    Column(
+        modifier = Modifier.fillMaxWidth().padding(12.dp),
+        verticalArrangement = Arrangement.spacedBy(8.dp),
+    ) {
+        if (temporaryAccessAvailable) {
+            if (temporaryAccessPreferred) {
+                Button(
+                    onClick = onAllowTemporarily,
+                    modifier = Modifier.fillMaxWidth(),
+                    colors = ButtonDefaults.buttonColors(
+                        containerColor = MaterialTheme.agentknockColors.success,
+                        contentColor = MaterialTheme.agentknockColors.onSuccess,
+                    ),
+                ) {
+                    Icon(Icons.Outlined.Schedule, contentDescription = null)
+                    Spacer(Modifier.width(8.dp))
+                    Text("Allow for 4 hours")
+                }
+            } else {
+                FilledTonalButton(
+                    onClick = onAllowTemporarily,
+                    modifier = Modifier.fillMaxWidth(),
+                ) {
+                    Icon(Icons.Outlined.Schedule, contentDescription = null)
+                    Spacer(Modifier.width(8.dp))
+                    Text("Allow for 4 hours")
+                }
+            }
+        }
+        Row(
+            modifier = Modifier.fillMaxWidth(),
+            horizontalArrangement = Arrangement.spacedBy(10.dp),
+        ) {
+            OutlinedButton(
+                onClick = onDeny,
+                modifier = Modifier.weight(1f),
+                colors = ButtonDefaults.outlinedButtonColors(
+                    contentColor = MaterialTheme.agentknockColors.danger,
+                ),
+                border = BorderStroke(1.dp, MaterialTheme.agentknockColors.danger),
+            ) {
+                Text("Deny once")
+            }
+            if (temporaryAccessPreferred) {
+                OutlinedButton(
+                    onClick = onApprove,
+                    enabled = approveEnabled,
+                    modifier = Modifier.weight(1f),
+                    colors = ButtonDefaults.outlinedButtonColors(
+                        contentColor = MaterialTheme.agentknockColors.success,
+                    ),
+                    border = BorderStroke(1.dp, MaterialTheme.agentknockColors.success),
+                ) {
+                    Text(approveLabel)
+                }
+            } else {
+                Button(
+                    onClick = onApprove,
+                    enabled = approveEnabled,
+                    modifier = Modifier.weight(1f),
+                    colors = ButtonDefaults.buttonColors(
+                        containerColor = MaterialTheme.agentknockColors.success,
+                        contentColor = MaterialTheme.agentknockColors.onSuccess,
+                    ),
+                ) {
+                    Text(approveLabel)
+                }
+            }
+        }
+    }
+}
+
+@Composable
+private fun TemporaryAccessConfirmation(
+    clientName: String,
+    secretNames: List<String>,
+    operation: TemporaryAccessOperation,
+    approvesOtherUsesOnce: Boolean,
+    onConfirm: () -> Unit,
+    onDismiss: () -> Unit,
+) {
+    AlertDialog(
+        onDismissRequest = onDismiss,
+        title = { Text("Allow temporary access?") },
+        text = {
+            Column(verticalArrangement = Arrangement.spacedBy(10.dp)) {
+                Text(temporaryAccessScope(clientName, operation))
+                Text(
+                    "Eligible secrets",
+                    style = MaterialTheme.typography.labelLarge,
+                )
+                Surface(
+                    modifier = Modifier.fillMaxWidth(),
+                    color = MaterialTheme.colorScheme.surfaceContainerLow,
+                    shape = MaterialTheme.shapes.medium,
+                ) {
+                    Column(
+                        modifier = Modifier
+                            .heightIn(max = 144.dp)
+                            .verticalScroll(rememberScrollState())
+                            .padding(horizontal = 12.dp, vertical = 8.dp),
+                        verticalArrangement = Arrangement.spacedBy(4.dp),
+                    ) {
+                        secretNames.forEach { secretName ->
+                            Text("• $secretName", style = MaterialTheme.typography.bodyMedium)
+                        }
+                    }
+                }
+                Text(
+                    "Agentknock will not ask you or AI about these uses for the next 4 hours.",
+                    color = MaterialTheme.colorScheme.onSurfaceVariant,
+                )
+                if (approvesOtherUsesOnce) {
+                    Text(
+                        "Other protected uses in this request are approved once and do not gain temporary access.",
+                        color = MaterialTheme.colorScheme.onSurfaceVariant,
+                    )
+                }
+                Text(
+                    "The end time only blocks future Agentknock uses; it cannot recall values already delivered.",
+                    color = MaterialTheme.colorScheme.onSurfaceVariant,
+                )
+            }
+        },
+        confirmButton = { TextButton(onClick = onConfirm) { Text("Allow") } },
+        dismissButton = { TextButton(onClick = onDismiss) { Text("Cancel") } },
+    )
+}
+
+private fun temporaryAccessScope(
+    clientName: String,
+    operation: TemporaryAccessOperation,
+): String = when (operation) {
+    TemporaryAccessOperation.INVOCATION ->
+        "$clientName can receive protected values from the listed secrets for any command."
+    TemporaryAccessOperation.GIT_SIGN ->
+        "$clientName can request Git signatures from the listed secret for any repository."
+}
+
+private fun ApprovalEvaluation?.temporaryGrantSecretNames(
+    aiReviewInFlight: Boolean,
+): List<String> {
+    val evaluation = this ?: return emptyList()
+    if (aiReviewInFlight) return emptyList()
+    val aiCanEscalate = evaluation.aiReview?.decision == AiReviewDecision.ASK_USER ||
+        evaluation.aiReview?.failure != null ||
+        evaluation.aiReview == null
+    return evaluation.secrets.filter { secret ->
+        secret.temporaryAccessEligible && secret.temporaryAccessExpiresAt == null &&
+            (secret.action == ApprovalAction.ASK_ME ||
+                (secret.action == ApprovalAction.ASK_AI && aiCanEscalate))
+    }.map { it.secretName }
+}
+
+private fun ApprovalEvaluation?.prefersTemporaryAccess(aiReviewInFlight: Boolean): Boolean =
+    this?.temporaryGrantSecretNames(aiReviewInFlight)?.isNotEmpty() == true &&
+        secrets.any { it.action == ApprovalAction.ASK_ME && it.temporaryAccessEligible }
 
 @Composable
 private fun GitSignDetail(
@@ -971,10 +1199,16 @@ private fun GitSignDetail(
     showBack: Boolean,
     onApprove: () -> Unit,
     onDeny: () -> Unit,
+    onAllowTemporarily: () -> Unit,
     modifier: Modifier,
 ) {
     val signing = checkNotNull(request.gitSign)
     val pending = signing.state == GitSignRequestState.APPROVAL_PENDING
+    var confirmTemporaryAccess by remember(request.id) { mutableStateOf(false) }
+    val aiReviewInFlight = !request.userDecisionAvailable
+    val temporarySecretNames = signing.approvalEvaluation.temporaryGrantSecretNames(
+        aiReviewInFlight,
+    )
     val title = "Git signature"
     val exactContent = signing.message.displayForApproval()
     val gitCommitMessage = exactContent.substringAfter("\n\n", missingDelimiterValue = "")
@@ -985,37 +1219,22 @@ private fun GitSignDetail(
         onBack = onBack,
         modifier = modifier,
         showBack = showBack,
-        bottomContent = if (pending) {
+        bottomContent = if (pending && request.userDecisionAvailable) {
             {
                 Surface(
                     color = MaterialTheme.colorScheme.surfaceContainerLow,
                     tonalElevation = 3.dp,
                 ) {
-                    Row(
-                        modifier = Modifier.fillMaxWidth().padding(12.dp),
-                        horizontalArrangement = Arrangement.spacedBy(10.dp),
-                    ) {
-                        OutlinedButton(
-                            onClick = onDeny,
-                            modifier = Modifier.weight(1f),
-                            colors = ButtonDefaults.outlinedButtonColors(
-                                contentColor = MaterialTheme.agentknockColors.danger,
-                            ),
-                            border = BorderStroke(1.dp, MaterialTheme.agentknockColors.danger),
-                        ) {
-                            Text("Deny")
-                        }
-                        Button(
-                            onClick = onApprove,
-                            modifier = Modifier.weight(1f),
-                            colors = ButtonDefaults.buttonColors(
-                                containerColor = MaterialTheme.agentknockColors.success,
-                                contentColor = MaterialTheme.agentknockColors.onSuccess,
-                            ),
-                        ) {
-                            Text("Sign")
-                        }
-                    }
+                    RequestDecisionButtons(
+                        approveLabel = "Sign once",
+                        approveEnabled = true,
+                        temporaryAccessAvailable = temporarySecretNames.isNotEmpty(),
+                        temporaryAccessPreferred = signing.approvalEvaluation
+                            .prefersTemporaryAccess(aiReviewInFlight),
+                        onDeny = onDeny,
+                        onApprove = onApprove,
+                        onAllowTemporarily = { confirmTemporaryAccess = true },
+                    )
                 }
             }
         } else {
@@ -1024,10 +1243,11 @@ private fun GitSignDetail(
     ) {
         InformationSurface {
             StatusLine(
-                signing.statusLabel(),
+                if (aiReviewInFlight) "AI review in progress" else signing.statusLabel(),
                 error = signing.state == GitSignRequestState.VERIFICATION_FAILED,
-                attention = pending,
-                subdued = signing.decision == SecretUseDecision.DENIED ||
+                attention = pending && request.userDecisionAvailable,
+                subdued = aiReviewInFlight ||
+                    signing.decision == SecretUseDecision.DENIED ||
                     signing.completionResult == GitSignCompletionResult.DENIED,
             )
             ClientIdentity(signing.clientName)
@@ -1035,11 +1255,23 @@ private fun GitSignDetail(
             InformationRow("Received", formatTimestamp(request.receivedAt))
         }
 
+        if (pending && signing.approvalEvaluation.prefersTemporaryAccess(aiReviewInFlight)) {
+            Notice(
+                "Your decision is required",
+                "Sign once, or allow ${signing.clientName} to request Git signatures with " +
+                    "this key for any repository for 4 hours.",
+                NoticeTone.ATTENTION,
+            )
+        }
+
         if (
-            pending &&
-            signing.approvalEvaluation?.action == ApprovalAction.ASK_AI
+            pending && (
+                signing.approvalEvaluation?.aiReview != null ||
+                    signing.approvalEvaluation?.secrets
+                        ?.any { it.action == ApprovalAction.ASK_AI } == true
+                )
         ) {
-            AiReviewNotice(signing.approvalEvaluation.aiReview)
+            AiReviewNotice(signing.approvalEvaluation.aiReview, aiReviewInFlight)
         }
 
         signing.repository?.takeIf(GitSignRepository::hasVisibleContext)?.let { repository ->
@@ -1139,6 +1371,19 @@ private fun GitSignDetail(
             DetailValue("Invocation request ID", signing.invocationRequestId, true)
             DetailValue("Signing request ID", request.relayRequestId, true)
         }
+    }
+    if (confirmTemporaryAccess) {
+        TemporaryAccessConfirmation(
+            clientName = signing.clientName,
+            secretNames = temporarySecretNames,
+            operation = TemporaryAccessOperation.GIT_SIGN,
+            approvesOtherUsesOnce = false,
+            onConfirm = {
+                confirmTemporaryAccess = false
+                onAllowTemporarily()
+            },
+            onDismiss = { confirmTemporaryAccess = false },
+        )
     }
 }
 
@@ -1663,13 +1908,64 @@ private fun SshKeyUploadDetails(upload: SecretUploadRequestDetails) {
 
 @Composable
 private fun SecretUseOutcome(secretUse: SecretUseRequestDetails) {
+    val temporaryAccessScopes = secretUse.approvalEvaluation.temporaryAccessHistory()
+    val aiReview = secretUse.approvalEvaluation?.aiReview
+    val aiEscalation = aiReview?.escalationSummary()
+    val humanAiDetail = when {
+        aiReview?.decision == AiReviewDecision.APPROVE -> {
+            val resolution = if (secretUse.decision == SecretUseDecision.APPROVED) {
+                "you approved the remaining use once"
+            } else {
+                "you denied the complete request"
+            }
+            "AI review approved its part${aiReview.explanationClause()}; $resolution."
+        }
+        aiEscalation != null -> {
+            val resolution = if (secretUse.decision == SecretUseDecision.APPROVED) {
+                "you approved it once"
+            } else {
+                "you denied it"
+            }
+            "$aiEscalation; $resolution."
+        }
+        else -> null
+    }
     val decisionDetail = when (secretUse.decisionSource) {
         "rule" -> " A previous approval rule made this decision."
         "policy" -> " Approval settings made this decision."
-        "ai" -> secretUse.approvalEvaluation?.aiReview?.explanation?.let { explanation ->
-            " AI review made this decision: $explanation"
-        } ?: " AI review made this decision."
-        else -> ""
+        "ai" -> when (aiReview?.decision) {
+            AiReviewDecision.APPROVE ->
+                " AI review approved this use${aiReview.explanationClause()}."
+            AiReviewDecision.DENY ->
+                " AI review denied this use${aiReview.explanationClause()}."
+            else -> " AI review made this decision."
+        }
+        "temporary_access" -> {
+            val accessDetail = if (temporaryAccessScopes.isEmpty()) {
+                "Temporary access allowed this use."
+            } else {
+                "Temporary access allowed this use: $temporaryAccessScopes."
+            }
+            val escalationDetail = aiEscalation?.let {
+                " $it; you allowed temporary access."
+            }.orEmpty()
+            " $accessDetail$escalationDetail"
+        }
+        "mixed" -> {
+            val temporaryDetail = if (temporaryAccessScopes.isEmpty()) {
+                "Temporary access"
+            } else {
+                "Temporary access ($temporaryAccessScopes)"
+            }
+            if (aiReview?.decision == AiReviewDecision.APPROVE) {
+                " $temporaryDetail allowed part of this use; AI review approved the rest" +
+                    "${aiReview.explanationClause()}."
+            } else {
+                val escalationDetail = aiEscalation?.let { " $it." }.orEmpty()
+                " $temporaryDetail and your one-time approval allowed this use.$escalationDetail"
+            }
+        }
+        else -> humanAiDetail?.let { " $it" }.orEmpty()
     }
     val outcome = when (secretUse.state) {
         SecretUseRequestState.WAITING_FOR_COMPLETION -> OutcomeNotice(
@@ -1717,6 +2013,31 @@ private fun SecretUseOutcome(secretUse: SecretUseRequestDetails) {
         SecretUseRequestState.APPROVAL_PENDING -> return
     }
     Notice(outcome.title, outcome.detail, outcome.tone)
+}
+
+private fun ApprovalEvaluation?.temporaryAccessHistory(): String = this?.secrets
+    ?.mapNotNull { secret ->
+        secret.temporaryAccessExpiresAt?.let { expiresAt ->
+            "${secret.secretName} through ${formatTimestamp(expiresAt)}"
+        }
+    }
+    ?.joinToString("; ")
+    .orEmpty()
+
+private fun AiReview.explanationClause(): String = explanation
+    ?.trim()
+    ?.trimEnd('.', '!', '?')
+    ?.takeIf(String::isNotEmpty)
+    ?.let { ": $it" }
+    .orEmpty()
+
+private fun AiReview.escalationSummary(): String? = when {
+    decision == AiReviewDecision.ASK_USER ->
+        "AI review asked you to decide${explanationClause()}"
+    failure == AiReviewFailure.SUBSCRIPTION_REQUIRED ->
+        "AI review required an active subscription"
+    failure != null -> "AI review was unavailable"
+    else -> null
 }
 
 private data class OutcomeNotice(
@@ -1906,7 +2227,8 @@ private fun RequestStatusBadge(request: InboxRequestSummary) {
     val error = request.secretUseState == SecretUseRequestState.VERIFICATION_FAILED ||
         request.gitSignState == GitSignRequestState.VERIFICATION_FAILED
     val rejected = request.wasRejected()
-    val actionRequired = request.state == InboxRequestState.ACTION_REQUIRED
+    val actionRequired = request.state == InboxRequestState.ACTION_REQUIRED &&
+        request.userDecisionAvailable
     val accepted = request.wasAccepted()
     val semanticColors = MaterialTheme.agentknockColors
     Surface(
@@ -1964,6 +2286,10 @@ private enum class NoticeTone {
 }
 
 private fun InboxRequestSummary.statusLabel(): String = when {
+    !userDecisionAvailable && (
+        secretUseState == SecretUseRequestState.APPROVAL_PENDING ||
+            gitSignState == GitSignRequestState.APPROVAL_PENDING
+        ) -> "AI reviewing"
     secretUseState != null -> secretUseStatusLabel(
         secretUseState,
         secretUseResult,
@@ -2025,6 +2351,28 @@ private fun gitSignStatusLabel(
 
 @Composable
 private fun GitSignOutcome(signing: GitSignRequestDetails) {
+    val temporaryAccessUntil = signing.approvalEvaluation?.secrets
+        ?.mapNotNull { it.temporaryAccessExpiresAt }
+        ?.maxOrNull()
+    val temporaryAccessDetail = temporaryAccessUntil?.let {
+        " Future signing was authorized through ${formatTimestamp(it)}."
+    }.orEmpty()
+    val aiReview = signing.approvalEvaluation?.aiReview
+    val aiReviewDetail = when (aiReview?.decision) {
+        AiReviewDecision.APPROVE ->
+            " AI review approved this signature request${aiReview.explanationClause()}."
+        AiReviewDecision.DENY ->
+            " AI review denied this signature request${aiReview.explanationClause()}."
+        AiReviewDecision.ASK_USER, null -> aiReview?.escalationSummary()?.let { escalation ->
+            val resolution = when {
+                signing.decision == SecretUseDecision.DENIED -> "you denied it"
+                temporaryAccessUntil != null ->
+                    "you approved this signature and allowed temporary access"
+                else -> "you approved it once"
+            }
+            " $escalation; $resolution."
+        }.orEmpty()
+    }
     when {
         signing.state == GitSignRequestState.VERIFICATION_FAILED -> Notice(
             "Signature could not be confirmed",
@@ -2033,7 +2381,7 @@ private fun GitSignOutcome(signing: GitSignRequestDetails) {
         )
         signing.completionResult == GitSignCompletionResult.APPROVED -> Notice(
             "Content signed",
-            "The signature was delivered to the client.",
+            "The signature was delivered to the client.$temporaryAccessDetail$aiReviewDetail",
             NoticeTone.SUCCESS,
         )
         signing.completionResult == GitSignCompletionResult.DENIED -> Notice(
@@ -2042,7 +2390,7 @@ private fun GitSignOutcome(signing: GitSignRequestDetails) {
             } else {
                 "Signature denied"
             },
-            signing.completionMessage ?: "No signature was created.",
+            (signing.completionMessage ?: "No signature was created.") + aiReviewDetail,
             NoticeTone.SUBDUED,
         )
         signing.completionResult == GitSignCompletionResult.ABORTED -> Notice(
@@ -2053,12 +2401,13 @@ private fun GitSignOutcome(signing: GitSignRequestDetails) {
         signing.state == GitSignRequestState.WAITING_FOR_COMPLETION &&
             signing.decision == SecretUseDecision.APPROVED -> Notice(
             "Signature sent",
-            "Waiting for the client to confirm receipt.",
+            "Waiting for the client to confirm receipt.$temporaryAccessDetail$aiReviewDetail",
             NoticeTone.SUCCESS,
         )
         signing.state == GitSignRequestState.WAITING_FOR_COMPLETION -> Notice(
             "Signature denied",
-            signing.completionMessage ?: "Waiting for the client to confirm the denial.",
+            (signing.completionMessage ?: "Waiting for the client to confirm the denial.") +
+                aiReviewDetail,
             NoticeTone.SUBDUED,
         )
     }
@@ -2152,6 +2501,10 @@ private fun SecretUseDecisionResult.message(): String = when (this) {
     SecretUseDecisionResult.SecretCorrupted -> "A secret value could not be authenticated"
     SecretUseDecisionResult.UnsupportedEncryption -> "A secret value uses unsupported encryption"
     SecretUseDecisionResult.PairingUnavailable -> "The paired client is unavailable"
+    SecretUseDecisionResult.TemporaryAccessUnavailable ->
+        "Temporary access is no longer available"
+    SecretUseDecisionResult.TemporaryAccessNotStarted ->
+        "Request approved once, but temporary access could not be started"
 }
 
 private fun GitSignDecisionResult.message(): String = when (this) {
@@ -2160,12 +2513,18 @@ private fun GitSignDecisionResult.message(): String = when (this) {
     GitSignDecisionResult.NotFound -> "Signing request is no longer available"
     GitSignDecisionResult.InvocationUnavailable -> "The original command request is unavailable"
     GitSignDecisionResult.PairingUnavailable -> "The paired client is unavailable"
+    GitSignDecisionResult.ApprovalChanged ->
+        "The SSH key or approval setting changed; review the request again"
     GitSignDecisionResult.KeyChanged ->
         "The SSH key changed or was renamed after the command began; start the command again"
     GitSignDecisionResult.SecretUnavailable -> "The SSH private key is unavailable on this device"
     GitSignDecisionResult.SecretCorrupted -> "The SSH private key could not be authenticated"
     GitSignDecisionResult.UnsupportedEncryption ->
         "The SSH private key uses unsupported encryption"
+    GitSignDecisionResult.TemporaryAccessUnavailable ->
+        "Temporary access is no longer available"
+    GitSignDecisionResult.TemporaryAccessNotStarted ->
+        "Signature approved once, but temporary access could not be started"
 }
 
 internal fun SecretUploadDecisionResult.message(): String = when (this) {

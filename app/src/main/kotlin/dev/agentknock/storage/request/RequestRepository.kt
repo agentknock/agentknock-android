@@ -69,6 +69,7 @@ import dev.agentknock.storage.secret.SSH_SECRET_TYPE
 import dev.agentknock.storage.secret.SecretRepository
 import dev.agentknock.storage.secret.SecretApprovalMode
 import dev.agentknock.storage.secret.SecretApprovalPolicy
+import dev.agentknock.storage.secret.TemporaryAccessOperation
 import dev.agentknock.storage.approval.ApprovalAction
 import dev.agentknock.storage.approval.AiReview
 import dev.agentknock.storage.approval.AiReviewDecision
@@ -76,6 +77,8 @@ import dev.agentknock.storage.approval.AiReviewFailure
 import dev.agentknock.storage.approval.ApprovalPolicyEvaluator
 import dev.agentknock.storage.approval.ApprovalEvaluation
 import dev.agentknock.storage.approval.RequestedSecretApproval
+import dev.agentknock.storage.approval.requiresAiReview
+import dev.agentknock.storage.approval.isFullyApproved
 import dev.agentknock.storage.audit.AuditCategory
 import dev.agentknock.storage.audit.AuditOutcome
 import dev.agentknock.storage.audit.AuditRecord
@@ -96,6 +99,7 @@ import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.asStateFlow
 import kotlinx.coroutines.flow.combine
 import kotlinx.coroutines.flow.map
+import kotlinx.coroutines.flow.update
 import kotlinx.coroutines.flow.first
 import kotlinx.coroutines.selects.select
 import kotlinx.coroutines.sync.Mutex
@@ -210,6 +214,14 @@ private data class IncomingRelayMessage(
 
 private data class ProcessedRelayMessage(val response: JsonElement? = null)
 
+private data class TemporaryGrant(
+    val policies: List<SecretApprovalPolicy>,
+    val operation: TemporaryAccessOperation,
+    val expiresAt: Long,
+    val evaluation: ApprovalEvaluation,
+    val decisionSource: String,
+)
+
 private data class AcceptedRequestSecrets(
     val requestSecret: RequestSecretEntity,
     val currentPairingSecret: PairingSecretEntity?,
@@ -248,6 +260,8 @@ internal data class InboxRequestSummary(
     val gitSignDecision: SecretUseDecision? = null,
     val gitSignResult: GitSignCompletionResult? = null,
     val gitSignCompletionReason: String? = null,
+    val relayRequestId: String? = null,
+    val userDecisionAvailable: Boolean = true,
 )
 
 internal data class PairingRequestDetails(
@@ -278,6 +292,7 @@ internal data class InboxRequestDetails(
     val secretList: SecretListRequestDetails?,
     val secretUpload: SecretUploadRequestDetails?,
     val gitSign: GitSignRequestDetails? = null,
+    val userDecisionAvailable: Boolean = true,
 )
 
 internal data class GitSignRequestDetails(
@@ -398,6 +413,7 @@ internal data class ClientSummary(
     val state: RelayClientState,
     val desiredState: RelayClientState?,
     val pairedAt: Long?,
+    val temporaryAccessCount: Int = 0,
 )
 
 internal data class ClientDetails(
@@ -481,6 +497,10 @@ internal sealed interface SecretUseDecisionResult {
     data object UnsupportedEncryption : SecretUseDecisionResult
 
     data object PairingUnavailable : SecretUseDecisionResult
+
+    data object TemporaryAccessUnavailable : SecretUseDecisionResult
+
+    data object TemporaryAccessNotStarted : SecretUseDecisionResult
 }
 
 internal sealed interface SecretUploadDecisionResult {
@@ -500,10 +520,13 @@ internal sealed interface GitSignDecisionResult {
     data object NotFound : GitSignDecisionResult
     data object InvocationUnavailable : GitSignDecisionResult
     data object PairingUnavailable : GitSignDecisionResult
+    data object ApprovalChanged : GitSignDecisionResult
     data object KeyChanged : GitSignDecisionResult
     data object SecretUnavailable : GitSignDecisionResult
     data object SecretCorrupted : GitSignDecisionResult
     data object UnsupportedEncryption : GitSignDecisionResult
+    data object TemporaryAccessUnavailable : GitSignDecisionResult
+    data object TemporaryAccessNotStarted : GitSignDecisionResult
 }
 
 internal enum class ClientChangeResult {
@@ -539,6 +562,7 @@ internal class RequestRepository(
     private val connectionMutex = Mutex()
     private val pendingChanges = Channel<Unit>(Channel.CONFLATED)
     private val _pushRegistrationState = MutableStateFlow<RelayPushRegistrationState?>(null)
+    private val aiReviewInFlight = MutableStateFlow<Set<String>>(emptySet())
 
     val pushRegistrationState: StateFlow<RelayPushRegistrationState?> =
         _pushRegistrationState.asStateFlow()
@@ -563,6 +587,7 @@ internal class RequestRepository(
                     val pairing = pairingByRequest[request.id] ?: return@mapNotNull null
                     InboxRequestSummary(
                         id = request.id,
+                        relayRequestId = request.relayRequestId,
                         kind = InboxRequestKind.PAIRING,
                         state = request.state.toInboxRequestState(),
                         pairingState = pairing.state.toPairingState(),
@@ -588,6 +613,7 @@ internal class RequestRepository(
                     val requestedSecrets = decodeStringList(secretUse.secretsJson)
                     InboxRequestSummary(
                         id = request.id,
+                        relayRequestId = request.relayRequestId,
                         kind = InboxRequestKind.SECRET_USE,
                         state = request.state.toInboxRequestState(),
                         pairingState = null,
@@ -614,6 +640,7 @@ internal class RequestRepository(
                         ?: return@mapNotNull null
                     InboxRequestSummary(
                         id = request.id,
+                        relayRequestId = request.relayRequestId,
                         kind = InboxRequestKind.GIT_SIGN,
                         state = request.state.toInboxRequestState(),
                         pairingState = null,
@@ -642,6 +669,7 @@ internal class RequestRepository(
                     val pairing = pairingByClient[upload.clientId]
                     InboxRequestSummary(
                         id = request.id,
+                        relayRequestId = request.relayRequestId,
                         kind = InboxRequestKind.SECRET_UPLOAD,
                         state = request.state.toInboxRequestState(),
                         pairingState = null,
@@ -669,6 +697,10 @@ internal class RequestRepository(
                 }
                 else -> null
             }
+        }
+    }.combine(aiReviewInFlight) { requests, inFlight ->
+        requests.map { request ->
+            request.copy(userDecisionAvailable = request.relayRequestId !in inFlight)
         }
     }
 
@@ -845,10 +877,17 @@ internal class RequestRepository(
                 ),
             )
         }
+        .combine(aiReviewInFlight) { details, inFlight ->
+            details?.copy(userDecisionAvailable = details.relayRequestId !in inFlight)
+        }
 
     suspend fun getRequestDetails(id: Long): InboxRequestDetails? = observeRequest(id).first()
 
-    fun observeClients(): Flow<List<ClientSummary>> = dao.observePairings().map { pairings ->
+    fun observeClients(): Flow<List<ClientSummary>> = combine(
+        dao.observePairings(),
+        secrets.observeTemporaryAccessGrants(),
+    ) { pairings, grants ->
+        val grantCounts = grants.groupingBy { it.clientId }.eachCount()
         pairings
             .filter { it.state == PairingState.ACTIVE.storedName }
             .mapNotNull { pairing ->
@@ -865,6 +904,7 @@ internal class RequestRepository(
                     state = state,
                     desiredState = desiredState,
                     pairedAt = pairing.completedAt,
+                    temporaryAccessCount = grantCounts[pairing.clientId] ?: 0,
                 )
             }
             .sortedBy { it.name.lowercase() }
@@ -937,7 +977,7 @@ internal class RequestRepository(
                             RequestNotificationDetail("Command", command),
                             RequestNotificationDetail("Secrets", secretNames),
                         ),
-                        decisionAvailable = true,
+                        decisionAvailable = request.relayRequestId !in aiReviewInFlight.value,
                     )
                 }
                 RequestKind.GIT_SIGN.storedName -> {
@@ -970,7 +1010,7 @@ internal class RequestRepository(
                                 ),
                             ),
                         ),
-                        decisionAvailable = true,
+                        decisionAvailable = request.relayRequestId !in aiReviewInFlight.value,
                     )
                 }
                 RequestKind.PAIRING.storedName -> {
@@ -1659,6 +1699,15 @@ internal class RequestRepository(
     }
 
     suspend fun approveSecretUseRequest(requestId: Long): SecretUseDecisionResult =
+        approveSecretUseRequest(requestId, allowTemporaryAccess = false)
+
+    suspend fun allowSecretUseTemporarily(requestId: Long): SecretUseDecisionResult =
+        approveSecretUseRequest(requestId, allowTemporaryAccess = true)
+
+    private suspend fun approveSecretUseRequest(
+        requestId: Long,
+        allowTemporaryAccess: Boolean,
+    ): SecretUseDecisionResult =
         operationMutex.withLock {
             val request = dao.getRequestById(requestId)
                 ?: return SecretUseDecisionResult.NotFound
@@ -1673,11 +1722,48 @@ internal class RequestRepository(
                 secretUseRequest.secretDetailsJson,
             )
             val storedMissingSecrets = decodeStringList(secretUseRequest.missingSecretsJson)
+            val protectedNames = latestDescription.reviewMetadata
+                .filter { secret ->
+                    secret.type == ENVIRONMENT_SECRET_TYPE &&
+                        secret.environmentVariables.any { it.sensitive }
+                }
+                .map { it.name }
+            val currentPolicies = secrets.approvalPoliciesForNames(
+                protectedNames,
+                secretUseRequest.clientId,
+                TemporaryAccessOperation.INVOCATION,
+            )
+            val currentEvaluation = protectedNames.takeIf { it.isNotEmpty() }?.let {
+                ApprovalPolicyEvaluator.evaluate(
+                    currentPolicies.map { policy -> policy.toRequestedSecretApproval() },
+                )
+            }
+            val storedEvaluation = secretUseRequest.approvalEvaluationJson
+                ?.let(::decodeApprovalEvaluation)
+            val approvalContextChanged = when {
+                currentEvaluation == null -> storedEvaluation?.secrets?.isNotEmpty() == true
+                storedEvaluation == null -> true
+                else -> !storedEvaluation.hasSameSecretPolicies(currentEvaluation)
+            }
+            if (currentEvaluation?.secrets?.any { it.action == ApprovalAction.DENY } == true) {
+                return@withLock decideSecretUseRequest(
+                    request = request,
+                    secretUseRequest = secretUseRequest,
+                    decision = SecretUseDecision.DENIED,
+                    responsePlaintext = invocationProtocol.deniedResponse(
+                        InvocationDenialReason.POLICY_DENIED,
+                        "Approval settings denied access to a requested secret.",
+                    ),
+                    providedSecretsJson = null,
+                    decisionSource = DECISION_SOURCE_POLICY,
+                )
+            }
             if (
                 latestDescription.secrets != storedSecrets ||
                 latestDescription.missingSecrets != storedMissingSecrets ||
                 latestDescription.containsSensitiveMaterial !=
-                secretUseRequest.containsSensitiveMaterial
+                secretUseRequest.containsSensitiveMaterial ||
+                approvalContextChanged
             ) {
                 val now = currentTimeMillis()
                 dao.updateSecretUseRequest(
@@ -1686,6 +1772,7 @@ internal class RequestRepository(
                         secretDetailsJson = json.encodeToString(latestDescription.secrets),
                         missingSecretsJson = encodeStringList(latestDescription.missingSecrets),
                         containsSensitiveMaterial = latestDescription.containsSensitiveMaterial,
+                        approvalEvaluationJson = currentEvaluation?.let { json.encodeToString(it) },
                         updatedAt = now,
                     ),
                 )
@@ -1719,7 +1806,79 @@ internal class RequestRepository(
                     return SecretUseDecisionResult.UnsupportedEncryption
                 }
             }
-            decideSecretUseRequest(
+            val authorization = latestDescription.authorizationCommitment(currentPolicies)
+            val temporaryGrant = if (allowTemporaryAccess) {
+                val storedEvaluation = secretUseRequest.approvalEvaluationJson
+                    ?.let(::decodeApprovalEvaluation)
+                    ?: return SecretUseDecisionResult.TemporaryAccessUnavailable
+                val evaluationsById = storedEvaluation.secrets.associateBy { it.secretId }
+                val aiCanEscalateToTemporaryAccess =
+                    storedEvaluation.aiReview?.decision == AiReviewDecision.ASK_USER ||
+                        storedEvaluation.aiReview?.failure != null ||
+                        (storedEvaluation.aiReview == null &&
+                            request.relayRequestId !in aiReviewInFlight.value)
+                val protectedNames = latestDescription.reviewMetadata
+                    .filter { secret ->
+                        secret.type == ENVIRONMENT_SECRET_TYPE &&
+                            secret.environmentVariables.any { it.sensitive }
+                    }
+                    .map { it.name }
+                val currentPolicies = secrets.approvalPoliciesForNames(
+                    protectedNames,
+                    secretUseRequest.clientId,
+                    TemporaryAccessOperation.INVOCATION,
+                )
+                val currentEvaluation = ApprovalPolicyEvaluator.evaluate(
+                    currentPolicies.map { it.toRequestedSecretApproval() },
+                )
+                if (!storedEvaluation.hasSameSecretPolicies(currentEvaluation)) {
+                    return SecretUseDecisionResult.TemporaryAccessUnavailable
+                }
+                val grantablePolicies = currentPolicies.filter { policy ->
+                    val evaluation = evaluationsById[policy.secretId]
+                    evaluation?.temporaryAccessExpiresAt == null && when (policy.mode) {
+                        SecretApprovalMode.TEMPORARY -> evaluation?.action == ApprovalAction.ASK_ME
+                        SecretApprovalMode.ASK_AI ->
+                            evaluation?.action == ApprovalAction.ASK_AI &&
+                                aiCanEscalateToTemporaryAccess
+                        else -> false
+                    }
+                }
+                if (grantablePolicies.isEmpty()) {
+                    return SecretUseDecisionResult.TemporaryAccessUnavailable
+                }
+                val expiresAt = currentTimeMillis() + TEMPORARY_ACCESS_DURATION_MILLIS
+                val grantedIds = grantablePolicies.map(SecretApprovalPolicy::secretId).toSet()
+                val alsoApprovedByAi = storedEvaluation.aiReview?.decision ==
+                    AiReviewDecision.APPROVE && storedEvaluation.secrets.any {
+                    it.action == ApprovalAction.ASK_AI && it.secretId !in grantedIds
+                }
+                val alsoApprovedOnce = storedEvaluation.secrets.any {
+                    it.secretId !in grantedIds && it.action == ApprovalAction.ASK_ME
+                }
+                TemporaryGrant(
+                    policies = grantablePolicies,
+                    operation = TemporaryAccessOperation.INVOCATION,
+                    expiresAt = expiresAt,
+                    evaluation = storedEvaluation.copy(
+                        secrets = storedEvaluation.secrets.map { evaluation ->
+                            if (grantablePolicies.any { it.secretId == evaluation.secretId }) {
+                                evaluation.copy(temporaryAccessExpiresAt = expiresAt)
+                            } else {
+                                evaluation
+                            }
+                        },
+                    ),
+                    decisionSource = if (alsoApprovedByAi || alsoApprovedOnce) {
+                        DECISION_SOURCE_MIXED
+                    } else {
+                        DECISION_SOURCE_TEMPORARY_ACCESS
+                    },
+                )
+            } else {
+                null
+            }
+            val decisionResult = decideSecretUseRequest(
                 request = request,
                 secretUseRequest = secretUseRequest,
                 decision = SecretUseDecision.APPROVED,
@@ -1729,9 +1888,40 @@ internal class RequestRepository(
                 providedSecretsJson = json.encodeToString(
                     approvalReviewSecretFacts(latestDescription, availableSecrets),
                 ),
+                authorization = authorization,
             )
+            if (decisionResult == SecretUseDecisionResult.Decided && temporaryGrant != null) {
+                val started = runCatching {
+                    secrets.allowTemporaryAccess(
+                        policies = temporaryGrant.policies,
+                        clientId = secretUseRequest.clientId,
+                        operation = temporaryGrant.operation,
+                        expiresAt = temporaryGrant.expiresAt,
+                    )
+                }.getOrDefault(false)
+                if (!started) {
+                    return@withLock SecretUseDecisionResult.TemporaryAccessNotStarted
+                }
+                val decidedRequest = dao.getRequestById(requestId)
+                    ?: return@withLock SecretUseDecisionResult.TemporaryAccessNotStarted
+                val decidedSecretUse = dao.getSecretUseRequest(requestId)
+                    ?: return@withLock SecretUseDecisionResult.TemporaryAccessNotStarted
+                dao.updateSecretUseRequest(
+                    decidedRequest,
+                    decidedSecretUse.copy(
+                        decisionSource = temporaryGrant.decisionSource,
+                        approvalEvaluationJson = json.encodeToString(temporaryGrant.evaluation),
+                    ),
+                )
+            }
+            decisionResult
         }.also { result ->
-            if (result == SecretUseDecisionResult.Decided) requestSync()
+            if (
+                result == SecretUseDecisionResult.Decided ||
+                result == SecretUseDecisionResult.TemporaryAccessNotStarted
+            ) {
+                requestSync()
+            }
         }
 
     suspend fun denySecretUseRequest(requestId: Long): SecretUseDecisionResult =
@@ -1763,9 +1953,14 @@ internal class RequestRepository(
         decision: SecretUseDecision,
         responsePlaintext: ByteArray,
         providedSecretsJson: String?,
+        decisionSource: String = DECISION_SOURCE_USER,
+        authorization: AuthorizationCommitment? = null,
     ): SecretUseDecisionResult {
         require(decision != SecretUseDecision.APPROVED || providedSecretsJson != null) {
             "An approved invocation must record its provided secrets"
+        }
+        require(decision != SecretUseDecision.APPROVED || authorization != null) {
+            "An approved invocation must bind its authorization state"
         }
         val pairingRequestId = secretUseRequest.pairingRequestId
             ?: return SecretUseDecisionResult.PairingUnavailable
@@ -1791,29 +1986,42 @@ internal class RequestRepository(
             )
         }.getOrNull() ?: return SecretUseDecisionResult.PairingUnavailable
         val now = currentTimeMillis()
-        dao.updateSecretUseRequest(
-            request = request.copy(
+        val updatedRequest = request.copy(
                 state = InboxRequestState.WAITING.storedName,
                 responseJson = response.toString(),
                 responseAcknowledgedAt = null,
                 updatedAt = now,
-            ),
-            secretUseRequest = secretUseRequest.copy(
+            )
+        val updatedSecretUse = secretUseRequest.copy(
                 state = SecretUseRequestState.WAITING_FOR_COMPLETION.storedName,
                 decision = decision.storedName,
-                decisionSource = DECISION_SOURCE_USER,
+                decisionSource = decisionSource,
                 providedSecretsJson = providedSecretsJson,
                 updatedAt = now,
                 decidedAt = now,
-            ),
-        )
+            )
+        val persisted = if (decision == SecretUseDecision.APPROVED) {
+            dao.updateSecretUseRequestIfAuthorized(
+                request = updatedRequest,
+                secretUseRequest = updatedSecretUse,
+                authorization = checkNotNull(authorization),
+                clientId = secretUseRequest.clientId,
+                operation = TemporaryAccessOperation.INVOCATION.storedName,
+                now = now,
+            )
+        } else {
+            dao.updateSecretUseRequest(updatedRequest, updatedSecretUse)
+            true
+        }
+        if (!persisted) return SecretUseDecisionResult.SecretsChanged
         audit.record(
             AuditRecord(
                 category = AuditCategory.SECRET_USE,
-                title = if (decision == SecretUseDecision.APPROVED) {
-                    "Secret use approved"
-                } else {
-                    "Secret use denied"
+                title = when {
+                    decision == SecretUseDecision.APPROVED -> "Secret use approved"
+                    decisionSource == DECISION_SOURCE_POLICY ->
+                        "Secret use denied by approval settings"
+                    else -> "Secret use denied"
                 },
                 detail = decodeStringList(secretUseRequest.secretsJson).joinToString(),
                 outcome = if (decision == SecretUseDecision.APPROVED) {
@@ -1829,6 +2037,15 @@ internal class RequestRepository(
     }
 
     suspend fun approveGitSignRequest(requestId: Long): GitSignDecisionResult =
+        approveGitSignRequest(requestId, allowTemporaryAccess = false)
+
+    suspend fun allowGitSignTemporarily(requestId: Long): GitSignDecisionResult =
+        approveGitSignRequest(requestId, allowTemporaryAccess = true)
+
+    private suspend fun approveGitSignRequest(
+        requestId: Long,
+        allowTemporaryAccess: Boolean,
+    ): GitSignDecisionResult =
         operationMutex.withLock {
             val request = dao.getRequestById(requestId) ?: return GitSignDecisionResult.NotFound
             val gitSign = dao.getGitSignRequest(requestId)
@@ -1840,6 +2057,45 @@ internal class RequestRepository(
                 ?: return GitSignDecisionResult.InvocationUnavailable
             val invocation = dao.getSecretUseRequest(invocationId)
                 ?: return GitSignDecisionResult.InvocationUnavailable
+            val latestDescription = secrets.describeRequestedSecrets(listOf(gitSign.secretName))
+            val policy = secrets.approvalPoliciesForNames(
+                listOf(gitSign.secretName),
+                invocation.clientId,
+                TemporaryAccessOperation.GIT_SIGN,
+            ).singleOrNull() ?: return GitSignDecisionResult.ApprovalChanged
+            val currentEvaluation = ApprovalPolicyEvaluator.evaluate(
+                listOf(policy.toRequestedSecretApproval()),
+            )
+            val storedEvaluation = gitSign.approvalEvaluationJson
+                ?.let(::decodeApprovalEvaluation)
+            if (currentEvaluation.secrets.single().action == ApprovalAction.DENY) {
+                return@withLock decideGitSignRequest(
+                    request = request,
+                    gitSign = gitSign,
+                    invocation = invocation,
+                    decision = SecretUseDecision.DENIED,
+                    responsePlaintext = gitSignProtocol.deniedResponse(
+                        InvocationDenialReason.POLICY_DENIED,
+                        "Approval settings denied use of the SSH key.",
+                    ),
+                    decisionSource = DECISION_SOURCE_POLICY,
+                )
+            }
+            if (
+                storedEvaluation == null ||
+                !storedEvaluation.hasSameSecretPolicies(currentEvaluation)
+            ) {
+                val changedAt = currentTimeMillis()
+                dao.updateGitSignRequest(
+                    request.copy(updatedAt = changedAt),
+                    gitSign.copy(
+                        approvalEvaluationJson = json.encodeToString(currentEvaluation),
+                        updatedAt = changedAt,
+                    ),
+                )
+                return GitSignDecisionResult.ApprovalChanged
+            }
+            val authorization = latestDescription.authorizationCommitment(listOf(policy))
             val expectedPublicKey = json.decodeFromString<List<SecretMetadata>>(
                 invocation.secretDetailsJson,
             ).singleOrNull { secret ->
@@ -1866,15 +2122,78 @@ internal class RequestRepository(
                 GitSignatureResult.SecretCorrupted,
                 -> return GitSignDecisionResult.SecretCorrupted
             }
-            decideGitSignRequest(
+            val temporaryGrant = if (allowTemporaryAccess) {
+                val secretEvaluation = storedEvaluation.secrets.singleOrNull()
+                    ?: return GitSignDecisionResult.TemporaryAccessUnavailable
+                val aiCanEscalateToTemporaryAccess =
+                    storedEvaluation.aiReview?.decision == AiReviewDecision.ASK_USER ||
+                        storedEvaluation.aiReview?.failure != null ||
+                        (storedEvaluation.aiReview == null &&
+                            request.relayRequestId !in aiReviewInFlight.value)
+                val eligible = secretEvaluation.temporaryAccessExpiresAt == null &&
+                    when (policy.mode) {
+                        SecretApprovalMode.TEMPORARY ->
+                            secretEvaluation.action == ApprovalAction.ASK_ME
+                        SecretApprovalMode.ASK_AI ->
+                            secretEvaluation.action == ApprovalAction.ASK_AI &&
+                                aiCanEscalateToTemporaryAccess
+                        else -> false
+                    }
+                if (!eligible) return GitSignDecisionResult.TemporaryAccessUnavailable
+                val expiresAt = currentTimeMillis() + TEMPORARY_ACCESS_DURATION_MILLIS
+                TemporaryGrant(
+                    policies = listOf(policy),
+                    operation = TemporaryAccessOperation.GIT_SIGN,
+                    expiresAt = expiresAt,
+                    evaluation = storedEvaluation.copy(
+                        secrets = listOf(
+                            secretEvaluation.copy(temporaryAccessExpiresAt = expiresAt),
+                        ),
+                    ),
+                    decisionSource = DECISION_SOURCE_TEMPORARY_ACCESS,
+                )
+            } else {
+                null
+            }
+            val decisionResult = decideGitSignRequest(
                 request = request,
                 gitSign = gitSign,
                 invocation = invocation,
                 decision = SecretUseDecision.APPROVED,
                 responsePlaintext = gitSignProtocol.approvedResponse(signature),
+                authorization = authorization,
             )
+            if (decisionResult == GitSignDecisionResult.Decided && temporaryGrant != null) {
+                val started = runCatching {
+                    secrets.allowTemporaryAccess(
+                        policies = temporaryGrant.policies,
+                        clientId = invocation.clientId,
+                        operation = temporaryGrant.operation,
+                        expiresAt = temporaryGrant.expiresAt,
+                    )
+                }.getOrDefault(false)
+                if (!started) {
+                    return@withLock GitSignDecisionResult.TemporaryAccessNotStarted
+                }
+                val decidedRequest = dao.getRequestById(requestId)
+                    ?: return@withLock GitSignDecisionResult.TemporaryAccessNotStarted
+                val decidedGitSign = dao.getGitSignRequest(requestId)
+                    ?: return@withLock GitSignDecisionResult.TemporaryAccessNotStarted
+                dao.updateGitSignRequest(
+                    decidedRequest,
+                    decidedGitSign.copy(
+                        approvalEvaluationJson = json.encodeToString(temporaryGrant.evaluation),
+                    ),
+                )
+            }
+            decisionResult
         }.also { result ->
-            if (result == GitSignDecisionResult.Decided) requestSync()
+            if (
+                result == GitSignDecisionResult.Decided ||
+                result == GitSignDecisionResult.TemporaryAccessNotStarted
+            ) {
+                requestSync()
+            }
         }
 
     suspend fun denyGitSignRequest(requestId: Long): GitSignDecisionResult =
@@ -1907,7 +2226,12 @@ internal class RequestRepository(
         invocation: SecretUseRequestEntity,
         decision: SecretUseDecision,
         responsePlaintext: ByteArray,
+        decisionSource: String = DECISION_SOURCE_USER,
+        authorization: AuthorizationCommitment? = null,
     ): GitSignDecisionResult {
+        require(decision != SecretUseDecision.APPROVED || authorization != null) {
+            "An approved Git signature must bind its authorization state"
+        }
         val pairingRequestId = invocation.pairingRequestId
             ?: return GitSignDecisionResult.PairingUnavailable
         val pairing = dao.getPairing(pairingRequestId)
@@ -1932,37 +2256,58 @@ internal class RequestRepository(
             )
         }.getOrNull() ?: return GitSignDecisionResult.PairingUnavailable
         val now = currentTimeMillis()
-        dao.updateGitSignRequest(
-            request = request.copy(
+        val updatedRequest = request.copy(
                 state = InboxRequestState.WAITING.storedName,
                 responseJson = response.toString(),
                 responseAcknowledgedAt = null,
                 updatedAt = now,
-            ),
-            gitSignRequest = gitSign.copy(
+            )
+        val updatedGitSign = gitSign.copy(
                 state = GitSignRequestState.WAITING_FOR_COMPLETION.storedName,
                 decision = decision.storedName,
                 completionReason = if (decision == SecretUseDecision.DENIED) {
-                    InvocationDenialReason.USER_DENIED.wireName
+                    if (decisionSource == DECISION_SOURCE_POLICY) {
+                        InvocationDenialReason.POLICY_DENIED.wireName
+                    } else {
+                        InvocationDenialReason.USER_DENIED.wireName
+                    }
                 } else {
                     null
                 },
                 completionMessage = if (decision == SecretUseDecision.DENIED) {
-                    GIT_SIGN_DENIAL_MESSAGE
+                    if (decisionSource == DECISION_SOURCE_POLICY) {
+                        "Approval settings denied use of the SSH key."
+                    } else {
+                        GIT_SIGN_DENIAL_MESSAGE
+                    }
                 } else {
                     null
                 },
                 updatedAt = now,
                 decidedAt = now,
-            ),
-        )
+            )
+        val persisted = if (decision == SecretUseDecision.APPROVED) {
+            dao.updateGitSignRequestIfAuthorized(
+                request = updatedRequest,
+                gitSignRequest = updatedGitSign,
+                authorization = checkNotNull(authorization),
+                clientId = invocation.clientId,
+                operation = TemporaryAccessOperation.GIT_SIGN.storedName,
+                now = now,
+            )
+        } else {
+            dao.updateGitSignRequest(updatedRequest, updatedGitSign)
+            true
+        }
+        if (!persisted) return GitSignDecisionResult.ApprovalChanged
         audit.record(
             AuditRecord(
                 category = AuditCategory.GIT_SIGN,
-                title = if (decision == SecretUseDecision.APPROVED) {
-                    "SSH signature approved"
-                } else {
-                    "SSH signature denied"
+                title = when {
+                    decision == SecretUseDecision.APPROVED -> "SSH signature approved"
+                    decisionSource == DECISION_SOURCE_POLICY ->
+                        "SSH signature denied by approval settings"
+                    else -> "SSH signature denied"
                 },
                 detail = gitSign.secretName,
                 outcome = if (decision == SecretUseDecision.APPROVED) {
@@ -2456,29 +2801,32 @@ internal class RequestRepository(
         val description = secrets.describeRequestedSecrets(contents.secrets)
         val requestedSecrets = secrets.requestedSecrets(contents.secrets)
         val automaticDenial = automaticSecretUseDenial(requestedSecrets)
+        val protectedSecretNames = description.reviewMetadata
+            .filter { secret ->
+                secret.type == ENVIRONMENT_SECRET_TYPE &&
+                    secret.environmentVariables.any { it.sensitive }
+            }
+            .map { it.name }
         val approvalPolicies = if (automaticDenial == null) {
-            secrets.approvalPoliciesForNames(contents.secrets, pairing.clientId)
+            secrets.approvalPoliciesForNames(
+                protectedSecretNames,
+                pairing.clientId,
+                TemporaryAccessOperation.INVOCATION,
+            )
         } else {
             emptyList()
         }
-        val initialApprovalEvaluation = if (
-            automaticDenial == null && description.containsSensitiveMaterial
-        ) {
-            val identities = approvalPolicies.map { policy ->
-                RequestedSecretApproval(
-                    id = policy.secretId,
-                    name = policy.secretName,
-                    defaultAction = policy.mode.toApprovalAction(),
-                )
-            }
-            if (identities.size == contents.secrets.distinct().size) {
-                ApprovalPolicyEvaluator.evaluate(identities)
+        val initialApprovalEvaluation = if (automaticDenial == null && protectedSecretNames.isNotEmpty()) {
+            val approvals = approvalPolicies.map { it.toRequestedSecretApproval() }
+            if (approvals.size == protectedSecretNames.distinct().size) {
+                ApprovalPolicyEvaluator.evaluate(approvals)
             } else {
                 null
             }
         } else {
             null
         }
+        val needsAiReview = initialApprovalEvaluation?.requiresAiReview() == true
         val now = currentTimeMillis()
         val initialRequest = InboxRequestEntity(
             relayRequestId = relayRequestId,
@@ -2504,31 +2852,34 @@ internal class RequestRepository(
         ).copy(
             approvalEvaluationJson = initialApprovalEvaluation?.let { json.encodeToString(it) },
         )
-        val pendingRequestId = if (
-            initialApprovalEvaluation?.action == ApprovalAction.ASK_AI
-        ) {
-            dao.insertSecretUseRequest(
-                request = initialRequest,
-                secretUseRequest = initialSecretUse,
-                requestSecret = acceptedSecrets.requestSecret,
-                currentPairingSecret = acceptedSecrets.currentPairingSecret,
-                previousPairingSecret = acceptedSecrets.previousPairingSecret,
-            ).also {
-                recordSecretUseRequested(pairing, relayRequestId, contents)
+        val pendingRequestId = if (needsAiReview) {
+            aiReviewInFlight.update { it + relayRequestId }
+            try {
+                dao.insertSecretUseRequest(
+                    request = initialRequest,
+                    secretUseRequest = initialSecretUse,
+                    requestSecret = acceptedSecrets.requestSecret,
+                    currentPairingSecret = acceptedSecrets.currentPairingSecret,
+                    previousPairingSecret = acceptedSecrets.previousPairingSecret,
+                ).also {
+                    recordSecretUseRequested(pairing, relayRequestId, contents)
+                }
+            } catch (failure: Throwable) {
+                aiReviewInFlight.update { it - relayRequestId }
+                throw failure
             }
         } else {
             null
         }
-        val availableSecrets = (requestedSecrets as? RequestedSecretsResult.Available)?.secrets
-        val providedSecretsJson = availableSecrets?.let { values ->
-            json.encodeToString(approvalReviewSecretFacts(description, values))
-        }
-        val aiReview = if (initialApprovalEvaluation?.action == ApprovalAction.ASK_AI) {
+        try {
+        val initialAvailableSecrets =
+            (requestedSecrets as? RequestedSecretsResult.Available)?.secrets
+        val reviewResult = if (needsAiReview) {
             requestAiReview(
                 pairing = pairing,
                 contents = contents,
                 description = description,
-                values = checkNotNull(availableSecrets),
+                values = checkNotNull(initialAvailableSecrets),
                 evaluation = initialApprovalEvaluation,
                 policies = approvalPolicies,
                 credentials = credentials,
@@ -2536,9 +2887,83 @@ internal class RequestRepository(
         } else {
             null
         }
-        val approvalEvaluation = initialApprovalEvaluation?.copy(aiReview = aiReview)
+        val currentDescription = if (needsAiReview) {
+            secrets.describeRequestedSecrets(contents.secrets)
+        } else {
+            description
+        }
+        val currentRequestedSecrets = if (needsAiReview) {
+            secrets.requestedSecrets(contents.secrets)
+        } else {
+            requestedSecrets
+        }
+        val currentAutomaticDenial = automaticSecretUseDenial(currentRequestedSecrets)
+        val availableSecrets =
+            (currentRequestedSecrets as? RequestedSecretsResult.Available)?.secrets
+        val providedSecretsJson = availableSecrets?.let { values ->
+            json.encodeToString(approvalReviewSecretFacts(currentDescription, values))
+        }
+        val currentProtectedSecretNames = currentDescription.reviewMetadata
+            .filter { secret ->
+                secret.type == ENVIRONMENT_SECRET_TYPE &&
+                    secret.environmentVariables.any { it.sensitive }
+            }
+            .map { it.name }
+        val currentApprovalPolicies = if (needsAiReview) {
+            secrets.approvalPoliciesForNames(
+                currentProtectedSecretNames,
+                pairing.clientId,
+                TemporaryAccessOperation.INVOCATION,
+            )
+        } else {
+            approvalPolicies
+        }
+        val currentApprovalEvaluation = if (needsAiReview) {
+            ApprovalPolicyEvaluator.evaluate(
+                currentApprovalPolicies.map { it.toRequestedSecretApproval() },
+            )
+        } else {
+            initialApprovalEvaluation
+        }
+        val currentCredentials = if (needsAiReview) credentialsForPairing(pairing) else credentials
+        val aiInputsChanged = needsAiReview && (
+            currentAutomaticDenial != null ||
+                !description.hasSameSecretRevisions(currentDescription) ||
+                currentApprovalEvaluation == null ||
+                !checkNotNull(initialApprovalEvaluation)
+                    .hasSameSecretPolicies(currentApprovalEvaluation) ||
+                currentCredentials?.instructions != credentials.instructions
+            )
+        val aiReview = if (aiInputsChanged) {
+            AiReview(
+                decision = AiReviewDecision.ASK_USER,
+                explanation = "The secret or approval settings changed during AI review.",
+            )
+        } else {
+            reviewResult
+        }
+        val approvalEvaluation = (if (aiInputsChanged) {
+            currentApprovalEvaluation
+        } else {
+            initialApprovalEvaluation
+        })?.copy(aiReview = aiReview)
+        val authorization = currentDescription.authorizationCommitment(
+            policies = currentApprovalPolicies,
+            deviceInstructions = if (needsAiReview) {
+                currentCredentials?.let { current ->
+                    AuthorizationDeviceInstructionsCommitment(
+                        deviceIdentityId = current.deviceIdentityId,
+                        instructions = current.instructions,
+                    )
+                }
+            } else {
+                null
+            },
+        )
         val policyDenial = approvalEvaluation
-            ?.takeIf { it.action == ApprovalAction.DENY }
+            ?.takeIf { evaluation ->
+                evaluation.secrets.any { it.action == ApprovalAction.DENY }
+            }
             ?.let {
                 InvocationDenialReason.POLICY_DENIED to
                     "Approval settings denied access to a requested secret."
@@ -2550,17 +2975,23 @@ internal class RequestRepository(
                     "AI review denied access to a requested secret."
             }
         val aiApproved = aiReview?.decision == AiReviewDecision.APPROVE
-        val denial = automaticDenial ?: policyDenial ?: aiDenial
+        val allProtectedUsesApproved = !aiInputsChanged && approvalEvaluation
+            ?.isFullyApproved(aiReview?.decision) == true
+        val temporaryAccessUsed = approvalEvaluation?.secrets
+            ?.any { it.temporaryAccessExpiresAt != null } == true
+        val aiApprovalUsed = approvalEvaluation?.secrets
+            ?.any { it.action == ApprovalAction.ASK_AI } == true && aiApproved
+        val denial = currentAutomaticDenial ?: policyDenial ?: aiDenial
         val responsePlaintext = when {
             denial != null -> invocationProtocol.deniedResponse(denial.first, denial.second)
-            approvalEvaluation?.action == ApprovalAction.APPROVE || aiApproved -> {
+            allProtectedUsesApproved -> {
                 invocationProtocol.approvedResponse(
                     checkNotNull(availableSecrets).mapValues { (_, secret) ->
                         secret.toResponseSecret()
                     },
                 )
             }
-            !description.containsSensitiveMaterial -> {
+            !currentDescription.containsSensitiveMaterial -> {
                 invocationProtocol.approvedResponse(
                     checkNotNull(availableSecrets).mapValues { (_, secret) ->
                         secret.toResponseSecret()
@@ -2587,9 +3018,8 @@ internal class RequestRepository(
         }
         val automaticDecision = when {
             denial != null -> SecretUseDecision.DENIED
-            approvalEvaluation?.action == ApprovalAction.APPROVE || aiApproved ->
-                SecretUseDecision.APPROVED
-            !description.containsSensitiveMaterial -> SecretUseDecision.APPROVED
+            allProtectedUsesApproved -> SecretUseDecision.APPROVED
+            !currentDescription.containsSensitiveMaterial -> SecretUseDecision.APPROVED
             else -> null
         }
         val decidedAt = currentTimeMillis()
@@ -2603,25 +3033,40 @@ internal class RequestRepository(
             responseJson = response?.toString(),
             updatedAt = decidedAt,
         )
+        val currentSecretUse = if (aiInputsChanged) {
+            secretUseRequestEntity(
+                pairing = pairing,
+                contents = contents,
+                description = currentDescription,
+                now = now,
+            )
+        } else {
+            initialSecretUse
+        }
         val finalSecretUse = if (automaticDecision == null) {
-            initialSecretUse.copy(
+            currentSecretUse.copy(
                 requestId = pendingRequestId ?: 0,
                 approvalEvaluationJson = approvalEvaluation?.let { json.encodeToString(it) },
                 updatedAt = decidedAt,
             )
         } else {
-            initialSecretUse.copy(
+            currentSecretUse.copy(
                 requestId = pendingRequestId ?: 0,
                 state = SecretUseRequestState.WAITING_FOR_COMPLETION.storedName,
                 decision = automaticDecision.storedName,
-                decisionSource = if (aiApproved || aiDenial != null) {
+                decisionSource = if (aiDenial != null) {
                     DECISION_SOURCE_AI
-                } else if (
-                    policyDenial != null ||
-                    approvalEvaluation?.action == ApprovalAction.APPROVE
-                ) {
+                } else if (policyDenial != null) {
                     DECISION_SOURCE_POLICY
-                } else if (!description.containsSensitiveMaterial) {
+                } else if (temporaryAccessUsed && aiApprovalUsed) {
+                    DECISION_SOURCE_MIXED
+                } else if (temporaryAccessUsed) {
+                    DECISION_SOURCE_TEMPORARY_ACCESS
+                } else if (aiApprovalUsed) {
+                    DECISION_SOURCE_AI
+                } else if (allProtectedUsesApproved) {
+                    DECISION_SOURCE_POLICY
+                } else if (!currentDescription.containsSensitiveMaterial) {
                     DECISION_SOURCE_NON_SENSITIVE
                 } else {
                     null
@@ -2639,14 +3084,39 @@ internal class RequestRepository(
             )
         }
         if (pendingRequestId == null) {
-            dao.insertSecretUseRequest(
+            val inserted = if (automaticDecision == SecretUseDecision.APPROVED) {
+                dao.insertSecretUseRequestIfAuthorized(
+                    request = finalRequest,
+                    secretUseRequest = finalSecretUse,
+                    requestSecret = acceptedSecrets.requestSecret,
+                    currentPairingSecret = acceptedSecrets.currentPairingSecret,
+                    previousPairingSecret = acceptedSecrets.previousPairingSecret,
+                    authorization = authorization,
+                    clientId = pairing.clientId,
+                    operation = TemporaryAccessOperation.INVOCATION.storedName,
+                    now = currentTimeMillis(),
+                )
+            } else {
+                dao.insertSecretUseRequest(
+                    request = finalRequest,
+                    secretUseRequest = finalSecretUse,
+                    requestSecret = acceptedSecrets.requestSecret,
+                    currentPairingSecret = acceptedSecrets.currentPairingSecret,
+                    previousPairingSecret = acceptedSecrets.previousPairingSecret,
+                )
+            }
+            if (automaticDecision == SecretUseDecision.APPROVED && inserted == null) return null
+            recordSecretUseRequested(pairing, relayRequestId, contents)
+        } else if (automaticDecision == SecretUseDecision.APPROVED) {
+            val updated = dao.updateSecretUseRequestIfAuthorized(
                 request = finalRequest,
                 secretUseRequest = finalSecretUse,
-                requestSecret = acceptedSecrets.requestSecret,
-                currentPairingSecret = acceptedSecrets.currentPairingSecret,
-                previousPairingSecret = acceptedSecrets.previousPairingSecret,
+                authorization = authorization,
+                clientId = pairing.clientId,
+                operation = TemporaryAccessOperation.INVOCATION.storedName,
+                now = currentTimeMillis(),
             )
-            recordSecretUseRequested(pairing, relayRequestId, contents)
+            if (!updated) return ProcessedRelayMessage()
         } else {
             dao.updateSecretUseRequest(finalRequest, finalSecretUse)
         }
@@ -2676,9 +3146,13 @@ internal class RequestRepository(
                     category = AuditCategory.SECRET_USE,
                     title = when {
                         automaticDecision == SecretUseDecision.APPROVED ->
-                            if (description.containsSensitiveMaterial) {
-                                if (aiApproved) {
+                            if (currentDescription.containsSensitiveMaterial) {
+                                if (aiApprovalUsed && temporaryAccessUsed) {
+                                    "Secret use approved by AI review and temporary access"
+                                } else if (aiApproved) {
                                     "Secret use approved by AI review"
+                                } else if (temporaryAccessUsed) {
+                                    "Secret use approved using temporary access"
                                 } else {
                                     "Secret use approved automatically"
                                 }
@@ -2701,6 +3175,11 @@ internal class RequestRepository(
             )
         }
         return ProcessedRelayMessage(response)
+        } finally {
+            pendingRequestId?.let {
+                aiReviewInFlight.update { it - relayRequestId }
+            }
+        }
     }
 
     private suspend fun recordSecretUseRequested(
@@ -2760,6 +3239,7 @@ internal class RequestRepository(
         val approvalPolicies = secrets.approvalPoliciesForNames(
             listOf(contents.secret),
             pairing.clientId,
+            TemporaryAccessOperation.GIT_SIGN,
         )
         val policy = approvalPolicies.singleOrNull()
         var denial = if (
@@ -2774,13 +3254,7 @@ internal class RequestRepository(
         }
         val initialEvaluation = if (denial == null) {
             ApprovalPolicyEvaluator.evaluate(
-                listOf(
-                    RequestedSecretApproval(
-                        id = checkNotNull(policy).secretId,
-                        name = policy.secretName,
-                        defaultAction = policy.mode.toApprovalAction(),
-                    ),
-                ),
+                listOf(checkNotNull(policy).toRequestedSecretApproval()),
             )
         } else {
             null
@@ -2818,18 +3292,26 @@ internal class RequestRepository(
             decidedAt = null,
             completedAt = null,
         )
-        val pendingRequestId = if (initialEvaluation?.action == ApprovalAction.ASK_AI) {
-            dao.insertGitSignRequest(
-                request = initialRequest,
-                gitSignRequest = initialGitSign,
-                requestSecret = acceptedSecrets.requestSecret,
-                currentPairingSecret = acceptedSecrets.currentPairingSecret,
-                previousPairingSecret = acceptedSecrets.previousPairingSecret,
-            )
+        val needsAiReview = initialEvaluation?.requiresAiReview() == true
+        val pendingRequestId = if (needsAiReview) {
+            aiReviewInFlight.update { it + relayRequestId }
+            try {
+                dao.insertGitSignRequest(
+                    request = initialRequest,
+                    gitSignRequest = initialGitSign,
+                    requestSecret = acceptedSecrets.requestSecret,
+                    currentPairingSecret = acceptedSecrets.currentPairingSecret,
+                    previousPairingSecret = acceptedSecrets.previousPairingSecret,
+                )
+            } catch (failure: Throwable) {
+                aiReviewInFlight.update { it - relayRequestId }
+                throw failure
+            }
         } else {
             null
         }
-        val aiReview = if (initialEvaluation?.action == ApprovalAction.ASK_AI) {
+        try {
+        val reviewResult = if (needsAiReview) {
             requestGitSignAiReview(
                 pairing = pairing,
                 contents = contents,
@@ -2846,8 +3328,62 @@ internal class RequestRepository(
         } else {
             null
         }
-        val evaluation = initialEvaluation?.copy(aiReview = aiReview)
-        if (denial == null && evaluation?.action == ApprovalAction.DENY) {
+        val currentDescription = if (needsAiReview) {
+            secrets.describeRequestedSecrets(listOf(contents.secret))
+        } else {
+            description
+        }
+        val currentPolicies = if (needsAiReview) {
+            secrets.approvalPoliciesForNames(
+                listOf(contents.secret),
+                pairing.clientId,
+                TemporaryAccessOperation.GIT_SIGN,
+            )
+        } else {
+            approvalPolicies
+        }
+        val currentEvaluation = if (needsAiReview) {
+            currentPolicies.singleOrNull()?.let { currentPolicy ->
+                ApprovalPolicyEvaluator.evaluate(
+                    listOf(currentPolicy.toRequestedSecretApproval()),
+                )
+            }
+        } else {
+            initialEvaluation
+        }
+        val currentCredentials = if (needsAiReview) credentialsForPairing(pairing) else credentials
+        val aiInputsChanged = needsAiReview && (
+            currentEvaluation == null ||
+                !checkNotNull(initialEvaluation).hasSameSecretPolicies(currentEvaluation) ||
+                currentCredentials?.instructions != credentials.instructions
+            )
+        val aiReview = if (aiInputsChanged) {
+            AiReview(
+                decision = AiReviewDecision.ASK_USER,
+                explanation = "The SSH key or approval settings changed during AI review.",
+            )
+        } else {
+            reviewResult
+        }
+        val evaluation = (if (aiInputsChanged) currentEvaluation else initialEvaluation)
+            ?.copy(aiReview = aiReview)
+        val authorization = currentDescription.authorizationCommitment(
+            policies = currentPolicies,
+            deviceInstructions = if (needsAiReview) {
+                currentCredentials?.let { current ->
+                    AuthorizationDeviceInstructionsCommitment(
+                        deviceIdentityId = current.deviceIdentityId,
+                        instructions = current.instructions,
+                    )
+                }
+            } else {
+                null
+            },
+        )
+        if (
+            denial == null &&
+            evaluation?.secrets?.any { it.action == ApprovalAction.DENY } == true
+        ) {
             denial = InvocationDenialReason.POLICY_DENIED to
                 "Approval settings denied use of the SSH key."
         }
@@ -2855,10 +3391,10 @@ internal class RequestRepository(
             denial = InvocationDenialReason.POLICY_DENIED to
                 "AI review denied use of the SSH key."
         }
-        val shouldApprove = denial == null && (
-            evaluation?.action == ApprovalAction.APPROVE ||
-                aiReview?.decision == AiReviewDecision.APPROVE
-            )
+        val shouldApprove = !aiInputsChanged && denial == null &&
+            evaluation?.isFullyApproved(aiReview?.decision) == true
+        val temporaryAccessUsed = evaluation?.secrets
+            ?.any { it.temporaryAccessExpiresAt != null } == true
         var signature: String? = null
         if (shouldApprove) {
             when (
@@ -2935,13 +3471,38 @@ internal class RequestRepository(
             decidedAt = automaticDecision?.let { decidedAt },
         )
         if (pendingRequestId == null) {
-            dao.insertGitSignRequest(
+            val inserted = if (automaticDecision == SecretUseDecision.APPROVED) {
+                dao.insertGitSignRequestIfAuthorized(
+                    request = finalRequest,
+                    gitSignRequest = finalGitSign,
+                    requestSecret = acceptedSecrets.requestSecret,
+                    currentPairingSecret = acceptedSecrets.currentPairingSecret,
+                    previousPairingSecret = acceptedSecrets.previousPairingSecret,
+                    authorization = authorization,
+                    clientId = pairing.clientId,
+                    operation = TemporaryAccessOperation.GIT_SIGN.storedName,
+                    now = currentTimeMillis(),
+                )
+            } else {
+                dao.insertGitSignRequest(
+                    request = finalRequest,
+                    gitSignRequest = finalGitSign,
+                    requestSecret = acceptedSecrets.requestSecret,
+                    currentPairingSecret = acceptedSecrets.currentPairingSecret,
+                    previousPairingSecret = acceptedSecrets.previousPairingSecret,
+                )
+            }
+            if (automaticDecision == SecretUseDecision.APPROVED && inserted == null) return null
+        } else if (automaticDecision == SecretUseDecision.APPROVED) {
+            val updated = dao.updateGitSignRequestIfAuthorized(
                 request = finalRequest,
                 gitSignRequest = finalGitSign,
-                requestSecret = acceptedSecrets.requestSecret,
-                currentPairingSecret = acceptedSecrets.currentPairingSecret,
-                previousPairingSecret = acceptedSecrets.previousPairingSecret,
+                authorization = authorization,
+                clientId = pairing.clientId,
+                operation = TemporaryAccessOperation.GIT_SIGN.storedName,
+                now = currentTimeMillis(),
             )
+            if (!updated) return ProcessedRelayMessage()
         } else {
             dao.updateGitSignRequest(finalRequest, finalGitSign)
         }
@@ -2971,6 +3532,8 @@ internal class RequestRepository(
                 title = when {
                     signature != null && aiReview?.decision == AiReviewDecision.APPROVE ->
                         "Git signature approved by AI review"
+                    signature != null && temporaryAccessUsed ->
+                        "Git signature approved using temporary access"
                     signature != null -> "Git signature approved automatically"
                     denial != null && aiReview?.decision == AiReviewDecision.DENY ->
                         "Git signature denied by AI review"
@@ -2988,6 +3551,11 @@ internal class RequestRepository(
             ),
         )
         return ProcessedRelayMessage(response)
+        } finally {
+            pendingRequestId?.let {
+                aiReviewInFlight.update { it - relayRequestId }
+            }
+        }
     }
 
     private suspend fun automaticSecretUseDenial(
@@ -4098,6 +4666,7 @@ internal class RequestRepository(
                 ),
             )
         }
+        dao.deleteTemporaryAccessGrantsForClient(pairing.clientId)
         if (firstCompletion) {
             audit.record(
                 AuditRecord(
@@ -4869,15 +5438,64 @@ internal class RequestRepository(
         const val DECISION_SOURCE_POLICY = "policy"
         const val DECISION_SOURCE_AI = "ai"
         const val DECISION_SOURCE_NON_SENSITIVE = "non_sensitive"
+        const val DECISION_SOURCE_TEMPORARY_ACCESS = "temporary_access"
+        const val DECISION_SOURCE_MIXED = "mixed"
+        const val TEMPORARY_ACCESS_DURATION_MILLIS = 4 * 60 * 60 * 1_000L
         val STRING_LIST_SERIALIZER = ListSerializer(String.serializer())
     }
 
-    private fun SecretApprovalMode.toApprovalAction(): ApprovalAction = when (this) {
-        SecretApprovalMode.DENY -> ApprovalAction.DENY
-        SecretApprovalMode.ASK_ME -> ApprovalAction.ASK_ME
-        SecretApprovalMode.ASK_AI -> ApprovalAction.ASK_AI
-        SecretApprovalMode.APPROVE -> ApprovalAction.APPROVE
+    private fun SecretApprovalPolicy.toRequestedSecretApproval(): RequestedSecretApproval {
+        val activeTemporaryAccess = temporaryAccessExpiresAt?.takeIf {
+            mode == SecretApprovalMode.TEMPORARY || mode == SecretApprovalMode.ASK_AI
+        }
+        return RequestedSecretApproval(
+            id = secretId,
+            name = secretName,
+            defaultAction = when {
+                activeTemporaryAccess != null -> ApprovalAction.APPROVE
+                mode == SecretApprovalMode.DENY -> ApprovalAction.DENY
+                mode == SecretApprovalMode.ASK_ME -> ApprovalAction.ASK_ME
+                mode == SecretApprovalMode.TEMPORARY -> ApprovalAction.ASK_ME
+                mode == SecretApprovalMode.ASK_AI -> ApprovalAction.ASK_AI
+                else -> ApprovalAction.APPROVE
+            },
+            temporaryAccessEligible = mode == SecretApprovalMode.TEMPORARY ||
+                mode == SecretApprovalMode.ASK_AI,
+            temporaryAccessExpiresAt = activeTemporaryAccess,
+            revision = revision,
+        )
     }
+
+    private fun RequestedSecretDescription.authorizationCommitment(
+        policies: List<SecretApprovalPolicy>,
+        deviceInstructions: AuthorizationDeviceInstructionsCommitment? = null,
+    ): AuthorizationCommitment = AuthorizationCommitment(
+        secretRevisions = reviewMetadata.associate { secret ->
+            secret.id to secret.revision
+        },
+        policies = policies.associate { policy ->
+            policy.secretId to AuthorizationPolicyCommitment(
+                mode = policy.mode.storedName,
+                temporaryAccessExpiresAt = policy.temporaryAccessExpiresAt,
+            )
+        },
+        deviceInstructions = deviceInstructions,
+    )
+
+    private fun RequestedSecretDescription.hasSameSecretRevisions(
+        other: RequestedSecretDescription,
+    ): Boolean = reviewMetadata.associate { it.id to it.revision } ==
+        other.reviewMetadata.associate { it.id to it.revision }
+
+    private fun ApprovalEvaluation.hasSameSecretPolicies(other: ApprovalEvaluation): Boolean =
+        secrets.size == other.secrets.size && secrets.zip(other.secrets).all { (stored, current) ->
+            stored.secretId == current.secretId &&
+                stored.secretName == current.secretName &&
+                stored.action == current.action &&
+                stored.temporaryAccessEligible == current.temporaryAccessEligible &&
+                stored.temporaryAccessExpiresAt == current.temporaryAccessExpiresAt &&
+                stored.revision == current.revision
+        }
 }
 
 private enum class RequestKind(val storedName: String) {

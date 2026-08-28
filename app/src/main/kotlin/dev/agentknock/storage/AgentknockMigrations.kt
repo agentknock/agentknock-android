@@ -255,3 +255,26 @@ internal val MIGRATION_10_11 = Migration(10, 11) { connection ->
         "ALTER TABLE `git_sign_requests` ADD COLUMN `rule_evaluation_json` TEXT",
     )
 }
+
+internal val MIGRATION_11_12 = Migration(11, 12) { connection ->
+    connection.execSQL(
+        "ALTER TABLE `secrets` ADD COLUMN `revision` INTEGER NOT NULL DEFAULT 1",
+    )
+    connection.execSQL(
+        """
+        CREATE TABLE IF NOT EXISTS `temporary_access_grants` (
+            `secret_id` TEXT NOT NULL,
+            `client_id` TEXT NOT NULL,
+            `operation` TEXT NOT NULL,
+            `expires_at` INTEGER NOT NULL,
+            PRIMARY KEY(`secret_id`, `client_id`, `operation`),
+            FOREIGN KEY(`secret_id`) REFERENCES `secrets`(`id`) ON UPDATE NO ACTION ON DELETE CASCADE,
+            FOREIGN KEY(`client_id`) REFERENCES `pairings`(`client_id`) ON UPDATE NO ACTION ON DELETE CASCADE
+        )
+        """.trimIndent(),
+    )
+    connection.execSQL(
+        "CREATE INDEX IF NOT EXISTS `index_temporary_access_grants_client_id` " +
+            "ON `temporary_access_grants` (`client_id`)",
+    )
+}

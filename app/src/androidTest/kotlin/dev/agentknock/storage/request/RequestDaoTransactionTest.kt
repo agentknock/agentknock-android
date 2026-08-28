@@ -6,12 +6,16 @@ import androidx.test.platform.app.InstrumentationRegistry
 import dev.agentknock.storage.AgentknockDatabase
 import dev.agentknock.storage.crypto.VaultKeyEntity
 import dev.agentknock.storage.crypto.VaultKeyPurpose
+import dev.agentknock.storage.secret.SecretClientApprovalOverrideEntity
+import dev.agentknock.storage.secret.SecretEntity
+import dev.agentknock.storage.secret.TemporaryAccessGrantEntity
 import dev.agentknock.storage.vault.DeviceIdentityEntity
 import kotlinx.coroutines.runBlocking
 import kotlinx.coroutines.test.runTest
 import org.junit.After
 import org.junit.Assert.assertArrayEquals
 import org.junit.Assert.assertEquals
+import org.junit.Assert.assertFalse
 import org.junit.Assert.assertNotNull
 import org.junit.Assert.assertNull
 import org.junit.Assert.assertTrue
@@ -185,6 +189,25 @@ class RequestDaoTransactionTest {
         dao.updatePairing(pairing)
         dao.insertPairingSecret(pairingSecret(rootId, CURRENT_KIND, CURRENT_ID, byteArrayOf(2)))
         dao.insertPairingSecret(pairingSecret(rootId, PREVIOUS_KIND, PREVIOUS_ID, byteArrayOf(1)))
+        database.secretDao().insertSecret(
+            SecretEntity(
+                id = "secret",
+                name = "github",
+                description = "",
+                createdAt = 1,
+                updatedAt = 1,
+            ),
+        )
+        database.secretDao().upsertTemporaryAccessGrants(
+            listOf(
+                TemporaryAccessGrantEntity(
+                    secretId = "secret",
+                    clientId = CLIENT_ID,
+                    operation = "invocation",
+                    expiresAt = 10_000,
+                ),
+            ),
+        )
         val removal = pairingRemovalRequest(rootId)
         val revokedPairing = pairing.copy(desiredRelayClientState = "revoked", updatedAt = 2)
 
@@ -200,6 +223,15 @@ class RequestDaoTransactionTest {
         assertEquals("active", dao.getPairing(rootId)?.desiredRelayClientState)
         assertNotNull(dao.getPairingSecret(rootId, CURRENT_KIND))
         assertNotNull(dao.getPairingSecret(rootId, PREVIOUS_KIND))
+        assertEquals(
+            1,
+            database.secretDao().getActiveTemporaryAccessGrants(
+                CLIENT_ID,
+                listOf("secret"),
+                "invocation",
+                0,
+            ).size,
+        )
 
         dao.insertPairingRemoval(
             request = removal,
@@ -213,6 +245,14 @@ class RequestDaoTransactionTest {
         assertEquals("revoked", dao.getPairing(rootId)?.desiredRelayClientState)
         assertNull(dao.getPairingSecret(rootId, CURRENT_KIND))
         assertNull(dao.getPairingSecret(rootId, PREVIOUS_KIND))
+        assertTrue(
+            database.secretDao().getActiveTemporaryAccessGrants(
+                CLIENT_ID,
+                listOf("secret"),
+                "invocation",
+                0,
+            ).isEmpty(),
+        )
     }
 
     @Test
@@ -279,6 +319,207 @@ class RequestDaoTransactionTest {
             dao.getSecretUploadRequest(requestId)?.summaryJson,
         )
     }
+
+    @Test
+    fun authorizationCommitmentRequiresExactLiveState() = runTest {
+        val pairingRequestId = insertActivePairing()
+        val secretDao = database.secretDao()
+        secretDao.insertSecret(
+            SecretEntity(
+                id = "secret",
+                name = "github",
+                description = "",
+                type = "environment",
+                createdAt = 1,
+                updatedAt = 1,
+                revision = 4,
+                approvalMode = "temporary",
+            ),
+        )
+        secretDao.upsertTemporaryAccessGrants(
+            listOf(
+                TemporaryAccessGrantEntity(
+                    secretId = "secret",
+                    clientId = CLIENT_ID,
+                    operation = "invocation",
+                    expiresAt = 1_000,
+                ),
+            ),
+        )
+        val commitment = AuthorizationCommitment(
+            secretRevisions = mapOf("secret" to 4),
+            policies = mapOf(
+                "secret" to AuthorizationPolicyCommitment(
+                    mode = "temporary",
+                    temporaryAccessExpiresAt = 1_000,
+                ),
+            ),
+        )
+
+        assertTrue(dao.authorizationMatches(commitment, CLIENT_ID, "invocation", 999))
+        assertFalse(dao.authorizationMatches(commitment, CLIENT_ID, "invocation", 1_000))
+
+        secretDao.upsertClientApprovalOverride(
+            SecretClientApprovalOverrideEntity("secret", CLIENT_ID, "ask_me"),
+        )
+        assertFalse(dao.authorizationMatches(commitment, CLIENT_ID, "invocation", 999))
+        secretDao.deleteClientApprovalOverride("secret", CLIENT_ID)
+
+        val secret = checkNotNull(secretDao.getSecret("secret"))
+        secretDao.updateSecret(secret.copy(revision = 5))
+        assertFalse(dao.authorizationMatches(commitment, CLIENT_ID, "invocation", 999))
+        secretDao.updateSecret(secret)
+
+        val pairing = checkNotNull(dao.getPairing(pairingRequestId))
+        dao.updatePairing(pairing.copy(relayClientState = "suspended"))
+        assertFalse(dao.authorizationMatches(commitment, CLIENT_ID, "invocation", 999))
+    }
+
+    @Test
+    fun authorizationCommitmentRejectsChangedDeviceInstructions() = runTest {
+        insertActivePairing()
+        database.vaultDao().insertIdentity(
+            DeviceIdentityEntity(
+                id = DEVICE_IDENTITY_ID,
+                role = "active",
+                address = "write-leader-hungry",
+                addressId = "address-id",
+                deviceId = DEVICE_ID,
+                devicePublicKey = ByteArray(32),
+                createdAt = 1,
+                claimedAt = 1,
+                instructions = "Allow repository inspection.",
+            ),
+        )
+        val commitment = AuthorizationCommitment(
+            secretRevisions = emptyMap(),
+            policies = emptyMap(),
+            deviceInstructions = AuthorizationDeviceInstructionsCommitment(
+                deviceIdentityId = DEVICE_IDENTITY_ID,
+                instructions = "Allow repository inspection.",
+            ),
+        )
+
+        assertTrue(dao.authorizationMatches(commitment, CLIENT_ID, "invocation", 1))
+
+        database.vaultDao().updateActiveInstructions(
+            activeRole = "active",
+            instructions = "Ask before every use.",
+        )
+        assertFalse(dao.authorizationMatches(commitment, CLIENT_ID, "invocation", 1))
+    }
+
+    @Test
+    fun approvedRequestUpdateIsRejectedWhenAuthorizationChanged() = runTest {
+        val pairingRequestId = insertActivePairing()
+        val secretDao = database.secretDao()
+        secretDao.insertSecret(
+            SecretEntity(
+                id = "secret",
+                name = "github",
+                description = "",
+                type = "environment",
+                createdAt = 1,
+                updatedAt = 1,
+                revision = 2,
+                approvalMode = "approve",
+            ),
+        )
+        val requestId = dao.insertRequest(
+            rootRequest().copy(
+                relayRequestId = "invocation-request",
+                parentRequestId = null,
+                kind = "secret_use",
+                state = "action_required",
+                responseJson = null,
+            ),
+        )
+        dao.insertSecretUseRequestRow(secretUseRequest(requestId, pairingRequestId))
+        val request = checkNotNull(dao.getRequestById(requestId))
+        val secretUse = checkNotNull(dao.getSecretUseRequest(requestId))
+        val stale = AuthorizationCommitment(
+            secretRevisions = mapOf("secret" to 1),
+            policies = mapOf(
+                "secret" to AuthorizationPolicyCommitment("approve", null),
+            ),
+        )
+
+        assertFalse(
+            dao.updateSecretUseRequestIfAuthorized(
+                request.copy(state = "waiting", responseJson = RESPONSE_JSON),
+                secretUse.copy(state = "waiting_for_completion", decision = "approved"),
+                stale,
+                CLIENT_ID,
+                "invocation",
+                10,
+            ),
+        )
+        assertEquals("action_required", dao.getRequestById(requestId)?.state)
+        assertNull(dao.getSecretUseRequest(requestId)?.decision)
+
+        val exact = stale.copy(secretRevisions = mapOf("secret" to 2))
+        assertTrue(
+            dao.updateSecretUseRequestIfAuthorized(
+                request.copy(state = "waiting", responseJson = RESPONSE_JSON),
+                secretUse.copy(state = "waiting_for_completion", decision = "approved"),
+                exact,
+                CLIENT_ID,
+                "invocation",
+                10,
+            ),
+        )
+        assertEquals("waiting", dao.getRequestById(requestId)?.state)
+        assertEquals("approved", dao.getSecretUseRequest(requestId)?.decision)
+    }
+
+    private suspend fun insertActivePairing(): Long = dao.insertPairingRequest(
+        rootRequest().copy(state = "completed", completedAt = 2),
+        pendingPairing().copy(state = "active", completedAt = 2),
+    )
+
+    private fun secretUseRequest(requestId: Long, pairingRequestId: Long) =
+        SecretUseRequestEntity(
+            requestId = requestId,
+            pairingRequestId = pairingRequestId,
+            clientId = CLIENT_ID,
+            clientName = "Test client",
+            pairingAddress = "write-leader-hungry",
+            hostname = "test",
+            platform = "linux",
+            architecture = "x86_64",
+            machineId = null,
+            osVersion = null,
+            state = "approval_pending",
+            invocationTokenHash = ByteArray(32),
+            containsSensitiveMaterial = true,
+            clientSoftwareJson = "{}",
+            secretsJson = "[\"github\"]",
+            secretDetailsJson = "[]",
+            providedSecretsJson = null,
+            missingSecretsJson = "[]",
+            reason = null,
+            command = "git",
+            argumentsJson = "[]",
+            workingDirectory = "/tmp/project",
+            executablePath = "/usr/bin/git",
+            executableHash = null,
+            executableMode = "direct",
+            stdinKind = "terminal",
+            stdoutKind = "terminal",
+            stderrKind = "terminal",
+            launcherChainJson = "[]",
+            decision = null,
+            decisionSource = null,
+            approvalEvaluationJson = null,
+            completionResult = null,
+            completionReason = null,
+            completionMessage = null,
+            error = null,
+            createdAt = 1,
+            updatedAt = 1,
+            decidedAt = null,
+            completedAt = null,
+        )
 
     private fun rootRequest() = InboxRequestEntity(
         relayRequestId = ROOT_REQUEST_ID,

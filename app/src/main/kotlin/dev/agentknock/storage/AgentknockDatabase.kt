@@ -12,6 +12,7 @@ import dev.agentknock.storage.secret.EnvironmentVariableEntity
 import dev.agentknock.storage.secret.SecretDao
 import dev.agentknock.storage.secret.SecretEntity
 import dev.agentknock.storage.secret.SecretClientApprovalOverrideEntity
+import dev.agentknock.storage.secret.TemporaryAccessGrantEntity
 import dev.agentknock.storage.secret.SshKeyEntity
 import dev.agentknock.storage.request.InboxRequestEntity
 import dev.agentknock.storage.request.SecretUseRequestEntity
@@ -34,6 +35,7 @@ import dev.agentknock.storage.vault.VaultSecretEntity
         VaultKeyEntity::class,
         SecretEntity::class,
         SecretClientApprovalOverrideEntity::class,
+        TemporaryAccessGrantEntity::class,
         EnvironmentVariableEntity::class,
         SshKeyEntity::class,
         DeviceIdentityEntity::class,
@@ -51,7 +53,7 @@ import dev.agentknock.storage.vault.VaultSecretEntity
         AuditEventEntity::class,
         ApprovalRuleEntity::class,
     ],
-    version = 11,
+    version = 12,
     exportSchema = true,
 )
 internal abstract class AgentknockDatabase : RoomDatabase() {
@@ -77,6 +79,7 @@ internal abstract class AgentknockDatabase : RoomDatabase() {
                     MIGRATION_8_9,
                     MIGRATION_9_10,
                     MIGRATION_10_11,
+                    MIGRATION_11_12,
                 )
                 .build()
     }

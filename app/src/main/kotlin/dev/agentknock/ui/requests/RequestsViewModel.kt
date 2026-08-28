@@ -67,6 +67,11 @@ internal class RequestsViewModel(application: Application) : AndroidViewModel(ap
         return repository.denySecretUseRequest(requestId)
     }
 
+    suspend fun allowSecretUseTemporarily(requestId: Long): SecretUseDecisionResult {
+        container.localStorage.await()
+        return repository.allowSecretUseTemporarily(requestId)
+    }
+
     suspend fun approveGitSignRequest(requestId: Long): GitSignDecisionResult {
         container.localStorage.await()
         return repository.approveGitSignRequest(requestId)
@@ -75,6 +80,11 @@ internal class RequestsViewModel(application: Application) : AndroidViewModel(ap
     suspend fun denyGitSignRequest(requestId: Long): GitSignDecisionResult {
         container.localStorage.await()
         return repository.denyGitSignRequest(requestId)
+    }
+
+    suspend fun allowGitSignTemporarily(requestId: Long): GitSignDecisionResult {
+        container.localStorage.await()
+        return repository.allowGitSignTemporarily(requestId)
     }
 
 }

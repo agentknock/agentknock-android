@@ -340,6 +340,7 @@ class ApprovalReviewContextTest {
         defaultMode = mode,
         overridden = false,
         instructions = instructions,
+        revision = 1,
     )
 
     private fun secretEvaluation(

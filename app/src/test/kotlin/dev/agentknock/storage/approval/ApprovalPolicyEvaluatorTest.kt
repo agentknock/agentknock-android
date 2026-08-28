@@ -25,6 +25,7 @@ class ApprovalPolicyEvaluatorTest {
         assertEquals(ApprovalAction.ASK_AI, evaluation.action)
         assertEquals(setOf("old-rule"), evaluation.secrets.single().matchedRuleIds)
         assertEquals(setOf("old-rule"), evaluation.secrets.single().decisiveRuleIds)
+        assertNull(evaluation.secrets.single().revision)
         assertNull(evaluation.aiReview)
     }
 
@@ -63,6 +64,54 @@ class ApprovalPolicyEvaluatorTest {
             ApprovalAction.ASK_ME,
             ApprovalPolicyEvaluator.evaluate(emptyList()).action,
         )
+    }
+
+    @Test
+    fun `manual scope does not suppress AI review for another secret`() {
+        val evaluation = ApprovalPolicyEvaluator.evaluate(
+            listOf(
+                secret("manual", ApprovalAction.ASK_ME),
+                secret("reviewed", ApprovalAction.ASK_AI),
+            ),
+        )
+
+        assertEquals(ApprovalAction.ASK_ME, evaluation.action)
+        assertEquals(true, evaluation.requiresAiReview())
+        assertEquals(false, evaluation.isFullyApproved(AiReviewDecision.APPROVE))
+    }
+
+    @Test
+    fun `denial suppresses AI review`() {
+        val evaluation = ApprovalPolicyEvaluator.evaluate(
+            listOf(
+                secret("blocked", ApprovalAction.DENY),
+                secret("reviewed", ApprovalAction.ASK_AI),
+            ),
+        )
+
+        assertEquals(false, evaluation.requiresAiReview())
+        assertEquals(false, evaluation.isFullyApproved(AiReviewDecision.APPROVE))
+    }
+
+    @Test
+    fun `temporary access metadata remains attached to its secret`() {
+        val evaluation = ApprovalPolicyEvaluator.evaluate(
+            listOf(
+                RequestedSecretApproval(
+                    id = "github-id",
+                    name = "github",
+                    defaultAction = ApprovalAction.APPROVE,
+                    temporaryAccessEligible = true,
+                    temporaryAccessExpiresAt = 1234,
+                    revision = 5678,
+                ),
+            ),
+        )
+
+        assertEquals(true, evaluation.isFullyApproved(null))
+        assertEquals(true, evaluation.secrets.single().temporaryAccessEligible)
+        assertEquals(1234L, evaluation.secrets.single().temporaryAccessExpiresAt)
+        assertEquals(5678L, evaluation.secrets.single().revision)
     }
 
     private fun secret(name: String, action: ApprovalAction) = RequestedSecretApproval(

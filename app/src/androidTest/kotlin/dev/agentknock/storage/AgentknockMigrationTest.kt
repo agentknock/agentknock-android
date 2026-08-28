@@ -335,4 +335,135 @@ class AgentknockMigrationTest {
             }
         }
     }
+
+    @Test
+    fun migration11To12PreservesVaultDataAndAddsTemporaryAccess() = runTest {
+        helper.createDatabase(11).use { database ->
+            database.execSQL(
+                "INSERT INTO vault_keys " +
+                    "(id, purpose, active, created_at, backing) " +
+                    "VALUES ('secret-key', 'secret_values', 1, 1, 'ANDROID_KEYSTORE')",
+            )
+            database.execSQL(
+                "INSERT INTO device_identities " +
+                    "(id, role, address, address_id, device_id, device_public_key, created_at, " +
+                    "claimed_at, pairing_enabled, instructions) VALUES " +
+                    "('identity-1', 'active', 'three-word-address', 'address-1', 'device-1', " +
+                    "X'0102', 1, 2, 1, '')",
+            )
+            database.execSQL(
+                "INSERT INTO inbox_requests " +
+                    "(id, relay_request_id, parent_request_id, kind, state, listed, request_json, " +
+                    "received_at, updated_at) VALUES " +
+                    "(60, 'pairing-1', NULL, 'pairing', 'completed', 1, '{}', 3, 4)",
+            )
+            database.execSQL(
+                "INSERT INTO pairings " +
+                    "(request_id, device_identity_id, pairing_address, device_id, client_id, " +
+                    "friendly_name, device_random, relay_client_state, state, created_at, " +
+                    "updated_at, completed_at, instructions) VALUES " +
+                    "(60, 'identity-1', 'three-word-address', 'device-1', 'client-1', " +
+                    "'Laptop', X'0304', 'active', 'active', 3, 4, 5, '')",
+            )
+            database.execSQL(
+                "INSERT INTO secrets " +
+                    "(id, name, description, type, created_at, updated_at, approval_mode, " +
+                    "instructions) VALUES " +
+                    "('secret-1', 'aws-read-only', 'AWS access', 'environment', 6, 7, " +
+                    "'ask_ai', 'Only for logs')",
+            )
+            database.execSQL(
+                "INSERT INTO environment_variables " +
+                    "(id, secret_id, name, sensitive, notes, encryption_format, " +
+                    "encryption_key_id, nonce, ciphertext, created_at, updated_at, " +
+                    "value_updated_at) VALUES " +
+                    "('variable-1', 'secret-1', 'AWS_TOKEN', 1, '', 1, 'secret-key', " +
+                    "X'0506', X'0708', 8, 9, 10)",
+            )
+            database.execSQL(
+                "INSERT INTO secret_client_approval_overrides " +
+                    "(secret_id, client_id, approval_mode) " +
+                    "VALUES ('secret-1', 'client-1', 'ask_me')",
+            )
+        }
+
+        helper.runMigrationsAndValidate(12, listOf(MIGRATION_11_12)).use { database ->
+            database.execSQL("PRAGMA foreign_keys=ON")
+            database.prepare(
+                "SELECT name, approval_mode, instructions, revision " +
+                    "FROM secrets WHERE id = 'secret-1'",
+            ).use { statement ->
+                assertTrue(statement.step())
+                assertEquals("aws-read-only", statement.getText(0))
+                assertEquals("ask_ai", statement.getText(1))
+                assertEquals("Only for logs", statement.getText(2))
+                assertEquals(1, statement.getLong(3))
+            }
+            database.prepare(
+                "SELECT sensitive, nonce, ciphertext FROM environment_variables " +
+                    "WHERE id = 'variable-1'",
+            ).use { statement ->
+                assertTrue(statement.step())
+                assertEquals(1, statement.getLong(0))
+                assertArrayEquals(byteArrayOf(5, 6), statement.getBlob(1))
+                assertArrayEquals(byteArrayOf(7, 8), statement.getBlob(2))
+            }
+            database.prepare(
+                "SELECT friendly_name, state FROM pairings WHERE client_id = 'client-1'",
+            ).use { statement ->
+                assertTrue(statement.step())
+                assertEquals("Laptop", statement.getText(0))
+                assertEquals("active", statement.getText(1))
+            }
+            database.prepare(
+                "SELECT approval_mode FROM secret_client_approval_overrides " +
+                    "WHERE secret_id = 'secret-1' AND client_id = 'client-1'",
+            ).use { statement ->
+                assertTrue(statement.step())
+                assertEquals("ask_me", statement.getText(0))
+            }
+            database.prepare("SELECT count(*) FROM temporary_access_grants").use { statement ->
+                assertTrue(statement.step())
+                assertEquals(0, statement.getLong(0))
+            }
+            database.execSQL(
+                "INSERT INTO temporary_access_grants " +
+                    "(secret_id, client_id, operation, expires_at) " +
+                    "VALUES ('secret-1', 'client-1', 'invocation', 12345)",
+            )
+            database.execSQL(
+                "INSERT INTO temporary_access_grants " +
+                    "(secret_id, client_id, operation, expires_at) " +
+                    "VALUES ('secret-1', 'client-1', 'git_sign', 12346)",
+            )
+            database.prepare(
+                "SELECT count(*) FROM temporary_access_grants " +
+                    "WHERE secret_id = 'secret-1' AND client_id = 'client-1'",
+            ).use { statement ->
+                assertTrue(statement.step())
+                assertEquals(2, statement.getLong(0))
+            }
+            database.execSQL("DELETE FROM secrets WHERE id = 'secret-1'")
+            database.prepare("SELECT count(*) FROM temporary_access_grants").use { statement ->
+                assertTrue(statement.step())
+                assertEquals(0, statement.getLong(0))
+            }
+            database.execSQL(
+                "INSERT INTO secrets " +
+                    "(id, name, description, type, created_at, updated_at, revision, " +
+                    "approval_mode, instructions) VALUES " +
+                    "('secret-2', 'production-ssh', '', 'ssh', 11, 11, 1, 'temporary', '')",
+            )
+            database.execSQL(
+                "INSERT INTO temporary_access_grants " +
+                    "(secret_id, client_id, operation, expires_at) " +
+                    "VALUES ('secret-2', 'client-1', 'git_sign', 12347)",
+            )
+            database.execSQL("DELETE FROM pairings WHERE client_id = 'client-1'")
+            database.prepare("SELECT count(*) FROM temporary_access_grants").use { statement ->
+                assertTrue(statement.step())
+                assertEquals(0, statement.getLong(0))
+            }
+        }
+    }
 }

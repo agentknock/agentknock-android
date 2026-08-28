@@ -12,6 +12,9 @@ import androidx.room3.Transaction
 import androidx.room3.Update
 import androidx.room3.Upsert
 import dev.agentknock.storage.crypto.VaultKeyEntity
+import dev.agentknock.storage.secret.SecretClientApprovalOverrideEntity
+import dev.agentknock.storage.secret.SecretEntity
+import dev.agentknock.storage.secret.TemporaryAccessGrantEntity
 import dev.agentknock.storage.vault.DeviceIdentityEntity
 import kotlinx.coroutines.flow.Flow
 
@@ -601,6 +604,22 @@ internal data class SecretUploadSshKeyEntity(
     val createdAt: Long,
 )
 
+internal data class AuthorizationPolicyCommitment(
+    val mode: String,
+    val temporaryAccessExpiresAt: Long?,
+)
+
+internal data class AuthorizationDeviceInstructionsCommitment(
+    val deviceIdentityId: String,
+    val instructions: String,
+)
+
+internal data class AuthorizationCommitment(
+    val secretRevisions: Map<String, Long>,
+    val policies: Map<String, AuthorizationPolicyCommitment>,
+    val deviceInstructions: AuthorizationDeviceInstructionsCommitment? = null,
+)
+
 @Dao
 internal interface RequestDao {
     @Query("SELECT * FROM inbox_requests WHERE listed = 1 ORDER BY id DESC LIMIT 100")
@@ -666,6 +685,34 @@ internal interface RequestDao {
 
     @Query("SELECT * FROM pairings WHERE client_id = :clientId")
     suspend fun getPairingByClientId(clientId: String): PairingEntity?
+
+    @Query("SELECT * FROM secrets WHERE id IN (:secretIds)")
+    suspend fun getAuthorizationSecrets(secretIds: List<String>): List<SecretEntity>
+
+    @Query(
+        "SELECT instructions FROM device_identities " +
+            "WHERE id = :deviceIdentityId AND role = 'active'",
+    )
+    suspend fun getAuthorizationDeviceInstructions(deviceIdentityId: String): String?
+
+    @Query(
+        "SELECT * FROM secret_client_approval_overrides " +
+            "WHERE client_id = :clientId AND secret_id IN (:secretIds)",
+    )
+    suspend fun getAuthorizationOverrides(
+        clientId: String,
+        secretIds: List<String>,
+    ): List<SecretClientApprovalOverrideEntity>
+
+    @Query(
+        "SELECT * FROM temporary_access_grants " +
+            "WHERE client_id = :clientId AND secret_id IN (:secretIds) AND operation = :operation",
+    )
+    suspend fun getAuthorizationGrants(
+        clientId: String,
+        secretIds: List<String>,
+        operation: String,
+    ): List<TemporaryAccessGrantEntity>
 
     @Query("SELECT * FROM secret_use_requests WHERE request_id = :requestId")
     suspend fun getSecretUseRequest(requestId: Long): SecretUseRequestEntity?
@@ -782,6 +829,9 @@ internal interface RequestDao {
     @Query("DELETE FROM pairing_secrets WHERE pairing_request_id = :pairingRequestId")
     suspend fun deletePairingSecrets(pairingRequestId: Long): Int
 
+    @Query("DELETE FROM temporary_access_grants WHERE client_id = :clientId")
+    suspend fun deleteTemporaryAccessGrantsForClient(clientId: String): Int
+
     @Query("DELETE FROM secret_upload_environment_variables WHERE request_id = :requestId")
     suspend fun deleteSecretUploadEnvironmentVariables(requestId: Long): Int
 
@@ -816,6 +866,7 @@ internal interface RequestDao {
     suspend fun revokePairing(pairing: PairingEntity) {
         check(updatePairing(pairing) == 1)
         deletePairingSecrets(pairing.requestId)
+        deleteTemporaryAccessGrantsForClient(pairing.clientId)
     }
 
     @Transaction
@@ -823,6 +874,7 @@ internal interface RequestDao {
         check(updateRequest(request) == 1)
         check(updatePairing(pairing) == 1)
         deletePairingSecrets(pairing.requestId)
+        deleteTemporaryAccessGrantsForClient(pairing.clientId)
         trimCompletedHistory()
     }
 
@@ -949,6 +1001,50 @@ internal interface RequestDao {
     }
 
     @Transaction
+    suspend fun insertSecretUseRequestIfAuthorized(
+        request: InboxRequestEntity,
+        secretUseRequest: SecretUseRequestEntity,
+        requestSecret: RequestSecretEntity,
+        currentPairingSecret: PairingSecretEntity?,
+        previousPairingSecret: PairingSecretEntity?,
+        authorization: AuthorizationCommitment,
+        clientId: String,
+        operation: String,
+        now: Long,
+    ): Long? {
+        if (!authorizationMatches(authorization, clientId, operation, now)) return null
+        return insertSecretUseRequest(
+            request,
+            secretUseRequest,
+            requestSecret,
+            currentPairingSecret,
+            previousPairingSecret,
+        )
+    }
+
+    @Transaction
+    suspend fun insertGitSignRequestIfAuthorized(
+        request: InboxRequestEntity,
+        gitSignRequest: GitSignRequestEntity,
+        requestSecret: RequestSecretEntity,
+        currentPairingSecret: PairingSecretEntity?,
+        previousPairingSecret: PairingSecretEntity?,
+        authorization: AuthorizationCommitment,
+        clientId: String,
+        operation: String,
+        now: Long,
+    ): Long? {
+        if (!authorizationMatches(authorization, clientId, operation, now)) return null
+        return insertGitSignRequest(
+            request,
+            gitSignRequest,
+            requestSecret,
+            currentPairingSecret,
+            previousPairingSecret,
+        )
+    }
+
+    @Transaction
     suspend fun insertSecretListRequest(
         request: InboxRequestEntity,
         secretListRequest: SecretListRequestEntity,
@@ -1008,6 +1104,7 @@ internal interface RequestDao {
         insertRequestSecret(requestSecret.copy(requestId = requestId))
         check(updatePairing(pairing) == 1)
         deletePairingSecrets(pairing.requestId)
+        deleteTemporaryAccessGrantsForClient(pairing.clientId)
         trimCompletedHistory()
         return requestId
     }
@@ -1061,6 +1158,20 @@ internal interface RequestDao {
     }
 
     @Transaction
+    suspend fun updateSecretUseRequestIfAuthorized(
+        request: InboxRequestEntity,
+        secretUseRequest: SecretUseRequestEntity,
+        authorization: AuthorizationCommitment,
+        clientId: String,
+        operation: String,
+        now: Long,
+    ): Boolean {
+        if (!authorizationMatches(authorization, clientId, operation, now)) return false
+        updateSecretUseRequest(request, secretUseRequest)
+        return true
+    }
+
+    @Transaction
     suspend fun updateGitSignRequest(
         request: InboxRequestEntity,
         gitSignRequest: GitSignRequestEntity,
@@ -1068,6 +1179,69 @@ internal interface RequestDao {
         check(updateRequest(request) == 1)
         check(updateGitSignRequestRow(gitSignRequest) == 1)
         trimCompletedHistory()
+    }
+
+    @Transaction
+    suspend fun updateGitSignRequestIfAuthorized(
+        request: InboxRequestEntity,
+        gitSignRequest: GitSignRequestEntity,
+        authorization: AuthorizationCommitment,
+        clientId: String,
+        operation: String,
+        now: Long,
+    ): Boolean {
+        if (!authorizationMatches(authorization, clientId, operation, now)) return false
+        updateGitSignRequest(request, gitSignRequest)
+        return true
+    }
+
+    @Transaction
+    suspend fun authorizationMatches(
+        authorization: AuthorizationCommitment,
+        clientId: String,
+        operation: String,
+        now: Long,
+    ): Boolean {
+        val pairing = getPairingByClientId(clientId) ?: return false
+        if (
+            pairing.state != "active" ||
+            pairing.relayClientState != "active" ||
+            pairing.desiredRelayClientState?.let { it != "active" } == true
+        ) {
+            return false
+        }
+        authorization.deviceInstructions?.let { expected ->
+            if (
+                getAuthorizationDeviceInstructions(expected.deviceIdentityId) !=
+                expected.instructions
+            ) {
+                return false
+            }
+        }
+        val secretIds = authorization.secretRevisions.keys
+        if (!secretIds.containsAll(authorization.policies.keys)) return false
+        if (secretIds.isEmpty()) return authorization.policies.isEmpty()
+        val secrets = getAuthorizationSecrets(secretIds.toList()).associateBy(SecretEntity::id)
+        if (secrets.size != secretIds.size) return false
+        if (authorization.secretRevisions.any { (id, revision) ->
+                secrets.getValue(id).revision != revision
+            }
+        ) {
+            return false
+        }
+        if (authorization.policies.isEmpty()) return true
+        val policyIds = authorization.policies.keys.toList()
+        val overrides = getAuthorizationOverrides(clientId, policyIds)
+            .associateBy(SecretClientApprovalOverrideEntity::secretId)
+        val activeGrants = getAuthorizationGrants(clientId, policyIds, operation)
+            .filter { it.expiresAt > now }
+            .associateBy(TemporaryAccessGrantEntity::secretId)
+        return authorization.policies.all { (secretId, expected) ->
+            val currentMode = overrides[secretId]?.approvalMode
+                ?: secrets.getValue(secretId).approvalMode
+            currentMode == expected.mode &&
+                activeGrants[secretId]?.expiresAt == expected.temporaryAccessExpiresAt
+        }
     }
 
     @Transaction

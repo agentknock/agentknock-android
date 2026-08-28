@@ -15,6 +15,7 @@ import kotlinx.coroutines.test.runTest
 import org.junit.Assert.assertEquals
 import org.junit.Assert.assertFalse
 import org.junit.Assert.assertNotEquals
+import org.junit.Assert.assertNull
 import org.junit.Assert.assertTrue
 import org.junit.Test
 
@@ -54,6 +55,36 @@ class SecretRepositoryTest {
             ),
             fixture.repository.listSecretsForClient().single(),
         )
+    }
+
+    @Test
+    fun `saving an SSH comment cannot restore stale key material`() = runTest {
+        val fixture = Fixture()
+        val key = fixture.repository.generateSshKey("first@example")
+        val created = fixture.repository.createSshSecret("git-signing", "", key)
+        check(created is CreateSecretResult.Created)
+        val original = fixture.dao.sshKeys.value.single()
+        val replacement = original.copy(
+            publicKey = byteArrayOf(9, 8, 7),
+            encryptionKeyId = "replacement-key",
+            nonce = byteArrayOf(6, 5, 4),
+            ciphertext = byteArrayOf(3, 2, 1),
+            materialUpdatedAt = original.materialUpdatedAt + 100,
+        )
+        fixture.dao.beforeSshCommentUpdate = {
+            fixture.dao.directlyReplaceSshKey(replacement)
+        }
+
+        assertEquals(
+            SaveSshSecretResult.Saved(created.id),
+            fixture.repository.saveSshComment(created.id, "new@example"),
+        )
+
+        val stored = fixture.dao.sshKeys.value.single()
+        assertEquals(replacement.publicKey.toList(), stored.publicKey.toList())
+        assertEquals(replacement.ciphertext.toList(), stored.ciphertext.toList())
+        assertEquals(replacement.materialUpdatedAt, stored.materialUpdatedAt)
+        assertEquals("new@example", stored.comment)
     }
 
     @Test
@@ -134,6 +165,48 @@ class SecretRepositoryTest {
         checkNotNull(secret)
         assertEquals(2, secret.environmentVariables.size)
         assertTrue(secret.environmentVariables.all { it.valueAvailable })
+    }
+
+    @Test
+    fun `saving environment notes cannot restore stale encrypted material`() = runTest {
+        val fixture = Fixture()
+        val secretId = fixture.createSecret("github")
+        val variableId = fixture.createVariable(secretId, "TOKEN", "first", true)
+        val original = fixture.dao.variables.value.single()
+        val replacement = original.copy(
+            encryptionKeyId = "replacement-key",
+            nonce = byteArrayOf(9, 8, 7),
+            ciphertext = byteArrayOf(6, 5, 4),
+            valueUpdatedAt = original.valueUpdatedAt + 100,
+        )
+        val revisedSecret = fixture.dao.secrets.value.single().copy(
+            revision = 9,
+            updatedAt = 9_999,
+        )
+        fixture.dao.beforeEnvironmentNotesUpdate = {
+            fixture.dao.directlyReplaceVariable(replacement)
+            fixture.dao.secrets.value = listOf(revisedSecret)
+        }
+
+        assertEquals(
+            SaveEnvironmentVariableResult.SAVED,
+            fixture.repository.saveEnvironmentVariable(
+                id = variableId,
+                name = "TOKEN",
+                sensitive = true,
+                notes = "Rotated out of band",
+                replacementValue = null,
+            ),
+        )
+
+        val stored = fixture.dao.variables.value.single()
+        assertEquals(replacement.encryptionKeyId, stored.encryptionKeyId)
+        assertEquals(replacement.nonce.toList(), stored.nonce.toList())
+        assertEquals(replacement.ciphertext.toList(), stored.ciphertext.toList())
+        assertEquals(replacement.valueUpdatedAt, stored.valueUpdatedAt)
+        assertEquals("Rotated out of band", stored.notes)
+        assertEquals(9L, fixture.dao.secrets.value.single().revision)
+        assertEquals(9_999L, fixture.dao.secrets.value.single().updatedAt)
     }
 
     @Test
@@ -399,6 +472,7 @@ class SecretRepositoryTest {
         val secret = fixture.repository.observeSecret(result.secretId).first()
         checkNotNull(secret)
         assertEquals("Cloudflare production account", secret.description)
+        assertEquals(SecretApprovalMode.TEMPORARY, secret.approvalMode)
         assertTrue(secret.environmentVariables.all(EnvironmentVariableMetadata::sensitive))
         assertEquals(
             EnvironmentVariableValue.Available("token"),
@@ -477,7 +551,11 @@ class SecretRepositoryTest {
             )
 
             val overridden = fixture.repository
-                .approvalPoliciesForNames(listOf("github"), "workstation")
+                .approvalPoliciesForNames(
+                    listOf("github"),
+                    "workstation",
+                    TemporaryAccessOperation.INVOCATION,
+                )
                 .single()
             assertEquals(SecretApprovalMode.APPROVE, overridden.mode)
             assertEquals(SecretApprovalMode.ASK_AI, overridden.defaultMode)
@@ -489,11 +567,231 @@ class SecretRepositoryTest {
 
             fixture.repository.setClientApprovalOverride(secretId, "workstation", null)
             val inherited = fixture.repository
-                .approvalPoliciesForNames(listOf("github"), "workstation")
+                .approvalPoliciesForNames(
+                    listOf("github"),
+                    "workstation",
+                    TemporaryAccessOperation.INVOCATION,
+                )
                 .single()
             assertEquals(SecretApprovalMode.ASK_AI, inherited.mode)
             assertFalse(inherited.overridden)
         }
+
+    @Test
+    fun `temporary access is scoped to client secret and operation`() = runTest {
+        val fixture = Fixture()
+        val secretId = fixture.createSecret("github")
+        val otherSecretId = fixture.createSecret("production")
+        fixture.repository.saveApprovalMode(secretId, SecretApprovalMode.TEMPORARY)
+
+        fixture.repository.allowTemporaryAccess(
+            policies = fixture.repository.approvalPoliciesForNames(
+                listOf("github"),
+                "workstation",
+                TemporaryAccessOperation.INVOCATION,
+            ),
+            clientId = "workstation",
+            operation = TemporaryAccessOperation.INVOCATION,
+            expiresAt = 10_000,
+        )
+
+        assertEquals(
+            10_000L,
+            fixture.repository.approvalPoliciesForNames(
+                listOf("github"),
+                "workstation",
+                TemporaryAccessOperation.INVOCATION,
+            ).single().temporaryAccessExpiresAt,
+        )
+        assertNull(
+            fixture.repository.approvalPoliciesForNames(
+                listOf("github"),
+                "workstation",
+                TemporaryAccessOperation.GIT_SIGN,
+            ).single().temporaryAccessExpiresAt,
+        )
+        assertNull(
+            fixture.repository.approvalPoliciesForNames(
+                listOf("github"),
+                "other-client",
+                TemporaryAccessOperation.INVOCATION,
+            ).single().temporaryAccessExpiresAt,
+        )
+        assertNull(
+            fixture.repository.approvalPoliciesForNames(
+                listOf("production"),
+                "workstation",
+                TemporaryAccessOperation.INVOCATION,
+            ).single { it.secretId == otherSecretId }.temporaryAccessExpiresAt,
+        )
+    }
+
+    @Test
+    fun `temporary access cannot be extended and can be ended explicitly`() = runTest {
+        val fixture = Fixture()
+        val secretId = fixture.createSecret("github")
+        val initialPolicy = fixture.repository.approvalPoliciesForNames(
+            listOf("github"),
+            "workstation",
+            TemporaryAccessOperation.INVOCATION,
+        )
+        assertTrue(
+            fixture.repository.allowTemporaryAccess(
+                policies = initialPolicy,
+                clientId = "workstation",
+                operation = TemporaryAccessOperation.INVOCATION,
+                expiresAt = 10_000,
+            ),
+        )
+
+        val activePolicy = fixture.repository.approvalPoliciesForNames(
+            listOf("github"),
+            "workstation",
+            TemporaryAccessOperation.INVOCATION,
+        )
+        assertFalse(
+            fixture.repository.allowTemporaryAccess(
+                policies = activePolicy,
+                clientId = "workstation",
+                operation = TemporaryAccessOperation.INVOCATION,
+                expiresAt = 20_000,
+            ),
+        )
+        assertEquals(10_000L, fixture.dao.temporaryAccessGrants.value.single().expiresAt)
+
+        assertTrue(
+            fixture.repository.endTemporaryAccess(
+                secretId,
+                "workstation",
+                TemporaryAccessOperation.INVOCATION,
+            ),
+        )
+        assertTrue(fixture.dao.temporaryAccessGrants.value.isEmpty())
+        assertFalse(
+            fixture.repository.endTemporaryAccess(
+                secretId,
+                "workstation",
+                TemporaryAccessOperation.INVOCATION,
+            ),
+        )
+    }
+
+    @Test
+    fun `new secrets use four-hour approval by default`() = runTest {
+        val fixture = Fixture()
+
+        val secretId = fixture.createSecret("github")
+
+        assertEquals(
+            SecretApprovalMode.TEMPORARY,
+            fixture.repository.observeSecret(secretId).first()?.approvalMode,
+        )
+    }
+
+    @Test
+    fun `temporary access is not inserted after secret material changes`() = runTest {
+        val fixture = Fixture()
+        val secretId = fixture.createSecret("github")
+        val variableId = fixture.createVariable(secretId, "GITHUB_TOKEN", "old-token", true)
+        val stalePolicy = fixture.repository.approvalPoliciesForNames(
+            listOf("github"),
+            "workstation",
+            TemporaryAccessOperation.INVOCATION,
+        )
+
+        fixture.repository.saveEnvironmentVariable(
+            id = variableId,
+            name = "GITHUB_TOKEN",
+            sensitive = true,
+            notes = "",
+            replacementValue = "new-token",
+        )
+        val inserted = fixture.repository.allowTemporaryAccess(
+            policies = stalePolicy,
+            clientId = "workstation",
+            operation = TemporaryAccessOperation.INVOCATION,
+            expiresAt = 10_000,
+        )
+
+        assertFalse(inserted)
+        assertTrue(fixture.dao.temporaryAccessGrants.value.isEmpty())
+    }
+
+    @Test
+    fun `renaming a secret ends its temporary access`() = runTest {
+        val fixture = Fixture()
+        val secretId = fixture.createSecret("staging")
+        fixture.repository.allowTemporaryAccess(
+            policies = fixture.repository.approvalPoliciesForNames(
+                listOf("staging"),
+                "workstation",
+                TemporaryAccessOperation.INVOCATION,
+            ),
+            clientId = "workstation",
+            operation = TemporaryAccessOperation.INVOCATION,
+            expiresAt = 10_000,
+        )
+
+        fixture.repository.saveSecret(secretId, "production", "")
+
+        assertTrue(fixture.dao.temporaryAccessGrants.value.isEmpty())
+    }
+
+    @Test
+    fun `approval and secret changes end temporary access`() = runTest {
+        val fixture = Fixture()
+        val secretId = fixture.createSecret("github")
+        val variableId = fixture.createVariable(secretId, "GITHUB_TOKEN", "token", true)
+        fixture.repository.saveApprovalMode(secretId, SecretApprovalMode.TEMPORARY)
+        fixture.repository.allowTemporaryAccess(
+            policies = fixture.repository.approvalPoliciesForNames(
+                listOf("github"),
+                "workstation",
+                TemporaryAccessOperation.INVOCATION,
+            ),
+            clientId = "workstation",
+            operation = TemporaryAccessOperation.INVOCATION,
+            expiresAt = 10_000,
+        )
+
+        fixture.repository.saveEnvironmentVariable(
+            id = variableId,
+            name = "GITHUB_TOKEN",
+            sensitive = true,
+            notes = "",
+            replacementValue = "new-token",
+        )
+        assertNull(
+            fixture.repository.approvalPoliciesForNames(
+                listOf("github"),
+                "workstation",
+                TemporaryAccessOperation.INVOCATION,
+            ).single().temporaryAccessExpiresAt,
+        )
+
+        fixture.repository.allowTemporaryAccess(
+            policies = fixture.repository.approvalPoliciesForNames(
+                listOf("github"),
+                "workstation",
+                TemporaryAccessOperation.INVOCATION,
+            ),
+            clientId = "workstation",
+            operation = TemporaryAccessOperation.INVOCATION,
+            expiresAt = 10_000,
+        )
+        fixture.repository.setClientApprovalOverride(
+            secretId,
+            "workstation",
+            SecretApprovalMode.ASK_ME,
+        )
+        assertNull(
+            fixture.repository.approvalPoliciesForNames(
+                listOf("github"),
+                "workstation",
+                TemporaryAccessOperation.INVOCATION,
+            ).single().temporaryAccessExpiresAt,
+        )
+    }
 
     @Test
     fun `update uploads leave omitted environment variables untouched`() = runTest {
@@ -582,6 +880,10 @@ private class FakeSecretDao : SecretDao {
     val sshKeys = MutableStateFlow<List<SshKeyEntity>>(emptyList())
     val approvalOverrides =
         MutableStateFlow<List<SecretClientApprovalOverrideEntity>>(emptyList())
+    val temporaryAccessGrants = MutableStateFlow<List<TemporaryAccessGrantEntity>>(emptyList())
+    var temporaryAccessClientAvailable = true
+    var beforeEnvironmentNotesUpdate: (() -> Unit)? = null
+    var beforeSshCommentUpdate: (() -> Unit)? = null
 
     override fun observeSecrets(): Flow<List<SecretSummaryRow>> = combine(
         secrets,
@@ -612,6 +914,22 @@ private class FakeSecretDao : SecretDao {
     ): Flow<List<SecretClientApprovalOverrideEntity>> = approvalOverrides.map { all ->
         all.filter { it.secretId == secretId }.sortedBy { it.clientId }
     }
+
+    override fun observeTemporaryAccessGrants(): Flow<List<TemporaryAccessGrantRow>> =
+        combine(temporaryAccessGrants, secrets) { grants, currentSecrets ->
+            val names = currentSecrets.associate { it.id to it.name }
+            grants.mapNotNull { grant ->
+                names[grant.secretId]?.let { secretName ->
+                    TemporaryAccessGrantRow(
+                        secretId = grant.secretId,
+                        secretName = secretName,
+                        clientId = grant.clientId,
+                        operation = grant.operation,
+                        expiresAt = grant.expiresAt,
+                    )
+                }
+            }
+        }
 
     override fun observeSshKey(secretId: String): Flow<SshKeyMetadataRow?> =
         sshKeys.map { all ->
@@ -674,6 +992,19 @@ private class FakeSecretDao : SecretDao {
         it.clientId == clientId && it.secretId in secretIds
     }
 
+    override suspend fun getActiveTemporaryAccessGrants(
+        clientId: String,
+        secretIds: List<String>,
+        operation: String,
+        now: Long,
+    ): List<TemporaryAccessGrantEntity> = temporaryAccessGrants.value.filter {
+        it.clientId == clientId && it.secretId in secretIds &&
+            it.operation == operation && it.expiresAt > now
+    }
+
+    override suspend fun clientCanReceiveTemporaryAccess(clientId: String): Boolean =
+        temporaryAccessClientAvailable
+
     override suspend fun getEnvironmentVariablesForSecrets(
         secretIds: List<String>,
     ): List<EnvironmentVariableEntity> = variables.value.filter { it.secretId in secretIds }
@@ -703,12 +1034,59 @@ private class FakeSecretDao : SecretDao {
         return 1
     }
 
+    override suspend fun updateSecretApprovalMode(
+        secretId: String,
+        approvalMode: String,
+        updatedAt: Long,
+    ): Int {
+        if (secrets.value.none { it.id == secretId }) return 0
+        secrets.value = secrets.value.map { secret ->
+            if (secret.id == secretId) {
+                secret.copy(
+                    approvalMode = approvalMode,
+                    updatedAt = updatedAt,
+                    revision = secret.revision + 1,
+                )
+            } else {
+                secret
+            }
+        }
+        return 1
+    }
+
+    override suspend fun updateSecretInstructions(
+        secretId: String,
+        instructions: String,
+        updatedAt: Long,
+    ): Int {
+        if (secrets.value.none { it.id == secretId }) return 0
+        secrets.value = secrets.value.map { secret ->
+            if (secret.id == secretId) {
+                secret.copy(
+                    instructions = instructions,
+                    updatedAt = updatedAt,
+                    revision = secret.revision + 1,
+                )
+            } else {
+                secret
+            }
+        }
+        return 1
+    }
+
     override suspend fun upsertClientApprovalOverride(
         override: SecretClientApprovalOverrideEntity,
     ) {
         approvalOverrides.value = approvalOverrides.value.filterNot {
             it.secretId == override.secretId && it.clientId == override.clientId
         } + override
+    }
+
+    override suspend fun upsertTemporaryAccessGrants(grants: List<TemporaryAccessGrantEntity>) {
+        val keys = grants.map { Triple(it.secretId, it.clientId, it.operation) }.toSet()
+        temporaryAccessGrants.value = temporaryAccessGrants.value.filterNot {
+            Triple(it.secretId, it.clientId, it.operation) in keys
+        } + grants
     }
 
     override suspend fun deleteClientApprovalOverride(secretId: String, clientId: String): Int {
@@ -719,11 +1097,57 @@ private class FakeSecretDao : SecretDao {
         return before - approvalOverrides.value.size
     }
 
+    override suspend fun deleteTemporaryAccessGrant(
+        secretId: String,
+        clientId: String,
+        operation: String,
+    ): Int {
+        val before = temporaryAccessGrants.value.size
+        temporaryAccessGrants.value = temporaryAccessGrants.value.filterNot {
+            it.secretId == secretId && it.clientId == clientId && it.operation == operation
+        }
+        return before - temporaryAccessGrants.value.size
+    }
+
+    override suspend fun deleteTemporaryAccessGrantsForSecret(secretId: String): Int {
+        val before = temporaryAccessGrants.value.size
+        temporaryAccessGrants.value = temporaryAccessGrants.value.filterNot {
+            it.secretId == secretId
+        }
+        return before - temporaryAccessGrants.value.size
+    }
+
+    override suspend fun deleteTemporaryAccessGrantsForSecretClient(
+        secretId: String,
+        clientId: String,
+    ): Int {
+        val before = temporaryAccessGrants.value.size
+        temporaryAccessGrants.value = temporaryAccessGrants.value.filterNot {
+            it.secretId == secretId && it.clientId == clientId
+        }
+        return before - temporaryAccessGrants.value.size
+    }
+
+    override suspend fun deleteExpiredTemporaryAccessGrants(now: Long): Int {
+        val before = temporaryAccessGrants.value.size
+        temporaryAccessGrants.value = temporaryAccessGrants.value.filter { it.expiresAt > now }
+        return before - temporaryAccessGrants.value.size
+    }
+
+    override suspend fun deleteAllTemporaryAccessGrants(): Int {
+        val before = temporaryAccessGrants.value.size
+        temporaryAccessGrants.value = emptyList()
+        return before
+    }
+
     override suspend fun deleteSecret(secret: SecretEntity) {
         secrets.value = secrets.value.filterNot { it.id == secret.id }
         variables.value = variables.value.filterNot { it.secretId == secret.id }
         sshKeys.value = sshKeys.value.filterNot { it.secretId == secret.id }
         approvalOverrides.value = approvalOverrides.value.filterNot { it.secretId == secret.id }
+        temporaryAccessGrants.value = temporaryAccessGrants.value.filterNot {
+            it.secretId == secret.id
+        }
     }
 
     override suspend fun insertSshKeyRow(key: SshKeyEntity) {
@@ -734,6 +1158,18 @@ private class FakeSecretDao : SecretDao {
     override suspend fun updateSshKeyRow(key: SshKeyEntity): Int {
         if (sshKeys.value.none { it.secretId == key.secretId }) return 0
         sshKeys.value = sshKeys.value.map { if (it.secretId == key.secretId) key else it }
+        return 1
+    }
+
+    override suspend fun updateSshKeyCommentRow(secretId: String, comment: String): Int {
+        beforeSshCommentUpdate?.also {
+            beforeSshCommentUpdate = null
+            it()
+        }
+        if (sshKeys.value.none { it.secretId == secretId }) return 0
+        sshKeys.value = sshKeys.value.map { key ->
+            if (key.secretId == secretId) key.copy(comment = comment) else key
+        }
         return 1
     }
 
@@ -748,13 +1184,44 @@ private class FakeSecretDao : SecretDao {
         return 1
     }
 
+    override suspend fun updateEnvironmentVariableNotesRow(
+        variableId: String,
+        secretId: String,
+        notes: String,
+        updatedAt: Long,
+    ): Int {
+        beforeEnvironmentNotesUpdate?.also {
+            beforeEnvironmentNotesUpdate = null
+            it()
+        }
+        if (variables.value.none { it.id == variableId && it.secretId == secretId }) return 0
+        variables.value = variables.value.map { variable ->
+            if (variable.id == variableId && variable.secretId == secretId) {
+                variable.copy(notes = notes, updatedAt = updatedAt)
+            } else {
+                variable
+            }
+        }
+        return 1
+    }
+
     override suspend fun deleteEnvironmentVariableRow(variable: EnvironmentVariableEntity) {
         variables.value = variables.value.filterNot { it.id == variable.id }
     }
 
     override suspend fun touchSecret(secretId: String, updatedAt: Long) {
         secrets.value = secrets.value.map {
-            if (it.id == secretId) it.copy(updatedAt = updatedAt) else it
+            if (it.id == secretId) it.copy(updatedAt = maxOf(it.updatedAt, updatedAt)) else it
+        }
+    }
+
+    override suspend fun reviseSecret(secretId: String, updatedAt: Long) {
+        secrets.value = secrets.value.map {
+            if (it.id == secretId) {
+                it.copy(updatedAt = maxOf(it.updatedAt, updatedAt), revision = it.revision + 1)
+            } else {
+                it
+            }
         }
     }
 
@@ -777,5 +1244,9 @@ private class FakeSecretDao : SecretDao {
 
     fun directlyReplaceVariable(variable: EnvironmentVariableEntity) {
         variables.value = variables.value.map { if (it.id == variable.id) variable else it }
+    }
+
+    fun directlyReplaceSshKey(key: SshKeyEntity) {
+        sshKeys.value = sshKeys.value.map { if (it.secretId == key.secretId) key else it }
     }
 }

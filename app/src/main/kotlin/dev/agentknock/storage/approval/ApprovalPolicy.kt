@@ -14,6 +14,9 @@ internal data class RequestedSecretApproval(
     val id: String,
     val name: String,
     val defaultAction: ApprovalAction = ApprovalAction.ASK_ME,
+    val temporaryAccessEligible: Boolean = false,
+    val temporaryAccessExpiresAt: Long? = null,
+    val revision: Long? = null,
 )
 
 @Serializable
@@ -24,6 +27,9 @@ internal data class SecretApprovalEvaluation(
     // Kept so evaluations saved by builds with command rules remain readable.
     val matchedRuleIds: Set<String> = emptySet(),
     val decisiveRuleIds: Set<String> = emptySet(),
+    val temporaryAccessEligible: Boolean = false,
+    val temporaryAccessExpiresAt: Long? = null,
+    val revision: Long? = null,
 )
 
 @Serializable
@@ -66,6 +72,9 @@ internal object ApprovalPolicyEvaluator {
                 secretId = secret.id,
                 secretName = secret.name,
                 action = secret.defaultAction,
+                temporaryAccessEligible = secret.temporaryAccessEligible,
+                temporaryAccessExpiresAt = secret.temporaryAccessExpiresAt,
+                revision = secret.revision,
             )
         }
         return ApprovalEvaluation(
@@ -75,3 +84,13 @@ internal object ApprovalPolicyEvaluator {
         )
     }
 }
+
+internal fun ApprovalEvaluation.requiresAiReview(): Boolean =
+    secrets.none { it.action == ApprovalAction.DENY } &&
+        secrets.any { it.action == ApprovalAction.ASK_AI }
+
+internal fun ApprovalEvaluation.isFullyApproved(aiDecision: AiReviewDecision?): Boolean =
+    secrets.all { secret ->
+        secret.action == ApprovalAction.APPROVE ||
+            (secret.action == ApprovalAction.ASK_AI && aiDecision == AiReviewDecision.APPROVE)
+    }

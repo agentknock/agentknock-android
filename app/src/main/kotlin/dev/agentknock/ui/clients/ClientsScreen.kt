@@ -36,6 +36,7 @@ import androidx.compose.material.icons.outlined.Edit
 import androidx.compose.material.icons.outlined.PauseCircle
 import androidx.compose.material.icons.outlined.PlayCircle
 import androidx.compose.material.icons.outlined.Settings
+import androidx.compose.material.icons.outlined.Schedule
 import androidx.compose.material3.AlertDialog
 import androidx.compose.material3.Button
 import androidx.compose.material3.ButtonDefaults
@@ -85,6 +86,8 @@ import dev.agentknock.storage.request.InboxRequestState
 import dev.agentknock.storage.request.InboxRequestSummary
 import dev.agentknock.storage.request.PairingState
 import dev.agentknock.storage.vault.DeviceIdentity
+import dev.agentknock.storage.secret.TemporaryAccessGrant
+import dev.agentknock.storage.secret.TemporaryAccessOperation
 import dev.agentknock.ui.components.InformationRow
 import dev.agentknock.ui.components.InformationSurface
 import dev.agentknock.ui.components.TonalIcon
@@ -105,6 +108,7 @@ internal fun ClientsScreen(
     val selection by viewModel.selection.collectAsStateWithLifecycle()
     val pairingSelection by viewModel.pairingSelection.collectAsStateWithLifecycle()
     val selectedClient by viewModel.selectedClient.collectAsStateWithLifecycle()
+    val temporaryAccessGrants by viewModel.temporaryAccessGrants.collectAsStateWithLifecycle()
     val selectedPairing by viewModel.selectedPairing.collectAsStateWithLifecycle()
     val configuration by viewModel.configuration.collectAsStateWithLifecycle()
     val snackbar = remember { SnackbarHostState() }
@@ -167,6 +171,7 @@ internal fun ClientsScreen(
                     } else {
                         ClientSelectionDetail(
                             client = selectedClient,
+                            temporaryAccessGrants = temporaryAccessGrants,
                             viewModel = viewModel,
                             report = ::report,
                             onBack = { viewModel.selectClient(null) },
@@ -202,6 +207,7 @@ internal fun ClientsScreen(
                 BackHandler { viewModel.selectClient(null) }
                 ClientSelectionDetail(
                     client = selectedClient,
+                    temporaryAccessGrants = temporaryAccessGrants,
                     viewModel = viewModel,
                     report = ::report,
                     onBack = { viewModel.selectClient(null) },
@@ -266,6 +272,7 @@ private fun PairingSelectionDetail(
 @Composable
 private fun ClientSelectionDetail(
     client: ClientDetails?,
+    temporaryAccessGrants: List<TemporaryAccessGrant>,
     viewModel: ClientsViewModel,
     report: (String) -> Unit,
     onBack: () -> Unit,
@@ -279,6 +286,7 @@ private fun ClientSelectionDetail(
     }
     ClientDetail(
         client = client,
+        temporaryAccessGrants = temporaryAccessGrants,
         onBack = onBack,
         showBack = showBack,
         onRename = { name ->
@@ -318,6 +326,20 @@ private fun ClientSelectionDetail(
                         "Instructions could not be updated"
                     },
                 )
+            }
+        },
+        onEndTemporaryAccess = { grant ->
+            scope.launch {
+                val ended = viewModel.endTemporaryAccess(
+                    grant.secretId,
+                    client.clientId,
+                    grant.operation,
+                )
+                report(if (ended) {
+                    "Temporary access ended"
+                } else {
+                    "Temporary access had already ended"
+                })
             }
         },
         report = report,
@@ -451,7 +473,31 @@ private fun ClientList(
                                     platform != null -> platform
                                     else -> ""
                                 }
-                                if (machine.isNotEmpty()) Text(machine)
+                                Column(verticalArrangement = Arrangement.spacedBy(2.dp)) {
+                                    if (machine.isNotEmpty()) Text(machine)
+                                    if (client.temporaryAccessCount > 0) {
+                                        Row(
+                                            horizontalArrangement = Arrangement.spacedBy(6.dp),
+                                            verticalAlignment = Alignment.CenterVertically,
+                                        ) {
+                                            Icon(
+                                                Icons.Outlined.Schedule,
+                                                contentDescription = null,
+                                                modifier = Modifier.size(14.dp),
+                                            )
+                                            Text(
+                                                "${client.temporaryAccessCount} temporary " +
+                                                    if (client.temporaryAccessCount == 1) {
+                                                        "approval"
+                                                    } else {
+                                                        "approvals"
+                                                    },
+                                                style = MaterialTheme.typography.labelMedium,
+                                                color = MaterialTheme.colorScheme.primary,
+                                            )
+                                        }
+                                    }
+                                }
                             },
                             leadingContent = {
                                 TonalIcon(Icons.Outlined.Computer, contentDescription = null)
@@ -589,11 +635,13 @@ private fun SectionHeading(
 @Composable
 private fun ClientDetail(
     client: ClientDetails,
+    temporaryAccessGrants: List<TemporaryAccessGrant>,
     onBack: () -> Unit,
     showBack: Boolean,
     onRename: (String) -> Unit,
     onSetState: (RelayClientState) -> Unit,
     onSaveInstructions: (String) -> Unit,
+    onEndTemporaryAccess: (TemporaryAccessGrant) -> Unit,
     report: (String) -> Unit,
     modifier: Modifier = Modifier,
 ) {
@@ -634,9 +682,53 @@ private fun ClientDetail(
             verticalArrangement = Arrangement.spacedBy(16.dp),
         ) {
             val pending = client.desiredState?.takeIf { it != client.state }
+            val temporaryAccessPaused = client.state != RelayClientState.ACTIVE ||
+                client.desiredState?.let { it != RelayClientState.ACTIVE } == true
             InformationSurface {
                 ClientStateBadge(client.state, pending)
                 Text(client.state.explanation())
+            }
+
+            if (temporaryAccessGrants.isNotEmpty()) {
+                InformationSurface {
+                    Text(
+                        "Temporary approvals",
+                        style = MaterialTheme.typography.titleMedium,
+                    )
+                    Text(
+                        if (temporaryAccessPaused) {
+                            "They are paused until this client is active. They resume if that " +
+                                "happens before their end time."
+                        } else {
+                            "These uses bypass both your decision and AI review until their end time."
+                        },
+                        color = MaterialTheme.colorScheme.onSurfaceVariant,
+                    )
+                    temporaryAccessGrants.forEachIndexed { index, grant ->
+                        if (index > 0) HorizontalDivider()
+                        Row(
+                            modifier = Modifier.fillMaxWidth(),
+                            horizontalArrangement = Arrangement.spacedBy(12.dp),
+                            verticalAlignment = Alignment.CenterVertically,
+                        ) {
+                            Column(
+                                modifier = Modifier.weight(1f),
+                                verticalArrangement = Arrangement.spacedBy(2.dp),
+                            ) {
+                                Text(grant.secretName, style = MaterialTheme.typography.bodyLarge)
+                                Text(
+                                    "${grant.operation.displayName()} · Ends " +
+                                        formatTimestamp(grant.expiresAt),
+                                    style = MaterialTheme.typography.bodyMedium,
+                                    color = MaterialTheme.colorScheme.onSurfaceVariant,
+                                )
+                            }
+                            TextButton(onClick = { onEndTemporaryAccess(grant) }) {
+                                Text("End")
+                            }
+                        }
+                    }
+                }
             }
 
             InformationSurface {
@@ -927,4 +1019,9 @@ private fun RelayClientState.successMessage(): String = when (this) {
     RelayClientState.SUSPENDED -> "Client suspended"
     RelayClientState.REVOKED -> "Client revoked"
     RelayClientState.PENDING -> "Client state updated"
+}
+
+private fun TemporaryAccessOperation.displayName(): String = when (this) {
+    TemporaryAccessOperation.INVOCATION -> "Environment values for any command"
+    TemporaryAccessOperation.GIT_SIGN -> "Git signing for any repository"
 }

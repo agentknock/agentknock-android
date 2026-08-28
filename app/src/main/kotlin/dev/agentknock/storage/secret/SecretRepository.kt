@@ -16,10 +16,13 @@ import dev.agentknock.protocol.SecretUploadMode
 import java.util.UUID
 import java.util.Base64
 import java.security.MessageDigest
+import java.time.Instant
 import kotlinx.coroutines.CoroutineDispatcher
 import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.delay
 import kotlinx.coroutines.flow.Flow
 import kotlinx.coroutines.flow.combine
+import kotlinx.coroutines.flow.flow
 import kotlinx.coroutines.flow.map
 import kotlinx.coroutines.withContext
 import kotlinx.serialization.Serializable
@@ -34,9 +37,20 @@ internal enum class SecretApprovalMode(
 ) {
     DENY("deny", 0),
     ASK_ME("ask_me", 1),
+    TEMPORARY("temporary", 1),
     ASK_AI("ask_ai", 2),
     APPROVE("approve", 3),
 }
+
+internal enum class TemporaryAccessOperation(val storedName: String) {
+    INVOCATION("invocation"),
+    GIT_SIGN("git_sign"),
+}
+
+internal fun String.toTemporaryAccessOperation(): TemporaryAccessOperation =
+    checkNotNull(TemporaryAccessOperation.entries.find { it.storedName == this }) {
+        "Unknown temporary access operation"
+    }
 
 internal fun String.toSecretApprovalMode(): SecretApprovalMode =
     checkNotNull(SecretApprovalMode.entries.find { it.storedName == this }) {
@@ -48,6 +62,14 @@ internal data class SecretClientApprovalOverride(
     val mode: SecretApprovalMode,
 )
 
+internal data class TemporaryAccessGrant(
+    val secretId: String,
+    val secretName: String,
+    val clientId: String,
+    val operation: TemporaryAccessOperation,
+    val expiresAt: Long,
+)
+
 internal data class SecretApprovalPolicy(
     val secretId: String,
     val secretName: String,
@@ -55,6 +77,8 @@ internal data class SecretApprovalPolicy(
     val defaultMode: SecretApprovalMode,
     val overridden: Boolean,
     val instructions: String,
+    val revision: Long,
+    val temporaryAccessExpiresAt: Long? = null,
 )
 
 internal data class SecretSummary(
@@ -66,6 +90,7 @@ internal data class SecretSummary(
     val sshKey: SshKeyMetadata?,
     val createdAt: Long,
     val updatedAt: Long,
+    val temporaryAccessCount: Int = 0,
 )
 
 internal data class SecretDetails(
@@ -78,6 +103,7 @@ internal data class SecretDetails(
     val approvalMode: SecretApprovalMode,
     val instructions: String,
     val clientApprovalOverrides: List<SecretClientApprovalOverride>,
+    val temporaryAccessGrants: List<TemporaryAccessGrant>,
     val createdAt: Long,
     val updatedAt: Long,
 )
@@ -230,6 +256,7 @@ internal data class RequestedSecretDescription(
 
 internal data class SecretReviewMetadata(
     val id: String,
+    val revision: Long = 1,
     val name: String,
     val description: String,
     val type: String,
@@ -328,7 +355,11 @@ internal class SecretRepository(
     private val currentTimeMillis: () -> Long = System::currentTimeMillis,
     private val cryptographyDispatcher: CoroutineDispatcher = Dispatchers.IO,
 ) : RequestedSecretSource {
-    fun observeSecrets(): Flow<List<SecretSummary>> = dao.observeSecrets().map { rows ->
+    fun observeSecrets(): Flow<List<SecretSummary>> = combine(
+        dao.observeSecrets(),
+        observeTemporaryAccessGrants(),
+    ) { rows, grants ->
+        val grantCounts = grants.groupingBy(TemporaryAccessGrant::secretId).eachCount()
         rows.map { row ->
             SecretSummary(
                 id = row.id,
@@ -355,6 +386,7 @@ internal class SecretRepository(
                 },
                 createdAt = row.createdAt,
                 updatedAt = row.updatedAt,
+                temporaryAccessCount = grantCounts[row.id] ?: 0,
             )
         }
     }
@@ -364,7 +396,8 @@ internal class SecretRepository(
         dao.observeEnvironmentVariables(id),
         dao.observeSshKey(id),
         dao.observeClientApprovalOverrides(id),
-    ) { secret, variables, sshKey, overrides ->
+        observeTemporaryAccessGrants(),
+    ) { secret, variables, sshKey, overrides, grants ->
         secret?.let {
             val availability = variables
                 .map(EnvironmentVariableMetadataRow::encryptionKeyId)
@@ -407,8 +440,24 @@ internal class SecretRepository(
                         mode = override.approvalMode.toSecretApprovalMode(),
                     )
                 },
+                temporaryAccessGrants = grants.filter { it.secretId == secret.id },
                 createdAt = secret.createdAt,
                 updatedAt = secret.updatedAt,
+            )
+        }
+    }
+
+    fun observeTemporaryAccessGrants(): Flow<List<TemporaryAccessGrant>> = combine(
+        dao.observeTemporaryAccessGrants(),
+        currentTimeFlow(),
+    ) { rows, now ->
+        rows.filter { it.expiresAt > now }.map { row ->
+            TemporaryAccessGrant(
+                secretId = row.secretId,
+                secretName = row.secretName,
+                clientId = row.clientId,
+                operation = row.operation.toTemporaryAccessOperation(),
+                expiresAt = row.expiresAt,
             )
         }
     }
@@ -423,6 +472,7 @@ internal class SecretRepository(
     suspend fun approvalPoliciesForNames(
         names: List<String>,
         clientId: String,
+        operation: TemporaryAccessOperation,
     ): List<SecretApprovalPolicy> {
         val requestedNames = names.distinct()
         val secrets = dao.getSecretsByName(requestedNames)
@@ -430,6 +480,17 @@ internal class SecretRepository(
             clientId = clientId,
             secretIds = secrets.map(SecretEntity::id),
         ).associateBy(SecretClientApprovalOverrideEntity::secretId)
+        val now = currentTimeMillis()
+        val grants = if (secrets.isEmpty()) {
+            emptyMap()
+        } else {
+            dao.getActiveTemporaryAccessGrants(
+                clientId = clientId,
+                secretIds = secrets.map(SecretEntity::id),
+                operation = operation.storedName,
+                now = now,
+            ).associateBy(TemporaryAccessGrantEntity::secretId)
+        }
         val byName = secrets.associateBy(SecretEntity::name)
         return requestedNames.mapNotNull { name ->
             byName[name]?.let { secret ->
@@ -442,6 +503,8 @@ internal class SecretRepository(
                     defaultMode = defaultMode,
                     overridden = override != null,
                     instructions = secret.instructions,
+                    revision = secret.revision,
+                    temporaryAccessExpiresAt = grants[secret.id]?.expiresAt,
                 )
             }
         }
@@ -450,9 +513,9 @@ internal class SecretRepository(
     suspend fun saveApprovalMode(id: String, mode: SecretApprovalMode): SaveSecretResult {
         val secret = dao.getSecret(id) ?: return SaveSecretResult.NOT_FOUND
         if (secret.approvalMode == mode.storedName) return SaveSecretResult.SAVED
-        dao.updateSecret(
-            secret.copy(approvalMode = mode.storedName, updatedAt = currentTimeMillis()),
-        )
+        if (!dao.setSecretApprovalMode(id, mode.storedName, currentTimeMillis())) {
+            return SaveSecretResult.NOT_FOUND
+        }
         audit.record(
             AuditRecord(
                 category = AuditCategory.SECRET,
@@ -468,9 +531,9 @@ internal class SecretRepository(
         val secret = dao.getSecret(id) ?: return SaveSecretResult.NOT_FOUND
         val normalized = instructions.trim()
         if (secret.instructions == normalized) return SaveSecretResult.SAVED
-        dao.updateSecret(
-            secret.copy(instructions = normalized, updatedAt = currentTimeMillis()),
-        )
+        if (dao.updateSecretInstructions(id, normalized, currentTimeMillis()) != 1) {
+            return SaveSecretResult.NOT_FOUND
+        }
         audit.record(
             AuditRecord(
                 category = AuditCategory.SECRET,
@@ -489,9 +552,9 @@ internal class SecretRepository(
     ): SaveSecretResult {
         val secret = dao.getSecret(secretId) ?: return SaveSecretResult.NOT_FOUND
         if (mode == null) {
-            dao.deleteClientApprovalOverride(secretId, clientId)
+            dao.deleteClientApprovalOverrideAndTemporaryAccess(secretId, clientId)
         } else {
-            dao.upsertClientApprovalOverride(
+            dao.upsertClientApprovalOverrideAndDeleteTemporaryAccess(
                 SecretClientApprovalOverrideEntity(
                     secretId = secretId,
                     clientId = clientId,
@@ -509,6 +572,78 @@ internal class SecretRepository(
             ),
         )
         return SaveSecretResult.SAVED
+    }
+
+    suspend fun allowTemporaryAccess(
+        policies: List<SecretApprovalPolicy>,
+        clientId: String,
+        operation: TemporaryAccessOperation,
+        expiresAt: Long,
+    ): Boolean {
+        val now = currentTimeMillis()
+        require(expiresAt > now) { "Temporary access must expire in the future" }
+        val distinctPolicies = policies.distinctBy(SecretApprovalPolicy::secretId)
+        if (distinctPolicies.isEmpty()) return false
+        if (distinctPolicies.any { it.temporaryAccessExpiresAt != null }) return false
+        require(distinctPolicies.all { policy ->
+            policy.mode == SecretApprovalMode.TEMPORARY || policy.mode == SecretApprovalMode.ASK_AI
+        }) { "Temporary access is not enabled for this client and secret" }
+        val inserted = dao.upsertTemporaryAccessGrantsIfCurrent(
+            grants = distinctPolicies.map { policy ->
+                TemporaryAccessGrantEntity(
+                    secretId = policy.secretId,
+                    clientId = clientId,
+                    operation = operation.storedName,
+                    expiresAt = expiresAt,
+                )
+            },
+            expectedRevisions = distinctPolicies.associate { it.secretId to it.revision },
+            expectedApprovalModes = distinctPolicies.associate {
+                it.secretId to it.mode.storedName
+            },
+            now = now,
+        )
+        if (!inserted) return false
+        distinctPolicies.forEach { policy ->
+            runCatching {
+                audit.record(
+                    AuditRecord(
+                        category = AuditCategory.SECRET_USE,
+                        title = "Temporary access allowed",
+                        detail = "${policy.secretName} · ${operation.auditName()} · expires " +
+                            Instant.ofEpochMilli(expiresAt),
+                        outcome = AuditOutcome.APPROVED,
+                        clientId = clientId,
+                    ),
+                )
+            }
+        }
+        return true
+    }
+
+    suspend fun endTemporaryAccess(
+        secretId: String,
+        clientId: String,
+        operation: TemporaryAccessOperation,
+    ): Boolean {
+        val secret = dao.getSecret(secretId)
+        val deleted = dao.deleteTemporaryAccessGrant(secretId, clientId, operation.storedName) > 0
+        if (deleted) {
+            audit.record(
+                AuditRecord(
+                    category = AuditCategory.SECRET_USE,
+                    title = "Temporary access ended",
+                    detail = "${secret?.name.orEmpty()} · ${operation.auditName()}",
+                    outcome = AuditOutcome.CHANGED,
+                    clientId = clientId,
+                ),
+            )
+        }
+        return deleted
+    }
+
+    suspend fun clearRestoredTemporaryAccess() {
+        dao.deleteAllTemporaryAccessGrants()
     }
 
     suspend fun generateSshKey(comment: String): SshPrivateKey =
@@ -603,7 +738,9 @@ internal class SecretRepository(
             .getOrElse { throw IllegalArgumentException(it.message, it) }
         if (key.comment == trimmed) return SaveSshSecretResult.Saved(id)
         val now = currentTimeMillis()
-        dao.updateSshKey(key.copy(comment = trimmed), secretUpdatedAt = now)
+        if (!dao.updateSshKeyComment(id, trimmed, secretUpdatedAt = now)) {
+            return SaveSshSecretResult.NotFound
+        }
         audit.record(
             AuditRecord(
                 category = AuditCategory.SECRET,
@@ -619,13 +756,9 @@ internal class SecretRepository(
         validateSecretName(name)
         val existing = dao.getSecret(id) ?: return SaveSecretResult.NOT_FOUND
         if (dao.secretNameInUse(name, excludingId = id)) return SaveSecretResult.NAME_IN_USE
-        dao.updateSecret(
-            existing.copy(
-                name = name,
-                description = description,
-                updatedAt = currentTimeMillis(),
-            ),
-        )
+        if (!dao.updateSecretMetadata(id, name, description, currentTimeMillis())) {
+            return SaveSecretResult.NOT_FOUND
+        }
         audit.record(
             AuditRecord(
                 category = AuditCategory.SECRET,
@@ -743,8 +876,7 @@ internal class SecretRepository(
         }
 
         val now = currentTimeMillis()
-        dao.updateEnvironmentVariable(
-            existing.copy(
+        val updated = existing.copy(
                 name = name,
                 sensitive = sensitive,
                 notes = notes,
@@ -754,8 +886,18 @@ internal class SecretRepository(
                 ciphertext = encrypted.ciphertext,
                 updatedAt = now,
                 valueUpdatedAt = if (replacementValue == null) existing.valueUpdatedAt else now,
-            ),
-        )
+            )
+        val rowsUpdated = if (!authenticatedFieldsChanged && replacementValue == null) {
+            dao.updateEnvironmentVariableNotes(
+                variableId = id,
+                secretId = existing.secretId,
+                notes = notes,
+                updatedAt = now,
+            )
+        } else {
+            dao.updateEnvironmentVariable(updated)
+        }
+        if (rowsUpdated != 1) return SaveEnvironmentVariableResult.NOT_FOUND
         audit.record(
             AuditRecord(
                 category = AuditCategory.SECRET,
@@ -880,7 +1022,8 @@ internal class SecretRepository(
             type = ENVIRONMENT_SECRET_TYPE,
             createdAt = existing?.createdAt ?: now,
             updatedAt = now,
-            approvalMode = existing?.approvalMode ?: SecretApprovalMode.ASK_ME.storedName,
+            revision = existing?.revision?.plus(1) ?: 1,
+            approvalMode = existing?.approvalMode ?: SecretApprovalMode.TEMPORARY.storedName,
             instructions = existing?.instructions.orEmpty(),
         )
         val existingVariables = existing?.let {
@@ -1005,7 +1148,8 @@ internal class SecretRepository(
             type = SSH_SECRET_TYPE,
             createdAt = existing?.createdAt ?: now,
             updatedAt = now,
-            approvalMode = existing?.approvalMode ?: SecretApprovalMode.ASK_ME.storedName,
+            revision = existing?.revision?.plus(1) ?: 1,
+            approvalMode = existing?.approvalMode ?: SecretApprovalMode.TEMPORARY.storedName,
             instructions = existing?.instructions.orEmpty(),
         )
         val currentKey = existing?.let { dao.getSshKey(it.id) }
@@ -1102,6 +1246,7 @@ internal class SecretRepository(
                     when (secret.type) {
                         ENVIRONMENT_SECRET_TYPE -> SecretReviewMetadata(
                             id = secret.id,
+                            revision = secret.revision,
                             name = secret.name,
                             description = secret.description,
                             type = ENVIRONMENT_SECRET_TYPE,
@@ -1127,6 +1272,7 @@ internal class SecretRepository(
                             val publicKey = publicKey(key)
                             SecretReviewMetadata(
                                 id = secret.id,
+                                revision = secret.revision,
                                 name = secret.name,
                                 description = secret.description,
                                 type = SSH_SECRET_TYPE,
@@ -1381,6 +1527,13 @@ internal class SecretRepository(
         DecryptionResult.UnsupportedFormat -> EnvironmentVariableValue.UnsupportedFormat
     }
 
+    private fun currentTimeFlow(): Flow<Long> = flow {
+        while (true) {
+            emit(currentTimeMillis())
+            delay(TEMPORARY_ACCESS_REFRESH_MILLIS)
+        }
+    }
+
     private fun location(
         id: String,
         secretId: String,
@@ -1422,6 +1575,12 @@ internal class SecretRepository(
         }.exceptionOrNull()?.message
 
     private companion object {
+        const val TEMPORARY_ACCESS_REFRESH_MILLIS = 30_000L
         val ENVIRONMENT_VARIABLE_NAME = Regex("[A-Za-z_][A-Za-z0-9_]*")
     }
+}
+
+private fun TemporaryAccessOperation.auditName(): String = when (this) {
+    TemporaryAccessOperation.INVOCATION -> "environment values"
+    TemporaryAccessOperation.GIT_SIGN -> "Git signing"
 }

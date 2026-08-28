@@ -1,1 +1,1 @@
-Simplify approvals around per-secret modes and AI review instructions.
+Add scoped four-hour approvals with clear active-access controls and AI fallback.

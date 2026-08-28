@@ -12,6 +12,8 @@ import dev.agentknock.storage.request.InboxRequestDetails
 import dev.agentknock.storage.request.InboxRequestSummary
 import dev.agentknock.storage.request.PairingDecisionResult
 import dev.agentknock.storage.vault.DeviceConfiguration
+import dev.agentknock.storage.secret.TemporaryAccessGrant
+import dev.agentknock.storage.secret.TemporaryAccessOperation
 import dev.agentknock.ui.pendingPairings
 import kotlinx.coroutines.ExperimentalCoroutinesApi
 import kotlinx.coroutines.flow.MutableStateFlow
@@ -44,6 +46,19 @@ internal class ClientsViewModel(application: Application) : AndroidViewModel(app
         started = SharingStarted.Eagerly,
         initialValue = null,
     )
+    val temporaryAccessGrants: StateFlow<List<TemporaryAccessGrant>> = selectedClientId
+        .flatMapLatest { clientId ->
+            clientId?.let { selected ->
+                container.secrets.observeTemporaryAccessGrants().map { grants ->
+                    grants.filter { it.clientId == selected }
+                }
+            } ?: flowOf(emptyList())
+        }
+        .stateIn(
+            scope = viewModelScope,
+            started = SharingStarted.Eagerly,
+            initialValue = emptyList(),
+        )
     val pendingPairings: StateFlow<List<InboxRequestSummary>> = repository.observeRequests()
         .map(List<InboxRequestSummary>::pendingPairings)
         .stateIn(
@@ -83,6 +98,12 @@ internal class ClientsViewModel(application: Application) : AndroidViewModel(app
 
     suspend fun setState(clientId: String, state: RelayClientState): ClientChangeResult =
         repository.setClientState(clientId, state)
+
+    suspend fun endTemporaryAccess(
+        secretId: String,
+        clientId: String,
+        operation: TemporaryAccessOperation,
+    ): Boolean = container.secrets.endTemporaryAccess(secretId, clientId, operation)
 
     suspend fun chooseSas(requestId: Long, selectedIndex: Int?): PairingDecisionResult {
         container.localStorage.await()

@@ -33,6 +33,7 @@ import kotlinx.coroutines.SupervisorJob
 import kotlinx.coroutines.async
 import kotlinx.coroutines.launch
 import okhttp3.OkHttpClient
+import java.io.File
 import java.util.concurrent.TimeUnit
 
 class AgentknockApplication : Application() {
@@ -70,6 +71,17 @@ internal class ApplicationContainer(application: Application) {
     // Every future worker and messaging entry point must await this before using local state.
     val localStorage = applicationScope.async(start = CoroutineStart.DEFAULT) {
         vaultKeyManager.initialize()
+        val temporaryAccessMarker = application.noBackupFilesDir.resolve(
+            "temporary_access_initialized_v1",
+        )
+        initializeTemporaryAccessStorage(
+            marker = temporaryAccessMarker,
+            now = System.currentTimeMillis(),
+            clearAll = { database.secretDao().deleteAllTemporaryAccessGrants() },
+            clearExpired = { now ->
+                database.secretDao().deleteExpiredTemporaryAccessGrants(now)
+            },
+        )
         database.requestDao().discardDecidedSecretUploadValues()
     }
 
@@ -157,4 +169,17 @@ internal class ApplicationContainer(application: Application) {
         encryptionKeys = vaultKeyManager,
         deviceManagement = deviceManagement,
     )
+}
+
+internal suspend fun initializeTemporaryAccessStorage(
+    marker: File,
+    now: Long,
+    clearAll: suspend () -> Unit,
+    clearExpired: suspend (Long) -> Unit,
+) {
+    if (!marker.exists()) {
+        clearAll()
+        check(marker.createNewFile() || marker.exists())
+    }
+    clearExpired(now)
 }

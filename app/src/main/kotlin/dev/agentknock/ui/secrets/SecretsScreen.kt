@@ -53,6 +53,7 @@ import androidx.compose.material.icons.outlined.ContentCopy
 import androidx.compose.material.icons.outlined.Edit
 import androidx.compose.material.icons.outlined.Lock
 import androidx.compose.material.icons.outlined.MoreVert
+import androidx.compose.material.icons.outlined.Schedule
 import androidx.compose.material.icons.outlined.Settings
 import androidx.compose.material.icons.outlined.Visibility
 import androidx.compose.material.icons.outlined.VisibilityOff
@@ -107,6 +108,7 @@ import androidx.lifecycle.Lifecycle
 import androidx.lifecycle.LifecycleEventObserver
 import dev.agentknock.R
 import dev.agentknock.presentation.formatTimestamp
+import dev.agentknock.relay.RelayClientState
 import dev.agentknock.ui.components.InformationRow
 import dev.agentknock.ui.components.InformationSurface
 import dev.agentknock.ui.components.TonalIcon
@@ -116,6 +118,8 @@ import dev.agentknock.storage.secret.EnvironmentVariableMetadata
 import dev.agentknock.storage.secret.EnvironmentVariableValue
 import dev.agentknock.storage.secret.SecretDetails
 import dev.agentknock.storage.secret.SecretApprovalMode
+import dev.agentknock.storage.secret.TemporaryAccessOperation
+import dev.agentknock.storage.secret.TemporaryAccessGrant
 import dev.agentknock.storage.secret.SecretSummary
 import dev.agentknock.storage.secret.SaveEnvironmentVariableResult
 import dev.agentknock.storage.secret.SaveSecretResult
@@ -473,6 +477,20 @@ internal fun SecretsScreen(
                                     })
                                 }
                             },
+                            onEndTemporaryAccess = { grant ->
+                                scope.launch {
+                                    val ended = viewModel.endTemporaryAccess(
+                                        secret.id,
+                                        grant.clientId,
+                                        grant.operation,
+                                    )
+                                    report(if (ended) {
+                                        "Temporary access ended"
+                                    } else {
+                                        "Temporary access had already ended"
+                                    })
+                                }
+                            },
                             modifier = Modifier.weight(1f),
                         )
                     }
@@ -564,6 +582,20 @@ internal fun SecretsScreen(
                                 "Instructions updated"
                             } else {
                                 "Instructions could not be updated"
+                            })
+                        }
+                    },
+                    onEndTemporaryAccess = { grant ->
+                        scope.launch {
+                            val ended = viewModel.endTemporaryAccess(
+                                secret.id,
+                                grant.clientId,
+                                grant.operation,
+                            )
+                            report(if (ended) {
+                                "Temporary access ended"
+                            } else {
+                                "Temporary access had already ended"
                             })
                         }
                     },
@@ -967,6 +999,28 @@ private fun SecretList(
                                         maxLines = 1,
                                         overflow = TextOverflow.Ellipsis,
                                     )
+                                    if (secret.temporaryAccessCount > 0) {
+                                        Row(
+                                            horizontalArrangement = Arrangement.spacedBy(6.dp),
+                                            verticalAlignment = Alignment.CenterVertically,
+                                        ) {
+                                            Icon(
+                                                Icons.Outlined.Schedule,
+                                                contentDescription = null,
+                                                modifier = Modifier.size(14.dp),
+                                            )
+                                            Text(
+                                                "${secret.temporaryAccessCount} temporary " +
+                                                    if (secret.temporaryAccessCount == 1) {
+                                                        "approval"
+                                                    } else {
+                                                        "approvals"
+                                                    },
+                                                style = MaterialTheme.typography.labelMedium,
+                                                color = MaterialTheme.colorScheme.primary,
+                                            )
+                                        }
+                                    }
                                 }
                             },
                             leadingContent = {
@@ -1095,6 +1149,7 @@ private fun SecretDetail(
     onSetApprovalMode: (SecretApprovalMode) -> Unit,
     onSetClientApprovalOverride: (String, SecretApprovalMode?) -> Unit,
     onSaveInstructions: (String) -> Unit,
+    onEndTemporaryAccess: (TemporaryAccessGrant) -> Unit,
     modifier: Modifier = Modifier,
 ) {
     var menuExpanded by remember(secret.id) { mutableStateOf(false) }
@@ -1173,6 +1228,51 @@ private fun SecretDetail(
                     InformationRow(stringResource(R.string.secret_type), secret.type.displayName())
                 }
             }
+            if (secret.temporaryAccessGrants.isNotEmpty()) {
+                item {
+                    SecretTemporaryApprovals(
+                        grants = secret.temporaryAccessGrants,
+                        clients = clients,
+                        onEnd = onEndTemporaryAccess,
+                    )
+                }
+            }
+            item {
+                Text("Approval", style = MaterialTheme.typography.titleLarge)
+            }
+            item {
+                InformationSurface {
+                    Text(
+                        "Controls protected uses, such as providing sensitive values or using a private key.",
+                        color = MaterialTheme.colorScheme.onSurfaceVariant,
+                    )
+                    ApprovalSettingRow(
+                        title = "Default",
+                        value = secret.approvalMode.displayName(),
+                        onClick = { editingDefaultApproval = true },
+                    )
+                    if (clients.isNotEmpty()) {
+                        HorizontalDivider()
+                        Text("Client overrides", style = MaterialTheme.typography.titleMedium)
+                        clients.forEach { client ->
+                            val override = overrides[client.clientId]
+                            val configuredMode = override?.mode?.displayName()
+                                ?: "Use default · ${secret.approvalMode.displayName()}"
+                            ApprovalSettingRow(
+                                title = client.name,
+                                value = configuredMode,
+                                onClick = { editingClientApproval = client.clientId },
+                            )
+                        }
+                    }
+                    HorizontalDivider()
+                    ApprovalSettingRow(
+                        title = "AI instructions",
+                        value = secret.instructions.ifBlank { "None" },
+                        onClick = { editingInstructions = true },
+                    )
+                }
+            }
             if (secret.type == ENVIRONMENT_SECRET_TYPE) {
                 item {
                     FlowRow(
@@ -1235,62 +1335,6 @@ private fun SecretDetail(
                 }
             }
             item {
-                Text("Approval", style = MaterialTheme.typography.titleLarge)
-            }
-            item {
-                InformationSurface {
-                    Text(
-                        "Controls protected uses, such as providing sensitive values or using a private key.",
-                        color = MaterialTheme.colorScheme.onSurfaceVariant,
-                    )
-                    ApprovalSettingRow(
-                        title = "Default",
-                        value = secret.approvalMode.displayName(),
-                        onClick = { editingDefaultApproval = true },
-                    )
-                    if (clients.isNotEmpty()) {
-                        HorizontalDivider()
-                        Text("Client overrides", style = MaterialTheme.typography.titleMedium)
-                        clients.forEach { client ->
-                            val override = overrides[client.clientId]
-                            ApprovalSettingRow(
-                                title = client.name,
-                                value = override?.mode?.displayName()
-                                    ?: "Use default · ${secret.approvalMode.displayName()}",
-                                onClick = { editingClientApproval = client.clientId },
-                            )
-                        }
-                    }
-                }
-            }
-            item {
-                InformationSurface {
-                    Row(
-                        modifier = Modifier.fillMaxWidth(),
-                        verticalAlignment = Alignment.CenterVertically,
-                    ) {
-                        Text(
-                            "AI review instructions",
-                            style = MaterialTheme.typography.titleMedium,
-                            modifier = Modifier.weight(1f),
-                        )
-                        IconButton(onClick = { editingInstructions = true }) {
-                            Icon(Icons.Outlined.Edit, contentDescription = "Edit instructions")
-                        }
-                    }
-                    Text(
-                        secret.instructions.ifBlank {
-                            "No instructions for this secret."
-                        },
-                        color = if (secret.instructions.isBlank()) {
-                            MaterialTheme.colorScheme.onSurfaceVariant
-                        } else {
-                            MaterialTheme.colorScheme.onSurface
-                        },
-                    )
-                }
-            }
-            item {
                 InformationSurface(modifier = Modifier.padding(top = 8.dp)) {
                     InformationRow("Created", formatTimestamp(secret.createdAt))
                     InformationRow("Updated", formatTimestamp(secret.updatedAt))
@@ -1329,6 +1373,7 @@ private fun SecretDetail(
             title = "Default approval",
             selected = secret.approvalMode,
             defaultMode = null,
+            secretType = secret.type,
             onSelect = { mode ->
                 checkNotNull(mode)
                 editingDefaultApproval = false
@@ -1344,6 +1389,7 @@ private fun SecretDetail(
                 title = client.name,
                 selected = overrides[clientId]?.mode,
                 defaultMode = secret.approvalMode,
+                secretType = secret.type,
                 onSelect = { mode ->
                     editingClientApproval = null
                     onSetClientApprovalOverride(clientId, mode)
@@ -1387,6 +1433,53 @@ private fun SecretDetail(
 }
 
 @Composable
+private fun SecretTemporaryApprovals(
+    grants: List<TemporaryAccessGrant>,
+    clients: List<ClientSummary>,
+    onEnd: (TemporaryAccessGrant) -> Unit,
+) {
+    InformationSurface {
+        Text("Temporary approvals", style = MaterialTheme.typography.titleMedium)
+        Text(
+            "Each approval remains until its end time. While its client is active, the use " +
+                "bypasses both your decision and AI review.",
+            color = MaterialTheme.colorScheme.onSurfaceVariant,
+        )
+        grants.forEachIndexed { index, grant ->
+            if (index > 0) HorizontalDivider()
+            val client = clients.firstOrNull { it.clientId == grant.clientId }
+            val paused = client == null || client.state != RelayClientState.ACTIVE ||
+                client.desiredState?.let { it != RelayClientState.ACTIVE } == true
+            Row(
+                modifier = Modifier.fillMaxWidth(),
+                horizontalArrangement = Arrangement.spacedBy(12.dp),
+                verticalAlignment = Alignment.CenterVertically,
+            ) {
+                Column(
+                    modifier = Modifier.weight(1f),
+                    verticalArrangement = Arrangement.spacedBy(2.dp),
+                ) {
+                    Text(client?.name ?: "Unknown client", style = MaterialTheme.typography.bodyLarge)
+                    Text(
+                        "${grant.operation.displayName()} · Ends ${formatTimestamp(grant.expiresAt)}",
+                        style = MaterialTheme.typography.bodyMedium,
+                        color = MaterialTheme.colorScheme.onSurfaceVariant,
+                    )
+                    if (paused) {
+                        Text(
+                            "Paused until this client is active",
+                            style = MaterialTheme.typography.labelMedium,
+                            color = MaterialTheme.colorScheme.onSurfaceVariant,
+                        )
+                    }
+                }
+                TextButton(onClick = { onEnd(grant) }) { Text("End") }
+            }
+        }
+    }
+}
+
+@Composable
 private fun ApprovalSettingRow(
     title: String,
     value: String,
@@ -1404,6 +1497,8 @@ private fun ApprovalSettingRow(
                 value,
                 style = MaterialTheme.typography.bodyMedium,
                 color = MaterialTheme.colorScheme.onSurfaceVariant,
+                maxLines = 2,
+                overflow = TextOverflow.Ellipsis,
             )
         }
         Icon(Icons.AutoMirrored.Outlined.NavigateNext, contentDescription = null)
@@ -1415,12 +1510,19 @@ private fun ApprovalModeDialog(
     title: String,
     selected: SecretApprovalMode?,
     defaultMode: SecretApprovalMode?,
+    secretType: String,
     onSelect: (SecretApprovalMode?) -> Unit,
     onDismiss: () -> Unit,
 ) {
     val options = buildList<Pair<SecretApprovalMode?, String>> {
         if (defaultMode != null) add(null to "Use default · ${defaultMode.displayName()}")
-        SecretApprovalMode.entries.reversed().forEach { mode -> add(mode to mode.displayName()) }
+        listOf(
+            SecretApprovalMode.ASK_AI,
+            SecretApprovalMode.TEMPORARY,
+            SecretApprovalMode.ASK_ME,
+            SecretApprovalMode.APPROVE,
+            SecretApprovalMode.DENY,
+        ).forEach { mode -> add(mode to mode.displayName()) }
     }
     AlertDialog(
         onDismissRequest = onDismiss,
@@ -1438,7 +1540,7 @@ private fun ApprovalModeDialog(
                             Text(label, style = MaterialTheme.typography.bodyLarge)
                             mode?.let {
                                 Text(
-                                    it.description(),
+                                    it.description(secretType),
                                     style = MaterialTheme.typography.bodySmall,
                                     color = MaterialTheme.colorScheme.onSurfaceVariant,
                                 )
@@ -1456,15 +1558,30 @@ private fun ApprovalModeDialog(
 private fun SecretApprovalMode.displayName(): String = when (this) {
     SecretApprovalMode.APPROVE -> "Approve automatically"
     SecretApprovalMode.ASK_AI -> "Ask AI"
+    SecretApprovalMode.TEMPORARY -> "Ask me, with 4-hour access"
     SecretApprovalMode.ASK_ME -> "Ask every time"
     SecretApprovalMode.DENY -> "Always deny"
 }
 
-private fun SecretApprovalMode.description(): String = when (this) {
+private fun SecretApprovalMode.description(secretType: String): String = when (this) {
     SecretApprovalMode.APPROVE -> "Allow protected use without asking."
-    SecretApprovalMode.ASK_AI -> "AI may approve, deny, or ask you."
+    SecretApprovalMode.ASK_AI ->
+        "Requires AI review access. AI may approve, deny, or ask you; otherwise, you decide " +
+            "and can allow 4-hour access."
+    SecretApprovalMode.TEMPORARY -> if (secretType == SSH_SECRET_TYPE) {
+        "When asked, you can sign once or allow that client to request Git signatures with " +
+            "this key for any repository for 4 hours."
+    } else {
+        "When asked, you can approve once or allow that client to receive protected values " +
+            "from this secret for any command for 4 hours."
+    }
     SecretApprovalMode.ASK_ME -> "Always require your decision."
     SecretApprovalMode.DENY -> "Reject protected use without asking."
+}
+
+private fun TemporaryAccessOperation.displayName(): String = when (this) {
+    TemporaryAccessOperation.INVOCATION -> "Environment values for any command"
+    TemporaryAccessOperation.GIT_SIGN -> "Git signing for any repository"
 }
 
 @Composable
