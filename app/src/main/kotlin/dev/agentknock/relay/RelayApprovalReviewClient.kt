@@ -18,6 +18,8 @@ internal data class ApprovalReviewRequest(
     val instructions: ApprovalReviewInstructions,
     val facts: ApprovalReviewFacts,
     val evidence: ApprovalReviewEvidence,
+    @SerialName("parent_facts") val parentFacts: ApprovalReviewParentFacts? = null,
+    @SerialName("parent_evidence") val parentEvidence: ApprovalReviewEvidence? = null,
 )
 
 @Serializable
@@ -30,29 +32,26 @@ internal data class ApprovalReviewInstructions(
 @Serializable
 internal data class ApprovalReviewFacts(
     val client: String,
-    val operation: ApprovalReviewOperationFacts,
-    val invocation: ApprovalReviewInvocationFacts? = null,
+    val operation: ApprovalReviewOperation,
+    val secret: String? = null,
+    val secrets: Map<String, ApprovalReviewSecretFacts>? = null,
 )
 
 @Serializable
-internal sealed interface ApprovalReviewOperationFacts
-
-@Serializable
-@SerialName("invocation")
-internal data class ApprovalReviewInvocationOperationFacts(
-    val secrets: Map<String, ApprovalReviewSecretFacts>,
-) : ApprovalReviewOperationFacts
-
-@Serializable
-@SerialName("git_sign")
-internal data class ApprovalReviewGitSignOperationFacts(
-    val secret: String,
-) : ApprovalReviewOperationFacts
-
-@Serializable
-internal data class ApprovalReviewInvocationFacts(
+internal data class ApprovalReviewParentFacts(
+    val operation: ApprovalReviewOperation,
+    @SerialName("elapsed_seconds") val elapsedSeconds: Long,
     val secrets: Map<String, ApprovalReviewSecretFacts>,
 )
+
+@Serializable
+internal enum class ApprovalReviewOperation {
+    @SerialName("invocation")
+    INVOCATION,
+
+    @SerialName("git_sign")
+    GIT_SIGN,
+}
 
 @Serializable
 internal sealed interface ApprovalReviewSecretFacts
@@ -72,14 +71,10 @@ internal data class ApprovalReviewSshSecretFacts(
 
 @Serializable
 internal data class ApprovalReviewEvidence(
-    val invocation: ApprovalReviewInvocationEvidence,
-    val git: ApprovalReviewGitEvidence? = null,
-)
-
-@Serializable
-internal data class ApprovalReviewInvocationEvidence(
     val reason: String? = null,
-    val command: ApprovalReviewCommandEvidence,
+    val command: ApprovalReviewCommandEvidence? = null,
+    @SerialName("signed_content") val signedContent: String? = null,
+    val repository: ApprovalReviewGitRepositoryEvidence? = null,
 )
 
 @Serializable
@@ -88,12 +83,6 @@ internal data class ApprovalReviewCommandEvidence(
     @SerialName("working_directory") val workingDirectory: String,
     @SerialName("resolved_executable") val resolvedExecutable: String,
     @SerialName("launcher_chain") val launcherChain: List<String>,
-)
-
-@Serializable
-internal data class ApprovalReviewGitEvidence(
-    @SerialName("signed_content") val signedContent: String,
-    val repository: ApprovalReviewGitRepositoryEvidence? = null,
 )
 
 @Serializable

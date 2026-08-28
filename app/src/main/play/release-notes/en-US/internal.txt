@@ -1,1 +1,1 @@
-Improve automatic approval context and add repository details to Git signing requests.
+Clarify automatic approval context for Git signing and its parent invocation.

@@ -62,9 +62,8 @@ class RelayApprovalReviewClientTest {
             )
             val facts = body.getValue("facts").jsonObject
             assertEquals("git", facts.getValue("client").jsonPrimitive.content)
-            val operation = facts.getValue("operation").jsonObject
-            assertEquals("invocation", operation.getValue("type").jsonPrimitive.content)
-            val secrets = operation.getValue("secrets").jsonObject
+            assertEquals("invocation", facts.getValue("operation").jsonPrimitive.content)
+            val secrets = facts.getValue("secrets").jsonObject
             val github = secrets.getValue("github").jsonObject
             assertEquals("environment", github.getValue("type").jsonPrimitive.content)
             val variables = github.getValue("environment_variables").jsonObject
@@ -74,11 +73,10 @@ class RelayApprovalReviewClientTest {
                 variables.getValue("GITHUB_API_URL").jsonPrimitive.content,
             )
             val evidence = body.getValue("evidence").jsonObject
-            assertEquals(setOf("invocation"), evidence.keys)
-            val invocation = evidence.getValue("invocation").jsonObject
+            assertEquals(setOf("reason", "command"), evidence.keys)
             assertEquals(
                 "issue",
-                invocation.getValue("command").jsonObject.getValue("argv")
+                evidence.getValue("command").jsonObject.getValue("argv")
                     .jsonArray[1].jsonPrimitive.content,
             )
         }
@@ -188,29 +186,26 @@ class RelayApprovalReviewClientTest {
         ),
         facts = ApprovalReviewFacts(
             client = "git",
-            operation = ApprovalReviewInvocationOperationFacts(
-                secrets = linkedMapOf(
-                    "github" to ApprovalReviewEnvironmentSecretFacts(
-                        environmentVariables = linkedMapOf(
-                            "GITHUB_TOKEN" to null,
-                            "GITHUB_API_URL" to "https://api.github.com",
-                        ),
+            operation = ApprovalReviewOperation.INVOCATION,
+            secrets = linkedMapOf(
+                "github" to ApprovalReviewEnvironmentSecretFacts(
+                    environmentVariables = linkedMapOf(
+                        "GITHUB_TOKEN" to null,
+                        "GITHUB_API_URL" to "https://api.github.com",
                     ),
-                    "git-signing" to ApprovalReviewSshSecretFacts(
-                        provides = "public_key",
-                    ),
+                ),
+                "git-signing" to ApprovalReviewSshSecretFacts(
+                    provides = "public_key",
                 ),
             ),
         ),
         evidence = ApprovalReviewEvidence(
-            invocation = ApprovalReviewInvocationEvidence(
-                reason = "Inspect an issue",
-                command = ApprovalReviewCommandEvidence(
-                    argv = listOf("gh", "issue", "view", "234"),
-                    workingDirectory = "/work/project",
-                    resolvedExecutable = "/run/current-system/sw/bin/gh",
-                    launcherChain = listOf("agentknock", "shell"),
-                ),
+            reason = "Inspect an issue",
+            command = ApprovalReviewCommandEvidence(
+                argv = listOf("gh", "issue", "view", "234"),
+                workingDirectory = "/work/project",
+                resolvedExecutable = "/run/current-system/sw/bin/gh",
+                launcherChain = listOf("agentknock", "shell"),
             ),
         ),
     )

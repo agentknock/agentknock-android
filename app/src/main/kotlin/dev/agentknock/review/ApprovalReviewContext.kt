@@ -8,15 +8,11 @@ import dev.agentknock.relay.ApprovalReviewEnvironmentSecretFacts
 import dev.agentknock.relay.ApprovalReviewEvidence
 import dev.agentknock.relay.ApprovalReviewFacts
 import dev.agentknock.relay.ApprovalReviewGitChangedPathEvidence
-import dev.agentknock.relay.ApprovalReviewGitEvidence
 import dev.agentknock.relay.ApprovalReviewGitHeadEvidence
 import dev.agentknock.relay.ApprovalReviewGitRepositoryEvidence
-import dev.agentknock.relay.ApprovalReviewGitSignOperationFacts
 import dev.agentknock.relay.ApprovalReviewInstructions
-import dev.agentknock.relay.ApprovalReviewInvocationEvidence
-import dev.agentknock.relay.ApprovalReviewInvocationFacts
-import dev.agentknock.relay.ApprovalReviewInvocationOperationFacts
-import dev.agentknock.relay.ApprovalReviewOperationFacts
+import dev.agentknock.relay.ApprovalReviewOperation
+import dev.agentknock.relay.ApprovalReviewParentFacts
 import dev.agentknock.relay.ApprovalReviewRequest
 import dev.agentknock.relay.ApprovalReviewSecretFacts
 import dev.agentknock.relay.ApprovalReviewSshSecretFacts
@@ -41,23 +37,26 @@ internal fun approvalReviewRequest(
     deviceInstructions: String,
 ): ApprovalReviewRequest {
     val secrets = approvalReviewSecretFacts(description, values)
-    return approvalReviewRequestBase(
-        pairing = pairing,
-        deviceInstructions = deviceInstructions,
-        operation = ApprovalReviewInvocationOperationFacts(secrets),
-        parentInvocation = null,
-        decisionSecretNames = secrets.keys,
-        evaluation = evaluation,
-        policies = policies,
+    return ApprovalReviewRequest(
+        instructions = approvalReviewInstructions(
+            pairing = pairing,
+            deviceInstructions = deviceInstructions,
+            decisionSecretNames = secrets.keys,
+            evaluation = evaluation,
+            policies = policies,
+        ),
+        facts = ApprovalReviewFacts(
+            client = pairing.approvalReviewClientName(),
+            operation = ApprovalReviewOperation.INVOCATION,
+            secrets = secrets,
+        ),
         evidence = ApprovalReviewEvidence(
-            invocation = ApprovalReviewInvocationEvidence(
-                reason = contents.reason,
-                command = ApprovalReviewCommandEvidence(
-                    argv = listOf(contents.operation.command) + contents.operation.arguments,
-                    workingDirectory = contents.operation.workingDirectory,
-                    resolvedExecutable = contents.operation.executablePath,
-                    launcherChain = contents.launcherChain,
-                ),
+            reason = contents.reason,
+            command = ApprovalReviewCommandEvidence(
+                argv = listOf(contents.operation.command) + contents.operation.arguments,
+                workingDirectory = contents.operation.workingDirectory,
+                resolvedExecutable = contents.operation.executablePath,
+                launcherChain = contents.launcherChain,
             ),
         ),
     )
@@ -69,6 +68,7 @@ internal fun approvalReviewGitSignRequest(
     signedContent: String,
     invocation: SecretUseRequestEntity,
     invocationSecrets: Map<String, ApprovalReviewSecretFacts>,
+    parentElapsedSeconds: Long,
     evaluation: ApprovalRuleEvaluation,
     policies: List<SecretApprovalPolicy>,
     deviceInstructions: String,
@@ -76,65 +76,71 @@ internal fun approvalReviewGitSignRequest(
     require(invocationSecrets[contents.secret] is ApprovalReviewSshSecretFacts) {
         "Git signing review requires an SSH secret from the parent invocation"
     }
-    return approvalReviewRequestBase(
-        pairing = pairing,
-        deviceInstructions = deviceInstructions,
-        operation = ApprovalReviewGitSignOperationFacts(secret = contents.secret),
-        parentInvocation = ApprovalReviewInvocationFacts(secrets = invocationSecrets),
-        decisionSecretNames = setOf(contents.secret),
-        evaluation = evaluation,
-        policies = policies,
+    require(parentElapsedSeconds >= 0) { "Parent elapsed time is negative" }
+    return ApprovalReviewRequest(
+        instructions = approvalReviewInstructions(
+            pairing = pairing,
+            deviceInstructions = deviceInstructions,
+            decisionSecretNames = setOf(contents.secret),
+            evaluation = evaluation,
+            policies = policies,
+        ),
+        facts = ApprovalReviewFacts(
+            client = pairing.approvalReviewClientName(),
+            operation = ApprovalReviewOperation.GIT_SIGN,
+            secret = contents.secret,
+        ),
+        parentFacts = ApprovalReviewParentFacts(
+            operation = ApprovalReviewOperation.INVOCATION,
+            elapsedSeconds = parentElapsedSeconds,
+            secrets = invocationSecrets,
+        ),
         evidence = ApprovalReviewEvidence(
-            invocation = ApprovalReviewInvocationEvidence(
-                reason = invocation.reason,
-                command = ApprovalReviewCommandEvidence(
-                    argv = listOf(invocation.command) + decodeStringList(invocation.argumentsJson),
-                    workingDirectory = invocation.workingDirectory,
-                    resolvedExecutable = invocation.executablePath,
-                    launcherChain = decodeStringList(invocation.launcherChainJson),
-                ),
-            ),
-            git = ApprovalReviewGitEvidence(
-                signedContent = signedContent,
-                repository = contents.repository?.let { repository ->
-                    ApprovalReviewGitRepositoryEvidence(
-                        remote = repository.remote,
-                        worktree = repository.worktree,
-                        head = repository.head?.let { head ->
-                            when (head) {
-                                is GitSignHead.Branch -> ApprovalReviewGitHeadEvidence(
-                                    type = "BRANCH",
-                                    name = head.name,
-                                    upstream = head.upstream,
-                                )
-                                GitSignHead.Detached ->
-                                    ApprovalReviewGitHeadEvidence(type = "DETACHED")
-                            }
-                        },
-                        changedPathCount = repository.changedPathCount,
-                        changedPaths = repository.changedPaths?.map { path ->
-                            ApprovalReviewGitChangedPathEvidence(
-                                status = path.status.name,
-                                path = path.path,
+            signedContent = signedContent,
+            repository = contents.repository?.let { repository ->
+                ApprovalReviewGitRepositoryEvidence(
+                    remote = repository.remote,
+                    worktree = repository.worktree,
+                    head = repository.head?.let { head ->
+                        when (head) {
+                            is GitSignHead.Branch -> ApprovalReviewGitHeadEvidence(
+                                type = "BRANCH",
+                                name = head.name,
+                                upstream = head.upstream,
                             )
-                        },
-                    )
-                },
+                            GitSignHead.Detached ->
+                                ApprovalReviewGitHeadEvidence(type = "DETACHED")
+                        }
+                    },
+                    changedPathCount = repository.changedPathCount,
+                    changedPaths = repository.changedPaths?.map { path ->
+                        ApprovalReviewGitChangedPathEvidence(
+                            status = path.status.name,
+                            path = path.path,
+                        )
+                    },
+                )
+            },
+        ),
+        parentEvidence = ApprovalReviewEvidence(
+            reason = invocation.reason,
+            command = ApprovalReviewCommandEvidence(
+                argv = listOf(invocation.command) + decodeStringList(invocation.argumentsJson),
+                workingDirectory = invocation.workingDirectory,
+                resolvedExecutable = invocation.executablePath,
+                launcherChain = decodeStringList(invocation.launcherChainJson),
             ),
         ),
     )
 }
 
-private fun approvalReviewRequestBase(
+private fun approvalReviewInstructions(
     pairing: PairingEntity,
     deviceInstructions: String,
-    operation: ApprovalReviewOperationFacts,
-    parentInvocation: ApprovalReviewInvocationFacts?,
     decisionSecretNames: Set<String>,
     evaluation: ApprovalRuleEvaluation,
     policies: List<SecretApprovalPolicy>,
-    evidence: ApprovalReviewEvidence,
-): ApprovalReviewRequest {
+): ApprovalReviewInstructions {
     val policiesById = policies.associateBy(SecretApprovalPolicy::secretId)
     val secretInstructions = evaluation.secrets
         .filter { it.action == ApprovalRuleAction.ASK_AI }
@@ -149,20 +155,15 @@ private fun approvalReviewRequestBase(
         }
     require(secretInstructions.isNotEmpty()) { "AI review has no secrets to review" }
 
-    return ApprovalReviewRequest(
-        instructions = ApprovalReviewInstructions(
-            general = deviceInstructions,
-            client = pairing.instructions,
-            secrets = secretInstructions,
-        ),
-        facts = ApprovalReviewFacts(
-            client = pairing.friendlyName ?: pairing.hostname ?: "Unknown client",
-            operation = operation,
-            invocation = parentInvocation,
-        ),
-        evidence = evidence,
+    return ApprovalReviewInstructions(
+        general = deviceInstructions,
+        client = pairing.instructions,
+        secrets = secretInstructions,
     )
 }
+
+private fun PairingEntity.approvalReviewClientName(): String =
+    friendlyName ?: hostname ?: "Unknown client"
 
 internal fun approvalReviewSecretFacts(
     description: RequestedSecretDescription,

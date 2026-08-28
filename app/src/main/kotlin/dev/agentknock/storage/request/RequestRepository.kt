@@ -2766,6 +2766,7 @@ internal class RequestRepository(
         credentials: RelayDeviceCredentials,
     ): ProcessedRelayMessage? {
         if (pairing.state != PairingState.ACTIVE.storedName) return null
+        val now = currentTimeMillis()
         val contents = runCatching { gitSignProtocol.decodeRequest(opened.plaintext) }
             .getOrNull() ?: return null
         val invocationRequest = dao.getRequestByRelayId(contents.invocationId) ?: return null
@@ -2840,7 +2841,6 @@ internal class RequestRepository(
                 },
             )
         }
-        val now = currentTimeMillis()
         val initialRequest = InboxRequestEntity(
             relayRequestId = relayRequestId,
             parentRequestId = invocationRequest.id,
@@ -2889,6 +2889,11 @@ internal class RequestRepository(
                 pairing = pairing,
                 contents = contents,
                 invocation = invocation,
+                parentElapsedSeconds = if (now >= invocationRequest.receivedAt) {
+                    (now - invocationRequest.receivedAt) / 1_000
+                } else {
+                    null
+                },
                 evaluation = initialEvaluation,
                 policies = approvalPolicies,
                 credentials = credentials,
@@ -3100,12 +3105,17 @@ internal class RequestRepository(
         pairing: PairingEntity,
         contents: GitSignRequestMessage,
         invocation: SecretUseRequestEntity,
+        parentElapsedSeconds: Long?,
         evaluation: ApprovalRuleEvaluation,
         policies: List<SecretApprovalPolicy>,
         credentials: RelayDeviceCredentials,
     ): AiReview {
         val reviewer = approvalReviewer
             ?: return AiReview(failure = AiReviewFailure.UNAVAILABLE)
+        val elapsedSeconds = parentElapsedSeconds ?: return AiReview(
+            decision = AiReviewDecision.ASK_USER,
+            explanation = "The relative timing of the parent invocation is unavailable.",
+        )
         if (contents.message.size > MAX_AI_REVIEW_GIT_CONTENT_BYTES) {
             return AiReview(
                 decision = AiReviewDecision.ASK_USER,
@@ -3132,6 +3142,7 @@ internal class RequestRepository(
             signedContent = signedContent,
             invocation = invocation,
             invocationSecrets = invocationSecrets,
+            parentElapsedSeconds = elapsedSeconds,
             evaluation = evaluation,
             policies = policies,
             deviceInstructions = credentials.instructions,

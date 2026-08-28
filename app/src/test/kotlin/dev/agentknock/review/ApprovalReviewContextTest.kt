@@ -10,8 +10,7 @@ import dev.agentknock.protocol.InvocationExecOperation
 import dev.agentknock.protocol.InvocationRequestMessage
 import dev.agentknock.protocol.SoftwareInfo
 import dev.agentknock.relay.ApprovalReviewEnvironmentSecretFacts
-import dev.agentknock.relay.ApprovalReviewGitSignOperationFacts
-import dev.agentknock.relay.ApprovalReviewInvocationOperationFacts
+import dev.agentknock.relay.ApprovalReviewOperation
 import dev.agentknock.relay.ApprovalReviewSshSecretFacts
 import dev.agentknock.storage.request.PairingEntity
 import dev.agentknock.storage.request.SecretUseRequestEntity
@@ -106,27 +105,40 @@ class ApprovalReviewContextTest {
             request.instructions.secrets,
         )
         assertEquals("survo", request.facts.client)
-        val operation = request.facts.operation as ApprovalReviewInvocationOperationFacts
-        assertEquals(setOf("aws-read-only", "git-signing"), operation.secrets.keys)
-        assertNull(request.facts.invocation)
+        assertEquals(ApprovalReviewOperation.INVOCATION, request.facts.operation)
+        assertNull(request.facts.secret)
+        val secrets = checkNotNull(request.facts.secrets)
+        assertEquals(setOf("aws-read-only", "git-signing"), secrets.keys)
+        assertNull(request.parentFacts)
 
-        val environment = operation.secrets.getValue("aws-read-only")
+        val environment = secrets.getValue("aws-read-only")
             as ApprovalReviewEnvironmentSecretFacts
         assertNull(environment.environmentVariables.getValue("AWS_ACCESS_KEY_ID"))
         assertNull(environment.environmentVariables.getValue("AWS_SECRET_ACCESS_KEY"))
         assertEquals("eu-north-1", environment.environmentVariables.getValue("AWS_REGION"))
         assertEquals(
             ApprovalReviewSshSecretFacts(provides = "public_key"),
-            operation.secrets.getValue("git-signing"),
+            secrets.getValue("git-signing"),
         )
-        assertEquals(listOf("aws", "s3", "ls"), request.evidence.invocation.command.argv)
+        assertEquals(listOf("aws", "s3", "ls"), request.evidence.command?.argv)
         assertEquals(
             "/nix/store/aws/bin/aws",
-            request.evidence.invocation.command.resolvedExecutable,
+            request.evidence.command?.resolvedExecutable,
         )
-        assertNull(request.evidence.git)
+        assertNull(request.evidence.signedContent)
+        assertNull(request.parentEvidence)
 
         val wire = WIRE_JSON.encodeToString(request)
+        val payload = Json.parseToJsonElement(wire).jsonObject
+        assertEquals(setOf("instructions", "facts", "evidence"), payload.keys)
+        assertEquals(
+            setOf("client", "operation", "secrets"),
+            payload.getValue("facts").jsonObject.keys,
+        )
+        assertEquals(
+            setOf("reason", "command"),
+            payload.getValue("evidence").jsonObject.keys,
+        )
         assertTrue(wire.contains("\"AWS_ACCESS_KEY_ID\":null"))
         assertFalse(wire.contains("sensitive-access-key"))
         assertFalse(wire.contains("sensitive-secret-key"))
@@ -169,6 +181,7 @@ class ApprovalReviewContextTest {
                 ),
                 "git-signing" to ApprovalReviewSshSecretFacts(provides = "public_key"),
             ),
+            parentElapsedSeconds = 12,
             evaluation = ApprovalRuleEvaluation(
                 action = ApprovalRuleAction.ASK_AI,
                 secrets = listOf(
@@ -190,49 +203,75 @@ class ApprovalReviewContextTest {
             mapOf("git-signing" to "Sign commits created for this repository."),
             request.instructions.secrets,
         )
-        assertEquals(
-            ApprovalReviewGitSignOperationFacts(secret = "git-signing"),
-            request.facts.operation,
-        )
+        assertEquals(ApprovalReviewOperation.GIT_SIGN, request.facts.operation)
+        assertEquals("git-signing", request.facts.secret)
+        assertNull(request.facts.secrets)
         assertEquals(
             setOf("aws-read-only", "git-signing"),
-            request.facts.invocation?.secrets?.keys,
+            request.parentFacts?.secrets?.keys,
         )
+        assertEquals(ApprovalReviewOperation.INVOCATION, request.parentFacts?.operation)
+        assertEquals(12L, request.parentFacts?.elapsedSeconds)
         assertEquals(
             listOf("git", "commit", "-S", "-m", "Sign this commit"),
-            request.evidence.invocation.command.argv,
+            request.parentEvidence?.command?.argv,
         )
         assertEquals(
             "tree abcdef\n\nSign this commit\n",
-            request.evidence.git?.signedContent,
+            request.evidence.signedContent,
         )
         assertEquals(
             "github.com/example/project",
-            request.evidence.git?.repository?.remote,
+            request.evidence.repository?.remote,
         )
         assertEquals(
             "BRANCH",
-            request.evidence.git?.repository?.head?.type,
+            request.evidence.repository?.head?.type,
         )
         assertEquals(
             listOf("src/main.rs", "src/main_test.rs"),
-            request.evidence.git?.repository?.changedPaths?.map { it.path },
+            request.evidence.repository?.changedPaths?.map { it.path },
         )
 
         val wire = WIRE_JSON.encodeToString(request)
         val payload = Json.parseToJsonElement(wire).jsonObject
         assertEquals(
+            setOf("instructions", "facts", "evidence", "parent_facts", "parent_evidence"),
+            payload.keys,
+        )
+        assertEquals(
+            setOf("client", "operation", "secret"),
+            payload.getValue("facts").jsonObject.keys,
+        )
+        assertEquals(
+            setOf("signed_content", "repository"),
+            payload.getValue("evidence").jsonObject.keys,
+        )
+        assertEquals(
+            setOf("operation", "elapsed_seconds", "secrets"),
+            payload.getValue("parent_facts").jsonObject.keys,
+        )
+        assertEquals(
+            setOf("reason", "command"),
+            payload.getValue("parent_evidence").jsonObject.keys,
+        )
+        assertEquals(
             "git_sign",
             payload.getValue("facts").jsonObject
-                .getValue("operation").jsonObject
-                .getValue("type").jsonPrimitive.content,
+                .getValue("operation").jsonPrimitive.content,
         )
         assertEquals(
             "tree abcdef\n\nSign this commit\n",
             payload.getValue("evidence").jsonObject
-                .getValue("git").jsonObject
                 .getValue("signed_content").jsonPrimitive.content,
         )
+        assertEquals(
+            12L,
+            payload.getValue("parent_facts").jsonObject
+                .getValue("elapsed_seconds").jsonPrimitive.content.toLong(),
+        )
+        assertTrue("parent_evidence" in payload)
+        assertFalse(wire.contains("elapsed_ms"))
         assertFalse(wire.contains("invocation-id-not-for-the-reviewer"))
         assertFalse(wire.contains("public-key"))
         assertFalse(wire.contains("fingerprint"))
