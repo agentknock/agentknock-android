@@ -645,7 +645,7 @@ private fun ClientDetail(
                     verticalAlignment = Alignment.CenterVertically,
                 ) {
                     Text(
-                        "Instructions",
+                        "AI review instructions",
                         style = MaterialTheme.typography.titleMedium,
                         modifier = Modifier.weight(1f),
                     )
@@ -654,7 +654,7 @@ private fun ClientDetail(
                     }
                 }
                 Text(
-                    client.instructions.ifBlank { "No instructions for AI review." },
+                    client.instructions.ifBlank { "No instructions for this client." },
                     color = if (client.instructions.isBlank()) {
                         MaterialTheme.colorScheme.onSurfaceVariant
                     } else {

@@ -2,7 +2,7 @@
 
 Status: review draft
 
-Last updated: 2026-08-16
+Last updated: 2026-08-28
 
 ## Purpose
 
@@ -115,10 +115,10 @@ Names do not need redundant type prefixes:
 - A secret detail uses the secret name as its title, for example
   **aws-read-only**, with its type shown as supporting information rather than
   **Secret: aws-read-only**.
-- An approval rule's detail screen uses the rule name as its title. A request or audit event
-  without a user-assigned name uses a concise type or operation title.
-- Inside another object's detail, a role label such as **Client**, **Secret**,
-  or **Rule** precedes a linked name when the relationship would otherwise be
+- A request or audit event without a user-assigned name uses a concise type or
+  operation title.
+- Inside another object's detail, a role label such as **Client** or **Secret**
+  precedes a linked name when the relationship would otherwise be
   ambiguous.
 - IDs, timestamps with distinct meanings, reported-versus-authoritative data,
   commands, paths, and security state are explicitly labeled. A familiar name
@@ -140,11 +140,9 @@ The signed-in/account concept does not currently exist, and device setup is not
 an everyday task. The primary destinations should therefore be:
 
 1. **Requests** — the home destination and authoritative authorization inbox
-   and history.
+   and history for secret use and mediated operations such as Git signing.
 2. **Secrets** — typed capabilities that clients can request.
 3. **Clients** — active, suspended, and previously paired CLI installations.
-4. **Rules** — approval rules that can approve, deny, or ask the user about
-   matching secret use requests.
 
 Settings remains a secondary destination rather than a primary domain.
 Device and pairing management belongs there and is linked contextually from
@@ -162,27 +160,25 @@ Initial setup
 Main application
 ├── Requests
 │   └── Request detail
-│       ├── Pairing variant
 │       ├── Secret use variant
-│       ├── Secret upload variant
+│       ├── Git signature variant
 │       └── Future authorized-operation variants
 ├── Secrets
+│   ├── Incoming secret upload review
 │   ├── Secret detail with embedded type-specific display
 │   ├── New secret and type-selection editor
 │   ├── Environment variable editor
 │   ├── AWS configuration editor
 │   └── SSH key action editors
 ├── Clients
+│   ├── Pending pairing review
 │   └── Client detail
 │       └── Reauthorization flow
-├── Rules
-│   ├── Approval rule detail
-│   └── Create or edit approval rule
 └── Settings
     ├── Device & pairing
     ├── Notifications
     ├── Security
-    ├── Automation
+    ├── AI review
     ├── Data and history
     │   ├── Audit log
     │   │   └── Audit event detail
@@ -193,9 +189,9 @@ Main application
     └── About, privacy, and licenses
 ```
 
-Approval rules are a primary destination and are also linked from the secret,
-client, and request they affect. Automation settings control their overall
-behavior without duplicating the rule-management workflow.
+Each secret owns its default approval mode and optional per-client overrides.
+General AI review instructions live in Settings; more specific instructions
+live on the relevant client and secret.
 
 ### Application-wide exceptional state
 
@@ -232,7 +228,7 @@ claim a cause that the public protocol cannot establish.
 
 ### Phone and tablet behavior
 
-Requests, Secrets, Clients, Rules, and the Audit log are
+Requests, Secrets, Clients, and the Audit log are
 list-detail flows:
 
 - Compact windows show either list or detail, with normal back navigation.
@@ -345,7 +341,7 @@ screens in recovery mode rather than introducing another recovery editor.
 **Surface:** Primary destination and list screen.
 
 **Purpose:** Be both the application home and the authoritative, durable inbox
-and history for operations that require a user decision or rule evaluation.
+and history for secret use and mediated operations such as Git signing.
 
 Purely read-only or automatically handled operations do not appear here merely
 because they arrived from a client. Secret-list operations, automatic
@@ -364,17 +360,16 @@ recorded in the Audit log instead.
 
 Each row directly shows:
 
-- one request label: **Pairing**, **Secret use**, or **Secret upload**;
+- one request label, such as **Secret use** or **Git signature**;
 - current status;
 - the client's friendly name as supporting text, falling back to reported
   hostname and then an unknown-client label; and
 - received time.
 
-A secret use row also shows the complete shell command and a compact
+A secret use or signing row also shows the complete triggering shell command and a compact
 secret-name summary when they fit, such as one name plus a count of additional
-secrets. It never shows values. A secret upload row shows its mode and secret
-name. A completed row may show a compact automatic-decision marker; the full
-decision source, rule version, and delivery state belong to detail. The
+secrets. It never shows values. A completed row may show a compact
+automatic-decision marker; the full decision source and delivery state belong to detail. The
 request label makes redundant **Request:** and **Client:** prefixes
 unnecessary.
 
@@ -384,10 +379,8 @@ for client**, **Delivered**, **Approved**, **Rejected**, **Denied**,
 appropriate to the request type. “Completed” alone is too vague for security
 history.
 
-Empty state shows whether new pairings are accepted. When they are accepted, it
-shows the current pairing address, a copyable pairing command, and links to
-create the first secret and view pairing instructions. When they are paused,
-it instead links to **Device & pairing** to resume them.
+Empty state explains that secret-use and signing requests will appear here.
+Pairing requests belong under Clients, and secret uploads belong under Secrets.
 
 The list must not automatically open a new request or place a modal over the
 current screen. Several requests remain independently navigable.
@@ -410,9 +403,9 @@ Every request detail starts with:
   hostname when known;
 - received time and any current expiry or response deadline;
 - a short type-appropriate lifecycle timeline that distinguishes receipt,
-  review or rule evaluation, the resulting action, and any confirmation still
+  review or approval evaluation, the resulting action, and any confirmation still
   expected;
-- decision source when applicable and, for an approval rule, its name and version;
+- decision source when applicable;
 - any safe failure reason;
 - the relay request ID and client ID under technical details; and
 - **Delete from history** only for terminal requests.
@@ -423,7 +416,7 @@ Lifecycle and decision information is supporting content. **Request ID**,
 **Client ID**, decided/completed/last-updated timestamps, versions, and
 cryptographic diagnostics remain under Technical details.
 
-Deletion removes the local history entry, not secrets, approval rules, or an active
+Deletion removes the local history entry, not secrets, approval settings, or an active
 client. Active or unsettled requests cannot be deleted. Existing audit-log
 events about the request remain and show that the detailed request record is no
 longer available.
@@ -443,7 +436,7 @@ the useful request data unreadable.
 
 ### R-03 — Pairing request detail
 
-**Surface:** Pairing variant of the request detail screen.
+**Surface:** Pending pairing detail reached from Clients.
 
 **Show:**
 
@@ -499,8 +492,7 @@ requested capabilities without revealing confidential material.
   operation.
 - Reported client identity: friendly name and hostname.
 - Request timing and any expiry or cancellation state.
-- The decision mode: manual, matching device-held approval rule, or later remote
-  reviewer under a named rule.
+- The effective approval mode: automatic, AI review, ask every time, or deny.
 
 A supporting **Execution details** section shows working directory, executable
 path and mode, SHA-256 identity when reported, standard-stream kinds, and
@@ -509,32 +501,15 @@ CLI version remain in the linked client or under Reported information. These
 fields stay reachable but do not crowd the secret, command, and decision
 actions.
 
-Manual pending state always provides:
+Manual pending state provides **Deny** and **Approve**. Both affect only the
+current request. Reusable behavior is configured on each secret rather than
+created as a side effect of deciding a request.
 
-1. **Deny once** — deny only this request.
-2. **Approve once** — approve only this request without creating an approval rule.
-
-3. **Approve for a while** — open a temporary-rule editor copied from this
-   request. The user chooses an exact command or a token prefix, selects where
-   that prefix ends by touching the command or an argument, and reviews the
-   duration and any additional executable or folder checks before one final
-   create-and-approve action.
-
-The temporary rule uses a four-hour editable default. It applies independently
-to each selected secret rather than matching the requested set as one opaque
-value. A prefix is a prefix of the structured command-and-argument vector, not
-of rendered text; it can therefore express scopes such as `gh issue` without
-turning into a shell pattern. An exact command requires the entire vector to
-match. There is no wildcard or substring mode.
-
-Every approving action revalidates the request and every secret's type,
+Every approval revalidates the request and every secret's type,
 configuration, contents, and availability before responding. If anything
 changed since the screen was rendered, the decision stops and the updated
-details must be reviewed again. Creating the temporary rule and recording
-the current decision must not produce a duplicate or broader rule if delivery
-is retried. The temporary rule is not enabled until the current approval
-succeeds. The current request records the user as its decision source; only
-later matching requests identify the rule as their automatic decision source.
+details must be reviewed again. The request records whether its decision came
+from the user, approval settings, non-sensitive delivery, or AI review.
 
 Terminal states must separately report:
 
@@ -543,11 +518,8 @@ Terminal states must separately report:
 - denied and client confirmation state;
 - cancelled or expired before a response;
 - invalid request or cryptographic verification failure; and
-- an automatic decision, including the exact rule or reviewer version.
-
-Additional rule detail, if offered, remains within that editor. There is no
-second unnamed confirmation screen, and the editor never creates or widens a
-rule without authenticated review.
+- an automatic decision, including the applicable approval mode and reviewer
+  version where relevant.
 
 The title is **Secret use**. **Requested secrets**, **Client**, **Command**,
 **Working directory**, and **Reason reported by client** are labeled because
@@ -559,9 +531,31 @@ supporting information. Complete environment variable or provided environment va
 names remain available within that secret's request detail without becoming
 headline fields.
 
-### R-05 — Secret upload request detail
+### R-05 — Git signature request detail
 
-**Surface:** Secret upload variant of the request detail screen.
+**Surface:** Git signature variant of request detail.
+
+**Show:**
+
+- the SSH key secret and requesting client;
+- the parent invocation's shell-readable command;
+- repository, branch, upstream, remote, and changed-path context when reported;
+- the Git commit message when one can be identified safely;
+- the exact content that will be signed, available without obscuring the
+  decision-critical summary;
+- the AI reviewer verdict and explanation when AI review left the decision to
+  the user; and
+- the elapsed time since the parent invocation in supporting details when it
+  materially helps identify an unexpected late signing request.
+
+Pending actions are **Deny** and **Sign**. Signing uses the private key on the
+device and returns one SSHSIG signature; the private key is never sent to the
+client. The screen distinguishes request approval from confirmed completion
+and keeps protocol identifiers under Technical details.
+
+### R-06 — Secret upload request detail
+
+**Surface:** Incoming upload detail reached from Secrets.
 
 **Purpose:** Let the user review a secret uploaded by a client before it
 changes the device's secret collection.
@@ -627,20 +621,20 @@ events without creating a request row.
 **Surface:** List screen under Data and history.
 
 **Purpose:** Present a chronological record of security-relevant client,
-device, user, and rule activity.
+device, user, approval-setting, and AI-review activity.
 
 Record at least:
 
 - Secret-list operations and their outcomes;
-- request receipt, user or rule decision, response, expiry, cancellation,
+- request receipt, automatic, AI, or user decision, response, expiry, cancellation,
   and delivery confirmation;
 - Secret upload receipt, approval, rejection, and validation failure;
 - pairing activation, rejection, failure, and client-initiated unpairing;
 - client rename, requested and confirmed suspension or resumption,
   reauthorization, and revocation;
 - pairing-address claim and replacement, and pausing or resuming new pairings;
-- Secret, environment variable, SSH key, issuer configuration, and rule creation,
-  change, replacement, and deletion;
+- Secret, environment variable, SSH key, and issuer-configuration creation,
+  change, replacement, and deletion, plus approval-setting changes;
 - device setup, recovery, and protected-key availability changes; and
 - security-relevant authentication, cryptographic, and protocol failures.
 
@@ -674,7 +668,7 @@ separate screen.
 - actor and decision source;
 - stable IDs and friendly-name snapshots for affected objects;
 - safe before-and-after summaries for local management changes;
-- related request, client, secret, or rule links when those records still
+- related request, client, or secret links when those records still
   exist;
 - delivery or client-confirmation state when applicable;
 - a sanitized failure category; and
@@ -814,10 +808,8 @@ Each row directly shows:
   role, or abbreviated SSH fingerprint.
 
 Description, complete provided environment variable names, delivery mechanism,
-created and updated times, last request and outcome, active approval rules, and
-any high-value classification belong to secret detail. A compact rule or
-high-value marker may appear in the row only when it changes how the user
-should interpret the secret.
+approval settings, created and updated times, and any high-value classification
+belong to secret detail.
 
 Primary action: **New secret**.
 
@@ -861,7 +853,8 @@ Every secret detail shows:
 - availability and any type-specific configuration error;
 - its public delivery contract and, where applicable, the fixed environment
   variables it provides;
-- active approval rules that reference the secret; and
+- its default approval mode and any per-client overrides;
+- secret-specific AI review instructions; and
 - recent authorization requests and audit events filtered to this secret,
   linking to their normal details.
 
@@ -872,7 +865,7 @@ exposed or retained merely because a request completed.
 Secret actions are **Edit**, **Rename**, and **Delete**, plus type-specific
 actions such as replacing stored material or testing issuer configuration.
 Renaming changes the CLI-facing handle but preserves the stable internal ID,
-approval rules, and history. Deleting makes future requests by that name fail;
+approval settings, and history. Deleting makes future requests by that name fail;
 history retains the secret name, type, and request metadata, never values.
 
 Saving, renaming, and deleting are security-sensitive management actions and
@@ -1010,8 +1003,8 @@ Each row directly shows:
 - last activity time.
 
 A pending-request indicator appears when nonzero because it requires attention.
-Paired time, full platform information, active rule count, and exact request
-counts belong to client detail. Rows use **my laptop**, not **Client: my
+Paired time, full platform information, and exact request counts belong to
+client detail. Rows use **my laptop**, not **Client: my
 laptop**.
 
 Default view prioritizes active and attention-requiring clients. A
@@ -1036,9 +1029,9 @@ request detail rather than becoming half-created client rows.
   version, and client ID;
 - paired, last authorization request, last successful request, last secret-list
   operation, and last seen times when available;
+- client-specific AI review instructions;
 - continuity-key rotation status in user language: healthy, stale,
   reauthorization required, or competing copy detected;
-- active approval rules for this client;
 - authorization requests and audit events filtered to this client; and
 - an explanation that reported machine information is not independent host
   attestation.
@@ -1048,8 +1041,7 @@ Actions:
 - **Rename**;
 - **Suspend** or **Resume**;
 - **Reauthorize** when stale or after a copied-state warning;
-- **Revoke client**; and
-- **View approval rules** when rules are available.
+- **Revoke client**.
 
 The client remains **Suspending**, **Resuming**, or **Revoking** until the relay
 confirms the requested state. These transitions survive leaving the screen or
@@ -1066,17 +1058,15 @@ Revocation is authoritative and permanent for that pairing: future requests
 fail, outstanding exchanges and delayed responses are terminated, the CLI must
 pair as a new client, and local history remains.
 
-A competing-copy warning automatically suspends approval rules for that client
-until the user explicitly reauthorizes or revokes it.
+A competing-copy warning prevents automatic approval for that client until the
+user explicitly reauthorizes or revokes it.
 
 The friendly name is the screen title. State and any security warning are
 primary. **Reported hostname**, **Platform**, **Architecture**, **OS version**,
 and **Machine ID** remain explicitly labeled because they are client-reported
 attributes, while **Client ID** and CLI/protocol versions belong under
-Technical details. Related approval rules, Requests, and Audit events are named
-sections rather than fields competing with the client identity. **View approval
-rules** opens the existing rule list filtered to this client; it does not
-create a client-specific rule screen.
+Technical details. Related Requests and Audit events are named sections rather
+than fields competing with the client identity.
 
 ### C-03 — Client reauthorization
 
@@ -1093,7 +1083,7 @@ state or a competing-copy warning.
 - why reauthorization is required and what evidence the user must compare or
   confirm once that protocol is defined;
 - progress and any expiry while reauthorization is incomplete;
-- the effect on suspended approval rules; and
+- the effect on automatic approval; and
 - **Cancel**, **Reauthorize**, and **Revoke client** only in the states where
   each action is valid.
 
@@ -1103,137 +1093,40 @@ transcript state remain secondary. Until a concrete verification contract
 exists, the UI must not substitute a generic confirmation that treats reported
 machine metadata as proof.
 
-## Approval rules and automation
+## Approval settings and AI review
 
-Approval rules are a product capability with their own screens rather than a
-loose collection of settings toggles.
+Approval is configured where its subject is understood:
 
-### A-01 — Approval rule list
+- each secret has a default mode: **Approve automatically**, **Ask AI**,
+  **Ask every time**, or **Always deny**;
+- a secret may override that mode for an individual client;
+- general AI review instructions live in Settings;
+- client and secret instructions live on their respective detail screens; and
+- a pending request can be approved or denied once without changing reusable
+  settings.
 
-**Surface:** Primary list screen reached from **Rules** and contextual links.
+For a request containing multiple secrets, each secret is evaluated under its
+effective mode and the least permissive result governs the atomic request.
+Non-sensitive material, such as an SSH public key, is delivered without an
+approval decision. A later protected operation using the same secret, such as
+Git signing, is evaluated separately.
 
-**Purpose:** Inspect and stop reusable device-held request decisions.
+### A-01 — AI review settings
 
-**Show:**
-
-- each rule's name as primary text, enabled/paused/expired status, decision,
-  concise client/secret scope, and expiry;
-- prominent warnings for rules suspended by client competition,
-  unavailable secret material, invalid issuer configuration, or subscription
-  entitlement; and
-- a link to every automatic decision through normal request history.
-
-Last match, recent match count, complete executable scope, and version belong to
-rule detail. A row uses the rule name without a **Rule:** prefix.
-
-Standing rules can be created directly from this screen. Temporary rules start
-from a pending secret use request so the app can copy machine-reported fields
-without asking a person to type them. Rules can be paused individually without
-deleting their definitions; unmatched requests still require a user decision.
-
-### A-02 — Approval rule detail
-
-**Surface:** Detail screen for one approval rule.
+**Surface:** Settings sub-screen.
 
 **Show:**
 
-- rule name and stable identifier;
-- enabled, paused, expired, or blocked state and reason;
-- exact client selector;
-- one or more exact secret selectors;
-- one structured command-and-argument vector, matched exactly or as a token
-  prefix;
-- optional resolved executable path and executable-content identity, and
-  optional working directory, when captured from a request;
-- start, expiry, created, updated, and last-used times;
-- action for matching requests: **Approve**, **Ask me**, **Deny**, or **Ask
-  AI**;
-- automatic decision count and recent matching requests; and
-- what request data the AI reviewer may see, if applicable.
+- current AI review availability;
+- editable general instructions that apply to every review;
+- a concise explanation of the general, client, and secret instruction
+  hierarchy;
+- that Ask AI may approve, deny, or leave the decision to the user;
+- that secret values, private keys, and decryption keys are never sent; and
+- a link to Plan and billing.
 
-Actions: **Pause/enable**, **Edit**, **Delete**, and **View matching activity**.
-Deleting prevents future matches but cannot retract material already delivered
-or operations already completed.
-
-**View matching activity** opens the existing request list filtered to this
-rule rather than a separate activity screen.
-
-The rule name is the screen title and current status is primary. **Client**,
-**Secrets**, **Command**, **Decision**, and **Expires** are labeled scope fields.
-Stable identifier, exact hash, and timestamps other than expiry and last use
-remain under Technical details or a secondary history section.
-
-### A-03 — Create or edit an approval rule
-
-**Surface:** Approval rule editor opened from the rule list, a pending secret use
-request, or an existing rule detail.
-
-**Show and require review of:**
-
-- a generated, editable user-visible rule name;
-- one exact client;
-- one or more exact secrets, each evaluated independently;
-- one structured command-and-argument vector, matched exactly or as a token
-  prefix;
-- for a request-derived rule, optional resolved executable identity and working
-  directory checks copied from the request rather than typed by the user;
-- for a request-derived rule, an editable duration defaulting to four hours;
-- action on a match: **Approve**, **Ask me**, **Deny**, or **Ask AI**; and
-- a final natural-language summary of the effective scope.
-
-Command comparison operates on the structured ordered token vector, not a
-rendered shell command. Executable names are not reduced to basenames. A
-prefix must include the command token and may extend through one or more
-arguments. A manually created standing rule accepts a shell-readable command
-line and parses quoting without performing shell expansion. It does not expose
-fields such as executable hashes or working directories that a person would
-not reasonably type.
-
-Each requested secret finds its own matching decision. **Deny** takes
-precedence over **Ask me**, which takes precedence over **Ask AI**, which takes
-precedence over **Approve**. A secret with no matching rule defaults to **Ask
-me**, and the least permissive result across all requested secrets decides the
-atomic request. Rule order therefore has no effect and rules are not manually
-reordered.
-
-Standing rules created from the Rules screen have no expiry. Temporary rules
-are created from a request. A different order of requested secret names does
-not alter per-secret evaluation. Renaming a secret retains its stable identity;
-deleting and recreating one does not inherit the old rule.
-
-The safe default is no rule. The editor must not offer selectors whose match
-semantics are not implemented and testable. A client or agent cannot create,
-widen, extend, or make a rule indefinite. **Deny once** and **Approve once**
-never create rule records.
-
-Saving, widening, enabling, or extending a rule requires device
-authentication. Pausing and deletion remain fast ways to stop future matches.
-
-The create flow uses a **New approval rule** title and a labeled **Name**
-field. Editing an existing rule uses its rule name as the title without a
-**Rule:** prefix.
-
-### A-04 — Automatic approvals setup
-
-**Surface:** Focused Automation setup screen; not a primary destination.
-
-**Status:** later, potentially paid.
-
-**Show before enabling:**
-
-- the difference between the deterministic **Approve** and **Deny** actions and
-  AI review through **Ask AI**;
-- exact request fields sent to the provider;
-- that no secret values, generated temporary credentials, private keys, or
-  decryption keys are sent;
-- eligible rules and the fallback on timeout, provider failure, or
-  uncertainty;
-- current subscription entitlement and expected usage limits; and
-- an explicit link to disable the reviewer without deleting rules.
-
-The user chooses this trust mode deliberately. The UI makes clear that the AI
-reviewer may authorize a request without asking the user, while deterministic
-**Approve** rules do not involve AI.
+Approval modes and client overrides remain on secret detail screens. This
+screen must not grow into a second secret-management or subscription screen.
 
 ## Settings and secondary screens
 
@@ -1249,7 +1142,8 @@ Rows show their current state in supporting text and open focused subscreens:
   accepted, or recovery required.
 - **Notifications** — enabled, disabled, or delivery setup needs attention.
 - **Security** — device protection and local-key status.
-- **Automation** — off, paused, or number of active rules.
+- **AI review** — active, unavailable, or subscription required, plus whether
+  general instructions are set.
 - **Data and history** — backup, bounded request history, and audit log.
 - **Plan and billing** — Free, paid plan name, payment attention, or unavailable.
 - **Connection diagnostics** — connected, offline, or last error.
@@ -1279,7 +1173,7 @@ address, does not cancel an already admitted pairing request, and remains in
 effect until the user explicitly resumes it; there is no automatic timeout.
 
 Changing the pairing address affects only future pairings. Existing clients,
-secrets, approval rules, and history are unaffected. The current address remains in
+secrets, approval settings, and history are unaffected. The current address remains in
 use until the replacement has been claimed successfully, and an interrupted
 change remains resumable.
 
@@ -1325,20 +1219,17 @@ content shows enough context to distinguish the client, request type, command,
 and secrets without showing confidential material or a reason reported by the
 client.
 
-Pending secret use notifications initially provide **Deny once** and
-**Approve once**:
+Pending secret use notifications provide **Deny** and **Approve**:
 
-- **Deny once** applies only if the same request is still pending and is safe to
+- **Deny** applies only if the same request is still pending and is safe to
   repeat without changing the outcome.
-- **Approve once** requires device authentication and the same complete
+- **Approve** requires device authentication and the same complete
   revalidation as approval in the app. If Android cannot provide the required
   authenticated interaction from the notification, the action opens the exact
   request detail to finish approval.
 
-Creating a temporary approval rule remains an in-app action initially. Its broader
-scope, argument mode, secret set, and editable expiry require the focused
-review surface. Dismissing a notification has no effect on its request, and a
-notification is removed or updated when the request resolves elsewhere.
+Dismissing a notification has no effect on its request, and a notification is
+removed or updated when the request resolves elsewhere.
 
 A secret upload notification identifies its client, mode, and secret name and
 opens the upload detail for review. It does not offer an approval shortcut
@@ -1367,26 +1258,13 @@ The overall usable/attention-required state and any corrective action are
 primary. Hardware-backing detail, counts, and explanatory limitations are
 supporting information rather than separate status cards for every mechanism.
 
-### T-05 — Automation
+### T-05 — AI review
 
-**Surface:** Settings sub-screen for overall rule behavior.
+**Surface:** Settings sub-screen described in A-01.
 
-**Show:**
-
-- master rule-evaluation state;
-- count of active, paused, expired, and blocked rules;
-- default behavior for unmatched requests, which is manual review unless a
-  future explicit deny mode is selected;
-- automatic approvals state and provider-visible-data summary when applicable;
-  and
-- link to the **Rules** destination.
-
-The master control pauses evaluation. Rule creation and detailed scoping stay
-in the rule workflow rather than becoming nested preference rows.
-
-The rule-evaluation state and link to **Rules** are primary. Counts and
-automatic approvals details are supporting summaries and appear only when those
-features exist.
+This is the one place for general AI review instructions and a compact access
+status. It links to Plan and billing but does not duplicate subscription
+management. Approval modes remain on each secret.
 
 ### T-06 — Data and history
 
@@ -1395,8 +1273,7 @@ reset.
 
 **Show:**
 
-- local counts for secrets, environment variables, clients, requests, audit events, and
-  approval rules;
+- local counts for secrets, environment variables, clients, requests, and audit events;
 - what Android backup/device transfer preserves: metadata and encrypted stored
   material, including Request history and the Audit log;
 - what it cannot preserve: device-bound private keys, so restored secret
@@ -1411,7 +1288,7 @@ reset.
 - **Factory reset Agentknock**, visually separated from ordinary data and
   history controls as an irreversible recovery and deletion action.
 
-Clearing history never deletes active clients, secrets, approval rules, or
+Clearing history never deletes active clients, secrets, approval settings, or
 unsettled Requests. It also does not delete Audit log events about pruned or
 manually deleted Requests. Individual audit events cannot be deleted; normal
 retention removes expired events, and Factory reset removes the log with
@@ -1438,7 +1315,7 @@ unavailable.
 
 - an unmistakable **This cannot be undone** warning;
 - every local category that will be erased: device identity and keys, secrets
-  and values, Clients, Requests, approval rules, Audit log, and settings;
+  and values, Clients, Requests, approval settings, Audit log, and settings;
 - the remote state Agentknock will attempt to delete: the relay device, client
   registrations, pending exchanges, and push registration;
 - that deletion removes live relay state while any limited infrastructure
@@ -1625,8 +1502,7 @@ navigation destinations:
 - pause or resume new pairings;
 - clear completed request history;
 - change pairing address or discard an incomplete claim;
-- reveal/copy a sensitive value; and
-- create, widen, extend, enable, or revoke an approval rule.
+- reveal/copy a sensitive value.
 
 Confirmation copy names the affected object and consequence. Destructive
 buttons use the precise verb—**Revoke**, **Delete**, **Clear**, **Deny**—rather
@@ -1710,12 +1586,12 @@ detail:
    hostname is accepted automatically after correct SAS or whether naming is a
    required pairing step. It remains editable either way.
 3. **Client reauthorization contract.** Define the verification evidence,
-   protocol lifecycle, expiry, and effect on existing rules before the
+   protocol lifecycle, expiry, and effect on automatic approval before the
    focused reauthorization screen is finalized. Reported machine metadata is
    not sufficient evidence by itself.
 4. **Secret type contracts.** Define the exact public metadata, fixed provided
    environment variable names where applicable, request result, delivery
-   behavior, and combination rules for each type before its screens are
+   behavior, and composition constraints for each type before its screens are
    finalized.
 5. **AWS credential generation.** Choose the authorization mechanism,
    configuration fields, storage of any long-lived material, duration limits,
@@ -1737,8 +1613,8 @@ detail:
    pseudonymous Agentknock device identity, and what restoration or
    multiple-device behavior is promised before the backend entitlement model
    is designed.
-11. **Automatic approvals and the Ask AI label.** **Ask AI** is the provisional
-   rule-action label. Revisit it before release while defining the provider,
+11. **AI review and the Ask AI label.** **Ask AI** is the provisional approval-mode
+   label. Revisit it before release while defining the provider,
    visible fields, evaluation gates, fallback behavior, and subscription
    economics.
 

@@ -48,6 +48,7 @@ import androidx.compose.material.icons.outlined.ChevronRight
 import androidx.compose.material.icons.outlined.ContentCopy
 import androidx.compose.material.icons.outlined.CheckCircle
 import androidx.compose.material.icons.outlined.Backup
+import androidx.compose.material.icons.outlined.AutoAwesome
 import androidx.compose.material.icons.outlined.DataUsage
 import androidx.compose.material.icons.outlined.DeleteForever
 import androidx.compose.material.icons.outlined.DeleteSweep
@@ -135,6 +136,7 @@ private enum class SettingsPage {
     DEVICE,
     NOTIFICATIONS,
     SECURITY,
+    AI_REVIEW,
     DATA,
     AUDIT,
     FACTORY_RESET,
@@ -242,6 +244,24 @@ internal fun SettingsScreen(
                             scope.launch { snackbar.showSnackbar(it) }
                         }
                     },
+                    onBack = ::back,
+                    modifier = modifier,
+                )
+                SettingsPage.AI_REVIEW -> AiReviewSettings(
+                    instructions = configuration?.active?.instructions.orEmpty(),
+                    subscription = subscriptionState,
+                    onSave = { instructions ->
+                        scope.launch {
+                            snackbar.showSnackbar(
+                                if (viewModel.saveGeneralInstructions(instructions)) {
+                                    "General instructions updated"
+                                } else {
+                                    "General instructions could not be updated"
+                                },
+                            )
+                        }
+                    },
+                    onOpenPlan = { page = SettingsPage.PLAN },
                     onBack = ::back,
                     modifier = modifier,
                 )
@@ -413,13 +433,22 @@ private fun SettingsOverview(
                 ) { onOpen(SettingsPage.SECURITY) }
             }
             item {
+                val access = when (subscription.access) {
+                    SubscriptionAccess.ACTIVE -> "Active"
+                    SubscriptionAccess.CHECKING -> "Checking access"
+                    SubscriptionAccess.FREE -> "Not active"
+                    SubscriptionAccess.UNAVAILABLE -> "Status unavailable"
+                }
+                val instructions = if (pairing?.instructions.isNullOrBlank()) {
+                    "No general instructions"
+                } else {
+                    "General instructions set"
+                }
                 SettingsRow(
-                    Icons.Outlined.History,
-                    "Data & history",
-                    "${counts.secrets.countLabel("secret")} · " +
-                        "${counts.requests.countLabel("workflow")} · " +
-                        "${counts.auditEvents.countLabel("audit event")}",
-                ) { onOpen(SettingsPage.DATA) }
+                    Icons.Outlined.AutoAwesome,
+                    "AI review",
+                    "$access · $instructions",
+                ) { onOpen(SettingsPage.AI_REVIEW) }
             }
             item {
                 SettingsRow(
@@ -427,6 +456,15 @@ private fun SettingsOverview(
                     "Plan and billing",
                     subscription.overviewLabel(),
                 ) { onOpen(SettingsPage.PLAN) }
+            }
+            item {
+                SettingsRow(
+                    Icons.Outlined.History,
+                    "Data & history",
+                    "${counts.secrets.countLabel("secret")} · " +
+                        "${counts.requests.countLabel("workflow")} · " +
+                        "${counts.auditEvents.countLabel("audit event")}",
+                ) { onOpen(SettingsPage.DATA) }
             }
             item {
                 val status = when (syncResult) {
@@ -722,6 +760,107 @@ private fun NotificationsSettings(
 }
 
 @Composable
+private fun AiReviewSettings(
+    instructions: String,
+    subscription: SubscriptionUiState,
+    onSave: (String) -> Unit,
+    onOpenPlan: () -> Unit,
+    onBack: () -> Unit,
+    modifier: Modifier,
+) {
+    var editedInstructions by remember(instructions) { mutableStateOf(instructions) }
+    val accessActive = subscription.access == SubscriptionAccess.ACTIVE
+    Column(modifier) {
+        PageTopBar("AI review", onBack)
+        Column(
+            Modifier.verticalScroll(rememberScrollState()).padding(20.dp),
+            verticalArrangement = Arrangement.spacedBy(20.dp),
+        ) {
+            Surface(
+                color = if (accessActive) {
+                    MaterialTheme.agentknockColors.successContainer
+                } else {
+                    MaterialTheme.colorScheme.surfaceContainerHigh
+                },
+                contentColor = if (accessActive) {
+                    MaterialTheme.agentknockColors.onSuccessContainer
+                } else {
+                    MaterialTheme.colorScheme.onSurface
+                },
+                shape = MaterialTheme.shapes.large,
+                modifier = Modifier.fillMaxWidth(),
+            ) {
+                Row(
+                    modifier = Modifier.padding(18.dp),
+                    horizontalArrangement = Arrangement.spacedBy(14.dp),
+                    verticalAlignment = Alignment.CenterVertically,
+                ) {
+                    Icon(Icons.Outlined.AutoAwesome, contentDescription = null)
+                    Column(Modifier.weight(1f), verticalArrangement = Arrangement.spacedBy(3.dp)) {
+                        Text(
+                            if (accessActive) "AI review active" else "AI review not active",
+                            style = MaterialTheme.typography.titleLarge,
+                        )
+                        Text(
+                            if (accessActive) {
+                                "Secrets set to Ask AI can be reviewed automatically."
+                            } else {
+                                "Manual approval and every other Agentknock feature remain available."
+                            },
+                            style = MaterialTheme.typography.bodyMedium,
+                        )
+                    }
+                }
+            }
+
+            TextButton(onClick = onOpenPlan, modifier = Modifier.align(Alignment.End)) {
+                Text("Plan and billing")
+                Spacer(Modifier.width(6.dp))
+                Icon(Icons.Outlined.ChevronRight, contentDescription = null)
+            }
+
+            Column(verticalArrangement = Arrangement.spacedBy(8.dp)) {
+                Text("General instructions", style = MaterialTheme.typography.titleLarge)
+                Text(
+                    "These instructions apply to every AI review. Client and secret instructions add more specific policy.",
+                    color = MaterialTheme.colorScheme.onSurfaceVariant,
+                )
+                OutlinedTextField(
+                    value = editedInstructions,
+                    onValueChange = { editedInstructions = it },
+                    label = { Text("Instructions") },
+                    placeholder = {
+                        Text("For example, deny production access from personal clients.")
+                    },
+                    minLines = 5,
+                    maxLines = 10,
+                    modifier = Modifier.fillMaxWidth(),
+                )
+                Button(
+                    onClick = { onSave(editedInstructions) },
+                    enabled = editedInstructions.trim() != instructions,
+                    modifier = Modifier.fillMaxWidth(),
+                ) {
+                    Text("Save instructions")
+                }
+            }
+
+            InformationSurface {
+                Text("Approval behavior", style = MaterialTheme.typography.titleMedium)
+                Text(
+                    "Choose a default approval mode on each secret. A secret can use a different mode for individual clients.",
+                    color = MaterialTheme.colorScheme.onSurfaceVariant,
+                )
+                Text(
+                    "Ask AI can approve, deny, or leave a request for you to decide. Secret values and private keys are never sent for review.",
+                    color = MaterialTheme.colorScheme.onSurfaceVariant,
+                )
+            }
+        }
+    }
+}
+
+@Composable
 private fun SecuritySettings(
     protection: VaultProtection?,
     authenticationMode: DeviceAuthenticationMode,
@@ -808,7 +947,7 @@ private fun SecuritySettings(
                 }
             }
             Text(
-                "This controls Agentknock's interface. Background synchronization and automatic approval rules continue while the app is locked.",
+                "This controls Agentknock's interface. Background synchronization and automatic approvals continue while the app is locked.",
                 color = MaterialTheme.colorScheme.onSurfaceVariant,
             )
         }
@@ -1148,7 +1287,7 @@ private fun AuditDetail(
                     InformationRow("Time", formatTimestamp(event.occurredAt))
                     InformationRow(
                         "Category",
-                        event.category.storedName.replace('_', ' ').replaceFirstChar(Char::uppercase),
+                        event.category.displayName,
                     )
                     clientName?.let { InformationRow("Client", it) }
                     event.clientId?.let {

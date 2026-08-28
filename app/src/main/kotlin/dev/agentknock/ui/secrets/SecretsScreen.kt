@@ -1173,62 +1173,6 @@ private fun SecretDetail(
                     InformationRow(stringResource(R.string.secret_type), secret.type.displayName())
                 }
             }
-            item {
-                Text("Approval", style = MaterialTheme.typography.titleLarge)
-            }
-            item {
-                InformationSurface {
-                    Text(
-                        "Controls protected uses, such as providing sensitive values or using a private key.",
-                        color = MaterialTheme.colorScheme.onSurfaceVariant,
-                    )
-                    ApprovalSettingRow(
-                        title = "Default",
-                        value = secret.approvalMode.displayName(),
-                        onClick = { editingDefaultApproval = true },
-                    )
-                    if (clients.isNotEmpty()) {
-                        HorizontalDivider()
-                        Text("Clients", style = MaterialTheme.typography.titleMedium)
-                        clients.forEach { client ->
-                            val override = overrides[client.clientId]
-                            ApprovalSettingRow(
-                                title = client.name,
-                                value = override?.mode?.displayName()
-                                    ?: "Default · ${secret.approvalMode.displayName()}",
-                                onClick = { editingClientApproval = client.clientId },
-                            )
-                        }
-                    }
-                }
-            }
-            item {
-                InformationSurface {
-                    Row(
-                        modifier = Modifier.fillMaxWidth(),
-                        verticalAlignment = Alignment.CenterVertically,
-                    ) {
-                        Text(
-                            "Instructions",
-                            style = MaterialTheme.typography.titleMedium,
-                            modifier = Modifier.weight(1f),
-                        )
-                        IconButton(onClick = { editingInstructions = true }) {
-                            Icon(Icons.Outlined.Edit, contentDescription = "Edit instructions")
-                        }
-                    }
-                    Text(
-                        secret.instructions.ifBlank {
-                            "No instructions for AI review."
-                        },
-                        color = if (secret.instructions.isBlank()) {
-                            MaterialTheme.colorScheme.onSurfaceVariant
-                        } else {
-                            MaterialTheme.colorScheme.onSurface
-                        },
-                    )
-                }
-            }
             if (secret.type == ENVIRONMENT_SECRET_TYPE) {
                 item {
                     FlowRow(
@@ -1287,6 +1231,62 @@ private fun SecretDetail(
                         title = "SSH key unavailable",
                         description = "The encrypted private key could not be recovered on this device.",
                         modifier = Modifier.fillMaxWidth().padding(vertical = 48.dp),
+                    )
+                }
+            }
+            item {
+                Text("Approval", style = MaterialTheme.typography.titleLarge)
+            }
+            item {
+                InformationSurface {
+                    Text(
+                        "Controls protected uses, such as providing sensitive values or using a private key.",
+                        color = MaterialTheme.colorScheme.onSurfaceVariant,
+                    )
+                    ApprovalSettingRow(
+                        title = "Default",
+                        value = secret.approvalMode.displayName(),
+                        onClick = { editingDefaultApproval = true },
+                    )
+                    if (clients.isNotEmpty()) {
+                        HorizontalDivider()
+                        Text("Client overrides", style = MaterialTheme.typography.titleMedium)
+                        clients.forEach { client ->
+                            val override = overrides[client.clientId]
+                            ApprovalSettingRow(
+                                title = client.name,
+                                value = override?.mode?.displayName()
+                                    ?: "Use default · ${secret.approvalMode.displayName()}",
+                                onClick = { editingClientApproval = client.clientId },
+                            )
+                        }
+                    }
+                }
+            }
+            item {
+                InformationSurface {
+                    Row(
+                        modifier = Modifier.fillMaxWidth(),
+                        verticalAlignment = Alignment.CenterVertically,
+                    ) {
+                        Text(
+                            "AI review instructions",
+                            style = MaterialTheme.typography.titleMedium,
+                            modifier = Modifier.weight(1f),
+                        )
+                        IconButton(onClick = { editingInstructions = true }) {
+                            Icon(Icons.Outlined.Edit, contentDescription = "Edit instructions")
+                        }
+                    }
+                    Text(
+                        secret.instructions.ifBlank {
+                            "No instructions for this secret."
+                        },
+                        color = if (secret.instructions.isBlank()) {
+                            MaterialTheme.colorScheme.onSurfaceVariant
+                        } else {
+                            MaterialTheme.colorScheme.onSurface
+                        },
                     )
                 }
             }

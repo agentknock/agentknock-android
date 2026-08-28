@@ -18,8 +18,8 @@ import dev.agentknock.relay.ApprovalReviewSecretFacts
 import dev.agentknock.relay.ApprovalReviewSshSecretFacts
 import dev.agentknock.storage.request.PairingEntity
 import dev.agentknock.storage.request.SecretUseRequestEntity
-import dev.agentknock.storage.rule.ApprovalRuleAction
-import dev.agentknock.storage.rule.ApprovalRuleEvaluation
+import dev.agentknock.storage.approval.ApprovalAction
+import dev.agentknock.storage.approval.ApprovalEvaluation
 import dev.agentknock.storage.secret.ENVIRONMENT_SECRET_TYPE
 import dev.agentknock.storage.secret.RequestedSecretDescription
 import dev.agentknock.storage.secret.SSH_SECRET_TYPE
@@ -32,7 +32,7 @@ internal fun approvalReviewRequest(
     contents: InvocationRequestMessage,
     description: RequestedSecretDescription,
     values: Map<String, SecretValues>,
-    evaluation: ApprovalRuleEvaluation,
+    evaluation: ApprovalEvaluation,
     policies: List<SecretApprovalPolicy>,
     deviceInstructions: String,
 ): ApprovalReviewRequest {
@@ -69,7 +69,7 @@ internal fun approvalReviewGitSignRequest(
     invocation: SecretUseRequestEntity,
     invocationSecrets: Map<String, ApprovalReviewSecretFacts>,
     parentElapsedSeconds: Long,
-    evaluation: ApprovalRuleEvaluation,
+    evaluation: ApprovalEvaluation,
     policies: List<SecretApprovalPolicy>,
     deviceInstructions: String,
 ): ApprovalReviewRequest {
@@ -138,12 +138,12 @@ private fun approvalReviewInstructions(
     pairing: PairingEntity,
     deviceInstructions: String,
     decisionSecretNames: Set<String>,
-    evaluation: ApprovalRuleEvaluation,
+    evaluation: ApprovalEvaluation,
     policies: List<SecretApprovalPolicy>,
 ): ApprovalReviewInstructions {
     val policiesById = policies.associateBy(SecretApprovalPolicy::secretId)
     val secretInstructions = evaluation.secrets
-        .filter { it.action == ApprovalRuleAction.ASK_AI }
+        .filter { it.action == ApprovalAction.ASK_AI }
         .associateTo(linkedMapOf()) { secret ->
             val policy = checkNotNull(policiesById[secret.secretId]) {
                 "Missing approval policy for ${secret.secretName}"

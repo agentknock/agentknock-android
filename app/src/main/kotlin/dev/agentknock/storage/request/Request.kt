@@ -320,7 +320,7 @@ internal data class SecretUseRequestEntity(
     @ColumnInfo(name = "decision_source")
     val decisionSource: String?,
     @ColumnInfo(name = "rule_evaluation_json")
-    val ruleEvaluationJson: String?,
+    val approvalEvaluationJson: String?,
     @ColumnInfo(name = "completion_result")
     val completionResult: String?,
     @ColumnInfo(name = "completion_reason")
@@ -365,7 +365,7 @@ internal data class GitSignRequestEntity(
     @ColumnInfo(name = "repository_json")
     val repositoryJson: String?,
     @ColumnInfo(name = "rule_evaluation_json")
-    val ruleEvaluationJson: String?,
+    val approvalEvaluationJson: String?,
     @ColumnInfo(name = "decision")
     val decision: String?,
     @ColumnInfo(name = "completion_result")

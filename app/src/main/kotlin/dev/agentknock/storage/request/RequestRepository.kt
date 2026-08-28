@@ -69,15 +69,13 @@ import dev.agentknock.storage.secret.SSH_SECRET_TYPE
 import dev.agentknock.storage.secret.SecretRepository
 import dev.agentknock.storage.secret.SecretApprovalMode
 import dev.agentknock.storage.secret.SecretApprovalPolicy
-import dev.agentknock.storage.rule.ApprovalRuleAction
-import dev.agentknock.storage.rule.AiReview
-import dev.agentknock.storage.rule.AiReviewDecision
-import dev.agentknock.storage.rule.AiReviewFailure
-import dev.agentknock.storage.rule.ApprovalRuleEvaluation
-import dev.agentknock.storage.rule.ApprovalRuleRepository
-import dev.agentknock.storage.rule.ApprovalRuleRequest
-import dev.agentknock.storage.rule.RequestedSecretIdentity
-import dev.agentknock.storage.rule.SecretRuleEvaluation
+import dev.agentknock.storage.approval.ApprovalAction
+import dev.agentknock.storage.approval.AiReview
+import dev.agentknock.storage.approval.AiReviewDecision
+import dev.agentknock.storage.approval.AiReviewFailure
+import dev.agentknock.storage.approval.ApprovalPolicyEvaluator
+import dev.agentknock.storage.approval.ApprovalEvaluation
+import dev.agentknock.storage.approval.RequestedSecretApproval
 import dev.agentknock.storage.audit.AuditCategory
 import dev.agentknock.storage.audit.AuditOutcome
 import dev.agentknock.storage.audit.AuditRecord
@@ -244,7 +242,6 @@ internal data class InboxRequestSummary(
     val listSummary: String?,
     val command: String?,
     val arguments: List<String>,
-    val matchedRuleIds: Set<String>,
     val receivedAt: Long,
     val completedAt: Long?,
     val gitSignState: GitSignRequestState? = null,
@@ -292,7 +289,7 @@ internal data class GitSignRequestDetails(
     val secretName: String,
     val message: ByteArray,
     val repository: GitSignRepository?,
-    val ruleEvaluation: ApprovalRuleEvaluation?,
+    val approvalEvaluation: ApprovalEvaluation?,
     val invocationRequestId: String,
     val command: String,
     val arguments: List<String>,
@@ -322,7 +319,7 @@ internal data class SecretUseRequestDetails(
     val state: SecretUseRequestState,
     val decision: SecretUseDecision?,
     val decisionSource: String?,
-    val ruleEvaluation: ApprovalRuleEvaluation?,
+    val approvalEvaluation: ApprovalEvaluation?,
     val completionResult: InvocationCompletionResult?,
     val completionReason: String?,
     val completionMessage: String?,
@@ -519,7 +516,6 @@ internal class RequestRepository(
     private val dao: RequestDao,
     private val deviceCredentials: RelayDeviceCredentialSource,
     private val secrets: SecretRepository,
-    private val approvalRules: ApprovalRuleRepository? = null,
     private val approvalReviewer: RelayApprovalReviewClient? = null,
     private val relay: RelayDeviceClient,
     private val keyManager: VaultKeyManager,
@@ -583,7 +579,6 @@ internal class RequestRepository(
                         listSummary = null,
                         command = null,
                         arguments = emptyList(),
-                        matchedRuleIds = emptySet(),
                         receivedAt = request.receivedAt,
                         completedAt = request.completedAt,
                     )
@@ -609,10 +604,6 @@ internal class RequestRepository(
                         listSummary = null,
                         command = secretUse.command,
                         arguments = decodeStringList(secretUse.argumentsJson),
-                        matchedRuleIds = secretUse.ruleEvaluationJson
-                            ?.let(::decodeRuleEvaluation)
-                            ?.matchedRuleIds
-                            .orEmpty(),
                         receivedAt = request.receivedAt,
                         completedAt = request.completedAt,
                     )
@@ -638,7 +629,6 @@ internal class RequestRepository(
                         listSummary = null,
                         command = invocation.command,
                         arguments = decodeStringList(invocation.argumentsJson),
-                        matchedRuleIds = emptySet(),
                         receivedAt = request.receivedAt,
                         completedAt = request.completedAt,
                         gitSignState = gitSign.state.toGitSignRequestState(),
@@ -673,7 +663,6 @@ internal class RequestRepository(
                         listSummary = upload.listSummary(),
                         command = null,
                         arguments = emptyList(),
-                        matchedRuleIds = emptySet(),
                         receivedAt = request.receivedAt,
                         completedAt = request.completedAt,
                     )
@@ -742,7 +731,7 @@ internal class RequestRepository(
                     state = it.state.toSecretUseRequestState(),
                     decision = it.decision?.toSecretUseDecision(),
                     decisionSource = it.decisionSource,
-                    ruleEvaluation = it.ruleEvaluationJson?.let(::decodeRuleEvaluation),
+                    approvalEvaluation = it.approvalEvaluationJson?.let(::decodeApprovalEvaluation),
                     completionResult = it.completionResult?.toInvocationCompletionResult(),
                     completionReason = it.completionReason,
                     completionMessage = it.completionMessage,
@@ -843,7 +832,7 @@ internal class RequestRepository(
                     repository = gitSign.repositoryJson?.let {
                         runCatching { json.decodeFromString<GitSignRepository>(it) }.getOrNull()
                     },
-                    ruleEvaluation = gitSign.ruleEvaluationJson?.let(::decodeRuleEvaluation),
+                    approvalEvaluation = gitSign.approvalEvaluationJson?.let(::decodeApprovalEvaluation),
                     invocationRequestId = invocationRequest.relayRequestId,
                     command = invocation.command,
                     arguments = decodeStringList(invocation.argumentsJson),
@@ -2472,27 +2461,18 @@ internal class RequestRepository(
         } else {
             emptyList()
         }
-        val initialRuleEvaluation = if (
-            automaticDenial == null && description.containsSensitiveMaterial && approvalRules != null
+        val initialApprovalEvaluation = if (
+            automaticDenial == null && description.containsSensitiveMaterial
         ) {
             val identities = approvalPolicies.map { policy ->
-                RequestedSecretIdentity(
+                RequestedSecretApproval(
                     id = policy.secretId,
                     name = policy.secretName,
-                    defaultAction = policy.mode.toApprovalRuleAction(),
+                    defaultAction = policy.mode.toApprovalAction(),
                 )
             }
             if (identities.size == contents.secrets.distinct().size) {
-                approvalRules.evaluate(
-                    ApprovalRuleRequest(
-                        clientId = pairing.clientId,
-                        secrets = identities,
-                        command = listOf(contents.operation.command) + contents.operation.arguments,
-                        executablePath = contents.operation.executablePath,
-                        executableHash = contents.operation.executableHash,
-                        workingDirectory = contents.operation.workingDirectory,
-                    ),
-                )
+                ApprovalPolicyEvaluator.evaluate(identities)
             } else {
                 null
             }
@@ -2522,10 +2502,10 @@ internal class RequestRepository(
             description = description,
             now = now,
         ).copy(
-            ruleEvaluationJson = initialRuleEvaluation?.let { json.encodeToString(it) },
+            approvalEvaluationJson = initialApprovalEvaluation?.let { json.encodeToString(it) },
         )
         val pendingRequestId = if (
-            initialRuleEvaluation?.action == ApprovalRuleAction.ASK_AI
+            initialApprovalEvaluation?.action == ApprovalAction.ASK_AI
         ) {
             dao.insertSecretUseRequest(
                 request = initialRequest,
@@ -2543,33 +2523,25 @@ internal class RequestRepository(
         val providedSecretsJson = availableSecrets?.let { values ->
             json.encodeToString(approvalReviewSecretFacts(description, values))
         }
-        val aiReview = if (initialRuleEvaluation?.action == ApprovalRuleAction.ASK_AI) {
+        val aiReview = if (initialApprovalEvaluation?.action == ApprovalAction.ASK_AI) {
             requestAiReview(
                 pairing = pairing,
                 contents = contents,
                 description = description,
                 values = checkNotNull(availableSecrets),
-                evaluation = initialRuleEvaluation,
+                evaluation = initialApprovalEvaluation,
                 policies = approvalPolicies,
                 credentials = credentials,
             )
         } else {
             null
         }
-        if (pendingRequestId != null) {
-            approvalRules?.recordMatches(checkNotNull(initialRuleEvaluation))
-        }
-        val ruleEvaluation = initialRuleEvaluation?.copy(aiReview = aiReview)
-        val decisionMadeByRule = ruleEvaluation?.decisiveRuleIds?.isNotEmpty() == true
-        val ruleDenial = ruleEvaluation
-            ?.takeIf { it.action == ApprovalRuleAction.DENY }
+        val approvalEvaluation = initialApprovalEvaluation?.copy(aiReview = aiReview)
+        val policyDenial = approvalEvaluation
+            ?.takeIf { it.action == ApprovalAction.DENY }
             ?.let {
                 InvocationDenialReason.POLICY_DENIED to
-                    if (decisionMadeByRule) {
-                        "An approval rule denied access to a requested secret."
-                    } else {
-                        "Approval settings denied access to a requested secret."
-                    }
+                    "Approval settings denied access to a requested secret."
             }
         val aiDenial = aiReview
             ?.takeIf { it.decision == AiReviewDecision.DENY }
@@ -2578,10 +2550,10 @@ internal class RequestRepository(
                     "AI review denied access to a requested secret."
             }
         val aiApproved = aiReview?.decision == AiReviewDecision.APPROVE
-        val denial = automaticDenial ?: ruleDenial ?: aiDenial
+        val denial = automaticDenial ?: policyDenial ?: aiDenial
         val responsePlaintext = when {
             denial != null -> invocationProtocol.deniedResponse(denial.first, denial.second)
-            ruleEvaluation?.action == ApprovalRuleAction.APPROVE || aiApproved -> {
+            approvalEvaluation?.action == ApprovalAction.APPROVE || aiApproved -> {
                 invocationProtocol.approvedResponse(
                     checkNotNull(availableSecrets).mapValues { (_, secret) ->
                         secret.toResponseSecret()
@@ -2615,7 +2587,7 @@ internal class RequestRepository(
         }
         val automaticDecision = when {
             denial != null -> SecretUseDecision.DENIED
-            ruleEvaluation?.action == ApprovalRuleAction.APPROVE || aiApproved ->
+            approvalEvaluation?.action == ApprovalAction.APPROVE || aiApproved ->
                 SecretUseDecision.APPROVED
             !description.containsSensitiveMaterial -> SecretUseDecision.APPROVED
             else -> null
@@ -2634,7 +2606,7 @@ internal class RequestRepository(
         val finalSecretUse = if (automaticDecision == null) {
             initialSecretUse.copy(
                 requestId = pendingRequestId ?: 0,
-                ruleEvaluationJson = ruleEvaluation?.let { json.encodeToString(it) },
+                approvalEvaluationJson = approvalEvaluation?.let { json.encodeToString(it) },
                 updatedAt = decidedAt,
             )
         } else {
@@ -2644,11 +2616,9 @@ internal class RequestRepository(
                 decision = automaticDecision.storedName,
                 decisionSource = if (aiApproved || aiDenial != null) {
                     DECISION_SOURCE_AI
-                } else if (decisionMadeByRule) {
-                    DECISION_SOURCE_RULE
                 } else if (
-                    ruleDenial != null ||
-                    ruleEvaluation?.action == ApprovalRuleAction.APPROVE
+                    policyDenial != null ||
+                    approvalEvaluation?.action == ApprovalAction.APPROVE
                 ) {
                     DECISION_SOURCE_POLICY
                 } else if (!description.containsSensitiveMaterial) {
@@ -2656,7 +2626,7 @@ internal class RequestRepository(
                 } else {
                     null
                 },
-                ruleEvaluationJson = ruleEvaluation?.let { json.encodeToString(it) },
+                approvalEvaluationJson = approvalEvaluation?.let { json.encodeToString(it) },
                 providedSecretsJson = if (automaticDecision == SecretUseDecision.APPROVED) {
                     checkNotNull(providedSecretsJson)
                 } else {
@@ -2676,7 +2646,6 @@ internal class RequestRepository(
                 currentPairingSecret = acceptedSecrets.currentPairingSecret,
                 previousPairingSecret = acceptedSecrets.previousPairingSecret,
             )
-            ruleEvaluation?.let { approvalRules?.recordMatches(it) }
             recordSecretUseRequested(pairing, relayRequestId, contents)
         } else {
             dao.updateSecretUseRequest(finalRequest, finalSecretUse)
@@ -2711,27 +2680,19 @@ internal class RequestRepository(
                                 if (aiApproved) {
                                     "Secret use approved by AI review"
                                 } else {
-                                    if (decisionMadeByRule) {
-                                        "Secret use approved by rule"
-                                    } else {
-                                        "Secret use approved automatically"
-                                    }
+                                    "Secret use approved automatically"
                                 }
                             } else {
                                 "Non-sensitive secret use delivered"
                             }
                         aiDenial != null -> "Secret use denied by AI review"
-                        ruleDenial != null -> if (decisionMadeByRule) {
-                            "Secret use denied by rule"
-                        } else {
-                            "Secret use denied by approval settings"
-                        }
+                        policyDenial != null -> "Secret use denied by approval settings"
                         else -> "Secret use rejected automatically"
                     },
                     detail = denial?.second ?: contents.secrets.joinToString(),
                     outcome = when {
                         automaticDecision == SecretUseDecision.APPROVED -> AuditOutcome.APPROVED
-                        ruleDenial != null || aiDenial != null -> AuditOutcome.DENIED
+                        policyDenial != null || aiDenial != null -> AuditOutcome.DENIED
                         else -> AuditOutcome.REJECTED
                     },
                     clientId = pairing.clientId,
@@ -2811,37 +2772,18 @@ internal class RequestRepository(
         } else {
             null
         }
-        val ruleRequest = if (denial == null) {
-            ApprovalRuleRequest(
-                clientId = pairing.clientId,
-                secrets = listOf(
-                    RequestedSecretIdentity(
+        val initialEvaluation = if (denial == null) {
+            ApprovalPolicyEvaluator.evaluate(
+                listOf(
+                    RequestedSecretApproval(
                         id = checkNotNull(policy).secretId,
                         name = policy.secretName,
-                        defaultAction = policy.mode.toApprovalRuleAction(),
+                        defaultAction = policy.mode.toApprovalAction(),
                     ),
                 ),
-                command = listOf(invocation.command) + decodeStringList(invocation.argumentsJson),
-                executablePath = invocation.executablePath,
-                executableHash = invocation.executableHash,
-                workingDirectory = invocation.workingDirectory,
             )
         } else {
             null
-        }
-        val initialEvaluation = ruleRequest?.let { request ->
-            approvalRules?.evaluate(request) ?: ApprovalRuleEvaluation(
-                action = request.secrets.single().defaultAction,
-                secrets = request.secrets.map { secret ->
-                    SecretRuleEvaluation(
-                        secretId = secret.id,
-                        secretName = secret.name,
-                        action = secret.defaultAction,
-                        matchedRuleIds = emptySet(),
-                        decisiveRuleIds = emptySet(),
-                    )
-                },
-            )
         }
         val initialRequest = InboxRequestEntity(
             relayRequestId = relayRequestId,
@@ -2865,7 +2807,7 @@ internal class RequestRepository(
             secretName = contents.secret,
             message = contents.message,
             repositoryJson = contents.repository?.let { json.encodeToString(it) },
-            ruleEvaluationJson = initialEvaluation?.let { json.encodeToString(it) },
+            approvalEvaluationJson = initialEvaluation?.let { json.encodeToString(it) },
             decision = null,
             completionResult = null,
             completionReason = null,
@@ -2876,7 +2818,7 @@ internal class RequestRepository(
             decidedAt = null,
             completedAt = null,
         )
-        val pendingRequestId = if (initialEvaluation?.action == ApprovalRuleAction.ASK_AI) {
+        val pendingRequestId = if (initialEvaluation?.action == ApprovalAction.ASK_AI) {
             dao.insertGitSignRequest(
                 request = initialRequest,
                 gitSignRequest = initialGitSign,
@@ -2887,7 +2829,7 @@ internal class RequestRepository(
         } else {
             null
         }
-        val aiReview = if (initialEvaluation?.action == ApprovalRuleAction.ASK_AI) {
+        val aiReview = if (initialEvaluation?.action == ApprovalAction.ASK_AI) {
             requestGitSignAiReview(
                 pairing = pairing,
                 contents = contents,
@@ -2905,21 +2847,16 @@ internal class RequestRepository(
             null
         }
         val evaluation = initialEvaluation?.copy(aiReview = aiReview)
-        evaluation?.let { approvalRules?.recordMatches(it) }
-        val decisionMadeByRule = evaluation?.decisiveRuleIds?.isNotEmpty() == true
-        if (denial == null && evaluation?.action == ApprovalRuleAction.DENY) {
-            denial = InvocationDenialReason.POLICY_DENIED to if (decisionMadeByRule) {
-                "An approval rule denied use of the SSH key."
-            } else {
+        if (denial == null && evaluation?.action == ApprovalAction.DENY) {
+            denial = InvocationDenialReason.POLICY_DENIED to
                 "Approval settings denied use of the SSH key."
-            }
         }
         if (denial == null && aiReview?.decision == AiReviewDecision.DENY) {
             denial = InvocationDenialReason.POLICY_DENIED to
                 "AI review denied use of the SSH key."
         }
         val shouldApprove = denial == null && (
-            evaluation?.action == ApprovalRuleAction.APPROVE ||
+            evaluation?.action == ApprovalAction.APPROVE ||
                 aiReview?.decision == AiReviewDecision.APPROVE
             )
         var signature: String? = null
@@ -2991,7 +2928,7 @@ internal class RequestRepository(
                 GitSignRequestState.WAITING_FOR_COMPLETION.storedName
             },
             decision = automaticDecision?.storedName,
-            ruleEvaluationJson = evaluation?.let { json.encodeToString(it) },
+            approvalEvaluationJson = evaluation?.let { json.encodeToString(it) },
             completionReason = denial?.first?.wireName,
             completionMessage = denial?.second,
             updatedAt = decidedAt,
@@ -3034,11 +2971,9 @@ internal class RequestRepository(
                 title = when {
                     signature != null && aiReview?.decision == AiReviewDecision.APPROVE ->
                         "Git signature approved by AI review"
-                    signature != null && decisionMadeByRule -> "Git signature approved by rule"
                     signature != null -> "Git signature approved automatically"
                     denial != null && aiReview?.decision == AiReviewDecision.DENY ->
                         "Git signature denied by AI review"
-                    denial != null && decisionMadeByRule -> "Git signature denied by rule"
                     denial != null -> "Git signature rejected automatically"
                     else -> "Git signature requested"
                 },
@@ -3087,7 +3022,7 @@ internal class RequestRepository(
         contents: InvocationRequestMessage,
         description: RequestedSecretDescription,
         values: Map<String, SecretValues>,
-        evaluation: ApprovalRuleEvaluation,
+        evaluation: ApprovalEvaluation,
         policies: List<SecretApprovalPolicy>,
         credentials: RelayDeviceCredentials,
     ): AiReview {
@@ -3110,7 +3045,7 @@ internal class RequestRepository(
         contents: GitSignRequestMessage,
         invocation: SecretUseRequestEntity,
         parentElapsedSeconds: Long?,
-        evaluation: ApprovalRuleEvaluation,
+        evaluation: ApprovalEvaluation,
         policies: List<SecretApprovalPolicy>,
         credentials: RelayDeviceCredentials,
     ): AiReview {
@@ -3697,7 +3632,7 @@ internal class RequestRepository(
         launcherChainJson = encodeStringList(contents.launcherChain),
         decision = null,
         decisionSource = null,
-        ruleEvaluationJson = null,
+        approvalEvaluationJson = null,
         completionResult = null,
         completionReason = null,
         completionMessage = null,
@@ -4916,8 +4851,8 @@ internal class RequestRepository(
         is SecretValues.Ssh -> InvocationResponseSecret.Ssh(description, publicKey)
     }
 
-    private fun decodeRuleEvaluation(value: String): ApprovalRuleEvaluation? =
-        runCatching { json.decodeFromString<ApprovalRuleEvaluation>(value) }.getOrNull()
+    private fun decodeApprovalEvaluation(value: String): ApprovalEvaluation? =
+        runCatching { json.decodeFromString<ApprovalEvaluation>(value) }.getOrNull()
 
     private fun encodeClientSoftware(value: ClientSoftware): String = json.encodeToString(value)
 
@@ -4931,18 +4866,17 @@ internal class RequestRepository(
         const val GIT_SIGN_DENIAL_MESSAGE = "Git signature denied on device."
         const val MAX_AI_REVIEW_GIT_CONTENT_BYTES = 128 * 1024
         const val DECISION_SOURCE_USER = "user"
-        const val DECISION_SOURCE_RULE = "rule"
         const val DECISION_SOURCE_POLICY = "policy"
         const val DECISION_SOURCE_AI = "ai"
         const val DECISION_SOURCE_NON_SENSITIVE = "non_sensitive"
         val STRING_LIST_SERIALIZER = ListSerializer(String.serializer())
     }
 
-    private fun SecretApprovalMode.toApprovalRuleAction(): ApprovalRuleAction = when (this) {
-        SecretApprovalMode.DENY -> ApprovalRuleAction.DENY
-        SecretApprovalMode.ASK_ME -> ApprovalRuleAction.ASK_ME
-        SecretApprovalMode.ASK_AI -> ApprovalRuleAction.ASK_AI
-        SecretApprovalMode.APPROVE -> ApprovalRuleAction.APPROVE
+    private fun SecretApprovalMode.toApprovalAction(): ApprovalAction = when (this) {
+        SecretApprovalMode.DENY -> ApprovalAction.DENY
+        SecretApprovalMode.ASK_ME -> ApprovalAction.ASK_ME
+        SecretApprovalMode.ASK_AI -> ApprovalAction.ASK_AI
+        SecretApprovalMode.APPROVE -> ApprovalAction.APPROVE
     }
 }
 

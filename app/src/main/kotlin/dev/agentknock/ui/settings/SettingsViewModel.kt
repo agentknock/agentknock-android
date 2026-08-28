@@ -87,6 +87,9 @@ internal class SettingsViewModel(application: Application) : AndroidViewModel(ap
     suspend fun setPairingEnabled(enabled: Boolean): DeviceManagementResult =
         container.deviceManagement.setPairingEnabled(enabled)
 
+    suspend fun saveGeneralInstructions(instructions: String): Boolean =
+        container.vault.saveInstructions(instructions)
+
     suspend fun clearCompletedRequests(): Int = container.requests.clearCompletedHistory()
 
     suspend fun factoryReset(localOnly: Boolean): FactoryResetResult {

@@ -3,7 +3,10 @@ package dev.agentknock.storage.audit
 import kotlinx.coroutines.flow.Flow
 import kotlinx.coroutines.flow.map
 
-internal enum class AuditCategory(val storedName: String) {
+internal enum class AuditCategory(
+    val storedName: String,
+    val displayName: String = storedName.replace('_', ' ').replaceFirstChar(Char::uppercase),
+) {
     PAIRING("pairing"),
     SECRET_USE("secret_use"),
     GIT_SIGN("git_sign"),
@@ -13,7 +16,9 @@ internal enum class AuditCategory(val storedName: String) {
     SECRET("secret"),
     DEVICE("device"),
     VERIFICATION("verification"),
-    RULE("rule"),
+    APPROVAL("approval"),
+    // Old events retain their stored value, but use the current product terminology.
+    RULE("rule", "Approval"),
 }
 
 internal enum class AuditOutcome(val storedName: String) {

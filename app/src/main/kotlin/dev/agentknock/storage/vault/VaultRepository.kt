@@ -277,7 +277,7 @@ internal class VaultRepository(
         if (updated) {
             audit.record(
                 AuditRecord(
-                    category = AuditCategory.RULE,
+                    category = AuditCategory.APPROVAL,
                     title = "General AI review instructions changed",
                     detail = "",
                     outcome = AuditOutcome.CHANGED,

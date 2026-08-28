@@ -14,9 +14,9 @@ import dev.agentknock.relay.ApprovalReviewOperation
 import dev.agentknock.relay.ApprovalReviewSshSecretFacts
 import dev.agentknock.storage.request.PairingEntity
 import dev.agentknock.storage.request.SecretUseRequestEntity
-import dev.agentknock.storage.rule.ApprovalRuleAction
-import dev.agentknock.storage.rule.ApprovalRuleEvaluation
-import dev.agentknock.storage.rule.SecretRuleEvaluation
+import dev.agentknock.storage.approval.ApprovalAction
+import dev.agentknock.storage.approval.ApprovalEvaluation
+import dev.agentknock.storage.approval.SecretApprovalEvaluation
 import dev.agentknock.storage.secret.ENVIRONMENT_SECRET_TYPE
 import dev.agentknock.storage.secret.EnvironmentVariableReviewMetadata
 import dev.agentknock.storage.secret.RequestedSecretDescription
@@ -74,11 +74,11 @@ class ApprovalReviewContextTest {
                     publicKey = "ssh-ed25519 public-key",
                 ),
             ),
-            evaluation = ApprovalRuleEvaluation(
-                action = ApprovalRuleAction.ASK_AI,
+            evaluation = ApprovalEvaluation(
+                action = ApprovalAction.ASK_AI,
                 secrets = listOf(
-                    secretEvaluation("aws-id", "aws-read-only", ApprovalRuleAction.ASK_AI),
-                    secretEvaluation("ssh-id", "git-signing", ApprovalRuleAction.APPROVE),
+                    secretEvaluation("aws-id", "aws-read-only", ApprovalAction.ASK_AI),
+                    secretEvaluation("ssh-id", "git-signing", ApprovalAction.APPROVE),
                 ),
             ),
             policies = listOf(
@@ -182,10 +182,10 @@ class ApprovalReviewContextTest {
                 "git-signing" to ApprovalReviewSshSecretFacts(provides = "public_key"),
             ),
             parentElapsedSeconds = 12,
-            evaluation = ApprovalRuleEvaluation(
-                action = ApprovalRuleAction.ASK_AI,
+            evaluation = ApprovalEvaluation(
+                action = ApprovalAction.ASK_AI,
                 secrets = listOf(
-                    secretEvaluation("ssh-id", "git-signing", ApprovalRuleAction.ASK_AI),
+                    secretEvaluation("ssh-id", "git-signing", ApprovalAction.ASK_AI),
                 ),
             ),
             policies = listOf(
@@ -345,13 +345,11 @@ class ApprovalReviewContextTest {
     private fun secretEvaluation(
         id: String,
         name: String,
-        action: ApprovalRuleAction,
-    ) = SecretRuleEvaluation(
+        action: ApprovalAction,
+    ) = SecretApprovalEvaluation(
         secretId = id,
         secretName = name,
         action = action,
-        matchedRuleIds = emptySet(),
-        decisiveRuleIds = emptySet(),
     )
 
     private fun pairing() = PairingEntity(
@@ -415,7 +413,7 @@ class ApprovalReviewContextTest {
         launcherChainJson = "[\"/bin/bash\",\"/bin/codex\"]",
         decision = "approved",
         decisionSource = "non_sensitive",
-        ruleEvaluationJson = null,
+        approvalEvaluationJson = null,
         completionResult = null,
         completionReason = null,
         completionMessage = null,

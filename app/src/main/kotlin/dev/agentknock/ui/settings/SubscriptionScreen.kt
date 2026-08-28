@@ -69,14 +69,14 @@ internal fun PlanAndBillingScreen(
             InformationSurface {
                 Text("Access", style = MaterialTheme.typography.titleMedium)
                 InformationRow("Secret storage and release", "Included")
-                InformationRow("Manual and rule-based approvals", "Included")
+                InformationRow("Manual and automatic approvals", "Included")
                 InformationRow(
                     "AI review",
                     if (state.access == SubscriptionAccess.ACTIVE) "Active" else "Subscription required",
                 )
             }
             Text(
-                "Ask AI rules send request and secret metadata to Agentknock's AI reviewer. " +
+                "Ask AI sends request and secret metadata to Agentknock's AI reviewer. " +
                     "Secret values and private keys are never sent for AI review.",
                 color = MaterialTheme.colorScheme.onSurfaceVariant,
             )
@@ -132,7 +132,7 @@ private fun SubscriptionStatusSurface(state: SubscriptionUiState) {
         )
         SubscriptionAccess.ACTIVE -> StatusPresentation(
             title = "AI review active",
-            detail = "Ask AI approval rules can use the Agentknock reviewer.",
+            detail = "Secrets set to Ask AI can use the Agentknock reviewer.",
             container = MaterialTheme.agentknockColors.successContainer,
             content = MaterialTheme.agentknockColors.onSuccessContainer,
             icon = { Icon(Icons.Outlined.CheckCircle, contentDescription = null) },

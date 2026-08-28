@@ -17,7 +17,7 @@ sentence-case capitalization when quoted in prose.
 | **Agentknock** | The product as a whole. |
 | **Relay** | The Agentknock network service through which clients and devices exchange protocol messages. It temporarily stores and forwards messages so they do not need to be online simultaneously. It does not receive decrypted secret contents. |
 | **Relay URL** | The network address used to reach a relay. Show it only where technically useful, such as connection diagnostics. It is distinct from the pairing address. |
-| **Device** | This Android app installation. It owns the device identity, device-held keys, secrets, approval rules, and approval decisions. It is not called a vault. |
+| **Device** | This Android app installation. It owns the device identity, device-held keys, secrets, approval settings, and approval decisions. It is not called a vault. |
 | **Device ID** | The opaque technical identifier for this device. It belongs in technical details and is not the pairing address. |
 | **Client** | One Agentknock CLI installation that is paired with, or attempting to pair with, this device. It may run on a laptop, server, VM, container, or hosted runner. |
 | **Client name** | The user-assigned display name for a client, such as **Build workstation**. It is distinct from the hostname reported by the client. |
@@ -34,14 +34,13 @@ sentence-case capitalization when quoted in prose.
 | **Credential** | Specific authentication material, such as an API token, AWS access-key set, or SSH private key. Do not use it as the umbrella name for every secret. |
 | **AWS temporary credentials** | A secret type that provides a short-lived AWS credential set with a shared lifetime, plus any supported companion environment variables such as `AWS_REGION`. |
 | **SSH key** | A secret type that owns one SSH key and provides SSH-specific use without exposing it as an environment variable. |
-| **Request** | A durable authorization workflow resolved by protocol validation, approval settings, an approval rule, AI review, or a user decision. It remains in bounded request history after completion. |
+| **Request** | A durable authorization workflow resolved by protocol validation, approval settings, AI review, or a user decision. It remains in bounded request history after completion. |
 | **Reason** | An optional explanation supplied by the client for a request. It is untrusted supporting information, not an authoritative description of the operation. |
 | **Secret use** | A request for a client to use one or more named secrets for one operation. Depending on the secret type, use may provide values or mediate an operation; it does not necessarily disclose protected key material. |
 | **Secret upload** | Secret data uploaded by a client for review. The upload remains inactive until approved on the device; rejecting it discards the uploaded data. **Create** makes a new secret. **Update** changes supplied content and retains unspecified content. **Replace** supplies the complete content and removes unspecified content. |
 | **Approval mode** | A secret's normal handling for protected use: **Approve automatically**, **Ask AI**, **Ask every time**, or **Always deny**. A secret has one default mode and may override it for individual clients. Non-sensitive disclosure, such as an SSH public key, does not require approval. **Ask AI** remains provisional wording to revisit before release. |
 | **Instructions** | User-written context for AI review. General instructions apply to every review; client instructions describe that client; secret instructions describe acceptable use of that secret. The reviewer receives every applicable layer. Do not call these *guidance*. |
-| **Approval rule** | A narrower device-held override for a matching command and secret: **Approve**, **Ask me**, **Deny**, or **Ask AI**. A standing rule is created directly by the user and has no expiry; a temporary rule may be created while approving a request and expires. Rules apply to protected secret use; pairing and secret uploads require a user decision. Use **Rules** as the primary-navigation label and **Approval rules** as the screen title or fuller name. **Ask AI** is provisional wording to revisit before release. |
-| **Automatic approvals** | The optional AI review feature used by **Ask AI**. The AI reviewer may approve, deny, or ask the user. Do not use this term for deterministic **Approve automatically** settings or **Approve** rules. |
+| **AI review** | The optional reviewer used by **Ask AI**. It receives request and secret metadata plus applicable instructions, never secret values or private keys. It may approve, deny, or ask the user. |
 | **Audit event** | One append-only record of a security-relevant action or state transition, including operations that did not require approval. Audit events form the **Audit log**. |
 
 | Interaction | Request label | Notification |
@@ -52,7 +51,7 @@ sentence-case capitalization when quoted in prose.
 
 | Other context | Preferred wording |
 | --- | --- |
-| Primary navigation | **Requests**, **Secrets**, **Clients**, and **Rules** |
+| Primary navigation | **Requests**, **Secrets**, and **Clients** |
 | Creation | **New secret** |
 | Pairing decision | **Accept** / **Reject** |
 | Secret use decision | **Approve** / **Deny** |

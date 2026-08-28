@@ -1,1 +1,1 @@
-Show the AI review explanation when Git signing needs your decision.
+Simplify approvals around per-secret modes and AI review instructions.

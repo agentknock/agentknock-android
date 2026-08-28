@@ -16,7 +16,6 @@ import androidx.compose.material.icons.outlined.Computer
 import androidx.compose.material.icons.outlined.Inbox
 import androidx.compose.material.icons.outlined.Key
 import androidx.compose.material.icons.outlined.Lock
-import androidx.compose.material.icons.automirrored.outlined.Rule
 import androidx.compose.material3.Badge
 import androidx.compose.material3.BadgedBox
 import androidx.compose.material3.Icon
@@ -57,8 +56,6 @@ import dev.agentknock.ui.requests.RequestsScreen
 import dev.agentknock.ui.requests.RequestsViewModel
 import dev.agentknock.ui.settings.SettingsScreen
 import dev.agentknock.ui.settings.SubscriptionViewModel
-import dev.agentknock.ui.rules.RulesScreen
-import dev.agentknock.ui.rules.RulesViewModel
 import dev.agentknock.ui.device.DeviceSetupScreen
 import dev.agentknock.ui.device.DeviceSetupViewModel
 import dev.agentknock.ui.auth.AuthenticationSession
@@ -84,7 +81,6 @@ internal fun AgentknockScreen(
     requestsViewModel: RequestsViewModel = viewModel(),
     secretsViewModel: SecretsViewModel = viewModel(),
     clientsViewModel: ClientsViewModel = viewModel(),
-    rulesViewModel: RulesViewModel = viewModel(),
     subscriptionViewModel: SubscriptionViewModel = viewModel(),
 ) {
     val authenticationMode by authentication.mode.collectAsStateWithLifecycle()
@@ -114,7 +110,6 @@ internal fun AgentknockScreen(
             )
             MainSection.SECRETS -> requestSummaries.actionRequiredCount(InboxRequestKind.SECRET_UPLOAD)
             MainSection.CLIENTS -> requestSummaries.actionRequiredCount(InboxRequestKind.PAIRING)
-            MainSection.RULES -> 0
         }
     }
     val current = configuration
@@ -150,7 +145,6 @@ internal fun AgentknockScreen(
                 MainSection.REQUESTS -> requestsViewModel.selectRequest(requestId)
                 MainSection.SECRETS -> secretsViewModel.selectUpload(requestId)
                 MainSection.CLIENTS -> clientsViewModel.selectPairing(requestId)
-                MainSection.RULES -> Unit
             }
             handledNavigationGeneration = requestNavigationTarget.generation
         }
@@ -254,8 +248,6 @@ internal fun AgentknockScreen(
                         requestsViewModel = requestsViewModel,
                         secretsViewModel = secretsViewModel,
                         clientsViewModel = clientsViewModel,
-                        rulesViewModel = rulesViewModel,
-                        onSelectSection = { section = it },
                         modifier = Modifier.weight(1f),
                     )
                 }
@@ -281,8 +273,6 @@ internal fun AgentknockScreen(
                         requestsViewModel = requestsViewModel,
                         secretsViewModel = secretsViewModel,
                         clientsViewModel = clientsViewModel,
-                        rulesViewModel = rulesViewModel,
-                        onSelectSection = { section = it },
                         modifier = Modifier.fillMaxSize().padding(padding),
                     )
                 }
@@ -369,8 +359,6 @@ private fun MainContent(
     requestsViewModel: RequestsViewModel,
     secretsViewModel: SecretsViewModel,
     clientsViewModel: ClientsViewModel,
-    rulesViewModel: RulesViewModel,
-    onSelectSection: (MainSection) -> Unit,
     modifier: Modifier = Modifier,
 ) {
     Box(modifier) {
@@ -380,10 +368,6 @@ private fun MainContent(
                 notificationsEnabled = notificationsEnabled,
                 viewModel = requestsViewModel,
                 onTopLevelChanged = onTopLevelChanged,
-                onCreateRule = { requestId ->
-                    rulesViewModel.startRuleFromRequest(requestId)
-                    onSelectSection(MainSection.RULES)
-                },
             )
             MainSection.SECRETS -> SecretsScreen(
                 authorizeProtectedAction = authorizeProtectedAction,
@@ -396,15 +380,6 @@ private fun MainContent(
                 onOpenSettings = onOpenSettings,
                 onTopLevelChanged = onTopLevelChanged,
                 viewModel = clientsViewModel,
-            )
-            MainSection.RULES -> RulesScreen(
-                onOpenSettings = onOpenSettings,
-                onOpenRequest = { requestId ->
-                    requestsViewModel.selectRequest(requestId)
-                    onSelectSection(MainSection.REQUESTS)
-                },
-                onTopLevelChanged = onTopLevelChanged,
-                viewModel = rulesViewModel,
             )
         }
     }
@@ -454,7 +429,6 @@ private fun MainSectionIcon(section: MainSection, actionRequiredCount: Int) {
                 MainSection.REQUESTS -> Icons.Outlined.Inbox
                 MainSection.SECRETS -> Icons.Outlined.Key
                 MainSection.CLIENTS -> Icons.Outlined.Computer
-                MainSection.RULES -> Icons.AutoMirrored.Outlined.Rule
             },
             contentDescription = null,
         )
@@ -477,12 +451,10 @@ private fun MainSection.label(): String = when (this) {
     MainSection.REQUESTS -> stringResource(R.string.requests)
     MainSection.SECRETS -> stringResource(R.string.secrets)
     MainSection.CLIENTS -> "Clients"
-    MainSection.RULES -> "Rules"
 }
 
 private enum class MainSection {
     REQUESTS,
     SECRETS,
-    RULES,
     CLIENTS,
 }

@@ -106,7 +106,6 @@ class WorkflowPresentationTest {
         listSummary = null,
         command = null,
         arguments = emptyList(),
-        matchedRuleIds = emptySet(),
         receivedAt = id,
         completedAt = null,
     )
