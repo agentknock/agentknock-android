@@ -4,6 +4,7 @@ import android.app.Application
 import android.util.Log
 import androidx.lifecycle.ProcessLifecycleOwner
 import com.google.firebase.messaging.FirebaseMessaging
+import dev.agentknock.network.AgentknockUserAgentInterceptor
 import dev.agentknock.push.PushRegistrationRepository
 import dev.agentknock.push.RequestNotifications
 import dev.agentknock.storage.AgentknockDatabase
@@ -57,6 +58,12 @@ internal class ApplicationContainer(application: Application) {
     )
     private val encryption = AesGcmEncryption(encryptionKeyStore)
     private val httpClient = OkHttpClient.Builder()
+        .addInterceptor(
+            AgentknockUserAgentInterceptor(
+                versionName = BuildConfig.VERSION_NAME,
+                versionCode = BuildConfig.VERSION_CODE,
+            ),
+        )
         .pingInterval(30, TimeUnit.SECONDS)
         .build()
     private val applicationScope = CoroutineScope(SupervisorJob() + Dispatchers.IO)
