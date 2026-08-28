@@ -273,7 +273,7 @@ internal fun SettingsScreen(
                     onClearRequests = {
                         scope.launch {
                             val removed = viewModel.clearCompletedRequests()
-                            snackbar.showSnackbar("Cleared $removed completed workflows")
+                            snackbar.showSnackbar("Cleared $removed completed requests")
                         }
                     },
                     modifier = modifier,
@@ -462,7 +462,7 @@ private fun SettingsOverview(
                     Icons.Outlined.History,
                     "Data & history",
                     "${counts.secrets.countLabel("secret")} · " +
-                        "${counts.requests.countLabel("workflow")} · " +
+                        "${counts.requests.countLabel("request")} · " +
                         "${counts.auditEvents.countLabel("audit event")}",
                 ) { onOpen(SettingsPage.DATA) }
             }
@@ -548,7 +548,7 @@ private fun DeviceAndPairing(
                     SelectionContainer(Modifier.weight(1f)) {
                         Text(
                             identity.address,
-                            style = MaterialTheme.typography.headlineSmall,
+                            style = MaterialTheme.typography.titleLarge,
                             fontFamily = FontFamily.Monospace,
                         )
                     }
@@ -727,7 +727,7 @@ private fun NotificationsSettings(
                 },
             )
             Text(
-                "Secret use and signing notifications can include approval and denial actions. Approving requires the device to be unlocked; on older Android versions, Agentknock opens the request for review.",
+                "Secret use and Git signing notifications can include approval and denial actions. Approving requires the device to be unlocked; on older Android versions, Agentknock opens the request for review.",
             )
             Text(
                 "Android controls notification sounds and how much content is visible on the lock screen.",
@@ -753,7 +753,15 @@ private fun NotificationsSettings(
                 Text("Open Android notification settings")
             }
             if (pushState != null && pushState != "registered") {
-                Text("Relay push registration: $pushState", color = MaterialTheme.colorScheme.error)
+                Text(
+                    when (pushState) {
+                        "missing" -> "Push delivery is not registered with the relay yet."
+                        "invalid" ->
+                            "The relay rejected the current push registration. Agentknock will retry."
+                        else -> "Push delivery needs attention."
+                    },
+                    color = MaterialTheme.colorScheme.error,
+                )
             }
         }
     }
@@ -813,7 +821,7 @@ private fun AiReviewSettings(
                 }
             }
 
-            TextButton(onClick = onOpenPlan, modifier = Modifier.align(Alignment.End)) {
+            OutlinedButton(onClick = onOpenPlan, modifier = Modifier.fillMaxWidth()) {
                 Text("Plan and billing")
                 Spacer(Modifier.width(6.dp))
                 Icon(Icons.Outlined.ChevronRight, contentDescription = null)
@@ -1079,22 +1087,23 @@ private fun DataAndHistory(
                     counts.secrets.countLabel("secret"),
                     counts.variables.countLabel("environment variable"),
                     counts.clients.countLabel("client"),
-                    counts.requests.countLabel("workflow"),
+                    counts.requests.countLabel("request"),
                 ).joinToString(" · "),
             )
             SettingsInformationRow(
                 icon = Icons.Outlined.Backup,
                 title = "Android backup and transfer",
-                summary = "Secrets, clients, workflow history, audit events, and encrypted values " +
-                    "are included. Device-bound keys cannot be restored on another device.",
+                summary = "Metadata, request history, audit events, and encrypted values are " +
+                    "included. Device-bound keys do not transfer, so restored secret values and " +
+                    "client pairings must be replaced.",
             )
             SettingsActionRow(
                 icon = Icons.Outlined.DeleteSweep,
-                title = "Clear completed workflow history",
+                title = "Clear completed request history",
                 summary = if (counts.requests == 0) {
-                    "No workflow history to clear"
+                    "No request history to clear"
                 } else {
-                    "Pending workflows and audit events are kept"
+                    "Pending requests and audit events are kept"
                 },
                 enabled = counts.requests > 0,
                 onClick = { confirmClear = true },
@@ -1112,8 +1121,8 @@ private fun DataAndHistory(
     if (confirmClear) {
         AlertDialog(
             onDismissRequest = { confirmClear = false },
-            title = { Text("Clear completed workflows?") },
-            text = { Text("Pending workflows, paired clients, secrets, and the audit log are not removed.") },
+            title = { Text("Clear completed requests?") },
+            text = { Text("Pending requests, paired clients, secrets, and the audit log are not removed.") },
             confirmButton = { TextButton(onClick = { onClearRequests(); confirmClear = false }) { Text("Clear") } },
             dismissButton = { TextButton(onClick = { confirmClear = false }) { Text("Cancel") } },
         )
@@ -1263,7 +1272,7 @@ private fun AuditDetail(
     }
 
     Column(modifier) {
-        PageTopBar("Audit event", onBack, showBack)
+        PageTopBar("Audit details", onBack, showBack)
         SelectionContainer {
             Column(
                 Modifier.verticalScroll(rememberScrollState()).padding(20.dp),
@@ -1276,7 +1285,7 @@ private fun AuditDetail(
                 if (event.detail.isNotBlank()) {
                     InformationSurface {
                         Text(
-                            "Recorded details",
+                            "Details",
                             style = MaterialTheme.typography.labelMedium,
                             color = MaterialTheme.colorScheme.onSurfaceVariant,
                         )
@@ -1406,7 +1415,7 @@ private fun FactoryReset(
                 color = MaterialTheme.colorScheme.error,
                 modifier = Modifier.semantics { heading() },
             )
-            Text("Agentknock will ask the relay to delete this Agentknock device registration and its live state.")
+            Text("Agentknock will ask the relay to delete this device registration and its live relay state.")
             Text("It will then permanently erase:")
             Column(verticalArrangement = Arrangement.spacedBy(6.dp)) {
                 Text("• Device identity and encryption keys")

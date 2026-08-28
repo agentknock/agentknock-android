@@ -153,6 +153,7 @@ internal fun ClientsScreen(
                         onOpen = viewModel::selectClient,
                         onOpenPairing = viewModel::selectPairing,
                         onOpenSettings = onOpenSettings,
+                        report = ::report,
                         modifier = Modifier.width(340.dp).fillMaxHeight(),
                     )
                     VerticalDivider()
@@ -190,6 +191,7 @@ internal fun ClientsScreen(
                     onOpen = viewModel::selectClient,
                     onOpenPairing = viewModel::selectPairing,
                     onOpenSettings = onOpenSettings,
+                    report = ::report,
                     modifier = Modifier.fillMaxSize(),
                 )
             } else if (pairingSelection != null) {
@@ -367,8 +369,13 @@ private fun ClientList(
     onOpen: (String) -> Unit,
     onOpenPairing: (Long) -> Unit,
     onOpenSettings: () -> Unit,
+    report: (String) -> Unit,
     modifier: Modifier = Modifier,
 ) {
+    val context = LocalContext.current
+    val duplicateClientNames = clients.groupingBy(ClientSummary::name).eachCount()
+        .filterValues { it > 1 }
+        .keys
     Column(modifier) {
         TopAppBar(
             title = { Text("Clients") },
@@ -386,23 +393,69 @@ private fun ClientList(
                     verticalArrangement = Arrangement.spacedBy(10.dp),
                 ) {
                     Text("No paired clients", style = MaterialTheme.typography.titleLarge)
-                    Text(
-                        "Pairing requests will appear here.",
-                        color = MaterialTheme.colorScheme.onSurfaceVariant,
-                    )
                     identity?.let {
                         Text(
                             if (it.pairingEnabled) {
-                                "Pairing address"
+                                "Run this command on the machine you want to pair."
                             } else {
-                                "Pairing paused"
+                                "New pairings are paused. Resume them in Device & pairing."
                             },
-                            style = MaterialTheme.typography.labelLarge,
                             color = MaterialTheme.colorScheme.onSurfaceVariant,
                             modifier = Modifier.padding(top = 12.dp),
                         )
-                        SelectionContainer {
-                            Text(it.address, fontFamily = FontFamily.Monospace)
+                        if (it.pairingEnabled) {
+                            val pairingCommand = "agentknock pairing start ${it.address}"
+                            Surface(
+                                onClick = {
+                                    context.getSystemService(ClipboardManager::class.java)
+                                        .setPrimaryClip(
+                                            ClipData.newPlainText(
+                                                "Agentknock pairing command",
+                                                pairingCommand,
+                                            ),
+                                        )
+                                    report("Pairing command copied")
+                                },
+                                color = MaterialTheme.colorScheme.surfaceContainerLow,
+                                shape = MaterialTheme.shapes.medium,
+                                border = BorderStroke(
+                                    1.dp,
+                                    MaterialTheme.colorScheme.outlineVariant,
+                                ),
+                                modifier = Modifier.fillMaxWidth(),
+                            ) {
+                                Row(
+                                    modifier = Modifier.padding(
+                                        start = 14.dp,
+                                        end = 4.dp,
+                                        top = 10.dp,
+                                        bottom = 10.dp,
+                                    ),
+                                    verticalAlignment = Alignment.CenterVertically,
+                                ) {
+                                    Text(
+                                        pairingCommand,
+                                        fontFamily = FontFamily.Monospace,
+                                        style = MaterialTheme.typography.bodyMedium,
+                                        modifier = Modifier.weight(1f),
+                                    )
+                                    IconButton(onClick = {
+                                        context.getSystemService(ClipboardManager::class.java)
+                                            .setPrimaryClip(
+                                                ClipData.newPlainText(
+                                                    "Agentknock pairing command",
+                                                    pairingCommand,
+                                                ),
+                                            )
+                                        report("Pairing command copied")
+                                    }) {
+                                        Icon(
+                                            Icons.Outlined.ContentCopy,
+                                            contentDescription = "Copy pairing command",
+                                        )
+                                    }
+                                }
+                            }
                         }
                     }
                 }
@@ -475,6 +528,14 @@ private fun ClientList(
                                 }
                                 Column(verticalArrangement = Arrangement.spacedBy(2.dp)) {
                                     if (machine.isNotEmpty()) Text(machine)
+                                    if (client.name in duplicateClientNames) {
+                                        Text(
+                                            "Client ID …${client.clientId.takeLast(6)}",
+                                            style = MaterialTheme.typography.labelMedium,
+                                            color = MaterialTheme.colorScheme.onSurfaceVariant,
+                                            fontFamily = FontFamily.Monospace,
+                                        )
+                                    }
                                     if (client.temporaryAccessCount > 0) {
                                         Row(
                                             horizontalArrangement = Arrangement.spacedBy(6.dp),
@@ -689,6 +750,24 @@ private fun ClientDetail(
                 Text(client.state.explanation())
             }
 
+            InformationSurface {
+                Text("Client information", style = MaterialTheme.typography.titleMedium)
+                Text(
+                    "Reported by the client when it paired.",
+                    color = MaterialTheme.colorScheme.onSurfaceVariant,
+                )
+                ClientField("Hostname", client.hostname)
+                ClientField("Platform", client.platform?.let(::formatPlatformName))
+                ClientField("Architecture", client.architecture)
+                ClientField("Operating system", client.osVersion)
+                client.clientSoftware?.let { software ->
+                    ClientField("Client software", renderSoftware(software.application))
+                    if (software.library != software.application) {
+                        ClientField("Agentknock library", renderSoftware(software.library))
+                    }
+                }
+            }
+
             if (temporaryAccessGrants.isNotEmpty()) {
                 InformationSurface {
                     Text(
@@ -700,7 +779,8 @@ private fun ClientDetail(
                             "They are paused until this client is active. They resume if that " +
                                 "happens before their end time."
                         } else {
-                            "These uses bypass both your decision and AI review until their end time."
+                            "These uses are already approved and will not ask you or AI again " +
+                                "before they end."
                         },
                         color = MaterialTheme.colorScheme.onSurfaceVariant,
                     )
@@ -756,16 +836,10 @@ private fun ClientDetail(
             }
 
             InformationSurface {
-                Text("Pairing", style = MaterialTheme.typography.titleMedium)
+                Text("Access", style = MaterialTheme.typography.titleMedium)
                 client.pairedAt?.let {
                     ClientField("Paired", formatTimestamp(it))
                 }
-                ClientField(
-                    "Client ID",
-                    client.clientId,
-                    monospace = true,
-                    onCopy = { copy("Client ID", client.clientId) },
-                )
                 when (client.state) {
                     RelayClientState.ACTIVE -> OutlinedButton(
                         onClick = { onSetState(RelayClientState.SUSPENDED) },
@@ -803,28 +877,21 @@ private fun ClientDetail(
             }
 
             InformationSurface {
-                Text("Reported information", style = MaterialTheme.typography.titleMedium)
-                Text(
-                    "Supplied by the client when it paired.",
-                    color = MaterialTheme.colorScheme.onSurfaceVariant,
-                )
-                ClientField("Hostname", client.hostname)
-                ClientField("Platform", client.platform?.let(::formatPlatformName))
-                ClientField("Architecture", client.architecture)
-                ClientField("Operating system", client.osVersion)
-                client.clientSoftware?.let { software ->
-                    ClientField("Client software", renderSoftware(software.application))
-                    if (software.library != software.application) {
-                        ClientField("Agentknock library", renderSoftware(software.library))
-                    }
-                }
+                Text("Identifiers", style = MaterialTheme.typography.titleMedium)
                 ClientField(
                     "Machine ID",
                     client.machineId,
                     monospace = true,
                     onCopy = client.machineId?.let { { copy("Machine ID", it) } },
                 )
+                ClientField(
+                    "Client ID",
+                    client.clientId,
+                    monospace = true,
+                    onCopy = { copy("Client ID", client.clientId) },
+                )
             }
+
             if (client.state != RelayClientState.REVOKED) {
                 InformationSurface {
                     Text("Remove access", style = MaterialTheme.typography.titleMedium)

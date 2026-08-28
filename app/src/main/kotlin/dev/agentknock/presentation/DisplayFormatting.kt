@@ -48,6 +48,38 @@ internal fun formatPlatformName(platform: String): String = when (platform.lower
     else -> platform
 }
 
+internal data class GitSigningContent(
+    val requestTitle: String,
+    val messageLabel: String?,
+    val message: String?,
+)
+
+internal fun describeGitSigningContent(content: ByteArray): GitSigningContent {
+    val text = runCatching { content.decodeToString(throwOnInvalidSequence = true) }
+        .getOrNull()
+        ?.takeIf { value ->
+            value.all { character ->
+                character == '\n' || character == '\r' || character == '\t' ||
+                    !character.isISOControl()
+            }
+        }
+        ?: return GitSigningContent("Git signature", null, null)
+    val header = text.substringBefore("\n\n")
+    val message = text.substringAfter("\n\n", missingDelimiterValue = "")
+        .trimEnd()
+        .takeIf(String::isNotEmpty)
+    val headerLines = header.lineSequence().toList()
+    return when {
+        headerLines.firstOrNull()?.startsWith("tree ") == true ->
+            GitSigningContent("Git commit signature", "Commit message", message)
+        headerLines.firstOrNull()?.startsWith("object ") == true &&
+            headerLines.any { it.startsWith("type ") } &&
+            headerLines.any { it.startsWith("tag ") } ->
+            GitSigningContent("Git tag signature", "Tag message", message)
+        else -> GitSigningContent("Git signature", null, null)
+    }
+}
+
 internal fun renderShellWord(value: String): String = when {
     value.isEmpty() -> "''"
     unquotedShellWord.matches(value) -> value

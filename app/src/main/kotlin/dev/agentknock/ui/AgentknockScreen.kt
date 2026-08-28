@@ -289,7 +289,7 @@ internal fun AgentknockScreen(
             title = { Text("Stay informed about requests?") },
             text = {
                 Text(
-                    "Agentknock can notify you when a pairing, secret upload, secret use, or signing request needs attention. You control notification privacy in Android settings.",
+                    "Agentknock can notify you when a pairing, secret upload, secret use, or Git signature needs attention. You control notification privacy in Android settings.",
                 )
             },
             confirmButton = {

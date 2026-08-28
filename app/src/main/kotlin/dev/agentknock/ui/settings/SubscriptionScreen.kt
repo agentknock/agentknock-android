@@ -72,7 +72,7 @@ internal fun PlanAndBillingScreen(
                 InformationRow("Manual and automatic approvals", "Included")
                 InformationRow(
                     "AI review",
-                    if (state.access == SubscriptionAccess.ACTIVE) "Active" else "Subscription required",
+                    if (state.access == SubscriptionAccess.ACTIVE) "Active" else "Not active",
                 )
             }
             Text(

@@ -103,6 +103,7 @@ import dev.agentknock.protocol.GitSignHead
 import dev.agentknock.protocol.GitSignRepository
 import dev.agentknock.presentation.formatTimestamp
 import dev.agentknock.presentation.formatPlatformName
+import dev.agentknock.presentation.describeGitSigningContent
 import dev.agentknock.presentation.renderShellCommand
 import dev.agentknock.presentation.renderSoftware
 import dev.agentknock.storage.secret.SecretMetadata
@@ -116,6 +117,7 @@ import dev.agentknock.storage.request.GitSignDecisionResult
 import dev.agentknock.storage.request.GitSignRequestDetails
 import dev.agentknock.storage.request.GitSignRequestState
 import dev.agentknock.storage.request.InboxRequestDetails
+import dev.agentknock.storage.request.InboxRequestKind
 import dev.agentknock.storage.request.InboxRequestState
 import dev.agentknock.storage.request.InboxRequestSummary
 import dev.agentknock.storage.request.PairingDecisionResult
@@ -393,9 +395,9 @@ private fun RequestList(
                     modifier = Modifier.padding(horizontal = 28.dp),
                     verticalArrangement = Arrangement.spacedBy(10.dp),
                 ) {
-                    Text("No secret requests", style = MaterialTheme.typography.titleLarge)
+                    Text("No requests yet", style = MaterialTheme.typography.titleLarge)
                     Text(
-                        "Requests to use your secrets will appear here.",
+                        "Secret use and Git signing requests will appear here.",
                         color = MaterialTheme.colorScheme.onSurfaceVariant,
                     )
                 }
@@ -579,7 +581,7 @@ private fun RequestRowContent(
                     modifier = Modifier.padding(top = 2.dp),
                 )
             }
-            request.command?.let {
+            request.command?.takeUnless { request.kind == InboxRequestKind.GIT_SIGN }?.let {
                 Text(
                     renderShellCommand(it, request.arguments),
                     style = MaterialTheme.typography.titleMedium,
@@ -593,6 +595,18 @@ private fun RequestRowContent(
                     it,
                     style = MaterialTheme.typography.bodyMedium,
                     color = MaterialTheme.colorScheme.onSurfaceVariant,
+                    maxLines = 2,
+                    overflow = TextOverflow.Ellipsis,
+                )
+            }
+            if (request.kind == InboxRequestKind.GIT_SIGN && request.command != null) {
+                Text(
+                    "Triggered by ${renderShellCommand(request.command, request.arguments)}",
+                    style = MaterialTheme.typography.bodySmall,
+                    color = MaterialTheme.colorScheme.onSurfaceVariant,
+                    fontFamily = FontFamily.Monospace,
+                    maxLines = 1,
+                    overflow = TextOverflow.Ellipsis,
                 )
             }
             FlowRow(
@@ -900,7 +914,7 @@ private fun SecretUseDetail(
             } == true
             if (evaluation.prefersTemporaryAccess(aiReviewInFlight)) {
                 Notice(
-                    "Your decision is required",
+                    "Temporary access available",
                     if (asksEveryTime) {
                         "Approve everything once, or allow the eligible secrets for any command " +
                             "from ${secretUse.clientName} for 4 hours. Other protected uses " +
@@ -909,13 +923,6 @@ private fun SecretUseDetail(
                         "Approve once, or allow ${secretUse.clientName} to receive these protected " +
                             "values for any command for 4 hours."
                     },
-                    NoticeTone.ATTENTION,
-                )
-            }
-            if (asksEveryTime && !evaluation.prefersTemporaryAccess(aiReviewInFlight)) {
-                Notice(
-                    "Your decision is required",
-                    "At least one requested secret is set to Ask every time.",
                     NoticeTone.ATTENTION,
                 )
             }
@@ -1209,11 +1216,10 @@ private fun GitSignDetail(
     val temporarySecretNames = signing.approvalEvaluation.temporaryGrantSecretNames(
         aiReviewInFlight,
     )
-    val title = "Git signature"
+    val signingContent = describeGitSigningContent(signing.message)
+    val title = signingContent.requestTitle
     val exactContent = signing.message.displayForApproval()
-    val gitCommitMessage = exactContent.substringAfter("\n\n", missingDelimiterValue = "")
-        .trimEnd()
-        .takeIf(String::isNotEmpty)
+    val gitMessage = signingContent.message
     DetailPage(
         title = title,
         onBack = onBack,
@@ -1257,7 +1263,7 @@ private fun GitSignDetail(
 
         if (pending && signing.approvalEvaluation.prefersTemporaryAccess(aiReviewInFlight)) {
             Notice(
-                "Your decision is required",
+                "Temporary access available",
                 "Sign once, or allow ${signing.clientName} to request Git signatures with " +
                     "this key for any repository for 4 hours.",
                 NoticeTone.ATTENTION,
@@ -1278,7 +1284,7 @@ private fun GitSignDetail(
             GitRepositoryContext(repository)
         }
 
-        gitCommitMessage?.let { message ->
+        gitMessage?.let { message ->
             Surface(
                 color = if (pending) {
                     MaterialTheme.agentknockColors.attentionContainer
@@ -1297,7 +1303,10 @@ private fun GitSignDetail(
                     Modifier.padding(16.dp),
                     verticalArrangement = Arrangement.spacedBy(8.dp),
                 ) {
-                    Text("Commit message", style = MaterialTheme.typography.labelLarge)
+                    Text(
+                        checkNotNull(signingContent.messageLabel),
+                        style = MaterialTheme.typography.labelLarge,
+                    )
                     SelectionContainer {
                         Text(message, style = MaterialTheme.typography.titleMedium)
                     }
@@ -1332,12 +1341,12 @@ private fun GitSignDetail(
         }
 
         Disclosure(
-            title = if (gitCommitMessage == null) "Content to sign" else "Exact content to sign",
-            initiallyExpanded = gitCommitMessage == null,
+            title = if (gitMessage == null) "Content to sign" else "Exact content to sign",
+            initiallyExpanded = gitMessage == null,
         ) {
-            if (gitCommitMessage != null) {
+            if (gitMessage != null) {
                 Text(
-                    "The complete Git commit object that will be signed.",
+                    "The complete Git object that will be signed.",
                     style = MaterialTheme.typography.bodySmall,
                     color = MaterialTheme.colorScheme.onSurfaceVariant,
                 )
@@ -1349,7 +1358,7 @@ private fun GitSignDetail(
 
         if (pending) {
             Text(
-                "Signing uses the private key on this device. The private key is never sent to the client.",
+                "Git signing uses the private key on this device. The private key is never sent to the client.",
                 style = MaterialTheme.typography.bodySmall,
                 color = MaterialTheme.colorScheme.onSurfaceVariant,
             )
@@ -1609,8 +1618,8 @@ internal fun SecretUploadRequestDetail(
         )
         if (upload.state == SecretUploadRequestState.REVIEW_PENDING) {
             Text(
-                "Values are hidden by default. You can reveal them and choose whether each " +
-                    "should require device authentication after saving.",
+                "Values are hidden by default. Review them and choose which should remain " +
+                    "sensitive after saving.",
                 style = MaterialTheme.typography.bodyMedium,
                 color = MaterialTheme.colorScheme.onSurfaceVariant,
             )
@@ -1677,9 +1686,9 @@ internal fun SecretUploadRequestDetail(
                             Text("Sensitive", style = MaterialTheme.typography.labelMedium)
                             Text(
                                 if (variable.sensitive) {
-                                    "Authentication required to view after saving"
+                                    "Hidden by default after saving"
                                 } else {
-                                    "Visible without authentication after saving"
+                                    "Shown by default after saving"
                                 },
                                 style = MaterialTheme.typography.bodySmall,
                                 color = MaterialTheme.colorScheme.onSurfaceVariant,
@@ -2300,7 +2309,7 @@ private fun InboxRequestSummary.statusLabel(): String = when {
         gitSignResult,
         gitSignCompletionReason,
     )
-    state == InboxRequestState.ACTION_REQUIRED -> "Action required"
+    state == InboxRequestState.ACTION_REQUIRED -> "Needs attention"
     state == InboxRequestState.WAITING -> "Waiting"
     else -> "Completed"
 }
@@ -2334,7 +2343,7 @@ private fun gitSignStatusLabel(
     result: GitSignCompletionResult?,
     completionReason: String?,
 ): String = when (state) {
-    GitSignRequestState.APPROVAL_PENDING -> "Action required"
+    GitSignRequestState.APPROVAL_PENDING -> "Needs approval"
     GitSignRequestState.WAITING_FOR_COMPLETION -> "Waiting for client"
     GitSignRequestState.VERIFICATION_FAILED -> "Verification failed"
     GitSignRequestState.COMPLETED -> when (result) {
@@ -2355,7 +2364,7 @@ private fun GitSignOutcome(signing: GitSignRequestDetails) {
         ?.mapNotNull { it.temporaryAccessExpiresAt }
         ?.maxOrNull()
     val temporaryAccessDetail = temporaryAccessUntil?.let {
-        " Future signing was authorized through ${formatTimestamp(it)}."
+        " Future Git signing was authorized through ${formatTimestamp(it)}."
     }.orEmpty()
     val aiReview = signing.approvalEvaluation?.aiReview
     val aiReviewDetail = when (aiReview?.decision) {
@@ -2395,7 +2404,7 @@ private fun GitSignOutcome(signing: GitSignRequestDetails) {
         )
         signing.completionResult == GitSignCompletionResult.ABORTED -> Notice(
             "Request ended",
-            signing.completionMessage ?: "The client ended the signing request.",
+            signing.completionMessage ?: "The client ended the Git signing request.",
             NoticeTone.NEUTRAL,
         )
         signing.state == GitSignRequestState.WAITING_FOR_COMPLETION &&
@@ -2429,7 +2438,7 @@ private fun ByteArray.displayForApproval(): String {
 
 private fun PairingState.label(): String = when (this) {
     PairingState.RECEIVING -> "Receiving"
-    PairingState.SAS_VERIFICATION_PENDING -> "Action required"
+    PairingState.SAS_VERIFICATION_PENDING -> "Verify security code"
     PairingState.RELAY_ACTIVATION_PENDING -> "Activating"
     PairingState.WAITING_FOR_FINISH -> "Waiting for client"
     PairingState.REJECTED -> "Rejected"
@@ -2450,7 +2459,7 @@ private fun secretUseStatusLabel(
     result: InvocationCompletionResult?,
     completionReason: String?,
 ): String = when (state) {
-    SecretUseRequestState.APPROVAL_PENDING -> "Action required"
+    SecretUseRequestState.APPROVAL_PENDING -> "Needs approval"
     SecretUseRequestState.WAITING_FOR_COMPLETION -> "Waiting for client"
     SecretUseRequestState.VERIFICATION_FAILED -> "Verification failed"
     SecretUseRequestState.COMPLETED -> when (result) {
@@ -2469,7 +2478,7 @@ private fun SecretUseRequestDetails.isError(): Boolean =
     state == SecretUseRequestState.VERIFICATION_FAILED || completionReason == "INVALID_REQUEST"
 
 private fun SecretUploadRequestState.label(): String = when (this) {
-    SecretUploadRequestState.REVIEW_PENDING -> "Action required"
+    SecretUploadRequestState.REVIEW_PENDING -> "Needs review"
     SecretUploadRequestState.APPROVED -> "Approved"
     SecretUploadRequestState.REJECTED -> "Rejected"
     SecretUploadRequestState.VERIFICATION_FAILED -> "Verification failed"
@@ -2509,8 +2518,8 @@ private fun SecretUseDecisionResult.message(): String = when (this) {
 
 private fun GitSignDecisionResult.message(): String = when (this) {
     GitSignDecisionResult.Decided -> "Decision saved"
-    GitSignDecisionResult.NotPending -> "This signing request no longer needs a decision"
-    GitSignDecisionResult.NotFound -> "Signing request is no longer available"
+    GitSignDecisionResult.NotPending -> "This Git signing request no longer needs a decision"
+    GitSignDecisionResult.NotFound -> "Git signing request is no longer available"
     GitSignDecisionResult.InvocationUnavailable -> "The original command request is unavailable"
     GitSignDecisionResult.PairingUnavailable -> "The paired client is unavailable"
     GitSignDecisionResult.ApprovalChanged ->

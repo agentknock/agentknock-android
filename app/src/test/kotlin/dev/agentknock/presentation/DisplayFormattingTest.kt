@@ -46,4 +46,41 @@ class DisplayFormattingTest {
         assertEquals("macOS", formatPlatformName("Darwin"))
         assertEquals("Plan 9", formatPlatformName("Plan 9"))
     }
+
+    @Test
+    fun gitCommit_isDescribedUsingItsHumanMessage() {
+        assertEquals(
+            GitSigningContent(
+                requestTitle = "Git commit signature",
+                messageLabel = "Commit message",
+                message = "Explain the change\n\nWith useful detail",
+            ),
+            describeGitSigningContent(
+                "tree abc\nauthor Example\n\nExplain the change\n\nWith useful detail\n"
+                    .encodeToByteArray(),
+            ),
+        )
+    }
+
+    @Test
+    fun annotatedTag_isNotMislabelledAsACommit() {
+        assertEquals(
+            GitSigningContent(
+                requestTitle = "Git tag signature",
+                messageLabel = "Tag message",
+                message = "Release 1.0",
+            ),
+            describeGitSigningContent(
+                "object abc\ntype commit\ntag v1.0\ntagger Example\n\nRelease 1.0\n".encodeToByteArray(),
+            ),
+        )
+    }
+
+    @Test
+    fun unknownOrBinarySigningContent_isKeptGeneric() {
+        assertEquals(
+            GitSigningContent("Git signature", null, null),
+            describeGitSigningContent(byteArrayOf(0, 1, 2)),
+        )
+    }
 }

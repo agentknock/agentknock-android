@@ -264,7 +264,7 @@ private fun ActiveDeviceCard(identity: DeviceIdentity) {
             )
             Text(
                 identity.address,
-                style = MaterialTheme.typography.headlineSmall,
+                style = MaterialTheme.typography.titleLarge,
                 fontFamily = FontFamily.Monospace,
             )
         }

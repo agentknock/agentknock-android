@@ -24,6 +24,7 @@ import dev.agentknock.protocol.SecretUploadContents
 import dev.agentknock.protocol.SecretUploadRequestMessage
 import dev.agentknock.presentation.renderShellCommand
 import dev.agentknock.presentation.renderSingleLineText
+import dev.agentknock.presentation.describeGitSigningContent
 import dev.agentknock.review.approvalReviewRequest
 import dev.agentknock.review.approvalReviewGitSignRequest
 import dev.agentknock.review.approvalReviewSecretFacts
@@ -638,6 +639,7 @@ internal class RequestRepository(
                     val gitSign = gitSignByRequest[request.id] ?: return@mapNotNull null
                     val invocation = request.parentRequestId?.let(secretUseByRequest::get)
                         ?: return@mapNotNull null
+                    val signingContent = describeGitSigningContent(gitSign.message)
                     InboxRequestSummary(
                         id = request.id,
                         relayRequestId = request.relayRequestId,
@@ -650,10 +652,10 @@ internal class RequestRepository(
                         secretUseCompletionReason = null,
                         secretListState = null,
                         secretUploadState = null,
-                        title = "Git signature",
+                        title = signingContent.requestTitle,
                         clientName = invocation.clientName,
                         secretNames = listOf(gitSign.secretName),
-                        listSummary = null,
+                        listSummary = signingContent.message,
                         command = invocation.command,
                         arguments = decodeStringList(invocation.argumentsJson),
                         receivedAt = request.receivedAt,
@@ -2304,10 +2306,10 @@ internal class RequestRepository(
             AuditRecord(
                 category = AuditCategory.GIT_SIGN,
                 title = when {
-                    decision == SecretUseDecision.APPROVED -> "SSH signature approved"
+                    decision == SecretUseDecision.APPROVED -> "Git signature approved"
                     decisionSource == DECISION_SOURCE_POLICY ->
-                        "SSH signature denied by approval settings"
-                    else -> "SSH signature denied"
+                        "Git signature denied by approval settings"
+                    else -> "Git signature denied"
                 },
                 detail = gitSign.secretName,
                 outcome = if (decision == SecretUseDecision.APPROVED) {
@@ -3248,7 +3250,7 @@ internal class RequestRepository(
             policy == null
         ) {
             InvocationDenialReason.INVALID_REQUEST to
-                "The SSH signing request does not match its invocation."
+                "The Git signing request does not match its invocation."
         } else {
             null
         }

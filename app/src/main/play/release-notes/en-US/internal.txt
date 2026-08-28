@@ -1,1 +1,1 @@
-Add scoped four-hour approvals with clear active-access controls and AI fallback.
+Polish screen hierarchy and wording across Agentknock, improve pairing guidance and client details, and make Git signing requests show the commit or tag message at a glance.

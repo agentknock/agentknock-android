@@ -87,10 +87,10 @@
     <string name="choose_pairing_address">Choose your pairing address</string>
     <string name="choose_new_pairing_address">Choose a new pairing address</string>
     <string name="pairing_address">Pairing address</string>
-    <string name="pairing_address_description">This is the public address you give to the Agentknock command-line app when pairing. Sharing it does not grant access; every pairing still needs your approval. You may use the suggestion or enter your own.</string>
+    <string name="pairing_address_description">Clients use this public address to start pairing. It does not grant access—you approve every pairing.</string>
     <string name="pairing_address_format">Use lowercase English letters and hyphens only.</string>
     <string name="pairing_address_unchanged">This is already your pairing address</string>
-    <string name="claim_pairing_address">Claim address</string>
+    <string name="claim_pairing_address">Claim pairing address</string>
     <string name="another_suggestion">Another suggestion</string>
     <string name="pairing_address_claimed">Pairing address claimed</string>
     <string name="pairing_address_claim_incomplete">Claim not completed</string>
