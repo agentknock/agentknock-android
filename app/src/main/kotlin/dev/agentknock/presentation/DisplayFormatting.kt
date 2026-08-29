@@ -1,5 +1,6 @@
 package dev.agentknock.presentation
 
+import java.time.Duration
 import java.time.Instant
 import java.time.ZoneId
 import java.time.format.DateTimeFormatter
@@ -14,6 +15,17 @@ internal fun formatTimestamp(
     timestamp: Long,
     zoneId: ZoneId = ZoneId.systemDefault(),
 ): String = timestampFormatter.format(Instant.ofEpochMilli(timestamp).atZone(zoneId))
+
+internal fun formatRelativeTime(timestamp: Long, now: Long = System.currentTimeMillis()): String {
+    val elapsed = Duration.ofMillis((now - timestamp).coerceAtLeast(0))
+    return when {
+        elapsed.toMinutes() < 1 -> "just now"
+        elapsed.toHours() < 1 -> "${elapsed.toMinutes()} min ago"
+        elapsed.toDays() < 1 -> "${elapsed.toHours()} h ago"
+        elapsed.toDays() < 30 -> "${elapsed.toDays()} d ago"
+        else -> formatTimestamp(timestamp).substringBefore(' ')
+    }
+}
 
 internal fun renderShellCommand(command: String, arguments: List<String>): String =
     (listOf(command) + arguments).joinToString(" ", transform = ::renderShellWord)

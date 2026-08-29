@@ -14,6 +14,7 @@ import androidx.compose.foundation.layout.BoxWithConstraints
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.FlowRow
 import androidx.compose.foundation.layout.Row
+import androidx.compose.foundation.layout.IntrinsicSize
 import androidx.compose.foundation.layout.PaddingValues
 import androidx.compose.foundation.layout.Spacer
 import androidx.compose.foundation.layout.WindowInsets
@@ -21,6 +22,7 @@ import androidx.compose.foundation.layout.fillMaxHeight
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.heightIn
+import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.layout.width
@@ -31,7 +33,6 @@ import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.text.selection.SelectionContainer
 import androidx.compose.foundation.verticalScroll
 import androidx.compose.material.icons.Icons
-import androidx.compose.material.icons.automirrored.outlined.ArrowBack
 import androidx.compose.material.icons.automirrored.outlined.NavigateNext
 import androidx.compose.material.icons.outlined.ExpandLess
 import androidx.compose.material.icons.outlined.ExpandMore
@@ -43,6 +44,8 @@ import androidx.compose.material.icons.outlined.NotificationsOff
 import androidx.compose.material.icons.outlined.Refresh
 import androidx.compose.material.icons.outlined.Settings
 import androidx.compose.material.icons.outlined.Schedule
+import androidx.compose.material.icons.outlined.Security
+import androidx.compose.material.icons.outlined.Key
 import androidx.compose.material.icons.outlined.Visibility
 import androidx.compose.material.icons.outlined.VisibilityOff
 import androidx.compose.material3.AlertDialog
@@ -84,6 +87,7 @@ import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.semantics.contentDescription
+import androidx.compose.ui.semantics.clearAndSetSemantics
 import androidx.compose.ui.semantics.CustomAccessibilityAction
 import androidx.compose.ui.semantics.customActions
 import androidx.compose.ui.semantics.selected
@@ -137,6 +141,7 @@ import dev.agentknock.ui.components.ClientIdentity
 import dev.agentknock.ui.components.InformationRow
 import dev.agentknock.ui.components.InformationSurface
 import dev.agentknock.ui.components.SecretIdentities
+import dev.agentknock.ui.components.NavigationBackButton
 import dev.agentknock.ui.theme.agentknockColors
 import kotlinx.coroutines.launch
 
@@ -527,7 +532,6 @@ private fun RequestRowContent(
         request.userDecisionAvailable
     val semanticColors = MaterialTheme.agentknockColors
     val containerColor = when {
-        actionRequired -> semanticColors.attentionContainer
         selected -> MaterialTheme.colorScheme.secondaryContainer
         rejected -> MaterialTheme.colorScheme.surfaceContainer
         else -> MaterialTheme.colorScheme.surfaceContainerLow
@@ -535,25 +539,23 @@ private fun RequestRowContent(
     Surface(
         color = containerColor,
         contentColor = when {
-            actionRequired -> semanticColors.onAttentionContainer
             rejected && !selected -> MaterialTheme.colorScheme.onSurfaceVariant
             else -> MaterialTheme.colorScheme.onSurface
         },
         shape = MaterialTheme.shapes.large,
-        border = if (actionRequired) {
-            BorderStroke(1.dp, semanticColors.attentionAccent)
-        } else {
-            null
-        },
-        tonalElevation = if (actionRequired) 2.dp else 0.dp,
         onClick = onClick,
-        modifier = Modifier
-            .fillMaxWidth(),
+        modifier = Modifier.fillMaxWidth(),
     ) {
-        Column(
-            modifier = Modifier.fillMaxWidth().padding(horizontal = 16.dp, vertical = 14.dp),
-            verticalArrangement = Arrangement.spacedBy(7.dp),
-        ) {
+        Row(Modifier.fillMaxWidth().height(IntrinsicSize.Min)) {
+            Box(
+                Modifier.width(5.dp).fillMaxHeight().background(
+                    if (actionRequired) semanticColors.attentionAccent else Color.Transparent,
+                ),
+            )
+            Column(
+                modifier = Modifier.fillMaxWidth().padding(horizontal = 15.dp, vertical = 13.dp),
+                verticalArrangement = Arrangement.spacedBy(6.dp),
+            ) {
             Row(
                 modifier = Modifier.fillMaxWidth(),
                 horizontalArrangement = Arrangement.spacedBy(8.dp),
@@ -622,12 +624,13 @@ private fun RequestRowContent(
                     )
                 }
             }
-            Text(
-                formatTimestamp(request.receivedAt),
-                style = MaterialTheme.typography.bodySmall,
-                color = MaterialTheme.colorScheme.onSurfaceVariant,
-                modifier = Modifier.align(Alignment.End),
-            )
+                Text(
+                    formatTimestamp(request.receivedAt),
+                    style = MaterialTheme.typography.bodySmall,
+                    color = MaterialTheme.colorScheme.onSurfaceVariant,
+                    modifier = Modifier.align(Alignment.End),
+                )
+            }
         }
     }
 }
@@ -804,8 +807,6 @@ private fun SecretUseDetail(
                         approveEnabled = secretUse.missingSecrets.isEmpty(),
                         temporaryAccessAvailable = temporarySecretNames.isNotEmpty() &&
                             secretUse.missingSecrets.isEmpty(),
-                        temporaryAccessPreferred = secretUse.approvalEvaluation
-                            .prefersTemporaryAccess(aiReviewInFlight),
                         onDeny = onDeny,
                         onApprove = onApprove,
                         onAllowTemporarily = { confirmTemporaryAccess = true },
@@ -816,58 +817,57 @@ private fun SecretUseDetail(
             null
         },
     ) {
-        InformationSurface {
-            StatusLine(
-                if (aiReviewInFlight) "AI review in progress" else secretUse.statusLabel(),
-                secretUse.isError(),
-                attention = secretUse.state == SecretUseRequestState.APPROVAL_PENDING &&
-                    request.userDecisionAvailable,
-                subdued = aiReviewInFlight ||
-                    secretUse.decision == SecretUseDecision.DENIED ||
-                    secretUse.completionResult == InvocationCompletionResult.DENIED,
-            )
-            ClientIdentity(secretUse.clientName)
-            SecretIdentities(secretUse.secrets)
-            val environmentVariableCount = secretUse.secretDetails.sumOf {
-                it.environmentVariableNames.size
-            }
-            if (environmentVariableCount > 0) {
-                Text(
-                    "$environmentVariableCount environment ${if (environmentVariableCount == 1) {
-                        "variable requested"
-                    } else {
-                        "variables requested"
-                    }}",
-                    style = MaterialTheme.typography.bodySmall,
-                    color = MaterialTheme.colorScheme.onSurfaceVariant,
-                )
-            }
-            val sshKeyCount = secretUse.secretDetails.count { it.type == "ssh" }
-            if (sshKeyCount > 0) {
-                Text(
-                    "$sshKeyCount SSH ${if (sshKeyCount == 1) "key" else "keys"} requested",
-                    style = MaterialTheme.typography.bodySmall,
-                    color = MaterialTheme.colorScheme.onSurfaceVariant,
-                )
-            }
-            InformationRow("Received", formatTimestamp(request.receivedAt))
-        }
-
-        secretUse.reason?.takeIf(String::isNotBlank)?.let { reason ->
-            Card(
-                colors = CardDefaults.cardColors(
-                    containerColor = MaterialTheme.colorScheme.surfaceContainerLow,
-                ),
-                shape = MaterialTheme.shapes.large,
+        Surface(
+            color = MaterialTheme.colorScheme.surfaceContainerLow,
+            shape = MaterialTheme.shapes.large,
+            modifier = Modifier.fillMaxWidth(),
+        ) {
+            Row(
+                modifier = Modifier.padding(18.dp),
+                horizontalArrangement = Arrangement.spacedBy(16.dp),
+                verticalAlignment = Alignment.Top,
             ) {
-                Column(Modifier.padding(16.dp), verticalArrangement = Arrangement.spacedBy(4.dp)) {
-                    Text("Reason reported by client", style = MaterialTheme.typography.labelLarge)
+                Surface(
+                    color = MaterialTheme.colorScheme.secondaryContainer,
+                    contentColor = MaterialTheme.colorScheme.onSecondaryContainer,
+                    shape = androidx.compose.foundation.shape.CircleShape,
+                    modifier = Modifier.size(56.dp),
+                ) {
+                    Box(contentAlignment = Alignment.Center) {
+                        Icon(Icons.Outlined.Security, contentDescription = null, modifier = Modifier.size(28.dp))
+                    }
+                }
+                Column(Modifier.weight(1f), verticalArrangement = Arrangement.spacedBy(5.dp)) {
                     Text(
-                        "Untrusted context supplied by the requesting client.",
+                        "${secretUse.clientName} wants to use ${secretUse.secrets.size} ${if (secretUse.secrets.size == 1) "secret" else "secrets"}",
+                        style = MaterialTheme.typography.titleLarge,
+                    )
+                    StatusLine(
+                        if (aiReviewInFlight) "AI review in progress" else secretUse.statusLabel(),
+                        secretUse.isError(),
+                        attention = secretUse.state == SecretUseRequestState.APPROVAL_PENDING &&
+                            request.userDecisionAvailable,
+                        subdued = aiReviewInFlight ||
+                            secretUse.decision == SecretUseDecision.DENIED ||
+                            secretUse.completionResult == InvocationCompletionResult.DENIED,
+                    )
+                    Text(
+                        "Received ${formatTimestamp(request.receivedAt)}",
                         style = MaterialTheme.typography.bodySmall,
                         color = MaterialTheme.colorScheme.onSurfaceVariant,
                     )
-                    Text(reason, style = MaterialTheme.typography.bodyLarge)
+                }
+            }
+        }
+
+        if (secretUse.secretDetails.isNotEmpty()) {
+            Column(verticalArrangement = Arrangement.spacedBy(8.dp)) {
+                Text("Requested secrets", style = MaterialTheme.typography.titleMedium)
+                InformationSurface(contentPadding = PaddingValues(horizontal = 16.dp, vertical = 8.dp)) {
+                    secretUse.secretDetails.forEachIndexed { index, secret ->
+                        SecretSummary(secret)
+                        if (index != secretUse.secretDetails.lastIndex) HorizontalDivider()
+                    }
                 }
             }
         }
@@ -896,6 +896,25 @@ private fun SecretUseDetail(
             }
         }
 
+        secretUse.reason?.takeIf(String::isNotBlank)?.let { reason ->
+            Card(
+                colors = CardDefaults.cardColors(
+                    containerColor = MaterialTheme.colorScheme.surfaceContainerLow,
+                ),
+                shape = MaterialTheme.shapes.large,
+            ) {
+                Column(Modifier.padding(16.dp), verticalArrangement = Arrangement.spacedBy(5.dp)) {
+                    Text("Why this command says it needs access", style = MaterialTheme.typography.labelLarge)
+                    Text(reason, style = MaterialTheme.typography.bodyLarge)
+                    Text(
+                        "Reported by the requesting client; not verified by Agentknock.",
+                        style = MaterialTheme.typography.bodySmall,
+                        color = MaterialTheme.colorScheme.onSurfaceVariant,
+                    )
+                }
+            }
+        }
+
         if (
             secretUse.missingSecrets.isNotEmpty() &&
             secretUse.completionResult != InvocationCompletionResult.DENIED
@@ -909,42 +928,11 @@ private fun SecretUseDetail(
 
         if (secretUse.state == SecretUseRequestState.APPROVAL_PENDING) {
             val evaluation = secretUse.approvalEvaluation
-            val asksEveryTime = evaluation?.secrets?.any {
-                it.action == ApprovalAction.ASK_ME && !it.temporaryAccessEligible
-            } == true
-            if (evaluation.prefersTemporaryAccess(aiReviewInFlight)) {
-                Notice(
-                    "Temporary access available",
-                    if (asksEveryTime) {
-                        "Approve everything once, or allow the eligible secrets for any command " +
-                            "from ${secretUse.clientName} for 4 hours. Other protected uses " +
-                            "are approved once."
-                    } else {
-                        "Approve once, or allow ${secretUse.clientName} to receive these protected " +
-                            "values for any command for 4 hours."
-                    },
-                    NoticeTone.ATTENTION,
-                )
-            }
             if (
                 evaluation?.aiReview != null ||
                 evaluation?.secrets?.any { it.action == ApprovalAction.ASK_AI } == true
             ) {
                 AiReviewNotice(evaluation.aiReview, aiReviewInFlight)
-            }
-        }
-
-        if (secretUse.secretDetails.isNotEmpty()) {
-            Disclosure(
-                title = "Secret details",
-                initiallyExpanded = secretUse.state == SecretUseRequestState.APPROVAL_PENDING,
-            ) {
-                secretUse.secretDetails.forEach { secret -> SecretSummary(secret) }
-                Text(
-                    "Private keys and environment-variable values are never shown in a request.",
-                    style = MaterialTheme.typography.bodySmall,
-                    color = MaterialTheme.colorScheme.onSurfaceVariant,
-                )
             }
         }
 
@@ -1036,7 +1024,6 @@ private fun RequestDecisionButtons(
     approveLabel: String,
     approveEnabled: Boolean,
     temporaryAccessAvailable: Boolean,
-    temporaryAccessPreferred: Boolean,
     onDeny: () -> Unit,
     onApprove: () -> Unit,
     onAllowTemporarily: () -> Unit,
@@ -1045,31 +1032,6 @@ private fun RequestDecisionButtons(
         modifier = Modifier.fillMaxWidth().padding(12.dp),
         verticalArrangement = Arrangement.spacedBy(8.dp),
     ) {
-        if (temporaryAccessAvailable) {
-            if (temporaryAccessPreferred) {
-                Button(
-                    onClick = onAllowTemporarily,
-                    modifier = Modifier.fillMaxWidth(),
-                    colors = ButtonDefaults.buttonColors(
-                        containerColor = MaterialTheme.agentknockColors.success,
-                        contentColor = MaterialTheme.agentknockColors.onSuccess,
-                    ),
-                ) {
-                    Icon(Icons.Outlined.Schedule, contentDescription = null)
-                    Spacer(Modifier.width(8.dp))
-                    Text("Allow for 4 hours")
-                }
-            } else {
-                FilledTonalButton(
-                    onClick = onAllowTemporarily,
-                    modifier = Modifier.fillMaxWidth(),
-                ) {
-                    Icon(Icons.Outlined.Schedule, contentDescription = null)
-                    Spacer(Modifier.width(8.dp))
-                    Text("Allow for 4 hours")
-                }
-            }
-        }
         Row(
             modifier = Modifier.fillMaxWidth(),
             horizontalArrangement = Arrangement.spacedBy(10.dp),
@@ -1084,30 +1046,26 @@ private fun RequestDecisionButtons(
             ) {
                 Text("Deny once")
             }
-            if (temporaryAccessPreferred) {
-                OutlinedButton(
-                    onClick = onApprove,
-                    enabled = approveEnabled,
-                    modifier = Modifier.weight(1f),
-                    colors = ButtonDefaults.outlinedButtonColors(
-                        contentColor = MaterialTheme.agentknockColors.success,
-                    ),
-                    border = BorderStroke(1.dp, MaterialTheme.agentknockColors.success),
-                ) {
-                    Text(approveLabel)
-                }
-            } else {
-                Button(
-                    onClick = onApprove,
-                    enabled = approveEnabled,
-                    modifier = Modifier.weight(1f),
-                    colors = ButtonDefaults.buttonColors(
-                        containerColor = MaterialTheme.agentknockColors.success,
-                        contentColor = MaterialTheme.agentknockColors.onSuccess,
-                    ),
-                ) {
-                    Text(approveLabel)
-                }
+            Button(
+                onClick = onApprove,
+                enabled = approveEnabled,
+                modifier = Modifier.weight(1f),
+                colors = ButtonDefaults.buttonColors(
+                    containerColor = MaterialTheme.agentknockColors.success,
+                    contentColor = MaterialTheme.agentknockColors.onSuccess,
+                ),
+            ) {
+                Text(approveLabel)
+            }
+        }
+        if (temporaryAccessAvailable) {
+            FilledTonalButton(
+                onClick = onAllowTemporarily,
+                modifier = Modifier.fillMaxWidth(),
+            ) {
+                Icon(Icons.Outlined.Schedule, contentDescription = null)
+                Spacer(Modifier.width(8.dp))
+                Text("Allow for 4 hours")
             }
         }
     }
@@ -1195,10 +1153,6 @@ private fun ApprovalEvaluation?.temporaryGrantSecretNames(
     }.map { it.secretName }
 }
 
-private fun ApprovalEvaluation?.prefersTemporaryAccess(aiReviewInFlight: Boolean): Boolean =
-    this?.temporaryGrantSecretNames(aiReviewInFlight)?.isNotEmpty() == true &&
-        secrets.any { it.action == ApprovalAction.ASK_ME && it.temporaryAccessEligible }
-
 @Composable
 private fun GitSignDetail(
     request: InboxRequestDetails,
@@ -1235,8 +1189,6 @@ private fun GitSignDetail(
                         approveLabel = "Sign once",
                         approveEnabled = true,
                         temporaryAccessAvailable = temporarySecretNames.isNotEmpty(),
-                        temporaryAccessPreferred = signing.approvalEvaluation
-                            .prefersTemporaryAccess(aiReviewInFlight),
                         onDeny = onDeny,
                         onApprove = onApprove,
                         onAllowTemporarily = { confirmTemporaryAccess = true },
@@ -1259,15 +1211,6 @@ private fun GitSignDetail(
             ClientIdentity(signing.clientName)
             SecretIdentities(listOf(signing.secretName))
             InformationRow("Received", formatTimestamp(request.receivedAt))
-        }
-
-        if (pending && signing.approvalEvaluation.prefersTemporaryAccess(aiReviewInFlight)) {
-            Notice(
-                "Temporary access available",
-                "Sign once, or allow ${signing.clientName} to request Git signatures with " +
-                    "this key for any repository for 4 hours.",
-                NoticeTone.ATTENTION,
-            )
         }
 
         if (
@@ -1592,7 +1535,7 @@ internal fun SecretUploadRequestDetail(
         if (upload.mode != SecretUploadMode.CREATE) {
             Card(
                 colors = CardDefaults.cardColors(
-                    containerColor = MaterialTheme.colorScheme.secondaryContainer,
+                    containerColor = MaterialTheme.colorScheme.surfaceContainer,
                 ),
             ) {
                 Column(
@@ -2057,25 +2000,67 @@ private data class OutcomeNotice(
 
 @Composable
 private fun SecretSummary(secret: SecretMetadata) {
-    Column(Modifier.padding(vertical = 4.dp), verticalArrangement = Arrangement.spacedBy(2.dp)) {
-        Text(secret.name, style = MaterialTheme.typography.titleMedium)
-        if (secret.description.isNotBlank()) {
-            Text(secret.description, color = MaterialTheme.colorScheme.onSurfaceVariant)
+    Column(Modifier.padding(vertical = 8.dp), verticalArrangement = Arrangement.spacedBy(8.dp)) {
+        Row(
+            modifier = Modifier.fillMaxWidth(),
+            horizontalArrangement = Arrangement.spacedBy(10.dp),
+            verticalAlignment = Alignment.CenterVertically,
+        ) {
+            Surface(
+                color = MaterialTheme.colorScheme.tertiaryContainer,
+                contentColor = MaterialTheme.colorScheme.onTertiaryContainer,
+                shape = androidx.compose.foundation.shape.CircleShape,
+                modifier = Modifier.size(36.dp),
+            ) {
+                Box(contentAlignment = Alignment.Center) {
+                    Icon(Icons.Outlined.Key, contentDescription = null, modifier = Modifier.size(18.dp))
+                }
+            }
+            Column(Modifier.weight(1f), verticalArrangement = Arrangement.spacedBy(1.dp)) {
+                Text(secret.name, style = MaterialTheme.typography.titleMedium)
+                Text(
+                    if (secret.type == "ssh") "SSH key" else "Environment variables",
+                    style = MaterialTheme.typography.bodySmall,
+                    color = MaterialTheme.colorScheme.onSurfaceVariant,
+                )
+            }
         }
-        Text(
-            if (secret.type == "ssh") "SSH key" else "Environment variables",
-            style = MaterialTheme.typography.labelMedium,
-            color = MaterialTheme.colorScheme.onSurfaceVariant,
-        )
-        SelectionContainer {
+        if (secret.description.isNotBlank()) {
             Text(
-                if (secret.type == "ssh") {
-                    secret.sshPublicKey.orEmpty()
-                } else {
-                    secret.environmentVariableNames.joinToString("\n")
-                },
-                fontFamily = FontFamily.Monospace,
+                secret.description,
+                style = MaterialTheme.typography.bodyMedium,
+                color = MaterialTheme.colorScheme.onSurfaceVariant,
             )
+        }
+        if (secret.type == "ssh") {
+            Text(
+                "The public key can be provided; private-key operations remain protected.",
+                style = MaterialTheme.typography.bodySmall,
+                color = MaterialTheme.colorScheme.onSurfaceVariant,
+            )
+        } else {
+            secret.environmentVariableNames.forEach { name ->
+                Row(
+                    modifier = Modifier.fillMaxWidth(),
+                    horizontalArrangement = Arrangement.spacedBy(12.dp),
+                    verticalAlignment = Alignment.CenterVertically,
+                ) {
+                    Text(
+                        name,
+                        fontFamily = FontFamily.Monospace,
+                        style = MaterialTheme.typography.bodyMedium,
+                        modifier = Modifier.weight(1f),
+                    )
+                    Text(
+                        "••••••••",
+                        fontFamily = FontFamily.Monospace,
+                        color = MaterialTheme.colorScheme.onSurfaceVariant,
+                        modifier = Modifier.clearAndSetSemantics {
+                            contentDescription = "Value hidden"
+                        },
+                    )
+                }
+            }
         }
     }
 }
@@ -2108,13 +2093,11 @@ private fun DetailPage(
     Column(modifier) {
         TopAppBar(
             title = titleContent,
-            navigationIcon = {
-                if (showBack) {
-                    IconButton(onClick = onBack) {
-                        Icon(Icons.AutoMirrored.Outlined.ArrowBack, contentDescription = "Back")
+                navigationIcon = {
+                    if (showBack) {
+                        NavigationBackButton(onBack)
                     }
-                }
-            },
+                },
         )
         Column(
             Modifier.weight(1f).fillMaxWidth().verticalScroll(rememberScrollState())

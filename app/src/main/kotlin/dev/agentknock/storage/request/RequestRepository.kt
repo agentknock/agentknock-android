@@ -414,6 +414,7 @@ internal data class ClientSummary(
     val state: RelayClientState,
     val desiredState: RelayClientState?,
     val pairedAt: Long?,
+    val lastRequestAt: Long? = null,
     val temporaryAccessCount: Int = 0,
 )
 
@@ -430,6 +431,18 @@ internal data class ClientDetails(
     val state: RelayClientState,
     val desiredState: RelayClientState?,
     val pairedAt: Long?,
+    val lastRequestAt: Long? = null,
+)
+
+private data class ClientObservation(
+    val clientId: String,
+    val observedAt: Long,
+    val hostname: String?,
+    val platform: String?,
+    val architecture: String?,
+    val machineId: String?,
+    val osVersion: String?,
+    val clientSoftwareJson: String,
 )
 
 internal data class RequestNotification(
@@ -885,10 +898,64 @@ internal class RequestRepository(
 
     suspend fun getRequestDetails(id: Long): InboxRequestDetails? = observeRequest(id).first()
 
+    private fun observeClientObservations(): Flow<Map<String, List<ClientObservation>>> = combine(
+        dao.observeSecretUseRequests(),
+        dao.observeSecretListRequests(),
+        dao.observeSecretUploadRequests(),
+    ) { uses, lists, uploads ->
+        buildList {
+            uses.forEach { request ->
+                add(
+                    ClientObservation(
+                        clientId = request.clientId,
+                        observedAt = request.createdAt,
+                        hostname = request.hostname,
+                        platform = request.platform,
+                        architecture = request.architecture,
+                        machineId = request.machineId,
+                        osVersion = request.osVersion,
+                        clientSoftwareJson = request.clientSoftwareJson,
+                    ),
+                )
+            }
+            lists.forEach { request ->
+                add(
+                    ClientObservation(
+                        clientId = request.clientId,
+                        observedAt = request.createdAt,
+                        hostname = request.hostname,
+                        platform = request.platform,
+                        architecture = request.architecture,
+                        machineId = request.machineId,
+                        osVersion = request.osVersion,
+                        clientSoftwareJson = request.clientSoftwareJson,
+                    ),
+                )
+            }
+            uploads.forEach { request ->
+                add(
+                    ClientObservation(
+                        clientId = request.clientId,
+                        observedAt = request.createdAt,
+                        hostname = null,
+                        platform = null,
+                        architecture = null,
+                        machineId = null,
+                        osVersion = null,
+                        clientSoftwareJson = request.clientSoftwareJson,
+                    ),
+                )
+            }
+        }.groupBy(ClientObservation::clientId).mapValues { (_, observations) ->
+            observations.sortedByDescending(ClientObservation::observedAt)
+        }
+    }
+
     fun observeClients(): Flow<List<ClientSummary>> = combine(
         dao.observePairings(),
         secrets.observeTemporaryAccessGrants(),
-    ) { pairings, grants ->
+        observeClientObservations(),
+    ) { pairings, grants, observationsByClient ->
         val grantCounts = grants.groupingBy { it.clientId }.eachCount()
         pairings
             .filter { it.state == PairingState.ACTIVE.storedName }
@@ -906,32 +973,43 @@ internal class RequestRepository(
                     state = state,
                     desiredState = desiredState,
                     pairedAt = pairing.completedAt,
+                    lastRequestAt = observationsByClient[pairing.clientId]?.firstOrNull()?.observedAt,
                     temporaryAccessCount = grantCounts[pairing.clientId] ?: 0,
                 )
             }
             .sortedBy { it.name.lowercase() }
     }
 
-    fun observeClient(clientId: String): Flow<ClientDetails?> =
-        dao.observePairingByClientId(clientId).map { pairing ->
+    fun observeClient(clientId: String): Flow<ClientDetails?> = combine(
+        dao.observePairingByClientId(clientId),
+        observeClientObservations(),
+    ) { pairing, observationsByClient ->
             pairing?.takeIf {
                 it.state == PairingState.ACTIVE.storedName &&
                     it.relayClientState != RelayClientState.REVOKED.wireName &&
                     it.desiredRelayClientState != RelayClientState.REVOKED.wireName
             }?.let {
+                val observations = observationsByClient[it.clientId].orEmpty()
+                val latest = observations.firstOrNull()
+                val latestDeviceFacts = observations.firstOrNull { observation ->
+                    observation.hostname != null || observation.platform != null ||
+                        observation.architecture != null || observation.osVersion != null
+                }
                 ClientDetails(
                     clientId = it.clientId,
                     name = it.friendlyName ?: it.hostname ?: "Unnamed client",
-                    hostname = it.hostname,
-                    platform = it.platform,
-                    architecture = it.architecture,
-                    osVersion = it.osVersion,
-                    machineId = it.machineId,
-                    clientSoftware = it.clientSoftwareJson?.let(::decodeClientSoftware),
+                    hostname = latestDeviceFacts?.hostname ?: it.hostname,
+                    platform = latestDeviceFacts?.platform ?: it.platform,
+                    architecture = latestDeviceFacts?.architecture ?: it.architecture,
+                    osVersion = latestDeviceFacts?.osVersion ?: it.osVersion,
+                    machineId = latestDeviceFacts?.machineId ?: it.machineId,
+                    clientSoftware = latest?.clientSoftwareJson?.let(::decodeClientSoftware)
+                        ?: it.clientSoftwareJson?.let(::decodeClientSoftware),
                     instructions = it.instructions,
                     state = it.relayClientState?.toRelayClientState() ?: RelayClientState.PENDING,
                     desiredState = it.desiredRelayClientState?.toRelayClientState(),
                     pairedAt = it.completedAt,
+                    lastRequestAt = latest?.observedAt,
                 )
             }
         }

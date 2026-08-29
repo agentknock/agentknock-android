@@ -1,1 +1,1 @@
-Make Settings feel native to Android, move pairing controls to Clients and AI instructions to Secrets, clarify security and backup behavior, separate quiet background notifications from approval alerts, and improve subscription and audit screens.
+Refines every core screen with clearer request decisions, easier-to-scan secrets and clients, Android-style settings, exact encryption and backup status, and a filterable audit timeline.

@@ -33,7 +33,6 @@ import androidx.compose.material3.TopAppBar
 import androidx.compose.material3.Icon
 import androidx.compose.material3.IconButton
 import androidx.compose.material.icons.Icons
-import androidx.compose.material.icons.automirrored.outlined.ArrowBack
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.getValue
@@ -61,6 +60,7 @@ import dev.agentknock.storage.vault.ClaimPairingAddressResult
 import dev.agentknock.storage.vault.DeviceConfiguration
 import dev.agentknock.storage.vault.DeviceIdentity
 import dev.agentknock.ui.theme.agentknockColors
+import dev.agentknock.ui.components.NavigationBackButton
 import kotlinx.coroutines.launch
 
 @Composable
@@ -126,9 +126,7 @@ internal fun DeviceSetupScreen(
                 },
                 navigationIcon = {
                     if (changeAddressInitially && onDone != null) {
-                        IconButton(onClick = onDone) {
-                            Icon(Icons.AutoMirrored.Outlined.ArrowBack, contentDescription = "Back")
-                        }
+                        NavigationBackButton(onDone)
                     }
                 },
             )

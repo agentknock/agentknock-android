@@ -15,18 +15,25 @@ import androidx.compose.foundation.layout.fillMaxHeight
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.padding
+import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.layout.width
 import androidx.compose.foundation.lazy.LazyColumn
+import androidx.compose.foundation.lazy.LazyRow
 import androidx.compose.foundation.lazy.items
 import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.text.selection.SelectionContainer
 import androidx.compose.foundation.verticalScroll
+import androidx.compose.material3.FilterChip
 import androidx.compose.material3.HorizontalDivider
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.Surface
 import androidx.compose.material3.Text
 import androidx.compose.material3.VerticalDivider
 import androidx.compose.runtime.Composable
+import androidx.compose.runtime.getValue
+import androidx.compose.runtime.mutableStateOf
+import androidx.compose.runtime.saveable.rememberSaveable
+import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.graphics.Color
@@ -44,6 +51,16 @@ import dev.agentknock.storage.request.ClientSummary
 import dev.agentknock.ui.components.InformationRow
 import dev.agentknock.ui.components.InformationSurface
 import dev.agentknock.ui.theme.agentknockColors
+import java.time.Instant
+import java.time.ZoneId
+import java.time.format.DateTimeFormatter
+
+private enum class AuditFilter(val label: String) {
+    ALL("All"),
+    SECRET_USE("Secret use"),
+    UPLOADS("Uploads"),
+    PAIRINGS("Pairings"),
+}
 
 @Composable
 internal fun AuditBrowser(
@@ -118,70 +135,112 @@ private fun AuditList(
     onOpen: (Long) -> Unit,
     modifier: Modifier,
 ) {
+    var filter by rememberSaveable { mutableStateOf(AuditFilter.ALL) }
+    val visibleEvents = events.filter(filter::matches)
+    val dayGroups = visibleEvents.groupBy { it.occurredAt.auditDate() }
     Column(modifier) {
         PageTopBar("Audit log", onBack)
-        if (events.isEmpty()) {
+        LazyRow(
+            contentPadding = PaddingValues(horizontal = 16.dp, vertical = 4.dp),
+            horizontalArrangement = Arrangement.spacedBy(8.dp),
+        ) {
+            items(AuditFilter.entries, key = AuditFilter::name) { option ->
+                FilterChip(
+                    selected = filter == option,
+                    onClick = { filter = option },
+                    label = { Text(option.label) },
+                )
+            }
+        }
+        if (visibleEvents.isEmpty()) {
             Box(Modifier.fillMaxSize(), contentAlignment = Alignment.Center) {
-                Text("No security activity recorded yet")
+                Text(
+                    if (events.isEmpty()) "No security activity recorded yet" else "No matching activity",
+                    color = MaterialTheme.colorScheme.onSurfaceVariant,
+                )
             }
         } else {
-            LazyColumn(contentPadding = PaddingValues(bottom = 16.dp)) {
-                items(events, key = AuditEvent::id) { event ->
-                    val selected = event.id == selectedEventId
-                    val clientName = event.clientId?.let(clientNames::get)
-                    Surface(
-                        color = if (selected) {
-                            MaterialTheme.colorScheme.secondaryContainer
-                        } else {
-                            Color.Transparent
-                        },
-                        modifier = Modifier
-                            .fillMaxWidth()
-                            .clickable { onOpen(event.id) }
-                            .semantics { this.selected = selected },
-                    ) {
-                        Column(
-                            modifier = Modifier.fillMaxWidth(),
-                        ) {
-                            Row(
-                                modifier = Modifier.fillMaxWidth().padding(
-                                    start = 16.dp,
-                                    end = 16.dp,
-                                    top = 10.dp,
-                                ),
-                                horizontalArrangement = Arrangement.spacedBy(10.dp),
-                                verticalAlignment = Alignment.CenterVertically,
-                            ) {
-                                Text(
-                                    formatTimestamp(event.occurredAt),
-                                    style = MaterialTheme.typography.bodySmall,
-                                    color = MaterialTheme.colorScheme.onSurfaceVariant,
-                                    fontFamily = FontFamily.Monospace,
-                                    modifier = Modifier.weight(1f),
-                                )
-                                AuditOutcomeBadge(event.outcome)
+            LazyColumn(
+                contentPadding = PaddingValues(start = 16.dp, end = 16.dp, bottom = 24.dp),
+                verticalArrangement = Arrangement.spacedBy(12.dp),
+            ) {
+                dayGroups.forEach { (day, dayEvents) ->
+                    item(key = "day_$day") {
+                        Column {
+                            SettingsSectionLabel(day)
+                            SettingsGroup {
+                                dayEvents.forEachIndexed { index, event ->
+                                    AuditTimelineRow(
+                                        event = event,
+                                        clientName = event.clientId?.let(clientNames::get),
+                                        selected = event.id == selectedEventId,
+                                        onClick = { onOpen(event.id) },
+                                    )
+                                    if (index != dayEvents.lastIndex) SettingsGroupDivider()
+                                }
                             }
-                            Text(
-                                event.title,
-                                style = MaterialTheme.typography.titleMedium,
-                                maxLines = 1,
-                                overflow = TextOverflow.Ellipsis,
-                                modifier = Modifier.padding(horizontal = 16.dp, vertical = 3.dp),
-                            )
-                            val context = event.contextLine(clientName)
-                            Text(
-                                if (context == null) event.category.displayName else "${event.category.displayName} · $context",
-                                style = MaterialTheme.typography.bodySmall,
-                                color = MaterialTheme.colorScheme.onSurfaceVariant,
-                                maxLines = 1,
-                                overflow = TextOverflow.Ellipsis,
-                                modifier = Modifier.padding(start = 16.dp, end = 16.dp, bottom = 10.dp),
-                            )
                         }
                     }
-                    HorizontalDivider(color = MaterialTheme.colorScheme.outlineVariant)
                 }
             }
+        }
+    }
+}
+
+@Composable
+private fun AuditTimelineRow(
+    event: AuditEvent,
+    clientName: String?,
+    selected: Boolean,
+    onClick: () -> Unit,
+) {
+    val context = event.contextLine(clientName)
+    val accent = event.outcome.accentColor()
+    Row(
+        modifier = Modifier.fillMaxWidth().clickable(onClick = onClick)
+            .semantics { this.selected = selected }
+            .padding(horizontal = 16.dp, vertical = 12.dp),
+        horizontalArrangement = Arrangement.spacedBy(12.dp),
+        verticalAlignment = Alignment.Top,
+    ) {
+        Text(
+            event.occurredAt.auditTime(),
+            style = MaterialTheme.typography.bodySmall,
+            color = MaterialTheme.colorScheme.onSurfaceVariant,
+            fontFamily = FontFamily.Monospace,
+            modifier = Modifier.width(66.dp).padding(top = 2.dp),
+        )
+        Surface(
+            color = accent,
+            shape = androidx.compose.foundation.shape.CircleShape,
+            modifier = Modifier.size(10.dp),
+        ) {}
+        Column(Modifier.weight(1f), verticalArrangement = Arrangement.spacedBy(2.dp)) {
+            Row(
+                modifier = Modifier.fillMaxWidth(),
+                horizontalArrangement = Arrangement.spacedBy(8.dp),
+                verticalAlignment = Alignment.CenterVertically,
+            ) {
+                Text(
+                    event.title,
+                    style = MaterialTheme.typography.bodyLarge,
+                    maxLines = 2,
+                    overflow = TextOverflow.Ellipsis,
+                    modifier = Modifier.weight(1f),
+                )
+                Text(
+                    event.outcome.displayName(),
+                    style = MaterialTheme.typography.labelMedium,
+                    color = accent,
+                )
+            }
+            Text(
+                context ?: event.category.displayName,
+                style = MaterialTheme.typography.bodySmall,
+                color = MaterialTheme.colorScheme.onSurfaceVariant,
+                maxLines = 2,
+                overflow = TextOverflow.Ellipsis,
+            )
         }
     }
 }
@@ -305,7 +364,7 @@ private fun AuditEvent.detailLabel(): String = when (category) {
         title.startsWith("Environment variable") -> "Environment variable"
         else -> "Secret"
     }
-    AuditCategory.SECRET_USE -> "Secret access"
+    AuditCategory.SECRET_USE -> "Secret"
     AuditCategory.GIT_SIGN -> "Git signing"
     AuditCategory.SECRET_LIST -> "Secret list"
     AuditCategory.SECRET_UPLOAD -> "Secret upload"
@@ -317,3 +376,32 @@ private fun AuditEvent.detailLabel(): String = when (category) {
 }
 
 private fun AuditOutcome.displayName(): String = storedName.replaceFirstChar(Char::uppercase)
+
+@Composable
+private fun AuditOutcome.accentColor(): Color = when (this) {
+    AuditOutcome.APPROVED,
+    AuditOutcome.COMPLETED,
+    AuditOutcome.CHANGED,
+    -> MaterialTheme.agentknockColors.success
+    AuditOutcome.FAILED -> MaterialTheme.agentknockColors.danger
+    else -> MaterialTheme.colorScheme.onSurfaceVariant
+}
+
+private fun AuditFilter.matches(event: AuditEvent): Boolean = when (this) {
+    AuditFilter.ALL -> true
+    AuditFilter.SECRET_USE -> event.category == AuditCategory.SECRET_USE ||
+        event.category == AuditCategory.GIT_SIGN
+    AuditFilter.UPLOADS -> event.category == AuditCategory.SECRET_UPLOAD
+    AuditFilter.PAIRINGS -> event.category == AuditCategory.PAIRING
+}
+
+private val auditDateFormatter = DateTimeFormatter.ofPattern("yyyy-MM-dd")
+private val auditTimeFormatter = DateTimeFormatter.ofPattern("HH:mm:ss")
+
+private fun Long.auditDate(): String = Instant.ofEpochMilli(this)
+    .atZone(ZoneId.systemDefault())
+    .format(auditDateFormatter)
+
+private fun Long.auditTime(): String = Instant.ofEpochMilli(this)
+    .atZone(ZoneId.systemDefault())
+    .format(auditTimeFormatter)

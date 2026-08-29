@@ -31,7 +31,6 @@ import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.text.KeyboardOptions
 import androidx.compose.foundation.verticalScroll
 import androidx.compose.material.icons.Icons
-import androidx.compose.material.icons.automirrored.outlined.ArrowBack
 import androidx.compose.material.icons.automirrored.outlined.Launch
 import androidx.compose.material.icons.outlined.Backup
 import androidx.compose.material.icons.outlined.ChevronRight
@@ -95,6 +94,7 @@ import dev.agentknock.storage.crypto.VaultProtection
 import dev.agentknock.storage.vault.DeviceIdentity
 import dev.agentknock.ui.auth.DeviceAuthenticationMode
 import dev.agentknock.ui.theme.agentknockColors
+import dev.agentknock.ui.components.NavigationBackButton
 import kotlinx.coroutines.launch
 
 private enum class SettingsPage {
@@ -243,55 +243,57 @@ private fun SettingsOverview(
     }
     Column(modifier) {
         PageTopBar("Settings", onBack)
-        LazyColumn(contentPadding = PaddingValues(bottom = 16.dp)) {
-            item { PreferenceGroupTitle("Preferences") }
+        LazyColumn(
+            contentPadding = PaddingValues(start = 16.dp, end = 16.dp, bottom = 24.dp),
+            verticalArrangement = Arrangement.spacedBy(16.dp),
+        ) {
             item {
-                PreferenceRow(
-                    icon = Icons.Outlined.Security,
-                    title = "Security & backup",
-                    summary = "${authenticationMode.overviewLabel()} · ${protection.overviewDescription()}",
-                    onClick = { onOpen(SettingsPage.SECURITY_BACKUP) },
-                )
+                SettingsGroup {
+                    SettingsRow(
+                        icon = Icons.Outlined.Security,
+                        title = "Security & backup",
+                        summary = "${authenticationMode.overviewLabel()} · ${protection.overviewDescription()}",
+                        onClick = { onOpen(SettingsPage.SECURITY_BACKUP) },
+                    )
+                    SettingsGroupDivider(withIcon = true)
+                    SettingsRow(
+                        icon = Icons.Outlined.Notifications,
+                        title = "Notifications",
+                        summary = when {
+                            !requestsEnabled -> "Requests needing approval are muted"
+                            pushState != null && pushState != "registered" -> "Delivery needs attention"
+                            else -> "Requests needing approval can alert you"
+                        },
+                        onClick = { onOpen(SettingsPage.NOTIFICATIONS) },
+                    )
+                }
             }
             item {
-                PreferenceRow(
-                    icon = Icons.Outlined.Notifications,
-                    title = "Notifications",
-                    summary = when {
-                        !requestsEnabled -> "Requests needing approval are muted"
-                        pushState != null && pushState != "registered" -> "Delivery needs attention"
-                        else -> "Requests needing approval can alert you"
-                    },
-                    onClick = { onOpen(SettingsPage.NOTIFICATIONS) },
-                )
-            }
-            item { PreferenceDivider() }
-            item { PreferenceGroupTitle("Activity and access") }
-            item {
-                PreferenceRow(
-                    icon = Icons.Outlined.WorkspacePremium,
-                    title = "Subscription & billing",
-                    summary = subscription.overviewLabel(),
-                    onClick = { onOpen(SettingsPage.SUBSCRIPTION) },
-                )
+                SettingsGroup {
+                    SettingsRow(
+                        icon = Icons.Outlined.WorkspacePremium,
+                        title = "Plan & billing",
+                        summary = subscription.overviewLabel(),
+                        onClick = { onOpen(SettingsPage.SUBSCRIPTION) },
+                    )
+                    SettingsGroupDivider(withIcon = true)
+                    SettingsRow(
+                        icon = Icons.Outlined.History,
+                        title = "Audit log",
+                        summary = "Security activity kept for one year",
+                        onClick = { onOpen(SettingsPage.AUDIT) },
+                    )
+                }
             }
             item {
-                PreferenceRow(
-                    icon = Icons.Outlined.History,
-                    title = "Audit log",
-                    summary = "Security activity kept for one year",
-                    onClick = { onOpen(SettingsPage.AUDIT) },
-                )
-            }
-            item { PreferenceDivider() }
-            item { PreferenceGroupTitle("App") }
-            item {
-                PreferenceRow(
-                    icon = Icons.Outlined.Info,
-                    title = "About",
-                    summary = "Version ${BuildConfig.VERSION_NAME} (${BuildConfig.VERSION_CODE})",
-                    onClick = { onOpen(SettingsPage.ABOUT) },
-                )
+                SettingsGroup {
+                    SettingsRow(
+                        icon = Icons.Outlined.Info,
+                        title = "About Agentknock",
+                        summary = "Version ${BuildConfig.VERSION_NAME} (${BuildConfig.VERSION_CODE})",
+                        onClick = { onOpen(SettingsPage.ABOUT) },
+                    )
+                }
             }
         }
     }
@@ -312,65 +314,65 @@ private fun SecurityAndBackup(
     var chooseAuthentication by remember { mutableStateOf(false) }
     Column(modifier) {
         PageTopBar("Security & backup", onBack)
-        LazyColumn(contentPadding = PaddingValues(bottom = 24.dp)) {
-            item { PreferenceGroupTitle("Device authentication") }
-            item {
-                PreferenceRow(
-                    icon = Icons.Outlined.Lock,
-                    title = "Require device authentication",
-                    summary = authenticationMode.displayLabel(),
-                    onClick = { chooseAuthentication = true },
-                )
-            }
-            item {
-                PreferenceText(
-                    "Background synchronization and automatic decisions continue regardless of this setting.",
-                )
-            }
-            item { PreferenceDivider() }
-            item { PreferenceGroupTitle("Encryption") }
+        LazyColumn(
+            contentPadding = PaddingValues(start = 16.dp, end = 16.dp, bottom = 24.dp),
+            verticalArrangement = Arrangement.spacedBy(16.dp),
+        ) {
             item { EncryptionStatus(protection) }
-            item { TechnicalValue(label = "Encryption", value = "AES-128-GCM") }
-            item { TechnicalValue(label = "Key storage", value = protection.keyStorageDescription()) }
             item {
-                TechnicalValue(
-                    label = "Device screen lock",
-                    value = if (deviceSecure) "Configured" else "Not configured",
-                )
+                Column {
+                    SettingsSectionLabel("Protection")
+                    SettingsGroup {
+                        SettingsRow(
+                            title = "Device authentication",
+                            summary = authenticationMode.displayLabel(),
+                            onClick = { chooseAuthentication = true },
+                        )
+                        SettingsGroupDivider()
+                        SettingsValueRow("Encryption", "AES-128-GCM")
+                        SettingsGroupDivider()
+                        SettingsValueRow("Key storage", protection.keyStorageDescription())
+                        SettingsGroupDivider()
+                        SettingsValueRow(
+                            "Device screen lock",
+                            if (deviceSecure) "Configured" else "Not configured",
+                        )
+                    }
             }
-            item { PreferenceDivider() }
-            item { PreferenceGroupTitle("Backup") }
-            item {
-                InformationPreference(
-                    icon = Icons.Outlined.Backup,
-                    title = "Android backup",
-                    summary = "Metadata and encrypted values are included. Device-bound encryption keys are excluded.",
-                )
-            }
-            item {
-                InformationPreference(
-                    icon = Icons.Outlined.Lock,
-                    title = "Key recovery",
-                    summary = "No recovery method. After restoring a backup, secrets and client pairings cannot be recovered.",
-                )
             }
             item {
-                InformationPreference(
-                    icon = Icons.Outlined.Storage,
-                    title = "Stored Agentknock data",
-                    summary = "${counts.secrets.countLabel("secret")} · ${counts.clients.countLabel("client")}",
-                )
+                Column {
+                    SettingsSectionLabel("Backup")
+                    SettingsGroup {
+                        SettingsRow(
+                            title = "Android backup",
+                            summary = "Metadata and encrypted values are backed up; device-bound encryption keys are not.",
+                        )
+                        SettingsGroupDivider()
+                        SettingsRow(
+                            title = "Key recovery",
+                            summary = "Not configured. Restored secrets and client pairings cannot be decrypted on another device.",
+                        )
+                        SettingsGroupDivider()
+                        SettingsRow(
+                            title = "Stored data",
+                            summary = "${counts.secrets.countLabel("secret")} · ${counts.clients.countLabel("client")}",
+                        )
+                    }
+                }
             }
-            item { PreferenceDivider() }
-            item { PreferenceGroupTitle("Reset") }
             item {
-                PreferenceRow(
-                    icon = Icons.Outlined.DeleteForever,
-                    title = "Factory reset Agentknock",
-                    summary = "Erase the device identity, encryption keys, secrets, clients, and history",
-                    destructive = true,
-                    onClick = onFactoryReset,
-                )
+                Column {
+                    SettingsSectionLabel("Reset")
+                    SettingsGroup {
+                        SettingsRow(
+                            title = "Factory reset Agentknock",
+                            summary = "Erase the device identity, encryption keys, secrets, clients, and history",
+                            destructive = true,
+                            onClick = onFactoryReset,
+                        )
+                    }
+                }
             }
         }
     }
@@ -455,16 +457,25 @@ private fun EncryptionStatus(protection: VaultProtection?) {
         color = style.container,
         contentColor = style.content,
         shape = MaterialTheme.shapes.large,
-        modifier = Modifier.padding(horizontal = 16.dp, vertical = 4.dp).fillMaxWidth(),
+        modifier = Modifier.fillMaxWidth(),
     ) {
         Row(
-            modifier = Modifier.padding(16.dp),
-            horizontalArrangement = Arrangement.spacedBy(12.dp),
+            modifier = Modifier.padding(horizontal = 20.dp, vertical = 18.dp),
+            horizontalArrangement = Arrangement.spacedBy(16.dp),
             verticalAlignment = Alignment.CenterVertically,
         ) {
-            Icon(Icons.Outlined.Security, contentDescription = null)
+            Surface(
+                color = style.content.copy(alpha = 0.14f),
+                contentColor = style.content,
+                shape = androidx.compose.foundation.shape.CircleShape,
+                modifier = Modifier.size(44.dp),
+            ) {
+                Box(contentAlignment = Alignment.Center) {
+                    Icon(Icons.Outlined.Security, contentDescription = null)
+                }
+            }
             Column(verticalArrangement = Arrangement.spacedBy(2.dp)) {
-                Text(style.title, style = MaterialTheme.typography.titleMedium)
+                Text(style.title, style = MaterialTheme.typography.titleLarge)
                 Text(style.detail, style = MaterialTheme.typography.bodyMedium)
             }
         }
@@ -500,66 +511,72 @@ private fun NotificationsSettings(
 
     Column(modifier) {
         PageTopBar("Notifications", onBack)
-        LazyColumn(contentPadding = PaddingValues(bottom = 24.dp)) {
-            item { PreferenceGroupTitle("Notification access") }
+        LazyColumn(
+            contentPadding = PaddingValues(start = 16.dp, end = 16.dp, bottom = 24.dp),
+            verticalArrangement = Arrangement.spacedBy(16.dp),
+        ) {
             item {
-                InformationPreference(
-                    icon = Icons.Outlined.Notifications,
-                    title = if (appNotificationsEnabled) "Notifications allowed" else "Notifications blocked",
-                    summary = if (appNotificationsEnabled) {
-                        "Choose how each notification category behaves below."
-                    } else {
-                        "Android is blocking Agentknock notifications."
-                    },
-                )
+                SettingsGroup {
+                    SettingsRow(
+                        icon = Icons.Outlined.Notifications,
+                        title = if (appNotificationsEnabled) "Notifications allowed" else "Notifications blocked",
+                        summary = if (appNotificationsEnabled) {
+                            "Android can show Agentknock notifications."
+                        } else {
+                            "Android is blocking Agentknock notifications."
+                        },
+                    )
+                }
             }
             if (!permissionGranted && Build.VERSION.SDK_INT >= Build.VERSION_CODES.TIRAMISU) {
                 item {
                     Button(
                         onClick = requestNotificationPermission,
-                        modifier = Modifier.padding(horizontal = 24.dp, vertical = 8.dp).fillMaxWidth(),
+                        modifier = Modifier.fillMaxWidth(),
                     ) { Text("Allow notifications") }
                 }
             }
-            item { PreferenceDivider() }
-            item { PreferenceGroupTitle("Categories") }
             item {
-                PreferenceRow(
-                    icon = Icons.Outlined.Notifications,
-                    title = "Requests needing approval",
-                    summary = "Alerts for decisions that need your attention",
-                    onClick = { openChannel(RequestNotifications.ACTION_CHANNEL_ID) },
-                    external = true,
-                )
-            }
-            item {
-                PreferenceRow(
-                    icon = Icons.Outlined.Sync,
-                    title = "Background processing",
-                    summary = "Silent status while Agentknock checks for new requests",
-                    onClick = { openChannel(RequestNotifications.BACKGROUND_CHANNEL_ID) },
-                    external = true,
-                )
-            }
-            item {
-                PreferenceText(
-                    "Android controls sound, vibration, lock-screen visibility, and interruption for each category.",
-                )
+                Column {
+                    SettingsSectionLabel("Categories")
+                    SettingsGroup {
+                        SettingsRow(
+                            title = "Requests needing approval",
+                            summary = "Alerts for decisions that need your attention",
+                            onClick = { openChannel(RequestNotifications.ACTION_CHANNEL_ID) },
+                            external = true,
+                        )
+                        SettingsGroupDivider()
+                        SettingsRow(
+                            title = "Background processing",
+                            summary = "Silent status while Agentknock checks for requests",
+                            onClick = { openChannel(RequestNotifications.BACKGROUND_CHANNEL_ID) },
+                            external = true,
+                        )
+                    }
+                    Text(
+                        "Android controls sound, vibration, lock-screen visibility, and interruption for each category.",
+                        style = MaterialTheme.typography.bodySmall,
+                        color = MaterialTheme.colorScheme.onSurfaceVariant,
+                        modifier = Modifier.padding(horizontal = 12.dp, vertical = 8.dp),
+                    )
+                }
             }
             if (pushState != null && pushState != "registered") {
-                item { PreferenceDivider() }
-                item { PreferenceGroupTitle("Delivery") }
                 item {
-                    InformationPreference(
-                        icon = Icons.Outlined.Notifications,
-                        title = "Push delivery needs attention",
-                        summary = when (pushState) {
-                            "missing" -> "This device has not finished registering for push delivery. Agentknock will retry."
-                            "invalid" -> "The relay rejected the current push registration. Agentknock will retry."
-                            else -> "Agentknock will retry push registration automatically."
-                        },
-                        warning = true,
-                    )
+                    Column {
+                        SettingsSectionLabel("Delivery")
+                        SettingsGroup {
+                            SettingsRow(
+                                title = "Push delivery needs attention",
+                                summary = when (pushState) {
+                                    "missing" -> "This device has not finished registering. Agentknock will retry."
+                                    "invalid" -> "The relay rejected the registration. Agentknock will retry."
+                                    else -> "Agentknock will retry push registration automatically."
+                                },
+                            )
+                        }
+                    }
                 }
             }
         }
@@ -579,59 +596,72 @@ private fun About(
             .onFailure { report("Could not open $label") }
     }
     Column(modifier) {
-        PageTopBar("About", onBack)
-        LazyColumn(contentPadding = PaddingValues(bottom = 16.dp)) {
+        PageTopBar("About Agentknock", onBack)
+        LazyColumn(
+            contentPadding = PaddingValues(start = 16.dp, end = 16.dp, bottom = 24.dp),
+            verticalArrangement = Arrangement.spacedBy(16.dp),
+        ) {
             item {
                 Column(
-                    modifier = Modifier.padding(horizontal = 24.dp, vertical = 8.dp),
+                    modifier = Modifier.padding(horizontal = 12.dp, vertical = 4.dp),
                     verticalArrangement = Arrangement.spacedBy(6.dp),
                 ) {
                     Text("Agentknock", style = MaterialTheme.typography.headlineMedium)
                     Text(
-                        "Developer secrets stay on this phone and are provided only to approved commands. Agentknock can return environment values or sign Git objects without releasing the private key.",
+                        "Developer secrets on your phone, provided only to approved commands. " +
+                            "Agentknock can supply environment variables or sign Git objects " +
+                            "without exposing SSH private keys.",
                         color = MaterialTheme.colorScheme.onSurfaceVariant,
                     )
                 }
             }
-            item { PreferenceGroupTitle("Links") }
             item {
-                PreferenceRow(
-                    title = "Website",
-                    summary = "agentknock.dev",
-                    onClick = { open("website", "https://agentknock.dev/") },
-                    external = true,
-                )
-            }
-            item {
-                PreferenceRow(
-                    title = "Privacy notice",
-                    summary = "Privacy information on agentknock.dev",
-                    onClick = { open("privacy notice", "https://agentknock.dev/privacy/") },
-                    external = true,
-                )
-            }
-            item {
-                PreferenceRow(
-                    title = "Source code",
-                    summary = "github.com/agentknock/agentknock-android",
-                    onClick = {
-                        open(
-                            "source code",
-                            "https://github.com/agentknock/agentknock-android",
+                Column {
+                    SettingsSectionLabel("Links")
+                    SettingsGroup {
+                        SettingsRow(
+                            title = "Website",
+                            summary = "agentknock.dev",
+                            onClick = { open("website", "https://agentknock.dev/") },
+                            external = true,
                         )
-                    },
-                    external = true,
-                )
+                        SettingsGroupDivider()
+                        SettingsRow(
+                            title = "Privacy notice",
+                            summary = "Privacy information on agentknock.dev",
+                            onClick = { open("privacy notice", "https://agentknock.dev/privacy/") },
+                            external = true,
+                        )
+                        SettingsGroupDivider()
+                        SettingsRow(
+                            title = "Source code",
+                            summary = "github.com/agentknock/agentknock-android",
+                            onClick = {
+                                open("source code", "https://github.com/agentknock/agentknock-android")
+                            },
+                            external = true,
+                        )
+                    }
+                }
             }
-            item { PreferenceDivider() }
-            item { PreferenceGroupTitle("App information") }
-            item { TechnicalValue("Version", "${BuildConfig.VERSION_NAME} (${BuildConfig.VERSION_CODE})") }
-            item { TechnicalValue("Source revision", BuildConfig.SOURCE_REVISION, monospace = true) }
-            item { TechnicalValue("Developer", "Full Disclosure") }
-            identity?.let { device ->
-                item { TechnicalValue("Device ID", device.deviceId, monospace = true) }
+            item {
+                Column {
+                    SettingsSectionLabel("App information")
+                    SettingsGroup {
+                        SettingsValueRow("Version", "${BuildConfig.VERSION_NAME} (${BuildConfig.VERSION_CODE})")
+                        SettingsGroupDivider()
+                        SettingsValueRow("Source revision", BuildConfig.SOURCE_REVISION, monospace = true)
+                        SettingsGroupDivider()
+                        SettingsValueRow("Developer", "Full Disclosure")
+                        identity?.let { device ->
+                            SettingsGroupDivider()
+                            SettingsValueRow("Device ID", device.deviceId, monospace = true)
+                        }
+                        SettingsGroupDivider()
+                        SettingsValueRow("Relay", "relay.agentknock.dev", monospace = true)
+                    }
+                }
             }
-            item { TechnicalValue("Relay", "relay.agentknock.dev", monospace = true) }
         }
     }
 }
@@ -748,109 +778,12 @@ private fun FactoryReset(
 }
 
 @Composable
-private fun PreferenceRow(
-    title: String,
-    summary: String,
-    onClick: () -> Unit,
-    icon: ImageVector? = null,
-    destructive: Boolean = false,
-    external: Boolean = false,
-) {
-    val accent = if (destructive) MaterialTheme.agentknockColors.danger else MaterialTheme.colorScheme.primary
-    ListItem(
-        headlineContent = { Text(title, color = if (destructive) accent else Color.Unspecified) },
-        supportingContent = { Text(summary) },
-        leadingContent = icon?.let { image ->
-            { Icon(image, contentDescription = null, tint = accent) }
-        },
-        trailingContent = {
-            Icon(
-                if (external) Icons.AutoMirrored.Outlined.Launch else Icons.Outlined.ChevronRight,
-                contentDescription = null,
-            )
-        },
-        colors = ListItemDefaults.colors(containerColor = Color.Transparent),
-        modifier = Modifier.fillMaxWidth().clickable(onClick = onClick),
-    )
-}
-
-@Composable
-private fun InformationPreference(
-    icon: ImageVector,
-    title: String,
-    summary: String,
-    warning: Boolean = false,
-) {
-    ListItem(
-        headlineContent = { Text(title) },
-        supportingContent = { Text(summary) },
-        leadingContent = {
-            Icon(
-                icon,
-                contentDescription = null,
-                tint = if (warning) MaterialTheme.colorScheme.error else MaterialTheme.colorScheme.primary,
-            )
-        },
-        colors = ListItemDefaults.colors(containerColor = Color.Transparent),
-    )
-}
-
-@Composable
-private fun PreferenceGroupTitle(title: String) {
-    Text(
-        title,
-        style = MaterialTheme.typography.labelLarge,
-        color = MaterialTheme.colorScheme.primary,
-        modifier = Modifier.padding(start = 24.dp, end = 24.dp, top = 16.dp, bottom = 6.dp),
-    )
-}
-
-@Composable
-private fun PreferenceText(text: String) {
-    Text(
-        text,
-        style = MaterialTheme.typography.bodySmall,
-        color = MaterialTheme.colorScheme.onSurfaceVariant,
-        modifier = Modifier.padding(horizontal = 24.dp, vertical = 6.dp),
-    )
-}
-
-@Composable
-private fun PreferenceDivider() {
-    HorizontalDivider(Modifier.padding(top = 8.dp), color = MaterialTheme.colorScheme.outlineVariant)
-}
-
-@Composable
-private fun TechnicalValue(label: String, value: String, monospace: Boolean = false) {
-    Row(
-        modifier = Modifier.fillMaxWidth().padding(horizontal = 24.dp, vertical = 7.dp),
-        horizontalArrangement = Arrangement.spacedBy(16.dp),
-        verticalAlignment = Alignment.Top,
-    ) {
-        Text(
-            label,
-            style = MaterialTheme.typography.bodyMedium,
-            color = MaterialTheme.colorScheme.onSurfaceVariant,
-            modifier = Modifier.width(120.dp),
-        )
-        Text(
-            value,
-            style = MaterialTheme.typography.bodyMedium,
-            fontFamily = if (monospace) FontFamily.Monospace else null,
-            modifier = Modifier.weight(1f),
-        )
-    }
-}
-
-@Composable
 internal fun PageTopBar(title: String, onBack: () -> Unit, showBack: Boolean = true) {
     TopAppBar(
         title = { Text(title, maxLines = 1, overflow = TextOverflow.Ellipsis) },
         navigationIcon = {
             if (showBack) {
-                IconButton(onClick = onBack) {
-                    Icon(Icons.AutoMirrored.Outlined.ArrowBack, contentDescription = "Back")
-                }
+                NavigationBackButton(onBack)
             }
         },
     )

@@ -48,7 +48,7 @@ internal fun SubscriptionAndBillingScreen(
     val context = LocalContext.current
     val active = state.access == SubscriptionAccess.ACTIVE
     Column(modifier) {
-        PageTopBar("Subscription & billing", onBack)
+        PageTopBar("Plan & billing", onBack)
         Column(
             Modifier.fillMaxSize().verticalScroll(rememberScrollState()).padding(20.dp),
             verticalArrangement = Arrangement.spacedBy(16.dp),

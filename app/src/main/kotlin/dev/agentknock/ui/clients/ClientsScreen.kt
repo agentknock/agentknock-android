@@ -27,7 +27,6 @@ import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.text.selection.SelectionContainer
 import androidx.compose.foundation.verticalScroll
 import androidx.compose.material.icons.Icons
-import androidx.compose.material.icons.automirrored.outlined.ArrowBack
 import androidx.compose.material.icons.automirrored.outlined.NavigateNext
 import androidx.compose.material.icons.outlined.Computer
 import androidx.compose.material.icons.outlined.ContentCopy
@@ -75,6 +74,7 @@ import androidx.compose.ui.unit.dp
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import androidx.lifecycle.viewmodel.compose.viewModel
 import dev.agentknock.presentation.formatTimestamp
+import dev.agentknock.presentation.formatRelativeTime
 import dev.agentknock.presentation.formatPlatformName
 import dev.agentknock.presentation.renderSoftware
 import dev.agentknock.relay.RelayClientState
@@ -92,6 +92,8 @@ import dev.agentknock.storage.secret.TemporaryAccessOperation
 import dev.agentknock.ui.components.InformationRow
 import dev.agentknock.ui.components.InformationSurface
 import dev.agentknock.ui.components.TonalIcon
+import dev.agentknock.ui.components.ActionListSurface
+import dev.agentknock.ui.components.NavigationBackButton
 import dev.agentknock.ui.requests.PairingRequestDetail
 import dev.agentknock.ui.requests.message
 import dev.agentknock.ui.theme.agentknockColors
@@ -354,7 +356,6 @@ private fun ClientSelectionDetail(
                 })
             }
         },
-        report = report,
         modifier = modifier,
     )
 }
@@ -404,7 +405,6 @@ private fun ClientList(
                 onSetPairingEnabled = onSetPairingEnabled,
                 report = report,
             )
-            HorizontalDivider()
         }
         if (clients.isEmpty() && pendingPairings.isEmpty()) {
             Box(Modifier.fillMaxSize(), contentAlignment = Alignment.Center) {
@@ -549,6 +549,17 @@ private fun ClientList(
                                 }
                                 Column(verticalArrangement = Arrangement.spacedBy(2.dp)) {
                                     if (machine.isNotEmpty()) Text(machine)
+                                    val activity = listOfNotNull(
+                                        client.pairedAt?.let { "Paired ${formatRelativeTime(it)}" },
+                                        client.lastRequestAt?.let { "Last request ${formatRelativeTime(it)}" },
+                                    ).joinToString(" · ")
+                                    if (activity.isNotEmpty()) {
+                                        Text(
+                                            activity,
+                                            style = MaterialTheme.typography.bodySmall,
+                                            color = MaterialTheme.colorScheme.onSurfaceVariant,
+                                        )
+                                    }
                                     if (client.name in duplicateClientNames) {
                                         Text(
                                             "Client ID …${client.clientId.takeLast(6)}",
@@ -621,45 +632,47 @@ private fun PairingControls(
     report: (String) -> Unit,
 ) {
     val context = LocalContext.current
-    Row(
-        modifier = Modifier.fillMaxWidth().padding(start = 16.dp, end = 4.dp, top = 6.dp, bottom = 6.dp),
-        horizontalArrangement = Arrangement.spacedBy(2.dp),
-        verticalAlignment = Alignment.CenterVertically,
+    Surface(
+        color = MaterialTheme.colorScheme.surfaceContainer,
+        shape = MaterialTheme.shapes.large,
+        modifier = Modifier.padding(horizontal = 16.dp, vertical = 6.dp).fillMaxWidth(),
     ) {
-        Column(
-            modifier = Modifier.weight(1f).clickable {
-                context.getSystemService(ClipboardManager::class.java).setPrimaryClip(
-                    ClipData.newPlainText("Agentknock pairing address", identity.address),
-                )
-                report("Pairing address copied")
-            }.padding(vertical = 6.dp),
-            verticalArrangement = Arrangement.spacedBy(1.dp),
+        Row(
+            modifier = Modifier.fillMaxWidth().padding(start = 16.dp, end = 4.dp, top = 8.dp, bottom = 8.dp),
+            horizontalArrangement = Arrangement.spacedBy(2.dp),
+            verticalAlignment = Alignment.CenterVertically,
         ) {
-            Text(
-                if (identity.pairingEnabled) "Pairing address" else "Pairing address · paused",
-                style = MaterialTheme.typography.labelMedium,
-                color = if (identity.pairingEnabled) {
-                    MaterialTheme.colorScheme.onSurfaceVariant
-                } else {
-                    MaterialTheme.colorScheme.tertiary
-                },
-            )
-            Text(
-                identity.address,
-                style = MaterialTheme.typography.bodyLarge,
-                fontFamily = FontFamily.Monospace,
-                maxLines = 1,
-                overflow = TextOverflow.Ellipsis,
-            )
-        }
-        IconButton(onClick = onChangePairingAddress) {
-            Icon(Icons.Outlined.Edit, contentDescription = "Change pairing address")
-        }
-        IconButton(onClick = { onSetPairingEnabled(!identity.pairingEnabled) }) {
-            Icon(
-                if (identity.pairingEnabled) Icons.Outlined.PauseCircle else Icons.Outlined.PlayCircle,
-                contentDescription = if (identity.pairingEnabled) "Pause new pairings" else "Resume new pairings",
-            )
+            Column(
+                modifier = Modifier.weight(1f).clickable {
+                    context.getSystemService(ClipboardManager::class.java).setPrimaryClip(
+                        ClipData.newPlainText("Agentknock pairing address", identity.address),
+                    )
+                    report("Pairing address copied")
+                }.padding(vertical = 4.dp),
+                verticalArrangement = Arrangement.spacedBy(1.dp),
+            ) {
+                Text(
+                    if (identity.pairingEnabled) "Pairing address" else "Pairing address · paused",
+                    style = MaterialTheme.typography.labelMedium,
+                    color = MaterialTheme.colorScheme.onSurfaceVariant,
+                )
+                Text(
+                    identity.address,
+                    style = MaterialTheme.typography.bodyLarge,
+                    fontFamily = FontFamily.Monospace,
+                    maxLines = 1,
+                    overflow = TextOverflow.Ellipsis,
+                )
+            }
+            IconButton(onClick = onChangePairingAddress) {
+                Icon(Icons.Outlined.Edit, contentDescription = "Change pairing address")
+            }
+            IconButton(onClick = { onSetPairingEnabled(!identity.pairingEnabled) }) {
+                Icon(
+                    if (identity.pairingEnabled) Icons.Outlined.PauseCircle else Icons.Outlined.PlayCircle,
+                    contentDescription = if (identity.pairingEnabled) "Pause new pairings" else "Resume new pairings",
+                )
+            }
         }
     }
 }
@@ -672,22 +685,9 @@ private fun PendingPairingRow(
 ) {
     val pairingState = checkNotNull(request.pairingState)
     val actionRequired = request.state == InboxRequestState.ACTION_REQUIRED
-    val colors = MaterialTheme.agentknockColors
-    val containerColor = when {
-        actionRequired -> colors.attentionContainer
-        selected -> MaterialTheme.colorScheme.secondaryContainer
-        else -> MaterialTheme.colorScheme.surfaceContainerLow
-    }
-    val contentColor = if (actionRequired) {
-        colors.onAttentionContainer
-    } else {
-        MaterialTheme.colorScheme.onSurface
-    }
-    Surface(
-        color = containerColor,
-        contentColor = contentColor,
-        shape = MaterialTheme.shapes.large,
-        border = if (actionRequired) BorderStroke(1.dp, colors.attentionAccent) else null,
+    ActionListSurface(
+        actionRequired = actionRequired,
+        selected = selected,
         onClick = onClick,
         modifier = Modifier.fillMaxWidth().semantics { this.selected = selected },
     ) {
@@ -717,9 +717,6 @@ private fun PendingPairingRow(
             },
             colors = ListItemDefaults.colors(
                 containerColor = androidx.compose.ui.graphics.Color.Transparent,
-                headlineColor = contentColor,
-                supportingColor = contentColor.copy(alpha = 0.78f),
-                trailingIconColor = contentColor,
             ),
         )
     }
@@ -775,7 +772,6 @@ private fun ClientDetail(
     onSetState: (RelayClientState) -> Unit,
     onSaveInstructions: (String) -> Unit,
     onEndTemporaryAccess: (TemporaryAccessGrant) -> Unit,
-    report: (String) -> Unit,
     modifier: Modifier = Modifier,
 ) {
     var showRename by remember { mutableStateOf(false) }
@@ -784,23 +780,12 @@ private fun ClientDetail(
         mutableStateOf(client.instructions)
     }
     var confirmation by remember { mutableStateOf<RelayClientState?>(null) }
-    val context = LocalContext.current
-
-    fun copy(label: String, value: String) {
-        context.getSystemService(ClipboardManager::class.java).setPrimaryClip(
-            ClipData.newPlainText(label, value),
-        )
-        report("$label copied")
-    }
-
     Column(modifier) {
         TopAppBar(
             title = { Text(client.name, maxLines = 1, overflow = TextOverflow.Ellipsis) },
             navigationIcon = {
                 if (showBack) {
-                    IconButton(onClick = onBack) {
-                        Icon(Icons.AutoMirrored.Outlined.ArrowBack, contentDescription = "Back")
-                    }
+                    NavigationBackButton(onBack)
                 }
             },
             actions = {
@@ -818,26 +803,55 @@ private fun ClientDetail(
             val temporaryAccessPaused = client.state != RelayClientState.ACTIVE ||
                 client.desiredState?.let { it != RelayClientState.ACTIVE } == true
             InformationSurface {
-                ClientStateBadge(client.state, pending)
-                Text(client.state.explanation())
+                Row(
+                    modifier = Modifier.fillMaxWidth(),
+                    horizontalArrangement = Arrangement.spacedBy(12.dp),
+                    verticalAlignment = Alignment.CenterVertically,
+                ) {
+                    ClientStateBadge(client.state, pending)
+                    Text(client.state.explanation(), modifier = Modifier.weight(1f))
+                }
+            }
+
+            InformationSurface {
+                Row(
+                    modifier = Modifier.fillMaxWidth(),
+                    verticalAlignment = Alignment.CenterVertically,
+                ) {
+                    Column(Modifier.weight(1f), verticalArrangement = Arrangement.spacedBy(3.dp)) {
+                        Text("AI review instructions", style = MaterialTheme.typography.titleMedium)
+                        Text(
+                            client.instructions.ifBlank { "No instructions for this client." },
+                            color = if (client.instructions.isBlank()) {
+                                MaterialTheme.colorScheme.onSurfaceVariant
+                            } else {
+                                MaterialTheme.colorScheme.onSurface
+                            },
+                        )
+                    }
+                    IconButton(onClick = { showInstructions = true }) {
+                        Icon(Icons.Outlined.Edit, contentDescription = "Edit instructions")
+                    }
+                }
             }
 
             InformationSurface {
                 Text("Client information", style = MaterialTheme.typography.titleMedium)
-                Text(
-                    "Reported by the client when it paired.",
-                    color = MaterialTheme.colorScheme.onSurfaceVariant,
-                )
                 ClientField("Hostname", client.hostname)
-                ClientField("Platform", client.platform?.let(::formatPlatformName))
-                ClientField("Architecture", client.architecture)
+                ClientField(
+                    "Platform",
+                    listOfNotNull(client.platform?.let(::formatPlatformName), client.architecture)
+                        .joinToString(" · ").ifBlank { null },
+                )
                 ClientField("Operating system", client.osVersion)
                 client.clientSoftware?.let { software ->
-                    ClientField("Client software", renderSoftware(software.application))
+                    ClientField("Last seen client software", renderSoftware(software.application))
                     if (software.library != software.application) {
                         ClientField("Agentknock library", renderSoftware(software.library))
                     }
                 }
+                client.pairedAt?.let { ClientField("Paired", formatTimestamp(it)) }
+                client.lastRequestAt?.let { ClientField("Last request", formatTimestamp(it)) }
             }
 
             if (temporaryAccessGrants.isNotEmpty()) {
@@ -884,34 +898,7 @@ private fun ClientDetail(
             }
 
             InformationSurface {
-                Row(
-                    modifier = Modifier.fillMaxWidth(),
-                    verticalAlignment = Alignment.CenterVertically,
-                ) {
-                    Text(
-                        "AI review instructions",
-                        style = MaterialTheme.typography.titleMedium,
-                        modifier = Modifier.weight(1f),
-                    )
-                    IconButton(onClick = { showInstructions = true }) {
-                        Icon(Icons.Outlined.Edit, contentDescription = "Edit instructions")
-                    }
-                }
-                Text(
-                    client.instructions.ifBlank { "No instructions for this client." },
-                    color = if (client.instructions.isBlank()) {
-                        MaterialTheme.colorScheme.onSurfaceVariant
-                    } else {
-                        MaterialTheme.colorScheme.onSurface
-                    },
-                )
-            }
-
-            InformationSurface {
                 Text("Access", style = MaterialTheme.typography.titleMedium)
-                client.pairedAt?.let {
-                    ClientField("Paired", formatTimestamp(it))
-                }
                 when (client.state) {
                     RelayClientState.ACTIVE -> OutlinedButton(
                         onClick = { onSetState(RelayClientState.SUSPENDED) },
@@ -954,13 +941,11 @@ private fun ClientDetail(
                     "Machine ID",
                     client.machineId,
                     monospace = true,
-                    onCopy = client.machineId?.let { { copy("Machine ID", it) } },
                 )
                 ClientField(
                     "Client ID",
                     client.clientId,
                     monospace = true,
-                    onCopy = { copy("Client ID", client.clientId) },
                 )
             }
 
@@ -1077,20 +1062,12 @@ private fun ClientField(
     label: String,
     value: String?,
     monospace: Boolean = false,
-    onCopy: (() -> Unit)? = null,
 ) {
     if (value.isNullOrBlank()) return
     InformationRow(
         label = label,
         value = value,
         monospace = monospace,
-        trailingContent = onCopy?.let { copy ->
-            {
-                IconButton(onClick = copy) {
-                    Icon(Icons.Outlined.ContentCopy, contentDescription = "Copy $label")
-                }
-            }
-        },
     )
 }
 
@@ -1161,7 +1138,7 @@ private fun RelayClientState.successMessage(): String = when (this) {
 }
 
 private fun TemporaryAccessOperation.displayName(): String = when (this) {
-    TemporaryAccessOperation.INVOCATION -> "Environment values for any command"
+    TemporaryAccessOperation.INVOCATION -> "Secret values for any command"
     TemporaryAccessOperation.GIT_SIGN -> "Git signing for any repository"
 }
 

@@ -56,6 +56,7 @@ import dev.agentknock.ui.requests.RequestsScreen
 import dev.agentknock.ui.requests.RequestsViewModel
 import dev.agentknock.ui.settings.SettingsScreen
 import dev.agentknock.ui.settings.SubscriptionViewModel
+import dev.agentknock.ui.settings.SubscriptionAccess
 import dev.agentknock.ui.device.DeviceSetupScreen
 import dev.agentknock.ui.device.DeviceSetupViewModel
 import dev.agentknock.ui.auth.AuthenticationSession
@@ -98,6 +99,7 @@ internal fun AgentknockScreen(
     val subscriptionNavigationTarget by subscriptionNavigation.collectAsStateWithLifecycle()
     val notificationRefreshGeneration by notificationStateGeneration.collectAsStateWithLifecycle()
     val requestSummaries by requestsViewModel.allRequests.collectAsStateWithLifecycle()
+    val subscription by subscriptionViewModel.state.collectAsStateWithLifecycle()
     val context = LocalContext.current
     val notificationsEnabled = remember(notificationRefreshGeneration) {
         RequestNotifications.actionNotificationsEnabled(context)
@@ -113,6 +115,10 @@ internal fun AgentknockScreen(
         }
     }
     val current = configuration
+
+    LaunchedEffect(current?.active?.deviceId, subscriptionViewModel) {
+        if (current?.active?.credentialsAvailable == true) subscriptionViewModel.refresh()
+    }
 
     fun authorizeProtectedAction(
         title: String,
@@ -240,6 +246,7 @@ internal fun AgentknockScreen(
                         onOpenSettings = { showSettings = true },
                         onChangePairingAddress = { showAddressEditor = true },
                         notificationsEnabled = notificationsEnabled,
+                        aiReviewActive = subscription.access == SubscriptionAccess.ACTIVE,
                         onTopLevelChanged = { showNavigation = true },
                         requestsViewModel = requestsViewModel,
                         secretsViewModel = secretsViewModel,
@@ -266,6 +273,7 @@ internal fun AgentknockScreen(
                         onOpenSettings = { showSettings = true },
                         onChangePairingAddress = { showAddressEditor = true },
                         notificationsEnabled = notificationsEnabled,
+                        aiReviewActive = subscription.access == SubscriptionAccess.ACTIVE,
                         onTopLevelChanged = { showNavigation = it },
                         requestsViewModel = requestsViewModel,
                         secretsViewModel = secretsViewModel,
@@ -353,6 +361,7 @@ private fun MainContent(
     onOpenSettings: () -> Unit,
     onChangePairingAddress: () -> Unit,
     notificationsEnabled: Boolean,
+    aiReviewActive: Boolean,
     onTopLevelChanged: (Boolean) -> Unit,
     requestsViewModel: RequestsViewModel,
     secretsViewModel: SecretsViewModel,
@@ -371,6 +380,7 @@ private fun MainContent(
                 authorizeProtectedAction = authorizeProtectedAction,
                 onOpenSettings = onOpenSettings,
                 onTopLevelChanged = onTopLevelChanged,
+                aiReviewActive = aiReviewActive,
                 viewModel = secretsViewModel,
             )
             MainSection.CLIENTS -> ClientsScreen(

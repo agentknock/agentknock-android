@@ -46,7 +46,6 @@ import androidx.compose.material3.FilledTonalButton
 import androidx.compose.material3.FilterChip
 import androidx.compose.material3.HorizontalDivider
 import androidx.compose.material.icons.Icons
-import androidx.compose.material.icons.automirrored.outlined.ArrowBack
 import androidx.compose.material.icons.automirrored.outlined.NavigateNext
 import androidx.compose.material.icons.outlined.Add
 import androidx.compose.material.icons.outlined.AutoAwesome
@@ -113,6 +112,8 @@ import dev.agentknock.relay.RelayClientState
 import dev.agentknock.ui.components.InformationRow
 import dev.agentknock.ui.components.InformationSurface
 import dev.agentknock.ui.components.TonalIcon
+import dev.agentknock.ui.components.ActionListSurface
+import dev.agentknock.ui.components.NavigationBackButton
 import dev.agentknock.storage.secret.CreateEnvironmentVariableResult
 import dev.agentknock.storage.secret.CreateSecretResult
 import dev.agentknock.storage.secret.EnvironmentVariableMetadata
@@ -188,6 +189,7 @@ internal fun SecretsScreen(
     ) -> Unit,
     onOpenSettings: () -> Unit,
     onTopLevelChanged: (Boolean) -> Unit,
+    aiReviewActive: Boolean,
     viewModel: SecretsViewModel = viewModel(),
 ) {
     val secrets by viewModel.secrets.collectAsStateWithLifecycle()
@@ -396,6 +398,7 @@ internal fun SecretsScreen(
                         onSelectUpload = viewModel::selectUpload,
                         onCreate = viewModel::startNewSecret,
                         generalInstructions = configuration?.active?.instructions.orEmpty(),
+                        aiReviewActive = aiReviewActive,
                         onSaveGeneralInstructions = { instructions ->
                             scope.launch {
                                 report(
@@ -519,6 +522,7 @@ internal fun SecretsScreen(
                     onSelectUpload = viewModel::selectUpload,
                     onCreate = viewModel::startNewSecret,
                     generalInstructions = configuration?.active?.instructions.orEmpty(),
+                    aiReviewActive = aiReviewActive,
                     onSaveGeneralInstructions = { instructions ->
                         scope.launch {
                             report(
@@ -918,6 +922,7 @@ private fun SecretList(
     onSelectUpload: (Long) -> Unit,
     onCreate: () -> Unit,
     generalInstructions: String,
+    aiReviewActive: Boolean,
     onSaveGeneralInstructions: (String) -> Unit,
     onOpenSettings: () -> Unit,
     modifier: Modifier = Modifier,
@@ -941,35 +946,6 @@ private fun SecretList(
                 }
             },
         )
-        ListItem(
-            headlineContent = { Text("AI review instructions") },
-            leadingContent = {
-                Icon(
-                    Icons.Outlined.AutoAwesome,
-                    contentDescription = null,
-                    tint = MaterialTheme.colorScheme.primary,
-                )
-            },
-            trailingContent = {
-                Row(
-                    horizontalArrangement = Arrangement.spacedBy(8.dp),
-                    verticalAlignment = Alignment.CenterVertically,
-                ) {
-                    Text(
-                        if (generalInstructions.isBlank()) "Not set" else "Set",
-                        style = MaterialTheme.typography.labelLarge,
-                        color = MaterialTheme.colorScheme.onSurfaceVariant,
-                    )
-                    Icon(Icons.Outlined.Edit, contentDescription = null)
-                }
-            },
-            colors = ListItemDefaults.colors(containerColor = androidx.compose.ui.graphics.Color.Transparent),
-            modifier = Modifier.fillMaxWidth().clickable {
-                editedGeneralInstructions = generalInstructions
-                showGeneralInstructions = true
-            },
-        )
-        HorizontalDivider()
         if (secrets.isEmpty() && pendingUploads.isEmpty()) {
             EmptyMessage(
                 title = stringResource(R.string.no_secrets),
@@ -982,6 +958,40 @@ private fun SecretList(
                 contentPadding = PaddingValues(start = 16.dp, end = 16.dp, top = 4.dp, bottom = 16.dp),
                 verticalArrangement = Arrangement.spacedBy(8.dp),
             ) {
+                if (aiReviewActive) {
+                    item(key = "ai_review_instructions") {
+                        Surface(
+                            color = MaterialTheme.colorScheme.surfaceContainer,
+                            shape = MaterialTheme.shapes.large,
+                            onClick = {
+                                editedGeneralInstructions = generalInstructions
+                                showGeneralInstructions = true
+                            },
+                            modifier = Modifier.fillMaxWidth(),
+                        ) {
+                            Row(
+                                modifier = Modifier.padding(horizontal = 16.dp, vertical = 13.dp),
+                                horizontalArrangement = Arrangement.spacedBy(12.dp),
+                                verticalAlignment = Alignment.CenterVertically,
+                            ) {
+                                TonalIcon(Icons.Outlined.AutoAwesome, contentDescription = null)
+                                Column(Modifier.weight(1f)) {
+                                    Text("AI review instructions", style = MaterialTheme.typography.bodyLarge)
+                                    Text(
+                                        if (generalInstructions.isBlank()) {
+                                            "No instructions for all reviews"
+                                        } else {
+                                            "Applied to every AI review"
+                                        },
+                                        style = MaterialTheme.typography.bodyMedium,
+                                        color = MaterialTheme.colorScheme.onSurfaceVariant,
+                                    )
+                                }
+                                Icon(Icons.Outlined.Edit, contentDescription = "Edit AI review instructions")
+                            }
+                        }
+                    }
+                }
                 if (pendingUploads.isNotEmpty()) {
                     item(key = "incoming_uploads_heading") {
                         SecretListSectionHeading(
@@ -1140,23 +1150,10 @@ private fun PendingSecretUploadRow(
     onClick: () -> Unit,
 ) {
     val actionRequired = request.state == InboxRequestState.ACTION_REQUIRED
-    val colors = MaterialTheme.agentknockColors
-    val containerColor = when {
-        actionRequired -> colors.attentionContainer
-        selected -> MaterialTheme.colorScheme.secondaryContainer
-        else -> MaterialTheme.colorScheme.surfaceContainerLow
-    }
-    val contentColor = if (actionRequired) {
-        colors.onAttentionContainer
-    } else {
-        MaterialTheme.colorScheme.onSurface
-    }
     val secretName = request.secretNames.singleOrNull() ?: "Unnamed secret"
-    Surface(
-        color = containerColor,
-        contentColor = contentColor,
-        shape = MaterialTheme.shapes.large,
-        border = if (actionRequired) BorderStroke(1.dp, colors.attentionAccent) else null,
+    ActionListSurface(
+        actionRequired = actionRequired,
+        selected = selected,
         onClick = onClick,
         modifier = Modifier.fillMaxWidth().semantics { this.selected = selected },
     ) {
@@ -1193,9 +1190,6 @@ private fun PendingSecretUploadRow(
             },
             colors = ListItemDefaults.colors(
                 containerColor = androidx.compose.ui.graphics.Color.Transparent,
-                headlineColor = contentColor,
-                supportingColor = contentColor.copy(alpha = 0.78f),
-                trailingIconColor = contentColor,
             ),
         )
     }
@@ -1265,12 +1259,7 @@ private fun SecretDetail(
             title = { Text(secret.name, maxLines = 1, overflow = TextOverflow.Ellipsis) },
             navigationIcon = {
                 if (showBack) {
-                    IconButton(onClick = onBack) {
-                        Icon(
-                            Icons.AutoMirrored.Outlined.ArrowBack,
-                            contentDescription = stringResource(R.string.back),
-                        )
-                    }
+                    NavigationBackButton(onBack)
                 }
             },
             actions = {
@@ -1333,10 +1322,15 @@ private fun SecretDetail(
                         maxItemsInEachRow = if (fontScale >= 1.5f) 1 else Int.MAX_VALUE,
                     ) {
                         Text("Environment variables", style = MaterialTheme.typography.titleLarge)
-                        FilledTonalButton(onClick = onAddVariable) {
+                        FilledTonalButton(
+                            onClick = onAddVariable,
+                            modifier = Modifier.semantics {
+                                contentDescription = "Add environment variable"
+                            },
+                        ) {
                             Icon(Icons.Outlined.Add, contentDescription = null)
                             Spacer(Modifier.width(6.dp))
-                            Text(stringResource(R.string.add_variable))
+                            Text("Add")
                         }
                     }
                 }
@@ -1349,18 +1343,23 @@ private fun SecretDetail(
                         )
                     }
                 } else {
-                    items(
-                        secret.environmentVariables,
-                        key = EnvironmentVariableMetadata::id,
-                    ) { variable ->
-                        EnvironmentVariableCard(
-                            variable = variable,
-                            revealedValue = revealedValues[variable.id],
-                            onReveal = { onReveal(variable) },
-                            onReadValue = { onReadValue(variable) },
-                            onCopy = { onCopy(variable) },
-                            onEdit = { onEditVariable(variable) },
-                        )
+                    item {
+                        InformationSurface(contentPadding = PaddingValues(0.dp)) {
+                            secret.environmentVariables.forEachIndexed { index, variable ->
+                                EnvironmentVariableCard(
+                                    variable = variable,
+                                    revealedValue = revealedValues[variable.id],
+                                    onReveal = { onReveal(variable) },
+                                    onReadValue = { onReadValue(variable) },
+                                    onCopy = { onCopy(variable) },
+                                    onEdit = { onEditVariable(variable) },
+                                    embedded = true,
+                                )
+                                if (index != secret.environmentVariables.lastIndex) {
+                                    HorizontalDivider(Modifier.padding(start = 16.dp))
+                                }
+                            }
+                        }
                     }
                 }
             } else {
@@ -1676,7 +1675,7 @@ private fun SecretApprovalMode.description(secretType: String): String = when (t
 }
 
 private fun TemporaryAccessOperation.displayName(): String = when (this) {
-    TemporaryAccessOperation.INVOCATION -> "Environment values for any command"
+    TemporaryAccessOperation.INVOCATION -> "Secret values for any command"
     TemporaryAccessOperation.GIT_SIGN -> "Git signing for any repository"
 }
 
@@ -1758,6 +1757,7 @@ private fun EnvironmentVariableCard(
     onReadValue: suspend () -> String?,
     onCopy: () -> Unit,
     onEdit: () -> Unit,
+    embedded: Boolean = false,
 ) {
     var publicValue by remember(
         variable.id,
@@ -1779,9 +1779,11 @@ private fun EnvironmentVariableCard(
 
     val displayedValue = if (variable.sensitive) revealedValue else publicValue
     Surface(
-        color = MaterialTheme.colorScheme.surfaceContainerLow,
-        shape = MaterialTheme.shapes.medium,
-        tonalElevation = 1.dp,
+        color = if (embedded) androidx.compose.ui.graphics.Color.Transparent else {
+            MaterialTheme.colorScheme.surfaceContainerLow
+        },
+        shape = if (embedded) androidx.compose.ui.graphics.RectangleShape else MaterialTheme.shapes.medium,
+        tonalElevation = if (embedded) 0.dp else 1.dp,
     ) {
         Column(
             modifier = Modifier
@@ -1941,12 +1943,7 @@ private fun SecretEditorScreen(
                     )
                 },
                 navigationIcon = {
-                    IconButton(onClick = ::requestDismiss) {
-                        Icon(
-                            Icons.AutoMirrored.Outlined.ArrowBack,
-                            contentDescription = stringResource(R.string.back),
-                        )
-                    }
+                    NavigationBackButton(::requestDismiss)
                 },
             )
         },
@@ -2210,12 +2207,7 @@ private fun SshKeyEditorScreen(
             TopAppBar(
                 title = { Text("Replace SSH key") },
                 navigationIcon = {
-                    IconButton(onClick = ::requestDismiss) {
-                        Icon(
-                            Icons.AutoMirrored.Outlined.ArrowBack,
-                            contentDescription = stringResource(R.string.back),
-                        )
-                    }
+                    NavigationBackButton(::requestDismiss)
                 },
             )
         },
@@ -2329,12 +2321,7 @@ private fun EnvironmentVariableEditorScreen(
                     )
                 },
                 navigationIcon = {
-                    IconButton(onClick = ::requestDismiss) {
-                        Icon(
-                            Icons.AutoMirrored.Outlined.ArrowBack,
-                            contentDescription = stringResource(R.string.back),
-                        )
-                    }
+                    NavigationBackButton(::requestDismiss)
                 },
                 actions = {
                     if (onDelete != null) {
