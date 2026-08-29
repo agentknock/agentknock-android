@@ -100,7 +100,7 @@ internal fun AgentknockScreen(
     val requestSummaries by requestsViewModel.allRequests.collectAsStateWithLifecycle()
     val context = LocalContext.current
     val notificationsEnabled = remember(notificationRefreshGeneration) {
-        RequestNotifications.areEnabled(context)
+        RequestNotifications.actionNotificationsEnabled(context)
     }
     val actionRequiredCounts = MainSection.entries.associateWith { section ->
         when (section) {
@@ -203,7 +203,6 @@ internal fun AgentknockScreen(
             configuration = current,
             onDone = {
                 showAddressEditor = false
-                showSettings = true
             },
             changeAddressInitially = true,
             onDeviceClaimed = {},
@@ -211,10 +210,6 @@ internal fun AgentknockScreen(
         )
         showSettings -> SettingsScreen(
             onClose = { showSettings = false },
-            onChangeAddress = {
-                showSettings = false
-                showAddressEditor = true
-            },
             authenticationMode = authenticationMode,
             onAuthenticationModeChange = { mode, onError ->
                 authentication.changeMode(mode, authenticate, onError)
@@ -243,6 +238,7 @@ internal fun AgentknockScreen(
                         section = section,
                         authorizeProtectedAction = ::authorizeProtectedAction,
                         onOpenSettings = { showSettings = true },
+                        onChangePairingAddress = { showAddressEditor = true },
                         notificationsEnabled = notificationsEnabled,
                         onTopLevelChanged = { showNavigation = true },
                         requestsViewModel = requestsViewModel,
@@ -268,6 +264,7 @@ internal fun AgentknockScreen(
                         section = section,
                         authorizeProtectedAction = ::authorizeProtectedAction,
                         onOpenSettings = { showSettings = true },
+                        onChangePairingAddress = { showAddressEditor = true },
                         notificationsEnabled = notificationsEnabled,
                         onTopLevelChanged = { showNavigation = it },
                         requestsViewModel = requestsViewModel,
@@ -354,6 +351,7 @@ private fun MainContent(
     section: MainSection,
     authorizeProtectedAction: (String, () -> Unit, (String) -> Unit) -> Unit,
     onOpenSettings: () -> Unit,
+    onChangePairingAddress: () -> Unit,
     notificationsEnabled: Boolean,
     onTopLevelChanged: (Boolean) -> Unit,
     requestsViewModel: RequestsViewModel,
@@ -378,6 +376,7 @@ private fun MainContent(
             MainSection.CLIENTS -> ClientsScreen(
                 authorizeProtectedAction = authorizeProtectedAction,
                 onOpenSettings = onOpenSettings,
+                onChangePairingAddress = onChangePairingAddress,
                 onTopLevelChanged = onTopLevelChanged,
                 viewModel = clientsViewModel,
             )

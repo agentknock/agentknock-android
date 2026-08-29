@@ -4,8 +4,6 @@ package dev.agentknock.ui.settings
 
 import android.Manifest
 import android.app.KeyguardManager
-import android.content.ClipData
-import android.content.ClipboardManager
 import android.content.Intent
 import android.content.pm.PackageManager
 import android.net.Uri
@@ -13,21 +11,15 @@ import android.os.Build
 import android.provider.Settings
 import androidx.activity.compose.BackHandler
 import androidx.compose.foundation.clickable
-import androidx.compose.foundation.selection.toggleable
-import androidx.compose.foundation.BorderStroke
-import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
-import androidx.compose.foundation.layout.BoxWithConstraints
 import androidx.compose.foundation.layout.Column
-import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.PaddingValues
-import androidx.compose.foundation.layout.Spacer
+import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.WindowInsets
 import androidx.compose.foundation.layout.fillMaxHeight
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
-import androidx.compose.foundation.layout.heightIn
 import androidx.compose.foundation.layout.imePadding
 import androidx.compose.foundation.layout.navigationBars
 import androidx.compose.foundation.layout.padding
@@ -35,34 +27,22 @@ import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.layout.width
 import androidx.compose.foundation.layout.widthIn
 import androidx.compose.foundation.lazy.LazyColumn
-import androidx.compose.foundation.lazy.items
-import androidx.compose.foundation.lazy.itemsIndexed
 import androidx.compose.foundation.rememberScrollState
-import androidx.compose.foundation.text.selection.SelectionContainer
 import androidx.compose.foundation.text.KeyboardOptions
 import androidx.compose.foundation.verticalScroll
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.automirrored.outlined.ArrowBack
 import androidx.compose.material.icons.automirrored.outlined.Launch
-import androidx.compose.material.icons.outlined.ChevronRight
-import androidx.compose.material.icons.outlined.ContentCopy
-import androidx.compose.material.icons.outlined.CheckCircle
 import androidx.compose.material.icons.outlined.Backup
-import androidx.compose.material.icons.outlined.AutoAwesome
-import androidx.compose.material.icons.outlined.DataUsage
+import androidx.compose.material.icons.outlined.ChevronRight
 import androidx.compose.material.icons.outlined.DeleteForever
-import androidx.compose.material.icons.outlined.DeleteSweep
-import androidx.compose.material.icons.outlined.Description
-import androidx.compose.material.icons.outlined.ExpandLess
-import androidx.compose.material.icons.outlined.ExpandMore
 import androidx.compose.material.icons.outlined.History
 import androidx.compose.material.icons.outlined.Info
 import androidx.compose.material.icons.outlined.Lock
 import androidx.compose.material.icons.outlined.Notifications
-import androidx.compose.material.icons.outlined.Refresh
 import androidx.compose.material.icons.outlined.Security
-import androidx.compose.material.icons.outlined.Smartphone
 import androidx.compose.material.icons.outlined.Storage
+import androidx.compose.material.icons.outlined.Sync
 import androidx.compose.material.icons.outlined.WorkspacePremium
 import androidx.compose.material3.AlertDialog
 import androidx.compose.material3.Button
@@ -81,11 +61,9 @@ import androidx.compose.material3.Scaffold
 import androidx.compose.material3.SnackbarHost
 import androidx.compose.material3.SnackbarHostState
 import androidx.compose.material3.Surface
-import androidx.compose.material3.Switch
 import androidx.compose.material3.Text
 import androidx.compose.material3.TextButton
 import androidx.compose.material3.TopAppBar
-import androidx.compose.material3.VerticalDivider
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.getValue
@@ -96,16 +74,14 @@ import androidx.compose.runtime.saveable.rememberSaveable
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.vector.ImageVector
 import androidx.compose.ui.platform.LocalContext
-import androidx.compose.ui.semantics.stateDescription
-import androidx.compose.ui.semantics.Role
 import androidx.compose.ui.semantics.heading
-import androidx.compose.ui.semantics.selected
 import androidx.compose.ui.semantics.semantics
+import androidx.compose.ui.text.font.FontFamily
 import androidx.compose.ui.text.input.KeyboardCapitalization
 import androidx.compose.ui.text.input.KeyboardType
-import androidx.compose.ui.text.font.FontFamily
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
 import androidx.core.content.ContextCompat
@@ -113,42 +89,27 @@ import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import androidx.lifecycle.viewmodel.compose.viewModel
 import dev.agentknock.BuildConfig
 import dev.agentknock.push.RequestNotifications
-import dev.agentknock.presentation.formatTimestamp
-import dev.agentknock.ui.components.InformationRow
-import dev.agentknock.ui.components.InformationSurface
-import dev.agentknock.ui.components.TonalIcon
-import dev.agentknock.ui.theme.agentknockColors
-import dev.agentknock.ui.auth.DeviceAuthenticationMode
 import dev.agentknock.storage.FactoryResetResult
 import dev.agentknock.storage.crypto.EncryptionKeyBacking
-import dev.agentknock.storage.crypto.VaultKeyPurpose
 import dev.agentknock.storage.crypto.VaultProtection
-import dev.agentknock.storage.audit.AuditEvent
-import dev.agentknock.storage.audit.AuditOutcome
-import dev.agentknock.storage.request.RequestSyncResult
-import dev.agentknock.storage.request.ClientSummary
-import dev.agentknock.storage.vault.DeviceManagementResult
 import dev.agentknock.storage.vault.DeviceIdentity
+import dev.agentknock.ui.auth.DeviceAuthenticationMode
+import dev.agentknock.ui.theme.agentknockColors
 import kotlinx.coroutines.launch
 
 private enum class SettingsPage {
     OVERVIEW,
-    DEVICE,
+    SECURITY_BACKUP,
     NOTIFICATIONS,
-    SECURITY,
-    AI_REVIEW,
-    DATA,
+    SUBSCRIPTION,
     AUDIT,
     FACTORY_RESET,
-    DIAGNOSTICS,
-    PLAN,
     ABOUT,
 }
 
 @Composable
 internal fun SettingsScreen(
     onClose: () -> Unit,
-    onChangeAddress: () -> Unit,
     authenticationMode: DeviceAuthenticationMode,
     onAuthenticationModeChange: (DeviceAuthenticationMode, (String) -> Unit) -> Unit,
     notificationStateGeneration: Long,
@@ -164,20 +125,16 @@ internal fun SettingsScreen(
     val auditEvents by viewModel.auditEvents.collectAsStateWithLifecycle()
     val clients by viewModel.clients.collectAsStateWithLifecycle()
     val selectedAudit by viewModel.selectedAuditEvent.collectAsStateWithLifecycle()
-    val syncing by viewModel.syncing.collectAsStateWithLifecycle()
-    val syncResult by viewModel.lastSyncResult.collectAsStateWithLifecycle()
     val pushState by viewModel.pushRegistrationState.collectAsStateWithLifecycle()
-    val vaultProtection by viewModel.vaultProtection.collectAsStateWithLifecycle()
-    val subscriptionState by subscriptionViewModel.state.collectAsStateWithLifecycle()
+    val protection by viewModel.vaultProtection.collectAsStateWithLifecycle()
+    val subscription by subscriptionViewModel.state.collectAsStateWithLifecycle()
     val snackbar = remember { SnackbarHostState() }
     val scope = rememberCoroutineScope()
 
-    LaunchedEffect(subscriptionViewModel) {
-        subscriptionViewModel.refresh()
-    }
+    LaunchedEffect(subscriptionViewModel) { subscriptionViewModel.refresh() }
     LaunchedEffect(openPlanInitially) {
         if (openPlanInitially) {
-            page = SettingsPage.PLAN
+            page = SettingsPage.SUBSCRIPTION
             onPlanOpened()
         }
     }
@@ -185,8 +142,12 @@ internal fun SettingsScreen(
     fun back() {
         when (page) {
             SettingsPage.OVERVIEW -> onClose()
-            SettingsPage.AUDIT -> if (selectedAudit != null) viewModel.selectAuditEvent(null) else page = SettingsPage.DATA
-            SettingsPage.FACTORY_RESET -> page = SettingsPage.DATA
+            SettingsPage.AUDIT -> if (selectedAudit != null) {
+                viewModel.selectAuditEvent(null)
+            } else {
+                page = SettingsPage.OVERVIEW
+            }
+            SettingsPage.FACTORY_RESET -> page = SettingsPage.SECURITY_BACKUP
             else -> page = SettingsPage.OVERVIEW
         }
     }
@@ -204,29 +165,26 @@ internal fun SettingsScreen(
             }
             when (page) {
                 SettingsPage.OVERVIEW -> SettingsOverview(
+                    authenticationMode = authenticationMode,
+                    protection = protection,
+                    notificationStateGeneration = notificationStateGeneration,
+                    pushState = pushState?.wireName,
+                    subscription = subscription,
                     onBack = onClose,
                     onOpen = { page = it },
-                    pairing = configuration?.active,
-                    counts = counts,
-                    syncResult = syncResult,
-                    pushState = pushState?.wireName,
-                    protection = vaultProtection,
-                    authenticationMode = authenticationMode,
-                    subscription = subscriptionState,
                     modifier = modifier,
                 )
-                SettingsPage.DEVICE -> DeviceAndPairing(
-                    identity = configuration?.active,
-                    onBack = ::back,
-                    onChangeAddress = onChangeAddress,
-                    onSetPairingEnabled = { enabled ->
-                        scope.launch {
-                            snackbar.showSnackbar(
-                                viewModel.setPairingEnabled(enabled).message(enabled),
-                            )
+                SettingsPage.SECURITY_BACKUP -> SecurityAndBackup(
+                    counts = counts,
+                    protection = protection,
+                    authenticationMode = authenticationMode,
+                    onAuthenticationModeChange = { mode ->
+                        onAuthenticationModeChange(mode) { error ->
+                            scope.launch { snackbar.showSnackbar(error) }
                         }
                     },
-                    report = { scope.launch { snackbar.showSnackbar(it) } },
+                    onFactoryReset = { page = SettingsPage.FACTORY_RESET },
+                    onBack = ::back,
                     modifier = modifier,
                 )
                 SettingsPage.NOTIFICATIONS -> NotificationsSettings(
@@ -236,46 +194,10 @@ internal fun SettingsScreen(
                     onBack = ::back,
                     modifier = modifier,
                 )
-                SettingsPage.SECURITY -> SecuritySettings(
-                    protection = vaultProtection,
-                    authenticationMode = authenticationMode,
-                    onAuthenticationModeChange = { mode ->
-                        onAuthenticationModeChange(mode) {
-                            scope.launch { snackbar.showSnackbar(it) }
-                        }
-                    },
+                SettingsPage.SUBSCRIPTION -> SubscriptionAndBillingScreen(
+                    state = subscription,
                     onBack = ::back,
-                    modifier = modifier,
-                )
-                SettingsPage.AI_REVIEW -> AiReviewSettings(
-                    instructions = configuration?.active?.instructions.orEmpty(),
-                    subscription = subscriptionState,
-                    onSave = { instructions ->
-                        scope.launch {
-                            snackbar.showSnackbar(
-                                if (viewModel.saveGeneralInstructions(instructions)) {
-                                    "General instructions updated"
-                                } else {
-                                    "General instructions could not be updated"
-                                },
-                            )
-                        }
-                    },
-                    onOpenPlan = { page = SettingsPage.PLAN },
-                    onBack = ::back,
-                    modifier = modifier,
-                )
-                SettingsPage.DATA -> DataAndHistory(
-                    counts = counts,
-                    onBack = ::back,
-                    onAudit = { page = SettingsPage.AUDIT },
-                    onFactoryReset = { page = SettingsPage.FACTORY_RESET },
-                    onClearRequests = {
-                        scope.launch {
-                            val removed = viewModel.clearCompletedRequests()
-                            snackbar.showSnackbar("Cleared $removed completed requests")
-                        }
-                    },
+                    onRefresh = subscriptionViewModel::refresh,
                     modifier = modifier,
                 )
                 SettingsPage.AUDIT -> AuditBrowser(
@@ -284,389 +206,266 @@ internal fun SettingsScreen(
                     clients = clients,
                     onBack = ::back,
                     onOpen = viewModel::selectAuditEvent,
-                    report = { scope.launch { snackbar.showSnackbar(it) } },
+                    report = { message -> scope.launch { snackbar.showSnackbar(message) } },
                     modifier = modifier,
                 )
                 SettingsPage.FACTORY_RESET -> FactoryReset(
                     onBack = ::back,
                     reset = viewModel::factoryReset,
-                    report = { scope.launch { snackbar.showSnackbar(it) } },
-                    modifier = modifier,
-                )
-                SettingsPage.DIAGNOSTICS -> Diagnostics(
-                    syncing = syncing,
-                    result = syncResult,
-                    onBack = ::back,
-                    onReconnect = viewModel::reconnect,
-                    report = { scope.launch { snackbar.showSnackbar(it) } },
-                    modifier = modifier,
-                )
-                SettingsPage.PLAN -> PlanAndBillingScreen(
-                    state = subscriptionState,
-                    onBack = ::back,
-                    onRefresh = subscriptionViewModel::refresh,
+                    report = { message -> scope.launch { snackbar.showSnackbar(message) } },
                     modifier = modifier,
                 )
                 SettingsPage.ABOUT -> About(
+                    identity = configuration?.active,
                     onBack = ::back,
-                    report = { scope.launch { snackbar.showSnackbar(it) } },
+                    report = { message -> scope.launch { snackbar.showSnackbar(message) } },
                     modifier = modifier,
                 )
             }
-        }
-    }
-}
-
-@Composable
-private fun AuditBrowser(
-    events: List<AuditEvent>,
-    selected: AuditEvent?,
-    clients: List<ClientSummary>,
-    onBack: () -> Unit,
-    onOpen: (Long) -> Unit,
-    report: (String) -> Unit,
-    modifier: Modifier,
-) {
-    val clientNames = clients.associate { it.clientId to it.name }
-    BoxWithConstraints(modifier) {
-        val twoPane = maxWidth >= 840.dp
-        if (twoPane) {
-            Row(Modifier.fillMaxSize()) {
-                AuditList(
-                    events = events,
-                    selectedEventId = selected?.id,
-                    onBack = onBack,
-                    onOpen = onOpen,
-                    clientNames = clientNames,
-                    modifier = Modifier.width(420.dp).fillMaxHeight(),
-                )
-                VerticalDivider()
-                if (selected == null) {
-                    Box(
-                        Modifier.weight(1f).fillMaxHeight(),
-                        contentAlignment = Alignment.Center,
-                    ) {
-                        Text(
-                            "Select an event to view its details",
-                            color = MaterialTheme.colorScheme.onSurfaceVariant,
-                        )
-                    }
-                } else {
-                    AuditDetail(
-                        event = selected,
-                        clientName = selected.clientId?.let(clientNames::get),
-                        report = report,
-                        onBack = onBack,
-                        showBack = false,
-                        modifier = Modifier.weight(1f).fillMaxHeight(),
-                    )
-                }
-            }
-        } else if (selected == null) {
-            AuditList(
-                events = events,
-                selectedEventId = selected?.id,
-                onBack = onBack,
-                onOpen = onOpen,
-                clientNames = clientNames,
-                modifier = Modifier.fillMaxSize(),
-            )
-        } else {
-            AuditDetail(
-                event = selected,
-                clientName = selected.clientId?.let(clientNames::get),
-                report = report,
-                onBack = onBack,
-                showBack = true,
-                modifier = Modifier.fillMaxSize(),
-            )
         }
     }
 }
 
 @Composable
 private fun SettingsOverview(
+    authenticationMode: DeviceAuthenticationMode,
+    protection: VaultProtection?,
+    notificationStateGeneration: Long,
+    pushState: String?,
+    subscription: SubscriptionUiState,
     onBack: () -> Unit,
     onOpen: (SettingsPage) -> Unit,
-    pairing: DeviceIdentity?,
-    counts: DataCounts,
-    syncResult: RequestSyncResult?,
-    pushState: String?,
-    protection: VaultProtection?,
-    authenticationMode: DeviceAuthenticationMode,
-    subscription: SubscriptionUiState,
     modifier: Modifier,
 ) {
     val context = LocalContext.current
-    val notificationsEnabled = RequestNotifications.areEnabled(context)
+    val requestsEnabled = remember(notificationStateGeneration) {
+        RequestNotifications.actionNotificationsEnabled(context)
+    }
     Column(modifier) {
         PageTopBar("Settings", onBack)
-        LazyColumn(
-            contentPadding = PaddingValues(start = 16.dp, end = 16.dp, top = 4.dp, bottom = 16.dp),
-            verticalArrangement = Arrangement.spacedBy(8.dp),
-        ) {
+        LazyColumn(contentPadding = PaddingValues(bottom = 16.dp)) {
+            item { PreferenceGroupTitle("Preferences") }
             item {
-                val pairingSummary = when {
-                    pairing == null -> "Setup incomplete"
-                    pairing.pairingEnabled -> "${pairing.address} · Accepting new pairings"
-                    else -> "${pairing.address} · New pairings paused"
-                }
-                SettingsRow(Icons.Outlined.Smartphone, "Device & pairing", pairingSummary) {
-                    onOpen(SettingsPage.DEVICE)
-                }
+                PreferenceRow(
+                    icon = Icons.Outlined.Security,
+                    title = "Security & backup",
+                    summary = "${authenticationMode.overviewLabel()} · ${protection.overviewDescription()}",
+                    onClick = { onOpen(SettingsPage.SECURITY_BACKUP) },
+                )
             }
             item {
-                val notificationSummary = when {
-                    !notificationsEnabled -> "Disabled"
-                    pushState != null && pushState != "registered" -> "Delivery needs attention"
-                    else -> "Enabled"
-                }
-                SettingsRow(Icons.Outlined.Notifications, "Notifications", notificationSummary) {
-                    onOpen(SettingsPage.NOTIFICATIONS)
-                }
+                PreferenceRow(
+                    icon = Icons.Outlined.Notifications,
+                    title = "Notifications",
+                    summary = when {
+                        !requestsEnabled -> "Requests needing approval are muted"
+                        pushState != null && pushState != "registered" -> "Delivery needs attention"
+                        else -> "Requests needing approval can alert you"
+                    },
+                    onClick = { onOpen(SettingsPage.NOTIFICATIONS) },
+                )
+            }
+            item { PreferenceDivider() }
+            item { PreferenceGroupTitle("Activity and access") }
+            item {
+                PreferenceRow(
+                    icon = Icons.Outlined.WorkspacePremium,
+                    title = "Subscription & billing",
+                    summary = subscription.overviewLabel(),
+                    onClick = { onOpen(SettingsPage.SUBSCRIPTION) },
+                )
             }
             item {
-                SettingsRow(
-                    Icons.Outlined.Security,
-                    "Security",
-                    "${protection.overviewDescription()} · ${authenticationMode.overviewLabel()}",
-                ) { onOpen(SettingsPage.SECURITY) }
+                PreferenceRow(
+                    icon = Icons.Outlined.History,
+                    title = "Audit log",
+                    summary = "Security activity kept for one year",
+                    onClick = { onOpen(SettingsPage.AUDIT) },
+                )
             }
+            item { PreferenceDivider() }
+            item { PreferenceGroupTitle("App") }
             item {
-                val access = when (subscription.access) {
-                    SubscriptionAccess.ACTIVE -> "Active"
-                    SubscriptionAccess.CHECKING -> "Checking access"
-                    SubscriptionAccess.FREE -> "Not active"
-                    SubscriptionAccess.UNAVAILABLE -> "Status unavailable"
-                }
-                val instructions = if (pairing?.instructions.isNullOrBlank()) {
-                    "No general instructions"
-                } else {
-                    "General instructions set"
-                }
-                SettingsRow(
-                    Icons.Outlined.AutoAwesome,
-                    "AI review",
-                    "$access · $instructions",
-                ) { onOpen(SettingsPage.AI_REVIEW) }
-            }
-            item {
-                SettingsRow(
-                    Icons.Outlined.WorkspacePremium,
-                    "Plan and billing",
-                    subscription.overviewLabel(),
-                ) { onOpen(SettingsPage.PLAN) }
-            }
-            item {
-                SettingsRow(
-                    Icons.Outlined.History,
-                    "Data & history",
-                    "${counts.secrets.countLabel("secret")} · " +
-                        "${counts.requests.countLabel("request")} · " +
-                        "${counts.auditEvents.countLabel("audit event")}",
-                ) { onOpen(SettingsPage.DATA) }
-            }
-            item {
-                val status = when (syncResult) {
-                    null, RequestSyncResult.Success -> "Connected"
-                    else -> "Needs attention"
-                }
-                SettingsRow(Icons.Outlined.DataUsage, "Connection diagnostics", status) { onOpen(SettingsPage.DIAGNOSTICS) }
-            }
-            item {
-                SettingsRow(
-                    Icons.Outlined.Info,
-                    "About",
-                    "Version ${BuildConfig.VERSION_NAME}",
-                ) { onOpen(SettingsPage.ABOUT) }
+                PreferenceRow(
+                    icon = Icons.Outlined.Info,
+                    title = "About",
+                    summary = "Version ${BuildConfig.VERSION_NAME} (${BuildConfig.VERSION_CODE})",
+                    onClick = { onOpen(SettingsPage.ABOUT) },
+                )
             }
         }
     }
 }
 
 @Composable
-private fun SettingsRow(
-    icon: ImageVector,
-    title: String,
-    summary: String,
-    onClick: () -> Unit,
+private fun SecurityAndBackup(
+    counts: DataCounts,
+    protection: VaultProtection?,
+    authenticationMode: DeviceAuthenticationMode,
+    onAuthenticationModeChange: (DeviceAuthenticationMode) -> Unit,
+    onFactoryReset: () -> Unit,
+    onBack: () -> Unit,
+    modifier: Modifier,
 ) {
-    Surface(
-        color = MaterialTheme.colorScheme.surfaceContainerLow,
-        shape = MaterialTheme.shapes.large,
-        onClick = onClick,
-        modifier = Modifier.fillMaxWidth(),
-    ) {
-        ListItem(
-            headlineContent = { Text(title) },
-            supportingContent = { if (summary.isNotBlank()) Text(summary) },
-            leadingContent = { TonalIcon(icon, contentDescription = null) },
-            trailingContent = { Icon(Icons.Outlined.ChevronRight, contentDescription = null) },
-            colors = ListItemDefaults.colors(
-                containerColor = androidx.compose.ui.graphics.Color.Transparent,
-            ),
+    val context = LocalContext.current
+    val deviceSecure = context.getSystemService(KeyguardManager::class.java).isDeviceSecure
+    var chooseAuthentication by remember { mutableStateOf(false) }
+    Column(modifier) {
+        PageTopBar("Security & backup", onBack)
+        LazyColumn(contentPadding = PaddingValues(bottom = 24.dp)) {
+            item { PreferenceGroupTitle("Device authentication") }
+            item {
+                PreferenceRow(
+                    icon = Icons.Outlined.Lock,
+                    title = "Require device authentication",
+                    summary = authenticationMode.displayLabel(),
+                    onClick = { chooseAuthentication = true },
+                )
+            }
+            item {
+                PreferenceText(
+                    "Background synchronization and automatic decisions continue regardless of this setting.",
+                )
+            }
+            item { PreferenceDivider() }
+            item { PreferenceGroupTitle("Encryption") }
+            item { EncryptionStatus(protection) }
+            item { TechnicalValue(label = "Encryption", value = "AES-128-GCM") }
+            item { TechnicalValue(label = "Key storage", value = protection.keyStorageDescription()) }
+            item {
+                TechnicalValue(
+                    label = "Device screen lock",
+                    value = if (deviceSecure) "Configured" else "Not configured",
+                )
+            }
+            item { PreferenceDivider() }
+            item { PreferenceGroupTitle("Backup") }
+            item {
+                InformationPreference(
+                    icon = Icons.Outlined.Backup,
+                    title = "Android backup",
+                    summary = "Metadata and encrypted values are included. Device-bound encryption keys are excluded.",
+                )
+            }
+            item {
+                InformationPreference(
+                    icon = Icons.Outlined.Lock,
+                    title = "Key recovery",
+                    summary = "No recovery method. After restoring a backup, secrets and client pairings cannot be recovered.",
+                )
+            }
+            item {
+                InformationPreference(
+                    icon = Icons.Outlined.Storage,
+                    title = "Stored Agentknock data",
+                    summary = "${counts.secrets.countLabel("secret")} · ${counts.clients.countLabel("client")}",
+                )
+            }
+            item { PreferenceDivider() }
+            item { PreferenceGroupTitle("Reset") }
+            item {
+                PreferenceRow(
+                    icon = Icons.Outlined.DeleteForever,
+                    title = "Factory reset Agentknock",
+                    summary = "Erase the device identity, encryption keys, secrets, clients, and history",
+                    destructive = true,
+                    onClick = onFactoryReset,
+                )
+            }
+        }
+    }
+    if (chooseAuthentication) {
+        AlertDialog(
+            onDismissRequest = { chooseAuthentication = false },
+            title = { Text("Require device authentication") },
+            text = {
+                Column(verticalArrangement = Arrangement.spacedBy(4.dp)) {
+                    DeviceAuthenticationMode.entries.forEach { mode ->
+                        Row(
+                            modifier = Modifier
+                                .fillMaxWidth()
+                                .clickable {
+                                    chooseAuthentication = false
+                                    onAuthenticationModeChange(mode)
+                                }
+                                .padding(vertical = 8.dp),
+                            horizontalArrangement = Arrangement.spacedBy(8.dp),
+                            verticalAlignment = Alignment.Top,
+                        ) {
+                            RadioButton(selected = mode == authenticationMode, onClick = null)
+                            Column(Modifier.weight(1f)) {
+                                Text(mode.displayLabel(), style = MaterialTheme.typography.titleSmall)
+                                Text(
+                                    mode.explanation(),
+                                    style = MaterialTheme.typography.bodyMedium,
+                                    color = MaterialTheme.colorScheme.onSurfaceVariant,
+                                )
+                            }
+                        }
+                    }
+                }
+            },
+            confirmButton = {},
+            dismissButton = {
+                TextButton(onClick = { chooseAuthentication = false }) { Text("Cancel") }
+            },
         )
     }
 }
 
 @Composable
-private fun DeviceAndPairing(
-    identity: DeviceIdentity?,
-    onBack: () -> Unit,
-    onChangeAddress: () -> Unit,
-    onSetPairingEnabled: (Boolean) -> Unit,
-    report: (String) -> Unit,
-    modifier: Modifier,
-) {
-    var technicalExpanded by remember { mutableStateOf(false) }
-    val context = LocalContext.current
-    val pairingCommand = identity?.let { "agentknock pairing start ${it.address}" }
-    Column(modifier) {
-        PageTopBar("Device & pairing", onBack)
-        Column(
-            Modifier.verticalScroll(rememberScrollState()).padding(20.dp),
-            verticalArrangement = Arrangement.spacedBy(20.dp),
+private fun EncryptionStatus(protection: VaultProtection?) {
+    val hardwareBacked = protection is VaultProtection.Available &&
+        protection.backings.values.all(EncryptionKeyBacking::isHardwareBacked)
+    val softwareBacked = protection is VaultProtection.Available &&
+        protection.backings.values.any { it == EncryptionKeyBacking.SOFTWARE }
+    val style = when {
+        hardwareBacked -> StatusStyle(
+            "Hardware-backed encryption",
+            "Stored secret values and device credentials are encrypted with keys protected by secure hardware.",
+            MaterialTheme.agentknockColors.successContainer,
+            MaterialTheme.agentknockColors.onSuccessContainer,
+        )
+        softwareBacked -> StatusStyle(
+            "Android Keystore encryption",
+            "Stored secret values and device credentials are encrypted on this device.",
+            MaterialTheme.colorScheme.surfaceContainerHigh,
+            MaterialTheme.colorScheme.onSurface,
+        )
+        protection is VaultProtection.KeyUnavailable -> StatusStyle(
+            "Encryption key unavailable",
+            "One or more keys cannot be used on this device.",
+            MaterialTheme.agentknockColors.dangerContainer,
+            MaterialTheme.agentknockColors.onDangerContainer,
+        )
+        protection == null -> StatusStyle(
+            "Checking encryption",
+            "Reading this device's key protection.",
+            MaterialTheme.colorScheme.surfaceContainerHigh,
+            MaterialTheme.colorScheme.onSurface,
+        )
+        else -> StatusStyle(
+            "Stored values are encrypted",
+            "Android did not report the exact hardware protection for the encryption keys.",
+            MaterialTheme.colorScheme.surfaceContainerHigh,
+            MaterialTheme.colorScheme.onSurface,
+        )
+    }
+    Surface(
+        color = style.container,
+        contentColor = style.content,
+        shape = MaterialTheme.shapes.large,
+        modifier = Modifier.padding(horizontal = 16.dp, vertical = 4.dp).fillMaxWidth(),
+    ) {
+        Row(
+            modifier = Modifier.padding(16.dp),
+            horizontalArrangement = Arrangement.spacedBy(12.dp),
+            verticalAlignment = Alignment.CenterVertically,
         ) {
-            if (identity == null) {
-                Text("Device setup is incomplete.")
-                return@Column
-            }
-            Text(
-                "Pairing address",
-                style = MaterialTheme.typography.labelLarge,
-                color = MaterialTheme.colorScheme.onSurfaceVariant,
-            )
-            Surface(
-                color = MaterialTheme.colorScheme.surfaceContainerLow,
-                shape = RoundedCornerShape(12.dp),
-                modifier = Modifier.fillMaxWidth(),
-            ) {
-                Row(
-                    modifier = Modifier.padding(start = 16.dp, end = 4.dp, top = 8.dp, bottom = 8.dp),
-                    verticalAlignment = Alignment.CenterVertically,
-                ) {
-                    SelectionContainer(Modifier.weight(1f)) {
-                        Text(
-                            identity.address,
-                            style = MaterialTheme.typography.titleLarge,
-                            fontFamily = FontFamily.Monospace,
-                        )
-                    }
-                    IconButton(
-                        onClick = {
-                            context.getSystemService(ClipboardManager::class.java).setPrimaryClip(
-                                ClipData.newPlainText("Agentknock pairing address", identity.address),
-                            )
-                            report("Pairing address copied")
-                        },
-                    ) {
-                        Icon(Icons.Outlined.ContentCopy, contentDescription = "Copy pairing address")
-                    }
-                }
-            }
-            Text(
-                "This address is public. Sharing it does not grant access.",
-                color = MaterialTheme.colorScheme.onSurfaceVariant,
-            )
-            OutlinedButton(onClick = onChangeAddress, modifier = Modifier.fillMaxWidth()) {
-                Text("Change pairing address")
-            }
-            Text(
-                "Existing clients keep working after the pairing address changes.",
-                color = MaterialTheme.colorScheme.onSurfaceVariant,
-            )
-            Surface(
-                color = MaterialTheme.colorScheme.surfaceContainerLow,
-                shape = RoundedCornerShape(12.dp),
-                modifier = Modifier
-                    .fillMaxWidth()
-                    .toggleable(
-                        value = identity.pairingEnabled,
-                        role = Role.Switch,
-                        onValueChange = onSetPairingEnabled,
-                    ),
-            ) {
-                ListItem(
-                    headlineContent = { Text("Accept new pairings") },
-                    supportingContent = {
-                        Text(
-                            if (identity.pairingEnabled) {
-                                "New clients can request pairing. Every request still needs your approval."
-                            } else {
-                                "New pairing requests are paused."
-                            },
-                        )
-                    },
-                    trailingContent = {
-                        Switch(
-                            checked = identity.pairingEnabled,
-                            onCheckedChange = null,
-                        )
-                    },
-                    colors = ListItemDefaults.colors(
-                        containerColor = MaterialTheme.colorScheme.surfaceContainerLow,
-                    ),
-                )
-            }
-            if (identity.pairingEnabled) {
-                Text("Pair a client", style = MaterialTheme.typography.titleMedium)
-                Text(
-                    "Run this command on the machine you want to pair. Review the pairing in Clients before starting another one.",
-                    color = MaterialTheme.colorScheme.onSurfaceVariant,
-                )
-                Surface(
-                    onClick = {
-                        context.getSystemService(ClipboardManager::class.java).setPrimaryClip(
-                            ClipData.newPlainText("Agentknock pairing command", pairingCommand),
-                        )
-                        report("Pairing command copied")
-                    },
-                    color = MaterialTheme.colorScheme.surfaceContainerLow,
-                    shape = RoundedCornerShape(12.dp),
-                    border = BorderStroke(1.dp, MaterialTheme.colorScheme.outlineVariant),
-                    modifier = Modifier.fillMaxWidth(),
-                ) {
-                    Row(
-                        modifier = Modifier.padding(start = 16.dp, end = 4.dp, top = 10.dp, bottom = 10.dp),
-                        verticalAlignment = Alignment.CenterVertically,
-                    ) {
-                        SelectionContainer(Modifier.weight(1f)) {
-                            Text(
-                                checkNotNull(pairingCommand),
-                                fontFamily = FontFamily.Monospace,
-                                color = MaterialTheme.colorScheme.onSurfaceVariant,
-                            )
-                        }
-                        Icon(Icons.Outlined.ContentCopy, contentDescription = "Copy pairing command")
-                        Spacer(Modifier.width(12.dp))
-                    }
-                }
-            } else {
-                Text("Pairing is paused", style = MaterialTheme.typography.titleMedium)
-                Text(
-                    "Resume new pairings before giving a pairing command to a client.",
-                    color = MaterialTheme.colorScheme.onSurfaceVariant,
-                )
-            }
-            Row(
-                Modifier
-                    .fillMaxWidth()
-                    .heightIn(min = 48.dp)
-                    .clickable { technicalExpanded = !technicalExpanded }
-                    .semantics {
-                        stateDescription = if (technicalExpanded) "Expanded" else "Collapsed"
-                    },
-                horizontalArrangement = Arrangement.SpaceBetween,
-                verticalAlignment = Alignment.CenterVertically,
-            ) {
-                Text("Technical details", style = MaterialTheme.typography.titleMedium)
-                Icon(
-                    if (technicalExpanded) Icons.Outlined.ExpandLess else Icons.Outlined.ExpandMore,
-                    contentDescription = null,
-                )
-            }
-            if (technicalExpanded) SelectionContainer {
-                LabeledValue("Device ID", identity.deviceId, true)
+            Icon(Icons.Outlined.Security, contentDescription = null)
+            Column(verticalArrangement = Arrangement.spacedBy(2.dp)) {
+                Text(style.title, style = MaterialTheme.typography.titleMedium)
+                Text(style.detail, style = MaterialTheme.typography.bodyMedium)
             }
         }
     }
@@ -681,683 +480,159 @@ private fun NotificationsSettings(
     modifier: Modifier,
 ) {
     val context = LocalContext.current
-    val notificationsEnabled = remember(refreshGeneration) {
-        RequestNotifications.areEnabled(context)
+    val permissionGranted = remember(refreshGeneration) {
+        Build.VERSION.SDK_INT < Build.VERSION_CODES.TIRAMISU ||
+            ContextCompat.checkSelfPermission(context, Manifest.permission.POST_NOTIFICATIONS) ==
+            PackageManager.PERMISSION_GRANTED
     }
+    val appNotificationsEnabled = remember(refreshGeneration) {
+        RequestNotifications.appNotificationsEnabled(context)
+    }
+
+    fun openChannel(channelId: String) {
+        context.startActivity(
+            Intent(Settings.ACTION_CHANNEL_NOTIFICATION_SETTINGS).apply {
+                putExtra(Settings.EXTRA_APP_PACKAGE, context.packageName)
+                putExtra(Settings.EXTRA_CHANNEL_ID, channelId)
+            },
+        )
+    }
+
     Column(modifier) {
         PageTopBar("Notifications", onBack)
-        Column(
-            Modifier.verticalScroll(rememberScrollState()).padding(20.dp),
-            verticalArrangement = Arrangement.spacedBy(20.dp),
-        ) {
-            Surface(
-                color = if (notificationsEnabled) {
-                    MaterialTheme.agentknockColors.successContainer
-                } else {
-                    MaterialTheme.agentknockColors.attentionContainer
-                },
-                contentColor = if (notificationsEnabled) {
-                    MaterialTheme.agentknockColors.onSuccessContainer
-                } else {
-                    MaterialTheme.agentknockColors.onAttentionContainer
-                },
-                shape = RoundedCornerShape(12.dp),
-                modifier = Modifier.fillMaxWidth(),
-            ) {
-                Row(
-                    modifier = Modifier.padding(16.dp),
-                    horizontalArrangement = Arrangement.spacedBy(12.dp),
-                    verticalAlignment = Alignment.CenterVertically,
-                ) {
-                    Icon(
-                        if (notificationsEnabled) Icons.Outlined.CheckCircle else Icons.Outlined.Notifications,
-                        contentDescription = null,
-                    )
-                    Text(
-                        if (notificationsEnabled) "Notifications enabled" else "Notifications disabled",
-                        style = MaterialTheme.typography.titleMedium,
-                    )
+        LazyColumn(contentPadding = PaddingValues(bottom = 24.dp)) {
+            item { PreferenceGroupTitle("Notification access") }
+            item {
+                InformationPreference(
+                    icon = Icons.Outlined.Notifications,
+                    title = if (appNotificationsEnabled) "Notifications allowed" else "Notifications blocked",
+                    summary = if (appNotificationsEnabled) {
+                        "Choose how each notification category behaves below."
+                    } else {
+                        "Android is blocking Agentknock notifications."
+                    },
+                )
+            }
+            if (!permissionGranted && Build.VERSION.SDK_INT >= Build.VERSION_CODES.TIRAMISU) {
+                item {
+                    Button(
+                        onClick = requestNotificationPermission,
+                        modifier = Modifier.padding(horizontal = 24.dp, vertical = 8.dp).fillMaxWidth(),
+                    ) { Text("Allow notifications") }
                 }
             }
-            Text(
-                if (notificationsEnabled) {
-                    "Agentknock can alert you as soon as a request needs your attention."
-                } else {
-                    "You will not see new requests until you open Agentknock."
-                },
-            )
-            Text(
-                "Secret use and Git signing notifications can include approval and denial actions. Approving requires the device to be unlocked; on older Android versions, Agentknock opens the request for review.",
-            )
-            Text(
-                "Android controls notification sounds and how much content is visible on the lock screen.",
-                color = MaterialTheme.colorScheme.onSurfaceVariant,
-            )
-            if (!notificationsEnabled && Build.VERSION.SDK_INT >= Build.VERSION_CODES.TIRAMISU) {
-                Button(
-                    onClick = requestNotificationPermission,
-                    modifier = Modifier.fillMaxWidth(),
-                ) { Text("Allow notifications") }
+            item { PreferenceDivider() }
+            item { PreferenceGroupTitle("Categories") }
+            item {
+                PreferenceRow(
+                    icon = Icons.Outlined.Notifications,
+                    title = "Requests needing approval",
+                    summary = "Alerts for decisions that need your attention",
+                    onClick = { openChannel(RequestNotifications.ACTION_CHANNEL_ID) },
+                    external = true,
+                )
             }
-            OutlinedButton(
-                onClick = {
-                    val intent = Intent(Settings.ACTION_APP_NOTIFICATION_SETTINGS).apply {
-                        putExtra(Settings.EXTRA_APP_PACKAGE, context.packageName)
-                    }
-                    context.startActivity(intent)
-                },
-                modifier = Modifier.fillMaxWidth(),
-            ) {
-                Icon(Icons.AutoMirrored.Outlined.Launch, contentDescription = null)
-                Spacer(Modifier.width(8.dp))
-                Text("Open Android notification settings")
+            item {
+                PreferenceRow(
+                    icon = Icons.Outlined.Sync,
+                    title = "Background processing",
+                    summary = "Silent status while Agentknock checks for new requests",
+                    onClick = { openChannel(RequestNotifications.BACKGROUND_CHANNEL_ID) },
+                    external = true,
+                )
+            }
+            item {
+                PreferenceText(
+                    "Android controls sound, vibration, lock-screen visibility, and interruption for each category.",
+                )
             }
             if (pushState != null && pushState != "registered") {
-                Text(
-                    when (pushState) {
-                        "missing" -> "Push delivery is not registered with the relay yet."
-                        "invalid" ->
-                            "The relay rejected the current push registration. Agentknock will retry."
-                        else -> "Push delivery needs attention."
-                    },
-                    color = MaterialTheme.colorScheme.error,
-                )
-            }
-        }
-    }
-}
-
-@Composable
-private fun AiReviewSettings(
-    instructions: String,
-    subscription: SubscriptionUiState,
-    onSave: (String) -> Unit,
-    onOpenPlan: () -> Unit,
-    onBack: () -> Unit,
-    modifier: Modifier,
-) {
-    var editedInstructions by remember(instructions) { mutableStateOf(instructions) }
-    val accessActive = subscription.access == SubscriptionAccess.ACTIVE
-    Column(modifier) {
-        PageTopBar("AI review", onBack)
-        Column(
-            Modifier.verticalScroll(rememberScrollState()).padding(20.dp),
-            verticalArrangement = Arrangement.spacedBy(20.dp),
-        ) {
-            Surface(
-                color = if (accessActive) {
-                    MaterialTheme.agentknockColors.successContainer
-                } else {
-                    MaterialTheme.colorScheme.surfaceContainerHigh
-                },
-                contentColor = if (accessActive) {
-                    MaterialTheme.agentknockColors.onSuccessContainer
-                } else {
-                    MaterialTheme.colorScheme.onSurface
-                },
-                shape = MaterialTheme.shapes.large,
-                modifier = Modifier.fillMaxWidth(),
-            ) {
-                Row(
-                    modifier = Modifier.padding(18.dp),
-                    horizontalArrangement = Arrangement.spacedBy(14.dp),
-                    verticalAlignment = Alignment.CenterVertically,
-                ) {
-                    Icon(Icons.Outlined.AutoAwesome, contentDescription = null)
-                    Column(Modifier.weight(1f), verticalArrangement = Arrangement.spacedBy(3.dp)) {
-                        Text(
-                            if (accessActive) "AI review active" else "AI review not active",
-                            style = MaterialTheme.typography.titleLarge,
-                        )
-                        Text(
-                            if (accessActive) {
-                                "Secrets set to Ask AI can be reviewed automatically."
-                            } else {
-                                "Manual approval and every other Agentknock feature remain available."
-                            },
-                            style = MaterialTheme.typography.bodyMedium,
-                        )
-                    }
-                }
-            }
-
-            OutlinedButton(onClick = onOpenPlan, modifier = Modifier.fillMaxWidth()) {
-                Text("Plan and billing")
-                Spacer(Modifier.width(6.dp))
-                Icon(Icons.Outlined.ChevronRight, contentDescription = null)
-            }
-
-            Column(verticalArrangement = Arrangement.spacedBy(8.dp)) {
-                Text("General instructions", style = MaterialTheme.typography.titleLarge)
-                Text(
-                    "These instructions apply to every AI review. Client and secret instructions add more specific policy.",
-                    color = MaterialTheme.colorScheme.onSurfaceVariant,
-                )
-                OutlinedTextField(
-                    value = editedInstructions,
-                    onValueChange = { editedInstructions = it },
-                    label = { Text("Instructions") },
-                    placeholder = {
-                        Text("For example, deny production access from personal clients.")
-                    },
-                    minLines = 5,
-                    maxLines = 10,
-                    modifier = Modifier.fillMaxWidth(),
-                )
-                Button(
-                    onClick = { onSave(editedInstructions) },
-                    enabled = editedInstructions.trim() != instructions,
-                    modifier = Modifier.fillMaxWidth(),
-                ) {
-                    Text("Save instructions")
-                }
-            }
-
-            InformationSurface {
-                Text("Approval behavior", style = MaterialTheme.typography.titleMedium)
-                Text(
-                    "Choose a default approval mode on each secret. A secret can use a different mode for individual clients.",
-                    color = MaterialTheme.colorScheme.onSurfaceVariant,
-                )
-                Text(
-                    "Ask AI can approve, deny, or leave a request for you to decide. Secret values and private keys are never sent for review.",
-                    color = MaterialTheme.colorScheme.onSurfaceVariant,
-                )
-            }
-        }
-    }
-}
-
-@Composable
-private fun SecuritySettings(
-    protection: VaultProtection?,
-    authenticationMode: DeviceAuthenticationMode,
-    onAuthenticationModeChange: (DeviceAuthenticationMode) -> Unit,
-    onBack: () -> Unit,
-    modifier: Modifier,
-) {
-    val context = LocalContext.current
-    val deviceSecure = context.getSystemService(KeyguardManager::class.java).isDeviceSecure
-    val hardwareBackings = setOf(
-        EncryptionKeyBacking.STRONGBOX,
-        EncryptionKeyBacking.TRUSTED_ENVIRONMENT,
-        EncryptionKeyBacking.UNKNOWN_SECURE,
-    )
-    val hardwareBacked = protection is VaultProtection.Available &&
-        protection.backings.values.all { it in hardwareBackings }
-    val protectionKnown = protection is VaultProtection.Available
-    Column(modifier) {
-        PageTopBar("Security", onBack)
-        Column(
-            Modifier.verticalScroll(rememberScrollState()).padding(20.dp),
-            verticalArrangement = Arrangement.spacedBy(20.dp),
-        ) {
-            Surface(
-                color = when {
-                    hardwareBacked -> MaterialTheme.agentknockColors.successContainer
-                    protectionKnown -> MaterialTheme.agentknockColors.attentionContainer
-                    else -> MaterialTheme.agentknockColors.dangerContainer
-                },
-                contentColor = when {
-                    hardwareBacked -> MaterialTheme.agentknockColors.onSuccessContainer
-                    protectionKnown -> MaterialTheme.agentknockColors.onAttentionContainer
-                    else -> MaterialTheme.agentknockColors.onDangerContainer
-                },
-                shape = RoundedCornerShape(12.dp),
-                modifier = Modifier.fillMaxWidth(),
-            ) {
-                Row(
-                    modifier = Modifier.padding(16.dp),
-                    horizontalArrangement = Arrangement.spacedBy(12.dp),
-                    verticalAlignment = Alignment.CenterVertically,
-                ) {
-                    Icon(Icons.Outlined.Lock, contentDescription = null)
-                    Column {
-                        Text(
-                            if (
-                                protection is VaultProtection.Available &&
-                                protection.backings.values.any { it == EncryptionKeyBacking.SOFTWARE }
-                            ) {
-                                "Encrypted without hardware protection"
-                            } else {
-                                "Stored values are encrypted"
-                            },
-                            style = MaterialTheme.typography.titleMedium,
-                        )
-                        Text(
-                            protection.protectionExplanation(),
-                            style = MaterialTheme.typography.bodyMedium,
-                        )
-                    }
-                }
-            }
-            LabeledValue("Encryption", "AES-128-GCM")
-            LabeledValue(
-                "Secret values key",
-                protection.description(VaultKeyPurpose.SECRET_VALUES),
-            )
-            LabeledValue(
-                "Device state key",
-                protection.description(VaultKeyPurpose.DEVICE_STATE),
-            )
-            LabeledValue(
-                "Device authentication",
-                if (deviceSecure) "Secure screen lock configured" else "No secure screen lock configured",
-            )
-            Text("Require device authentication", style = MaterialTheme.typography.titleMedium)
-            Column(verticalArrangement = Arrangement.spacedBy(8.dp)) {
-                DeviceAuthenticationMode.entries.forEach { mode ->
-                    AuthenticationModeOption(
-                        mode = mode,
-                        selected = mode == authenticationMode,
-                        onSelect = { onAuthenticationModeChange(mode) },
+                item { PreferenceDivider() }
+                item { PreferenceGroupTitle("Delivery") }
+                item {
+                    InformationPreference(
+                        icon = Icons.Outlined.Notifications,
+                        title = "Push delivery needs attention",
+                        summary = when (pushState) {
+                            "missing" -> "This device has not finished registering for push delivery. Agentknock will retry."
+                            "invalid" -> "The relay rejected the current push registration. Agentknock will retry."
+                            else -> "Agentknock will retry push registration automatically."
+                        },
+                        warning = true,
                     )
                 }
             }
-            Text(
-                "This controls Agentknock's interface. Background synchronization and automatic approvals continue while the app is locked.",
-                color = MaterialTheme.colorScheme.onSurfaceVariant,
-            )
         }
     }
 }
 
 @Composable
-private fun AuthenticationModeOption(
-    mode: DeviceAuthenticationMode,
-    selected: Boolean,
-    onSelect: () -> Unit,
-) {
-    Surface(
-        color = if (selected) {
-            MaterialTheme.colorScheme.secondaryContainer
-        } else {
-            MaterialTheme.colorScheme.surfaceContainerLow
-        },
-        shape = MaterialTheme.shapes.large,
-        onClick = onSelect,
-        modifier = Modifier.fillMaxWidth().semantics { this.selected = selected },
-    ) {
-        Row(
-            modifier = Modifier.padding(horizontal = 12.dp, vertical = 10.dp),
-            horizontalArrangement = Arrangement.spacedBy(8.dp),
-            verticalAlignment = Alignment.CenterVertically,
-        ) {
-            RadioButton(selected = selected, onClick = null)
-            Column(Modifier.weight(1f), verticalArrangement = Arrangement.spacedBy(2.dp)) {
-                Text(mode.displayLabel(), style = MaterialTheme.typography.titleSmall)
-                Text(
-                    mode.explanation(),
-                    style = MaterialTheme.typography.bodyMedium,
-                    color = MaterialTheme.colorScheme.onSurfaceVariant,
-                )
-            }
-        }
-    }
-}
-
-private fun DeviceAuthenticationMode.displayLabel(): String = when (this) {
-    DeviceAuthenticationMode.DEVICE_LOCK -> "Rely on device lock"
-    DeviceAuthenticationMode.SENSITIVE_VALUES_AND_PAIRING -> "Sensitive values and pairing"
-    DeviceAuthenticationMode.APP_LOCK -> "Lock Agentknock"
-}
-
-private fun DeviceAuthenticationMode.overviewLabel(): String = when (this) {
-    DeviceAuthenticationMode.DEVICE_LOCK -> "Device lock"
-    DeviceAuthenticationMode.SENSITIVE_VALUES_AND_PAIRING -> "Protected values and pairing"
-    DeviceAuthenticationMode.APP_LOCK -> "App lock"
-}
-
-private fun DeviceAuthenticationMode.explanation(): String = when (this) {
-    DeviceAuthenticationMode.DEVICE_LOCK ->
-        "No additional Agentknock prompts. Review and destructive confirmations still apply."
-    DeviceAuthenticationMode.SENSITIVE_VALUES_AND_PAIRING ->
-        "Authenticate before showing, copying, or editing sensitive values, weakening their protection, or accepting a new client."
-    DeviceAuthenticationMode.APP_LOCK ->
-        "Authenticate before any Agentknock content is shown. One unlock lasts for the foreground session."
-}
-
-private fun VaultProtection?.description(purpose: VaultKeyPurpose): String = when (this) {
-    null -> "Checking this device…"
-    is VaultProtection.Available -> when (backings[purpose]) {
-        EncryptionKeyBacking.STRONGBOX -> "StrongBox hardware"
-        EncryptionKeyBacking.TRUSTED_ENVIRONMENT -> "Trusted execution environment"
-        EncryptionKeyBacking.SOFTWARE -> "Android Keystore (software-backed)"
-        EncryptionKeyBacking.UNKNOWN_SECURE -> "Secure hardware (type unavailable)"
-        EncryptionKeyBacking.UNKNOWN -> "Android Keystore (backing unknown)"
-        null -> "Protection could not be determined"
-    }
-    is VaultProtection.KeyUnavailable -> if (purpose in purposes) {
-        "Key unavailable on this device"
-    } else {
-        "Protection could not be determined"
-    }
-    VaultProtection.Unknown -> "Protection could not be determined"
-}
-
-private fun VaultProtection?.overviewDescription(): String = when (this) {
-    null -> "Checking this device…"
-    is VaultProtection.Available -> when {
-        backings.values.all {
-            it == EncryptionKeyBacking.STRONGBOX ||
-                it == EncryptionKeyBacking.TRUSTED_ENVIRONMENT ||
-                it == EncryptionKeyBacking.UNKNOWN_SECURE
-        } -> "Hardware-backed encryption"
-        backings.values.any { it == EncryptionKeyBacking.SOFTWARE } -> "OS-protected encryption"
-        else -> "Encryption protection unknown"
-    }
-    is VaultProtection.KeyUnavailable -> "Encryption key unavailable"
-    VaultProtection.Unknown -> "Protection could not be determined"
-}
-
-private fun VaultProtection?.protectionExplanation(): String = when (this) {
-    is VaultProtection.Available ->
-        "Secret values and device state use separate keys in Android Keystore."
-    is VaultProtection.KeyUnavailable -> "A vault key is not available on this device."
-    VaultProtection.Unknown -> "Agentknock could not determine how the vault keys are protected."
-    null -> "Checking how this device protects the vault keys…"
-}
-
-@Composable
-private fun DataAndHistory(
-    counts: DataCounts,
+private fun About(
+    identity: DeviceIdentity?,
     onBack: () -> Unit,
-    onAudit: () -> Unit,
-    onFactoryReset: () -> Unit,
-    onClearRequests: () -> Unit,
-    modifier: Modifier,
-) {
-    var confirmClear by remember { mutableStateOf(false) }
-    Column(modifier) {
-        PageTopBar("Data & history", onBack)
-        Column(
-            Modifier.verticalScroll(rememberScrollState()).padding(16.dp),
-            verticalArrangement = Arrangement.spacedBy(8.dp),
-        ) {
-            SettingsRow(
-                Icons.Outlined.History,
-                "Audit log",
-                "${counts.auditEvents.countLabel("event")} · kept for one year",
-                onClick = onAudit,
-            )
-            SettingsInformationRow(
-                icon = Icons.Outlined.Storage,
-                title = "On this device",
-                summary = listOf(
-                    counts.secrets.countLabel("secret"),
-                    counts.variables.countLabel("environment variable"),
-                    counts.clients.countLabel("client"),
-                    counts.requests.countLabel("request"),
-                ).joinToString(" · "),
-            )
-            SettingsInformationRow(
-                icon = Icons.Outlined.Backup,
-                title = "Android backup and transfer",
-                summary = "Metadata, request history, audit events, and encrypted values are " +
-                    "included. Device-bound keys do not transfer, so restored secret values and " +
-                    "client pairings must be replaced.",
-            )
-            SettingsActionRow(
-                icon = Icons.Outlined.DeleteSweep,
-                title = "Clear completed request history",
-                summary = if (counts.requests == 0) {
-                    "No request history to clear"
-                } else {
-                    "Pending requests and audit events are kept"
-                },
-                enabled = counts.requests > 0,
-                onClick = { confirmClear = true },
-            )
-            Spacer(Modifier.size(8.dp))
-            SettingsActionRow(
-                icon = Icons.Outlined.DeleteForever,
-                title = "Factory reset Agentknock",
-                summary = "Erase this Agentknock device identity, secrets, clients, and history",
-                destructive = true,
-                onClick = onFactoryReset,
-            )
-        }
-    }
-    if (confirmClear) {
-        AlertDialog(
-            onDismissRequest = { confirmClear = false },
-            title = { Text("Clear completed requests?") },
-            text = { Text("Pending requests, paired clients, secrets, and the audit log are not removed.") },
-            confirmButton = { TextButton(onClick = { onClearRequests(); confirmClear = false }) { Text("Clear") } },
-            dismissButton = { TextButton(onClick = { confirmClear = false }) { Text("Cancel") } },
-        )
-    }
-}
-
-@Composable
-private fun SettingsInformationRow(
-    icon: ImageVector,
-    title: String,
-    summary: String,
-) {
-    Surface(
-        color = MaterialTheme.colorScheme.surfaceContainerLow,
-        shape = MaterialTheme.shapes.large,
-        modifier = Modifier.fillMaxWidth(),
-    ) {
-        ListItem(
-            headlineContent = { Text(title) },
-            supportingContent = { Text(summary) },
-            leadingContent = { TonalIcon(icon, contentDescription = null) },
-            colors = ListItemDefaults.colors(
-                containerColor = androidx.compose.ui.graphics.Color.Transparent,
-            ),
-        )
-    }
-}
-
-@Composable
-private fun SettingsActionRow(
-    icon: ImageVector,
-    title: String,
-    summary: String,
-    enabled: Boolean = true,
-    destructive: Boolean = false,
-    onClick: () -> Unit,
-) {
-    val contentColor = when {
-        !enabled -> MaterialTheme.colorScheme.onSurface.copy(alpha = 0.38f)
-        destructive -> MaterialTheme.agentknockColors.danger
-        else -> MaterialTheme.colorScheme.primary
-    }
-    Surface(
-        color = MaterialTheme.colorScheme.surfaceContainerLow,
-        shape = MaterialTheme.shapes.large,
-        onClick = onClick,
-        enabled = enabled,
-        modifier = Modifier.fillMaxWidth(),
-    ) {
-        ListItem(
-            headlineContent = { Text(title, color = contentColor) },
-            supportingContent = { Text(summary) },
-            leadingContent = {
-                Icon(icon, contentDescription = null, tint = contentColor)
-            },
-            colors = ListItemDefaults.colors(
-                containerColor = androidx.compose.ui.graphics.Color.Transparent,
-            ),
-        )
-    }
-}
-
-@Composable
-private fun AuditList(
-    events: List<AuditEvent>,
-    selectedEventId: Long?,
-    clientNames: Map<String, String>,
-    onBack: () -> Unit,
-    onOpen: (Long) -> Unit,
-    modifier: Modifier,
-) {
-    Column(modifier) {
-        PageTopBar("Audit log", onBack)
-        if (events.isEmpty()) {
-            Box(Modifier.fillMaxSize(), contentAlignment = Alignment.Center) { Text("No audit events yet") }
-        } else {
-            LazyColumn(
-                contentPadding = PaddingValues(start = 16.dp, end = 16.dp, top = 4.dp, bottom = 16.dp),
-                verticalArrangement = Arrangement.spacedBy(6.dp),
-            ) {
-                items(events, key = AuditEvent::id) { event ->
-                    val selected = event.id == selectedEventId
-                    Surface(
-                        color = if (selected) {
-                            MaterialTheme.colorScheme.secondaryContainer
-                        } else {
-                            MaterialTheme.colorScheme.surfaceContainerLow
-                        },
-                        shape = MaterialTheme.shapes.medium,
-                        onClick = { onOpen(event.id) },
-                        modifier = Modifier.fillMaxWidth().semantics {
-                            this.selected = selected
-                        },
-                    ) {
-                        ListItem(
-                            headlineContent = { Text(event.title) },
-                            supportingContent = {
-                                Column(verticalArrangement = Arrangement.spacedBy(2.dp)) {
-                                    event.clientId?.let(clientNames::get)?.let {
-                                        Text("Client: $it", maxLines = 1, overflow = TextOverflow.Ellipsis)
-                                    }
-                                    event.detail.takeIf(String::isNotBlank)?.let {
-                                        Text(it, maxLines = 1, overflow = TextOverflow.Ellipsis)
-                                    }
-                                    Text(formatTimestamp(event.occurredAt))
-                                }
-                            },
-                            trailingContent = {
-                                Row(
-                                    horizontalArrangement = Arrangement.spacedBy(8.dp),
-                                    verticalAlignment = Alignment.CenterVertically,
-                                ) {
-                                    AuditOutcomeBadge(event.outcome)
-                                    Icon(
-                                        Icons.Outlined.ChevronRight,
-                                        contentDescription = null,
-                                    )
-                                }
-                            },
-                            colors = ListItemDefaults.colors(
-                                containerColor = androidx.compose.ui.graphics.Color.Transparent,
-                            ),
-                        )
-                    }
-                }
-            }
-        }
-    }
-}
-
-@Composable
-private fun AuditDetail(
-    event: AuditEvent,
-    clientName: String?,
     report: (String) -> Unit,
-    onBack: () -> Unit,
-    showBack: Boolean,
     modifier: Modifier,
 ) {
     val context = LocalContext.current
-
-    fun copy(label: String, value: String) {
-        context.getSystemService(ClipboardManager::class.java).setPrimaryClip(
-            ClipData.newPlainText(label, value),
-        )
-        report("$label copied")
+    fun open(label: String, url: String) {
+        runCatching { context.startActivity(Intent(Intent.ACTION_VIEW, Uri.parse(url))) }
+            .onFailure { report("Could not open $label") }
     }
-
     Column(modifier) {
-        PageTopBar("Audit details", onBack, showBack)
-        SelectionContainer {
-            Column(
-                Modifier.verticalScroll(rememberScrollState()).padding(20.dp),
-                verticalArrangement = Arrangement.spacedBy(16.dp),
-            ) {
-                InformationSurface {
-                    Text(event.title, style = MaterialTheme.typography.headlineSmall)
-                    AuditOutcomeBadge(event.outcome)
-                }
-                if (event.detail.isNotBlank()) {
-                    InformationSurface {
-                        Text(
-                            "Details",
-                            style = MaterialTheme.typography.labelMedium,
-                            color = MaterialTheme.colorScheme.onSurfaceVariant,
-                        )
-                        Text(event.detail, style = MaterialTheme.typography.titleMedium)
-                    }
-                }
-                InformationSurface {
-                    InformationRow("Time", formatTimestamp(event.occurredAt))
-                    InformationRow(
-                        "Category",
-                        event.category.displayName,
-                    )
-                    clientName?.let { InformationRow("Client", it) }
-                    event.clientId?.let {
-                        CopyableLabeledValue("Client ID", it) { copy("Client ID", it) }
-                    }
-                    event.relayRequestId?.let {
-                        CopyableLabeledValue("Request ID", it) { copy("Request ID", it) }
-                    }
-                    InformationRow(
-                        "Audit sequence number",
-                        event.id.toString(),
-                        monospace = true,
+        PageTopBar("About", onBack)
+        LazyColumn(contentPadding = PaddingValues(bottom = 16.dp)) {
+            item {
+                Column(
+                    modifier = Modifier.padding(horizontal = 24.dp, vertical = 8.dp),
+                    verticalArrangement = Arrangement.spacedBy(6.dp),
+                ) {
+                    Text("Agentknock", style = MaterialTheme.typography.headlineMedium)
+                    Text(
+                        "Developer secrets stay on this phone and are provided only to approved commands. Agentknock can return environment values or sign Git objects without releasing the private key.",
+                        color = MaterialTheme.colorScheme.onSurfaceVariant,
                     )
                 }
             }
+            item { PreferenceGroupTitle("Links") }
+            item {
+                PreferenceRow(
+                    title = "Website",
+                    summary = "agentknock.dev",
+                    onClick = { open("website", "https://agentknock.dev/") },
+                    external = true,
+                )
+            }
+            item {
+                PreferenceRow(
+                    title = "Privacy notice",
+                    summary = "Privacy information on agentknock.dev",
+                    onClick = { open("privacy notice", "https://agentknock.dev/privacy/") },
+                    external = true,
+                )
+            }
+            item {
+                PreferenceRow(
+                    title = "Source code",
+                    summary = "github.com/agentknock/agentknock-android",
+                    onClick = {
+                        open(
+                            "source code",
+                            "https://github.com/agentknock/agentknock-android",
+                        )
+                    },
+                    external = true,
+                )
+            }
+            item { PreferenceDivider() }
+            item { PreferenceGroupTitle("App information") }
+            item { TechnicalValue("Version", "${BuildConfig.VERSION_NAME} (${BuildConfig.VERSION_CODE})") }
+            item { TechnicalValue("Source revision", BuildConfig.SOURCE_REVISION, monospace = true) }
+            item { TechnicalValue("Developer", "Full Disclosure") }
+            identity?.let { device ->
+                item { TechnicalValue("Device ID", device.deviceId, monospace = true) }
+            }
+            item { TechnicalValue("Relay", "relay.agentknock.dev", monospace = true) }
         }
-    }
-}
-
-@Composable
-private fun CopyableLabeledValue(label: String, value: String, onCopy: () -> Unit) {
-    Row(
-        modifier = Modifier.fillMaxWidth(),
-        verticalAlignment = Alignment.CenterVertically,
-    ) {
-        Box(Modifier.weight(1f)) {
-            LabeledValue(label, value, true)
-        }
-        IconButton(onClick = onCopy) {
-            Icon(Icons.Outlined.ContentCopy, contentDescription = "Copy $label")
-        }
-    }
-}
-
-@Composable
-private fun AuditOutcomeBadge(outcome: AuditOutcome) {
-    val failed = outcome == AuditOutcome.FAILED
-    val rejected = outcome == AuditOutcome.DENIED || outcome == AuditOutcome.REJECTED
-    val positive = outcome == AuditOutcome.APPROVED ||
-        outcome == AuditOutcome.COMPLETED ||
-        outcome == AuditOutcome.CHANGED
-    Surface(
-        color = when {
-            failed -> MaterialTheme.agentknockColors.dangerContainer
-            positive -> MaterialTheme.agentknockColors.successContainer
-            rejected -> MaterialTheme.colorScheme.surfaceContainerHighest
-            else -> MaterialTheme.colorScheme.surfaceContainerHighest
-        },
-        contentColor = when {
-            failed -> MaterialTheme.agentknockColors.onDangerContainer
-            positive -> MaterialTheme.agentknockColors.onSuccessContainer
-            rejected -> MaterialTheme.colorScheme.onSurfaceVariant
-            else -> MaterialTheme.colorScheme.onSurfaceVariant
-        },
-        shape = RoundedCornerShape(100.dp),
-    ) {
-        Text(
-            outcome.storedName.replaceFirstChar(Char::uppercase),
-            style = MaterialTheme.typography.labelSmall,
-            modifier = Modifier.padding(horizontal = 9.dp, vertical = 4.dp),
-        )
     }
 }
 
@@ -1428,10 +703,7 @@ private fun FactoryReset(
                 "If relay deletion cannot be confirmed, nothing is erased unless you explicitly choose a local-only reset. Factory reset does not fix temporary connection problems.",
                 color = MaterialTheme.colorScheme.onSurfaceVariant,
             )
-            Text(
-                "Type RESET AGENTKNOCK to confirm.",
-                style = MaterialTheme.typography.titleMedium,
-            )
+            Text("Type RESET AGENTKNOCK to confirm.", style = MaterialTheme.typography.titleMedium)
             OutlinedTextField(
                 value = phrase,
                 onValueChange = { phrase = it },
@@ -1455,16 +727,16 @@ private fun FactoryReset(
                 ),
             ) {
                 if (working) {
-                    CircularProgressIndicator(
-                        Modifier.size(20.dp),
-                        color = MaterialTheme.colorScheme.onError,
-                    )
+                    CircularProgressIndicator(Modifier.size(20.dp), color = MaterialTheme.colorScheme.onError)
                 } else {
                     Text("Erase and reset Agentknock")
                 }
             }
             if (allowLocalOnly) {
-                Text("Remote deletion was not confirmed. Resetting only this app may leave inaccessible relay state until automatic cleanup.", color = MaterialTheme.colorScheme.error)
+                Text(
+                    "Remote deletion was not confirmed. Resetting only this app may leave inaccessible relay state until automatic cleanup.",
+                    color = MaterialTheme.colorScheme.error,
+                )
                 OutlinedButton(
                     onClick = { start(true) },
                     enabled = !working,
@@ -1476,140 +748,102 @@ private fun FactoryReset(
 }
 
 @Composable
-private fun Diagnostics(
-    syncing: Boolean,
-    result: RequestSyncResult?,
-    onBack: () -> Unit,
-    onReconnect: () -> Unit,
-    report: (String) -> Unit,
-    modifier: Modifier,
+private fun PreferenceRow(
+    title: String,
+    summary: String,
+    onClick: () -> Unit,
+    icon: ImageVector? = null,
+    destructive: Boolean = false,
+    external: Boolean = false,
 ) {
-    val context = LocalContext.current
-    val healthy = result == null || result == RequestSyncResult.Success
-    Column(modifier) {
-        PageTopBar("Connection diagnostics", onBack)
-        Column(
-            Modifier.verticalScroll(rememberScrollState()).padding(20.dp),
-            verticalArrangement = Arrangement.spacedBy(20.dp),
-        ) {
-            Surface(
-                color = if (healthy) {
-                    MaterialTheme.agentknockColors.successContainer
-                } else {
-                    MaterialTheme.agentknockColors.dangerContainer
-                },
-                contentColor = if (healthy) {
-                    MaterialTheme.agentknockColors.onSuccessContainer
-                } else {
-                    MaterialTheme.agentknockColors.onDangerContainer
-                },
-                shape = RoundedCornerShape(12.dp),
-                modifier = Modifier.fillMaxWidth(),
-            ) {
-                Row(
-                    modifier = Modifier.padding(16.dp),
-                    horizontalArrangement = Arrangement.spacedBy(12.dp),
-                    verticalAlignment = Alignment.CenterVertically,
-                ) {
-                    if (healthy && !syncing) {
-                        Icon(Icons.Outlined.CheckCircle, contentDescription = null)
-                    } else if (syncing) {
-                        CircularProgressIndicator(Modifier.size(22.dp), strokeWidth = 2.dp)
-                    } else {
-                        Icon(Icons.Outlined.DataUsage, contentDescription = null)
-                    }
-                    Column {
-                        Text(
-                            when {
-                                syncing -> "Synchronizing"
-                                healthy -> "Connected"
-                                else -> "Temporarily unavailable"
-                            },
-                            style = MaterialTheme.typography.titleMedium,
-                        )
-                        Text(
-                            if (healthy) "Synchronized with the relay" else "Agentknock will keep retrying",
-                            style = MaterialTheme.typography.bodyMedium,
-                        )
-                    }
-                }
-            }
-            val detail = result.diagnosticMessage()
-            if (detail != null) Text(detail, color = MaterialTheme.colorScheme.onSurfaceVariant)
-            OutlinedButton(onClick = onReconnect, enabled = !syncing, modifier = Modifier.fillMaxWidth()) {
-                Icon(Icons.Outlined.Refresh, contentDescription = null)
-                Spacer(Modifier.width(8.dp))
-                Text("Reconnect and sync now")
-            }
-            Text("Technical details", style = MaterialTheme.typography.titleMedium)
-            Surface(
-                color = MaterialTheme.colorScheme.surfaceContainerLow,
-                shape = RoundedCornerShape(12.dp),
-                modifier = Modifier.fillMaxWidth(),
-            ) {
-                Row(
-                    modifier = Modifier.padding(start = 16.dp, end = 4.dp, top = 8.dp, bottom = 8.dp),
-                    verticalAlignment = Alignment.CenterVertically,
-                ) {
-                    SelectionContainer(Modifier.weight(1f)) {
-                        LabeledValue("Relay", "wss://relay.agentknock.dev", true)
-                    }
-                    IconButton(
-                        onClick = {
-                            context.getSystemService(ClipboardManager::class.java).setPrimaryClip(
-                                ClipData.newPlainText(
-                                    "Agentknock relay",
-                                    "wss://relay.agentknock.dev",
-                                ),
-                            )
-                            report("Relay address copied")
-                        },
-                    ) {
-                        Icon(Icons.Outlined.ContentCopy, contentDescription = "Copy relay address")
-                    }
-                }
-            }
-        }
-    }
-}
-
-@Composable
-private fun About(onBack: () -> Unit, report: (String) -> Unit, modifier: Modifier) {
-    val context = LocalContext.current
-    val version = "Version ${BuildConfig.VERSION_NAME} (build ${BuildConfig.VERSION_CODE})"
-    Column(modifier) {
-        PageTopBar("About", onBack)
-        Column(
-            Modifier.verticalScroll(rememberScrollState()).padding(20.dp),
-            verticalArrangement = Arrangement.spacedBy(12.dp),
-        ) {
-            Text("Agentknock", style = MaterialTheme.typography.headlineMedium)
-            Row(
-                modifier = Modifier.fillMaxWidth(),
-                verticalAlignment = Alignment.CenterVertically,
-            ) {
-                Text(version, modifier = Modifier.weight(1f))
-                IconButton(
-                    onClick = {
-                        context.getSystemService(ClipboardManager::class.java).setPrimaryClip(
-                            ClipData.newPlainText("Agentknock version", version),
-                        )
-                        report("Version copied")
-                    },
-                ) {
-                    Icon(Icons.Outlined.ContentCopy, contentDescription = "Copy version")
-                }
-            }
-            Text(
-                "Stored values and device identity keys are protected on this device. Secret use responses are encrypted end to end for the paired client. The relay routes ciphertext and generic wake signals.",
+    val accent = if (destructive) MaterialTheme.agentknockColors.danger else MaterialTheme.colorScheme.primary
+    ListItem(
+        headlineContent = { Text(title, color = if (destructive) accent else Color.Unspecified) },
+        supportingContent = { Text(summary) },
+        leadingContent = icon?.let { image ->
+            { Icon(image, contentDescription = null, tint = accent) }
+        },
+        trailingContent = {
+            Icon(
+                if (external) Icons.AutoMirrored.Outlined.Launch else Icons.Outlined.ChevronRight,
+                contentDescription = null,
             )
-            Text("Made by Full Disclosure", color = MaterialTheme.colorScheme.onSurfaceVariant)
-        }
+        },
+        colors = ListItemDefaults.colors(containerColor = Color.Transparent),
+        modifier = Modifier.fillMaxWidth().clickable(onClick = onClick),
+    )
+}
+
+@Composable
+private fun InformationPreference(
+    icon: ImageVector,
+    title: String,
+    summary: String,
+    warning: Boolean = false,
+) {
+    ListItem(
+        headlineContent = { Text(title) },
+        supportingContent = { Text(summary) },
+        leadingContent = {
+            Icon(
+                icon,
+                contentDescription = null,
+                tint = if (warning) MaterialTheme.colorScheme.error else MaterialTheme.colorScheme.primary,
+            )
+        },
+        colors = ListItemDefaults.colors(containerColor = Color.Transparent),
+    )
+}
+
+@Composable
+private fun PreferenceGroupTitle(title: String) {
+    Text(
+        title,
+        style = MaterialTheme.typography.labelLarge,
+        color = MaterialTheme.colorScheme.primary,
+        modifier = Modifier.padding(start = 24.dp, end = 24.dp, top = 16.dp, bottom = 6.dp),
+    )
+}
+
+@Composable
+private fun PreferenceText(text: String) {
+    Text(
+        text,
+        style = MaterialTheme.typography.bodySmall,
+        color = MaterialTheme.colorScheme.onSurfaceVariant,
+        modifier = Modifier.padding(horizontal = 24.dp, vertical = 6.dp),
+    )
+}
+
+@Composable
+private fun PreferenceDivider() {
+    HorizontalDivider(Modifier.padding(top = 8.dp), color = MaterialTheme.colorScheme.outlineVariant)
+}
+
+@Composable
+private fun TechnicalValue(label: String, value: String, monospace: Boolean = false) {
+    Row(
+        modifier = Modifier.fillMaxWidth().padding(horizontal = 24.dp, vertical = 7.dp),
+        horizontalArrangement = Arrangement.spacedBy(16.dp),
+        verticalAlignment = Alignment.Top,
+    ) {
+        Text(
+            label,
+            style = MaterialTheme.typography.bodyMedium,
+            color = MaterialTheme.colorScheme.onSurfaceVariant,
+            modifier = Modifier.width(120.dp),
+        )
+        Text(
+            value,
+            style = MaterialTheme.typography.bodyMedium,
+            fontFamily = if (monospace) FontFamily.Monospace else null,
+            modifier = Modifier.weight(1f),
+        )
     }
 }
 
 @Composable
-private fun PageTopBar(title: String, onBack: () -> Unit, showBack: Boolean = true) {
+internal fun PageTopBar(title: String, onBack: () -> Unit, showBack: Boolean = true) {
     TopAppBar(
         title = { Text(title, maxLines = 1, overflow = TextOverflow.Ellipsis) },
         navigationIcon = {
@@ -1622,34 +856,72 @@ private fun PageTopBar(title: String, onBack: () -> Unit, showBack: Boolean = tr
     )
 }
 
-@Composable
-private fun LabeledValue(label: String, value: String, monospace: Boolean = false) {
-    Column {
-        Text(label, style = MaterialTheme.typography.labelMedium, color = MaterialTheme.colorScheme.onSurfaceVariant)
-        Text(value, fontFamily = if (monospace) FontFamily.Monospace else null)
-    }
+private data class StatusStyle(
+    val title: String,
+    val detail: String,
+    val container: Color,
+    val content: Color,
+)
+
+private fun EncryptionKeyBacking.isHardwareBacked(): Boolean = when (this) {
+    EncryptionKeyBacking.STRONGBOX,
+    EncryptionKeyBacking.TRUSTED_ENVIRONMENT,
+    EncryptionKeyBacking.UNKNOWN_SECURE,
+    -> true
+    EncryptionKeyBacking.SOFTWARE,
+    EncryptionKeyBacking.UNKNOWN,
+    -> false
 }
 
-private fun DeviceManagementResult.message(enabled: Boolean): String = when (this) {
-    DeviceManagementResult.Changed -> if (enabled) "New pairings resumed" else "New pairings paused"
-    DeviceManagementResult.NoDevice -> "Device setup is incomplete"
-    DeviceManagementResult.CredentialsUnavailable -> "Device keys are unavailable"
-    DeviceManagementResult.CredentialsCorrupted -> "Device keys could not be verified"
-    DeviceManagementResult.UnsupportedEncryption -> "Device keys use unsupported encryption"
-    is DeviceManagementResult.Rejected -> message ?: "The relay rejected the change"
-    is DeviceManagementResult.Unavailable -> message ?: "The relay is unavailable"
-    DeviceManagementResult.InvalidResponse -> "The relay returned an invalid response"
+private fun VaultProtection?.keyStorageDescription(): String = when (this) {
+    null -> "Checking this device…"
+    is VaultProtection.Available -> backings.values.distinct().let { kinds ->
+        if (kinds.size != 1) {
+            "Mixed Android Keystore protection"
+        } else {
+            when (kinds.single()) {
+                EncryptionKeyBacking.STRONGBOX -> "Android StrongBox"
+                EncryptionKeyBacking.TRUSTED_ENVIRONMENT -> "Trusted execution environment"
+                EncryptionKeyBacking.SOFTWARE -> "Android Keystore, software-backed"
+                EncryptionKeyBacking.UNKNOWN_SECURE -> "Secure hardware"
+                EncryptionKeyBacking.UNKNOWN -> "Android Keystore, backing not reported"
+            }
+        }
+    }
+    is VaultProtection.KeyUnavailable -> "Key unavailable on this device"
+    VaultProtection.Unknown -> "Android Keystore, protection not reported"
+}
+
+private fun VaultProtection?.overviewDescription(): String = when (this) {
+    null -> "Checking encryption"
+    is VaultProtection.Available -> if (backings.values.all(EncryptionKeyBacking::isHardwareBacked)) {
+        "Hardware-backed encryption"
+    } else {
+        "Android Keystore encryption"
+    }
+    is VaultProtection.KeyUnavailable -> "Encryption key unavailable"
+    VaultProtection.Unknown -> "Encryption status unknown"
+}
+
+private fun DeviceAuthenticationMode.displayLabel(): String = when (this) {
+    DeviceAuthenticationMode.DEVICE_LOCK -> "Rely on device lock"
+    DeviceAuthenticationMode.SENSITIVE_VALUES_AND_PAIRING -> "Sensitive values and pairing"
+    DeviceAuthenticationMode.APP_LOCK -> "Lock Agentknock"
+}
+
+private fun DeviceAuthenticationMode.overviewLabel(): String = when (this) {
+    DeviceAuthenticationMode.DEVICE_LOCK -> "Device lock"
+    DeviceAuthenticationMode.SENSITIVE_VALUES_AND_PAIRING -> "Protected values and pairing"
+    DeviceAuthenticationMode.APP_LOCK -> "App lock"
+}
+
+private fun DeviceAuthenticationMode.explanation(): String = when (this) {
+    DeviceAuthenticationMode.DEVICE_LOCK ->
+        "No additional Agentknock prompts. Review and destructive confirmations still apply."
+    DeviceAuthenticationMode.SENSITIVE_VALUES_AND_PAIRING ->
+        "Authenticate before showing, copying, or editing sensitive values, weakening their protection, or accepting a new client."
+    DeviceAuthenticationMode.APP_LOCK ->
+        "Authenticate before any Agentknock content is shown. One unlock lasts for the foreground session."
 }
 
 private fun Int.countLabel(noun: String): String = "$this $noun${if (this == 1) "" else "s"}"
-
-private fun RequestSyncResult?.diagnosticMessage(): String? = when (this) {
-    null, RequestSyncResult.Success -> null
-    RequestSyncResult.NoDevice -> "Device setup is incomplete."
-    RequestSyncResult.DeviceCredentialsUnavailable -> "Device keys are unavailable on this device."
-    RequestSyncResult.DeviceCredentialsCorrupted -> "Device keys could not be verified."
-    RequestSyncResult.UnsupportedDeviceCredentialEncryption -> "Device keys use unsupported encryption."
-    is RequestSyncResult.RelayRejected -> message ?: "The relay rejected the connection."
-    is RequestSyncResult.RelayUnavailable -> message ?: "The relay could not be reached."
-    RequestSyncResult.InvalidRelayResponse -> "The relay returned an invalid response."
-}

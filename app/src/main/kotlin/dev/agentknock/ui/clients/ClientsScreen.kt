@@ -86,6 +86,7 @@ import dev.agentknock.storage.request.InboxRequestState
 import dev.agentknock.storage.request.InboxRequestSummary
 import dev.agentknock.storage.request.PairingState
 import dev.agentknock.storage.vault.DeviceIdentity
+import dev.agentknock.storage.vault.DeviceManagementResult
 import dev.agentknock.storage.secret.TemporaryAccessGrant
 import dev.agentknock.storage.secret.TemporaryAccessOperation
 import dev.agentknock.ui.components.InformationRow
@@ -100,6 +101,7 @@ import kotlinx.coroutines.launch
 internal fun ClientsScreen(
     authorizeProtectedAction: (String, () -> Unit, (String) -> Unit) -> Unit,
     onOpenSettings: () -> Unit,
+    onChangePairingAddress: () -> Unit,
     onTopLevelChanged: (Boolean) -> Unit,
     viewModel: ClientsViewModel = viewModel(),
 ) {
@@ -152,6 +154,10 @@ internal fun ClientsScreen(
                         identity = configuration?.active,
                         onOpen = viewModel::selectClient,
                         onOpenPairing = viewModel::selectPairing,
+                        onChangePairingAddress = onChangePairingAddress,
+                        onSetPairingEnabled = { enabled ->
+                            scope.launch { report(viewModel.setPairingEnabled(enabled).message(enabled)) }
+                        },
                         onOpenSettings = onOpenSettings,
                         report = ::report,
                         modifier = Modifier.width(340.dp).fillMaxHeight(),
@@ -190,6 +196,10 @@ internal fun ClientsScreen(
                     identity = configuration?.active,
                     onOpen = viewModel::selectClient,
                     onOpenPairing = viewModel::selectPairing,
+                    onChangePairingAddress = onChangePairingAddress,
+                    onSetPairingEnabled = { enabled ->
+                        scope.launch { report(viewModel.setPairingEnabled(enabled).message(enabled)) }
+                    },
                     onOpenSettings = onOpenSettings,
                     report = ::report,
                     modifier = Modifier.fillMaxSize(),
@@ -368,6 +378,8 @@ private fun ClientList(
     identity: DeviceIdentity?,
     onOpen: (String) -> Unit,
     onOpenPairing: (Long) -> Unit,
+    onChangePairingAddress: () -> Unit,
+    onSetPairingEnabled: (Boolean) -> Unit,
     onOpenSettings: () -> Unit,
     report: (String) -> Unit,
     modifier: Modifier = Modifier,
@@ -385,6 +397,15 @@ private fun ClientList(
                 }
             },
         )
+        identity?.let {
+            PairingControls(
+                identity = it,
+                onChangePairingAddress = onChangePairingAddress,
+                onSetPairingEnabled = onSetPairingEnabled,
+                report = report,
+            )
+            HorizontalDivider()
+        }
         if (clients.isEmpty() && pendingPairings.isEmpty()) {
             Box(Modifier.fillMaxSize(), contentAlignment = Alignment.Center) {
                 Column(
@@ -398,7 +419,7 @@ private fun ClientList(
                             if (it.pairingEnabled) {
                                 "Run this command on the machine you want to pair."
                             } else {
-                                "New pairings are paused. Resume them in Device & pairing."
+                                "New pairings are paused. Resume them above to pair a client."
                             },
                             color = MaterialTheme.colorScheme.onSurfaceVariant,
                             modifier = Modifier.padding(top = 12.dp),
@@ -588,6 +609,57 @@ private fun ClientList(
                     }
                 }
             }
+        }
+    }
+}
+
+@Composable
+private fun PairingControls(
+    identity: DeviceIdentity,
+    onChangePairingAddress: () -> Unit,
+    onSetPairingEnabled: (Boolean) -> Unit,
+    report: (String) -> Unit,
+) {
+    val context = LocalContext.current
+    Row(
+        modifier = Modifier.fillMaxWidth().padding(start = 16.dp, end = 4.dp, top = 6.dp, bottom = 6.dp),
+        horizontalArrangement = Arrangement.spacedBy(2.dp),
+        verticalAlignment = Alignment.CenterVertically,
+    ) {
+        Column(
+            modifier = Modifier.weight(1f).clickable {
+                context.getSystemService(ClipboardManager::class.java).setPrimaryClip(
+                    ClipData.newPlainText("Agentknock pairing address", identity.address),
+                )
+                report("Pairing address copied")
+            }.padding(vertical = 6.dp),
+            verticalArrangement = Arrangement.spacedBy(1.dp),
+        ) {
+            Text(
+                if (identity.pairingEnabled) "Pairing address" else "Pairing address · paused",
+                style = MaterialTheme.typography.labelMedium,
+                color = if (identity.pairingEnabled) {
+                    MaterialTheme.colorScheme.onSurfaceVariant
+                } else {
+                    MaterialTheme.colorScheme.tertiary
+                },
+            )
+            Text(
+                identity.address,
+                style = MaterialTheme.typography.bodyLarge,
+                fontFamily = FontFamily.Monospace,
+                maxLines = 1,
+                overflow = TextOverflow.Ellipsis,
+            )
+        }
+        IconButton(onClick = onChangePairingAddress) {
+            Icon(Icons.Outlined.Edit, contentDescription = "Change pairing address")
+        }
+        IconButton(onClick = { onSetPairingEnabled(!identity.pairingEnabled) }) {
+            Icon(
+                if (identity.pairingEnabled) Icons.Outlined.PauseCircle else Icons.Outlined.PlayCircle,
+                contentDescription = if (identity.pairingEnabled) "Pause new pairings" else "Resume new pairings",
+            )
         }
     }
 }
@@ -1091,4 +1163,15 @@ private fun RelayClientState.successMessage(): String = when (this) {
 private fun TemporaryAccessOperation.displayName(): String = when (this) {
     TemporaryAccessOperation.INVOCATION -> "Environment values for any command"
     TemporaryAccessOperation.GIT_SIGN -> "Git signing for any repository"
+}
+
+private fun DeviceManagementResult.message(enabled: Boolean): String = when (this) {
+    DeviceManagementResult.Changed -> if (enabled) "New pairings resumed" else "New pairings paused"
+    DeviceManagementResult.NoDevice -> "Device setup is incomplete"
+    DeviceManagementResult.CredentialsUnavailable -> "Device keys are unavailable"
+    DeviceManagementResult.CredentialsCorrupted -> "Device keys could not be verified"
+    DeviceManagementResult.UnsupportedEncryption -> "Device keys use unsupported encryption"
+    is DeviceManagementResult.Rejected -> message ?: "The relay rejected the change"
+    is DeviceManagementResult.Unavailable -> message ?: "The relay is unavailable"
+    DeviceManagementResult.InvalidResponse -> "The relay returned an invalid response"
 }

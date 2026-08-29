@@ -2,6 +2,8 @@
 
 package dev.agentknock.ui.settings
 
+import android.content.Intent
+import android.net.Uri
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.Row
@@ -13,8 +15,9 @@ import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.verticalScroll
 import androidx.compose.material.icons.Icons
-import androidx.compose.material.icons.automirrored.outlined.ArrowBack
+import androidx.compose.material.icons.automirrored.outlined.Launch
 import androidx.compose.material.icons.outlined.AutoAwesome
+import androidx.compose.material.icons.outlined.Check
 import androidx.compose.material.icons.outlined.CheckCircle
 import androidx.compose.material.icons.outlined.CloudOff
 import androidx.compose.material.icons.outlined.Refresh
@@ -22,80 +25,100 @@ import androidx.compose.material.icons.outlined.WorkspacePremium
 import androidx.compose.material3.Button
 import androidx.compose.material3.CircularProgressIndicator
 import androidx.compose.material3.Icon
-import androidx.compose.material3.IconButton
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.OutlinedButton
 import androidx.compose.material3.Surface
 import androidx.compose.material3.Text
-import androidx.compose.material3.TopAppBar
 import androidx.compose.runtime.Composable
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
-import androidx.compose.ui.graphics.Color
+import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.semantics.heading
 import androidx.compose.ui.semantics.semantics
 import androidx.compose.ui.unit.dp
-import dev.agentknock.ui.components.InformationRow
-import dev.agentknock.ui.components.InformationSurface
 import dev.agentknock.ui.theme.agentknockColors
 
 @Composable
-internal fun PlanAndBillingScreen(
+internal fun SubscriptionAndBillingScreen(
     state: SubscriptionUiState,
     onBack: () -> Unit,
     onRefresh: () -> Unit,
     modifier: Modifier = Modifier,
 ) {
+    val context = LocalContext.current
+    val active = state.access == SubscriptionAccess.ACTIVE
     Column(modifier) {
-        TopAppBar(
-            title = { Text("Plan and billing") },
-            navigationIcon = {
-                IconButton(onClick = onBack) {
-                    Icon(Icons.AutoMirrored.Outlined.ArrowBack, contentDescription = "Back")
-                }
-            },
-        )
+        PageTopBar("Subscription & billing", onBack)
         Column(
-            Modifier
-                .fillMaxSize()
-                .verticalScroll(rememberScrollState())
-                .padding(20.dp),
-            verticalArrangement = Arrangement.spacedBy(20.dp),
+            Modifier.fillMaxSize().verticalScroll(rememberScrollState()).padding(20.dp),
+            verticalArrangement = Arrangement.spacedBy(16.dp),
         ) {
-            state.notice?.let { notice ->
-                SubscriptionNoticeSurface(notice)
-            }
-            SubscriptionStatusSurface(state)
-            InformationSurface {
-                Text("Access", style = MaterialTheme.typography.titleMedium)
-                InformationRow("Secret storage and release", "Included")
-                InformationRow("Manual and automatic approvals", "Included")
-                InformationRow(
-                    "AI review",
-                    if (state.access == SubscriptionAccess.ACTIVE) "Active" else "Not active",
-                )
-            }
+            state.notice?.let { SubscriptionNoticeSurface(it) }
+
             Text(
-                "Ask AI sends request and secret metadata to Agentknock's AI reviewer. " +
-                    "Secret values and private keys are never sent for AI review.",
+                "Agentknock's core features are free. A subscription adds AI review to the approval choices already available on your device.",
                 color = MaterialTheme.colorScheme.onSurfaceVariant,
             )
-            if (state.access != SubscriptionAccess.ACTIVE) {
-                Button(
-                    onClick = {},
-                    enabled = false,
+
+            AccessCard(
+                title = "Included for everyone",
+                status = "Always free",
+                highlighted = false,
+            ) {
+                IncludedFeature("Store and release secrets")
+                IncludedFeature("Manual approvals")
+                IncludedFeature("Temporary approvals")
+            }
+
+            AccessCard(
+                title = "AI review",
+                status = when (state.access) {
+                    SubscriptionAccess.ACTIVE -> "Active"
+                    SubscriptionAccess.CHECKING -> "Checking"
+                    SubscriptionAccess.FREE -> "Not active"
+                    SubscriptionAccess.UNAVAILABLE -> "Status unavailable"
+                },
+                highlighted = active,
+                warning = state.access == SubscriptionAccess.UNAVAILABLE,
+            ) {
+                Text(
+                    "Ask AI can approve, deny, or leave a request for you to decide. Secret values and private keys are never sent for review.",
+                    style = MaterialTheme.typography.bodyMedium,
+                    color = MaterialTheme.colorScheme.onSurfaceVariant,
+                )
+            }
+
+            if (active) {
+                OutlinedButton(
+                    onClick = {
+                        context.startActivity(
+                            Intent(
+                                Intent.ACTION_VIEW,
+                                Uri.parse(
+                                    "https://play.google.com/store/account/subscriptions?package=${context.packageName}",
+                                ),
+                            ),
+                        )
+                    },
                     modifier = Modifier.fillMaxWidth(),
                 ) {
+                    Icon(Icons.AutoMirrored.Outlined.Launch, contentDescription = null)
+                    Spacer(Modifier.size(8.dp))
+                    Text("Manage subscription in Google Play")
+                }
+            } else {
+                Button(onClick = {}, enabled = false, modifier = Modifier.fillMaxWidth()) {
                     Icon(Icons.Outlined.WorkspacePremium, contentDescription = null)
                     Spacer(Modifier.size(8.dp))
                     Text("Subscribe with Google Play")
                 }
                 Text(
                     "Google Play subscriptions are not available yet.",
+                    style = MaterialTheme.typography.bodySmall,
                     color = MaterialTheme.colorScheme.onSurfaceVariant,
-                    style = MaterialTheme.typography.bodyMedium,
                 )
             }
+
             OutlinedButton(
                 onClick = onRefresh,
                 enabled = !state.refreshing && !state.redeeming,
@@ -114,58 +137,61 @@ internal fun PlanAndBillingScreen(
 }
 
 @Composable
-private fun SubscriptionStatusSurface(state: SubscriptionUiState) {
-    val presentation = when (state.access) {
-        SubscriptionAccess.CHECKING -> StatusPresentation(
-            title = "Checking subscription",
-            detail = "Contacting the relay…",
-            container = MaterialTheme.colorScheme.surfaceContainerHigh,
-            content = MaterialTheme.colorScheme.onSurface,
-            icon = { CircularProgressIndicator(Modifier.size(24.dp), strokeWidth = 2.dp) },
-        )
-        SubscriptionAccess.FREE -> StatusPresentation(
-            title = "Free",
-            detail = "All core Agentknock features are available. AI review is not active.",
-            container = MaterialTheme.colorScheme.surfaceContainerHigh,
-            content = MaterialTheme.colorScheme.onSurface,
-            icon = { Icon(Icons.Outlined.AutoAwesome, contentDescription = null) },
-        )
-        SubscriptionAccess.ACTIVE -> StatusPresentation(
-            title = "AI review active",
-            detail = "Secrets set to Ask AI can use the Agentknock reviewer.",
-            container = MaterialTheme.agentknockColors.successContainer,
-            content = MaterialTheme.agentknockColors.onSuccessContainer,
-            icon = { Icon(Icons.Outlined.CheckCircle, contentDescription = null) },
-        )
-        SubscriptionAccess.UNAVAILABLE -> StatusPresentation(
-            title = "Subscription status unavailable",
-            detail = "Agentknock could not check the current status. Try again shortly.",
-            container = MaterialTheme.agentknockColors.attentionContainer,
-            content = MaterialTheme.agentknockColors.onAttentionContainer,
-            icon = { Icon(Icons.Outlined.CloudOff, contentDescription = null) },
-        )
+private fun AccessCard(
+    title: String,
+    status: String,
+    highlighted: Boolean,
+    warning: Boolean = false,
+    content: @Composable () -> Unit,
+) {
+    val container = when {
+        warning -> MaterialTheme.agentknockColors.attentionContainer
+        highlighted -> MaterialTheme.agentknockColors.successContainer
+        else -> MaterialTheme.colorScheme.surfaceContainerLow
+    }
+    val contentColor = when {
+        warning -> MaterialTheme.agentknockColors.onAttentionContainer
+        highlighted -> MaterialTheme.agentknockColors.onSuccessContainer
+        else -> MaterialTheme.colorScheme.onSurface
     }
     Surface(
-        color = presentation.container,
-        contentColor = presentation.content,
+        color = container,
+        contentColor = contentColor,
         shape = MaterialTheme.shapes.large,
         modifier = Modifier.fillMaxWidth(),
     ) {
-        Row(
+        Column(
             modifier = Modifier.padding(18.dp),
-            horizontalArrangement = Arrangement.spacedBy(14.dp),
-            verticalAlignment = Alignment.CenterVertically,
+            verticalArrangement = Arrangement.spacedBy(10.dp),
         ) {
-            presentation.icon()
-            Column(verticalArrangement = Arrangement.spacedBy(3.dp)) {
-                Text(
-                    presentation.title,
-                    style = MaterialTheme.typography.titleLarge,
-                    modifier = Modifier.semantics { heading() },
+            Row(
+                horizontalArrangement = Arrangement.spacedBy(12.dp),
+                verticalAlignment = Alignment.CenterVertically,
+            ) {
+                Icon(
+                    if (title == "AI review") Icons.Outlined.AutoAwesome else Icons.Outlined.CheckCircle,
+                    contentDescription = null,
                 )
-                Text(presentation.detail, style = MaterialTheme.typography.bodyMedium)
+                Column(Modifier.weight(1f)) {
+                    Text(
+                        title,
+                        style = MaterialTheme.typography.titleLarge,
+                        modifier = Modifier.semantics { heading() },
+                    )
+                    Text(status, style = MaterialTheme.typography.labelLarge)
+                }
+                if (warning) Icon(Icons.Outlined.CloudOff, contentDescription = null)
             }
+            content()
         }
+    }
+}
+
+@Composable
+private fun IncludedFeature(text: String) {
+    Row(horizontalArrangement = Arrangement.spacedBy(10.dp), verticalAlignment = Alignment.CenterVertically) {
+        Icon(Icons.Outlined.Check, contentDescription = null, modifier = Modifier.size(18.dp))
+        Text(text, style = MaterialTheme.typography.bodyMedium)
     }
 }
 
@@ -185,18 +211,6 @@ private fun SubscriptionNoticeSurface(notice: SubscriptionNotice) {
         shape = MaterialTheme.shapes.large,
         modifier = Modifier.fillMaxWidth(),
     ) {
-        Text(
-            notice.message,
-            style = MaterialTheme.typography.titleMedium,
-            modifier = Modifier.padding(16.dp),
-        )
+        Text(notice.message, style = MaterialTheme.typography.titleMedium, modifier = Modifier.padding(16.dp))
     }
 }
-
-private data class StatusPresentation(
-    val title: String,
-    val detail: String,
-    val container: Color,
-    val content: Color,
-    val icon: @Composable () -> Unit,
-)

@@ -1,1 +1,1 @@
-Polish screen hierarchy and wording across Agentknock, improve pairing guidance and client details, and make Git signing requests show the commit or tag message at a glance.
+Make Settings feel native to Android, move pairing controls to Clients and AI instructions to Secrets, clarify security and backup behavior, separate quiet background notifications from approval alerts, and improve subscription and audit screens.

@@ -9,6 +9,7 @@ agentknock_password_file="${agentknock_credentials_dir}/upload-keystore.password
 export AGENTKNOCK_PLAY_CREDENTIALS_FILE="${agentknock_credentials_dir}/play-publisher.json"
 export AGENTKNOCK_UPLOAD_STORE_FILE="${agentknock_credentials_dir}/upload-keystore.p12"
 export AGENTKNOCK_UPLOAD_KEY_ALIAS="agentknock-upload"
+export AGENTKNOCK_SOURCE_REVISION="$(git -C "${agentknock_project_dir}" rev-parse --short=12 HEAD)"
 
 for agentknock_required_file in \
     "${AGENTKNOCK_PLAY_CREDENTIALS_FILE}" \

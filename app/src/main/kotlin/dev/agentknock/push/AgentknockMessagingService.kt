@@ -176,27 +176,42 @@ internal object RequestNotifications {
     const val APPROVE_DECISION = "approve"
     const val DENY_DECISION = "deny"
 
-    private const val CHANNEL_ID = "requests"
+    const val ACTION_CHANNEL_ID = "requests"
+    const val BACKGROUND_CHANNEL_ID = "background_processing"
     private const val WAKE_NOTIFICATION_ID = 1
     private const val REQUEST_NOTIFICATION_ID_BASE = 10_000
 
     fun createChannel(context: Context) {
-        val channel = NotificationChannel(
-            CHANNEL_ID,
+        val actionChannel = NotificationChannel(
+            ACTION_CHANNEL_ID,
             context.getString(R.string.request_notification_channel),
             NotificationManager.IMPORTANCE_HIGH,
         ).apply {
             description = context.getString(R.string.request_notification_channel_description)
             lockscreenVisibility = Notification.VISIBILITY_PUBLIC
         }
-        context.getSystemService(NotificationManager::class.java)
-            .createNotificationChannel(channel)
+        val backgroundChannel = NotificationChannel(
+            BACKGROUND_CHANNEL_ID,
+            context.getString(R.string.background_notification_channel),
+            NotificationManager.IMPORTANCE_MIN,
+        ).apply {
+            description = context.getString(R.string.background_notification_channel_description)
+            lockscreenVisibility = Notification.VISIBILITY_SECRET
+            setSound(null, null)
+            enableVibration(false)
+        }
+        context.getSystemService(NotificationManager::class.java).createNotificationChannels(
+            listOf(actionChannel, backgroundChannel),
+        )
     }
 
-    fun areEnabled(context: Context): Boolean {
+    fun appNotificationsEnabled(context: Context): Boolean =
+        context.getSystemService(NotificationManager::class.java).areNotificationsEnabled()
+
+    fun actionNotificationsEnabled(context: Context): Boolean {
         val manager = context.getSystemService(NotificationManager::class.java)
         return manager.areNotificationsEnabled() &&
-            manager.getNotificationChannel(CHANNEL_ID)?.importance != NotificationManager.IMPORTANCE_NONE
+            manager.getNotificationChannel(ACTION_CHANNEL_ID)?.importance != NotificationManager.IMPORTANCE_NONE
     }
 
     fun showWake(context: Context) {
@@ -216,15 +231,16 @@ internal object RequestNotifications {
             },
             PendingIntent.FLAG_UPDATE_CURRENT or PendingIntent.FLAG_IMMUTABLE,
         )
-        val notification = Notification.Builder(context, CHANNEL_ID)
+        val notification = Notification.Builder(context, BACKGROUND_CHANNEL_ID)
             .setSmallIcon(R.drawable.ic_notification)
             .setColor(context.getColor(R.color.notification_accent))
             .setContentTitle(context.getString(R.string.app_name))
             .setContentText(context.getString(R.string.request_waiting))
             .setContentIntent(openApp)
             .setAutoCancel(true)
-            .setCategory(Notification.CATEGORY_MESSAGE)
-            .setVisibility(Notification.VISIBILITY_PUBLIC)
+            .setOnlyAlertOnce(true)
+            .setCategory(Notification.CATEGORY_SERVICE)
+            .setVisibility(Notification.VISIBILITY_SECRET)
             .build()
         context.getSystemService(NotificationManager::class.java)
             .notify(WAKE_NOTIFICATION_ID, notification)
@@ -249,7 +265,7 @@ internal object RequestNotifications {
                 },
                 PendingIntent.FLAG_UPDATE_CURRENT or PendingIntent.FLAG_IMMUTABLE,
             )
-            val publicVersion = Notification.Builder(context, CHANNEL_ID)
+            val publicVersion = Notification.Builder(context, ACTION_CHANNEL_ID)
                 .setSmallIcon(R.drawable.ic_notification)
                 .setColor(context.getColor(R.color.notification_accent))
                 .setContentTitle(context.getString(R.string.app_name))
@@ -257,7 +273,7 @@ internal object RequestNotifications {
                 .setContentIntent(openRequest)
                 .setCategory(Notification.CATEGORY_MESSAGE)
                 .build()
-            val builder = Notification.Builder(context, CHANNEL_ID)
+            val builder = Notification.Builder(context, ACTION_CHANNEL_ID)
                 .setSmallIcon(R.drawable.ic_notification)
                 .setColor(context.getColor(R.color.notification_accent))
                 .setContentTitle(request.title)
@@ -337,7 +353,7 @@ internal object RequestNotifications {
             }
         }
 
-    private fun canNotify(context: Context): Boolean = areEnabled(context) &&
+    private fun canNotify(context: Context): Boolean = actionNotificationsEnabled(context) &&
         (
             Build.VERSION.SDK_INT < Build.VERSION_CODES.TIRAMISU ||
                 context.checkSelfPermission(android.Manifest.permission.POST_NOTIFICATIONS) ==

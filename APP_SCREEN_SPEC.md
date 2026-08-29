@@ -145,9 +145,9 @@ an everyday task. The primary destinations should therefore be:
 3. **Clients** — active, suspended, and previously paired CLI installations.
 
 Settings remains a secondary destination rather than a primary domain.
-Device and pairing management belongs there and is linked contextually from
-pairing empty states. The navigation hierarchy stays the same across phone and
-tablet layouts even when its visual presentation adapts.
+Pairing is part of the client lifecycle, so pairing controls and pending
+pairings belong in Clients. The navigation hierarchy stays the same across
+phone and tablet layouts even when its visual presentation adapts.
 
 ### Navigation tree
 
@@ -171,26 +171,22 @@ Main application
 │   ├── AWS configuration editor
 │   └── SSH key action editors
 ├── Clients
+│   ├── Pairing address and new-pairing controls
 │   ├── Pending pairing review
 │   └── Client detail
 │       └── Reauthorization flow
 └── Settings
-    ├── Device & pairing
-    ├── Notifications
-    ├── Security
-    ├── AI review
-    ├── Data and history
-    │   ├── Audit log
-    │   │   └── Audit event detail
+    ├── Security & backup
     │   └── Factory reset Agentknock
-    ├── Connection diagnostics
-    ├── Plan and billing
-    ├── Help
-    └── About, privacy, and licenses
+    ├── Notifications
+    ├── Subscription & billing
+    ├── Audit log
+    │   └── Audit event detail
+    └── About
 ```
 
 Each secret owns its default approval mode and optional per-client overrides.
-General AI review instructions live in Settings; more specific instructions
+General AI review instructions live at the top of Secrets; more specific instructions
 live on the relevant client and secret.
 
 ### Application-wide exceptional state
@@ -202,8 +198,8 @@ Every main destination shares the following application-level behavior:
 
 - Normal connectivity is silent. When connection state materially affects the
   current screen, a small status icon may indicate synchronizing, offline, or
-  attention required and link to Connection diagnostics. The icon has an
-  accessible text description but need not consume a labeled row or banner.
+  attention required. It exposes a concise explanation and a relevant retry or
+  repair action without shifting the surrounding layout.
 - An actionable, non-modal banner appears when device keys are unavailable,
   notifications that the user expects are not deliverable, a client has a
   security warning,
@@ -326,7 +322,7 @@ device-bound private keys are unavailable.
 - **Set up this device again** as the main recovery action.
 - After replacement, a checklist to replace unavailable environment variables and SSH
   keys, reconfigure affected credential issuers, and pair clients again.
-- A link to Data and history explaining backup behavior.
+- A link to Security & backup explaining backup behavior.
 
 This state must not hide the main application. Requests and metadata remain
 readable; secrets with unavailable material are marked in place. Secret
@@ -608,8 +604,8 @@ are labeled; individual unchanged fields need not occupy the primary summary.
 ## Audit log
 
 The Audit log answers “what happened?” independently of whether an operation
-required authorization. It is a secondary, security-oriented screen under
-**Settings > Data and history**, not another primary navigation destination.
+required authorization. It is a first-level Settings destination, not another
+primary navigation destination.
 
 Requests and audit events are separate records. One request produces several
 audit events as it moves through receipt, decision, response, and confirmed or
@@ -618,7 +614,7 @@ events without creating a request row.
 
 ### L-01 — Audit log list
 
-**Surface:** List screen under Data and history.
+**Surface:** List screen opened directly from Settings.
 
 **Purpose:** Present a chronological record of security-relevant client,
 device, user, approval-setting, and AI-review activity.
@@ -639,9 +635,8 @@ Record at least:
 - security-relevant authentication, cryptographic, and protocol failures.
 
 Do not treat routine connection changes, screen navigation, rate or capacity
-backoff, or diagnostic messages as audit events. Connection and retry history
-belongs in Connection diagnostics. The Audit log records product and security
-actions, not internal events.
+backoff, or diagnostic messages as audit events. The Audit log records product
+and security actions, not internal events.
 
 Each reverse-chronological row directly shows:
 
@@ -1011,11 +1006,11 @@ Default view prioritizes active and attention-requiring clients. A
 **Previous** filter exposes revoked clients without mixing them into the
 normal active list.
 
-Empty state shows whether new pairings are accepted. If they are, it shows the
-pairing address and a copyable
-`agentknock pairing start <PAIRING_ADDRESS>` command. If they are paused, it
-links to the control that resumes them. Pending pairing attempts link to their
-request detail rather than becoming half-created client rows.
+The persistent pairing controls show whether new pairings are accepted. The
+empty state adds a copyable `agentknock pairing start <PAIRING_ADDRESS>` command
+when pairing is enabled, or points to the adjacent resume control when paused.
+Pending pairing attempts open their pairing detail rather than becoming
+half-created client rows.
 
 ### C-02 — Client detail
 
@@ -1100,7 +1095,7 @@ Approval is configured where its subject is understood:
 - each secret has a default mode: **Approve automatically**, **Ask AI**,
   **Ask every time**, or **Always deny**;
 - a secret may override that mode for an individual client;
-- general AI review instructions live in Settings;
+- general AI review instructions live at the top of Secrets;
 - client and secret instructions live on their respective detail screens; and
 - a pending request can be approved or denied once without changing reusable
   settings.
@@ -1111,22 +1106,16 @@ Non-sensitive material, such as an SSH public key, is delivered without an
 approval decision. A later protected operation using the same secret, such as
 Git signing, is evaluated separately.
 
-### A-01 — AI review settings
+### A-01 — General AI review instructions
 
-**Surface:** Settings sub-screen.
+**Surface:** Compact editor opened from the top of Secrets; not a separate
+navigation destination.
 
-**Show:**
-
-- current AI review availability;
-- editable general instructions that apply to every review;
-- a concise explanation of the general, client, and secret instruction
-  hierarchy;
-- that Ask AI may approve, deny, or leave the decision to the user;
-- that secret values, private keys, and decryption keys are never sent; and
-- a link to Plan and billing.
-
-Approval modes and client overrides remain on secret detail screens. This
-screen must not grow into a second secret-management or subscription screen.
+The row shows only whether general instructions are set. Its editor explains
+that the instructions apply to every AI review and combine with instructions
+on the relevant client and secret. AI availability and billing belong in
+Subscription & billing; approval modes and client overrides remain on secret
+detail screens.
 
 ## Settings and secondary screens
 
@@ -1138,35 +1127,32 @@ screen must not grow into a second secret-management or subscription screen.
 
 Rows show their current state in supporting text and open focused subscreens:
 
-- **Device & pairing** — current pairing address, whether new pairings are
-  accepted, or recovery required.
-- **Notifications** — enabled, disabled, or delivery setup needs attention.
-- **Security** — device protection and local-key status.
-- **AI review** — active, unavailable, or subscription required, plus whether
-  general instructions are set.
-- **Data and history** — backup, bounded request history, and audit log.
-- **Plan and billing** — Free, paid plan name, payment attention, or unavailable.
-- **Connection diagnostics** — connected, offline, or last error.
+- **Security & backup** — device authentication, key protection, Android backup,
+  recovery readiness, stored-data summary, and Factory reset.
+- **Notifications** — Android permission and the separate action-required and
+  silent background-processing categories.
+- **Subscription & billing** — free core access and AI-review entitlement.
+- **Audit log** — security and product activity.
+- **About** — product explanation, public links, version, source revision,
+  device ID, and relay address.
 
-Help and About are secondary destinations at the end, not mixed with behavior
-switches. Production Settings must not expose relay URLs, retry intervals,
-cryptographic algorithms, or other implementation knobs.
+Use conventional Android preference rows and section headings. Status appears
+as supporting text only when it helps the next decision. Settings must not
+duplicate controls that have a clearer domain home elsewhere.
 
-### T-02 — Device & pairing
+### T-02 — Pairing controls
 
-**Surface:** Settings sub-screen.
+**Surface:** Persistent compact display at the top of Clients; not a Settings
+screen.
 
 **Show:**
 
-- pairing address with copy/share action;
-- ready, incomplete claim, or keys-unavailable state;
-- device ID under technical details;
-- device-identity creation time and current-address claim time;
+- pairing address with copy action;
 - new-pairing state: **Accepting new pairings** or **New pairings paused**;
-- pairing instructions and link to Clients;
 - **Pause new pairings** or **Resume new pairings**;
 - **Change pairing address**; and
-- replacement device-identity setup when keys are unavailable.
+- the exact pairing command only when there are no clients and no pending
+  pairing.
 
 Pausing affects only previously unknown pairing attempts. It keeps the pairing
 address, does not cancel an already admitted pairing request, and remains in
@@ -1177,12 +1163,9 @@ secrets, approval settings, and history are unaffected. The current address rema
 use until the replacement has been claimed successfully, and an interrupted
 change remains resumable.
 
-Never display or export the device token or private device keys.
-
-The screen title is **Device & pairing**. **Pairing address** and
-**New pairings** are labeled primary fields because neither is a user-assigned
-object name. **Device ID** is labeled under Technical details. Claim and key
-states use concise status text without exposing transport terminology.
+Never display or export the device token or private device keys. Device ID and
+other installation details belong in About, while cryptographic protection
+belongs in Security & backup.
 
 ### T-03 — Notifications
 
@@ -1191,25 +1174,19 @@ surfaces where Android owns the choice.
 
 **Show:**
 
-- Android notification permission and channel state;
-- relay push registration state: registered, missing, invalid, or temporarily
-  unavailable;
-- last successful push registration and last generic wake, when known;
-- **Enable notifications** or **Open system notification settings** as
-  appropriate;
-- whether actionable request notifications are available on this device;
-- whether automatic approvals generate informational notifications, once that
-  feature exists; and
-- **Test notification** only if it can exercise the real production path
-  without creating misleading request state.
+- overall Android notification access and a direct route to system settings;
+- **Requests needing approval**, a prominent category allowed to alert the user;
+- **Background processing**, a quiet category for brief work triggered by push;
+  and
+- a concise delivery warning only when the app knows notification delivery is
+  impaired.
 
 Do not duplicate Android's channel controls. Link to system settings for sound,
 vibration, lock-screen visibility, and complete enable/disable behavior.
 
 The effective notification state and the action needed to change or repair it
-are primary. Relay registration state appears directly only when it needs
-attention; registration and wake timestamps are supporting diagnostics rather
-than top-level settings rows.
+are primary. Push registration internals and wake timestamps are not user
+settings and stay out of this screen.
 
 An actionable notification appears only after the app has retrieved and
 authenticated the request. A generic push wake can never authorize anything.
@@ -1223,10 +1200,10 @@ Pending secret use notifications provide **Deny** and **Approve**:
 
 - **Deny** applies only if the same request is still pending and is safe to
   repeat without changing the outcome.
-- **Approve** requires device authentication and the same complete
-  revalidation as approval in the app. If Android cannot provide the required
-  authenticated interaction from the notification, the action opens the exact
-  request detail to finish approval.
+- **Approve** performs the same complete revalidation as approval in the app
+  and follows the configured device-authentication policy. When Android cannot
+  provide a required authenticated interaction from the notification, the
+  action opens the exact request detail to finish approval.
 
 Dismissing a notification has no effect on its request, and a notification is
 removed or updated when the request resolves elsewhere.
@@ -1235,80 +1212,41 @@ A secret upload notification identifies its client, mode, and secret name and
 opens the upload detail for review. It does not offer an approval shortcut
 before the user has seen the uploaded changes.
 
-### T-04 — Security
+### T-04 — Security & backup
 
 **Surface:** Settings sub-screen.
 
 **Show:**
 
+- device-authentication policy first, using one Android-owned authentication
+  prompt only when the configured policy requires it;
 - secure screen-lock availability;
 - local encryption-key state and whether hardware-backed protection is in use
   when Android can report it reliably;
-- a plain explanation that hardware backing is best effort and the trusted
-  Android OS can use protected material while authorized;
-- number of secrets with sensitive or unavailable material;
-- clients with stale or competing state; and
-- links to manage step-up requirements if that later feature is enabled.
+- what Android backup includes: all metadata and encrypted stored values;
+- what Android backup excludes: device-bound encryption keys, meaning restored
+  encrypted values and pairings cannot be used without a recovery method;
+- the current key-recovery status without advertising unimplemented methods;
+- compact counts for secrets, clients, and audit events; and
+- a visually separated route to Factory reset Agentknock.
 
-This screen reports and explains security posture; it does not manufacture
-low-value security toggles. Android-owned screen lock and biometric enrollment
-open the relevant system settings.
+This screen reports and explains security posture and backup consequences; it
+does not manufacture low-value security toggles. Android-owned screen lock and
+biometric enrollment open the relevant system settings.
 
-The overall usable/attention-required state and any corrective action are
-primary. Hardware-backing detail, counts, and explanatory limitations are
-supporting information rather than separate status cards for every mechanism.
-
-### T-05 — AI review
-
-**Surface:** Settings sub-screen described in A-01.
-
-This is the one place for general AI review instructions and a compact access
-status. It links to Plan and billing but does not duplicate subscription
-management. Approval modes remain on each secret.
-
-### T-06 — Data and history
-
-**Surface:** Settings sub-screen and entry point to the Audit log and Factory
-reset.
-
-**Show:**
-
-- local counts for secrets, environment variables, clients, requests, and audit events;
-- what Android backup/device transfer preserves: metadata and encrypted stored
-  material, including Request history and the Audit log;
-- what it cannot preserve: device-bound private keys, so restored secret
-  material and pairings may be unavailable;
-- that the relay removes a device after 180 days without authenticated device
-  activity; client traffic and push attempts do not by themselves keep that
-  device registered;
-- the terminal request-history limit and current count;
-- **Audit log**, showing its one-year retention period and oldest retained
-  event;
-- **Clear completed request history** with count and confirmation; and
-- **Factory reset Agentknock**, visually separated from ordinary data and
-  history controls as an irreversible recovery and deletion action.
-
-Clearing history never deletes active clients, secrets, approval settings, or
-unsettled Requests. It also does not delete Audit log events about pruned or
-manually deleted Requests. Individual audit events cannot be deleted; normal
-retention removes expired events, and Factory reset removes the log with
-everything else. Export is omitted until its privacy model and format are
-defined.
-
-Audit log, backup/restore meaning, and the two available cleanup actions are
-the primary content. Object counts and retention dates are grouped supporting
-information rather than six competing headline values. Factory reset remains
-visually isolated from Clear completed request history.
+Authentication policy and backup/recovery consequences are primary.
+Cryptographic implementation detail and counts are supporting information at
+the end rather than separate status cards for every mechanism.
 
 ### T-07 — Factory reset Agentknock
 
-**Surface:** Focused action screen reached manually from Data and history.
+**Surface:** Focused action screen reached manually from Security & backup.
 
 **Purpose:** Give the user a deliberate way to erase Agentknock completely and
 recover by starting again when the current device can no longer be used.
 
 This is a dedicated full-screen destructive flow, not a routine confirmation
-dialog. It is manually reachable from Data and history even while the relay is
+dialog. It is manually reachable from Security & backup even while the relay is
 unavailable.
 
 **Show before reset:**
@@ -1356,52 +1294,18 @@ rather than an automatic diagnosis.
 Using Android's system **Clear storage** action erases only local app data and
 cannot request relay deletion. Help and this screen explain that distinction.
 
-### T-08 — Connection diagnostics
-
-**Surface:** Settings sub-screen reached directly or from a contextual status
-icon or error action.
-
-**Show:**
-
-- current live-connection state and why it is or is not expected to be
-  connected;
-- last connected, disconnected, caught-up, and successful-sync times;
-- last sanitized connection or synchronization error;
-- current retry state and the next retry time when the relay provides one;
-- rate-limited or temporarily-capacity-limited state when observable, without
-  exposing internal quotas as user settings;
-- count of pending incoming and outgoing work;
-- device claim state;
-- push registration and Android notification state;
-- service endpoint and app version under technical details; and
-- copyable, secret-free diagnostic summary.
-
-Actions: **Reconnect/synchronize now**, **Retry push registration**, and links
-to resolve the specific system setting. Never include device/client tokens,
-private keys, encrypted secret material or values, full request payloads, or
-Reasons reported by Clients in copied diagnostics.
-
-Retryable rate and capacity failures use ordinary backoff and must not be shown
-as authorization denials. Relay-internal administrative causes are not named or
-given dedicated UI; only their observable availability or delivery effect is
-shown.
-
-Current state, whether the app will retry, and an available corrective action
-are primary. Historical timestamps, queue counts, endpoint, version, and the
-copyable diagnostic summary are secondary or technical details.
-
-### T-09 — Plan and billing
+### T-09 — Subscription & billing
 
 **Surface:** Settings sub-screen.
 
-**Purpose:** Provide a stable home for a future monthly subscription without
-making billing a primary application destination.
+**Purpose:** Explain the free core product and manage the optional AI-review
+subscription without making billing a primary application destination.
 
 For a free user, show:
 
-- current plan: Free;
-- a capability comparison driven by actual product entitlements, not hardcoded
-  marketing promises;
+- that secret storage and release and manual approvals are included for
+  everyone;
+- that the subscription adds AI review;
 - localized price and billing period returned by Google Play;
 - trial or introductory-offer terms when eligible; and
 - **Subscribe with Google Play**.
@@ -1428,10 +1332,10 @@ The screen must work sensibly when Play Billing is unavailable, including a
 sideloaded open-source build. It explains that billing is unavailable in that
 installation rather than spinning forever or inventing a price.
 
-The current plan name, entitlement state, applicable price, and available
-action are primary. Billing lifecycle terminology and dates are labeled
-supporting information. The screen title remains **Plan and billing** rather
-than repeating **Plan:** before the plan name.
+The entitlement state, applicable price, and available action are primary.
+Billing lifecycle terminology and dates are labeled supporting information.
+The screen title is **Subscription & billing**. Do not imply that core features
+are a lower plan or that the entire product requires payment.
 
 Free, subscribed, payment-attention, expired, and billing-unavailable are states
 of this one screen, not separate billing screens.
@@ -1456,36 +1360,21 @@ ordinary app navigation into repeated paywall interruptions.
 Never cover a live manual approval with a paywall. Billing failure must not be
 misrepresented as a secret use denial or cryptographic failure.
 
-### T-11 — Help
+### T-12 — About
 
 **Surface:** Settings sub-screen.
 
 **Show:**
 
-- getting started: create a secret, pair a client, execute, and review;
-- exact examples for `agentknock pairing start <PAIRING_ADDRESS>`,
-  `agentknock pairing finish`, `agentknock secret list`, secret upload, and
-  `agentknock exec`, using the current pairing address where applicable;
-- troubleshooting links for offline requests, notification problems, broken
-  pairing, unavailable restored values, Factory reset, and subscription state;
-- concise security-boundary explanation; and
-- support and security-reporting links once publication details exist.
+- a concise explanation that Agentknock keeps developer secrets on the phone
+  and provides them only to approved commands;
+- website, privacy-information, and source-code links;
+- app version and exact source revision;
+- developer name;
+- Device ID and relay address as labeled installation information.
 
-Help examples never include real stored values or request data.
-
-### T-12 — About, privacy, and licenses
-
-**Surface:** Settings sub-screen.
-
-**Show:**
-
-- app name and version;
-- source-code link and license once selected;
-- privacy policy, terms, and subscription terms when applicable;
-- open-source licenses;
-- relay-service status/support links when available; and
-- a short statement of the device-held trust mode and what metadata the relay
-  and push provider can see.
+Keep this compact enough to fit a normal phone screen. It is product identity
+and supporting information, not a second diagnostics or security screen.
 
 ## Confirmations and authentication surfaces
 
@@ -1500,7 +1389,6 @@ navigation destinations:
 - delete an environment variable or secret;
 - suspend, resume, reauthorize, or revoke a client;
 - pause or resume new pairings;
-- clear completed request history;
 - change pairing address or discard an incomplete claim;
 - reveal/copy a sensitive value.
 
@@ -1518,15 +1406,15 @@ Simple Rename actions use a small labeled name editor rather than gaining a
 screen in the navigation tree. Changing the pairing address reuses the Claim
 pairing address editor in replacement mode, adding the effect on future
 pairings and replacement progress. Google Play owns the purchase system
-surface launched from Plan and billing.
+surface launched from Subscription & billing.
 
 ## Cross-screen behavior and presentation
 
 ### Timestamps and outcomes
 
-- Format times in the device locale and time zone.
-- Lists may use relative time plus date grouping; details show full date and
-  time.
+- Use the unambiguous `yyyy-MM-dd HH:mm:ss` format in the device time zone when
+  an exact timestamp is shown. Lists may use shorter relative time where the
+  surrounding date remains unmistakable.
 - Never derive “delivered” from the device's approval alone. Show it only after
   authenticated client confirmation.
 - Unknown or ambiguous delivery remains **Unconfirmed**, not successful.

@@ -12,6 +12,7 @@ import dev.agentknock.storage.request.InboxRequestDetails
 import dev.agentknock.storage.request.InboxRequestSummary
 import dev.agentknock.storage.request.PairingDecisionResult
 import dev.agentknock.storage.vault.DeviceConfiguration
+import dev.agentknock.storage.vault.DeviceManagementResult
 import dev.agentknock.storage.secret.TemporaryAccessGrant
 import dev.agentknock.storage.secret.TemporaryAccessOperation
 import dev.agentknock.ui.pendingPairings
@@ -98,6 +99,9 @@ internal class ClientsViewModel(application: Application) : AndroidViewModel(app
 
     suspend fun setState(clientId: String, state: RelayClientState): ClientChangeResult =
         repository.setClientState(clientId, state)
+
+    suspend fun setPairingEnabled(enabled: Boolean): DeviceManagementResult =
+        container.deviceManagement.setPairingEnabled(enabled)
 
     suspend fun endTemporaryAccess(
         secretId: String,

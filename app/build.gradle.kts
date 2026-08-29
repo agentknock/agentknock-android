@@ -10,7 +10,7 @@ plugins {
     alias(libs.plugins.room3)
 }
 
-val agentknockVersionCode = 28
+val agentknockVersionCode = 29
 val agentknockVersionName = "0.1.0"
 val uploadStoreFile = providers.environmentVariable("AGENTKNOCK_UPLOAD_STORE_FILE")
 val uploadStorePassword = providers.environmentVariable("AGENTKNOCK_UPLOAD_STORE_PASSWORD")
@@ -24,6 +24,8 @@ val uploadSigningValues = listOf(
 )
 val uploadSigningConfigured = uploadSigningValues.all { it.isPresent }
 val playCredentialsFile = providers.environmentVariable("AGENTKNOCK_PLAY_CREDENTIALS_FILE")
+val sourceRevision = providers.environmentVariable("AGENTKNOCK_SOURCE_REVISION")
+    .orElse("unverified")
 
 require(uploadSigningValues.none { it.isPresent } || uploadSigningConfigured) {
     "Set all Agentknock upload-signing environment variables or none of them"
@@ -40,6 +42,7 @@ android {
         versionCode = agentknockVersionCode
         versionName = agentknockVersionName
         testInstrumentationRunner = "androidx.test.runner.AndroidJUnitRunner"
+        buildConfigField("String", "SOURCE_REVISION", "\"${sourceRevision.get()}\"")
     }
 
     compileOptions {

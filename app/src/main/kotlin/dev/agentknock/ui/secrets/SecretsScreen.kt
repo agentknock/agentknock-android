@@ -49,6 +49,7 @@ import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.automirrored.outlined.ArrowBack
 import androidx.compose.material.icons.automirrored.outlined.NavigateNext
 import androidx.compose.material.icons.outlined.Add
+import androidx.compose.material.icons.outlined.AutoAwesome
 import androidx.compose.material.icons.outlined.ContentCopy
 import androidx.compose.material.icons.outlined.Edit
 import androidx.compose.material.icons.outlined.Lock
@@ -191,6 +192,7 @@ internal fun SecretsScreen(
 ) {
     val secrets by viewModel.secrets.collectAsStateWithLifecycle()
     val clients by viewModel.clients.collectAsStateWithLifecycle()
+    val configuration by viewModel.configuration.collectAsStateWithLifecycle()
     val pendingUploads by viewModel.pendingUploads.collectAsStateWithLifecycle()
     val selection by viewModel.selection.collectAsStateWithLifecycle()
     val uploadSelection by viewModel.uploadSelection.collectAsStateWithLifecycle()
@@ -393,6 +395,18 @@ internal fun SecretsScreen(
                         onSelect = viewModel::selectSecret,
                         onSelectUpload = viewModel::selectUpload,
                         onCreate = viewModel::startNewSecret,
+                        generalInstructions = configuration?.active?.instructions.orEmpty(),
+                        onSaveGeneralInstructions = { instructions ->
+                            scope.launch {
+                                report(
+                                    if (viewModel.saveGeneralInstructions(instructions)) {
+                                        "General instructions updated"
+                                    } else {
+                                        "General instructions could not be updated"
+                                    },
+                                )
+                            }
+                        },
                         onOpenSettings = onOpenSettings,
                         modifier = Modifier
                             .width(340.dp)
@@ -504,6 +518,18 @@ internal fun SecretsScreen(
                     onSelect = viewModel::selectSecret,
                     onSelectUpload = viewModel::selectUpload,
                     onCreate = viewModel::startNewSecret,
+                    generalInstructions = configuration?.active?.instructions.orEmpty(),
+                    onSaveGeneralInstructions = { instructions ->
+                        scope.launch {
+                            report(
+                                if (viewModel.saveGeneralInstructions(instructions)) {
+                                    "General instructions updated"
+                                } else {
+                                    "General instructions could not be updated"
+                                },
+                            )
+                        }
+                    },
                     onOpenSettings = onOpenSettings,
                     modifier = Modifier.fillMaxSize(),
                 )
@@ -891,9 +917,15 @@ private fun SecretList(
     onSelect: (String) -> Unit,
     onSelectUpload: (Long) -> Unit,
     onCreate: () -> Unit,
+    generalInstructions: String,
+    onSaveGeneralInstructions: (String) -> Unit,
     onOpenSettings: () -> Unit,
     modifier: Modifier = Modifier,
 ) {
+    var showGeneralInstructions by remember { mutableStateOf(false) }
+    var editedGeneralInstructions by remember(generalInstructions) {
+        mutableStateOf(generalInstructions)
+    }
     Column(modifier) {
         TopAppBar(
             title = { Text(stringResource(R.string.secrets)) },
@@ -909,6 +941,35 @@ private fun SecretList(
                 }
             },
         )
+        ListItem(
+            headlineContent = { Text("AI review instructions") },
+            leadingContent = {
+                Icon(
+                    Icons.Outlined.AutoAwesome,
+                    contentDescription = null,
+                    tint = MaterialTheme.colorScheme.primary,
+                )
+            },
+            trailingContent = {
+                Row(
+                    horizontalArrangement = Arrangement.spacedBy(8.dp),
+                    verticalAlignment = Alignment.CenterVertically,
+                ) {
+                    Text(
+                        if (generalInstructions.isBlank()) "Not set" else "Set",
+                        style = MaterialTheme.typography.labelLarge,
+                        color = MaterialTheme.colorScheme.onSurfaceVariant,
+                    )
+                    Icon(Icons.Outlined.Edit, contentDescription = null)
+                }
+            },
+            colors = ListItemDefaults.colors(containerColor = androidx.compose.ui.graphics.Color.Transparent),
+            modifier = Modifier.fillMaxWidth().clickable {
+                editedGeneralInstructions = generalInstructions
+                showGeneralInstructions = true
+            },
+        )
+        HorizontalDivider()
         if (secrets.isEmpty() && pendingUploads.isEmpty()) {
             EmptyMessage(
                 title = stringResource(R.string.no_secrets),
@@ -1038,6 +1099,37 @@ private fun SecretList(
                 }
             }
         }
+    }
+    if (showGeneralInstructions) {
+        AlertDialog(
+            onDismissRequest = { showGeneralInstructions = false },
+            title = { Text("AI review instructions") },
+            text = {
+                Column(verticalArrangement = Arrangement.spacedBy(12.dp)) {
+                    Text("These instructions apply to every AI review. Secret and client instructions add more specific context.")
+                    OutlinedTextField(
+                        value = editedGeneralInstructions,
+                        onValueChange = { editedGeneralInstructions = it },
+                        label = { Text("Instructions") },
+                        minLines = 4,
+                        maxLines = 8,
+                        modifier = Modifier.fillMaxWidth(),
+                    )
+                }
+            },
+            confirmButton = {
+                TextButton(
+                    enabled = editedGeneralInstructions.trim() != generalInstructions,
+                    onClick = {
+                        showGeneralInstructions = false
+                        onSaveGeneralInstructions(editedGeneralInstructions.trim())
+                    },
+                ) { Text("Save") }
+            },
+            dismissButton = {
+                TextButton(onClick = { showGeneralInstructions = false }) { Text("Cancel") }
+            },
+        )
     }
 }
 
