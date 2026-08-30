@@ -1,1 +1,1 @@
-Adds selective environment delivery, including renaming and standard input. Adds SSH-agent authentication with Ed25519 and RSA keys, plus RSA key import, generation, and Git signing.
+Adds privacy-preserving device attestation during setup and refreshes stale unclaimed device IDs. Improves AI review context for secrets already approved by policy.
