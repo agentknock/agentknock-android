@@ -131,6 +131,7 @@ import dev.agentknock.storage.secret.SaveEnvironmentVariableResult
 import dev.agentknock.storage.secret.SaveSecretResult
 import dev.agentknock.storage.secret.SaveSshSecretResult
 import dev.agentknock.storage.secret.SshKeyMetadata
+import dev.agentknock.storage.secret.SshKeyAlgorithm
 import dev.agentknock.storage.secret.SshPrivateKey
 import dev.agentknock.storage.secret.ENVIRONMENT_SECRET_TYPE
 import dev.agentknock.storage.secret.SSH_SECRET_TYPE
@@ -156,6 +157,7 @@ internal data class SecretEditorState(
     val description: String,
     val type: String,
     val sshInputMode: SshKeyInputMode = SshKeyInputMode.GENERATE,
+    val sshAlgorithm: SshKeyAlgorithm = SshKeyAlgorithm.ED25519,
     val sshPrivateKeyText: String = "",
     val sshComment: String = "",
     val preparedSshKey: SshPrivateKey? = null,
@@ -169,6 +171,7 @@ internal data class SshKeyEditorState(
     val secretName: String,
     val currentKey: SshKeyMetadata,
     val inputMode: SshKeyInputMode,
+    val algorithm: SshKeyAlgorithm,
     val privateKeyText: String,
     val comment: String,
     val preparedKey: SshPrivateKey?,
@@ -650,7 +653,10 @@ internal fun SecretsScreen(
                 scope.launch {
                     runCatching {
                         when (editor.sshInputMode) {
-                            SshKeyInputMode.GENERATE -> viewModel.generateSshKey(editor.sshComment)
+                            SshKeyInputMode.GENERATE -> viewModel.generateSshKey(
+                                editor.sshAlgorithm,
+                                editor.sshComment,
+                            )
                             SshKeyInputMode.IMPORT -> viewModel.importSshKey(editor.sshPrivateKeyText)
                         }
                     }.onSuccess { key ->
@@ -722,7 +728,10 @@ internal fun SecretsScreen(
                 scope.launch {
                     runCatching {
                         when (editor.inputMode) {
-                            SshKeyInputMode.GENERATE -> viewModel.generateSshKey(editor.comment)
+                            SshKeyInputMode.GENERATE -> viewModel.generateSshKey(
+                                editor.algorithm,
+                                editor.comment,
+                            )
                             SshKeyInputMode.IMPORT -> viewModel.importSshKey(editor.privateKeyText)
                         }
                     }.onSuccess { key ->
@@ -2066,6 +2075,7 @@ private fun SecretEditorScreen(
             if (secret == null && editor.type == SSH_SECRET_TYPE) {
                 SshKeyInput(
                     mode = editor.sshInputMode,
+                    algorithm = editor.sshAlgorithm,
                     privateKeyText = editor.sshPrivateKeyText,
                     comment = editor.sshComment,
                     preparedKey = editor.preparedSshKey,
@@ -2074,6 +2084,15 @@ private fun SecretEditorScreen(
                         onEditorChange(
                             editor.copy(
                                 sshInputMode = mode,
+                                preparedSshKey = null,
+                                sshError = null,
+                            ),
+                        )
+                    },
+                    onAlgorithmChange = { algorithm ->
+                        onEditorChange(
+                            editor.copy(
+                                sshAlgorithm = algorithm,
                                 preparedSshKey = null,
                                 sshError = null,
                             ),
@@ -2137,11 +2156,13 @@ private fun SecretEditorScreen(
 @Composable
 private fun SshKeyInput(
     mode: SshKeyInputMode,
+    algorithm: SshKeyAlgorithm,
     privateKeyText: String,
     comment: String,
     preparedKey: SshPrivateKey?,
     error: String?,
     onModeChange: (SshKeyInputMode) -> Unit,
+    onAlgorithmChange: (SshKeyAlgorithm) -> Unit,
     onPrivateKeyChange: (String) -> Unit,
     onCommentChange: (String) -> Unit,
     onPrepare: () -> Unit,
@@ -2161,8 +2182,29 @@ private fun SshKeyInput(
             )
         }
         if (mode == SshKeyInputMode.GENERATE) {
+            Text("Algorithm", style = MaterialTheme.typography.labelLarge)
+            FlowRow(
+                horizontalArrangement = Arrangement.spacedBy(8.dp),
+                verticalArrangement = Arrangement.spacedBy(4.dp),
+            ) {
+                FilterChip(
+                    selected = algorithm == SshKeyAlgorithm.ED25519,
+                    onClick = { onAlgorithmChange(SshKeyAlgorithm.ED25519) },
+                    label = { Text("Ed25519") },
+                )
+                FilterChip(
+                    selected = algorithm == SshKeyAlgorithm.RSA,
+                    onClick = { onAlgorithmChange(SshKeyAlgorithm.RSA) },
+                    label = { Text("RSA") },
+                )
+            }
             Text(
-                "Generate a new Ed25519 key on this device.",
+                when (algorithm) {
+                    SshKeyAlgorithm.ED25519 ->
+                        "Generate a new Ed25519 key on this device. Recommended for new keys."
+                    SshKeyAlgorithm.RSA ->
+                        "Generate a new 3072-bit RSA key for systems that require RSA."
+                },
                 color = MaterialTheme.colorScheme.onSurfaceVariant,
             )
             OutlinedTextField(
@@ -2246,7 +2288,8 @@ private fun SshKeyEditorScreen(
     val scrollState = rememberScrollState()
     val focusManager = LocalFocusManager.current
     val dirty = editor.privateKeyText.isNotEmpty() || editor.preparedKey != null ||
-        editor.comment != editor.currentKey.comment
+        editor.comment != editor.currentKey.comment ||
+        editor.algorithm.storedName != editor.currentKey.algorithm
     LaunchedEffect(editor.preparedKey) {
         if (editor.preparedKey != null) {
             withFrameNanos { }
@@ -2285,6 +2328,7 @@ private fun SshKeyEditorScreen(
             }
             SshKeyInput(
                 mode = editor.inputMode,
+                algorithm = editor.algorithm,
                 privateKeyText = editor.privateKeyText,
                 comment = editor.comment,
                 preparedKey = editor.preparedKey,
@@ -2292,6 +2336,11 @@ private fun SshKeyEditorScreen(
                 onModeChange = { mode ->
                     onEditorChange(
                         editor.copy(inputMode = mode, preparedKey = null, error = null),
+                    )
+                },
+                onAlgorithmChange = { algorithm ->
+                    onEditorChange(
+                        editor.copy(algorithm = algorithm, preparedKey = null, error = null),
                     )
                 },
                 onPrivateKeyChange = { value ->

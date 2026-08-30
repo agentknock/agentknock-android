@@ -8,6 +8,7 @@ import java.io.DataInputStream
 import java.io.DataOutputStream
 import java.math.BigInteger
 import java.security.KeyFactory
+import java.security.KeyPairGenerator
 import java.security.MessageDigest
 import java.security.SecureRandom
 import java.security.Signature
@@ -94,6 +95,22 @@ internal class SshKeyCodec(
             algorithm = SshKeyAlgorithm.ED25519,
             privateKey = privateKey.encoded,
             publicKey = privateKey.generatePublicKey().encoded,
+            comment = comment,
+        )
+    }
+
+    fun generateRsa(comment: String): SshPrivateKey {
+        validateComment(comment)
+        val pair = KeyPairGenerator.getInstance(RSA).apply {
+            initialize(GENERATED_RSA_BITS, secureRandom)
+        }.generateKeyPair()
+        val privateKey = pair.private as? RSAPrivateCrtKey
+            ?: throw IllegalStateException("RSA key generation returned an unsupported key")
+        val publicKey = encodeRsaPublicKey(privateKey.publicExponent, privateKey.modulus)
+        return fromStored(
+            algorithm = SshKeyAlgorithm.RSA.storedName,
+            privateKey = privateKey.encoded,
+            publicKey = publicKey,
             comment = comment,
         )
     }
@@ -490,6 +507,7 @@ internal class SshKeyCodec(
         const val ED25519_PUBLIC_KEY_BYTES = 32
         const val ED25519_PRIVATE_AND_PUBLIC_BYTES = 64
         const val MIN_RSA_BITS = 2048
+        const val GENERATED_RSA_BITS = 3072
         const val RSA = "RSA"
         const val RSA_SHA512 = "rsa-sha2-512"
         const val SHA256_WITH_RSA = "SHA256withRSA"

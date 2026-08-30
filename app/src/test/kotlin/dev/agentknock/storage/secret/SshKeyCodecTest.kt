@@ -72,6 +72,25 @@ class SshKeyCodecTest {
     }
 
     @Test
+    fun `generates a 3072-bit RSA key with an ordinary OpenSSH public key`() {
+        val key = codec.generateRsa("generated@example")
+
+        assertEquals(SshKeyAlgorithm.RSA, key.algorithm)
+        assertTrue(key.publicKeyLine.startsWith("ssh-rsa "))
+        assertTrue(key.publicKeyLine.endsWith(" generated@example"))
+        val stored = codec.fromStored(
+            key.algorithm.storedName,
+            key.privateKey,
+            key.publicKey,
+            key.comment,
+        )
+        val privateKey = java.security.KeyFactory.getInstance("RSA").generatePrivate(
+            java.security.spec.PKCS8EncodedKeySpec(stored.privateKey),
+        ) as RSAPrivateCrtKey
+        assertEquals(3072, privateKey.modulus.bitLength())
+    }
+
+    @Test
     fun `rejects a private key whose public half was changed`() {
         val key = codec.importOpenSshPrivateKey(TEST_PRIVATE_KEY)
         val changed = key.copy(publicKey = key.publicKey.copyOf().also { it[0] = (it[0] + 1).toByte() })

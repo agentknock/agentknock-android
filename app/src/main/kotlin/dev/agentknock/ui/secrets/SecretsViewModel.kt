@@ -18,6 +18,7 @@ import dev.agentknock.storage.secret.SecretSummary
 import dev.agentknock.storage.secret.SecretApprovalMode
 import dev.agentknock.storage.secret.TemporaryAccessOperation
 import dev.agentknock.storage.secret.SshPrivateKey
+import dev.agentknock.storage.secret.SshKeyAlgorithm
 import dev.agentknock.storage.secret.SaveSshSecretResult
 import dev.agentknock.storage.secret.SaveEnvironmentVariableResult
 import dev.agentknock.storage.secret.SaveSecretResult
@@ -137,6 +138,8 @@ internal class SecretsViewModel(application: Application) : AndroidViewModel(app
             secretName = secret.name,
             currentKey = key,
             inputMode = SshKeyInputMode.GENERATE,
+            algorithm = SshKeyAlgorithm.fromStoredName(key.algorithm)
+                ?: SshKeyAlgorithm.ED25519,
             privateKeyText = "",
             comment = key.comment,
             preparedKey = null,
@@ -190,8 +193,10 @@ internal class SecretsViewModel(application: Application) : AndroidViewModel(app
         privateKey: SshPrivateKey,
     ): CreateSecretResult = repository.createSshSecret(name, description, privateKey)
 
-    suspend fun generateSshKey(comment: String): SshPrivateKey =
-        repository.generateSshKey(comment)
+    suspend fun generateSshKey(
+        algorithm: SshKeyAlgorithm,
+        comment: String,
+    ): SshPrivateKey = repository.generateSshKey(algorithm, comment)
 
     suspend fun importSshKey(value: String): SshPrivateKey =
         repository.importSshKey(value)

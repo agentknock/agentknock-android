@@ -697,8 +697,15 @@ internal class SecretRepository(
         dao.deleteAllTemporaryAccessGrants()
     }
 
-    suspend fun generateSshKey(comment: String): SshPrivateKey =
-        withContext(cryptographyDispatcher) { sshKeys.generateEd25519(comment.trim()) }
+    suspend fun generateSshKey(
+        algorithm: SshKeyAlgorithm,
+        comment: String,
+    ): SshPrivateKey = withContext(cryptographyDispatcher) {
+        when (algorithm) {
+            SshKeyAlgorithm.ED25519 -> sshKeys.generateEd25519(comment.trim())
+            SshKeyAlgorithm.RSA -> sshKeys.generateRsa(comment.trim())
+        }
+    }
 
     suspend fun importSshKey(value: String): SshPrivateKey =
         withContext(cryptographyDispatcher) { sshKeys.importOpenSshPrivateKey(value) }

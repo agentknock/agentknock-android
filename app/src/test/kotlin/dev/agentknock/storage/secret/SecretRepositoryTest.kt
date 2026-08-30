@@ -23,7 +23,7 @@ class SecretRepositoryTest {
     @Test
     fun `stores an SSH private key encrypted and returns only its public key`() = runTest {
         val fixture = Fixture()
-        val key = fixture.repository.generateSshKey("test@example")
+        val key = fixture.repository.generateSshKey(SshKeyAlgorithm.ED25519, "test@example")
         val created = fixture.repository.createSshSecret(
             name = "production-ssh",
             description = "Production host access",
@@ -58,9 +58,25 @@ class SecretRepositoryTest {
     }
 
     @Test
+    fun `stores generated RSA material with its algorithm specific format`() = runTest {
+        val fixture = Fixture()
+        val key = fixture.repository.generateSshKey(SshKeyAlgorithm.RSA, "rsa@example")
+        val created = fixture.repository.createSshSecret("legacy-host", "", key)
+        check(created is CreateSecretResult.Created)
+
+        val stored = fixture.dao.sshKeys.value.single()
+        assertEquals("rsa", stored.algorithm)
+        assertEquals(RSA_PRIVATE_KEY_FORMAT, stored.privateKeyFormat)
+        assertFalse(stored.ciphertext.contentEquals(key.privateKey))
+        val details = checkNotNull(fixture.repository.observeSecret(created.id).first())
+        assertEquals("rsa", details.sshKey?.algorithm)
+        assertTrue(details.sshKey?.publicKey?.startsWith("ssh-rsa ") == true)
+    }
+
+    @Test
     fun `saving an SSH comment cannot restore stale key material`() = runTest {
         val fixture = Fixture()
-        val key = fixture.repository.generateSshKey("first@example")
+        val key = fixture.repository.generateSshKey(SshKeyAlgorithm.ED25519, "first@example")
         val created = fixture.repository.createSshSecret("git-signing", "", key)
         check(created is CreateSecretResult.Created)
         val original = fixture.dao.sshKeys.value.single()
@@ -90,7 +106,7 @@ class SecretRepositoryTest {
     @Test
     fun `SSH uploads create and replace one stable secret identity`() = runTest {
         val fixture = Fixture()
-        val firstKey = fixture.repository.generateSshKey("first@example")
+        val firstKey = fixture.repository.generateSshKey(SshKeyAlgorithm.ED25519, "first@example")
         val create = SshSecretUpload(
             mode = SecretUploadMode.CREATE,
             name = "client-suggested-name",
@@ -103,7 +119,7 @@ class SecretRepositoryTest {
         check(created is ApplySshSecretUploadResult.Applied)
 
         val before = fixture.dao.sshKeys.value.single()
-        val secondKey = fixture.repository.generateSshKey("second@example")
+        val secondKey = fixture.repository.generateSshKey(SshKeyAlgorithm.ED25519, "second@example")
         val replace = fixture.repository.applySshSecretUpload(
             SshSecretUpload(
                 mode = SecretUploadMode.REPLACE,
@@ -127,7 +143,10 @@ class SecretRepositoryTest {
         val fixture = Fixture()
         fixture.createSecret("environment")
         repeat(2) { index ->
-            val key = fixture.repository.generateSshKey("key-$index@example")
+            val key = fixture.repository.generateSshKey(
+                SshKeyAlgorithm.ED25519,
+                "key-$index@example",
+            )
             fixture.repository.createSshSecret("ssh-$index", "", key)
         }
 
@@ -448,7 +467,7 @@ class SecretRepositoryTest {
         val fixture = Fixture()
         val environment = fixture.createSecret("environment")
         fixture.createVariable(environment, "TOKEN", "secret", true)
-        val key = fixture.repository.generateSshKey("git@example")
+        val key = fixture.repository.generateSshKey(SshKeyAlgorithm.ED25519, "git@example")
         fixture.repository.createSshSecret("git-signing", "", key)
 
         assertEquals(
@@ -548,7 +567,7 @@ class SecretRepositoryTest {
         fixture.createVariable(public, "AWS_REGION", "eu-north-1", false)
         val sensitive = fixture.createSecret("credentials")
         fixture.createVariable(sensitive, "AWS_TOKEN", "secret", true)
-        val key = fixture.repository.generateSshKey("git@example")
+        val key = fixture.repository.generateSshKey(SshKeyAlgorithm.ED25519, "git@example")
         fixture.repository.createSshSecret("git-signing", "", key)
 
         assertFalse(
@@ -568,7 +587,7 @@ class SecretRepositoryTest {
     @Test
     fun `SSH signing requires the same public key approved for the invocation`() = runTest {
         val fixture = Fixture()
-        val first = fixture.repository.generateSshKey("first@example")
+        val first = fixture.repository.generateSshKey(SshKeyAlgorithm.ED25519, "first@example")
         val created = fixture.repository.createSshSecret("git-signing", "", first)
         check(created is CreateSecretResult.Created)
 
@@ -579,7 +598,7 @@ class SecretRepositoryTest {
         )
         assertTrue(signed is GitSignatureResult.Signed)
 
-        val second = fixture.repository.generateSshKey("second@example")
+        val second = fixture.repository.generateSshKey(SshKeyAlgorithm.ED25519, "second@example")
         fixture.repository.replaceSshKey(created.id, second)
         assertEquals(
             GitSignatureResult.KeyChanged,
