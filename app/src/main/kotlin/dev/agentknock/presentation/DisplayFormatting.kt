@@ -20,12 +20,15 @@ internal fun formatRelativeTime(timestamp: Long, now: Long = System.currentTimeM
     val elapsed = Duration.ofMillis((now - timestamp).coerceAtLeast(0))
     return when {
         elapsed.toMinutes() < 1 -> "just now"
-        elapsed.toHours() < 1 -> "${elapsed.toMinutes()} min ago"
-        elapsed.toDays() < 1 -> "${elapsed.toHours()} h ago"
-        elapsed.toDays() < 30 -> "${elapsed.toDays()} d ago"
+        elapsed.toHours() < 1 -> elapsed.toMinutes().relativeUnit("minute")
+        elapsed.toDays() < 1 -> elapsed.toHours().relativeUnit("hour")
+        elapsed.toDays() < 30 -> elapsed.toDays().relativeUnit("day")
         else -> formatTimestamp(timestamp).substringBefore(' ')
     }
 }
+
+private fun Long.relativeUnit(unit: String): String =
+    "$this $unit${if (this == 1L) "" else "s"} ago"
 
 internal fun renderShellCommand(command: String, arguments: List<String>): String =
     (listOf(command) + arguments).joinToString(" ", transform = ::renderShellWord)

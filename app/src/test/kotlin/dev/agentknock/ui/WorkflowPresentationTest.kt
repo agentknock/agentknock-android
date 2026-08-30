@@ -6,7 +6,10 @@ import dev.agentknock.storage.request.InboxRequestSummary
 import dev.agentknock.storage.request.PairingState
 import dev.agentknock.storage.request.SecretUploadRequestState
 import dev.agentknock.storage.request.SecretUseRequestState
+import dev.agentknock.ui.requests.shouldShowDecisionHistory
 import org.junit.Assert.assertEquals
+import org.junit.Assert.assertFalse
+import org.junit.Assert.assertTrue
 import org.junit.Test
 
 class WorkflowPresentationTest {
@@ -79,6 +82,28 @@ class WorkflowPresentationTest {
         assertEquals(
             2,
             requests.actionRequiredCount(InboxRequestKind.SECRET_USE, InboxRequestKind.GIT_SIGN),
+        )
+    }
+
+    @Test
+    fun `invalid and unverifiable requests do not show approval history`() {
+        assertFalse(
+            shouldShowDecisionHistory(
+                verificationFailed = false,
+                completionReason = "INVALID_REQUEST",
+            ),
+        )
+        assertFalse(
+            shouldShowDecisionHistory(
+                verificationFailed = true,
+                completionReason = null,
+            ),
+        )
+        assertTrue(
+            shouldShowDecisionHistory(
+                verificationFailed = false,
+                completionReason = null,
+            ),
         )
     }
 

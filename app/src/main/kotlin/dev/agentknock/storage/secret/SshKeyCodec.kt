@@ -267,7 +267,7 @@ internal class SshKeyCodec(
 
     private fun validateComment(comment: String) {
         require('\u0000' !in comment && '\n' !in comment && '\r' !in comment) {
-            "An SSH public-key comment must fit on one line"
+            "An SSH public key comment must fit on one line"
         }
     }
 

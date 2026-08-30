@@ -50,17 +50,17 @@ class AgentknockMessagingService : FirebaseMessagingService() {
     override fun onMessageReceived(message: RemoteMessage) {
         if (message.data["type"] != WAKE_MESSAGE_TYPE) return
 
-        RequestNotifications.showWake(this)
-        val application = application as AgentknockApplication
         if (
             ProcessLifecycleOwner.get().lifecycle.currentState.isAtLeast(
                 Lifecycle.State.STARTED,
             )
         ) {
-            application.container.requestConnection.refresh()
-        } else {
-            PushSynchronizationWorker.enqueue(this)
+            // The foreground websocket already receives this request. Restarting it here can
+            // cancel work that the websocket started, including an in-flight AI review.
+            return
         }
+        RequestNotifications.showWake(this)
+        PushSynchronizationWorker.enqueue(this)
     }
 }
 

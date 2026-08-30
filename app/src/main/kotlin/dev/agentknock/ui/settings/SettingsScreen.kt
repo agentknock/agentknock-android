@@ -124,6 +124,7 @@ internal fun SettingsScreen(
     val counts by viewModel.dataCounts.collectAsStateWithLifecycle()
     val auditEvents by viewModel.auditEvents.collectAsStateWithLifecycle()
     val clients by viewModel.clients.collectAsStateWithLifecycle()
+    val requests by viewModel.requests.collectAsStateWithLifecycle()
     val selectedAudit by viewModel.selectedAuditEvent.collectAsStateWithLifecycle()
     val pushState by viewModel.pushRegistrationState.collectAsStateWithLifecycle()
     val protection by viewModel.vaultProtection.collectAsStateWithLifecycle()
@@ -204,6 +205,7 @@ internal fun SettingsScreen(
                     events = auditEvents,
                     selected = selectedAudit,
                     clients = clients,
+                    requests = requests,
                     onBack = ::back,
                     onOpen = viewModel::selectAuditEvent,
                     report = { message -> scope.launch { snackbar.showSnackbar(message) } },
@@ -251,7 +253,7 @@ private fun SettingsOverview(
                 SettingsGroup {
                     SettingsRow(
                         icon = Icons.Outlined.Security,
-                        title = "Security & backup",
+                        title = "Security and backup",
                         summary = "${authenticationMode.overviewLabel()} · ${protection.overviewDescription()}",
                         onClick = { onOpen(SettingsPage.SECURITY_BACKUP) },
                     )
@@ -260,9 +262,9 @@ private fun SettingsOverview(
                         icon = Icons.Outlined.Notifications,
                         title = "Notifications",
                         summary = when {
-                            !requestsEnabled -> "Requests needing approval are muted"
+                            !requestsEnabled -> "Requests needing action are muted"
                             pushState != null && pushState != "registered" -> "Delivery needs attention"
-                            else -> "Requests needing approval can alert you"
+                            else -> "Requests needing action can alert you"
                         },
                         onClick = { onOpen(SettingsPage.NOTIFICATIONS) },
                     )
@@ -272,21 +274,21 @@ private fun SettingsOverview(
                 SettingsGroup {
                     SettingsRow(
                         icon = Icons.Outlined.WorkspacePremium,
-                        title = "Plan & billing",
+                        title = "Plan and billing",
                         summary = subscription.overviewLabel(),
                         onClick = { onOpen(SettingsPage.SUBSCRIPTION) },
                     )
-                    SettingsGroupDivider(withIcon = true)
+                }
+            }
+            item {
+                SettingsGroup {
                     SettingsRow(
                         icon = Icons.Outlined.History,
                         title = "Audit log",
                         summary = "Security activity kept for one year",
                         onClick = { onOpen(SettingsPage.AUDIT) },
                     )
-                }
-            }
-            item {
-                SettingsGroup {
+                    SettingsGroupDivider(withIcon = true)
                     SettingsRow(
                         icon = Icons.Outlined.Info,
                         title = "About Agentknock",
@@ -313,7 +315,7 @@ private fun SecurityAndBackup(
     val deviceSecure = context.getSystemService(KeyguardManager::class.java).isDeviceSecure
     var chooseAuthentication by remember { mutableStateOf(false) }
     Column(modifier) {
-        PageTopBar("Security & backup", onBack)
+        PageTopBar("Security and backup", onBack)
         LazyColumn(
             contentPadding = PaddingValues(start = 16.dp, end = 16.dp, bottom = 24.dp),
             verticalArrangement = Arrangement.spacedBy(16.dp),
@@ -379,9 +381,12 @@ private fun SecurityAndBackup(
     if (chooseAuthentication) {
         AlertDialog(
             onDismissRequest = { chooseAuthentication = false },
-            title = { Text("Require device authentication") },
+            title = { Text("Device authentication") },
             text = {
-                Column(verticalArrangement = Arrangement.spacedBy(4.dp)) {
+                Column(
+                    Modifier.verticalScroll(rememberScrollState()),
+                    verticalArrangement = Arrangement.spacedBy(4.dp),
+                ) {
                     DeviceAuthenticationMode.entries.forEach { mode ->
                         Row(
                             modifier = Modifier
@@ -541,8 +546,8 @@ private fun NotificationsSettings(
                     SettingsSectionLabel("Categories")
                     SettingsGroup {
                         SettingsRow(
-                            title = "Requests needing approval",
-                            summary = "Alerts for decisions that need your attention",
+                            title = "Requests needing action",
+                            summary = "Alerts for requests that need your attention",
                             onClick = { openChannel(RequestNotifications.ACTION_CHANNEL_ID) },
                             external = true,
                         )
@@ -653,11 +658,17 @@ private fun About(
                         SettingsValueRow("Source revision", BuildConfig.SOURCE_REVISION, monospace = true)
                         SettingsGroupDivider()
                         SettingsValueRow("Developer", "Full Disclosure")
+                    }
+                }
+            }
+            item {
+                Column {
+                    SettingsSectionLabel("This device")
+                    SettingsGroup {
                         identity?.let { device ->
-                            SettingsGroupDivider()
                             SettingsValueRow("Device ID", device.deviceId, monospace = true)
+                            SettingsGroupDivider()
                         }
-                        SettingsGroupDivider()
                         SettingsValueRow("Relay", "relay.agentknock.dev", monospace = true)
                     }
                 }
@@ -850,7 +861,7 @@ private fun DeviceAuthenticationMode.overviewLabel(): String = when (this) {
 
 private fun DeviceAuthenticationMode.explanation(): String = when (this) {
     DeviceAuthenticationMode.DEVICE_LOCK ->
-        "No additional Agentknock prompts. Review and destructive confirmations still apply."
+        "No additional Agentknock prompts. Request decisions and destructive confirmations still apply."
     DeviceAuthenticationMode.SENSITIVE_VALUES_AND_PAIRING ->
         "Authenticate before showing, copying, or editing sensitive values, weakening their protection, or accepting a new client."
     DeviceAuthenticationMode.APP_LOCK ->

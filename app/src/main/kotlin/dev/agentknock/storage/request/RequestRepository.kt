@@ -29,6 +29,7 @@ import dev.agentknock.review.approvalReviewRequest
 import dev.agentknock.review.approvalReviewGitSignRequest
 import dev.agentknock.review.approvalReviewSecretFacts
 import dev.agentknock.relay.ApprovalReviewRequest
+import dev.agentknock.relay.ApprovalReviewEnvironmentSecretFacts
 import dev.agentknock.relay.ApprovalReviewSecretFacts
 import dev.agentknock.relay.RelayClientState
 import dev.agentknock.relay.RelayApprovalReviewClient
@@ -93,6 +94,7 @@ import java.util.Base64
 import java.security.MessageDigest
 import kotlinx.coroutines.CoroutineDispatcher
 import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.NonCancellable
 import kotlinx.coroutines.channels.Channel
 import kotlinx.coroutines.flow.Flow
 import kotlinx.coroutines.flow.MutableStateFlow
@@ -341,6 +343,7 @@ internal data class SecretUseRequestDetails(
     val completionMessage: String?,
     val secrets: List<String>,
     val secretDetails: List<SecretMetadata>,
+    val environmentVariables: Map<String, Map<String, String?>>,
     val missingSecrets: List<String>,
     val reason: String?,
     val command: String,
@@ -411,6 +414,7 @@ internal data class ClientSummary(
     val name: String,
     val hostname: String?,
     val platform: String?,
+    val architecture: String?,
     val state: RelayClientState,
     val desiredState: RelayClientState?,
     val pairedAt: Long?,
@@ -784,6 +788,7 @@ internal class RequestRepository(
                     completionMessage = it.completionMessage,
                     secrets = decodeStringList(it.secretsJson),
                     secretDetails = json.decodeFromString(it.secretDetailsJson),
+                    environmentVariables = decodeEnvironmentReviewFacts(it.providedSecretsJson),
                     missingSecrets = decodeStringList(it.missingSecretsJson),
                     reason = it.reason,
                     command = it.command,
@@ -968,8 +973,15 @@ internal class RequestRepository(
                 ClientSummary(
                     clientId = pairing.clientId,
                     name = pairing.friendlyName ?: pairing.hostname ?: "Unnamed client",
-                    hostname = pairing.hostname,
-                    platform = pairing.platform,
+                    hostname = observationsByClient[pairing.clientId]?.firstNotNullOfOrNull {
+                        it.hostname
+                    } ?: pairing.hostname,
+                    platform = observationsByClient[pairing.clientId]?.firstNotNullOfOrNull {
+                        it.platform
+                    } ?: pairing.platform,
+                    architecture = observationsByClient[pairing.clientId]?.firstNotNullOfOrNull {
+                        it.architecture
+                    } ?: pairing.architecture,
                     state = state,
                     desiredState = desiredState,
                     pairedAt = pairing.completedAt,
@@ -1286,8 +1298,12 @@ internal class RequestRepository(
                 caughtUp = true
                 continue
             }
-            val failure = operationMutex.withLock {
-                when (event) {
+            // Finish an event once it starts changing local state, even if the foreground
+            // connection is refreshed or enters its background grace period. An invocation can
+            // already be persisted while its AI review is still in flight.
+            val failure = withContext(NonCancellable) {
+                operationMutex.withLock {
+                    when (event) {
                     is RelayDeviceEvent.Message -> {
                         val update = when (event.kind) {
                             RelayMessageKind.REQUEST -> processRequest(
@@ -1410,7 +1426,8 @@ internal class RequestRepository(
                     is RelayDeviceEvent.Failed -> {
                         RequestSyncResult.RelayUnavailable(event.message)
                     }
-                    RelayDeviceEvent.CaughtUp -> null
+                        RelayDeviceEvent.CaughtUp -> null
+                    }
                 }
             }
             if (failure != null) return failure
@@ -1437,6 +1454,21 @@ internal class RequestRepository(
         return operationMutex.withLock {
             for (pairing in dao.getPairings()) {
                 if (pairing.deviceIdentityId != credentials.deviceIdentityId) continue
+                if (
+                    pairing.state == PairingState.REJECTED.storedName &&
+                    pairing.relayClientState == RelayClientState.PENDING.wireName &&
+                    pairing.desiredRelayClientState == RelayClientState.REVOKED.wireName
+                ) {
+                    // Pending candidates never gained device authority and cannot transition to
+                    // revoked. Older builds queued that invalid transition after local rejection.
+                    dao.updatePairing(
+                        pairing.copy(
+                            desiredRelayClientState = null,
+                            updatedAt = currentTimeMillis(),
+                        ),
+                    )
+                    continue
+                }
                 val desired = pairing.desiredRelayClientState?.toRelayClientState() ?: continue
                 if (pairing.relayClientState == desired.wireName) continue
                 if (awaitingClientStates[pairing.clientId] == desired) continue
@@ -1510,6 +1542,8 @@ internal class RequestRepository(
                     pairing.state
                 },
                 relayClientState = event.state.wireName,
+                desiredRelayClientState = pairing.desiredRelayClientState
+                    ?.takeUnless { it == event.state.wireName },
                 updatedAt = now,
             )
         if (event.state == RelayClientState.REVOKED) {
@@ -1706,7 +1740,7 @@ internal class RequestRepository(
                 desiredRelayClientState = if (verified) {
                     RelayClientState.ACTIVE.wireName
                 } else {
-                    RelayClientState.REVOKED.wireName
+                    null
                 },
                 updatedAt = now,
                 decidedAt = now,
@@ -1758,7 +1792,7 @@ internal class RequestRepository(
             ),
             pairing = pairing.copy(
                 state = PairingState.REJECTED.storedName,
-                desiredRelayClientState = RelayClientState.REVOKED.wireName,
+                desiredRelayClientState = null,
                 updatedAt = now,
                 decidedAt = pairing.decidedAt ?: now,
                 completedAt = now,
@@ -1834,7 +1868,7 @@ internal class RequestRepository(
                         InvocationDenialReason.POLICY_DENIED,
                         "Approval settings denied access to a requested secret.",
                     ),
-                    providedSecretsJson = null,
+                    providedSecretsJson = secretUseRequest.providedSecretsJson,
                     decisionSource = DECISION_SOURCE_POLICY,
                 )
             }
@@ -2021,7 +2055,7 @@ internal class RequestRepository(
                     InvocationDenialReason.USER_DENIED,
                     SECRET_USE_DENIAL_MESSAGE,
                 ),
-                providedSecretsJson = null,
+                providedSecretsJson = secretUseRequest.providedSecretsJson,
             )
         }.also { result ->
             if (result == SecretUseDecisionResult.Decided) requestSync()
@@ -2542,7 +2576,11 @@ internal class RequestRepository(
             AuditRecord(
                 category = AuditCategory.SECRET_UPLOAD,
                 title = "Secret upload approved",
-                detail = uploadRequest.uploadedName,
+                detail = if (uploadRequest.uploadedName == approvedName.trim()) {
+                    approvedName.trim()
+                } else {
+                    "${uploadRequest.uploadedName} → ${approvedName.trim()}"
+                },
                 outcome = AuditOutcome.APPROVED,
                 clientId = uploadRequest.clientId,
                 relayRequestId = request.relayRequestId,
@@ -2717,7 +2755,7 @@ internal class RequestRepository(
             return startPairing(credentials, message, requestPayload)
         }
 
-        val pairing = dao.getPairingByClientId(message.clientId) ?: return null
+        var pairing = dao.getPairingByClientId(message.clientId) ?: return null
         if (pairing.deviceIdentityId != credentials.deviceIdentityId) return null
         val pairingState = pairing.state.toPairingState()
         if (
@@ -2750,6 +2788,21 @@ internal class RequestRepository(
                 request = requestPayload,
             )
         }.getOrNull() ?: return null
+        if (
+            pairingState == PairingState.ACTIVE &&
+            pairing.relayClientState == RelayClientState.PENDING.wireName &&
+            pairing.desiredRelayClientState == RelayClientState.ACTIVE.wireName
+        ) {
+            // A valid request from this client proves that the relay finished the original
+            // activation. Older builds could persist the pre-activation state indefinitely
+            // when the relay had already applied it and therefore emitted no further change.
+            pairing = pairing.copy(
+                relayClientState = RelayClientState.ACTIVE.wireName,
+                desiredRelayClientState = null,
+                updatedAt = now,
+            )
+            dao.updatePairing(pairing)
+        }
         val acceptedSecrets = acceptedRequestSecrets(
             pairing = pairing,
             relayRequestId = message.requestId,
@@ -2907,6 +2960,11 @@ internal class RequestRepository(
             null
         }
         val needsAiReview = initialApprovalEvaluation?.requiresAiReview() == true
+        val initialAvailableSecrets =
+            (requestedSecrets as? RequestedSecretsResult.Available)?.secrets
+        val initialProvidedSecretsJson = initialAvailableSecrets?.let { values ->
+            json.encodeToString(approvalReviewSecretFacts(description, values))
+        }
         val now = currentTimeMillis()
         val initialRequest = InboxRequestEntity(
             relayRequestId = relayRequestId,
@@ -2931,6 +2989,9 @@ internal class RequestRepository(
             now = now,
         ).copy(
             approvalEvaluationJson = initialApprovalEvaluation?.let { json.encodeToString(it) },
+            // Save the safe display snapshot before a potentially long AI call. It contains
+            // metadata, public SSH material, and values explicitly marked non-sensitive only.
+            providedSecretsJson = initialProvidedSecretsJson,
         )
         val pendingRequestId = if (needsAiReview) {
             aiReviewInFlight.update { it + relayRequestId }
@@ -2952,8 +3013,6 @@ internal class RequestRepository(
             null
         }
         try {
-        val initialAvailableSecrets =
-            (requestedSecrets as? RequestedSecretsResult.Available)?.secrets
         val reviewResult = if (needsAiReview) {
             requestAiReview(
                 pairing = pairing,
@@ -3127,6 +3186,7 @@ internal class RequestRepository(
             currentSecretUse.copy(
                 requestId = pendingRequestId ?: 0,
                 approvalEvaluationJson = approvalEvaluation?.let { json.encodeToString(it) },
+                providedSecretsJson = providedSecretsJson,
                 updatedAt = decidedAt,
             )
         } else {
@@ -3152,11 +3212,10 @@ internal class RequestRepository(
                     null
                 },
                 approvalEvaluationJson = approvalEvaluation?.let { json.encodeToString(it) },
-                providedSecretsJson = if (automaticDecision == SecretUseDecision.APPROVED) {
-                    checkNotNull(providedSecretsJson)
-                } else {
-                    null
-                },
+                // This snapshot contains only metadata, public SSH material, and values that the
+                // user explicitly marked non-sensitive. Keep it for denied requests as well so
+                // their history still shows the complete, safe-to-display request context.
+                providedSecretsJson = providedSecretsJson,
                 completionReason = denial?.first?.wireName,
                 completionMessage = denial?.second,
                 updatedAt = decidedAt,
@@ -3237,13 +3296,17 @@ internal class RequestRepository(
                                     "Secret use approved automatically"
                                 }
                             } else {
-                                "Non-sensitive secret use delivered"
+                                "Non-sensitive data provided automatically"
                             }
                         aiDenial != null -> "Secret use denied by AI review"
                         policyDenial != null -> "Secret use denied by approval settings"
                         else -> "Secret use rejected automatically"
                     },
-                    detail = denial?.second ?: contents.secrets.joinToString(),
+                    detail = when {
+                        aiReview != null && (aiApprovalUsed || aiDenial != null) ->
+                            aiReview.auditExplanation()
+                        else -> denial?.second ?: contents.secrets.joinToString()
+                    },
                     outcome = when {
                         automaticDecision == SecretUseDecision.APPROVED -> AuditOutcome.APPROVED
                         policyDenial != null || aiDenial != null -> AuditOutcome.DENIED
@@ -3620,7 +3683,15 @@ internal class RequestRepository(
                     denial != null -> "Git signature rejected automatically"
                     else -> "Git signature requested"
                 },
-                detail = contents.secret,
+                detail = if (
+                    aiReview != null &&
+                    (signature != null || denial != null) &&
+                    aiReview.decision != AiReviewDecision.ASK_USER
+                ) {
+                    aiReview.auditExplanation()
+                } else {
+                    contents.secret
+                },
                 outcome = when {
                     signature != null -> AuditOutcome.APPROVED
                     denial != null -> AuditOutcome.DENIED
@@ -3843,7 +3914,7 @@ internal class RequestRepository(
             AuditRecord(
                 category = AuditCategory.SECRET_LIST,
                 title = "Secret list requested",
-                detail = "${secretMetadata.size} secrets sent to ${pairing.friendlyName ?: pairing.hostname ?: "client"}",
+                detail = "${secretMetadata.size} secrets",
                 outcome = AuditOutcome.RECEIVED,
                 clientId = pairing.clientId,
                 relayRequestId = relayRequestId,
@@ -4039,9 +4110,9 @@ internal class RequestRepository(
                 title = if (prepared.error == null) {
                     "Secret upload received"
                 } else {
-                    "Secret upload rejected"
+                    "Secret upload rejected automatically"
                 },
-                detail = prepared.error ?: "${contents.mode.wireName.lowercase()} ${contents.name}",
+                detail = prepared.error ?: contents.name,
                 outcome = if (prepared.error == null) {
                     AuditOutcome.RECEIVED
                 } else {
@@ -4151,8 +4222,8 @@ internal class RequestRepository(
         audit.record(
             AuditRecord(
                 category = AuditCategory.VERIFICATION,
-                title = "Authenticated request rejected",
-                detail = code.wireName,
+                title = "Request rejected",
+                detail = code.message,
                 outcome = AuditOutcome.REJECTED,
                 clientId = pairing.clientId,
                 relayRequestId = relayRequestId,
@@ -4437,6 +4508,8 @@ internal class RequestRepository(
             ),
             pairing = pairing.copy(
                 state = PairingState.ACTIVE.storedName,
+                relayClientState = RelayClientState.ACTIVE.wireName,
+                desiredRelayClientState = null,
                 updatedAt = now,
                 completedAt = now,
             ),
@@ -4656,7 +4729,7 @@ internal class RequestRepository(
                     AuditCategory.VERIFICATION
                 },
                 title = if (valid) {
-                    "Secret upload receipt confirmed"
+                    "Client received upload result"
                 } else {
                     "Secret upload confirmation failed"
                 },
@@ -4866,14 +4939,16 @@ internal class RequestRepository(
                 category = if (valid) AuditCategory.SECRET_USE else AuditCategory.VERIFICATION,
                 title = when {
                     !valid -> "Secret use confirmation failed"
-                    completionResult is InvocationCompletion.Approved -> "Secret use delivered"
-                    completionResult is InvocationCompletion.Denied -> "Secret use denial confirmed"
+                    completionResult is InvocationCompletion.Approved ->
+                        "Client received secret data"
+                    completionResult is InvocationCompletion.Denied -> "Client received denial"
                     else -> "Secret use aborted"
                 },
                 detail = decodeStringList(secretUseRequest.secretsJson).joinToString(),
                 outcome = when {
                     !valid -> AuditOutcome.FAILED
                     completionResult is InvocationCompletion.Denied -> AuditOutcome.DENIED
+                    completionResult is InvocationCompletion.Aborted -> AuditOutcome.ABORTED
                     else -> AuditOutcome.COMPLETED
                 },
                 clientId = secretUseRequest.clientId,
@@ -4982,14 +5057,17 @@ internal class RequestRepository(
                 category = if (valid) AuditCategory.GIT_SIGN else AuditCategory.VERIFICATION,
                 title = when {
                     !valid -> "Git signature confirmation failed"
-                    completionResult is GitSignCompletion.Approved -> "Git signature delivered"
-                    completionResult is GitSignCompletion.Denied -> "Git signature denial confirmed"
+                    completionResult is GitSignCompletion.Approved ->
+                        "Client received signature"
+                    completionResult is GitSignCompletion.Denied ->
+                        "Client received signature denial"
                     else -> "Git signature request aborted"
                 },
                 detail = gitSign.secretName,
                 outcome = when {
                     !valid -> AuditOutcome.FAILED
                     completionResult is GitSignCompletion.Denied -> AuditOutcome.DENIED
+                    completionResult is GitSignCompletion.Aborted -> AuditOutcome.ABORTED
                     else -> AuditOutcome.COMPLETED
                 },
                 clientId = invocation.clientId,
@@ -5503,6 +5581,19 @@ internal class RequestRepository(
     private fun decodeApprovalEvaluation(value: String): ApprovalEvaluation? =
         runCatching { json.decodeFromString<ApprovalEvaluation>(value) }.getOrNull()
 
+    private fun decodeEnvironmentReviewFacts(
+        value: String?,
+    ): Map<String, Map<String, String?>> = value?.let { encoded ->
+        runCatching {
+            json.decodeFromString<Map<String, ApprovalReviewSecretFacts>>(encoded)
+                .mapNotNull { (secretName, facts) ->
+                    (facts as? ApprovalReviewEnvironmentSecretFacts)
+                        ?.let { secretName to it.environmentVariables }
+                }
+                .toMap()
+        }.getOrNull()
+    }.orEmpty()
+
     private fun encodeClientSoftware(value: ClientSoftware): String = json.encodeToString(value)
 
     private fun decodeClientSoftware(value: String): ClientSoftware? =
@@ -5577,6 +5668,24 @@ internal class RequestRepository(
                 stored.revision == current.revision
         }
 }
+
+private fun AiReview.auditExplanation(): String = explanation
+    ?.trim()
+    ?.let { text ->
+        val labels = when (decision) {
+            AiReviewDecision.APPROVE -> listOf("Approve:", "Approved:")
+            AiReviewDecision.DENY -> listOf("Deny:", "Denied:")
+            AiReviewDecision.ASK_USER -> listOf("Ask:", "Ask user:")
+            null -> emptyList()
+        }
+        labels.firstOrNull { text.startsWith(it, ignoreCase = true) }
+            ?.let { text.drop(it.length).trimStart() }
+            ?: text
+    }
+    ?.replace("**", "")
+    ?.replace("`", "")
+    ?.takeIf(String::isNotBlank)
+    ?: "AI review did not provide an explanation."
 
 private enum class RequestKind(val storedName: String) {
     PAIRING("pairing"),

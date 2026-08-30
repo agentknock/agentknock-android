@@ -117,6 +117,27 @@ internal fun ClientsScreen(
     val configuration by viewModel.configuration.collectAsStateWithLifecycle()
     val snackbar = remember { SnackbarHostState() }
     val scope = rememberCoroutineScope()
+    var loadedClientId by remember { mutableStateOf<String?>(null) }
+    var loadedPairingRequestId by remember { mutableStateOf<Long?>(null) }
+
+    LaunchedEffect(selection, selectedClient?.clientId) {
+        when {
+            selection != null && selectedClient?.clientId == selection ->
+                loadedClientId = selection
+            selection != null && loadedClientId == selection && selectedClient == null ->
+                viewModel.selectClient(null)
+        }
+    }
+
+    LaunchedEffect(pairingSelection, selectedPairing?.id) {
+        when {
+            pairingSelection != null && selectedPairing?.id == pairingSelection ->
+                loadedPairingRequestId = pairingSelection
+            pairingSelection != null &&
+                loadedPairingRequestId == pairingSelection &&
+                selectedPairing == null -> viewModel.selectPairing(null)
+        }
+    }
 
     fun report(message: String) {
         scope.launch { snackbar.showSnackbar(message) }
@@ -141,7 +162,7 @@ internal fun ClientsScreen(
         contentWindowInsets = WindowInsets(0, 0, 0, 0),
     ) { padding ->
         BoxWithConstraints(Modifier.fillMaxSize().padding(padding)) {
-            val twoPane = maxWidth >= 840.dp
+            val twoPane = maxWidth >= 720.dp
             val hasSelection = selection != null || pairingSelection != null
             LaunchedEffect(hasSelection, twoPane) {
                 onTopLevelChanged(twoPane || !hasSelection)
@@ -162,7 +183,7 @@ internal fun ClientsScreen(
                         },
                         onOpenSettings = onOpenSettings,
                         report = ::report,
-                        modifier = Modifier.width(340.dp).fillMaxHeight(),
+                        modifier = Modifier.width(320.dp).fillMaxHeight(),
                     )
                     VerticalDivider()
                     if (!hasSelection) {
@@ -540,7 +561,10 @@ private fun ClientList(
                             supportingContent = {
                                 val hostname = client.hostname
                                     ?.takeUnless { it.equals(client.name, ignoreCase = true) }
-                                val platform = client.platform?.let(::formatPlatformName)
+                                val platform = listOfNotNull(
+                                    client.platform?.let(::formatPlatformName),
+                                    client.architecture,
+                                ).joinToString(" · ").ifBlank { null }
                                 val machine = when {
                                     hostname != null && platform != null -> "$platform on $hostname"
                                     hostname != null -> hostname
@@ -549,13 +573,16 @@ private fun ClientList(
                                 }
                                 Column(verticalArrangement = Arrangement.spacedBy(2.dp)) {
                                     if (machine.isNotEmpty()) Text(machine)
-                                    val activity = listOfNotNull(
-                                        client.pairedAt?.let { "Paired ${formatRelativeTime(it)}" },
-                                        client.lastRequestAt?.let { "Last request ${formatRelativeTime(it)}" },
-                                    ).joinToString(" · ")
-                                    if (activity.isNotEmpty()) {
+                                    client.pairedAt?.let {
                                         Text(
-                                            activity,
+                                            "Paired ${formatRelativeTime(it)}",
+                                            style = MaterialTheme.typography.bodySmall,
+                                            color = MaterialTheme.colorScheme.onSurfaceVariant,
+                                        )
+                                    }
+                                    client.lastRequestAt?.let {
+                                        Text(
+                                            "Last request ${formatRelativeTime(it)}",
                                             style = MaterialTheme.typography.bodySmall,
                                             color = MaterialTheme.colorScheme.onSurfaceVariant,
                                         )
@@ -579,11 +606,12 @@ private fun ClientList(
                                                 modifier = Modifier.size(14.dp),
                                             )
                                             Text(
-                                                "${client.temporaryAccessCount} temporary " +
+                                                "Temporary access to " +
+                                                    "${client.temporaryAccessCount} " +
                                                     if (client.temporaryAccessCount == 1) {
-                                                        "approval"
+                                                        "secret"
                                                     } else {
-                                                        "approvals"
+                                                        "secrets"
                                                     },
                                                 style = MaterialTheme.typography.labelMedium,
                                                 color = MaterialTheme.colorScheme.primary,
@@ -637,42 +665,40 @@ private fun PairingControls(
         shape = MaterialTheme.shapes.large,
         modifier = Modifier.padding(horizontal = 16.dp, vertical = 6.dp).fillMaxWidth(),
     ) {
-        Row(
-            modifier = Modifier.fillMaxWidth().padding(start = 16.dp, end = 4.dp, top = 8.dp, bottom = 8.dp),
-            horizontalArrangement = Arrangement.spacedBy(2.dp),
-            verticalAlignment = Alignment.CenterVertically,
+        Column(
+            modifier = Modifier.fillMaxWidth().padding(start = 16.dp, end = 4.dp, top = 6.dp, bottom = 12.dp),
         ) {
-            Column(
-                modifier = Modifier.weight(1f).clickable {
-                    context.getSystemService(ClipboardManager::class.java).setPrimaryClip(
-                        ClipData.newPlainText("Agentknock pairing address", identity.address),
-                    )
-                    report("Pairing address copied")
-                }.padding(vertical = 4.dp),
-                verticalArrangement = Arrangement.spacedBy(1.dp),
-            ) {
+            Row(verticalAlignment = Alignment.CenterVertically) {
                 Text(
                     if (identity.pairingEnabled) "Pairing address" else "Pairing address · paused",
                     style = MaterialTheme.typography.labelMedium,
                     color = MaterialTheme.colorScheme.onSurfaceVariant,
+                    modifier = Modifier.weight(1f),
                 )
-                Text(
-                    identity.address,
-                    style = MaterialTheme.typography.bodyLarge,
-                    fontFamily = FontFamily.Monospace,
-                    maxLines = 1,
-                    overflow = TextOverflow.Ellipsis,
-                )
+                IconButton(onClick = {
+                    context.getSystemService(ClipboardManager::class.java).setPrimaryClip(
+                        ClipData.newPlainText("Agentknock pairing address", identity.address),
+                    )
+                    report("Pairing address copied")
+                }) {
+                    Icon(Icons.Outlined.ContentCopy, contentDescription = "Copy pairing address")
+                }
+                IconButton(onClick = onChangePairingAddress) {
+                    Icon(Icons.Outlined.Edit, contentDescription = "Change pairing address")
+                }
+                IconButton(onClick = { onSetPairingEnabled(!identity.pairingEnabled) }) {
+                    Icon(
+                        if (identity.pairingEnabled) Icons.Outlined.PauseCircle else Icons.Outlined.PlayCircle,
+                        contentDescription = if (identity.pairingEnabled) "Pause new pairings" else "Resume new pairings",
+                    )
+                }
             }
-            IconButton(onClick = onChangePairingAddress) {
-                Icon(Icons.Outlined.Edit, contentDescription = "Change pairing address")
-            }
-            IconButton(onClick = { onSetPairingEnabled(!identity.pairingEnabled) }) {
-                Icon(
-                    if (identity.pairingEnabled) Icons.Outlined.PauseCircle else Icons.Outlined.PlayCircle,
-                    contentDescription = if (identity.pairingEnabled) "Pause new pairings" else "Resume new pairings",
-                )
-            }
+            Text(
+                identity.address,
+                style = MaterialTheme.typography.bodyLarge,
+                fontFamily = FontFamily.Monospace,
+                modifier = Modifier.padding(end = 12.dp),
+            )
         }
     }
 }
@@ -704,32 +730,13 @@ private fun PendingPairingRow(
             },
             leadingContent = { TonalIcon(Icons.Outlined.Computer, contentDescription = null) },
             trailingContent = {
-                Row(
-                    horizontalArrangement = Arrangement.spacedBy(6.dp),
-                    verticalAlignment = Alignment.CenterVertically,
-                ) {
-                    Text(
-                        pairingState.pairingListStatus(),
-                        style = MaterialTheme.typography.labelMedium,
-                    )
-                    Icon(Icons.AutoMirrored.Outlined.NavigateNext, contentDescription = null)
-                }
+                Icon(Icons.AutoMirrored.Outlined.NavigateNext, contentDescription = null)
             },
             colors = ListItemDefaults.colors(
                 containerColor = androidx.compose.ui.graphics.Color.Transparent,
             ),
         )
     }
-}
-
-private fun PairingState.pairingListStatus(): String = when (this) {
-    PairingState.RECEIVING -> "Starting"
-    PairingState.SAS_VERIFICATION_PENDING -> "Review"
-    PairingState.RELAY_ACTIVATION_PENDING -> "Activating"
-    PairingState.WAITING_FOR_FINISH -> "Waiting"
-    PairingState.VERIFICATION_FAILED -> "Problem"
-    PairingState.REJECTED -> "Rejected"
-    PairingState.ACTIVE -> "Paired"
 }
 
 private fun PairingState.pairingListDescription(): String = when (this) {
@@ -829,7 +836,10 @@ private fun ClientDetail(
                             },
                         )
                     }
-                    IconButton(onClick = { showInstructions = true }) {
+                    IconButton(onClick = {
+                        instructions = client.instructions
+                        showInstructions = true
+                    }) {
                         Icon(Icons.Outlined.Edit, contentDescription = "Edit instructions")
                     }
                 }
@@ -851,13 +861,16 @@ private fun ClientDetail(
                     }
                 }
                 client.pairedAt?.let { ClientField("Paired", formatTimestamp(it)) }
-                client.lastRequestAt?.let { ClientField("Last request", formatTimestamp(it)) }
+                ClientField(
+                    "Last request",
+                    client.lastRequestAt?.let(::formatTimestamp) ?: "None yet",
+                )
             }
 
             if (temporaryAccessGrants.isNotEmpty()) {
                 InformationSurface {
                     Text(
-                        "Temporary approvals",
+                        "Temporary access",
                         style = MaterialTheme.typography.titleMedium,
                     )
                     Text(
@@ -897,8 +910,9 @@ private fun ClientDetail(
                 }
             }
 
-            InformationSurface {
-                Text("Access", style = MaterialTheme.typography.titleMedium)
+            if (client.state == RelayClientState.ACTIVE || client.state == RelayClientState.SUSPENDED) {
+                InformationSurface {
+                    Text("Access", style = MaterialTheme.typography.titleMedium)
                 when (client.state) {
                     RelayClientState.ACTIVE -> OutlinedButton(
                         onClick = { onSetState(RelayClientState.SUSPENDED) },
@@ -932,6 +946,7 @@ private fun ClientDetail(
                     RelayClientState.PENDING,
                     RelayClientState.REVOKED,
                     -> Unit
+                }
                 }
             }
 
@@ -979,7 +994,10 @@ private fun ClientDetail(
             onDismissRequest = { showRename = false },
             title = { Text("Rename client") },
             text = {
-                Column(verticalArrangement = Arrangement.spacedBy(12.dp)) {
+                Column(
+                    Modifier.verticalScroll(rememberScrollState()),
+                    verticalArrangement = Arrangement.spacedBy(12.dp),
+                ) {
                     Text("This only changes how the client appears in Agentknock.")
                     OutlinedTextField(
                         value = name,
@@ -1007,9 +1025,12 @@ private fun ClientDetail(
             onDismissRequest = { showInstructions = false },
             title = { Text("Client instructions") },
             text = {
-                Column(verticalArrangement = Arrangement.spacedBy(12.dp)) {
+                Column(
+                    Modifier.verticalScroll(rememberScrollState()),
+                    verticalArrangement = Arrangement.spacedBy(12.dp),
+                ) {
                     Text(
-                        "Tell AI review what this client is used for and how much it should be trusted.",
+                        "Tell the AI reviewer what this client is used for and how much it should be trusted.",
                     )
                     OutlinedTextField(
                         value = instructions,
@@ -1023,9 +1044,10 @@ private fun ClientDetail(
             },
             confirmButton = {
                 TextButton(
+                    enabled = instructions.trim() != client.instructions,
                     onClick = {
                         showInstructions = false
-                        onSaveInstructions(instructions)
+                        onSaveInstructions(instructions.trim())
                     },
                 ) { Text("Save") }
             },

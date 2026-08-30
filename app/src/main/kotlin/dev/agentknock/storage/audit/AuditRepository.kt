@@ -26,6 +26,7 @@ internal enum class AuditOutcome(val storedName: String) {
     APPROVED("approved"),
     DENIED("denied"),
     REJECTED("rejected"),
+    ABORTED("aborted"),
     COMPLETED("completed"),
     CHANGED("changed"),
     FAILED("failed"),
@@ -91,9 +92,9 @@ internal class AuditRepository(
         id = id,
         occurredAt = occurredAt,
         category = checkNotNull(AuditCategory.entries.find { it.storedName == category }),
-        title = title,
+        title = storedAuditTitle(title),
         detail = detail,
-        outcome = checkNotNull(AuditOutcome.entries.find { it.storedName == outcome }),
+        outcome = storedAuditOutcome(outcome, title),
         clientId = clientId,
         relayRequestId = relayRequestId,
     )
@@ -101,4 +102,30 @@ internal class AuditRepository(
     private companion object {
         const val RETENTION_MILLIS = 365L * 24 * 60 * 60 * 1000
     }
+}
+
+internal fun storedAuditOutcome(outcome: String, title: String): AuditOutcome = when {
+    // Releases before the aborted outcome was introduced stored an authenticated client abort
+    // as completed. Preserve those rows while presenting their real result.
+    outcome == AuditOutcome.COMPLETED.storedName && title.contains("aborted", ignoreCase = true) ->
+        AuditOutcome.ABORTED
+    else -> checkNotNull(AuditOutcome.entries.find { it.storedName == outcome })
+}
+
+internal fun storedAuditTitle(title: String): String = when (title) {
+    "Non-sensitive secret use delivered" -> "Non-sensitive data provided automatically"
+    "Secret upload receipt confirmed",
+    "Client confirmed upload receipt" -> "Client received upload result"
+    "Secret use delivered",
+    "Client confirmed secret data received" -> "Client received secret data"
+    "Git signature delivered",
+    "Client confirmed signature received" -> "Client received signature"
+    "Secret use denial confirmed",
+    "Client confirmed denial received",
+    "Client confirmed secret use was denied" -> "Client received denial"
+    "Git signature denial confirmed",
+    "Client confirmed signature denial received",
+    "Client confirmed Git signature was denied" -> "Client received signature denial"
+    "Authenticated request rejected" -> "Request rejected"
+    else -> title
 }

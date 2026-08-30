@@ -2,8 +2,6 @@
 
 package dev.agentknock.ui.settings
 
-import android.content.Intent
-import android.net.Uri
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.Row
@@ -15,7 +13,6 @@ import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.verticalScroll
 import androidx.compose.material.icons.Icons
-import androidx.compose.material.icons.automirrored.outlined.Launch
 import androidx.compose.material.icons.outlined.AutoAwesome
 import androidx.compose.material.icons.outlined.Check
 import androidx.compose.material.icons.outlined.CheckCircle
@@ -32,7 +29,6 @@ import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
-import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.semantics.heading
 import androidx.compose.ui.semantics.semantics
 import androidx.compose.ui.unit.dp
@@ -45,10 +41,9 @@ internal fun SubscriptionAndBillingScreen(
     onRefresh: () -> Unit,
     modifier: Modifier = Modifier,
 ) {
-    val context = LocalContext.current
     val active = state.access == SubscriptionAccess.ACTIVE
     Column(modifier) {
-        PageTopBar("Plan & billing", onBack)
+        PageTopBar("Plan and billing", onBack)
         Column(
             Modifier.fillMaxSize().verticalScroll(rememberScrollState()).padding(20.dp),
             verticalArrangement = Arrangement.spacedBy(16.dp),
@@ -67,7 +62,7 @@ internal fun SubscriptionAndBillingScreen(
             ) {
                 IncludedFeature("Store and release secrets")
                 IncludedFeature("Manual approvals")
-                IncludedFeature("Temporary approvals")
+                IncludedFeature("Temporary access")
             }
 
             AccessCard(
@@ -88,25 +83,7 @@ internal fun SubscriptionAndBillingScreen(
                 )
             }
 
-            if (active) {
-                OutlinedButton(
-                    onClick = {
-                        context.startActivity(
-                            Intent(
-                                Intent.ACTION_VIEW,
-                                Uri.parse(
-                                    "https://play.google.com/store/account/subscriptions?package=${context.packageName}",
-                                ),
-                            ),
-                        )
-                    },
-                    modifier = Modifier.fillMaxWidth(),
-                ) {
-                    Icon(Icons.AutoMirrored.Outlined.Launch, contentDescription = null)
-                    Spacer(Modifier.size(8.dp))
-                    Text("Manage subscription in Google Play")
-                }
-            } else {
+            if (!active) {
                 Button(onClick = {}, enabled = false, modifier = Modifier.fillMaxWidth()) {
                     Icon(Icons.Outlined.WorkspacePremium, contentDescription = null)
                     Spacer(Modifier.size(8.dp))

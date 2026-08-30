@@ -17,9 +17,9 @@ class DisplayFormattingTest {
     fun relativeTime_isCompactForRecentActivity() {
         val now = 2_000_000_000_000
         assertEquals("just now", formatRelativeTime(now - 20_000, now))
-        assertEquals("7 min ago", formatRelativeTime(now - 7 * 60_000, now))
-        assertEquals("5 h ago", formatRelativeTime(now - 5 * 60 * 60_000, now))
-        assertEquals("12 d ago", formatRelativeTime(now - 12 * 24 * 60 * 60_000L, now))
+        assertEquals("7 minutes ago", formatRelativeTime(now - 7 * 60_000, now))
+        assertEquals("5 hours ago", formatRelativeTime(now - 5 * 60 * 60_000, now))
+        assertEquals("12 days ago", formatRelativeTime(now - 12 * 24 * 60 * 60_000L, now))
     }
 
     @Test

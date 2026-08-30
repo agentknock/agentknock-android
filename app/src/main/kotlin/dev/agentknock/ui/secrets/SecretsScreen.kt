@@ -50,7 +50,9 @@ import androidx.compose.material.icons.automirrored.outlined.NavigateNext
 import androidx.compose.material.icons.outlined.Add
 import androidx.compose.material.icons.outlined.AutoAwesome
 import androidx.compose.material.icons.outlined.ContentCopy
+import androidx.compose.material.icons.outlined.DataObject
 import androidx.compose.material.icons.outlined.Edit
+import androidx.compose.material.icons.outlined.Key
 import androidx.compose.material.icons.outlined.Lock
 import androidx.compose.material.icons.outlined.MoreVert
 import androidx.compose.material.icons.outlined.Schedule
@@ -82,10 +84,12 @@ import androidx.compose.runtime.remember
 import androidx.compose.runtime.rememberCoroutineScope
 import androidx.compose.runtime.saveable.rememberSaveable
 import androidx.compose.runtime.setValue
+import androidx.compose.runtime.withFrameNanos
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.platform.LocalDensity
+import androidx.compose.ui.platform.LocalFocusManager
 import androidx.compose.ui.platform.LocalResources
 import androidx.compose.ui.res.stringResource
 import androidx.compose.ui.text.font.FontFamily
@@ -142,7 +146,9 @@ import kotlinx.coroutines.launch
 import java.util.UUID
 
 private val environmentVariableName = Regex("[A-Za-z_][A-Za-z0-9_]*")
-private val twoPaneWidth = 840.dp
+// Measured after the app-wide navigation rail, so this corresponds to an
+// expanded (roughly 840 dp) top-level window.
+private val twoPaneWidth = 720.dp
 
 internal data class SecretEditorState(
     val secret: SecretDetails?,
@@ -412,7 +418,7 @@ internal fun SecretsScreen(
                         },
                         onOpenSettings = onOpenSettings,
                         modifier = Modifier
-                            .width(340.dp)
+                            .width(320.dp)
                             .fillMaxHeight(),
                     )
                     VerticalDivider()
@@ -450,8 +456,8 @@ internal fun SecretsScreen(
                             onSaveSshComment = { comment ->
                                 scope.launch {
                                     when (viewModel.saveSshComment(secret.id, comment)) {
-                                        is SaveSshSecretResult.Saved -> report("Public-key comment updated")
-                                        else -> report("Public-key comment could not be updated")
+                                        is SaveSshSecretResult.Saved -> report("Public key comment updated")
+                                        else -> report("Public key comment could not be updated")
                                     }
                                 }
                             },
@@ -571,8 +577,8 @@ internal fun SecretsScreen(
                     onSaveSshComment = { comment ->
                         scope.launch {
                             when (viewModel.saveSshComment(secret.id, comment)) {
-                                is SaveSshSecretResult.Saved -> report("Public-key comment updated")
-                                else -> report("Public-key comment could not be updated")
+                                is SaveSshSecretResult.Saved -> report("Public key comment updated")
+                                else -> report("Public key comment could not be updated")
                             }
                         }
                     },
@@ -979,7 +985,7 @@ private fun SecretList(
                                     Text("AI review instructions", style = MaterialTheme.typography.bodyLarge)
                                     Text(
                                         if (generalInstructions.isBlank()) {
-                                            "No instructions for all reviews"
+                                            "No general instructions"
                                         } else {
                                             "Applied to every AI review"
                                         },
@@ -1057,7 +1063,8 @@ private fun SecretList(
                                     }
                                     Text(
                                         if (secret.type == SSH_SECRET_TYPE) {
-                                            secret.sshKey?.fingerprint ?: "SSH key unavailable"
+                                            secret.sshKey?.fingerprint?.let { "SSH key · $it" }
+                                                ?: "SSH key unavailable"
                                         } else {
                                             "${secret.environmentVariableCount} environment " +
                                                 if (secret.environmentVariableCount == 1) {
@@ -1081,11 +1088,12 @@ private fun SecretList(
                                                 modifier = Modifier.size(14.dp),
                                             )
                                             Text(
-                                                "${secret.temporaryAccessCount} temporary " +
+                                                "Temporary access for " +
+                                                    "${secret.temporaryAccessCount} " +
                                                     if (secret.temporaryAccessCount == 1) {
-                                                        "approval"
+                                                        "client"
                                                     } else {
-                                                        "approvals"
+                                                        "clients"
                                                     },
                                                 style = MaterialTheme.typography.labelMedium,
                                                 color = MaterialTheme.colorScheme.primary,
@@ -1095,7 +1103,14 @@ private fun SecretList(
                                 }
                             },
                             leadingContent = {
-                                TonalIcon(Icons.Outlined.Lock, contentDescription = null)
+                                TonalIcon(
+                                    if (secret.type == SSH_SECRET_TYPE) {
+                                        Icons.Outlined.Key
+                                    } else {
+                                        Icons.Outlined.DataObject
+                                    },
+                                    contentDescription = null,
+                                )
                             },
                             colors = ListItemDefaults.colors(containerColor = androidx.compose.ui.graphics.Color.Transparent),
                             trailingContent = {
@@ -1115,7 +1130,10 @@ private fun SecretList(
             onDismissRequest = { showGeneralInstructions = false },
             title = { Text("AI review instructions") },
             text = {
-                Column(verticalArrangement = Arrangement.spacedBy(12.dp)) {
+                Column(
+                    Modifier.verticalScroll(rememberScrollState()),
+                    verticalArrangement = Arrangement.spacedBy(12.dp),
+                ) {
                     Text("These instructions apply to every AI review. Secret and client instructions add more specific context.")
                     OutlinedTextField(
                         value = editedGeneralInstructions,
@@ -1180,13 +1198,7 @@ private fun PendingSecretUploadRow(
             },
             leadingContent = { TonalIcon(Icons.Outlined.Lock, contentDescription = null) },
             trailingContent = {
-                Row(
-                    horizontalArrangement = Arrangement.spacedBy(6.dp),
-                    verticalAlignment = Alignment.CenterVertically,
-                ) {
-                    Text("Review", style = MaterialTheme.typography.labelMedium)
-                    Icon(Icons.AutoMirrored.Outlined.NavigateNext, contentDescription = null)
-                }
+                Icon(Icons.AutoMirrored.Outlined.NavigateNext, contentDescription = null)
             },
             colors = ListItemDefaults.colors(
                 containerColor = androidx.compose.ui.graphics.Color.Transparent,
@@ -1339,7 +1351,7 @@ private fun SecretDetail(
                         EmptyMessage(
                             title = stringResource(R.string.no_variables),
                             description = stringResource(R.string.no_variables_description),
-                            modifier = Modifier.fillMaxWidth().padding(vertical = 48.dp),
+                            modifier = Modifier.fillMaxWidth().padding(vertical = 24.dp),
                         )
                     }
                 } else {
@@ -1371,7 +1383,10 @@ private fun SecretDetail(
                         SshPublicKeyCard(
                             key = key,
                             onCopy = onCopyPublicKey,
-                            onEditComment = { editingSshComment = true },
+                            onEditComment = {
+                                sshComment = key.comment
+                                editingSshComment = true
+                            },
                             onReplace = onReplaceSshKey,
                         )
                     }
@@ -1379,7 +1394,7 @@ private fun SecretDetail(
                     EmptyMessage(
                         title = "SSH key unavailable",
                         description = "The encrypted private key could not be recovered on this device.",
-                        modifier = Modifier.fillMaxWidth().padding(vertical = 48.dp),
+                        modifier = Modifier.fillMaxWidth().padding(vertical = 24.dp),
                     )
                 }
             }
@@ -1389,7 +1404,13 @@ private fun SecretDetail(
             item {
                 InformationSurface {
                     Text(
-                        "Controls protected uses, such as providing sensitive values or using a private key.",
+                        if (secret.type == ENVIRONMENT_SECRET_TYPE) {
+                            "Sensitive environment variable values follow these settings. " +
+                                "Non-sensitive values are provided without approval."
+                        } else {
+                            "Private key use follows these settings. " +
+                                "The public key is provided without approval."
+                        },
                         color = MaterialTheme.colorScheme.onSurfaceVariant,
                     )
                     if (secret.temporaryAccessGrants.isNotEmpty()) {
@@ -1401,9 +1422,18 @@ private fun SecretDetail(
                         HorizontalDivider()
                     }
                     ApprovalSettingRow(
-                        title = "Default",
+                        title = "Default for all clients",
                         value = secret.approvalMode.displayName(),
                         onClick = { editingDefaultApproval = true },
+                    )
+                    HorizontalDivider()
+                    ApprovalSettingRow(
+                        title = "AI review instructions",
+                        value = secret.instructions.ifBlank { "None" },
+                        onClick = {
+                            instructions = secret.instructions
+                            editingInstructions = true
+                        },
                     )
                     if (clients.isNotEmpty()) {
                         HorizontalDivider()
@@ -1419,12 +1449,6 @@ private fun SecretDetail(
                             )
                         }
                     }
-                    HorizontalDivider()
-                    ApprovalSettingRow(
-                        title = "AI instructions",
-                        value = secret.instructions.ifBlank { "None" },
-                        onClick = { editingInstructions = true },
-                    )
                 }
             }
             item {
@@ -1438,7 +1462,7 @@ private fun SecretDetail(
     if (editingSshComment) {
         AlertDialog(
             onDismissRequest = { editingSshComment = false },
-            title = { Text("Edit public-key comment") },
+            title = { Text("Edit public key comment") },
             text = {
                 OutlinedTextField(
                     value = sshComment,
@@ -1453,6 +1477,7 @@ private fun SecretDetail(
             },
             confirmButton = {
                 TextButton(
+                    enabled = sshComment != secret.sshKey?.comment.orEmpty(),
                     onClick = {
                         editingSshComment = false
                         onSaveSshComment(sshComment)
@@ -1463,7 +1488,7 @@ private fun SecretDetail(
     }
     if (editingDefaultApproval) {
         ApprovalModeDialog(
-            title = "Default approval",
+            title = "Default approval for all clients",
             selected = secret.approvalMode,
             defaultMode = null,
             secretType = secret.type,
@@ -1496,9 +1521,12 @@ private fun SecretDetail(
             onDismissRequest = { editingInstructions = false },
             title = { Text("Secret instructions") },
             text = {
-                Column(verticalArrangement = Arrangement.spacedBy(12.dp)) {
+                Column(
+                    Modifier.verticalScroll(rememberScrollState()),
+                    verticalArrangement = Arrangement.spacedBy(12.dp),
+                ) {
                     Text(
-                        "Tell AI review what this secret may and may not be used for. Do not include secret values.",
+                        "Tell the AI reviewer when this secret may and may not be used. Do not include secret values.",
                     )
                     OutlinedTextField(
                         value = instructions,
@@ -1515,9 +1543,10 @@ private fun SecretDetail(
             },
             confirmButton = {
                 TextButton(
+                    enabled = instructions.trim() != secret.instructions,
                     onClick = {
                         editingInstructions = false
-                        onSaveInstructions(instructions)
+                        onSaveInstructions(instructions.trim())
                     },
                 ) { Text("Save") }
             },
@@ -1653,7 +1682,7 @@ private fun ApprovalModeDialog(
 private fun SecretApprovalMode.displayName(): String = when (this) {
     SecretApprovalMode.APPROVE -> "Approve automatically"
     SecretApprovalMode.ASK_AI -> "Ask AI"
-    SecretApprovalMode.TEMPORARY -> "Ask me, with 4-hour access"
+    SecretApprovalMode.TEMPORARY -> "Ask with 4-hour option"
     SecretApprovalMode.ASK_ME -> "Ask every time"
     SecretApprovalMode.DENY -> "Always deny"
 }
@@ -1661,8 +1690,8 @@ private fun SecretApprovalMode.displayName(): String = when (this) {
 private fun SecretApprovalMode.description(secretType: String): String = when (this) {
     SecretApprovalMode.APPROVE -> "Allow protected use without asking."
     SecretApprovalMode.ASK_AI ->
-        "Requires AI review access. AI may approve, deny, or ask you; otherwise, you decide " +
-            "and can allow 4-hour access."
+        "Requires AI review access. AI may approve, deny, or ask you to decide. " +
+            "If asked, you can also allow 4-hour access."
     SecretApprovalMode.TEMPORARY -> if (secretType == SSH_SECRET_TYPE) {
         "When asked, you can sign once or allow that client to request Git signatures with " +
             "this key for any repository for 4 hours."
@@ -1710,7 +1739,7 @@ private fun SshPublicKeyCard(
                     Text(key.comment.ifBlank { "No comment" })
                 }
                 IconButton(onClick = onEditComment) {
-                    Icon(Icons.Outlined.Edit, contentDescription = "Edit public-key comment")
+                    Icon(Icons.Outlined.Edit, contentDescription = "Edit public key comment")
                 }
             }
             Column(verticalArrangement = Arrangement.spacedBy(4.dp)) {
@@ -1917,11 +1946,12 @@ private fun SecretEditorScreen(
     val secret = editor.secret
     val name = editor.name
     val description = editor.description
+    val scrollState = rememberScrollState()
+    val focusManager = LocalFocusManager.current
     var validationError by rememberSaveable(secret?.id) { mutableStateOf<Int?>(null) }
     var confirmDiscard by rememberSaveable(secret?.id) { mutableStateOf(false) }
     val dirty = if (secret == null) {
         name.isNotEmpty() || description.isNotEmpty() ||
-            editor.type != ENVIRONMENT_SECRET_TYPE ||
             editor.sshPrivateKeyText.isNotEmpty() || editor.sshComment.isNotEmpty() ||
             editor.preparedSshKey != null
     } else {
@@ -1929,6 +1959,18 @@ private fun SecretEditorScreen(
     }
     fun requestDismiss() {
         if (dirty) confirmDiscard = true else onDismiss()
+    }
+
+    LaunchedEffect(editor.preparedSshKey) {
+        if (editor.preparedSshKey != null) {
+            focusManager.clearFocus()
+            // Let the preview and save action participate in layout before moving them
+            // into view. Generating a key is a transition to review, not an invitation to
+            // keep editing the field that happened to retain focus.
+            withFrameNanos { }
+            withFrameNanos { }
+            scrollState.animateScrollTo(scrollState.maxValue)
+        }
     }
 
     BackHandler(onBack = ::requestDismiss)
@@ -1950,14 +1992,17 @@ private fun SecretEditorScreen(
         snackbarHost = { SnackbarHost(snackbar) },
     ) { padding ->
         Column(
-            Modifier.fillMaxSize().padding(padding).verticalScroll(rememberScrollState())
+            Modifier.fillMaxSize().padding(padding).verticalScroll(scrollState)
                 .padding(20.dp),
             verticalArrangement = Arrangement.spacedBy(18.dp),
         ) {
             if (secret == null) {
                 Column(verticalArrangement = Arrangement.spacedBy(8.dp)) {
                     Text("Secret type", style = MaterialTheme.typography.titleMedium)
-                    Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+                    FlowRow(
+                        horizontalArrangement = Arrangement.spacedBy(8.dp),
+                        verticalArrangement = Arrangement.spacedBy(4.dp),
+                    ) {
                         FilterChip(
                             selected = editor.type == ENVIRONMENT_SECRET_TYPE,
                             onClick = {
@@ -1969,14 +2014,14 @@ private fun SecretEditorScreen(
                                     ),
                                 )
                             },
-                            label = { Text("Environment variables") },
+                            label = { Text("Environment variables", maxLines = 1) },
                         )
                         FilterChip(
                             selected = editor.type == SSH_SECRET_TYPE,
                             onClick = {
                                 onEditorChange(editor.copy(type = SSH_SECRET_TYPE, sshError = null))
                             },
-                            label = { Text("SSH key") },
+                            label = { Text("SSH key", maxLines = 1) },
                         )
                     }
                     Text(
@@ -2054,28 +2099,29 @@ private fun SecretEditorScreen(
                     onPrepare = onPrepareSshKey,
                 )
             }
-            Button(
-                onClick = {
-                    validationError = when {
-                        name.isBlank() -> R.string.secret_name_required
-                        name != name.trim() -> R.string.secret_name_whitespace
-                        else -> null
-                    }
-                    if (validationError == null) onSave(name, description)
-                },
-                enabled = name.isNotBlank() &&
-                    (secret != null || editor.type != SSH_SECRET_TYPE || editor.preparedSshKey != null) && (
-                    secret == null ||
-                        name != secret.name ||
-                        description != secret.description
-                    ),
-                modifier = Modifier.fillMaxWidth(),
-            ) {
-                Text(
-                    stringResource(
-                        if (secret == null) R.string.create_secret else R.string.save_secret,
-                    ),
-                )
+            if (secret != null || editor.type != SSH_SECRET_TYPE || editor.preparedSshKey != null) {
+                Button(
+                    onClick = {
+                        validationError = when {
+                            name.isBlank() -> R.string.secret_name_required
+                            name != name.trim() -> R.string.secret_name_whitespace
+                            else -> null
+                        }
+                        if (validationError == null) onSave(name, description)
+                    },
+                    enabled = name.isNotBlank() && (
+                        secret == null ||
+                            name != secret.name ||
+                            description != secret.description
+                        ),
+                    modifier = Modifier.fillMaxWidth(),
+                ) {
+                    Text(
+                        stringResource(
+                            if (secret == null) R.string.create_secret else R.string.save_secret,
+                        ),
+                    )
+                }
             }
         }
     }
@@ -2121,7 +2167,7 @@ private fun SshKeyInput(
             OutlinedTextField(
                 value = comment,
                 onValueChange = onCommentChange,
-                label = { Text("Public-key comment (optional)") },
+                label = { Text("Public key comment (optional)") },
                 singleLine = true,
                 modifier = Modifier.fillMaxWidth(),
             )
@@ -2196,8 +2242,17 @@ private fun SshKeyEditorScreen(
     snackbar: SnackbarHostState,
 ) {
     var confirmDiscard by rememberSaveable(editor.secretId) { mutableStateOf(false) }
+    val scrollState = rememberScrollState()
+    val focusManager = LocalFocusManager.current
     val dirty = editor.privateKeyText.isNotEmpty() || editor.preparedKey != null ||
         editor.comment != editor.currentKey.comment
+    LaunchedEffect(editor.preparedKey) {
+        if (editor.preparedKey != null) {
+            withFrameNanos { }
+            withFrameNanos { }
+            scrollState.animateScrollTo(scrollState.maxValue)
+        }
+    }
     fun requestDismiss() {
         if (dirty) confirmDiscard = true else onDismiss()
     }
@@ -2214,7 +2269,7 @@ private fun SshKeyEditorScreen(
         snackbarHost = { SnackbarHost(snackbar) },
     ) { padding ->
         Column(
-            Modifier.fillMaxSize().padding(padding).verticalScroll(rememberScrollState())
+            Modifier.fillMaxSize().padding(padding).verticalScroll(scrollState)
                 .padding(20.dp),
             verticalArrangement = Arrangement.spacedBy(18.dp),
         ) {
@@ -2248,7 +2303,10 @@ private fun SshKeyEditorScreen(
                         editor.copy(comment = value, preparedKey = null, error = null),
                     )
                 },
-                onPrepare = onPrepare,
+                onPrepare = {
+                    focusManager.clearFocus()
+                    onPrepare()
+                },
             )
             Button(
                 onClick = onReplace,
@@ -2525,7 +2583,12 @@ private fun DeleteDialog(
         title = { Text(title) },
         text = { Text(explanation) },
         confirmButton = {
-            TextButton(onClick = onDelete) { Text(stringResource(R.string.delete)) }
+            TextButton(onClick = onDelete) {
+                Text(
+                    stringResource(R.string.delete),
+                    color = MaterialTheme.colorScheme.error,
+                )
+            }
         },
         dismissButton = {
             TextButton(onClick = onDismiss) { Text(stringResource(R.string.cancel)) }

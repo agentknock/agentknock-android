@@ -1,8 +1,8 @@
 <?xml version="1.0" encoding="utf-8"?>
 <resources>
     <string name="app_name">Agentknock</string>
-    <string name="request_notification_channel">Requests needing approval</string>
-    <string name="request_notification_channel_description">Pairing, secret access, Git signing, and secret upload decisions that need your attention</string>
+    <string name="request_notification_channel">Requests needing action</string>
+    <string name="request_notification_channel_description">Pairing, secret use, Git signing, and secret upload decisions that need your attention</string>
     <string name="background_notification_channel">Background processing</string>
     <string name="background_notification_channel_description">Silent status while Agentknock checks for new requests</string>
     <string name="request_waiting">Request waiting</string>
@@ -15,7 +15,7 @@
         <item quantity="other">%1$d environment variables</item>
     </plurals>
     <string name="select_secret">Select a secret</string>
-    <string name="select_secret_description">Choose a secret to inspect its environment variables.</string>
+    <string name="select_secret_description">Choose a secret to view its details.</string>
     <string name="back">Back</string>
     <string name="edit_secret">Edit secret</string>
     <string name="delete_secret">Delete secret</string>
@@ -50,7 +50,7 @@
     <string name="secret_name_in_use">A secret with that name already exists</string>
     <string name="secret_not_found">That secret no longer exists</string>
     <string name="delete_secret_question">Delete %1$s?</string>
-    <string name="delete_secret_explanation">This permanently deletes the secret and all its stored environment variable values.</string>
+    <string name="delete_secret_explanation">This permanently deletes the secret and any values or private keys stored in it.</string>
     <string name="delete">Delete</string>
     <string name="secret_deleted">Secret deleted</string>
     <string name="environment_variables">Environment variables</string>
@@ -59,7 +59,7 @@
     <string name="variable_name">Environment variable name</string>
     <string name="variable_value">Value</string>
     <string name="notes_optional">Notes (optional)</string>
-    <string name="sensitive_explanation">Hide this value by default. Device authentication follows your choice in Security settings.</string>
+    <string name="sensitive_explanation">Sensitive values follow this secret’s approval settings and are hidden by default on this device.</string>
     <string name="replace_unavailable_value">The stored value cannot be decrypted on this device. Enter a replacement to use this environment variable again.</string>
     <string name="save_variable">Save environment variable</string>
     <string name="create_variable">Create environment variable</string>
@@ -96,7 +96,7 @@
     <string name="another_suggestion">Another suggestion</string>
     <string name="pairing_address_claimed">Pairing address claimed</string>
     <string name="pairing_address_claim_incomplete">Claim not completed</string>
-    <string name="pairing_address_claim_incomplete_explanation">The identity is saved on this device. Retry to continue with the same keys and device token.</string>
+    <string name="pairing_address_claim_incomplete_explanation">Your device identity is saved. Retry to continue setup without replacing it.</string>
     <string name="pairing_address_unavailable">That pairing address is unavailable</string>
     <string name="pairing_address_unavailable_explanation">Choose another address. Retrying cannot claim an address owned by another device.</string>
     <string name="retry">Retry</string>

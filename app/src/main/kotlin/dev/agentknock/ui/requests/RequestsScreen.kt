@@ -86,6 +86,7 @@ import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.graphics.Color
+import androidx.compose.ui.platform.LocalDensity
 import androidx.compose.ui.semantics.contentDescription
 import androidx.compose.ui.semantics.clearAndSetSemantics
 import androidx.compose.ui.semantics.CustomAccessibilityAction
@@ -94,7 +95,9 @@ import androidx.compose.ui.semantics.selected
 import androidx.compose.ui.semantics.semantics
 import androidx.compose.ui.semantics.stateDescription
 import androidx.compose.ui.text.font.FontFamily
+import androidx.compose.ui.text.rememberTextMeasurer
 import androidx.compose.ui.text.style.TextOverflow
+import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.unit.dp
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import androidx.lifecycle.compose.LocalLifecycleOwner
@@ -195,7 +198,10 @@ internal fun RequestsScreen(
         contentWindowInsets = WindowInsets(0, 0, 0, 0),
     ) { padding ->
         BoxWithConstraints(Modifier.fillMaxSize().padding(padding)) {
-            val twoPane = maxWidth >= 840.dp
+            // The app-wide navigation rail already consumes part of an expanded window.
+            // Switch on the remaining content width so unfolded phones get a useful
+            // list-detail layout without hovering around the breakpoint.
+            val twoPane = maxWidth >= 720.dp
             LaunchedEffect(selection, twoPane) {
                 onTopLevelChanged(twoPane || selection == null)
             }
@@ -213,7 +219,7 @@ internal fun RequestsScreen(
                         onOpen = viewModel::selectRequest,
                         onApprove = ::approve,
                         onReject = ::reject,
-                        modifier = Modifier.width(440.dp).fillMaxHeight(),
+                        modifier = Modifier.width(360.dp).fillMaxHeight(),
                     )
                     VerticalDivider()
                     if (selection == null) {
@@ -367,13 +373,15 @@ private fun RequestList(
                         )
                     }
                 }
-                syncProblem?.let { problem ->
-                    IconButton(onClick = { onShowSyncProblem(problem) }) {
-                        Icon(
-                            Icons.Outlined.ErrorOutline,
-                            contentDescription = "Connection problem",
-                            tint = MaterialTheme.colorScheme.error,
-                        )
+                Box(Modifier.size(48.dp), contentAlignment = Alignment.Center) {
+                    syncProblem?.let { problem ->
+                        IconButton(onClick = { onShowSyncProblem(problem) }) {
+                            Icon(
+                                Icons.Outlined.ErrorOutline,
+                                contentDescription = "Connection problem",
+                                tint = MaterialTheme.colorScheme.error,
+                            )
+                        }
                     }
                 }
                 IconButton(onClick = onRefresh, enabled = !syncing) {
@@ -449,12 +457,17 @@ private fun RequestRow(
         positionalThreshold = { distance -> distance * 0.65f },
     )
     LaunchedEffect(swipeState.currentValue) {
-        when (swipeState.currentValue) {
+        val completedSwipe = swipeState.currentValue
+        if (completedSwipe == SwipeToDismissBoxValue.Settled) return@LaunchedEffect
+
+        when (completedSwipe) {
             SwipeToDismissBoxValue.StartToEnd -> if (canApprove) onApprove()
             SwipeToDismissBoxValue.EndToStart -> if (canReject) onReject()
             SwipeToDismissBoxValue.Settled -> return@LaunchedEffect
         }
-        swipeState.reset()
+        // The decision runs in its own UI coroutine. Snap back synchronously while it starts;
+        // an animated reset can be interrupted by the backing-list update and strand the row.
+        swipeState.snapTo(SwipeToDismissBoxValue.Settled)
     }
     SwipeToDismissBox(
         state = swipeState,
@@ -527,19 +540,19 @@ private fun RequestRowContent(
     selected: Boolean,
     onClick: () -> Unit,
 ) {
-    val rejected = request.wasRejected()
+    val subdued = request.wasRejected() || request.wasAborted() || request.hasVerificationFailure()
     val actionRequired = request.state == InboxRequestState.ACTION_REQUIRED &&
         request.userDecisionAvailable
     val semanticColors = MaterialTheme.agentknockColors
     val containerColor = when {
         selected -> MaterialTheme.colorScheme.secondaryContainer
-        rejected -> MaterialTheme.colorScheme.surfaceContainer
+        subdued -> MaterialTheme.colorScheme.surfaceContainer
         else -> MaterialTheme.colorScheme.surfaceContainerLow
     }
     Surface(
         color = containerColor,
         contentColor = when {
-            rejected && !selected -> MaterialTheme.colorScheme.onSurfaceVariant
+            subdued && !selected -> MaterialTheme.colorScheme.onSurfaceVariant
             else -> MaterialTheme.colorScheme.onSurface
         },
         shape = MaterialTheme.shapes.large,
@@ -645,7 +658,13 @@ internal fun PairingRequestDetail(
     modifier: Modifier,
 ) {
     val pairing = checkNotNull(request.pairing)
-    DetailPage("Pairing", onBack, modifier, showBack = showBack) {
+    DetailPage(
+        title = "Pairing",
+        onBack = onBack,
+        modifier = modifier,
+        showBack = showBack,
+        scrollResetKey = pairing.pairingState,
+    ) {
         InformationSurface {
             StatusLine(
                 pairing.pairingState.label(),
@@ -654,18 +673,18 @@ internal fun PairingRequestDetail(
                 attention = request.state == InboxRequestState.ACTION_REQUIRED,
                 subdued = pairing.pairingState == PairingState.REJECTED,
             )
-            InformationRow("Client-reported name", pairing.clientName)
+            InformationRow("Client", pairing.clientName)
             val reported = listOfNotNull(
                 pairing.hostname,
                 pairing.platform?.let(::formatPlatformName),
                 pairing.architecture,
             ).joinToString(" · ")
             if (reported.isNotEmpty()) {
-                InformationRow("Client-reported host", reported)
+                InformationRow("Machine", reported)
             }
             InformationRow("Received", formatTimestamp(request.receivedAt))
             pairing.decidedAt?.let {
-                InformationRow("User decision", formatTimestamp(it))
+                InformationRow("Code accepted", formatTimestamp(it))
             }
             request.completedAt?.let {
                 InformationRow("Completed", formatTimestamp(it))
@@ -704,8 +723,8 @@ internal fun PairingRequestDetail(
                 NoticeTone.SUCCESS,
             )
             PairingState.RELAY_ACTIVATION_PENDING -> Notice(
-                "Activating pairing",
-                "Waiting for the relay to apply the client state.",
+                "Code verified",
+                "Finishing the secure pairing with this client.",
                 NoticeTone.ATTENTION,
             )
             PairingState.ACTIVE -> Notice(
@@ -793,6 +812,7 @@ private fun SecretUseDetail(
         onBack = onBack,
         modifier = modifier,
         showBack = showBack,
+        scrollResetKey = secretUse.state to secretUse.completionResult,
         bottomContent = if (
             secretUse.state == SecretUseRequestState.APPROVAL_PENDING &&
             request.userDecisionAvailable
@@ -838,8 +858,19 @@ private fun SecretUseDetail(
                     }
                 }
                 Column(Modifier.weight(1f), verticalArrangement = Arrangement.spacedBy(5.dp)) {
+                    val secretCount = secretUse.secrets.size
+                    val secretLabel = if (secretCount == 1) "secret" else "secrets"
+                    val headline = when {
+                        secretUse.state == SecretUseRequestState.COMPLETED &&
+                            secretUse.completionResult == InvocationCompletionResult.APPROVED ->
+                            "${secretUse.clientName} used $secretCount $secretLabel"
+                        secretUse.state == SecretUseRequestState.COMPLETED ->
+                            "${secretUse.clientName} requested $secretCount $secretLabel"
+                        else ->
+                            "${secretUse.clientName} requests $secretCount $secretLabel"
+                    }
                     Text(
-                        "${secretUse.clientName} wants to use ${secretUse.secrets.size} ${if (secretUse.secrets.size == 1) "secret" else "secrets"}",
+                        headline,
                         style = MaterialTheme.typography.titleLarge,
                     )
                     StatusLine(
@@ -849,7 +880,8 @@ private fun SecretUseDetail(
                             request.userDecisionAvailable,
                         subdued = aiReviewInFlight ||
                             secretUse.decision == SecretUseDecision.DENIED ||
-                            secretUse.completionResult == InvocationCompletionResult.DENIED,
+                            secretUse.completionResult == InvocationCompletionResult.DENIED ||
+                            secretUse.completionResult == InvocationCompletionResult.ABORTED,
                     )
                     Text(
                         "Received ${formatTimestamp(request.receivedAt)}",
@@ -865,7 +897,7 @@ private fun SecretUseDetail(
                 Text("Requested secrets", style = MaterialTheme.typography.titleMedium)
                 InformationSurface(contentPadding = PaddingValues(horizontal = 16.dp, vertical = 8.dp)) {
                     secretUse.secretDetails.forEachIndexed { index, secret ->
-                        SecretSummary(secret)
+                        SecretSummary(secret, secretUse.environmentVariables[secret.name])
                         if (index != secretUse.secretDetails.lastIndex) HorizontalDivider()
                     }
                 }
@@ -896,25 +928,6 @@ private fun SecretUseDetail(
             }
         }
 
-        secretUse.reason?.takeIf(String::isNotBlank)?.let { reason ->
-            Card(
-                colors = CardDefaults.cardColors(
-                    containerColor = MaterialTheme.colorScheme.surfaceContainerLow,
-                ),
-                shape = MaterialTheme.shapes.large,
-            ) {
-                Column(Modifier.padding(16.dp), verticalArrangement = Arrangement.spacedBy(5.dp)) {
-                    Text("Why this command says it needs access", style = MaterialTheme.typography.labelLarge)
-                    Text(reason, style = MaterialTheme.typography.bodyLarge)
-                    Text(
-                        "Reported by the requesting client; not verified by Agentknock.",
-                        style = MaterialTheme.typography.bodySmall,
-                        color = MaterialTheme.colorScheme.onSurfaceVariant,
-                    )
-                }
-            }
-        }
-
         if (
             secretUse.missingSecrets.isNotEmpty() &&
             secretUse.completionResult != InvocationCompletionResult.DENIED
@@ -938,6 +951,25 @@ private fun SecretUseDetail(
 
         if (secretUse.state != SecretUseRequestState.APPROVAL_PENDING) {
             SecretUseOutcome(secretUse)
+        }
+
+        secretUse.reason?.takeIf(String::isNotBlank)?.let { reason ->
+            Card(
+                colors = CardDefaults.cardColors(
+                    containerColor = MaterialTheme.colorScheme.surfaceContainerLow,
+                ),
+                shape = MaterialTheme.shapes.large,
+            ) {
+                Column(Modifier.padding(16.dp), verticalArrangement = Arrangement.spacedBy(5.dp)) {
+                    Text("Why this command says it needs access", style = MaterialTheme.typography.labelLarge)
+                    Text(reason, style = MaterialTheme.typography.bodyLarge)
+                    Text(
+                        "Reported by the requesting client; not verified by Agentknock.",
+                        style = MaterialTheme.typography.bodySmall,
+                        color = MaterialTheme.colorScheme.onSurfaceVariant,
+                    )
+                }
+            }
         }
 
         Disclosure("Technical details") {
@@ -992,12 +1024,12 @@ private fun AiReviewNotice(review: AiReview?, reviewInFlight: Boolean) {
     when {
         review?.decision == AiReviewDecision.APPROVE -> Notice(
             "AI review approved its part",
-            review.explanation ?: "Another protected use still needs your decision.",
+            review.explanationText() ?: "Another protected use still needs your decision.",
             NoticeTone.SUCCESS,
         )
         review?.decision == AiReviewDecision.ASK_USER -> Notice(
             "AI review asked you to decide",
-            review.explanation ?: "The reviewer could not decide safely.",
+            review.explanationText() ?: "The reviewer could not decide safely.",
             NoticeTone.ATTENTION,
         )
         review?.failure == AiReviewFailure.SUBSCRIPTION_REQUIRED -> Notice(
@@ -1082,14 +1114,13 @@ private fun TemporaryAccessConfirmation(
 ) {
     AlertDialog(
         onDismissRequest = onDismiss,
-        title = { Text("Allow temporary access?") },
+        title = { Text("Allow $clientName for 4 hours?") },
         text = {
-            Column(verticalArrangement = Arrangement.spacedBy(10.dp)) {
+            Column(
+                Modifier.verticalScroll(rememberScrollState()),
+                verticalArrangement = Arrangement.spacedBy(10.dp),
+            ) {
                 Text(temporaryAccessScope(clientName, operation))
-                Text(
-                    "Eligible secrets",
-                    style = MaterialTheme.typography.labelLarge,
-                )
                 Surface(
                     modifier = Modifier.fillMaxWidth(),
                     color = MaterialTheme.colorScheme.surfaceContainerLow,
@@ -1117,13 +1148,9 @@ private fun TemporaryAccessConfirmation(
                         color = MaterialTheme.colorScheme.onSurfaceVariant,
                     )
                 }
-                Text(
-                    "The end time only blocks future Agentknock uses; it cannot recall values already delivered.",
-                    color = MaterialTheme.colorScheme.onSurfaceVariant,
-                )
             }
         },
-        confirmButton = { TextButton(onClick = onConfirm) { Text("Allow") } },
+        confirmButton = { TextButton(onClick = onConfirm) { Text("Allow 4 hours") } },
         dismissButton = { TextButton(onClick = onDismiss) { Text("Cancel") } },
     )
 }
@@ -1133,9 +1160,9 @@ private fun temporaryAccessScope(
     operation: TemporaryAccessOperation,
 ): String = when (operation) {
     TemporaryAccessOperation.INVOCATION ->
-        "$clientName can receive protected values from the listed secrets for any command."
+        "For any command, $clientName can receive protected values from:"
     TemporaryAccessOperation.GIT_SIGN ->
-        "$clientName can request Git signatures from the listed secret for any repository."
+        "For any repository, $clientName can request Git signatures from:"
 }
 
 private fun ApprovalEvaluation?.temporaryGrantSecretNames(
@@ -1179,6 +1206,7 @@ private fun GitSignDetail(
         onBack = onBack,
         modifier = modifier,
         showBack = showBack,
+        scrollResetKey = signing.state to signing.completionResult,
         bottomContent = if (pending && request.userDecisionAvailable) {
             {
                 Surface(
@@ -1206,7 +1234,8 @@ private fun GitSignDetail(
                 attention = pending && request.userDecisionAvailable,
                 subdued = aiReviewInFlight ||
                     signing.decision == SecretUseDecision.DENIED ||
-                    signing.completionResult == GitSignCompletionResult.DENIED,
+                    signing.completionResult == GitSignCompletionResult.DENIED ||
+                    signing.completionResult == GitSignCompletionResult.ABORTED,
             )
             ClientIdentity(signing.clientName)
             SecretIdentities(listOf(signing.secretName))
@@ -1221,6 +1250,10 @@ private fun GitSignDetail(
                 )
         ) {
             AiReviewNotice(signing.approvalEvaluation.aiReview, aiReviewInFlight)
+        }
+
+        if (!pending) {
+            GitSignOutcome(signing)
         }
 
         signing.repository?.takeIf(GitSignRepository::hasVisibleContext)?.let { repository ->
@@ -1274,9 +1307,18 @@ private fun GitSignDetail(
                     )
                 }
                 signing.reason?.takeIf(String::isNotBlank)?.let {
+                    HorizontalDivider()
+                    Text(
+                        "Why this command says it needs a signature",
+                        style = MaterialTheme.typography.labelLarge,
+                    )
                     Text(
                         it,
                         style = MaterialTheme.typography.bodyMedium,
+                    )
+                    Text(
+                        "Reported by the requesting client; not verified by Agentknock.",
+                        style = MaterialTheme.typography.bodySmall,
                         color = MaterialTheme.colorScheme.onSurfaceVariant,
                     )
                 }
@@ -1305,8 +1347,6 @@ private fun GitSignDetail(
                 style = MaterialTheme.typography.bodySmall,
                 color = MaterialTheme.colorScheme.onSurfaceVariant,
             )
-        } else {
-            GitSignOutcome(signing)
         }
 
         Disclosure("Technical details") {
@@ -1444,6 +1484,7 @@ internal fun SecretUploadRequestDetail(
         onBack = onBack,
         modifier = modifier,
         showBack = showBack,
+        scrollResetKey = upload.state,
         bottomContent = if (upload.state == SecretUploadRequestState.REVIEW_PENDING) {
             {
                 Surface(
@@ -1496,7 +1537,7 @@ internal fun SecretUploadRequestDetail(
             )
             Row(verticalAlignment = Alignment.CenterVertically) {
                 Text(
-                    "${upload.mode.titleLabel()} $approvedName",
+                    approvedName,
                     style = MaterialTheme.typography.titleLarge,
                     modifier = Modifier.weight(1f),
                     maxLines = 2,
@@ -1520,7 +1561,7 @@ internal fun SecretUploadRequestDetail(
             upload.description?.takeIf(String::isNotBlank)?.let {
                 Column(verticalArrangement = Arrangement.spacedBy(2.dp)) {
                     Text(
-                        "Description reported by client",
+                        "Description",
                         style = MaterialTheme.typography.labelMedium,
                         color = MaterialTheme.colorScheme.onSurfaceVariant,
                     )
@@ -1561,8 +1602,8 @@ internal fun SecretUploadRequestDetail(
         )
         if (upload.state == SecretUploadRequestState.REVIEW_PENDING) {
             Text(
-                "Values are hidden by default. Review them and choose which should remain " +
-                    "sensitive after saving.",
+                "Values are hidden by default. Reveal any value you want to inspect, and " +
+                    "choose which values remain sensitive after saving.",
                 style = MaterialTheme.typography.bodyMedium,
                 color = MaterialTheme.colorScheme.onSurfaceVariant,
             )
@@ -1629,9 +1670,9 @@ internal fun SecretUploadRequestDetail(
                             Text("Sensitive", style = MaterialTheme.typography.labelMedium)
                             Text(
                                 if (variable.sensitive) {
-                                    "Hidden by default after saving"
+                                    "Protected by approval settings"
                                 } else {
-                                    "Shown by default after saving"
+                                    "Provided without approval"
                                 },
                                 style = MaterialTheme.typography.bodySmall,
                                 color = MaterialTheme.colorScheme.onSurfaceVariant,
@@ -1773,7 +1814,7 @@ internal fun SecretUploadRequestDetail(
             },
             confirmButton = {
                 TextButton(
-                    enabled = editedName.isNotBlank(),
+                    enabled = editedName.isNotBlank() && editedName.trim() != approvedName,
                     onClick = {
                         approvedName = editedName.trim()
                         editingName = false
@@ -1805,7 +1846,7 @@ private fun SshKeyUploadDetails(upload: SecretUploadRequestDetails) {
                     upload.fingerprint?.let { DetailValue("New fingerprint", it, true) }
                 } else if (upload.publicKey != upload.previousPublicKey) {
                     Text(
-                        "The public-key comment will change; the key material is unchanged.",
+                        "The public key comment will change; the key material is unchanged.",
                         color = MaterialTheme.colorScheme.onSurfaceVariant,
                     )
                 } else {
@@ -1862,67 +1903,10 @@ private fun SshKeyUploadDetails(upload: SecretUploadRequestDetails) {
 private fun SecretUseOutcome(secretUse: SecretUseRequestDetails) {
     val temporaryAccessScopes = secretUse.approvalEvaluation.temporaryAccessHistory()
     val aiReview = secretUse.approvalEvaluation?.aiReview
-    val aiEscalation = aiReview?.escalationSummary()
-    val humanAiDetail = when {
-        aiReview?.decision == AiReviewDecision.APPROVE -> {
-            val resolution = if (secretUse.decision == SecretUseDecision.APPROVED) {
-                "you approved the remaining use once"
-            } else {
-                "you denied the complete request"
-            }
-            "AI review approved its part${aiReview.explanationClause()}; $resolution."
-        }
-        aiEscalation != null -> {
-            val resolution = if (secretUse.decision == SecretUseDecision.APPROVED) {
-                "you approved it once"
-            } else {
-                "you denied it"
-            }
-            "$aiEscalation; $resolution."
-        }
-        else -> null
-    }
-    val decisionDetail = when (secretUse.decisionSource) {
-        "rule" -> " A previous approval rule made this decision."
-        "policy" -> " Approval settings made this decision."
-        "ai" -> when (aiReview?.decision) {
-            AiReviewDecision.APPROVE ->
-                " AI review approved this use${aiReview.explanationClause()}."
-            AiReviewDecision.DENY ->
-                " AI review denied this use${aiReview.explanationClause()}."
-            else -> " AI review made this decision."
-        }
-        "temporary_access" -> {
-            val accessDetail = if (temporaryAccessScopes.isEmpty()) {
-                "Temporary access allowed this use."
-            } else {
-                "Temporary access allowed this use: $temporaryAccessScopes."
-            }
-            val escalationDetail = aiEscalation?.let {
-                " $it; you allowed temporary access."
-            }.orEmpty()
-            " $accessDetail$escalationDetail"
-        }
-        "mixed" -> {
-            val temporaryDetail = if (temporaryAccessScopes.isEmpty()) {
-                "Temporary access"
-            } else {
-                "Temporary access ($temporaryAccessScopes)"
-            }
-            if (aiReview?.decision == AiReviewDecision.APPROVE) {
-                " $temporaryDetail allowed part of this use; AI review approved the rest" +
-                    "${aiReview.explanationClause()}."
-            } else {
-                val escalationDetail = aiEscalation?.let { " $it." }.orEmpty()
-                " $temporaryDetail and your one-time approval allowed this use.$escalationDetail"
-            }
-        }
-        else -> humanAiDetail?.let { " $it" }.orEmpty()
-    }
     val outcome = when (secretUse.state) {
         SecretUseRequestState.WAITING_FOR_COMPLETION -> OutcomeNotice(
             title = if (secretUse.decision == SecretUseDecision.APPROVED) "Approved" else "Denied",
-            detail = "Waiting for the client to finish.$decisionDetail",
+            detail = "Waiting for the client to finish.",
             tone = if (secretUse.decision == SecretUseDecision.APPROVED) {
                 NoticeTone.SUCCESS
             } else {
@@ -1932,7 +1916,7 @@ private fun SecretUseOutcome(secretUse: SecretUseRequestDetails) {
         SecretUseRequestState.COMPLETED -> when (secretUse.completionResult) {
             InvocationCompletionResult.APPROVED -> OutcomeNotice(
                 "Delivered",
-                "The client received the secret values.$decisionDetail",
+                "The client received the secret values.",
                 NoticeTone.SUCCESS,
             )
             InvocationCompletionResult.DENIED -> if (
@@ -1946,7 +1930,7 @@ private fun SecretUseOutcome(secretUse: SecretUseRequestDetails) {
             } else {
                 OutcomeNotice(
                     "Denied",
-                    (secretUse.completionMessage ?: "No values were released.") + decisionDetail,
+                    "No requested values were released.",
                     NoticeTone.SUBDUED,
                 )
             }
@@ -1965,21 +1949,143 @@ private fun SecretUseOutcome(secretUse: SecretUseRequestDetails) {
         SecretUseRequestState.APPROVAL_PENDING -> return
     }
     Notice(outcome.title, outcome.detail, outcome.tone)
+    if (shouldShowDecisionHistory(
+            verificationFailed = secretUse.state == SecretUseRequestState.VERIFICATION_FAILED,
+            completionReason = secretUse.completionReason,
+        )
+    ) {
+        SecretUseDecisionHistory(
+            decision = secretUse.decision,
+            decisionSource = secretUse.decisionSource,
+            aiReview = aiReview,
+            temporaryAccessScopes = temporaryAccessScopes,
+        )
+    }
+}
+
+@Composable
+private fun SecretUseDecisionHistory(
+    decision: SecretUseDecision?,
+    decisionSource: String?,
+    aiReview: AiReview?,
+    temporaryAccessScopes: String,
+) {
+    val approved = decision == SecretUseDecision.APPROVED
+    when (decisionSource) {
+        "rule" -> Notice(
+            if (approved) "Approved by previous access" else "Denied by previous access",
+            "A previously saved approval made this decision.",
+            if (approved) NoticeTone.SUCCESS else NoticeTone.SUBDUED,
+        )
+        "policy" -> Notice(
+            if (approved) "Approved automatically" else "Denied automatically",
+            "Approval settings made this decision.",
+            if (approved) NoticeTone.SUCCESS else NoticeTone.SUBDUED,
+        )
+        "ai" -> HistoricalAiReview(aiReview, decision)
+        "temporary_access" -> {
+            Notice(
+                "Temporary access allowed",
+                if (temporaryAccessScopes.isEmpty()) {
+                    "A current temporary approval allowed this use."
+                } else {
+                    "$temporaryAccessScopes."
+                },
+                NoticeTone.SUCCESS,
+            )
+            HistoricalAiReview(aiReview, decision, "You allowed temporary access.")
+        }
+        "mixed" -> {
+            Notice(
+                "Multiple approvals used",
+                if (temporaryAccessScopes.isEmpty()) {
+                    "Temporary access allowed part of this use."
+                } else {
+                    "Temporary access allowed part of this use: $temporaryAccessScopes."
+                },
+                NoticeTone.SUCCESS,
+            )
+            HistoricalAiReview(aiReview, decision)
+        }
+        "non_sensitive" -> Notice(
+            "No approval needed",
+            "This request used only non-sensitive data.",
+            NoticeTone.NEUTRAL,
+        )
+        else -> HistoricalAiReview(aiReview, decision)
+    }
+}
+
+@Composable
+private fun HistoricalAiReview(
+    review: AiReview?,
+    decision: SecretUseDecision?,
+    humanResolution: String? = null,
+) {
+    review ?: return
+    val explanation = review.explanationText()
+    when (review.decision) {
+        AiReviewDecision.APPROVE -> Notice(
+            "AI review approved",
+            explanation ?: "AI review allowed its part of this use.",
+            NoticeTone.SUCCESS,
+        )
+        AiReviewDecision.DENY -> Notice(
+            "AI review denied",
+            explanation ?: "AI review denied its part of this use.",
+            NoticeTone.SUBDUED,
+        )
+        AiReviewDecision.ASK_USER -> {
+            val resolution = humanResolution ?: when (decision) {
+                SecretUseDecision.APPROVED -> "You approved it once."
+                SecretUseDecision.DENIED -> "You denied it."
+                null -> null
+            }
+            Notice(
+                "AI review asked you to decide",
+                listOfNotNull(explanation, resolution).joinToString(" ")
+                    .ifBlank { "You made the final decision." },
+                NoticeTone.NEUTRAL,
+            )
+        }
+        null -> if (review.failure != null) {
+            Notice(
+                "AI review unavailable",
+                humanResolution ?: "You made the final decision.",
+                NoticeTone.NEUTRAL,
+            )
+        }
+    }
 }
 
 private fun ApprovalEvaluation?.temporaryAccessHistory(): String = this?.secrets
     ?.mapNotNull { secret ->
         secret.temporaryAccessExpiresAt?.let { expiresAt ->
-            "${secret.secretName} through ${formatTimestamp(expiresAt)}"
+            "${secret.secretName} until ${formatTimestamp(expiresAt)}"
         }
     }
     ?.joinToString("; ")
     .orEmpty()
 
-private fun AiReview.explanationClause(): String = explanation
+private fun AiReview.explanationText(): String? = explanation
     ?.trim()
-    ?.trimEnd('.', '!', '?')
+    ?.let { text ->
+        val labels = when (decision) {
+            AiReviewDecision.APPROVE -> listOf("Approve:", "Approved:")
+            AiReviewDecision.DENY -> listOf("Deny:", "Denied:")
+            AiReviewDecision.ASK_USER -> listOf("Ask:", "Ask user:")
+            null -> emptyList()
+        }
+        labels.firstOrNull { text.startsWith(it, ignoreCase = true) }
+            ?.let { text.drop(it.length).trimStart() }
+            ?: text
+    }
+    ?.replace("**", "")
+    ?.replace("`", "")
     ?.takeIf(String::isNotEmpty)
+
+private fun AiReview.explanationClause(): String = explanationText()
+    ?.trimEnd('.', '!', '?')
     ?.let { ": $it" }
     .orEmpty()
 
@@ -1999,7 +2105,10 @@ private data class OutcomeNotice(
 )
 
 @Composable
-private fun SecretSummary(secret: SecretMetadata) {
+private fun SecretSummary(
+    secret: SecretMetadata,
+    environmentVariables: Map<String, String?>?,
+) {
     Column(Modifier.padding(vertical = 8.dp), verticalArrangement = Arrangement.spacedBy(8.dp)) {
         Row(
             modifier = Modifier.fillMaxWidth(),
@@ -2034,35 +2143,73 @@ private fun SecretSummary(secret: SecretMetadata) {
         }
         if (secret.type == "ssh") {
             Text(
-                "The public key can be provided; private-key operations remain protected.",
+                "The public key can be provided; private key operations remain protected.",
                 style = MaterialTheme.typography.bodySmall,
                 color = MaterialTheme.colorScheme.onSurfaceVariant,
             )
         } else {
             secret.environmentVariableNames.forEach { name ->
-                Row(
-                    modifier = Modifier.fillMaxWidth(),
-                    horizontalArrangement = Arrangement.spacedBy(12.dp),
-                    verticalAlignment = Alignment.CenterVertically,
-                ) {
-                    Text(
-                        name,
-                        fontFamily = FontFamily.Monospace,
-                        style = MaterialTheme.typography.bodyMedium,
-                        modifier = Modifier.weight(1f),
-                    )
-                    Text(
-                        "••••••••",
-                        fontFamily = FontFamily.Monospace,
-                        color = MaterialTheme.colorScheme.onSurfaceVariant,
-                        modifier = Modifier.clearAndSetSemantics {
-                            contentDescription = "Value hidden"
-                        },
-                    )
+                EnvironmentVariableFact(name, environmentVariables?.get(name))
+            }
+        }
+    }
+}
+
+@Composable
+private fun EnvironmentVariableFact(name: String, value: String?) {
+    val style = MaterialTheme.typography.bodyMedium.copy(fontFamily = FontFamily.Monospace)
+    val textMeasurer = rememberTextMeasurer()
+    val density = LocalDensity.current
+    BoxWithConstraints(Modifier.fillMaxWidth()) {
+        val availableWidth = with(density) { maxWidth.roundToPx() }
+        val gap = with(density) { 12.dp.roundToPx() }
+        val fitsOnOneLine = value == null || (
+            '\n' !in value && '\r' !in value &&
+                textMeasurer.measure(name, style = style, maxLines = 1).size.width +
+                textMeasurer.measure(value, style = style, maxLines = 1).size.width + gap <=
+                availableWidth
+            )
+        if (fitsOnOneLine) {
+            Row(
+                modifier = Modifier.fillMaxWidth(),
+                horizontalArrangement = Arrangement.spacedBy(12.dp),
+                verticalAlignment = Alignment.CenterVertically,
+            ) {
+                Text(name, style = style, modifier = Modifier.weight(1f))
+                if (value != null) {
+                    SelectionContainer(Modifier.weight(1f)) {
+                        Text(
+                            value,
+                            style = style,
+                            textAlign = TextAlign.End,
+                            modifier = Modifier.fillMaxWidth(),
+                        )
+                    }
+                } else {
+                    HiddenSensitiveValue(style)
+                }
+            }
+        } else {
+            Column(verticalArrangement = Arrangement.spacedBy(4.dp)) {
+                Text(name, style = style)
+                SelectionContainer {
+                    Text(checkNotNull(value), style = style)
                 }
             }
         }
     }
+}
+
+@Composable
+private fun HiddenSensitiveValue(style: androidx.compose.ui.text.TextStyle) {
+    Text(
+        "••••••••",
+        style = style,
+        color = MaterialTheme.colorScheme.onSurfaceVariant,
+        modifier = Modifier.clearAndSetSemantics {
+            contentDescription = "Sensitive value hidden"
+        },
+    )
 }
 
 @Composable
@@ -2084,12 +2231,17 @@ private fun DetailPage(
     onBack: () -> Unit,
     modifier: Modifier,
     showBack: Boolean,
+    scrollResetKey: Any? = null,
     titleContent: @Composable () -> Unit = {
         Text(title, maxLines = 1, overflow = TextOverflow.Ellipsis)
     },
     bottomContent: (@Composable () -> Unit)? = null,
     content: @Composable () -> Unit,
 ) {
+    val scrollState = rememberScrollState()
+    LaunchedEffect(scrollResetKey) {
+        scrollState.scrollTo(0)
+    }
     Column(modifier) {
         TopAppBar(
             title = titleContent,
@@ -2100,7 +2252,7 @@ private fun DetailPage(
                 },
         )
         Column(
-            Modifier.weight(1f).fillMaxWidth().verticalScroll(rememberScrollState())
+            Modifier.weight(1f).fillMaxWidth().verticalScroll(scrollState)
                 .padding(horizontal = 20.dp, vertical = 12.dp),
             verticalArrangement = Arrangement.spacedBy(18.dp),
         ) { content() }
@@ -2307,6 +2459,14 @@ private fun InboxRequestSummary.wasRejected(): Boolean =
         gitSignDecision == SecretUseDecision.DENIED ||
         gitSignResult == GitSignCompletionResult.DENIED
 
+private fun InboxRequestSummary.wasAborted(): Boolean =
+    secretUseResult == InvocationCompletionResult.ABORTED ||
+        gitSignResult == GitSignCompletionResult.ABORTED
+
+private fun InboxRequestSummary.hasVerificationFailure(): Boolean =
+    secretUseState == SecretUseRequestState.VERIFICATION_FAILED ||
+        gitSignState == GitSignRequestState.VERIFICATION_FAILED
+
 private fun InboxRequestSummary.wasAccepted(): Boolean =
     secretUseResult == InvocationCompletionResult.APPROVED ||
         gitSignResult == GitSignCompletionResult.APPROVED
@@ -2320,6 +2480,11 @@ private fun GitSignRequestDetails.statusLabel(): String = gitSignStatusLabel(
     completionResult,
     completionReason,
 )
+
+internal fun shouldShowDecisionHistory(
+    verificationFailed: Boolean,
+    completionReason: String?,
+): Boolean = !verificationFailed && completionReason != "INVALID_REQUEST"
 
 private fun gitSignStatusLabel(
     state: GitSignRequestState,
@@ -2346,25 +2511,7 @@ private fun GitSignOutcome(signing: GitSignRequestDetails) {
     val temporaryAccessUntil = signing.approvalEvaluation?.secrets
         ?.mapNotNull { it.temporaryAccessExpiresAt }
         ?.maxOrNull()
-    val temporaryAccessDetail = temporaryAccessUntil?.let {
-        " Future Git signing was authorized through ${formatTimestamp(it)}."
-    }.orEmpty()
     val aiReview = signing.approvalEvaluation?.aiReview
-    val aiReviewDetail = when (aiReview?.decision) {
-        AiReviewDecision.APPROVE ->
-            " AI review approved this signature request${aiReview.explanationClause()}."
-        AiReviewDecision.DENY ->
-            " AI review denied this signature request${aiReview.explanationClause()}."
-        AiReviewDecision.ASK_USER, null -> aiReview?.escalationSummary()?.let { escalation ->
-            val resolution = when {
-                signing.decision == SecretUseDecision.DENIED -> "you denied it"
-                temporaryAccessUntil != null ->
-                    "you approved this signature and allowed temporary access"
-                else -> "you approved it once"
-            }
-            " $escalation; $resolution."
-        }.orEmpty()
-    }
     when {
         signing.state == GitSignRequestState.VERIFICATION_FAILED -> Notice(
             "Signature could not be confirmed",
@@ -2373,7 +2520,7 @@ private fun GitSignOutcome(signing: GitSignRequestDetails) {
         )
         signing.completionResult == GitSignCompletionResult.APPROVED -> Notice(
             "Content signed",
-            "The signature was delivered to the client.$temporaryAccessDetail$aiReviewDetail",
+            "The signature was delivered to the client.",
             NoticeTone.SUCCESS,
         )
         signing.completionResult == GitSignCompletionResult.DENIED -> Notice(
@@ -2382,7 +2529,7 @@ private fun GitSignOutcome(signing: GitSignRequestDetails) {
             } else {
                 "Signature denied"
             },
-            (signing.completionMessage ?: "No signature was created.") + aiReviewDetail,
+            signing.completionMessage ?: "No signature was created.",
             NoticeTone.SUBDUED,
         )
         signing.completionResult == GitSignCompletionResult.ABORTED -> Notice(
@@ -2393,14 +2540,36 @@ private fun GitSignOutcome(signing: GitSignRequestDetails) {
         signing.state == GitSignRequestState.WAITING_FOR_COMPLETION &&
             signing.decision == SecretUseDecision.APPROVED -> Notice(
             "Signature sent",
-            "Waiting for the client to confirm receipt.$temporaryAccessDetail$aiReviewDetail",
+            "Waiting for the client to confirm receipt.",
             NoticeTone.SUCCESS,
         )
         signing.state == GitSignRequestState.WAITING_FOR_COMPLETION -> Notice(
             "Signature denied",
-            (signing.completionMessage ?: "Waiting for the client to confirm the denial.") +
-                aiReviewDetail,
+            signing.completionMessage ?: "Waiting for the client to confirm the denial.",
             NoticeTone.SUBDUED,
+        )
+    }
+    if (shouldShowDecisionHistory(
+            verificationFailed = signing.state == GitSignRequestState.VERIFICATION_FAILED,
+            completionReason = signing.completionReason,
+        )
+    ) {
+        temporaryAccessUntil?.let {
+            Notice(
+                "Temporary signing access",
+                "Future Git signing from this client is allowed through ${formatTimestamp(it)}.",
+                NoticeTone.SUCCESS,
+            )
+        }
+        HistoricalAiReview(
+            review = aiReview,
+            decision = signing.decision,
+            humanResolution = when {
+                aiReview?.decision != AiReviewDecision.ASK_USER -> null
+                signing.decision == SecretUseDecision.DENIED -> "You denied it."
+                temporaryAccessUntil != null -> "You signed it and allowed temporary access."
+                else -> "You signed it once."
+            },
         )
     }
 }
@@ -2535,7 +2704,8 @@ private fun RequestSyncResult?.problemMessage(): String? = when (this) {
     RequestSyncResult.DeviceCredentialsUnavailable -> "Device keys are unavailable"
     RequestSyncResult.DeviceCredentialsCorrupted -> "Device keys could not be verified"
     RequestSyncResult.UnsupportedDeviceCredentialEncryption -> "Device keys use unsupported encryption"
-    is RequestSyncResult.RelayRejected -> message ?: "The relay rejected the connection"
-    is RequestSyncResult.RelayUnavailable -> message ?: "The relay is temporarily unavailable"
+    is RequestSyncResult.RelayRejected -> "The relay rejected the connection"
+    is RequestSyncResult.RelayUnavailable ->
+        "Couldn't connect to the relay. Check your connection and try again."
     RequestSyncResult.InvalidRelayResponse -> "The relay returned an invalid response"
 }

@@ -744,7 +744,7 @@ internal class SecretRepository(
         audit.record(
             AuditRecord(
                 category = AuditCategory.SECRET,
-                title = "SSH public-key comment updated",
+                title = "SSH public key comment updated",
                 detail = secret.name,
                 outcome = AuditOutcome.CHANGED,
             ),
@@ -1581,6 +1581,6 @@ internal class SecretRepository(
 }
 
 private fun TemporaryAccessOperation.auditName(): String = when (this) {
-    TemporaryAccessOperation.INVOCATION -> "environment values"
+    TemporaryAccessOperation.INVOCATION -> "secret values"
     TemporaryAccessOperation.GIT_SIGN -> "Git signing"
 }
