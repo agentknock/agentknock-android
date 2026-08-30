@@ -272,15 +272,33 @@ internal class SshKeyCodec(
             privateKey.publicKey,
             privateKey.comment,
         )
-        require(
-            validated.algorithm == SshKeyAlgorithm.ED25519 &&
-                algorithm == SshSignatureAlgorithm.ED25519,
-        ) { "SSH signature algorithm does not match the key" }
-        val signer = Ed25519Signer().apply {
-            init(true, Ed25519PrivateKeyParameters(validated.privateKey))
-            update(message, 0, message.size)
+        val signature = when (validated.algorithm) {
+            SshKeyAlgorithm.ED25519 -> {
+                require(algorithm == SshSignatureAlgorithm.ED25519) {
+                    "SSH signature algorithm does not match the key"
+                }
+                Ed25519Signer().run {
+                    init(true, Ed25519PrivateKeyParameters(validated.privateKey))
+                    update(message, 0, message.size)
+                    generateSignature()
+                }
+            }
+            SshKeyAlgorithm.RSA -> {
+                val signatureName = when (algorithm) {
+                    SshSignatureAlgorithm.RSA_SHA256 -> SHA256_WITH_RSA
+                    SshSignatureAlgorithm.RSA_SHA512 -> SHA512_WITH_RSA
+                    SshSignatureAlgorithm.ED25519 -> throw IllegalArgumentException(
+                        "SSH signature algorithm does not match the key",
+                    )
+                }
+                Signature.getInstance(signatureName).run {
+                    initSign(rsaPrivateKey(validated.privateKey))
+                    update(message)
+                    sign()
+                }
+            }
         }
-        return sshSignatureBlob(algorithm, signer.generateSignature())
+        return sshSignatureBlob(algorithm, signature)
     }
 
     private fun parsePrivateBlock(
@@ -474,6 +492,7 @@ internal class SshKeyCodec(
         const val MIN_RSA_BITS = 2048
         const val RSA = "RSA"
         const val RSA_SHA512 = "rsa-sha2-512"
+        const val SHA256_WITH_RSA = "SHA256withRSA"
         const val SHA512_WITH_RSA = "SHA512withRSA"
         val SSHSIG_MAGIC = "SSHSIG".encodeToByteArray()
         const val SSHSIG_VERSION = 1

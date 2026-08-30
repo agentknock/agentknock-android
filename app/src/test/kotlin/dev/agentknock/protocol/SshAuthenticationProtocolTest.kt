@@ -52,6 +52,38 @@ class SshAuthenticationProtocolTest {
     }
 
     @Test
+    fun `accepts modern RSA authentication algorithms and rejects mismatches`() {
+        val rsaPublicKey = sshStrings(
+            "ssh-rsa".encodeToByteArray(),
+            byteArrayOf(1, 0, 1),
+            byteArrayOf(0, 1, 2, 3, 4),
+        )
+        for (algorithm in listOf("rsa-sha2-256", "rsa-sha2-512")) {
+            val details = protocol.validateMessage(
+                authenticationMessage(
+                    method = "publickey",
+                    algorithm = algorithm,
+                    publicKey = rsaPublicKey,
+                ),
+                rsaPublicKey,
+                "ssh-rsa",
+            )
+            assertEquals(algorithm, details.algorithm.wireName)
+        }
+        assertThrows(IllegalArgumentException::class.java) {
+            protocol.validateMessage(
+                authenticationMessage(
+                    method = "publickey",
+                    algorithm = "ssh-ed25519",
+                    publicKey = rsaPublicKey,
+                ),
+                rsaPublicKey,
+                "ssh-rsa",
+            )
+        }
+    }
+
+    @Test
     fun `rejects a different key and malformed authentication`() {
         assertThrows(IllegalArgumentException::class.java) {
             protocol.validateMessage(
@@ -94,7 +126,12 @@ class SshAuthenticationProtocolTest {
         """{${testClientSoftwareFields("0.3.0", "0.1.0")},"method":"SshAuthenticate","invocation_id":"01ARZ3NDEKTSV4RRFFQ69G5FAV","invocation_token":"AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA=","secret":"production-ssh","message":"${Base64.getEncoder().encodeToString(message)}"}"""
             .encodeToByteArray()
 
-    private fun authenticationMessage(method: String, hostKey: ByteArray? = null): ByteArray =
+    private fun authenticationMessage(
+        method: String,
+        hostKey: ByteArray? = null,
+        algorithm: String = "ssh-ed25519",
+        publicKey: ByteArray = publicKeyBlob,
+    ): ByteArray =
         ByteArrayOutputStream().use { bytes ->
             DataOutputStream(bytes).use { output ->
                 output.writeSshString("session identifier".encodeToByteArray())
@@ -103,8 +140,8 @@ class SshAuthenticationProtocolTest {
                 output.writeSshString("ssh-connection".encodeToByteArray())
                 output.writeSshString(method.encodeToByteArray())
                 output.writeByte(1)
-                output.writeSshString("ssh-ed25519".encodeToByteArray())
-                output.writeSshString(publicKeyBlob)
+                output.writeSshString(algorithm.encodeToByteArray())
+                output.writeSshString(publicKey)
                 hostKey?.let { output.writeSshString(it) }
             }
             bytes.toByteArray()

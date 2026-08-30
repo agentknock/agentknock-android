@@ -204,6 +204,31 @@ class SshKeyCodecTest {
         assertTrue(verifier.verifySignature(signature))
     }
 
+    @Test
+    fun `creates RSA SHA-2 SSH authentication signature blobs`() {
+        val fixture = rsaFixture()
+        val key = codec.importOpenSshPrivateKey(fixture.privateKey)
+        val message = "exact RSA SSH authentication packet".encodeToByteArray()
+        val algorithms = listOf(
+            SshSignatureAlgorithm.RSA_SHA256 to "SHA256withRSA",
+            SshSignatureAlgorithm.RSA_SHA512 to "SHA512withRSA",
+        )
+
+        algorithms.forEach { (algorithm, javaAlgorithm) ->
+            val blob = DataInputStream(
+                ByteArrayInputStream(codec.signSshAuthentication(key, message, algorithm)),
+            )
+            assertEquals(algorithm.wireName, blob.readSshString())
+            val signature = blob.readSshBytes()
+            assertEquals(0, blob.available())
+            val verifier = Signature.getInstance(javaAlgorithm).apply {
+                initVerify(fixture.keyPair.public)
+                update(message)
+            }
+            assertTrue(verifier.verify(signature))
+        }
+    }
+
     private fun DataInputStream.readSshBytes(): ByteArray =
         ByteArray(readInt()).also(::readFully)
 

@@ -102,11 +102,17 @@ internal class SshAuthenticationProtocol(
         val algorithm = SshSignatureAlgorithm.entries.singleOrNull {
             it.wireName == algorithmValue
         } ?: throw IllegalArgumentException("Unsupported SSH signature algorithm")
-        require(algorithm == SshSignatureAlgorithm.ED25519) {
-            "The SSH signature algorithm does not match the selected key"
-        }
-        require(expectedKeyAlgorithm == SSH_ED25519) {
-            "The selected key does not support the SSH signature algorithm"
+        when (expectedKeyAlgorithm) {
+            SSH_ED25519 -> require(algorithm == SshSignatureAlgorithm.ED25519) {
+                "The SSH signature algorithm does not match the selected key"
+            }
+            SSH_RSA -> require(
+                algorithm == SshSignatureAlgorithm.RSA_SHA256 ||
+                    algorithm == SshSignatureAlgorithm.RSA_SHA512,
+            ) { "The SSH signature algorithm does not match the selected key" }
+            else -> throw IllegalArgumentException(
+                "The selected key does not support SSH authentication",
+            )
         }
         require(MessageDigest.isEqual(input.string(), expectedPublicKeyBlob)) {
             "SSH authentication contains a different public key"
@@ -194,6 +200,7 @@ internal class SshAuthenticationProtocol(
         private const val INVOCATION_TOKEN_BYTES = 32
         private const val SSH_MSG_USERAUTH_REQUEST = 50
         private const val SSH_ED25519 = "ssh-ed25519"
+        private const val SSH_RSA = "ssh-rsa"
         private val SSH_CONNECTION = "ssh-connection".encodeToByteArray()
         private const val RESULT_APPROVED = "APPROVED"
         private const val RESULT_DENIED = "DENIED"
