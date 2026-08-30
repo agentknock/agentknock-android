@@ -18,7 +18,7 @@ class InvocationProtocolTest {
               ${testClientSoftwareFields("0.2.0", "0.1.0")},
               "method":"Invocation",
               "invocation_token":"AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA=",
-              "secrets":["aws-read-only","common"],
+              "secrets":{"aws-read-only":{},"common":{}},
               "reason":"Inspect production logs",
               "operation":{
                 "type":"exec",
@@ -130,9 +130,35 @@ class InvocationProtocolTest {
         assertEquals("Cancelled by user.", aborted.message)
         assertNull(
             protocol.decodeRequest(
-                """{${testClientSoftwareFields("0.2.0", "0.1.0")},"method":"Invocation","invocation_token":"AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA=","secrets":["test"],"operation":{"type":"exec","command":"env","arguments":[],"working_directory":"/tmp","executable_path":"/bin/env","executable_mode":"BINARY","stdin":"TERMINAL","stdout":"TERMINAL","stderr":"TERMINAL"},"launcher_chain":[]}"""
+                """{${testClientSoftwareFields("0.2.0", "0.1.0")},"method":"Invocation","invocation_token":"AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA=","secrets":{"test":{}},"operation":{"type":"exec","command":"env","arguments":[],"working_directory":"/tmp","executable_path":"/bin/env","executable_mode":"BINARY","stdin":"TERMINAL","stdout":"TERMINAL","stderr":"TERMINAL"},"launcher_chain":[]}"""
                     .encodeToByteArray(),
             ).reason,
+        )
+    }
+
+    @Test(expected = IllegalArgumentException::class)
+    fun `rejects delivery options until they are supported`() {
+        protocol.decodeRequest(
+            """
+            {
+              ${testClientSoftwareFields("0.3.0", "0.1.0")},
+              "method":"Invocation",
+              "invocation_token":"AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA=",
+              "secrets":{"github":{"environment":{"only":["GH_TOKEN"]}}},
+              "operation":{
+                "type":"exec",
+                "command":"gh",
+                "arguments":["auth","status"],
+                "working_directory":"/work",
+                "executable_path":"/usr/bin/gh",
+                "executable_mode":"BINARY",
+                "stdin":"TERMINAL",
+                "stdout":"TERMINAL",
+                "stderr":"TERMINAL"
+              },
+              "launcher_chain":[]
+            }
+            """.trimIndent().encodeToByteArray(),
         )
     }
 }

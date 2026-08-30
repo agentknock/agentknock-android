@@ -6,6 +6,7 @@ import kotlinx.serialization.encodeToString
 import kotlinx.serialization.json.Json
 import kotlinx.serialization.json.JsonObject
 import kotlinx.serialization.json.buildJsonObject
+import kotlinx.serialization.json.jsonObject
 import kotlinx.serialization.json.put
 import java.util.Base64
 
@@ -77,7 +78,14 @@ internal class InvocationProtocol(
         val request = json.decodeFromString<InvocationRequestWire>(plaintext.decodeToString())
         require(request.method == METHOD) { "Unexpected request method" }
         require(request.secrets.isNotEmpty()) { "Secret use request has no secrets" }
-        require(request.secrets.none(String::isEmpty)) { "Secret use request has an empty secret" }
+        require(request.secrets.keys.none(String::isEmpty)) {
+            "Secret use request has an empty secret"
+        }
+        request.secrets.values.forEach { options ->
+            require(options.jsonObject.isEmpty()) {
+                "Environment delivery options are not supported"
+            }
+        }
         require(request.operation.type == EXEC_OPERATION_TYPE) { "Unsupported operation type" }
         val invocationToken = runCatching {
             Base64.getDecoder().decode(request.invocationToken)
@@ -88,7 +96,7 @@ internal class InvocationProtocol(
         return InvocationRequestMessage(
             clientSoftware = clientSoftware,
             invocationToken = invocationToken,
-            secrets = request.secrets,
+            secrets = request.secrets.keys.toList(),
             reason = request.reason,
             operation = InvocationExecOperation(
                 command = request.operation.command,
@@ -188,7 +196,7 @@ internal class InvocationProtocol(
 @Serializable
 private data class InvocationRequestWire(
     val method: String,
-    val secrets: List<String>,
+    val secrets: JsonObject,
     val reason: String? = null,
     val operation: InvocationOperationWire,
     @SerialName("launcher_chain") val launcherChain: List<String>,
