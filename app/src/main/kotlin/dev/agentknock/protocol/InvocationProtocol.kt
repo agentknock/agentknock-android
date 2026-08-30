@@ -31,6 +31,7 @@ internal data class InvocationEnvironmentDelivery(
     val only: Set<String>? = null,
     val omit: Set<String> = emptySet(),
     val rename: Map<String, String> = emptyMap(),
+    val stdin: String? = null,
 )
 
 internal data class InvocationExecOperation(
@@ -97,6 +98,9 @@ internal class InvocationProtocol(
         }
         val secretDelivery = request.secrets.mapValues { (secret, options) ->
             decodeSecretDelivery(secret, options)
+        }
+        require(secretDelivery.values.count { it.environment?.stdin != null } <= 1) {
+            "An invocation can send only one environment variable to standard input"
         }
         require(request.operation.type == EXEC_OPERATION_TYPE) { "Unsupported operation type" }
         val invocationToken = runCatching {
@@ -224,12 +228,22 @@ internal class InvocationProtocol(
     ): InvocationEnvironmentDelivery {
         val options = value as? JsonObject
             ?: throw IllegalArgumentException("Environment delivery options must be an object")
-        require(options.keys.all { it == "only" || it == "omit" || it == "rename" }) {
+        require(
+            options.keys.all {
+                it == "only" || it == "omit" || it == "rename" || it == "stdin"
+            },
+        ) {
             "Unsupported environment delivery option for secret $secret"
         }
         val only = options["only"]?.let { decodeEnvironmentNames("only", it) }
         val omit = options["omit"]?.let { decodeEnvironmentNames("omit", it) }.orEmpty()
         val rename = options["rename"]?.let(::decodeEnvironmentRename).orEmpty()
+        val stdin = options["stdin"]?.let { value ->
+            require(value is JsonPrimitive && value.isString) {
+                "Environment stdin must be a string"
+            }
+            value.content.also(::requireValidEnvironmentName)
+        }
         require(only == null || only.isNotEmpty()) { "Secret $secret has an empty only set" }
         require(only == null || omit.isEmpty()) { "Secret $secret uses both only and omit" }
         require(only == null || rename.keys.all(only::contains)) {
@@ -238,7 +252,21 @@ internal class InvocationProtocol(
         require(rename.keys.none(omit::contains)) {
             "Secret $secret renames an omitted variable"
         }
-        return InvocationEnvironmentDelivery(only = only, omit = omit, rename = rename)
+        require(stdin == null || only == null || stdin in only) {
+            "Secret $secret sends a variable not selected by only to standard input"
+        }
+        require(stdin == null || stdin !in omit) {
+            "Secret $secret sends an omitted variable to standard input"
+        }
+        require(stdin == null || stdin !in rename) {
+            "Secret $secret both renames a variable and sends it to standard input"
+        }
+        return InvocationEnvironmentDelivery(
+            only = only,
+            omit = omit,
+            rename = rename,
+            stdin = stdin,
+        )
     }
 
     private fun decodeEnvironmentNames(option: String, value: JsonElement): Set<String> {

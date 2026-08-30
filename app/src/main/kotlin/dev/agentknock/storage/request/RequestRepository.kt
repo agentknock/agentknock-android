@@ -32,6 +32,7 @@ import dev.agentknock.relay.ApprovalReviewRequest
 import dev.agentknock.relay.ApprovalReviewEnvironmentSecretFacts
 import dev.agentknock.relay.ApprovalReviewEnvironmentDestination
 import dev.agentknock.relay.ApprovalReviewEnvironmentVariableFacts
+import dev.agentknock.relay.ApprovalReviewStandardInputDestination
 import dev.agentknock.relay.ApprovalReviewSecretFacts
 import dev.agentknock.relay.ApprovalReviewSshSecretFacts
 import dev.agentknock.relay.RelayClientState
@@ -383,6 +384,7 @@ private fun InvocationRequestMessage.environmentSelections(): Map<String, Enviro
                 only = environment.only,
                 omit = environment.omit,
                 rename = environment.rename,
+                stdin = environment.stdin,
             )
         }
     }.toMap()
@@ -392,6 +394,7 @@ private fun List<SecretMetadata>.environmentSelections(): Map<String, Environmen
         secret.name to EnvironmentVariableSelection(
             only = secret.environmentVariableNames.toSet(),
             rename = secret.environmentVariableRename,
+            stdin = secret.environmentVariableStdin,
         )
     }
 
@@ -5634,12 +5637,14 @@ internal class RequestRepository(
                 (facts as? ApprovalReviewEnvironmentSecretFacts)
                     ?.let { environment ->
                         secretName to environment.environmentVariables.mapNotNull {
-                                (_, variable) ->
-                            val destination = variable.destination as?
-                                ApprovalReviewEnvironmentDestination
-                                ?: return@mapNotNull null
+                                (source, variable) ->
+                            val displayName = when (val destination = variable.destination) {
+                                is ApprovalReviewEnvironmentDestination -> destination.name
+                                ApprovalReviewStandardInputDestination -> source
+                                else -> return@mapNotNull null
+                            }
                             val factValue = variable.value
-                            destination.name to when (factValue) {
+                            displayName to when (factValue) {
                                 null, JsonNull -> null
                                 else -> factValue.jsonPrimitive.content
                             }

@@ -8,6 +8,7 @@ import dev.agentknock.relay.ApprovalReviewEnvironmentSecretFacts
 import dev.agentknock.relay.ApprovalReviewEnvironmentVariableFacts
 import dev.agentknock.relay.ApprovalReviewEnvironmentDestination
 import dev.agentknock.relay.ApprovalReviewOmittedDestination
+import dev.agentknock.relay.ApprovalReviewStandardInputDestination
 import dev.agentknock.relay.ApprovalReviewEvidence
 import dev.agentknock.relay.ApprovalReviewFacts
 import dev.agentknock.relay.ApprovalReviewGitChangedPathEvidence
@@ -215,6 +216,18 @@ internal fun approvalReviewSecretFacts(
                             ApprovalReviewEnvironmentVariableFacts(
                                 destination = ApprovalReviewOmittedDestination,
                             )
+                        EnvironmentVariableReviewDestination.StandardInput -> {
+                            val variable = checkNotNull(metadata[source]) {
+                                "Missing review metadata for environment variable $source"
+                            }
+                            val value = checkNotNull(environment[source]) {
+                                "Missing environment variable $source"
+                            }
+                            ApprovalReviewEnvironmentVariableFacts(
+                                destination = ApprovalReviewStandardInputDestination,
+                                value = if (variable.sensitive) JsonNull else JsonPrimitive(value),
+                            )
+                        }
                     }
                 }
                 ApprovalReviewEnvironmentSecretFacts(variables)

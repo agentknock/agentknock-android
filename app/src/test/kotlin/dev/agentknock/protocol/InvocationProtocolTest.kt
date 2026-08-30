@@ -196,6 +196,18 @@ class InvocationProtocolTest {
         )
     }
 
+    @Test
+    fun `decodes standard input delivery`() {
+        val request = decodeWithSecrets(
+            """{"github":{"environment":{"only":["GH_TOKEN"],"stdin":"GH_TOKEN"}}}""",
+        )
+
+        assertEquals(
+            "GH_TOKEN",
+            request.secretDelivery.getValue("github").environment?.stdin,
+        )
+    }
+
     @Test(expected = IllegalArgumentException::class)
     fun `rejects combining only and omit`() {
         decodeWithSecrets(
@@ -217,6 +229,20 @@ class InvocationProtocolTest {
     fun `rejects renaming a variable excluded by only`() {
         decodeWithSecrets(
             """{"test":{"environment":{"only":["TOKEN"],"rename":{"OTHER":"RENAMED"}}}}""",
+        )
+    }
+
+    @Test(expected = IllegalArgumentException::class)
+    fun `rejects multiple standard input sources`() {
+        decodeWithSecrets(
+            """{"first":{"environment":{"stdin":"ONE"}},"second":{"environment":{"stdin":"TWO"}}}""",
+        )
+    }
+
+    @Test(expected = IllegalArgumentException::class)
+    fun `rejects renaming the standard input source`() {
+        decodeWithSecrets(
+            """{"test":{"environment":{"rename":{"TOKEN":"OTHER"},"stdin":"TOKEN"}}}""",
         )
     }
 

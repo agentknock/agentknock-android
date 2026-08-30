@@ -506,6 +506,42 @@ class SecretRepositoryTest {
     }
 
     @Test
+    fun `standard input delivery is recorded and excluded from environment conflicts`() = runTest {
+        val fixture = Fixture()
+        val input = fixture.createSecret("input")
+        val environment = fixture.createSecret("environment")
+        fixture.createVariable(input, "TOKEN", "stdin-value", true)
+        fixture.createVariable(environment, "TOKEN", "environment-value", true)
+        val delivery = mapOf(
+            "input" to EnvironmentVariableSelection(stdin = "TOKEN"),
+        )
+
+        val description = fixture.repository.describeRequestedSecrets(listOf("input"), delivery)
+        assertEquals("TOKEN", description.secrets.single().environmentVariableStdin)
+        assertEquals(
+            EnvironmentVariableReviewDestination.StandardInput,
+            description.reviewMetadata.single()
+                .environmentVariableDestinations.getValue("TOKEN"),
+        )
+        val requested = fixture.repository.requestedSecrets(
+            listOf("input", "environment"),
+            delivery,
+        )
+        check(requested is RequestedSecretsResult.Available)
+        assertEquals(
+            mapOf("TOKEN" to "stdin-value"),
+            (requested.secrets.getValue("input") as SecretValues.Environment).environment,
+        )
+        assertEquals(
+            RequestedSecretsResult.MissingEnvironmentVariables("input", listOf("MISSING")),
+            fixture.repository.requestedSecrets(
+                listOf("input"),
+                mapOf("input" to EnvironmentVariableSelection(stdin = "MISSING")),
+            ),
+        )
+    }
+
+    @Test
     fun `only sensitive environment values require approval`() = runTest {
         val fixture = Fixture()
         val public = fixture.createSecret("public-context")

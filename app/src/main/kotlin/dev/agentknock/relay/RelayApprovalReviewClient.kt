@@ -85,6 +85,11 @@ internal data object ApprovalReviewOmittedDestination :
     ApprovalReviewEnvironmentVariableDestination
 
 @Serializable
+@SerialName("standard_input")
+internal data object ApprovalReviewStandardInputDestination :
+    ApprovalReviewEnvironmentVariableDestination
+
+@Serializable
 @SerialName("ssh")
 internal data class ApprovalReviewSshSecretFacts(
     val provides: String,

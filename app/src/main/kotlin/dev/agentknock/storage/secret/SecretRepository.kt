@@ -245,6 +245,7 @@ internal data class SecretMetadata(
     val type: String = ENVIRONMENT_SECRET_TYPE,
     val environmentVariableNames: List<String> = emptyList(),
     val environmentVariableRename: Map<String, String> = emptyMap(),
+    val environmentVariableStdin: String? = null,
     val sshPublicKey: String? = null,
 )
 
@@ -274,6 +275,8 @@ internal sealed interface EnvironmentVariableReviewDestination {
     data class Environment(val name: String) : EnvironmentVariableReviewDestination
 
     data object Omitted : EnvironmentVariableReviewDestination
+
+    data object StandardInput : EnvironmentVariableReviewDestination
 }
 
 internal data class EnvironmentVariableReviewMetadata(
@@ -302,6 +305,7 @@ internal data class EnvironmentVariableSelection(
     val only: Set<String>? = null,
     val omit: Set<String> = emptySet(),
     val rename: Map<String, String> = emptyMap(),
+    val stdin: String? = null,
 )
 
 internal sealed interface SecretValues {
@@ -1270,6 +1274,7 @@ internal class SecretRepository(
                             environmentVariableRename = environmentSelections[secret.name]
                                 ?.rename
                                 .orEmpty(),
+                            environmentVariableStdin = environmentSelections[secret.name]?.stdin,
                         )
                         SSH_SECRET_TYPE -> sshKeysBySecret[secret.id]?.let { key ->
                             SecretMetadata(
@@ -1310,12 +1315,18 @@ internal class SecretRepository(
                                 .sortedBy(EnvironmentVariableEntity::name)
                                 .associate { variable ->
                                     val destination = if (isSelected(secret, variable)) {
-                                        EnvironmentVariableReviewDestination.Environment(
-                                            environmentSelections[secret.name]
-                                                ?.rename
-                                                ?.get(variable.name)
-                                                ?: variable.name,
-                                        )
+                                        if (
+                                            environmentSelections[secret.name]?.stdin == variable.name
+                                        ) {
+                                            EnvironmentVariableReviewDestination.StandardInput
+                                        } else {
+                                            EnvironmentVariableReviewDestination.Environment(
+                                                environmentSelections[secret.name]
+                                                    ?.rename
+                                                    ?.get(variable.name)
+                                                    ?: variable.name,
+                                            )
+                                        }
                                     } else {
                                         EnvironmentVariableReviewDestination.Omitted
                                     }
@@ -1389,7 +1400,8 @@ internal class SecretRepository(
             val selection = environmentSelections[secret.name] ?: continue
             val available = variablesBySecret[secret.id].orEmpty()
                 .mapTo(mutableSetOf(), EnvironmentVariableEntity::name)
-            val required = selection.only.orEmpty() + selection.rename.keys
+            val required = selection.only.orEmpty() + selection.rename.keys +
+                listOfNotNull(selection.stdin)
             val missingVariables = (required - available).sorted()
             if (missingVariables.isNotEmpty()) {
                 return RequestedSecretsResult.MissingEnvironmentVariables(
@@ -1428,6 +1440,7 @@ internal class SecretRepository(
                 }
             }
             secretEnvironments.getValue(variable.secretId)[variable.name] = value
+            if (selection?.stdin == variable.name) continue
             val deliveredName = selection?.rename?.get(variable.name) ?: variable.name
             val previous = combinedEnvironment.putIfAbsent(deliveredName, value)
             if (previous != null && previous != value) {

@@ -13,6 +13,7 @@ import dev.agentknock.relay.ApprovalReviewEnvironmentSecretFacts
 import dev.agentknock.relay.ApprovalReviewEnvironmentVariableFacts
 import dev.agentknock.relay.ApprovalReviewEnvironmentDestination
 import dev.agentknock.relay.ApprovalReviewOmittedDestination
+import dev.agentknock.relay.ApprovalReviewStandardInputDestination
 import dev.agentknock.relay.ApprovalReviewOperation
 import dev.agentknock.relay.ApprovalReviewSshSecretFacts
 import dev.agentknock.storage.request.PairingEntity
@@ -73,6 +74,7 @@ class ApprovalReviewContextTest {
                         "AWS_ACCESS_KEY_ID" to "sensitive-access-key",
                         "AWS_REGION" to "eu-north-1",
                         "AWS_SECRET_ACCESS_KEY" to "sensitive-secret-key",
+                        "AWS_SESSION_TOKEN" to "sensitive-session-token",
                     ),
                 ),
                 "git-signing" to SecretValues.Ssh(
@@ -134,6 +136,14 @@ class ApprovalReviewContextTest {
             environment.environmentVariables.getValue("AWS_PROFILE").destination,
         )
         assertNull(environment.environmentVariables.getValue("AWS_PROFILE").value)
+        assertEquals(
+            ApprovalReviewStandardInputDestination,
+            environment.environmentVariables.getValue("AWS_SESSION_TOKEN").destination,
+        )
+        assertEquals(
+            JsonNull,
+            environment.environmentVariables.getValue("AWS_SESSION_TOKEN").value,
+        )
         assertEquals(
             ApprovalReviewSshSecretFacts(provides = "public_key"),
             secrets.getValue("git-signing"),
@@ -310,6 +320,7 @@ class ApprovalReviewContextTest {
                     variable("AWS_ACCESS_KEY_ID", sensitive = true),
                     variable("AWS_REGION", sensitive = false),
                     variable("AWS_SECRET_ACCESS_KEY", sensitive = true),
+                    variable("AWS_SESSION_TOKEN", sensitive = true),
                 ),
                 environmentVariableDestinations = linkedMapOf(
                     "AWS_ACCESS_KEY_ID" to EnvironmentVariableReviewDestination.Environment(
@@ -323,6 +334,8 @@ class ApprovalReviewContextTest {
                         EnvironmentVariableReviewDestination.Environment(
                             "AWS_SECRET_ACCESS_KEY",
                         ),
+                    "AWS_SESSION_TOKEN" to
+                        EnvironmentVariableReviewDestination.StandardInput,
                 ),
                 sshKey = null,
                 createdAt = 1,

@@ -2150,9 +2150,14 @@ private fun SecretSummary(
         } else {
             secret.environmentVariableNames.forEach { name ->
                 val deliveredName = secret.environmentVariableRename[name] ?: name
+                val sentToStdin = secret.environmentVariableStdin == name
                 EnvironmentVariableFact(
-                    name = if (deliveredName == name) name else "$name → $deliveredName",
-                    value = environmentVariables?.get(deliveredName),
+                    name = when {
+                        sentToStdin -> "$name → standard input"
+                        deliveredName != name -> "$name → $deliveredName"
+                        else -> name
+                    },
+                    value = environmentVariables?.get(if (sentToStdin) name else deliveredName),
                 )
             }
         }
