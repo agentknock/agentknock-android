@@ -137,7 +137,6 @@ internal class VaultRepository(
             return claimCandidate()
         }
 
-        val identityId = newId()
         val addressId = DeviceProtocol.addressId(address)
         val device = if (active == null) {
             newDeviceMaterial()
@@ -151,10 +150,25 @@ internal class VaultRepository(
                 }
             }
         }
+        stageCandidate(
+            address = address,
+            addressId = addressId,
+            device = device,
+            settings = active,
+        )
+        return claimCandidate()
+    }
+
+    private suspend fun stageCandidate(
+        address: String,
+        addressId: String,
+        device: DeviceMaterial,
+        settings: DeviceIdentityEntity?,
+    ): DeviceIdentityEntity {
         val encryptionKey = keyManager.activeKey(VaultKeyPurpose.DEVICE_STATE)
         val now = currentTimeMillis()
         val identity = DeviceIdentityEntity(
-            id = identityId,
+            id = newId(),
             role = DeviceIdentityRole.CANDIDATE.storedName,
             address = address,
             addressId = addressId,
@@ -162,8 +176,9 @@ internal class VaultRepository(
             devicePublicKey = device.keyPair.publicKey,
             createdAt = now,
             claimedAt = null,
-            pairingEnabled = active?.pairingEnabled ?: true,
-            instructions = active?.instructions.orEmpty(),
+            claimAttemptedAt = null,
+            pairingEnabled = settings?.pairingEnabled ?: true,
+            instructions = settings?.instructions.orEmpty(),
         )
         val secrets = listOf(
             newSecret(
@@ -186,13 +201,26 @@ internal class VaultRepository(
             secrets = secrets,
             candidateRole = DeviceIdentityRole.CANDIDATE.storedName,
         )
-        return claimCandidate()
+        return identity
     }
 
     suspend fun claimCandidate(): ClaimPairingAddressResult {
-        val candidate = dao.getIdentity(DeviceIdentityRole.CANDIDATE.storedName)
+        var candidate = dao.getIdentity(DeviceIdentityRole.CANDIDATE.storedName)
             ?: return ClaimPairingAddressResult.NoCandidate
         val previous = dao.getIdentity(DeviceIdentityRole.ACTIVE.storedName)
+        val now = currentTimeMillis()
+        if (
+            previous == null &&
+            candidate.claimAttemptedAt == null &&
+            candidate.createdAt < now - DEVICE_ID_REFRESH_AGE_MILLIS
+        ) {
+            candidate = stageCandidate(
+                address = candidate.address,
+                addressId = candidate.addressId,
+                device = newDeviceMaterial(),
+                settings = candidate,
+            )
+        }
         val secrets = dao.getSecrets(candidate.id)
         when (val result = decryptSecret(candidate, secrets, VaultSecretKind.DEVICE_PRIVATE_KEY)) {
             is SecretResult.Available -> if (result.value.size != DEVICE_PRIVATE_KEY_BYTES) {
@@ -217,12 +245,26 @@ internal class VaultRepository(
             SecretResult.Missing -> return ClaimPairingAddressResult.CredentialsCorrupted
         }
         if (deviceToken.size != DEVICE_TOKEN_BYTES) return ClaimPairingAddressResult.CredentialsCorrupted
+        if (candidate.claimAttemptedAt == null) {
+            val attemptedAt = currentTimeMillis()
+            if (
+                dao.markCandidateClaimAttempted(
+                    candidateId = candidate.id,
+                    attemptedAt = attemptedAt,
+                    candidateRole = DeviceIdentityRole.CANDIDATE.storedName,
+                ) != 1
+            ) {
+                return ClaimPairingAddressResult.NoCandidate
+            }
+            candidate = candidate.copy(claimAttemptedAt = attemptedAt)
+        }
 
         return when (
             val result = relay.claim(
                 deviceId = candidate.deviceId,
                 addressId = candidate.addressId,
                 deviceToken = DeviceProtocol.encodeDeviceToken(deviceToken),
+                provideAttestation = previous?.deviceId != candidate.deviceId,
             )
         ) {
             RelayClaimResult.Claimed -> {
@@ -509,6 +551,7 @@ internal class VaultRepository(
     private companion object {
         const val DEVICE_TOKEN_BYTES = 32
         const val DEVICE_PRIVATE_KEY_BYTES = 32
+        const val DEVICE_ID_REFRESH_AGE_MILLIS = 4 * 60 * 1_000L
     }
 }
 

@@ -312,3 +312,16 @@ internal val MIGRATION_12_13 = Migration(12, 13) { connection ->
             "ON `ssh_authentication_requests` (`state`)",
     )
 }
+
+internal val MIGRATION_13_14 = Migration(13, 14) { connection ->
+    connection.execSQL(
+        "ALTER TABLE `device_identities` ADD COLUMN `claim_attempted_at` INTEGER",
+    )
+    connection.execSQL(
+        """
+        UPDATE `device_identities`
+        SET `claim_attempted_at` = `created_at`
+        WHERE `role` = 'candidate'
+        """.trimIndent(),
+    )
+}

@@ -56,6 +56,7 @@ class VaultRepositoryTest {
         )
         assertEquals(1, fixture.relay.claims.size)
         assertTrue(fixture.relay.claims.single().deviceToken.matches(Regex("[A-Za-z0-9_-]{43}")))
+        assertTrue(fixture.relay.claims.single().providedAttestation)
     }
 
     @Test
@@ -70,6 +71,8 @@ class VaultRepositoryTest {
         )
         val candidateId = fixture.dao.identities.value.single().id
         val firstClaim = fixture.relay.claims.single()
+        assertTrue(fixture.dao.identities.value.single().claimAttemptedAt != null)
+        fixture.advanceTimeBy(5 * 60 * 1_000L)
 
         assertEquals(
             ClaimPairingAddressResult.Claimed,
@@ -80,6 +83,36 @@ class VaultRepositoryTest {
         assertEquals("active", fixture.dao.identities.value.single().role)
         assertEquals(2, fixture.relay.claims.size)
         assertEquals(firstClaim, fixture.relay.claims.last())
+    }
+
+    @Test
+    fun `refreshes an unattempted initial device id after it becomes stale`() = runTest {
+        val fixture = Fixture(UnconfinedTestDispatcher(testScheduler))
+        fixture.relay.results += RelayClaimResult.Unavailable(IOException("offline"))
+
+        assertTrue(
+            fixture.repository.stageAndClaim("amber-river-maple") is
+                ClaimPairingAddressResult.RelayUnavailable,
+        )
+        val originalCandidate = fixture.dao.identities.value.single()
+        val originalClaim = fixture.relay.claims.single()
+        fixture.dao.identities.value = listOf(
+            originalCandidate.copy(claimAttemptedAt = null),
+        )
+        fixture.advanceTimeBy(5 * 60 * 1_000L)
+
+        assertEquals(
+            ClaimPairingAddressResult.Claimed,
+            fixture.repository.claimCandidate(),
+        )
+
+        val refreshed = fixture.dao.identities.value.single()
+        val refreshedClaim = fixture.relay.claims.last()
+        assertEquals("active", refreshed.role)
+        assertNotEquals(originalCandidate.id, refreshed.id)
+        assertNotEquals(originalClaim.deviceId, refreshedClaim.deviceId)
+        assertNotEquals(originalClaim.deviceToken, refreshedClaim.deviceToken)
+        assertEquals(originalClaim.addressId, refreshedClaim.addressId)
     }
 
     @Test
@@ -137,6 +170,10 @@ class VaultRepositoryTest {
         assertEquals(before.deviceToken, after.deviceToken)
         assertEquals(1, fixture.dao.identities.value.size)
         assertEquals(fixture.relay.claims[0].deviceId, fixture.relay.claims[1].deviceId)
+        assertEquals(
+            listOf(true, false),
+            fixture.relay.claims.map(RecordedClaim::providedAttestation),
+        )
     }
 
     @Test
@@ -202,6 +239,7 @@ class VaultRepositoryTest {
         assertEquals("silent-forest-cloud", replacement.address)
         assertNotEquals(original.id, replacement.id)
         assertNotEquals(original.deviceId, replacement.deviceId)
+        assertTrue(fixture.relay.claims.last().providedAttestation)
         assertEquals(
             setOf("device_token", "device_private_key"),
             fixture.dao.secrets.value.map { it.kind }.toSet(),
@@ -231,6 +269,10 @@ class VaultRepositoryTest {
             currentTimeMillis = { ++time },
             cryptographyDispatcher = dispatcher,
         )
+
+        fun advanceTimeBy(milliseconds: Long) {
+            time += milliseconds
+        }
     }
 }
 
@@ -238,6 +280,7 @@ private data class RecordedClaim(
     val deviceId: String,
     val addressId: String,
     val deviceToken: String,
+    val providedAttestation: Boolean,
 )
 
 private class FakeRelayClaimClient : RelayClaimClient {
@@ -248,8 +291,9 @@ private class FakeRelayClaimClient : RelayClaimClient {
         deviceId: String,
         addressId: String,
         deviceToken: String,
+        provideAttestation: Boolean,
     ): RelayClaimResult {
-        claims += RecordedClaim(deviceId, addressId, deviceToken)
+        claims += RecordedClaim(deviceId, addressId, deviceToken, provideAttestation)
         return if (results.isEmpty()) RelayClaimResult.Claimed else results.removeFirst()
     }
 }
@@ -349,6 +393,30 @@ private class FakeVaultDao : VaultDao {
         identities.value = identities.value.map { identity ->
             if (identity.id == identityId && identity.role == activeRole) {
                 identity.copy(pairingEnabled = enabled)
+            } else {
+                identity
+            }
+        }
+        return 1
+    }
+
+    override suspend fun markCandidateClaimAttempted(
+        candidateId: String,
+        attemptedAt: Long,
+        candidateRole: String,
+    ): Int {
+        if (
+            identities.value.none {
+                it.id == candidateId &&
+                    it.role == candidateRole &&
+                    it.claimAttemptedAt == null
+            }
+        ) {
+            return 0
+        }
+        identities.value = identities.value.map { identity ->
+            if (identity.id == candidateId && identity.role == candidateRole) {
+                identity.copy(claimAttemptedAt = attemptedAt)
             } else {
                 identity
             }

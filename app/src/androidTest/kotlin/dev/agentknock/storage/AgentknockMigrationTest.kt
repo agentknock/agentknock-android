@@ -518,4 +518,49 @@ class AgentknockMigrationTest {
             }
         }
     }
+
+    @Test
+    fun migration13To14PreservesClaimedIdentityAndProtectsCandidateRetries() = runTest {
+        helper.createDatabase(13).use { database ->
+            database.execSQL(
+                """
+                INSERT INTO device_identities (
+                    id, role, address, address_id, device_id, device_public_key,
+                    created_at, claimed_at, pairing_enabled, instructions
+                ) VALUES (
+                    'active', 'active', 'amber-river-maple',
+                    '11111111111111111111111111111111',
+                    '01K2ENXDTW1P3XAR4J7V7C9D0H', X'01', 10, 11, 1, ''
+                )
+                """.trimIndent(),
+            )
+            database.execSQL(
+                """
+                INSERT INTO device_identities (
+                    id, role, address, address_id, device_id, device_public_key,
+                    created_at, claimed_at, pairing_enabled, instructions
+                ) VALUES (
+                    'candidate', 'candidate', 'silent-forest-cloud',
+                    '22222222222222222222222222222222',
+                    '01K2ENXDTW1P3XAR4J7V7C9D0J', X'02', 20, NULL, 1, ''
+                )
+                """.trimIndent(),
+            )
+        }
+
+        helper.runMigrationsAndValidate(14, listOf(MIGRATION_13_14)).use { database ->
+            database.prepare(
+                "SELECT claim_attempted_at FROM device_identities WHERE id = 'active'",
+            ).use { statement ->
+                assertTrue(statement.step())
+                assertTrue(statement.isNull(0))
+            }
+            database.prepare(
+                "SELECT claim_attempted_at FROM device_identities WHERE id = 'candidate'",
+            ).use { statement ->
+                assertTrue(statement.step())
+                assertEquals(20, statement.getLong(0))
+            }
+        }
+    }
 }

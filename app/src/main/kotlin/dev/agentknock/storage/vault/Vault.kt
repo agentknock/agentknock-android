@@ -37,6 +37,8 @@ internal data class DeviceIdentityEntity(
     val createdAt: Long,
     @ColumnInfo(name = "claimed_at")
     val claimedAt: Long?,
+    @ColumnInfo(name = "claim_attempted_at")
+    val claimAttemptedAt: Long? = null,
     @ColumnInfo(name = "pairing_enabled")
     val pairingEnabled: Boolean = true,
     @ColumnInfo(name = "instructions")
@@ -162,6 +164,21 @@ internal interface VaultDao {
         identityId: String,
         enabled: Boolean,
         activeRole: String,
+    ): Int
+
+    @Query(
+        """
+        UPDATE device_identities
+        SET claim_attempted_at = :attemptedAt
+        WHERE id = :candidateId
+          AND role = :candidateRole
+          AND claim_attempted_at IS NULL
+        """,
+    )
+    suspend fun markCandidateClaimAttempted(
+        candidateId: String,
+        attemptedAt: Long,
+        candidateRole: String,
     ): Int
 
     @Transaction

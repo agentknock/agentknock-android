@@ -4,7 +4,7 @@ import kotlinx.coroutines.test.UnconfinedTestDispatcher
 import kotlinx.coroutines.ExperimentalCoroutinesApi
 import kotlinx.coroutines.test.runTest
 import kotlinx.serialization.json.Json
-import kotlinx.serialization.json.boolean
+import kotlinx.serialization.json.jsonArray
 import kotlinx.serialization.json.jsonObject
 import kotlinx.serialization.json.jsonPrimitive
 import mockwebserver3.MockResponse
@@ -37,9 +37,15 @@ class RelayClaimClientTest {
                 client = OkHttpClient(),
                 relayUrl = server.url("/").toString(),
                 dispatcher = UnconfinedTestDispatcher(testScheduler),
+                attestationProvider = attestationProvider(),
             )
 
-            val result = client.claim(DEVICE_ID, ADDRESS_ID, DEVICE_TOKEN)
+            val result = client.claim(
+                DEVICE_ID,
+                ADDRESS_ID,
+                DEVICE_TOKEN,
+                provideAttestation = true,
+            )
 
             assertEquals(RelayClaimResult.Claimed, result)
             val request = server.takeRequest()
@@ -51,9 +57,13 @@ class RelayClaimClientTest {
                 DEVICE_TOKEN,
                 body.getValue("device_token").jsonPrimitive.content,
             )
-            assertTrue(
-                body.getValue("attestation").jsonObject
-                    .getValue("development").jsonPrimitive.boolean,
+            val attestation = body.getValue("attestation").jsonObject
+            assertEquals("android_key", attestation.getValue("type").jsonPrimitive.content)
+            assertEquals(
+                listOf("bGVhZg==", "cm9vdA=="),
+                attestation.getValue("certificate_chain").jsonArray.map {
+                    it.jsonPrimitive.content
+                },
             )
             val addressRequest = server.takeRequest()
             assertEquals("POST", addressRequest.method)
@@ -89,13 +99,70 @@ class RelayClaimClientTest {
                 client = OkHttpClient(),
                 relayUrl = server.url("/").toString(),
                 dispatcher = UnconfinedTestDispatcher(testScheduler),
+                attestationProvider = attestationProvider(),
             )
 
             assertEquals(
                 RelayClaimResult.AddressUnavailable,
-                client.claim(DEVICE_ID, ADDRESS_ID, DEVICE_TOKEN),
+                client.claim(
+                    DEVICE_ID,
+                    ADDRESS_ID,
+                    DEVICE_TOKEN,
+                    provideAttestation = true,
+                ),
             )
         }
+    }
+
+    @Test
+    fun `omits attestation when it is not needed for an existing device`() = runTest {
+        MockWebServer().use { server ->
+            server.start()
+            server.enqueue(
+                MockResponse.Builder()
+                    .code(200)
+                    .body("{\"claimed\":true,\"device_id\":\"$DEVICE_ID\"}")
+                    .build(),
+            )
+            server.enqueue(
+                MockResponse.Builder()
+                    .code(200)
+                    .body("{\"address_id\":\"$ADDRESS_ID\"}")
+                    .build(),
+            )
+            val client = HttpRelayClaimClient(
+                client = OkHttpClient(),
+                relayUrl = server.url("/").toString(),
+                dispatcher = UnconfinedTestDispatcher(testScheduler),
+                attestationProvider = DeviceAttestationProvider { _, _ ->
+                    error("Attestation provider must not be called")
+                },
+            )
+
+            assertEquals(
+                RelayClaimResult.Claimed,
+                client.claim(
+                    DEVICE_ID,
+                    ADDRESS_ID,
+                    DEVICE_TOKEN,
+                    provideAttestation = false,
+                ),
+            )
+
+            val body = Json.parseToJsonElement(
+                checkNotNull(server.takeRequest().body).utf8(),
+            ).jsonObject
+            assertFalse("attestation" in body)
+        }
+    }
+
+    private fun attestationProvider() = DeviceAttestationProvider { deviceId, deviceToken ->
+        assertEquals(DEVICE_ID, deviceId)
+        assertEquals(DEVICE_TOKEN, deviceToken)
+        AndroidKeyAttestation(
+            type = "android_key",
+            certificateChain = listOf("bGVhZg==", "cm9vdA=="),
+        )
     }
 
     private companion object {

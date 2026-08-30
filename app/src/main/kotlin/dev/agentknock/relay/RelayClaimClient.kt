@@ -33,6 +33,7 @@ internal interface RelayClaimClient {
         deviceId: String,
         addressId: String,
         deviceToken: String,
+        provideAttestation: Boolean,
     ): RelayClaimResult
 }
 
@@ -41,17 +42,23 @@ internal class HttpRelayClaimClient(
     private val relayUrl: String = "https://relay.agentknock.dev/",
     private val json: Json = Json { ignoreUnknownKeys = true },
     private val dispatcher: CoroutineDispatcher = Dispatchers.IO,
+    private val attestationProvider: DeviceAttestationProvider = AndroidKeyAttestationProvider(),
 ) : RelayClaimClient {
     override suspend fun claim(
         deviceId: String,
         addressId: String,
         deviceToken: String,
+        provideAttestation: Boolean,
     ): RelayClaimResult = withContext(dispatcher) {
         val claimBody = json.encodeToString(
             DeviceClaimRequest.serializer(),
             DeviceClaimRequest(
                 deviceToken = deviceToken,
-                attestation = DevelopmentAttestation(development = true),
+                attestation = if (provideAttestation) {
+                    attestationProvider.attest(deviceId, deviceToken)
+                } else {
+                    null
+                },
             ),
         )
         try {
@@ -147,12 +154,14 @@ private sealed interface PostResult {
 private data class DeviceClaimRequest(
     @SerialName("device_token")
     val deviceToken: String,
-    val attestation: DevelopmentAttestation,
+    val attestation: AndroidKeyAttestation? = null,
 )
 
 @Serializable
-private data class DevelopmentAttestation(
-    val development: Boolean,
+internal data class AndroidKeyAttestation(
+    val type: String,
+    @SerialName("certificate_chain")
+    val certificateChain: List<String>,
 )
 
 @Serializable
