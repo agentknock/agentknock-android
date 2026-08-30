@@ -1,0 +1,25 @@
+Agentknock keeps developer secrets on your Android phone and provides them only to approved commands on paired clients.
+
+Store cohesive sets of environment variables and SSH keys on your phone. Pair laptops, workstations, and servers using a human-verifiable security code, then review each request with the command, arguments, client, and requested secrets shown together.
+
+Choose how each secret is handled:
+• Ask you for every sensitive use.
+• Grant temporary access to a specific client and operation.
+• Let Agentknock’s AI reviewer approve, deny, or refer a request to you, according to your instructions. AI review requires a paid subscription.
+
+SSH support:
+• Generate or import Ed25519 and RSA keys.
+• Provide public keys without approval.
+• Perform SSH authentication and Git commit signing without sending private keys to the client.
+
+Security and privacy:
+• Sensitive values and private keys are encrypted on the Android device and protected by Android Keystore.
+• Secret material is end-to-end encrypted between the paired client and phone.
+• AI review receives request context and secret metadata, never secret values or private keys.
+• Pairing uses a short authentication string that you verify on both devices.
+• Audit history records security-relevant activity on your phone.
+
+Agentknock’s core storage, pairing, manual approval, and temporary-access features are free. AI review is optional.
+
+Agentknock for Android is open source:
+https://github.com/agentknock/agentknock-android
