@@ -173,7 +173,7 @@ internal interface RelayDeviceClient {
 
 internal class WebSocketRelayDeviceClient(
     private val client: OkHttpClient,
-    private val relayUrl: String = "https://relay.agentknock.dev/",
+    private val relayUrl: String = DEFAULT_RELAY_URL,
     private val codec: RelayFrameCodec = RelayFrameCodec(),
 ) : RelayDeviceClient {
     override suspend fun connect(

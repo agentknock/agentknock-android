@@ -3,14 +3,10 @@ package dev.agentknock.relay
 import java.io.IOException
 import kotlinx.coroutines.CoroutineDispatcher
 import kotlinx.coroutines.Dispatchers
-import kotlinx.coroutines.withContext
 import kotlinx.serialization.SerialName
 import kotlinx.serialization.Serializable
 import kotlinx.serialization.json.Json
-import okhttp3.MediaType.Companion.toMediaType
 import okhttp3.OkHttpClient
-import okhttp3.Request
-import okhttp3.RequestBody.Companion.toRequestBody
 
 internal sealed interface RelayPushRegistrationResult {
     data object Registered : RelayPushRegistrationResult
@@ -35,58 +31,50 @@ internal interface RelayPushRegistrationClient {
 }
 
 internal class HttpRelayPushRegistrationClient(
-    private val client: OkHttpClient,
-    private val relayUrl: String = "https://relay.agentknock.dev/",
+    private val transport: RelayHttpTransport,
     private val json: Json = Json { ignoreUnknownKeys = true },
-    private val dispatcher: CoroutineDispatcher = Dispatchers.IO,
 ) : RelayPushRegistrationClient {
+    constructor(
+        client: OkHttpClient,
+        relayUrl: String = DEFAULT_RELAY_URL,
+        json: Json = Json { ignoreUnknownKeys = true },
+        dispatcher: CoroutineDispatcher = Dispatchers.IO,
+    ) : this(RelayHttpTransport(client, relayUrl, json, dispatcher), json)
+
     override suspend fun register(
         deviceId: String,
         deviceToken: String,
         firebaseInstallationId: String,
-    ): RelayPushRegistrationResult = withContext(dispatcher) {
+    ): RelayPushRegistrationResult {
         val body = json.encodeToString(
             PushRegistrationRequest.serializer(),
             PushRegistrationRequest(firebaseInstallationId),
         )
-        val request = Request.Builder()
-            .url("${relayUrl.trimEnd('/')}/v1/device/$deviceId/push")
-            .header("Authorization", "Bearer $deviceToken")
-            .post(body.toRequestBody(JSON_MEDIA_TYPE))
-            .build()
-        try {
-            client.newCall(request).execute().use { response ->
-                val responseBody = response.body.string()
-                if (response.isSuccessful) {
-                    val registered = runCatching {
-                        json.decodeFromString(
-                            PushRegistrationResponse.serializer(),
-                            responseBody,
-                        ).state == RelayPushRegistrationState.REGISTERED.wireName
-                    }.getOrDefault(false)
-                    if (registered) {
-                        RelayPushRegistrationResult.Registered
-                    } else {
-                        RelayPushRegistrationResult.InvalidResponse
-                    }
+        return when (
+            val result = transport.post(
+                path = "v1/device/$deviceId/push",
+                body = body,
+                bearerToken = deviceToken,
+            )
+        ) {
+            is RelayHttpResult.Success -> {
+                val registered = runCatching {
+                    json.decodeFromString<PushRegistrationResponse>(result.body).state ==
+                        RelayPushRegistrationState.REGISTERED.wireName
+                }.getOrDefault(false)
+                if (registered) {
+                    RelayPushRegistrationResult.Registered
                 } else {
-                    val error = runCatching {
-                        json.decodeFromString(PushRegistrationError.serializer(), responseBody)
-                    }.getOrNull()
-                    RelayPushRegistrationResult.Rejected(
-                        status = response.code,
-                        code = error?.code,
-                        message = error?.message,
-                    )
+                    RelayPushRegistrationResult.InvalidResponse
                 }
             }
-        } catch (exception: IOException) {
-            RelayPushRegistrationResult.Unavailable(exception)
+            is RelayHttpResult.Rejected -> RelayPushRegistrationResult.Rejected(
+                status = result.status,
+                code = result.code,
+                message = result.message,
+            )
+            is RelayHttpResult.Unavailable -> RelayPushRegistrationResult.Unavailable(result.cause)
         }
-    }
-
-    private companion object {
-        val JSON_MEDIA_TYPE = "application/json".toMediaType()
     }
 }
 
@@ -98,10 +86,4 @@ private data class PushRegistrationRequest(
 @Serializable
 private data class PushRegistrationResponse(
     @SerialName("push_registration") val state: String,
-)
-
-@Serializable
-private data class PushRegistrationError(
-    @SerialName("error") val code: String,
-    val message: String,
 )

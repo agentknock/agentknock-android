@@ -3,14 +3,10 @@ package dev.agentknock.relay
 import java.io.IOException
 import kotlinx.coroutines.CoroutineDispatcher
 import kotlinx.coroutines.Dispatchers
-import kotlinx.coroutines.withContext
 import kotlinx.serialization.SerialName
 import kotlinx.serialization.Serializable
 import kotlinx.serialization.json.Json
-import okhttp3.MediaType.Companion.toMediaType
 import okhttp3.OkHttpClient
-import okhttp3.Request
-import okhttp3.RequestBody.Companion.toRequestBody
 
 internal sealed interface RelaySubscriptionResult {
     data class Status(val active: Boolean) : RelaySubscriptionResult
@@ -40,11 +36,16 @@ internal interface RelaySubscriptionClient {
 }
 
 internal class HttpRelaySubscriptionClient(
-    private val client: OkHttpClient,
-    private val relayUrl: String = "https://relay.agentknock.dev/",
+    private val transport: RelayHttpTransport,
     private val json: Json = Json { ignoreUnknownKeys = true },
-    private val dispatcher: CoroutineDispatcher = Dispatchers.IO,
 ) : RelaySubscriptionClient {
+    constructor(
+        client: OkHttpClient,
+        relayUrl: String = DEFAULT_RELAY_URL,
+        json: Json = Json { ignoreUnknownKeys = true },
+        dispatcher: CoroutineDispatcher = Dispatchers.IO,
+    ) : this(RelayHttpTransport(client, relayUrl, json, dispatcher), json)
+
     override suspend fun status(
         deviceId: String,
         deviceToken: String,
@@ -73,40 +74,21 @@ internal class HttpRelaySubscriptionClient(
         path: String,
         deviceToken: String,
         body: String,
-    ): RelaySubscriptionResult = withContext(dispatcher) {
-        val request = Request.Builder()
-            .url("${relayUrl.trimEnd('/')}/$path")
-            .header("Authorization", "Bearer $deviceToken")
-            .post(body.toRequestBody(JSON_MEDIA_TYPE))
-            .build()
-        try {
-            client.newCall(request).execute().use { response ->
-                val responseBody = response.body.string()
-                if (response.isSuccessful) {
-                    runCatching {
-                        json.decodeFromString<SubscriptionStatusResponse>(responseBody)
-                    }.fold(
-                        onSuccess = { RelaySubscriptionResult.Status(it.active) },
-                        onFailure = { RelaySubscriptionResult.InvalidResponse },
-                    )
-                } else {
-                    val error = runCatching {
-                        json.decodeFromString<SubscriptionErrorResponse>(responseBody)
-                    }.getOrNull()
-                    RelaySubscriptionResult.Rejected(
-                        status = response.code,
-                        code = error?.code,
-                        message = error?.message,
-                    )
-                }
-            }
-        } catch (exception: IOException) {
-            RelaySubscriptionResult.Unavailable(exception)
-        }
-    }
-
-    private companion object {
-        val JSON_MEDIA_TYPE = "application/json".toMediaType()
+    ): RelaySubscriptionResult = when (
+        val result = transport.post(path, body, bearerToken = deviceToken)
+    ) {
+        is RelayHttpResult.Success -> runCatching {
+            json.decodeFromString<SubscriptionStatusResponse>(result.body)
+        }.fold(
+            onSuccess = { RelaySubscriptionResult.Status(it.active) },
+            onFailure = { RelaySubscriptionResult.InvalidResponse },
+        )
+        is RelayHttpResult.Rejected -> RelaySubscriptionResult.Rejected(
+            status = result.status,
+            code = result.code,
+            message = result.message,
+        )
+        is RelayHttpResult.Unavailable -> RelaySubscriptionResult.Unavailable(result.cause)
     }
 }
 
@@ -118,9 +100,3 @@ private data class SubscriptionRedemptionRequest(
 
 @Serializable
 private data class SubscriptionStatusResponse(val active: Boolean)
-
-@Serializable
-private data class SubscriptionErrorResponse(
-    @SerialName("error") val code: String,
-    val message: String,
-)

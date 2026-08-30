@@ -7,10 +7,7 @@ import kotlinx.coroutines.withContext
 import kotlinx.serialization.SerialName
 import kotlinx.serialization.Serializable
 import kotlinx.serialization.json.Json
-import okhttp3.MediaType.Companion.toMediaType
 import okhttp3.OkHttpClient
-import okhttp3.Request
-import okhttp3.RequestBody.Companion.toRequestBody
 
 internal sealed interface RelayClaimResult {
     data object Claimed : RelayClaimResult
@@ -38,12 +35,24 @@ internal interface RelayClaimClient {
 }
 
 internal class HttpRelayClaimClient(
-    private val client: OkHttpClient,
-    private val relayUrl: String = "https://relay.agentknock.dev/",
+    private val transport: RelayHttpTransport,
     private val json: Json = Json { ignoreUnknownKeys = true },
     private val dispatcher: CoroutineDispatcher = Dispatchers.IO,
     private val attestationProvider: DeviceAttestationProvider = AndroidKeyAttestationProvider(),
 ) : RelayClaimClient {
+    constructor(
+        client: OkHttpClient,
+        relayUrl: String = DEFAULT_RELAY_URL,
+        json: Json = Json { ignoreUnknownKeys = true },
+        dispatcher: CoroutineDispatcher = Dispatchers.IO,
+        attestationProvider: DeviceAttestationProvider = AndroidKeyAttestationProvider(),
+    ) : this(
+        transport = RelayHttpTransport(client, relayUrl, json, dispatcher),
+        json = json,
+        dispatcher = dispatcher,
+        attestationProvider = attestationProvider,
+    )
+
     override suspend fun claim(
         deviceId: String,
         addressId: String,
@@ -61,93 +70,52 @@ internal class HttpRelayClaimClient(
                 },
             ),
         )
-        try {
-            val claimResult = post(
-                path = "v1/device/$deviceId/claim",
-                body = claimBody,
-            ) { responseBody ->
-                val response = json.decodeFromString(
-                    DeviceClaimResponse.serializer(),
-                    responseBody,
-                )
-                response.claimed && response.deviceId == deviceId
+        val claimResult = transport.post(
+            path = "v1/device/$deviceId/claim",
+            body = claimBody,
+        )
+        when (claimResult) {
+            is RelayHttpResult.Success -> {
+                val valid = runCatching {
+                    val response = json.decodeFromString<DeviceClaimResponse>(claimResult.body)
+                    response.claimed && response.deviceId == deviceId
+                }.getOrDefault(false)
+                if (!valid) return@withContext RelayClaimResult.InvalidResponse
             }
-            if (claimResult != PostResult.Success) {
-                return@withContext claimResult.toClaimResult(addressRequest = false)
-            }
-
-            val addressBody = json.encodeToString(
-                DeviceAddressRequest.serializer(),
-                DeviceAddressRequest(addressId),
+            is RelayHttpResult.Rejected -> return@withContext RelayClaimResult.Rejected(
+                claimResult.status,
+                claimResult.code,
+                claimResult.message,
             )
-            post(
+            is RelayHttpResult.Unavailable -> {
+                return@withContext RelayClaimResult.Unavailable(claimResult.cause)
+            }
+        }
+
+        val addressBody = json.encodeToString(DeviceAddressRequest(addressId))
+        when (
+            val result = transport.post(
                 path = "v1/device/$deviceId/address",
                 body = addressBody,
-                deviceToken = deviceToken,
-            ) { responseBody ->
-                json.decodeFromString(
-                    DeviceAddressResponse.serializer(),
-                    responseBody,
-                ).addressId == addressId
-            }.toClaimResult(addressRequest = true)
-        } catch (exception: IOException) {
-            RelayClaimResult.Unavailable(exception)
-        }
-    }
-
-    private fun post(
-        path: String,
-        body: String,
-        deviceToken: String? = null,
-        validResponse: (String) -> Boolean,
-    ): PostResult {
-        val request = Request.Builder()
-            .url("${relayUrl.trimEnd('/')}/$path")
-            .apply {
-                deviceToken?.let { header("Authorization", "Bearer $it") }
-            }
-            .post(body.toRequestBody(JSON_MEDIA_TYPE))
-            .build()
-        return client.newCall(request).execute().use { response ->
-            val responseBody = response.body.string()
-            if (response.isSuccessful) {
-                if (runCatching { validResponse(responseBody) }.getOrDefault(false)) {
-                    PostResult.Success
-                } else {
-                    PostResult.InvalidResponse
-                }
-            } else {
-                val error = runCatching {
-                    json.decodeFromString(RelayErrorResponse.serializer(), responseBody)
-                }.getOrNull()
-                PostResult.Rejected(response.code, error?.code, error?.message)
-            }
-        }
-    }
-
-    private fun PostResult.toClaimResult(addressRequest: Boolean): RelayClaimResult = when (this) {
-        PostResult.Success -> RelayClaimResult.Claimed
-        is PostResult.Rejected -> if (
-            addressRequest && status == 409 && code == ADDRESS_ALREADY_CLAIMED
+                bearerToken = deviceToken,
+            )
         ) {
-            RelayClaimResult.AddressUnavailable
-        } else {
-            RelayClaimResult.Rejected(status, code, message)
+            is RelayHttpResult.Success -> {
+                val valid = runCatching {
+                    json.decodeFromString<DeviceAddressResponse>(result.body).addressId == addressId
+                }.getOrDefault(false)
+                if (valid) RelayClaimResult.Claimed else RelayClaimResult.InvalidResponse
+            }
+            is RelayHttpResult.Rejected -> {
+                if (result.status == 409 && result.code == ADDRESS_ALREADY_CLAIMED) {
+                    RelayClaimResult.AddressUnavailable
+                } else {
+                    RelayClaimResult.Rejected(result.status, result.code, result.message)
+                }
+            }
+            is RelayHttpResult.Unavailable -> RelayClaimResult.Unavailable(result.cause)
         }
-        PostResult.InvalidResponse -> RelayClaimResult.InvalidResponse
     }
-
-    private companion object {
-        val JSON_MEDIA_TYPE = "application/json".toMediaType()
-    }
-}
-
-private sealed interface PostResult {
-    data object Success : PostResult
-
-    data class Rejected(val status: Int, val code: String?, val message: String?) : PostResult
-
-    data object InvalidResponse : PostResult
 }
 
 @Serializable
@@ -175,11 +143,5 @@ private data class DeviceAddressRequest(@SerialName("address_id") val addressId:
 
 @Serializable
 private data class DeviceAddressResponse(@SerialName("address_id") val addressId: String)
-
-@Serializable
-private data class RelayErrorResponse(
-    @SerialName("error") val code: String,
-    val message: String,
-)
 
 private const val ADDRESS_ALREADY_CLAIMED = "ADDRESS_ALREADY_CLAIMED"

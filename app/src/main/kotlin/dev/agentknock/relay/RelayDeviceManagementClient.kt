@@ -3,14 +3,10 @@ package dev.agentknock.relay
 import java.io.IOException
 import kotlinx.coroutines.CoroutineDispatcher
 import kotlinx.coroutines.Dispatchers
-import kotlinx.coroutines.withContext
 import kotlinx.serialization.SerialName
 import kotlinx.serialization.Serializable
 import kotlinx.serialization.json.Json
-import okhttp3.MediaType.Companion.toMediaType
 import okhttp3.OkHttpClient
-import okhttp3.Request
-import okhttp3.RequestBody.Companion.toRequestBody
 
 internal sealed interface RelayDeviceManagementResult {
     data object Changed : RelayDeviceManagementResult
@@ -40,11 +36,16 @@ internal interface RelayDeviceManagementClient {
 }
 
 internal class HttpRelayDeviceManagementClient(
-    private val client: OkHttpClient,
-    private val relayUrl: String = "https://relay.agentknock.dev/",
+    private val transport: RelayHttpTransport,
     private val json: Json = Json { ignoreUnknownKeys = true },
-    private val dispatcher: CoroutineDispatcher = Dispatchers.IO,
 ) : RelayDeviceManagementClient {
+    constructor(
+        client: OkHttpClient,
+        relayUrl: String = DEFAULT_RELAY_URL,
+        json: Json = Json { ignoreUnknownKeys = true },
+        dispatcher: CoroutineDispatcher = Dispatchers.IO,
+    ) : this(RelayHttpTransport(client, relayUrl, json, dispatcher), json)
+
     override suspend fun setPairingEnabled(
         deviceId: String,
         deviceToken: String,
@@ -69,39 +70,22 @@ internal class HttpRelayDeviceManagementClient(
         deviceToken: String,
         body: String,
         validResponse: (String) -> Boolean,
-    ): RelayDeviceManagementResult = withContext(dispatcher) {
-        val request = Request.Builder()
-            .url("${relayUrl.trimEnd('/')}/$path")
-            .header("Authorization", "Bearer $deviceToken")
-            .post(body.toRequestBody(JSON_MEDIA_TYPE))
-            .build()
-        try {
-            client.newCall(request).execute().use { response ->
-                val responseBody = response.body.string()
-                if (response.isSuccessful) {
-                    if (runCatching { validResponse(responseBody) }.getOrDefault(false)) {
-                        RelayDeviceManagementResult.Changed
-                    } else {
-                        RelayDeviceManagementResult.InvalidResponse
-                    }
-                } else {
-                    val error = runCatching {
-                        json.decodeFromString<ManagementErrorResponse>(responseBody)
-                    }.getOrNull()
-                    RelayDeviceManagementResult.Rejected(
-                        status = response.code,
-                        code = error?.code,
-                        message = error?.message,
-                    )
-                }
-            }
-        } catch (exception: IOException) {
-            RelayDeviceManagementResult.Unavailable(exception)
+    ): RelayDeviceManagementResult = when (
+        val result = transport.post(path, body, bearerToken = deviceToken)
+    ) {
+        is RelayHttpResult.Success -> if (
+            runCatching { validResponse(result.body) }.getOrDefault(false)
+        ) {
+            RelayDeviceManagementResult.Changed
+        } else {
+            RelayDeviceManagementResult.InvalidResponse
         }
-    }
-
-    private companion object {
-        val JSON_MEDIA_TYPE = "application/json".toMediaType()
+        is RelayHttpResult.Rejected -> RelayDeviceManagementResult.Rejected(
+            status = result.status,
+            code = result.code,
+            message = result.message,
+        )
+        is RelayHttpResult.Unavailable -> RelayDeviceManagementResult.Unavailable(result.cause)
     }
 }
 
@@ -115,9 +99,3 @@ private data class PairingAdmissionResponse(
 
 @Serializable
 private data class DeviceDeletionResponse(val deleted: Boolean)
-
-@Serializable
-private data class ManagementErrorResponse(
-    @SerialName("error") val code: String,
-    val message: String,
-)

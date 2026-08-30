@@ -19,6 +19,7 @@ import dev.agentknock.relay.HttpRelayApprovalReviewClient
 import dev.agentknock.relay.HttpRelayPushRegistrationClient
 import dev.agentknock.relay.HttpRelaySubscriptionClient
 import dev.agentknock.relay.HttpRelayDeviceManagementClient
+import dev.agentknock.relay.RelayHttpTransport
 import dev.agentknock.relay.WebSocketRelayDeviceClient
 import dev.agentknock.storage.request.RequestRepository
 import dev.agentknock.storage.request.RequestConnectionManager
@@ -67,6 +68,7 @@ internal class ApplicationContainer(application: Application) {
         .pingInterval(30, TimeUnit.SECONDS)
         .build()
     private val applicationScope = CoroutineScope(SupervisorJob() + Dispatchers.IO)
+    private val relayHttp = RelayHttpTransport(httpClient)
 
     // Every future worker and messaging entry point must await this before using local state.
     val localStorage = applicationScope.async(start = CoroutineStart.DEFAULT) {
@@ -98,24 +100,24 @@ internal class ApplicationContainer(application: Application) {
         dao = database.vaultDao(),
         keyManager = vaultKeyManager,
         encryption = encryption,
-        relay = HttpRelayClaimClient(httpClient),
+        relay = HttpRelayClaimClient(relayHttp),
         audit = audit,
     )
 
     val pushRegistration = PushRegistrationRepository(
         deviceCredentials = vault,
-        relay = HttpRelayPushRegistrationClient(httpClient),
+        relay = HttpRelayPushRegistrationClient(relayHttp),
     )
 
     val subscription = SubscriptionRepository(
         deviceCredentials = vault,
-        relay = HttpRelaySubscriptionClient(httpClient),
+        relay = HttpRelaySubscriptionClient(relayHttp),
     )
 
     val deviceManagement = DeviceManagementRepository(
         vaultDao = database.vaultDao(),
         credentials = vault,
-        relay = HttpRelayDeviceManagementClient(httpClient),
+        relay = HttpRelayDeviceManagementClient(relayHttp),
         audit = audit,
     )
 
@@ -124,10 +126,12 @@ internal class ApplicationContainer(application: Application) {
         deviceCredentials = vault,
         secrets = secrets,
         approvalReviewer = HttpRelayApprovalReviewClient(
-            httpClient.newBuilder()
-                .readTimeout(45, TimeUnit.SECONDS)
-                .callTimeout(60, TimeUnit.SECONDS)
-                .build(),
+            RelayHttpTransport(
+                httpClient.newBuilder()
+                    .readTimeout(45, TimeUnit.SECONDS)
+                    .callTimeout(60, TimeUnit.SECONDS)
+                    .build(),
+            ),
         ),
         relay = WebSocketRelayDeviceClient(httpClient),
         keyManager = vaultKeyManager,

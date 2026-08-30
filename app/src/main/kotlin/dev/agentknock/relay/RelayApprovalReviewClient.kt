@@ -3,16 +3,12 @@ package dev.agentknock.relay
 import java.io.IOException
 import kotlinx.coroutines.CoroutineDispatcher
 import kotlinx.coroutines.Dispatchers
-import kotlinx.coroutines.withContext
 import kotlinx.serialization.SerialName
 import kotlinx.serialization.Serializable
 import kotlinx.serialization.encodeToString
 import kotlinx.serialization.json.Json
 import kotlinx.serialization.json.JsonElement
-import okhttp3.MediaType.Companion.toMediaType
 import okhttp3.OkHttpClient
-import okhttp3.Request
-import okhttp3.RequestBody.Companion.toRequestBody
 
 @Serializable
 internal data class ApprovalReviewRequest(
@@ -179,59 +175,52 @@ internal interface RelayApprovalReviewClient {
 }
 
 internal class HttpRelayApprovalReviewClient(
-    private val client: OkHttpClient,
-    private val relayUrl: String = "https://relay.agentknock.dev/",
+    private val transport: RelayHttpTransport,
     private val json: Json = Json {
         ignoreUnknownKeys = true
         explicitNulls = false
     },
-    private val dispatcher: CoroutineDispatcher = Dispatchers.IO,
 ) : RelayApprovalReviewClient {
+    constructor(
+        client: OkHttpClient,
+        relayUrl: String = DEFAULT_RELAY_URL,
+        json: Json = Json {
+            ignoreUnknownKeys = true
+            explicitNulls = false
+        },
+        dispatcher: CoroutineDispatcher = Dispatchers.IO,
+    ) : this(RelayHttpTransport(client, relayUrl, json, dispatcher), json)
+
     override suspend fun review(
         deviceId: String,
         deviceToken: String,
         request: ApprovalReviewRequest,
-    ): RelayApprovalReviewResult = withContext(dispatcher) {
-        val httpRequest = Request.Builder()
-            .url("${relayUrl.trimEnd('/')}/v1/device/$deviceId/review")
-            .header("Authorization", "Bearer $deviceToken")
-            .post(json.encodeToString(request).toRequestBody(JSON_MEDIA_TYPE))
-            .build()
-        try {
-            client.newCall(httpRequest).execute().use { response ->
-                val responseBody = response.body.string()
-                if (response.isSuccessful) {
-                    runCatching {
-                        val value = json.decodeFromString<ApprovalReviewResponse>(responseBody)
-                        val decision = when (value.decision) {
-                            "approve" -> RelayApprovalReviewDecision.APPROVE
-                            "deny" -> RelayApprovalReviewDecision.DENY
-                            "ask_user" -> RelayApprovalReviewDecision.ASK_USER
-                            else -> error("Unknown approval review decision")
-                        }
-                        require(value.explanation.isNotBlank()) {
-                            "Approval review explanation is empty"
-                        }
-                        RelayApprovalReviewResult.Reviewed(decision, value.explanation)
-                    }.getOrElse { RelayApprovalReviewResult.InvalidResponse }
-                } else {
-                    val error = runCatching {
-                        json.decodeFromString<ApprovalReviewErrorResponse>(responseBody)
-                    }.getOrNull()
-                    RelayApprovalReviewResult.Rejected(
-                        status = response.code,
-                        code = error?.code,
-                        message = error?.message,
-                    )
-                }
+    ): RelayApprovalReviewResult = when (
+        val result = transport.post(
+            path = "v1/device/$deviceId/review",
+            body = json.encodeToString(request),
+            bearerToken = deviceToken,
+        )
+    ) {
+        is RelayHttpResult.Success -> runCatching {
+            val value = json.decodeFromString<ApprovalReviewResponse>(result.body)
+            val decision = when (value.decision) {
+                "approve" -> RelayApprovalReviewDecision.APPROVE
+                "deny" -> RelayApprovalReviewDecision.DENY
+                "ask_user" -> RelayApprovalReviewDecision.ASK_USER
+                else -> error("Unknown approval review decision")
             }
-        } catch (exception: IOException) {
-            RelayApprovalReviewResult.Unavailable(exception)
-        }
-    }
-
-    private companion object {
-        val JSON_MEDIA_TYPE = "application/json".toMediaType()
+            require(value.explanation.isNotBlank()) {
+                "Approval review explanation is empty"
+            }
+            RelayApprovalReviewResult.Reviewed(decision, value.explanation)
+        }.getOrElse { RelayApprovalReviewResult.InvalidResponse }
+        is RelayHttpResult.Rejected -> RelayApprovalReviewResult.Rejected(
+            status = result.status,
+            code = result.code,
+            message = result.message,
+        )
+        is RelayHttpResult.Unavailable -> RelayApprovalReviewResult.Unavailable(result.cause)
     }
 }
 
@@ -239,10 +228,4 @@ internal class HttpRelayApprovalReviewClient(
 private data class ApprovalReviewResponse(
     val decision: String,
     val explanation: String,
-)
-
-@Serializable
-private data class ApprovalReviewErrorResponse(
-    @SerialName("error") val code: String,
-    val message: String,
 )
