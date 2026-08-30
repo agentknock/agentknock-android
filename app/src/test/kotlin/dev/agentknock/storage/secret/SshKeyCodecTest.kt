@@ -2,8 +2,14 @@ package dev.agentknock.storage.secret
 
 import dev.agentknock.protocol.SshSignatureAlgorithm
 import java.io.ByteArrayInputStream
+import java.io.ByteArrayOutputStream
 import java.io.DataInputStream
+import java.io.DataOutputStream
+import java.math.BigInteger
+import java.security.KeyPairGenerator
 import java.security.MessageDigest
+import java.security.Signature
+import java.security.interfaces.RSAPrivateCrtKey
 import java.util.Base64
 import org.bouncycastle.crypto.params.Ed25519PublicKeyParameters
 import org.bouncycastle.crypto.signers.Ed25519Signer
@@ -45,6 +51,24 @@ class SshKeyCodecTest {
         assertTrue(first.publicKeyLine.endsWith(" alice@example"))
         codec.fromStored(first.algorithm.storedName, first.privateKey, first.publicKey, first.comment)
         codec.fromStored(second.algorithm.storedName, second.privateKey, second.publicKey, second.comment)
+    }
+
+    @Test
+    fun `imports a standard unencrypted OpenSSH RSA private key`() {
+        val fixture = rsaFixture()
+
+        val key = codec.importOpenSshPrivateKey(fixture.privateKey)
+
+        assertEquals(SshKeyAlgorithm.RSA, key.algorithm)
+        assertEquals("rsa@test", key.comment)
+        assertEquals(fixture.publicKey, key.publicKeyLine)
+        assertTrue(key.fingerprint.startsWith("SHA256:"))
+        codec.fromStored(
+            key.algorithm.storedName,
+            key.privateKey,
+            key.publicKey,
+            key.comment,
+        )
     }
 
     @Test
@@ -123,6 +147,44 @@ class SshKeyCodecTest {
     }
 
     @Test
+    fun `creates an RSA SHA-512 SSHSIG envelope`() {
+        val fixture = rsaFixture()
+        val key = codec.importOpenSshPrivateKey(fixture.privateKey)
+        val message = "tree 5678\n\nSign with RSA\n".encodeToByteArray()
+
+        val armored = codec.signGitSignature(key, message)
+
+        val body = armored.lines().drop(1).dropLast(2).joinToString("")
+        val input = DataInputStream(ByteArrayInputStream(Base64.getDecoder().decode(body)))
+        assertArrayEquals("SSHSIG".encodeToByteArray(), ByteArray(6).also(input::readFully))
+        assertEquals(1, input.readInt())
+        assertArrayEquals(codec.importOpenSshPublicKey(fixture.publicKey).blob(), input.readSshBytes())
+        assertEquals("git", input.readSshString())
+        assertArrayEquals(byteArrayOf(), input.readSshBytes())
+        assertEquals("sha512", input.readSshString())
+        val signatureBlob = DataInputStream(ByteArrayInputStream(input.readSshBytes()))
+        assertEquals("rsa-sha2-512", signatureBlob.readSshString())
+        val signature = signatureBlob.readSshBytes()
+        assertEquals(0, signatureBlob.available())
+        assertEquals(0, input.available())
+        val signedData = ByteArrayOutputStream().use { bytes ->
+            DataOutputStream(bytes).use { output ->
+                output.write("SSHSIG".encodeToByteArray())
+                output.writeSshString("git".encodeToByteArray())
+                output.writeSshString(byteArrayOf())
+                output.writeSshString("sha512".encodeToByteArray())
+                output.writeSshString(MessageDigest.getInstance("SHA-512").digest(message))
+            }
+            bytes.toByteArray()
+        }
+        val verifier = Signature.getInstance("SHA512withRSA").apply {
+            initVerify(fixture.keyPair.public)
+            update(signedData)
+        }
+        assertTrue(verifier.verify(signature))
+    }
+
+    @Test
     fun `creates a valid Ed25519 SSH authentication signature blob`() {
         val key = codec.importOpenSshPrivateKey(TEST_PRIVATE_KEY)
         val message = "exact SSH authentication packet".encodeToByteArray()
@@ -153,6 +215,69 @@ class SshKeyCodecTest {
         (value.size ushr 8).toByte(),
         value.size.toByte(),
     ) + value
+
+    private fun rsaFixture(): RsaFixture {
+        val keyPair = KeyPairGenerator.getInstance("RSA").apply { initialize(2048) }.generateKeyPair()
+        val privateKey = keyPair.private as RSAPrivateCrtKey
+        val publicBlob = ByteArrayOutputStream().use { bytes ->
+            DataOutputStream(bytes).use { output ->
+                output.writeSshString("ssh-rsa".encodeToByteArray())
+                output.writeMpint(privateKey.publicExponent)
+                output.writeMpint(privateKey.modulus)
+            }
+            bytes.toByteArray()
+        }
+        val privateBlock = ByteArrayOutputStream().use { bytes ->
+            DataOutputStream(bytes).use { output ->
+                output.writeInt(0x1234_5678)
+                output.writeInt(0x1234_5678)
+                output.writeSshString("ssh-rsa".encodeToByteArray())
+                output.writeMpint(privateKey.modulus)
+                output.writeMpint(privateKey.publicExponent)
+                output.writeMpint(privateKey.privateExponent)
+                output.writeMpint(privateKey.crtCoefficient)
+                output.writeMpint(privateKey.primeP)
+                output.writeMpint(privateKey.primeQ)
+                output.writeSshString("rsa@test".encodeToByteArray())
+                var padding = 1
+                do {
+                    output.writeByte(padding++)
+                } while (bytes.size() % 8 != 0)
+            }
+            bytes.toByteArray()
+        }
+        val encoded = ByteArrayOutputStream().use { bytes ->
+            DataOutputStream(bytes).use { output ->
+                output.write("openssh-key-v1\u0000".encodeToByteArray())
+                output.writeSshString("none".encodeToByteArray())
+                output.writeSshString("none".encodeToByteArray())
+                output.writeSshString(byteArrayOf())
+                output.writeInt(1)
+                output.writeSshString(publicBlob)
+                output.writeSshString(privateBlock)
+            }
+            bytes.toByteArray()
+        }
+        val pem = "-----BEGIN OPENSSH PRIVATE KEY-----\n" +
+            Base64.getMimeEncoder(70, "\n".encodeToByteArray()).encodeToString(encoded) +
+            "\n-----END OPENSSH PRIVATE KEY-----"
+        val publicKey = "ssh-rsa ${Base64.getEncoder().encodeToString(publicBlob)} rsa@test"
+        return RsaFixture(pem, publicKey, keyPair)
+    }
+
+    private fun DataOutputStream.writeSshString(value: ByteArray) {
+        writeInt(value.size)
+        write(value)
+    }
+
+    private fun DataOutputStream.writeMpint(value: BigInteger) =
+        writeSshString(value.toByteArray())
+
+    private data class RsaFixture(
+        val privateKey: String,
+        val publicKey: String,
+        val keyPair: java.security.KeyPair,
+    )
 
     companion object {
         private val TEST_PRIVATE_KEY = """

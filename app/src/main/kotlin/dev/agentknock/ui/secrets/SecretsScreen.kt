@@ -1725,7 +1725,7 @@ private fun SshPublicKeyCard(
             Modifier.fillMaxWidth().padding(16.dp),
             verticalArrangement = Arrangement.spacedBy(12.dp),
         ) {
-            InformationRow("Algorithm", "Ed25519")
+            InformationRow("Algorithm", key.algorithm.sshAlgorithmDisplayName())
             InformationRow("Fingerprint", key.fingerprint)
             Row(
                 modifier = Modifier.fillMaxWidth(),
@@ -2174,7 +2174,7 @@ private fun SshKeyInput(
             )
         } else {
             Text(
-                "Paste an unencrypted OpenSSH Ed25519 private key. Encrypted keys must be " +
+                "Paste an unencrypted OpenSSH Ed25519 or RSA private key. Encrypted keys must be " +
                     "decrypted before import.",
                 color = MaterialTheme.colorScheme.onSurfaceVariant,
             )
@@ -2213,7 +2213,7 @@ private fun SshKeyInput(
 private fun SshKeyPreview(key: SshPrivateKey) {
     InformationSurface {
         Text("Ready to save", style = MaterialTheme.typography.titleMedium)
-        InformationRow("Algorithm", "Ed25519")
+        InformationRow("Algorithm", key.algorithm.storedName.sshAlgorithmDisplayName())
         InformationRow("Fingerprint", key.fingerprint)
         if (key.comment.isNotBlank()) InformationRow("Comment", key.comment)
         Column(verticalArrangement = Arrangement.spacedBy(3.dp)) {
@@ -2638,6 +2638,12 @@ private fun Loading(modifier: Modifier = Modifier) {
 private fun String.displayName(): String = when (this) {
     "environment" -> "Environment variables"
     "ssh" -> "SSH key"
+    else -> this
+}
+
+private fun String.sshAlgorithmDisplayName(): String = when (this) {
+    "ed25519", "ssh-ed25519" -> "Ed25519"
+    "rsa", "ssh-rsa" -> "RSA"
     else -> this
 }
 

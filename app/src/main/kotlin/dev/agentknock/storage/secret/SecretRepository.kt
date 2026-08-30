@@ -30,7 +30,13 @@ import kotlinx.serialization.Serializable
 
 internal const val ENVIRONMENT_SECRET_TYPE = "environment"
 internal const val SSH_SECRET_TYPE = "ssh"
-internal const val SSH_PRIVATE_KEY_FORMAT = "ed25519_seed"
+internal const val ED25519_PRIVATE_KEY_FORMAT = "ed25519_seed"
+internal const val RSA_PRIVATE_KEY_FORMAT = "rsa_pkcs8"
+
+internal fun SshKeyAlgorithm.privateKeyFormat(): String = when (this) {
+    SshKeyAlgorithm.ED25519 -> ED25519_PRIVATE_KEY_FORMAT
+    SshKeyAlgorithm.RSA -> RSA_PRIVATE_KEY_FORMAT
+}
 
 internal enum class SecretApprovalMode(
     val storedName: String,
@@ -1595,12 +1601,14 @@ internal class SecretRepository(
         materialUpdatedAt: Long,
     ): SshKeyEntity {
         val key = keyManager.activeKey(VaultKeyPurpose.SECRET_VALUES)
+        val privateKeyFormat = privateKey.algorithm.privateKeyFormat()
         val encrypted = withContext(cryptographyDispatcher) {
             encryption.encrypt(
                 keyId = key.id,
                 location = sshKeyLocation(
                     secretId = secretId,
                     algorithm = privateKey.algorithm.storedName,
+                    privateKeyFormat = privateKeyFormat,
                     publicKey = privateKey.publicKey,
                 ),
                 plaintext = privateKey.privateKey,
@@ -1611,7 +1619,7 @@ internal class SecretRepository(
             algorithm = privateKey.algorithm.storedName,
             publicKey = privateKey.publicKey.copyOf(),
             comment = privateKey.comment,
-            privateKeyFormat = SSH_PRIVATE_KEY_FORMAT,
+            privateKeyFormat = privateKeyFormat,
             encryptionFormat = encrypted.formatVersion,
             encryptionKeyId = encrypted.keyId,
             nonce = encrypted.nonce,
@@ -1621,7 +1629,9 @@ internal class SecretRepository(
     }
 
     private suspend fun decryptSshKey(key: SshKeyEntity): DecryptionResult {
-        if (key.privateKeyFormat != SSH_PRIVATE_KEY_FORMAT) {
+        val algorithm = SshKeyAlgorithm.fromStoredName(key.algorithm)
+            ?: return DecryptionResult.UnsupportedFormat
+        if (key.privateKeyFormat != algorithm.privateKeyFormat()) {
             return DecryptionResult.UnsupportedFormat
         }
         return withContext(cryptographyDispatcher) {
@@ -1632,7 +1642,12 @@ internal class SecretRepository(
                     nonce = key.nonce,
                     ciphertext = key.ciphertext,
                 ),
-                location = sshKeyLocation(key.secretId, key.algorithm, key.publicKey),
+                location = sshKeyLocation(
+                    key.secretId,
+                    key.algorithm,
+                    key.privateKeyFormat,
+                    key.publicKey,
+                ),
             )
         }
     }
@@ -1655,6 +1670,7 @@ internal class SecretRepository(
     private fun sshKeyLocation(
         secretId: String,
         algorithm: String,
+        privateKeyFormat: String,
         publicKey: ByteArray,
     ) = EncryptionLocation(
         recordType = "ssh_key",
@@ -1662,7 +1678,7 @@ internal class SecretRepository(
         fieldName = "private_key",
         bindings = listOf(
             EncryptionBinding("algorithm", algorithm),
-            EncryptionBinding("private_key_format", SSH_PRIVATE_KEY_FORMAT),
+            EncryptionBinding("private_key_format", privateKeyFormat),
             EncryptionBinding("public_key", Base64.getEncoder().encodeToString(publicKey)),
         ),
     )

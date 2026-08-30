@@ -77,7 +77,8 @@ import dev.agentknock.storage.secret.SshSecretUpload
 import dev.agentknock.storage.secret.SshSecretUploadResult
 import dev.agentknock.storage.secret.GitSignatureResult
 import dev.agentknock.storage.secret.SshAuthenticationSignatureResult
-import dev.agentknock.storage.secret.SSH_PRIVATE_KEY_FORMAT
+import dev.agentknock.storage.secret.SshKeyAlgorithm
+import dev.agentknock.storage.secret.privateKeyFormat
 import dev.agentknock.storage.secret.ENVIRONMENT_SECRET_TYPE
 import dev.agentknock.storage.secret.EnvironmentVariableSelection
 import dev.agentknock.storage.secret.SSH_SECRET_TYPE
@@ -6339,6 +6340,7 @@ internal class RequestRepository(
         now: Long,
     ): SecretUploadSshKeyEntity {
         val key = keyManager.activeKey(VaultKeyPurpose.SECRET_VALUES)
+        val privateKeyFormat = privateKey.algorithm.privateKeyFormat()
         val encrypted = withContext(cryptographyDispatcher) {
             encryption.encrypt(
                 keyId = key.id,
@@ -6346,6 +6348,7 @@ internal class RequestRepository(
                     relayRequestId,
                     clientId,
                     privateKey.algorithm.storedName,
+                    privateKeyFormat,
                     privateKey.publicKey,
                 ),
                 plaintext = privateKey.privateKey,
@@ -6356,7 +6359,7 @@ internal class RequestRepository(
             algorithm = privateKey.algorithm.storedName,
             publicKey = privateKey.publicKey.copyOf(),
             comment = privateKey.comment,
-            privateKeyFormat = SSH_PRIVATE_KEY_FORMAT,
+            privateKeyFormat = privateKeyFormat,
             encryptionFormat = encrypted.formatVersion,
             encryptionKeyId = encrypted.keyId,
             nonce = encrypted.nonce,
@@ -6370,7 +6373,9 @@ internal class RequestRepository(
         upload: SecretUploadRequestEntity,
         key: SecretUploadSshKeyEntity,
     ): DecryptionResult {
-        if (key.privateKeyFormat != SSH_PRIVATE_KEY_FORMAT) {
+        val algorithm = SshKeyAlgorithm.fromStoredName(key.algorithm)
+            ?: return DecryptionResult.UnsupportedFormat
+        if (key.privateKeyFormat != algorithm.privateKeyFormat()) {
             return DecryptionResult.UnsupportedFormat
         }
         return withContext(cryptographyDispatcher) {
@@ -6385,6 +6390,7 @@ internal class RequestRepository(
                     request.relayRequestId,
                     upload.clientId,
                     key.algorithm,
+                    key.privateKeyFormat,
                     key.publicKey,
                 ),
             )
@@ -6395,6 +6401,7 @@ internal class RequestRepository(
         relayRequestId: String,
         clientId: String,
         algorithm: String,
+        privateKeyFormat: String,
         publicKey: ByteArray,
     ) = EncryptionLocation(
         recordType = "secret_upload_ssh_key",
@@ -6403,7 +6410,7 @@ internal class RequestRepository(
         bindings = listOf(
             EncryptionBinding("client_id", clientId),
             EncryptionBinding("algorithm", algorithm),
-            EncryptionBinding("private_key_format", SSH_PRIVATE_KEY_FORMAT),
+            EncryptionBinding("private_key_format", privateKeyFormat),
             EncryptionBinding("public_key", Base64.getEncoder().encodeToString(publicKey)),
         ),
     )

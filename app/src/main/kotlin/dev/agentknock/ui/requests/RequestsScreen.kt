@@ -2081,7 +2081,14 @@ private fun SshKeyUploadDetails(upload: SecretUploadRequestDetails) {
                     },
                     style = MaterialTheme.typography.titleMedium,
                 )
-                DetailValue("Algorithm", "Ed25519")
+                DetailValue(
+                    "Algorithm",
+                    when (publicKey.substringBefore(' ')) {
+                        "ssh-ed25519" -> "Ed25519"
+                        "ssh-rsa" -> "RSA"
+                        else -> publicKey.substringBefore(' ')
+                    },
+                )
                 upload.fingerprint?.let { DetailValue("Fingerprint", it, true) }
                 Column(verticalArrangement = Arrangement.spacedBy(3.dp)) {
                     Text(
