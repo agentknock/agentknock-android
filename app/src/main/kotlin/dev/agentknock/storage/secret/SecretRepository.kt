@@ -244,6 +244,7 @@ internal data class SecretMetadata(
     val description: String,
     val type: String = ENVIRONMENT_SECRET_TYPE,
     val environmentVariableNames: List<String> = emptyList(),
+    val environmentVariableRename: Map<String, String> = emptyMap(),
     val sshPublicKey: String? = null,
 )
 
@@ -262,10 +263,18 @@ internal data class SecretReviewMetadata(
     val type: String,
     val instructions: String,
     val environmentVariables: List<EnvironmentVariableReviewMetadata>,
+    val environmentVariableDestinations: Map<String, EnvironmentVariableReviewDestination> =
+        emptyMap(),
     val sshKey: SshKeyReviewMetadata?,
     val createdAt: Long,
     val updatedAt: Long,
 )
+
+internal sealed interface EnvironmentVariableReviewDestination {
+    data class Environment(val name: String) : EnvironmentVariableReviewDestination
+
+    data object Omitted : EnvironmentVariableReviewDestination
+}
 
 internal data class EnvironmentVariableReviewMetadata(
     val name: String,
@@ -292,6 +301,7 @@ internal data class SecretIdentity(
 internal data class EnvironmentVariableSelection(
     val only: Set<String>? = null,
     val omit: Set<String> = emptySet(),
+    val rename: Map<String, String> = emptyMap(),
 )
 
 internal sealed interface SecretValues {
@@ -1229,15 +1239,16 @@ internal class SecretRepository(
             dao.getEnvironmentVariablesForSecrets(secrets.map(SecretEntity::id))
         }
         val variablesBySecret = variables.groupBy(EnvironmentVariableEntity::secretId)
-        fun selectedVariables(secret: SecretEntity): List<EnvironmentVariableEntity> {
+        fun isSelected(secret: SecretEntity, variable: EnvironmentVariableEntity): Boolean {
             val selection = environmentSelections[secret.name]
-            return variablesBySecret[secret.id].orEmpty().filter { variable ->
-                when {
-                    selection?.only != null -> variable.name in selection.only
-                    selection != null -> variable.name !in selection.omit
-                    else -> true
-                }
+            return when {
+                selection?.only != null -> variable.name in selection.only
+                selection != null -> variable.name !in selection.omit
+                else -> true
             }
+        }
+        fun selectedVariables(secret: SecretEntity): List<EnvironmentVariableEntity> {
+            return variablesBySecret[secret.id].orEmpty().filter { isSelected(secret, it) }
         }
         val sshKeysBySecret = if (secrets.isEmpty()) {
             emptyMap()
@@ -1256,6 +1267,9 @@ internal class SecretRepository(
                             environmentVariableNames = selectedVariables(secret)
                                 .map(EnvironmentVariableEntity::name)
                                 .sorted(),
+                            environmentVariableRename = environmentSelections[secret.name]
+                                ?.rename
+                                .orEmpty(),
                         )
                         SSH_SECRET_TYPE -> sshKeysBySecret[secret.id]?.let { key ->
                             SecretMetadata(
@@ -1290,6 +1304,22 @@ internal class SecretRepository(
                                         updatedAt = variable.updatedAt,
                                         valueUpdatedAt = variable.valueUpdatedAt,
                                     )
+                                },
+                            environmentVariableDestinations = variablesBySecret[secret.id]
+                                .orEmpty()
+                                .sortedBy(EnvironmentVariableEntity::name)
+                                .associate { variable ->
+                                    val destination = if (isSelected(secret, variable)) {
+                                        EnvironmentVariableReviewDestination.Environment(
+                                            environmentSelections[secret.name]
+                                                ?.rename
+                                                ?.get(variable.name)
+                                                ?: variable.name,
+                                        )
+                                    } else {
+                                        EnvironmentVariableReviewDestination.Omitted
+                                    }
+                                    variable.name to destination
                                 },
                             sshKey = null,
                             createdAt = secret.createdAt,
@@ -1356,10 +1386,11 @@ internal class SecretRepository(
         val variables = dao.getEnvironmentVariablesForSecrets(secrets.map(SecretEntity::id))
         val variablesBySecret = variables.groupBy(EnvironmentVariableEntity::secretId)
         for (secret in secrets.filter { it.type == ENVIRONMENT_SECRET_TYPE }) {
-            val only = environmentSelections[secret.name]?.only ?: continue
+            val selection = environmentSelections[secret.name] ?: continue
             val available = variablesBySecret[secret.id].orEmpty()
                 .mapTo(mutableSetOf(), EnvironmentVariableEntity::name)
-            val missingVariables = (only - available).sorted()
+            val required = selection.only.orEmpty() + selection.rename.keys
+            val missingVariables = (required - available).sorted()
             if (missingVariables.isNotEmpty()) {
                 return RequestedSecretsResult.MissingEnvironmentVariables(
                     secretName = secret.name,
@@ -1397,9 +1428,10 @@ internal class SecretRepository(
                 }
             }
             secretEnvironments.getValue(variable.secretId)[variable.name] = value
-            val previous = combinedEnvironment.putIfAbsent(variable.name, value)
+            val deliveredName = selection?.rename?.get(variable.name) ?: variable.name
+            val previous = combinedEnvironment.putIfAbsent(deliveredName, value)
             if (previous != null && previous != value) {
-                return RequestedSecretsResult.ConflictingVariable(variable.name)
+                return RequestedSecretsResult.ConflictingVariable(deliveredName)
             }
         }
         val sshKeysBySecret = dao.getSshKeysForSecrets(

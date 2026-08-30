@@ -5,6 +5,7 @@ import kotlinx.coroutines.test.UnconfinedTestDispatcher
 import kotlinx.coroutines.test.runTest
 import kotlinx.serialization.json.Json
 import kotlinx.serialization.json.JsonNull
+import kotlinx.serialization.json.JsonPrimitive
 import kotlinx.serialization.json.jsonArray
 import kotlinx.serialization.json.jsonObject
 import kotlinx.serialization.json.jsonPrimitive
@@ -67,10 +68,20 @@ class RelayApprovalReviewClientTest {
             val github = secrets.getValue("github").jsonObject
             assertEquals("environment", github.getValue("type").jsonPrimitive.content)
             val variables = github.getValue("environment_variables").jsonObject
-            assertEquals(JsonNull, variables.getValue("GITHUB_TOKEN"))
+            assertEquals(
+                JsonNull,
+                variables.getValue("GITHUB_TOKEN").jsonObject.getValue("value"),
+            )
             assertEquals(
                 "https://api.github.com",
-                variables.getValue("GITHUB_API_URL").jsonPrimitive.content,
+                variables.getValue("GITHUB_API_URL").jsonObject
+                    .getValue("value").jsonPrimitive.content,
+            )
+            assertEquals(
+                "GITHUB_API_URL",
+                variables.getValue("GITHUB_API_URL").jsonObject
+                    .getValue("destination").jsonObject
+                    .getValue("name").jsonPrimitive.content,
             )
             val evidence = body.getValue("evidence").jsonObject
             assertEquals(setOf("reason", "command"), evidence.keys)
@@ -190,8 +201,11 @@ class RelayApprovalReviewClientTest {
             secrets = linkedMapOf(
                 "github" to ApprovalReviewEnvironmentSecretFacts(
                     environmentVariables = linkedMapOf(
-                        "GITHUB_TOKEN" to null,
-                        "GITHUB_API_URL" to "https://api.github.com",
+                        "GITHUB_TOKEN" to environmentFact("GITHUB_TOKEN", null),
+                        "GITHUB_API_URL" to environmentFact(
+                            "GITHUB_API_URL",
+                            "https://api.github.com",
+                        ),
                     ),
                 ),
                 "git-signing" to ApprovalReviewSshSecretFacts(
@@ -209,6 +223,12 @@ class RelayApprovalReviewClientTest {
             ),
         ),
     )
+
+    private fun environmentFact(name: String, value: String?) =
+        ApprovalReviewEnvironmentVariableFacts(
+            destination = ApprovalReviewEnvironmentDestination(name),
+            value = value?.let(::JsonPrimitive) ?: JsonNull,
+        )
 
     private companion object {
         const val DEVICE_ID = "01K2ENXDTW1P3XAR4J7V7C9D0H"

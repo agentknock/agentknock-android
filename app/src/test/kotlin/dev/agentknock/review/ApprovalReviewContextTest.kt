@@ -10,6 +10,9 @@ import dev.agentknock.protocol.InvocationExecOperation
 import dev.agentknock.protocol.InvocationRequestMessage
 import dev.agentknock.protocol.SoftwareInfo
 import dev.agentknock.relay.ApprovalReviewEnvironmentSecretFacts
+import dev.agentknock.relay.ApprovalReviewEnvironmentVariableFacts
+import dev.agentknock.relay.ApprovalReviewEnvironmentDestination
+import dev.agentknock.relay.ApprovalReviewOmittedDestination
 import dev.agentknock.relay.ApprovalReviewOperation
 import dev.agentknock.relay.ApprovalReviewSshSecretFacts
 import dev.agentknock.storage.request.PairingEntity
@@ -19,6 +22,7 @@ import dev.agentknock.storage.approval.ApprovalEvaluation
 import dev.agentknock.storage.approval.SecretApprovalEvaluation
 import dev.agentknock.storage.secret.ENVIRONMENT_SECRET_TYPE
 import dev.agentknock.storage.secret.EnvironmentVariableReviewMetadata
+import dev.agentknock.storage.secret.EnvironmentVariableReviewDestination
 import dev.agentknock.storage.secret.RequestedSecretDescription
 import dev.agentknock.storage.secret.SSH_SECRET_TYPE
 import dev.agentknock.storage.secret.SecretApprovalMode
@@ -28,6 +32,8 @@ import dev.agentknock.storage.secret.SecretValues
 import dev.agentknock.storage.secret.SshKeyReviewMetadata
 import kotlinx.serialization.encodeToString
 import kotlinx.serialization.json.Json
+import kotlinx.serialization.json.JsonNull
+import kotlinx.serialization.json.JsonPrimitive
 import kotlinx.serialization.json.jsonObject
 import kotlinx.serialization.json.jsonPrimitive
 import org.junit.Assert.assertEquals
@@ -113,9 +119,21 @@ class ApprovalReviewContextTest {
 
         val environment = secrets.getValue("aws-read-only")
             as ApprovalReviewEnvironmentSecretFacts
-        assertNull(environment.environmentVariables.getValue("AWS_ACCESS_KEY_ID"))
-        assertNull(environment.environmentVariables.getValue("AWS_SECRET_ACCESS_KEY"))
-        assertEquals("eu-north-1", environment.environmentVariables.getValue("AWS_REGION"))
+        assertEquals(JsonNull, environment.environmentVariables.getValue("AWS_ACCESS_KEY_ID").value)
+        assertEquals(JsonNull, environment.environmentVariables.getValue("AWS_SECRET_ACCESS_KEY").value)
+        assertEquals(
+            JsonPrimitive("eu-north-1"),
+            environment.environmentVariables.getValue("AWS_REGION").value,
+        )
+        assertEquals(
+            ApprovalReviewEnvironmentDestination("AWS_DEFAULT_REGION"),
+            environment.environmentVariables.getValue("AWS_REGION").destination,
+        )
+        assertEquals(
+            ApprovalReviewOmittedDestination,
+            environment.environmentVariables.getValue("AWS_PROFILE").destination,
+        )
+        assertNull(environment.environmentVariables.getValue("AWS_PROFILE").value)
         assertEquals(
             ApprovalReviewSshSecretFacts(provides = "public_key"),
             secrets.getValue("git-signing"),
@@ -139,7 +157,8 @@ class ApprovalReviewContextTest {
             setOf("reason", "command"),
             payload.getValue("evidence").jsonObject.keys,
         )
-        assertTrue(wire.contains("\"AWS_ACCESS_KEY_ID\":null"))
+        assertTrue(wire.contains("\"AWS_ACCESS_KEY_ID\":{"))
+        assertTrue(wire.contains("\"value\":null"))
         assertFalse(wire.contains("sensitive-access-key"))
         assertFalse(wire.contains("sensitive-secret-key"))
         assertFalse(wire.contains("private vault description"))
@@ -174,9 +193,9 @@ class ApprovalReviewContextTest {
             invocationSecrets = linkedMapOf(
                 "aws-read-only" to ApprovalReviewEnvironmentSecretFacts(
                     environmentVariables = linkedMapOf(
-                        "AWS_ACCESS_KEY_ID" to null,
-                        "AWS_REGION" to "eu-north-1",
-                        "AWS_SECRET_ACCESS_KEY" to null,
+                        "AWS_ACCESS_KEY_ID" to environmentFact(null),
+                        "AWS_REGION" to environmentFact("eu-north-1"),
+                        "AWS_SECRET_ACCESS_KEY" to environmentFact(null),
                     ),
                 ),
                 "git-signing" to ApprovalReviewSshSecretFacts(provides = "public_key"),
@@ -292,6 +311,19 @@ class ApprovalReviewContextTest {
                     variable("AWS_REGION", sensitive = false),
                     variable("AWS_SECRET_ACCESS_KEY", sensitive = true),
                 ),
+                environmentVariableDestinations = linkedMapOf(
+                    "AWS_ACCESS_KEY_ID" to EnvironmentVariableReviewDestination.Environment(
+                        "AWS_ACCESS_KEY_ID",
+                    ),
+                    "AWS_PROFILE" to EnvironmentVariableReviewDestination.Omitted,
+                    "AWS_REGION" to EnvironmentVariableReviewDestination.Environment(
+                        "AWS_DEFAULT_REGION",
+                    ),
+                    "AWS_SECRET_ACCESS_KEY" to
+                        EnvironmentVariableReviewDestination.Environment(
+                            "AWS_SECRET_ACCESS_KEY",
+                        ),
+                ),
                 sshKey = null,
                 createdAt = 1,
                 updatedAt = 2,
@@ -327,6 +359,11 @@ class ApprovalReviewContextTest {
             updatedAt = 2,
             valueUpdatedAt = 3,
         )
+
+    private fun environmentFact(value: String?) = ApprovalReviewEnvironmentVariableFacts(
+        destination = ApprovalReviewEnvironmentDestination("unchanged"),
+        value = value?.let(::JsonPrimitive) ?: JsonNull,
+    )
 
     private fun policy(
         id: String,

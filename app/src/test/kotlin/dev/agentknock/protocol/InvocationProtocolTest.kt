@@ -184,6 +184,18 @@ class InvocationProtocolTest {
         )
     }
 
+    @Test
+    fun `decodes environment variable renaming`() {
+        val request = decodeWithSecrets(
+            """{"github":{"environment":{"only":["GH_HOST","GH_TOKEN"],"rename":{"GH_HOST":"GITHUB_HOST"}}}}""",
+        )
+
+        assertEquals(
+            mapOf("GH_HOST" to "GITHUB_HOST"),
+            request.secretDelivery.getValue("github").environment?.rename,
+        )
+    }
+
     @Test(expected = IllegalArgumentException::class)
     fun `rejects combining only and omit`() {
         decodeWithSecrets(
@@ -201,10 +213,16 @@ class InvocationProtocolTest {
         decodeWithSecrets("""{"test":{"environment":{"omit":["BAD=NAME"]}}}""")
     }
 
-    private fun decodeWithSecrets(secrets: String) {
+    @Test(expected = IllegalArgumentException::class)
+    fun `rejects renaming a variable excluded by only`() {
+        decodeWithSecrets(
+            """{"test":{"environment":{"only":["TOKEN"],"rename":{"OTHER":"RENAMED"}}}}""",
+        )
+    }
+
+    private fun decodeWithSecrets(secrets: String): InvocationRequestMessage =
         protocol.decodeRequest(
             """{${testClientSoftwareFields("0.3.0", "0.1.0")},"method":"Invocation","invocation_token":"AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA=","secrets":$secrets,"operation":{"type":"exec","command":"env","arguments":[],"working_directory":"/tmp","executable_path":"/bin/env","executable_mode":"BINARY","stdin":"TERMINAL","stdout":"TERMINAL","stderr":"TERMINAL"},"launcher_chain":[]}"""
                 .encodeToByteArray(),
         )
-    }
 }

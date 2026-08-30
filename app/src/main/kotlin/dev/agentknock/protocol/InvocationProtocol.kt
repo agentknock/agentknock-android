@@ -30,6 +30,7 @@ internal data class InvocationSecretDelivery(
 internal data class InvocationEnvironmentDelivery(
     val only: Set<String>? = null,
     val omit: Set<String> = emptySet(),
+    val rename: Map<String, String> = emptyMap(),
 )
 
 internal data class InvocationExecOperation(
@@ -223,14 +224,21 @@ internal class InvocationProtocol(
     ): InvocationEnvironmentDelivery {
         val options = value as? JsonObject
             ?: throw IllegalArgumentException("Environment delivery options must be an object")
-        require(options.keys.all { it == "only" || it == "omit" }) {
+        require(options.keys.all { it == "only" || it == "omit" || it == "rename" }) {
             "Unsupported environment delivery option for secret $secret"
         }
         val only = options["only"]?.let { decodeEnvironmentNames("only", it) }
         val omit = options["omit"]?.let { decodeEnvironmentNames("omit", it) }.orEmpty()
+        val rename = options["rename"]?.let(::decodeEnvironmentRename).orEmpty()
         require(only == null || only.isNotEmpty()) { "Secret $secret has an empty only set" }
         require(only == null || omit.isEmpty()) { "Secret $secret uses both only and omit" }
-        return InvocationEnvironmentDelivery(only = only, omit = omit)
+        require(only == null || rename.keys.all(only::contains)) {
+            "Secret $secret renames a variable not selected by only"
+        }
+        require(rename.keys.none(omit::contains)) {
+            "Secret $secret renames an omitted variable"
+        }
+        return InvocationEnvironmentDelivery(only = only, omit = omit, rename = rename)
     }
 
     private fun decodeEnvironmentNames(option: String, value: JsonElement): Set<String> {
@@ -250,6 +258,18 @@ internal class InvocationProtocol(
     private fun requireValidEnvironmentName(name: String) {
         require(name.isNotEmpty() && '=' !in name && '\u0000' !in name) {
             "Invalid environment variable name"
+        }
+    }
+
+    private fun decodeEnvironmentRename(value: JsonElement): Map<String, String> {
+        val mapping = value as? JsonObject
+            ?: throw IllegalArgumentException("Environment rename must be an object")
+        return mapping.mapValues { (source, destination) ->
+            requireValidEnvironmentName(source)
+            require(destination is JsonPrimitive && destination.isString) {
+                "Environment rename destinations must be strings"
+            }
+            destination.content.also(::requireValidEnvironmentName)
         }
     }
 }

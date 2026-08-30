@@ -5,6 +5,9 @@ import dev.agentknock.protocol.GitSignRequestMessage
 import dev.agentknock.protocol.InvocationRequestMessage
 import dev.agentknock.relay.ApprovalReviewCommandEvidence
 import dev.agentknock.relay.ApprovalReviewEnvironmentSecretFacts
+import dev.agentknock.relay.ApprovalReviewEnvironmentVariableFacts
+import dev.agentknock.relay.ApprovalReviewEnvironmentDestination
+import dev.agentknock.relay.ApprovalReviewOmittedDestination
 import dev.agentknock.relay.ApprovalReviewEvidence
 import dev.agentknock.relay.ApprovalReviewFacts
 import dev.agentknock.relay.ApprovalReviewGitChangedPathEvidence
@@ -21,11 +24,14 @@ import dev.agentknock.storage.request.SecretUseRequestEntity
 import dev.agentknock.storage.approval.ApprovalAction
 import dev.agentknock.storage.approval.ApprovalEvaluation
 import dev.agentknock.storage.secret.ENVIRONMENT_SECRET_TYPE
+import dev.agentknock.storage.secret.EnvironmentVariableReviewDestination
 import dev.agentknock.storage.secret.RequestedSecretDescription
 import dev.agentknock.storage.secret.SSH_SECRET_TYPE
 import dev.agentknock.storage.secret.SecretApprovalPolicy
 import dev.agentknock.storage.secret.SecretValues
 import kotlinx.serialization.json.Json
+import kotlinx.serialization.json.JsonNull
+import kotlinx.serialization.json.JsonPrimitive
 
 internal fun approvalReviewRequest(
     pairing: PairingEntity,
@@ -178,14 +184,38 @@ internal fun approvalReviewSecretFacts(
                 val environment = checkNotNull(values[secret.name] as? SecretValues.Environment) {
                     "Missing environment values for ${secret.name}"
                 }.environment
-                val variables = secret.environmentVariables.associateTo(linkedMapOf()) { variable ->
-                    val value = checkNotNull(environment[variable.name]) {
-                        "Missing environment variable ${variable.name}"
-                    }
-                    variable.name to value.takeUnless { variable.sensitive }
-                }
-                require(variables.keys == environment.keys) {
+                require(secret.environmentVariables.map { it.name }.toSet() == environment.keys) {
                     "Review metadata does not match environment values for ${secret.name}"
+                }
+                val metadata = secret.environmentVariables.associateBy { it.name }
+                val destinations = secret.environmentVariableDestinations.ifEmpty {
+                    secret.environmentVariables.associate { variable ->
+                        variable.name to EnvironmentVariableReviewDestination.Environment(
+                            variable.name,
+                        )
+                    }
+                }
+                val variables = destinations.mapValuesTo(
+                    linkedMapOf(),
+                ) { (source, destination) ->
+                    when (destination) {
+                        is EnvironmentVariableReviewDestination.Environment -> {
+                            val variable = checkNotNull(metadata[source]) {
+                                "Missing review metadata for environment variable $source"
+                            }
+                            val value = checkNotNull(environment[source]) {
+                                "Missing environment variable $source"
+                            }
+                            ApprovalReviewEnvironmentVariableFacts(
+                                destination = ApprovalReviewEnvironmentDestination(destination.name),
+                                value = if (variable.sensitive) JsonNull else JsonPrimitive(value),
+                            )
+                        }
+                        EnvironmentVariableReviewDestination.Omitted ->
+                            ApprovalReviewEnvironmentVariableFacts(
+                                destination = ApprovalReviewOmittedDestination,
+                            )
+                    }
                 }
                 ApprovalReviewEnvironmentSecretFacts(variables)
             }

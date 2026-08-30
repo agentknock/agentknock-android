@@ -30,7 +30,10 @@ import dev.agentknock.review.approvalReviewGitSignRequest
 import dev.agentknock.review.approvalReviewSecretFacts
 import dev.agentknock.relay.ApprovalReviewRequest
 import dev.agentknock.relay.ApprovalReviewEnvironmentSecretFacts
+import dev.agentknock.relay.ApprovalReviewEnvironmentDestination
+import dev.agentknock.relay.ApprovalReviewEnvironmentVariableFacts
 import dev.agentknock.relay.ApprovalReviewSecretFacts
+import dev.agentknock.relay.ApprovalReviewSshSecretFacts
 import dev.agentknock.relay.RelayClientState
 import dev.agentknock.relay.RelayApprovalReviewClient
 import dev.agentknock.relay.RelayApprovalReviewDecision
@@ -111,6 +114,9 @@ import kotlinx.coroutines.sync.withLock
 import kotlinx.coroutines.withContext
 import kotlinx.serialization.json.Json
 import kotlinx.serialization.json.JsonElement
+import kotlinx.serialization.json.JsonNull
+import kotlinx.serialization.json.jsonObject
+import kotlinx.serialization.json.jsonPrimitive
 import kotlinx.serialization.builtins.ListSerializer
 import kotlinx.serialization.builtins.serializer
 import kotlinx.serialization.decodeFromString
@@ -376,6 +382,7 @@ private fun InvocationRequestMessage.environmentSelections(): Map<String, Enviro
             secret to EnvironmentVariableSelection(
                 only = environment.only,
                 omit = environment.omit,
+                rename = environment.rename,
             )
         }
     }.toMap()
@@ -384,6 +391,7 @@ private fun List<SecretMetadata>.environmentSelections(): Map<String, Environmen
     filter { it.type == ENVIRONMENT_SECRET_TYPE }.associate { secret ->
         secret.name to EnvironmentVariableSelection(
             only = secret.environmentVariableNames.toSet(),
+            rename = secret.environmentVariableRename,
         )
     }
 
@@ -3826,9 +3834,7 @@ internal class RequestRepository(
             explanation = "The exact Git signing content is not valid UTF-8.",
         )
         val invocationSecrets = invocation.providedSecretsJson?.let { stored ->
-            runCatching {
-                json.decodeFromString<Map<String, ApprovalReviewSecretFacts>>(stored)
-            }.getOrNull()
+            decodeApprovalReviewSecretFacts(stored)
         } ?: return AiReview(
             decision = AiReviewDecision.ASK_USER,
             explanation = "The parent invocation context is unavailable.",
@@ -5623,15 +5629,56 @@ internal class RequestRepository(
     private fun decodeEnvironmentReviewFacts(
         value: String?,
     ): Map<String, Map<String, String?>> = value?.let { encoded ->
-        runCatching {
-            json.decodeFromString<Map<String, ApprovalReviewSecretFacts>>(encoded)
-                .mapNotNull { (secretName, facts) ->
-                    (facts as? ApprovalReviewEnvironmentSecretFacts)
-                        ?.let { secretName to it.environmentVariables }
-                }
-                .toMap()
-        }.getOrNull()
+        decodeApprovalReviewSecretFacts(encoded)
+            ?.mapNotNull { (secretName, facts) ->
+                (facts as? ApprovalReviewEnvironmentSecretFacts)
+                    ?.let { environment ->
+                        secretName to environment.environmentVariables.mapNotNull {
+                                (_, variable) ->
+                            val destination = variable.destination as?
+                                ApprovalReviewEnvironmentDestination
+                                ?: return@mapNotNull null
+                            val factValue = variable.value
+                            destination.name to when (factValue) {
+                                null, JsonNull -> null
+                                else -> factValue.jsonPrimitive.content
+                            }
+                        }.toMap()
+                    }
+            }
+            ?.toMap()
     }.orEmpty()
+
+    private fun decodeApprovalReviewSecretFacts(
+        encoded: String,
+    ): Map<String, ApprovalReviewSecretFacts>? {
+        val current = runCatching {
+            json.decodeFromString<Map<String, ApprovalReviewSecretFacts>>(encoded)
+        }.getOrNull()
+        if (current != null) return current
+        return runCatching {
+            json.parseToJsonElement(encoded).jsonObject.mapValues { (_, facts) ->
+                val objectValue = facts.jsonObject
+                when (objectValue.getValue("type").jsonPrimitive.content) {
+                    ENVIRONMENT_SECRET_TYPE -> {
+                        val variables = objectValue.getValue("environment_variables").jsonObject
+                        ApprovalReviewEnvironmentSecretFacts(
+                            variables.mapValues { (name, variable) ->
+                                ApprovalReviewEnvironmentVariableFacts(
+                                    destination = ApprovalReviewEnvironmentDestination(name),
+                                    value = variable,
+                                )
+                            },
+                        )
+                    }
+                    SSH_SECRET_TYPE -> ApprovalReviewSshSecretFacts(
+                        provides = objectValue.getValue("provides").jsonPrimitive.content,
+                    )
+                    else -> error("Unsupported stored review secret type")
+                }
+            }
+        }.getOrNull()
+    }
 
     private fun encodeClientSoftware(value: ClientSoftware): String = json.encodeToString(value)
 

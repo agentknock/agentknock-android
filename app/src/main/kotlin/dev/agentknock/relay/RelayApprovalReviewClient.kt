@@ -8,6 +8,7 @@ import kotlinx.serialization.SerialName
 import kotlinx.serialization.Serializable
 import kotlinx.serialization.encodeToString
 import kotlinx.serialization.json.Json
+import kotlinx.serialization.json.JsonElement
 import okhttp3.MediaType.Companion.toMediaType
 import okhttp3.OkHttpClient
 import okhttp3.Request
@@ -60,8 +61,28 @@ internal sealed interface ApprovalReviewSecretFacts
 @SerialName("environment")
 internal data class ApprovalReviewEnvironmentSecretFacts(
     @SerialName("environment_variables")
-    val environmentVariables: Map<String, String?>,
+    val environmentVariables: Map<String, ApprovalReviewEnvironmentVariableFacts>,
 ) : ApprovalReviewSecretFacts
+
+@Serializable
+internal data class ApprovalReviewEnvironmentVariableFacts(
+    val destination: ApprovalReviewEnvironmentVariableDestination,
+    val value: JsonElement? = null,
+)
+
+@Serializable
+internal sealed interface ApprovalReviewEnvironmentVariableDestination
+
+@Serializable
+@SerialName("environment")
+internal data class ApprovalReviewEnvironmentDestination(
+    val name: String,
+) : ApprovalReviewEnvironmentVariableDestination
+
+@Serializable
+@SerialName("omitted")
+internal data object ApprovalReviewOmittedDestination :
+    ApprovalReviewEnvironmentVariableDestination
 
 @Serializable
 @SerialName("ssh")

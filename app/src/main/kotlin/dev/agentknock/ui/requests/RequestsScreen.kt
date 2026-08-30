@@ -2149,7 +2149,11 @@ private fun SecretSummary(
             )
         } else {
             secret.environmentVariableNames.forEach { name ->
-                EnvironmentVariableFact(name, environmentVariables?.get(name))
+                val deliveredName = secret.environmentVariableRename[name] ?: name
+                EnvironmentVariableFact(
+                    name = if (deliveredName == name) name else "$name → $deliveredName",
+                    value = environmentVariables?.get(deliveredName),
+                )
             }
         }
     }

@@ -475,6 +475,37 @@ class SecretRepositoryTest {
     }
 
     @Test
+    fun `environment renaming is recorded and detects delivered-name conflicts`() = runTest {
+        val fixture = Fixture()
+        val first = fixture.createSecret("first")
+        val second = fixture.createSecret("second")
+        fixture.createVariable(first, "FIRST_TOKEN", "one", true)
+        fixture.createVariable(second, "TOKEN", "two", true)
+        val delivery = mapOf(
+            "first" to EnvironmentVariableSelection(
+                rename = mapOf("FIRST_TOKEN" to "TOKEN"),
+            ),
+        )
+
+        val description = fixture.repository.describeRequestedSecrets(listOf("first"), delivery)
+        assertEquals(
+            mapOf("FIRST_TOKEN" to "TOKEN"),
+            description.secrets.single().environmentVariableRename,
+        )
+        assertEquals(
+            RequestedSecretsResult.ConflictingVariable("TOKEN"),
+            fixture.repository.requestedSecrets(listOf("first", "second"), delivery),
+        )
+        assertEquals(
+            RequestedSecretsResult.MissingEnvironmentVariables("first", listOf("ABSENT")),
+            fixture.repository.requestedSecrets(
+                listOf("first"),
+                mapOf("first" to EnvironmentVariableSelection(rename = mapOf("ABSENT" to "TOKEN"))),
+            ),
+        )
+    }
+
+    @Test
     fun `only sensitive environment values require approval`() = runTest {
         val fixture = Fixture()
         val public = fixture.createSecret("public-context")
