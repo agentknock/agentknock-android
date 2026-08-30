@@ -37,9 +37,9 @@ class WorkflowPresentationTest {
             summary(7, InboxRequestKind.GIT_SIGN),
         )
 
-        assertEquals(listOf(6L, 7L), requests.requestHistory().map { it.id })
-        assertEquals(listOf(1L, 3L), requests.pendingPairings().map { it.id })
-        assertEquals(listOf(4L), requests.pendingSecretUploads().map { it.id })
+        assertEquals(listOf("6", "7"), requests.requestHistory().map { it.id })
+        assertEquals(listOf("1", "3"), requests.pendingPairings().map { it.id })
+        assertEquals(listOf("4"), requests.pendingSecretUploads().map { it.id })
     }
 
     @Test
@@ -115,7 +115,7 @@ class WorkflowPresentationTest {
         upload: SecretUploadRequestState? = null,
         secretUse: SecretUseRequestState? = null,
     ) = InboxRequestSummary(
-        id = id,
+        id = id.toString(),
         kind = kind,
         state = state,
         pairingState = pairing,

@@ -55,7 +55,8 @@ class RequestDaoTransactionTest {
 
     @Test
     fun pairingActivationAndItsFixedResponseAreAtomic() = runTest {
-        val rootId = dao.insertPairingRequest(rootRequest(), pendingPairing())
+        dao.insertPairingRequest(rootRequest(), pendingPairing())
+        val rootId = ROOT_REQUEST_ID
         val root = checkNotNull(dao.getRequestById(rootId))
         val pairing = checkNotNull(dao.getPairing(rootId))
         dao.insertPairingSecret(pairingSecret(rootId, CURRENT_KIND, CURRENT_ID, byteArrayOf(1)))
@@ -64,8 +65,8 @@ class RequestDaoTransactionTest {
             dao.finishPairing(
                 rootRequest = activatedRoot(root),
                 pairing = activePairing(pairing),
-                finishRequest = finishRequest(root.relayRequestId, rootId),
-                requestSecret = requestSecret(),
+                finishRequest = finishRequest(root.id, rootId),
+                requestSecret = requestSecret(root.id),
                 currentPairingSecret = pairingSecret(
                     rootId,
                     CURRENT_KIND,
@@ -88,13 +89,13 @@ class RequestDaoTransactionTest {
             dao.getPairingSecret(rootId, CURRENT_KIND)?.ciphertext,
         )
         assertNull(dao.getPairingSecret(rootId, PREVIOUS_KIND))
-        assertNull(dao.getRequestByRelayId(FINISH_REQUEST_ID))
+        assertNull(dao.getRequestById(FINISH_REQUEST_ID))
 
         dao.finishPairing(
             rootRequest = activatedRoot(root),
             pairing = activePairing(pairing),
             finishRequest = finishRequest(FINISH_REQUEST_ID, rootId),
-            requestSecret = requestSecret(),
+            requestSecret = requestSecret(FINISH_REQUEST_ID),
             currentPairingSecret = pairingSecret(
                 rootId,
                 CURRENT_KIND,
@@ -109,7 +110,7 @@ class RequestDaoTransactionTest {
             ),
         )
 
-        val storedFinish = checkNotNull(dao.getRequestByRelayId(FINISH_REQUEST_ID))
+        val storedFinish = checkNotNull(dao.getRequestById(FINISH_REQUEST_ID))
         assertEquals("completed", dao.getRequestById(rootId)?.state)
         assertEquals("active", dao.getPairing(rootId)?.state)
         assertEquals(RESPONSE_JSON, storedFinish.responseJson)
@@ -126,7 +127,8 @@ class RequestDaoTransactionTest {
 
     @Test
     fun pairingRejectionErasesThePendingBinding() = runTest {
-        val rootId = dao.insertPairingRequest(rootRequest(), pendingPairing())
+        dao.insertPairingRequest(rootRequest(), pendingPairing())
+        val rootId = ROOT_REQUEST_ID
         val root = checkNotNull(dao.getRequestById(rootId))
         val pairing = checkNotNull(dao.getPairing(rootId))
         dao.insertPairingSecret(pairingSecret(rootId, CURRENT_KIND, CURRENT_ID, byteArrayOf(1)))
@@ -155,7 +157,7 @@ class RequestDaoTransactionTest {
                 claimedAt = 1,
             ),
         )
-        val rootId = dao.insertPairingRequest(
+        dao.insertPairingRequest(
             rootRequest().copy(state = "completed", completedAt = 2, updatedAt = 2),
             pendingPairing().copy(
                 deviceIdentityId = DEVICE_IDENTITY_ID,
@@ -165,6 +167,7 @@ class RequestDaoTransactionTest {
                 completedAt = 2,
             ),
         )
+        val rootId = ROOT_REQUEST_ID
 
         assertEquals(0, dao.clearCompletedHistory())
         assertTrue(checkNotNull(dao.getRequestById(rootId)).listed)
@@ -183,8 +186,67 @@ class RequestDaoTransactionTest {
     }
 
     @Test
+    fun requestChronologyUsesReceivedTimeWithTheWireIdOnlyAsATieBreaker() = runTest {
+        dao.insertRequest(
+            rootRequest().copy(
+                id = "request-z",
+                kind = "secret_use",
+                state = "action_required",
+                receivedAt = 1,
+            ),
+        )
+        dao.insertRequest(
+            rootRequest().copy(
+                id = "request-a",
+                kind = "secret_use",
+                state = "action_required",
+                receivedAt = 2,
+            ),
+        )
+        dao.insertRequest(
+            rootRequest().copy(
+                id = "request-b",
+                kind = "secret_use",
+                state = "action_required",
+                receivedAt = 2,
+            ),
+        )
+
+        assertEquals(
+            listOf("request-b", "request-a", "request-z"),
+            dao.getActionRequiredRequests().map(InboxRequestEntity::id),
+        )
+    }
+
+    @Test
+    fun settledParentRequestsArePrunedOnlyAfterTheirChildren() = runTest {
+        val parent = rootRequest().copy(
+            id = "parent-request",
+            kind = "secret_use",
+            state = "completed",
+            listed = false,
+            completedAt = 2,
+        )
+        val child = parent.copy(
+            id = "child-request",
+            parentRequestId = parent.id,
+            kind = "git_sign",
+        )
+        dao.insertRequest(parent)
+        dao.insertRequest(child)
+
+        assertEquals(1, dao.deleteSettledHiddenRequests(receivedBefore = 2))
+        assertNotNull(dao.getRequestById(parent.id))
+        assertNull(dao.getRequestById(child.id))
+
+        assertEquals(1, dao.deleteSettledHiddenRequests(receivedBefore = 2))
+        assertNull(dao.getRequestById(parent.id))
+    }
+
+    @Test
     fun pairingRemovalAndItsFixedResponseAreAtomic() = runTest {
-        val rootId = dao.insertPairingRequest(rootRequest(), pendingPairing())
+        dao.insertPairingRequest(rootRequest(), pendingPairing())
+        val rootId = ROOT_REQUEST_ID
         val pairing = checkNotNull(dao.getPairing(rootId)).copy(state = "active")
         dao.updatePairing(pairing)
         dao.insertPairingSecret(pairingSecret(rootId, CURRENT_KIND, CURRENT_ID, byteArrayOf(2)))
@@ -214,12 +276,13 @@ class RequestDaoTransactionTest {
         val failed = runCatching {
             dao.insertPairingRemoval(
                 request = removal,
-                requestSecret = requestSecret().copy(encryptionKeyId = "missing-key"),
+                requestSecret = requestSecret(REMOVE_REQUEST_ID)
+                    .copy(encryptionKeyId = "missing-key"),
                 pairing = revokedPairing,
             )
         }
         assertTrue(failed.isFailure)
-        assertNull(dao.getRequestByRelayId(REMOVE_REQUEST_ID))
+        assertNull(dao.getRequestById(REMOVE_REQUEST_ID))
         assertEquals("active", dao.getPairing(rootId)?.desiredRelayClientState)
         assertNotNull(dao.getPairingSecret(rootId, CURRENT_KIND))
         assertNotNull(dao.getPairingSecret(rootId, PREVIOUS_KIND))
@@ -235,11 +298,11 @@ class RequestDaoTransactionTest {
 
         dao.insertPairingRemoval(
             request = removal,
-            requestSecret = requestSecret(),
+            requestSecret = requestSecret(REMOVE_REQUEST_ID),
             pairing = revokedPairing,
         )
 
-        val storedRemoval = checkNotNull(dao.getRequestByRelayId(REMOVE_REQUEST_ID))
+        val storedRemoval = checkNotNull(dao.getRequestById(REMOVE_REQUEST_ID))
         assertEquals(RESPONSE_JSON, storedRemoval.responseJson)
         assertNotNull(dao.getRequestSecret(storedRemoval.id))
         assertEquals("revoked", dao.getPairing(rootId)?.desiredRelayClientState)
@@ -257,14 +320,15 @@ class RequestDaoTransactionTest {
 
     @Test
     fun decidingASecretUploadDiscardsItsUploadedValues() = runTest {
-        val requestId = dao.insertSecretUploadRequest(
+        val requestId = UPLOAD_REQUEST_ID
+        dao.insertSecretUploadRequest(
             request = rootRequest().copy(
-                relayRequestId = "upload-request",
+                id = requestId,
                 kind = "secret_upload",
                 state = "action_required",
             ),
             secretUpload = SecretUploadRequestEntity(
-                requestId = 0,
+                requestId = requestId,
                 pairingRequestId = null,
                 clientId = CLIENT_ID,
                 clientName = "Test client",
@@ -288,7 +352,7 @@ class RequestDaoTransactionTest {
             environmentVariables = listOf(
                 SecretUploadEnvironmentVariableEntity(
                     id = "upload-variable",
-                    requestId = 0,
+                    requestId = requestId,
                     name = "TOKEN",
                     sensitive = true,
                     encryptionFormat = 1,
@@ -299,7 +363,7 @@ class RequestDaoTransactionTest {
                 ),
             ),
             sshKey = null,
-            requestSecret = requestSecret(),
+            requestSecret = requestSecret(requestId),
             currentPairingSecret = null,
             previousPairingSecret = null,
         )
@@ -425,9 +489,10 @@ class RequestDaoTransactionTest {
                 approvalMode = "approve",
             ),
         )
-        val requestId = dao.insertRequest(
+        val requestId = INVOCATION_REQUEST_ID
+        dao.insertRequest(
             rootRequest().copy(
-                relayRequestId = "invocation-request",
+                id = requestId,
                 parentRequestId = null,
                 kind = "secret_use",
                 state = "action_required",
@@ -472,12 +537,15 @@ class RequestDaoTransactionTest {
         assertEquals("approved", dao.getSecretUseRequest(requestId)?.decision)
     }
 
-    private suspend fun insertActivePairing(): Long = dao.insertPairingRequest(
-        rootRequest().copy(state = "completed", completedAt = 2),
-        pendingPairing().copy(state = "active", completedAt = 2),
-    )
+    private suspend fun insertActivePairing(): String {
+        dao.insertPairingRequest(
+            rootRequest().copy(state = "completed", completedAt = 2),
+            pendingPairing().copy(state = "active", completedAt = 2),
+        )
+        return ROOT_REQUEST_ID
+    }
 
-    private fun secretUseRequest(requestId: Long, pairingRequestId: Long) =
+    private fun secretUseRequest(requestId: String, pairingRequestId: String) =
         SecretUseRequestEntity(
             requestId = requestId,
             pairingRequestId = pairingRequestId,
@@ -522,7 +590,7 @@ class RequestDaoTransactionTest {
         )
 
     private fun rootRequest() = InboxRequestEntity(
-        relayRequestId = ROOT_REQUEST_ID,
+        id = ROOT_REQUEST_ID,
         parentRequestId = null,
         kind = "pairing",
         state = "waiting",
@@ -539,7 +607,7 @@ class RequestDaoTransactionTest {
     )
 
     private fun pendingPairing() = PairingEntity(
-        requestId = 0,
+        requestId = ROOT_REQUEST_ID,
         deviceIdentityId = null,
         pairingAddress = "write-leader-hungry",
         deviceId = DEVICE_ID,
@@ -578,8 +646,8 @@ class RequestDaoTransactionTest {
         completedAt = 2,
     )
 
-    private fun finishRequest(relayRequestId: String, rootId: Long) = InboxRequestEntity(
-        relayRequestId = relayRequestId,
+    private fun finishRequest(requestId: String, rootId: String) = InboxRequestEntity(
+        id = requestId,
         parentRequestId = rootId,
         kind = "pairing_finish",
         state = "completed",
@@ -595,8 +663,8 @@ class RequestDaoTransactionTest {
         completionAcknowledgedAt = null,
     )
 
-    private fun pairingRemovalRequest(rootId: Long) = InboxRequestEntity(
-        relayRequestId = REMOVE_REQUEST_ID,
+    private fun pairingRemovalRequest(rootId: String) = InboxRequestEntity(
+        id = REMOVE_REQUEST_ID,
         parentRequestId = rootId,
         kind = "pairing_remove",
         state = "waiting",
@@ -612,9 +680,9 @@ class RequestDaoTransactionTest {
         completionAcknowledgedAt = null,
     )
 
-    private fun requestSecret() = RequestSecretEntity(
+    private fun requestSecret(requestId: String) = RequestSecretEntity(
         id = REQUEST_SECRET_ID,
-        requestId = 0,
+        requestId = requestId,
         encryptionFormat = 1,
         encryptionKeyId = KEY_ID,
         nonce = ByteArray(12),
@@ -623,7 +691,7 @@ class RequestDaoTransactionTest {
     )
 
     private fun pairingSecret(
-        pairingRequestId: Long,
+        pairingRequestId: String,
         kind: String,
         id: String,
         ciphertext: ByteArray,
@@ -652,6 +720,8 @@ class RequestDaoTransactionTest {
         const val ROOT_REQUEST_ID = "01ARZ3NDEKTSV4RRFFQ69G5FAV"
         const val FINISH_REQUEST_ID = "01ARZ3NDEKTSV4RRFFQ69G5FAW"
         const val REMOVE_REQUEST_ID = "01ARZ3NDEKTSV4RRFFQ69G5FAY"
+        const val UPLOAD_REQUEST_ID = "01ARZ3NDEKTSV4RRFFQ69G5FAZ"
+        const val INVOCATION_REQUEST_ID = "01ARZ3NDEKTSV4RRFFQ69G5FB0"
         const val RESPONSE_JSON = "{\"nonce\":\"fixed\",\"ciphertext\":\"fixed\"}"
     }
 }

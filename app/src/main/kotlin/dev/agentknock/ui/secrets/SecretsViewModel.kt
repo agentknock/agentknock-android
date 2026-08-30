@@ -40,13 +40,13 @@ internal class SecretsViewModel(application: Application) : AndroidViewModel(app
     private val repository = container.secrets
     private val requests = container.requests
     private val selectedSecretId = MutableStateFlow<String?>(null)
-    private val selectedUploadRequestId = MutableStateFlow<Long?>(null)
+    private val selectedUploadRequestId = MutableStateFlow<String?>(null)
     private val secretEditorState = MutableStateFlow<SecretEditorState?>(null)
     private val variableEditorState = MutableStateFlow<VariableEditorState?>(null)
     private val sshKeyEditorState = MutableStateFlow<SshKeyEditorState?>(null)
 
     val selection: StateFlow<String?> = selectedSecretId.asStateFlow()
-    val uploadSelection: StateFlow<Long?> = selectedUploadRequestId.asStateFlow()
+    val uploadSelection: StateFlow<String?> = selectedUploadRequestId.asStateFlow()
     val secretEditor: StateFlow<SecretEditorState?> = secretEditorState.asStateFlow()
     val variableEditor: StateFlow<VariableEditorState?> = variableEditorState.asStateFlow()
     val sshKeyEditor: StateFlow<SshKeyEditorState?> = sshKeyEditorState.asStateFlow()
@@ -99,7 +99,7 @@ internal class SecretsViewModel(application: Application) : AndroidViewModel(app
         selectedSecretId.value = id
     }
 
-    fun selectUpload(requestId: Long?) {
+    fun selectUpload(requestId: String?) {
         if (requestId != null) {
             selectedSecretId.value = null
             secretEditorState.value = null
@@ -277,20 +277,20 @@ internal class SecretsViewModel(application: Application) : AndroidViewModel(app
         repository.readEnvironmentVariableValue(id)
 
     suspend fun approveSecretUpload(
-        requestId: Long,
+        requestId: String,
         approvedName: String,
     ): SecretUploadDecisionResult {
         container.localStorage.await()
         return requests.approveSecretUpload(requestId, approvedName)
     }
 
-    suspend fun rejectSecretUpload(requestId: Long): SecretUploadDecisionResult {
+    suspend fun rejectSecretUpload(requestId: String): SecretUploadDecisionResult {
         container.localStorage.await()
         return requests.rejectSecretUpload(requestId)
     }
 
     suspend fun readSecretUploadVariable(
-        requestId: Long,
+        requestId: String,
         variableId: String,
     ): SecretUploadVariableValue {
         container.localStorage.await()
@@ -298,7 +298,7 @@ internal class SecretsViewModel(application: Application) : AndroidViewModel(app
     }
 
     suspend fun setSecretUploadVariableSensitivity(
-        requestId: Long,
+        requestId: String,
         variableId: String,
         sensitive: Boolean,
     ): Boolean {

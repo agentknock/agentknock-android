@@ -31,7 +31,7 @@ internal class ClientsViewModel(application: Application) : AndroidViewModel(app
     private val container = (application as AgentknockApplication).container
     private val repository = container.requests
     private val selectedClientId = MutableStateFlow<String?>(null)
-    private val selectedPairingRequestId = MutableStateFlow<Long?>(null)
+    private val selectedPairingRequestId = MutableStateFlow<String?>(null)
 
     val clients: StateFlow<List<ClientSummary>> = repository.observeClients().stateIn(
         scope = viewModelScope,
@@ -39,7 +39,7 @@ internal class ClientsViewModel(application: Application) : AndroidViewModel(app
         initialValue = emptyList(),
     )
     val selection: StateFlow<String?> = selectedClientId.asStateFlow()
-    val pairingSelection: StateFlow<Long?> = selectedPairingRequestId.asStateFlow()
+    val pairingSelection: StateFlow<String?> = selectedPairingRequestId.asStateFlow()
     val selectedClient: StateFlow<ClientDetails?> = selectedClientId.flatMapLatest { id ->
         id?.let(repository::observeClient) ?: flowOf(null)
     }.stateIn(
@@ -86,7 +86,7 @@ internal class ClientsViewModel(application: Application) : AndroidViewModel(app
         selectedClientId.value = clientId
     }
 
-    fun selectPairing(requestId: Long?) {
+    fun selectPairing(requestId: String?) {
         if (requestId != null) selectedClientId.value = null
         selectedPairingRequestId.value = requestId
     }
@@ -109,17 +109,17 @@ internal class ClientsViewModel(application: Application) : AndroidViewModel(app
         operation: TemporaryAccessOperation,
     ): Boolean = container.secrets.endTemporaryAccess(secretId, clientId, operation)
 
-    suspend fun chooseSas(requestId: Long, selectedIndex: Int?): PairingDecisionResult {
+    suspend fun chooseSas(requestId: String, selectedIndex: Int?): PairingDecisionResult {
         container.localStorage.await()
         return repository.chooseSas(requestId, selectedIndex)
     }
 
-    suspend fun isMatchingPendingSas(requestId: Long, selectedIndex: Int): Boolean {
+    suspend fun isMatchingPendingSas(requestId: String, selectedIndex: Int): Boolean {
         container.localStorage.await()
         return repository.isMatchingPendingSas(requestId, selectedIndex)
     }
 
-    suspend fun rejectPairing(requestId: Long): PairingDecisionResult {
+    suspend fun rejectPairing(requestId: String): PairingDecisionResult {
         container.localStorage.await()
         return repository.rejectPairing(requestId)
     }

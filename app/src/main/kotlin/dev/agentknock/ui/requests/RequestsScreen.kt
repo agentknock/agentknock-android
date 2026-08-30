@@ -367,20 +367,20 @@ private fun EmptyRequestSelection(modifier: Modifier = Modifier) {
 @Composable
 private fun RequestList(
     requests: List<InboxRequestSummary>,
-    selectedRequestId: Long?,
+    selectedRequestId: String?,
     syncing: Boolean,
     syncProblem: String?,
     onRefresh: () -> Unit,
     onShowSyncProblem: (String) -> Unit,
     onOpenSettings: () -> Unit,
     notificationsEnabled: Boolean,
-    onOpen: (Long) -> Unit,
+    onOpen: (String) -> Unit,
     onApprove: (InboxRequestSummary) -> Unit,
     onReject: (InboxRequestSummary) -> Unit,
     modifier: Modifier = Modifier,
 ) {
     val listState = rememberLazyListState()
-    var previousNewestRequestId by remember { mutableStateOf<Long?>(null) }
+    var previousNewestRequestId by remember { mutableStateOf<String?>(null) }
     val newestRequestId = requests.firstOrNull()?.id
     LaunchedEffect(newestRequestId) {
         val previousNewest = previousNewestRequestId
@@ -830,7 +830,7 @@ internal fun PairingRequestDetail(
             }
             pairing.machineId?.let { DetailValue("Machine ID reported by client", it, true) }
             DetailValue("Client ID", pairing.clientId, true)
-            DetailValue("Request ID", request.relayRequestId, true)
+            DetailValue("Request ID", request.id, true)
         }
     }
 }
@@ -1042,7 +1042,7 @@ private fun SecretUseDetail(
             }
             secretUse.machineId?.let { DetailValue("Machine ID reported by client", it, true) }
             DetailValue("Client ID", secretUse.clientId, true)
-            DetailValue("Request ID", request.relayRequestId, true)
+            DetailValue("Request ID", request.id, true)
         }
     }
     if (confirmTemporaryAccess) {
@@ -1407,7 +1407,7 @@ private fun GitSignDetail(
             }
             DetailValue("Client ID", signing.clientId, true)
             DetailValue("Invocation request ID", signing.invocationRequestId, true)
-            DetailValue("Signing request ID", request.relayRequestId, true)
+            DetailValue("Signing request ID", request.id, true)
         }
     }
     if (confirmTemporaryAccess) {
@@ -1567,7 +1567,7 @@ private fun SshAuthenticationDetail(
             }
             DetailValue("Client ID", authentication.clientId, true)
             DetailValue("Invocation request ID", authentication.invocationRequestId, true)
-            DetailValue("Authentication request ID", request.relayRequestId, true)
+            DetailValue("Authentication request ID", request.id, true)
         }
     }
     if (confirmTemporaryAccess) {
@@ -2002,7 +2002,7 @@ internal fun SecretUploadRequestDetail(
                 }
             }
             DetailValue("Client ID", upload.clientId, true)
-            DetailValue("Request ID", request.relayRequestId, true)
+            DetailValue("Request ID", request.id, true)
         }
     }
     if (editingName) {

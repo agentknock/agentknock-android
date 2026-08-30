@@ -476,7 +476,7 @@ class ApprovalReviewContextTest {
     )
 
     private fun pairing() = PairingEntity(
-        requestId = 1,
+        requestId = "pairing-request",
         deviceIdentityId = "device-identity",
         pairingAddress = "three-word-address",
         deviceId = "device-id",
@@ -505,8 +505,8 @@ class ApprovalReviewContextTest {
     )
 
     private fun storedInvocation() = SecretUseRequestEntity(
-        requestId = 10,
-        pairingRequestId = 1,
+        requestId = "invocation-request",
+        pairingRequestId = "pairing-request",
         clientId = "client-id",
         clientName = "survo",
         pairingAddress = "three-word-address",

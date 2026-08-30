@@ -19,7 +19,7 @@ import kotlinx.coroutines.flow.update
 
 internal data class RequestNavigation(
     val generation: Long = 0,
-    val requestId: Long? = null,
+    val requestId: String? = null,
 )
 
 internal data class SubscriptionNavigation(
@@ -125,8 +125,7 @@ class MainActivity : FragmentActivity() {
         ) {
             requestNavigation.value = RequestNavigation(
                 generation = requestNavigation.value.generation + 1,
-                requestId = intent.getLongExtra(RequestNotifications.REQUEST_ID_EXTRA, -1L)
-                    .takeIf { it >= 0 },
+                requestId = intent.getStringExtra(RequestNotifications.REQUEST_ID_EXTRA),
             )
             intent.action = null
         }

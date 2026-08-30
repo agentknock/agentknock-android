@@ -118,7 +118,7 @@ internal fun ClientsScreen(
     val snackbar = remember { SnackbarHostState() }
     val scope = rememberCoroutineScope()
     var loadedClientId by remember { mutableStateOf<String?>(null) }
-    var loadedPairingRequestId by remember { mutableStateOf<Long?>(null) }
+    var loadedPairingRequestId by remember { mutableStateOf<String?>(null) }
 
     LaunchedEffect(selection, selectedClient?.clientId) {
         when {
@@ -396,10 +396,10 @@ private fun ClientList(
     clients: List<ClientSummary>,
     pendingPairings: List<InboxRequestSummary>,
     selectedClientId: String?,
-    selectedPairingRequestId: Long?,
+    selectedPairingRequestId: String?,
     identity: DeviceIdentity?,
     onOpen: (String) -> Unit,
-    onOpenPairing: (Long) -> Unit,
+    onOpenPairing: (String) -> Unit,
     onChangePairingAddress: () -> Unit,
     onSetPairingEnabled: (Boolean) -> Unit,
     onOpenSettings: () -> Unit,

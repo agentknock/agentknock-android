@@ -25,24 +25,21 @@ import kotlinx.coroutines.flow.Flow
             entity = InboxRequestEntity::class,
             parentColumns = ["id"],
             childColumns = ["parent_request_id"],
-            onDelete = ForeignKey.CASCADE,
+            onDelete = ForeignKey.RESTRICT,
             onUpdate = ForeignKey.NO_ACTION,
         ),
     ],
     indices = [
-        Index(value = ["relay_request_id"], unique = true),
         Index(value = ["parent_request_id"]),
-        Index(value = ["listed", "id"]),
+        Index(value = ["listed", "received_at", "id"]),
     ],
 )
 internal data class InboxRequestEntity(
-    @PrimaryKey(autoGenerate = true)
+    @PrimaryKey
     @ColumnInfo(name = "id")
-    val id: Long = 0,
-    @ColumnInfo(name = "relay_request_id")
-    val relayRequestId: String,
+    val id: String,
     @ColumnInfo(name = "parent_request_id")
-    val parentRequestId: Long?,
+    val parentRequestId: String?,
     @ColumnInfo(name = "kind")
     val kind: String,
     @ColumnInfo(name = "state")
@@ -96,7 +93,7 @@ internal data class InboxRequestEntity(
 internal data class PairingEntity(
     @PrimaryKey
     @ColumnInfo(name = "request_id")
-    val requestId: Long,
+    val requestId: String,
     @ColumnInfo(name = "device_identity_id")
     val deviceIdentityId: String?,
     @ColumnInfo(name = "pairing_address")
@@ -177,7 +174,7 @@ internal data class PairingSecretEntity(
     @ColumnInfo(name = "id")
     val id: String,
     @ColumnInfo(name = "pairing_request_id")
-    val pairingRequestId: Long,
+    val pairingRequestId: String,
     @ColumnInfo(name = "kind")
     val kind: String,
     @ColumnInfo(name = "encryption_format")
@@ -222,7 +219,7 @@ internal data class RequestSecretEntity(
     @ColumnInfo(name = "id")
     val id: String,
     @ColumnInfo(name = "request_id")
-    val requestId: Long,
+    val requestId: String,
     @ColumnInfo(name = "encryption_format")
     val encryptionFormat: Int,
     @ColumnInfo(name = "encryption_key_id")
@@ -261,9 +258,9 @@ internal data class RequestSecretEntity(
 internal data class SecretUseRequestEntity(
     @PrimaryKey
     @ColumnInfo(name = "request_id")
-    val requestId: Long,
+    val requestId: String,
     @ColumnInfo(name = "pairing_request_id")
-    val pairingRequestId: Long?,
+    val pairingRequestId: String?,
     @ColumnInfo(name = "client_id")
     val clientId: String,
     @ColumnInfo(name = "client_name")
@@ -358,7 +355,7 @@ internal data class SecretUseRequestEntity(
 internal data class GitSignRequestEntity(
     @PrimaryKey
     @ColumnInfo(name = "request_id")
-    val requestId: Long,
+    val requestId: String,
     @ColumnInfo(name = "state")
     val state: String,
     @ColumnInfo(name = "secret_name")
@@ -405,7 +402,7 @@ internal data class GitSignRequestEntity(
 internal data class SshAuthenticationRequestEntity(
     @PrimaryKey
     @ColumnInfo(name = "request_id")
-    val requestId: Long,
+    val requestId: String,
     @ColumnInfo(name = "state")
     val state: String,
     @ColumnInfo(name = "secret_name")
@@ -470,9 +467,9 @@ internal data class SshAuthenticationRequestEntity(
 internal data class SecretListRequestEntity(
     @PrimaryKey
     @ColumnInfo(name = "request_id")
-    val requestId: Long,
+    val requestId: String,
     @ColumnInfo(name = "pairing_request_id")
-    val pairingRequestId: Long?,
+    val pairingRequestId: String?,
     @ColumnInfo(name = "client_id")
     val clientId: String,
     @ColumnInfo(name = "pairing_address")
@@ -529,9 +526,9 @@ internal data class SecretListRequestEntity(
 internal data class SecretUploadRequestEntity(
     @PrimaryKey
     @ColumnInfo(name = "request_id")
-    val requestId: Long,
+    val requestId: String,
     @ColumnInfo(name = "pairing_request_id")
-    val pairingRequestId: Long?,
+    val pairingRequestId: String?,
     @ColumnInfo(name = "client_id")
     val clientId: String,
     @ColumnInfo(name = "client_name")
@@ -598,7 +595,7 @@ internal data class SecretUploadEnvironmentVariableEntity(
     @ColumnInfo(name = "id")
     val id: String,
     @ColumnInfo(name = "request_id")
-    val requestId: Long,
+    val requestId: String,
     @ColumnInfo(name = "name")
     val name: String,
     @ColumnInfo(name = "sensitive")
@@ -638,7 +635,7 @@ internal data class SecretUploadEnvironmentVariableEntity(
 internal data class SecretUploadSshKeyEntity(
     @PrimaryKey
     @ColumnInfo(name = "request_id")
-    val requestId: Long,
+    val requestId: String,
     @ColumnInfo(name = "algorithm")
     val algorithm: String,
     @ColumnInfo(name = "public_key")
@@ -677,72 +674,74 @@ internal data class AuthorizationCommitment(
 
 @Dao
 internal interface RequestDao {
-    @Query("SELECT * FROM inbox_requests WHERE listed = 1 ORDER BY id DESC LIMIT 100")
+    @Query(
+        "SELECT * FROM inbox_requests " +
+            "WHERE listed = 1 ORDER BY received_at DESC, id DESC LIMIT 100",
+    )
     fun observeListedRequests(): Flow<List<InboxRequestEntity>>
 
     @Query("SELECT count(*) FROM inbox_requests WHERE listed = 1")
     fun observeListedRequestCount(): Flow<Int>
 
-    @Query("SELECT * FROM pairings ORDER BY request_id DESC")
+    @Query("SELECT * FROM pairings ORDER BY created_at DESC, request_id DESC")
     fun observePairings(): Flow<List<PairingEntity>>
 
-    @Query("SELECT * FROM secret_use_requests ORDER BY request_id DESC")
+    @Query("SELECT * FROM secret_use_requests ORDER BY created_at DESC, request_id DESC")
     fun observeSecretUseRequests(): Flow<List<SecretUseRequestEntity>>
 
-    @Query("SELECT * FROM git_sign_requests ORDER BY request_id DESC")
+    @Query("SELECT * FROM git_sign_requests ORDER BY created_at DESC, request_id DESC")
     fun observeGitSignRequests(): Flow<List<GitSignRequestEntity>>
 
-    @Query("SELECT * FROM ssh_authentication_requests ORDER BY request_id DESC")
+    @Query(
+        "SELECT * FROM ssh_authentication_requests ORDER BY created_at DESC, request_id DESC",
+    )
     fun observeSshAuthenticationRequests(): Flow<List<SshAuthenticationRequestEntity>>
 
-    @Query("SELECT * FROM secret_list_requests ORDER BY request_id DESC")
+    @Query("SELECT * FROM secret_list_requests ORDER BY created_at DESC, request_id DESC")
     fun observeSecretListRequests(): Flow<List<SecretListRequestEntity>>
 
-    @Query("SELECT * FROM secret_upload_requests ORDER BY request_id DESC")
+    @Query("SELECT * FROM secret_upload_requests ORDER BY created_at DESC, request_id DESC")
     fun observeSecretUploadRequests(): Flow<List<SecretUploadRequestEntity>>
 
     @Query("SELECT * FROM inbox_requests WHERE id = :id")
-    fun observeRequest(id: Long): Flow<InboxRequestEntity?>
+    fun observeRequest(id: String): Flow<InboxRequestEntity?>
 
     @Query("SELECT * FROM pairings WHERE request_id = :requestId")
-    fun observePairing(requestId: Long): Flow<PairingEntity?>
+    fun observePairing(requestId: String): Flow<PairingEntity?>
 
     @Query("SELECT * FROM secret_use_requests WHERE request_id = :requestId")
-    fun observeSecretUseRequest(requestId: Long): Flow<SecretUseRequestEntity?>
+    fun observeSecretUseRequest(requestId: String): Flow<SecretUseRequestEntity?>
 
     @Query("SELECT * FROM git_sign_requests WHERE request_id = :requestId")
-    fun observeGitSignRequest(requestId: Long): Flow<GitSignRequestEntity?>
+    fun observeGitSignRequest(requestId: String): Flow<GitSignRequestEntity?>
 
     @Query("SELECT * FROM ssh_authentication_requests WHERE request_id = :requestId")
-    fun observeSshAuthenticationRequest(requestId: Long): Flow<SshAuthenticationRequestEntity?>
+    fun observeSshAuthenticationRequest(requestId: String): Flow<SshAuthenticationRequestEntity?>
 
     @Query("SELECT * FROM secret_list_requests WHERE request_id = :requestId")
-    fun observeSecretListRequest(requestId: Long): Flow<SecretListRequestEntity?>
+    fun observeSecretListRequest(requestId: String): Flow<SecretListRequestEntity?>
 
     @Query("SELECT * FROM secret_upload_requests WHERE request_id = :requestId")
-    fun observeSecretUploadRequest(requestId: Long): Flow<SecretUploadRequestEntity?>
+    fun observeSecretUploadRequest(requestId: String): Flow<SecretUploadRequestEntity?>
 
     @Query(
         "SELECT * FROM secret_upload_environment_variables WHERE request_id = :requestId ORDER BY name",
     )
     fun observeSecretUploadEnvironmentVariables(
-        requestId: Long,
+        requestId: String,
     ): Flow<List<SecretUploadEnvironmentVariableEntity>>
 
     @Query("SELECT * FROM secret_upload_ssh_keys WHERE request_id = :requestId")
-    fun observeSecretUploadSshKey(requestId: Long): Flow<SecretUploadSshKeyEntity?>
+    fun observeSecretUploadSshKey(requestId: String): Flow<SecretUploadSshKeyEntity?>
 
     @Query("SELECT * FROM pairings WHERE client_id = :clientId")
     fun observePairingByClientId(clientId: String): Flow<PairingEntity?>
 
-    @Query("SELECT * FROM inbox_requests WHERE relay_request_id = :relayRequestId")
-    suspend fun getRequestByRelayId(relayRequestId: String): InboxRequestEntity?
-
     @Query("SELECT * FROM inbox_requests WHERE id = :id")
-    suspend fun getRequestById(id: Long): InboxRequestEntity?
+    suspend fun getRequestById(id: String): InboxRequestEntity?
 
     @Query("SELECT * FROM pairings WHERE request_id = :requestId")
-    suspend fun getPairing(requestId: Long): PairingEntity?
+    suspend fun getPairing(requestId: String): PairingEntity?
 
     @Query("SELECT * FROM pairings WHERE client_id = :clientId")
     suspend fun getPairingByClientId(clientId: String): PairingEntity?
@@ -776,43 +775,45 @@ internal interface RequestDao {
     ): List<TemporaryAccessGrantEntity>
 
     @Query("SELECT * FROM secret_use_requests WHERE request_id = :requestId")
-    suspend fun getSecretUseRequest(requestId: Long): SecretUseRequestEntity?
+    suspend fun getSecretUseRequest(requestId: String): SecretUseRequestEntity?
 
     @Query("SELECT * FROM git_sign_requests WHERE request_id = :requestId")
-    suspend fun getGitSignRequest(requestId: Long): GitSignRequestEntity?
+    suspend fun getGitSignRequest(requestId: String): GitSignRequestEntity?
 
     @Query("SELECT * FROM ssh_authentication_requests WHERE request_id = :requestId")
-    suspend fun getSshAuthenticationRequest(requestId: Long): SshAuthenticationRequestEntity?
+    suspend fun getSshAuthenticationRequest(requestId: String): SshAuthenticationRequestEntity?
 
     @Query("SELECT * FROM secret_list_requests WHERE request_id = :requestId")
-    suspend fun getSecretListRequest(requestId: Long): SecretListRequestEntity?
+    suspend fun getSecretListRequest(requestId: String): SecretListRequestEntity?
 
     @Query("SELECT * FROM secret_upload_requests WHERE request_id = :requestId")
-    suspend fun getSecretUploadRequest(requestId: Long): SecretUploadRequestEntity?
+    suspend fun getSecretUploadRequest(requestId: String): SecretUploadRequestEntity?
 
     @Query(
         "SELECT * FROM secret_upload_environment_variables WHERE request_id = :requestId ORDER BY name",
     )
     suspend fun getSecretUploadEnvironmentVariables(
-        requestId: Long,
+        requestId: String,
     ): List<SecretUploadEnvironmentVariableEntity>
 
     @Query("SELECT * FROM secret_upload_ssh_keys WHERE request_id = :requestId")
-    suspend fun getSecretUploadSshKey(requestId: Long): SecretUploadSshKeyEntity?
+    suspend fun getSecretUploadSshKey(requestId: String): SecretUploadSshKeyEntity?
 
-    @Query("SELECT * FROM pairings ORDER BY request_id")
+    @Query("SELECT * FROM pairings ORDER BY created_at, request_id")
     suspend fun getPairings(): List<PairingEntity>
 
     @Query(
         "SELECT * FROM pairing_secrets WHERE pairing_request_id = :pairingRequestId AND kind = :kind",
     )
-    suspend fun getPairingSecret(pairingRequestId: Long, kind: String): PairingSecretEntity?
+    suspend fun getPairingSecret(pairingRequestId: String, kind: String): PairingSecretEntity?
 
     @Query("SELECT * FROM request_secrets WHERE request_id = :requestId")
-    suspend fun getRequestSecret(requestId: Long): RequestSecretEntity?
+    suspend fun getRequestSecret(requestId: String): RequestSecretEntity?
 
     @Query(
-        "SELECT * FROM inbox_requests WHERE response_json IS NOT NULL AND response_acknowledged_at IS NULL",
+        "SELECT * FROM inbox_requests " +
+            "WHERE response_json IS NOT NULL AND response_acknowledged_at IS NULL " +
+            "ORDER BY received_at, id",
     )
     suspend fun getUnacknowledgedResponses(): List<InboxRequestEntity>
 
@@ -821,13 +822,13 @@ internal interface RequestDao {
         SELECT * FROM inbox_requests
         WHERE completed_at IS NULL
            OR response_acknowledged_at IS NULL AND response_json IS NOT NULL
-        ORDER BY id
+        ORDER BY received_at, id
         """,
     )
     suspend fun getUnsettledRequests(): List<InboxRequestEntity>
 
     @Insert
-    suspend fun insertRequest(request: InboxRequestEntity): Long
+    suspend fun insertRequest(request: InboxRequestEntity)
 
     @Insert
     suspend fun insertPairing(pairing: PairingEntity)
@@ -894,19 +895,19 @@ internal interface RequestDao {
     ): Int
 
     @Query("DELETE FROM pairing_secrets WHERE pairing_request_id = :pairingRequestId AND kind = :kind")
-    suspend fun deletePairingSecret(pairingRequestId: Long, kind: String): Int
+    suspend fun deletePairingSecret(pairingRequestId: String, kind: String): Int
 
     @Query("DELETE FROM pairing_secrets WHERE pairing_request_id = :pairingRequestId")
-    suspend fun deletePairingSecrets(pairingRequestId: Long): Int
+    suspend fun deletePairingSecrets(pairingRequestId: String): Int
 
     @Query("DELETE FROM temporary_access_grants WHERE client_id = :clientId")
     suspend fun deleteTemporaryAccessGrantsForClient(clientId: String): Int
 
     @Query("DELETE FROM secret_upload_environment_variables WHERE request_id = :requestId")
-    suspend fun deleteSecretUploadEnvironmentVariables(requestId: Long): Int
+    suspend fun deleteSecretUploadEnvironmentVariables(requestId: String): Int
 
     @Query("DELETE FROM secret_upload_ssh_keys WHERE request_id = :requestId")
-    suspend fun deleteSecretUploadSshKey(requestId: Long): Int
+    suspend fun deleteSecretUploadSshKey(requestId: String): Int
 
     @Query(
         """
@@ -953,30 +954,30 @@ internal interface RequestDao {
         UPDATE inbox_requests
         SET request_acknowledged_at = COALESCE(request_acknowledged_at, :acknowledgedAt),
             updated_at = :acknowledgedAt
-        WHERE relay_request_id = :relayRequestId
+        WHERE id = :requestId
         """,
     )
-    suspend fun markRequestAcknowledged(relayRequestId: String, acknowledgedAt: Long): Int
+    suspend fun markRequestAcknowledged(requestId: String, acknowledgedAt: Long): Int
 
     @Query(
         """
         UPDATE inbox_requests
         SET response_acknowledged_at = COALESCE(response_acknowledged_at, :acknowledgedAt),
             updated_at = :acknowledgedAt
-        WHERE relay_request_id = :relayRequestId
+        WHERE id = :requestId
         """,
     )
-    suspend fun markResponseAcknowledged(relayRequestId: String, acknowledgedAt: Long): Int
+    suspend fun markResponseAcknowledged(requestId: String, acknowledgedAt: Long): Int
 
     @Query(
         """
         UPDATE inbox_requests
         SET completion_acknowledged_at = COALESCE(completion_acknowledged_at, :acknowledgedAt),
             updated_at = :acknowledgedAt
-        WHERE relay_request_id = :relayRequestId
+        WHERE id = :requestId
         """,
     )
-    suspend fun markCompletionAcknowledged(relayRequestId: String, acknowledgedAt: Long): Int
+    suspend fun markCompletionAcknowledged(requestId: String, acknowledgedAt: Long): Int
 
     @Query(
         """
@@ -984,7 +985,10 @@ internal interface RequestDao {
         WHERE listed = 1
           AND completed_at IS NOT NULL
           AND id NOT IN (
-            SELECT id FROM inbox_requests WHERE listed = 1 ORDER BY id DESC LIMIT 100
+            SELECT id FROM inbox_requests
+            WHERE listed = 1
+            ORDER BY received_at DESC, id DESC
+            LIMIT 100
           )
           AND id NOT IN (
             SELECT request_id FROM pairings
@@ -1020,12 +1024,17 @@ internal interface RequestDao {
           AND request_acknowledged_at IS NOT NULL
           AND (response_json IS NULL OR response_acknowledged_at IS NOT NULL)
           AND (completion_json IS NULL OR completion_acknowledged_at IS NOT NULL)
+          AND NOT EXISTS (
+            SELECT 1 FROM inbox_requests AS child
+            WHERE child.parent_request_id = inbox_requests.id
+          )
         """,
     )
     suspend fun deleteSettledHiddenRequests(receivedBefore: Long): Int
 
     @Query(
-        "SELECT * FROM inbox_requests WHERE listed = 1 AND state = 'action_required' ORDER BY id DESC",
+        "SELECT * FROM inbox_requests WHERE listed = 1 AND state = 'action_required' " +
+            "ORDER BY received_at DESC, id DESC",
     )
     suspend fun getActionRequiredRequests(): List<InboxRequestEntity>
 
@@ -1033,11 +1042,11 @@ internal interface RequestDao {
     suspend fun insertPairingRequest(
         request: InboxRequestEntity,
         pairing: PairingEntity,
-    ): Long {
-        val requestId = insertRequest(request)
-        insertPairing(pairing.copy(requestId = requestId))
+    ) {
+        check(pairing.requestId == request.id)
+        insertRequest(request)
+        insertPairing(pairing)
         trimCompletedHistory()
-        return requestId
     }
 
     @Transaction
@@ -1047,12 +1056,12 @@ internal interface RequestDao {
         requestSecret: RequestSecretEntity,
         currentPairingSecret: PairingSecretEntity?,
         previousPairingSecret: PairingSecretEntity?,
-    ): Long {
-        val requestId = insertRequest(request)
-        insertSecretUseRequestRow(secretUseRequest.copy(requestId = requestId))
-        storeAcceptedSecrets(requestId, requestSecret, currentPairingSecret, previousPairingSecret)
+    ) {
+        check(secretUseRequest.requestId == request.id)
+        insertRequest(request)
+        insertSecretUseRequestRow(secretUseRequest)
+        storeAcceptedSecrets(request.id, requestSecret, currentPairingSecret, previousPairingSecret)
         trimCompletedHistory()
-        return requestId
     }
 
     @Transaction
@@ -1062,12 +1071,12 @@ internal interface RequestDao {
         requestSecret: RequestSecretEntity,
         currentPairingSecret: PairingSecretEntity?,
         previousPairingSecret: PairingSecretEntity?,
-    ): Long {
-        val requestId = insertRequest(request)
-        insertGitSignRequestRow(gitSignRequest.copy(requestId = requestId))
-        storeAcceptedSecrets(requestId, requestSecret, currentPairingSecret, previousPairingSecret)
+    ) {
+        check(gitSignRequest.requestId == request.id)
+        insertRequest(request)
+        insertGitSignRequestRow(gitSignRequest)
+        storeAcceptedSecrets(request.id, requestSecret, currentPairingSecret, previousPairingSecret)
         trimCompletedHistory()
-        return requestId
     }
 
     @Transaction
@@ -1077,12 +1086,12 @@ internal interface RequestDao {
         requestSecret: RequestSecretEntity,
         currentPairingSecret: PairingSecretEntity?,
         previousPairingSecret: PairingSecretEntity?,
-    ): Long {
-        val requestId = insertRequest(request)
-        insertSshAuthenticationRequestRow(authentication.copy(requestId = requestId))
-        storeAcceptedSecrets(requestId, requestSecret, currentPairingSecret, previousPairingSecret)
+    ) {
+        check(authentication.requestId == request.id)
+        insertRequest(request)
+        insertSshAuthenticationRequestRow(authentication)
+        storeAcceptedSecrets(request.id, requestSecret, currentPairingSecret, previousPairingSecret)
         trimCompletedHistory()
-        return requestId
     }
 
     @Transaction
@@ -1096,15 +1105,16 @@ internal interface RequestDao {
         clientId: String,
         operation: String,
         now: Long,
-    ): Long? {
-        if (!authorizationMatches(authorization, clientId, operation, now)) return null
-        return insertSecretUseRequest(
+    ): Boolean {
+        if (!authorizationMatches(authorization, clientId, operation, now)) return false
+        insertSecretUseRequest(
             request,
             secretUseRequest,
             requestSecret,
             currentPairingSecret,
             previousPairingSecret,
         )
+        return true
     }
 
     @Transaction
@@ -1118,15 +1128,16 @@ internal interface RequestDao {
         clientId: String,
         operation: String,
         now: Long,
-    ): Long? {
-        if (!authorizationMatches(authorization, clientId, operation, now)) return null
-        return insertGitSignRequest(
+    ): Boolean {
+        if (!authorizationMatches(authorization, clientId, operation, now)) return false
+        insertGitSignRequest(
             request,
             gitSignRequest,
             requestSecret,
             currentPairingSecret,
             previousPairingSecret,
         )
+        return true
     }
 
     @Transaction
@@ -1140,15 +1151,16 @@ internal interface RequestDao {
         clientId: String,
         operation: String,
         now: Long,
-    ): Long? {
-        if (!authorizationMatches(authorization, clientId, operation, now)) return null
-        return insertSshAuthenticationRequest(
+    ): Boolean {
+        if (!authorizationMatches(authorization, clientId, operation, now)) return false
+        insertSshAuthenticationRequest(
             request,
             authentication,
             requestSecret,
             currentPairingSecret,
             previousPairingSecret,
         )
+        return true
     }
 
     @Transaction
@@ -1158,12 +1170,12 @@ internal interface RequestDao {
         requestSecret: RequestSecretEntity,
         currentPairingSecret: PairingSecretEntity?,
         previousPairingSecret: PairingSecretEntity?,
-    ): Long {
-        val requestId = insertRequest(request)
-        insertSecretListRequestRow(secretListRequest.copy(requestId = requestId))
-        storeAcceptedSecrets(requestId, requestSecret, currentPairingSecret, previousPairingSecret)
+    ) {
+        check(secretListRequest.requestId == request.id)
+        insertRequest(request)
+        insertSecretListRequestRow(secretListRequest)
+        storeAcceptedSecrets(request.id, requestSecret, currentPairingSecret, previousPairingSecret)
         trimCompletedHistory()
-        return requestId
     }
 
     @Transaction
@@ -1175,18 +1187,18 @@ internal interface RequestDao {
         requestSecret: RequestSecretEntity,
         currentPairingSecret: PairingSecretEntity?,
         previousPairingSecret: PairingSecretEntity?,
-    ): Long {
-        val requestId = insertRequest(request)
-        insertSecretUploadRequestRow(secretUpload.copy(requestId = requestId))
+    ) {
+        check(secretUpload.requestId == request.id)
+        check(environmentVariables.all { it.requestId == request.id })
+        check(sshKey == null || sshKey.requestId == request.id)
+        insertRequest(request)
+        insertSecretUploadRequestRow(secretUpload)
         if (environmentVariables.isNotEmpty()) {
-            insertSecretUploadEnvironmentVariables(
-                environmentVariables.map { it.copy(requestId = requestId) },
-            )
+            insertSecretUploadEnvironmentVariables(environmentVariables)
         }
-        sshKey?.let { insertSecretUploadSshKey(it.copy(requestId = requestId)) }
-        storeAcceptedSecrets(requestId, requestSecret, currentPairingSecret, previousPairingSecret)
+        sshKey?.let { insertSecretUploadSshKey(it) }
+        storeAcceptedSecrets(request.id, requestSecret, currentPairingSecret, previousPairingSecret)
         trimCompletedHistory()
-        return requestId
     }
 
     @Transaction
@@ -1195,10 +1207,9 @@ internal interface RequestDao {
         requestSecret: RequestSecretEntity,
         currentPairingSecret: PairingSecretEntity?,
         previousPairingSecret: PairingSecretEntity?,
-    ): Long {
-        val requestId = insertRequest(request)
-        storeAcceptedSecrets(requestId, requestSecret, currentPairingSecret, previousPairingSecret)
-        return requestId
+    ) {
+        insertRequest(request)
+        storeAcceptedSecrets(request.id, requestSecret, currentPairingSecret, previousPairingSecret)
     }
 
     @Transaction
@@ -1206,24 +1217,25 @@ internal interface RequestDao {
         request: InboxRequestEntity,
         requestSecret: RequestSecretEntity,
         pairing: PairingEntity,
-    ): Long {
-        val requestId = insertRequest(request)
-        insertRequestSecret(requestSecret.copy(requestId = requestId))
+    ) {
+        check(requestSecret.requestId == request.id)
+        insertRequest(request)
+        insertRequestSecret(requestSecret)
         check(updatePairing(pairing) == 1)
         deletePairingSecrets(pairing.requestId)
         deleteTemporaryAccessGrantsForClient(pairing.clientId)
         trimCompletedHistory()
-        return requestId
     }
 
     @Transaction
     suspend fun storeAcceptedSecrets(
-        requestId: Long,
+        requestId: String,
         requestSecret: RequestSecretEntity,
         currentPairingSecret: PairingSecretEntity?,
         previousPairingSecret: PairingSecretEntity?,
     ) {
-        insertRequestSecret(requestSecret.copy(requestId = requestId))
+        check(requestSecret.requestId == requestId)
+        insertRequestSecret(requestSecret)
         if (currentPairingSecret != null || previousPairingSecret != null) {
             checkNotNull(currentPairingSecret)
             checkNotNull(previousPairingSecret)
@@ -1412,9 +1424,9 @@ internal interface RequestDao {
     ) {
         check(updateRequest(rootRequest) == 1)
         check(updatePairing(pairing) == 1)
-        val finishRequestId = insertRequest(finishRequest)
+        insertRequest(finishRequest)
         storeAcceptedSecrets(
-            finishRequestId,
+            finishRequest.id,
             requestSecret,
             currentPairingSecret,
             previousPairingSecret,

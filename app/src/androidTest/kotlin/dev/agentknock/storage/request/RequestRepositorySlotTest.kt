@@ -150,7 +150,7 @@ class RequestRepositorySlotTest {
                 kind = RelayMessageKind.RESPONSE,
             ),
         )
-        val root = checkNotNull(database.requestDao().getRequestByRelayId(CLIENT_ID))
+        val root = checkNotNull(database.requestDao().getRequestById(CLIENT_ID))
         assertNull(root.completionJson)
         assertEquals("receiving", database.requestDao().getPairing(root.id)?.state)
 
@@ -240,7 +240,7 @@ class RequestRepositorySlotTest {
         )
 
         val stored = checkNotNull(
-            database.requestDao().getRequestByRelayId(INVOCATION_REQUEST_ID),
+            database.requestDao().getRequestById(INVOCATION_REQUEST_ID),
         )
         val storedInvocation = checkNotNull(database.requestDao().getSecretUseRequest(stored.id))
         val persistedResponse = Json.parseToJsonElement(checkNotNull(stored.responseJson))
@@ -296,7 +296,7 @@ class RequestRepositorySlotTest {
             replay.sentFrames,
         )
         val afterReplay = checkNotNull(
-            database.requestDao().getRequestByRelayId(INVOCATION_REQUEST_ID),
+            database.requestDao().getRequestById(INVOCATION_REQUEST_ID),
         )
         assertEquals(stored.id, afterReplay.id)
         assertEquals(stored.receivedAt, afterReplay.receivedAt)
@@ -326,7 +326,7 @@ class RequestRepositorySlotTest {
         assertEquals(RequestSyncResult.Success, repository.sync())
         assertFalse(invocationConnection.sentFrames.isEmpty())
         val parent = checkNotNull(
-            database.requestDao().getRequestByRelayId(INVOCATION_REQUEST_ID),
+            database.requestDao().getRequestById(INVOCATION_REQUEST_ID),
         )
 
         now += 1
@@ -342,7 +342,7 @@ class RequestRepositorySlotTest {
         )
         assertEquals(RequestSyncResult.Success, repository.sync())
 
-        val child = checkNotNull(database.requestDao().getRequestByRelayId(GIT_SIGN_REQUEST_ID))
+        val child = checkNotNull(database.requestDao().getRequestById(GIT_SIGN_REQUEST_ID))
         val gitSign = checkNotNull(database.requestDao().getGitSignRequest(child.id))
         assertEquals(parent.id, child.parentRequestId)
         assertEquals(signing.toString(), child.requestJson)
@@ -437,7 +437,7 @@ class RequestRepositorySlotTest {
                 addressId = ADDRESS_ID,
             ),
         )
-        val root = checkNotNull(database.requestDao().getRequestByRelayId(CLIENT_ID))
+        val root = checkNotNull(database.requestDao().getRequestById(CLIENT_ID))
         val pairing = checkNotNull(database.requestDao().getPairing(root.id))
         assertEquals(
             PairingDecisionResult.VERIFIED,

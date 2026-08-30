@@ -9,6 +9,7 @@ import android.content.Context
 import android.content.BroadcastReceiver
 import android.content.Intent
 import android.content.pm.PackageManager
+import android.net.Uri
 import android.os.Build
 import android.graphics.Typeface
 import android.text.SpannableStringBuilder
@@ -179,7 +180,9 @@ internal object RequestNotifications {
     const val ACTION_CHANNEL_ID = "requests"
     const val BACKGROUND_CHANNEL_ID = "background_processing"
     private const val WAKE_NOTIFICATION_ID = 1
-    private const val REQUEST_NOTIFICATION_ID_BASE = 10_000
+    private const val REQUEST_NOTIFICATION_ID = 10_000
+    private const val OPEN_INTENT_ACTION = "open"
+    private const val REQUEST_INTENT_SCHEME = "agentknock-request"
 
     fun createChannel(context: Context) {
         val actionChannel = NotificationChannel(
@@ -250,21 +253,16 @@ internal object RequestNotifications {
         if (!canNotify(context)) return
         val manager = context.getSystemService(NotificationManager::class.java)
         manager.cancel(WAKE_NOTIFICATION_ID)
-        val activeIds = requests.mapTo(mutableSetOf()) { notificationId(it.requestId) }
+        val activeTags = requests.mapTo(mutableSetOf(), RequestNotification::requestId)
         manager.activeNotifications
-            .filter { it.id >= REQUEST_NOTIFICATION_ID_BASE && it.id !in activeIds }
-            .forEach { manager.cancel(it.id) }
+            .filter {
+                it.id == REQUEST_NOTIFICATION_ID &&
+                    it.tag != null &&
+                    it.tag !in activeTags
+            }
+            .forEach { manager.cancel(it.tag, REQUEST_NOTIFICATION_ID) }
         requests.forEach { request ->
-            val openRequest = PendingIntent.getActivity(
-                context,
-                request.requestId.hashCode(),
-                Intent(context, MainActivity::class.java).apply {
-                    action = OPEN_REQUEST_ACTION
-                    putExtra(REQUEST_ID_EXTRA, request.requestId)
-                    flags = Intent.FLAG_ACTIVITY_CLEAR_TOP or Intent.FLAG_ACTIVITY_SINGLE_TOP
-                },
-                PendingIntent.FLAG_UPDATE_CURRENT or PendingIntent.FLAG_IMMUTABLE,
-            )
+            val openRequest = openRequestPendingIntent(context, request.requestId)
             val publicVersion = Notification.Builder(context, ACTION_CHANNEL_ID)
                 .setSmallIcon(R.drawable.ic_notification)
                 .setColor(context.getColor(R.color.notification_accent))
@@ -291,39 +289,21 @@ internal object RequestNotifications {
                     decisionAction(context, request.requestId, APPROVE_DECISION, "Approve once"),
                 )
             }
-            manager.notify(notificationId(request.requestId), builder.build())
+            manager.notify(request.requestId, REQUEST_NOTIFICATION_ID, builder.build())
         }
     }
 
     private fun decisionAction(
         context: Context,
-        requestId: Long,
+        requestId: String,
         decision: String,
         title: String,
     ): Notification.Action {
         if (decision == APPROVE_DECISION && Build.VERSION.SDK_INT < Build.VERSION_CODES.S) {
-            val openRequest = PendingIntent.getActivity(
-                context,
-                requestId.hashCode(),
-                Intent(context, MainActivity::class.java).apply {
-                    action = OPEN_REQUEST_ACTION
-                    putExtra(REQUEST_ID_EXTRA, requestId)
-                    flags = Intent.FLAG_ACTIVITY_CLEAR_TOP or Intent.FLAG_ACTIVITY_SINGLE_TOP
-                },
-                PendingIntent.FLAG_UPDATE_CURRENT or PendingIntent.FLAG_IMMUTABLE,
-            )
+            val openRequest = openRequestPendingIntent(context, requestId, decision)
             return Notification.Action.Builder(null, title, openRequest).build()
         }
-        val intent = PendingIntent.getBroadcast(
-            context,
-            (requestId.hashCode() * 31) + decision.hashCode(),
-            Intent(context, RequestNotificationActionReceiver::class.java).apply {
-                action = DECIDE_REQUEST_ACTION
-                putExtra(REQUEST_ID_EXTRA, requestId)
-                putExtra(DECISION_EXTRA, decision)
-            },
-            PendingIntent.FLAG_UPDATE_CURRENT or PendingIntent.FLAG_IMMUTABLE,
-        )
+        val intent = decisionPendingIntent(context, requestId, decision)
         return Notification.Action.Builder(null, title, intent).apply {
             if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.S) {
                 setAuthenticationRequired(true)
@@ -331,8 +311,44 @@ internal object RequestNotifications {
         }.build()
     }
 
-    private fun notificationId(requestId: Long): Int =
-        REQUEST_NOTIFICATION_ID_BASE + (requestId.hashCode() and 0x1fffffff)
+    internal fun openRequestPendingIntent(
+        context: Context,
+        requestId: String,
+        intentAction: String = OPEN_INTENT_ACTION,
+    ): PendingIntent = PendingIntent.getActivity(
+        context,
+        0,
+        Intent(context, MainActivity::class.java).apply {
+            action = OPEN_REQUEST_ACTION
+            data = requestIntentData(requestId, intentAction)
+            putExtra(REQUEST_ID_EXTRA, requestId)
+            flags = Intent.FLAG_ACTIVITY_CLEAR_TOP or Intent.FLAG_ACTIVITY_SINGLE_TOP
+        },
+        PendingIntent.FLAG_UPDATE_CURRENT or PendingIntent.FLAG_IMMUTABLE,
+    )
+
+    internal fun decisionPendingIntent(
+        context: Context,
+        requestId: String,
+        decision: String,
+    ): PendingIntent = PendingIntent.getBroadcast(
+        context,
+        0,
+        Intent(context, RequestNotificationActionReceiver::class.java).apply {
+            action = DECIDE_REQUEST_ACTION
+            data = requestIntentData(requestId, decision)
+            putExtra(REQUEST_ID_EXTRA, requestId)
+            putExtra(DECISION_EXTRA, decision)
+        },
+        PendingIntent.FLAG_UPDATE_CURRENT or PendingIntent.FLAG_IMMUTABLE,
+    )
+
+    private fun requestIntentData(requestId: String, intentAction: String): Uri =
+        Uri.fromParts(
+            REQUEST_INTENT_SCHEME,
+            "$requestId/$intentAction",
+            null,
+        )
 
     private fun styledDetails(details: List<RequestNotificationDetail>): CharSequence =
         SpannableStringBuilder().apply {
@@ -364,8 +380,7 @@ internal object RequestNotifications {
 class RequestNotificationActionReceiver : BroadcastReceiver() {
     override fun onReceive(context: Context, intent: Intent) {
         if (intent.action != RequestNotifications.DECIDE_REQUEST_ACTION) return
-        val requestId = intent.getLongExtra(RequestNotifications.REQUEST_ID_EXTRA, -1L)
-        if (requestId < 0) return
+        val requestId = intent.getStringExtra(RequestNotifications.REQUEST_ID_EXTRA) ?: return
         val decision = intent.getStringExtra(RequestNotifications.DECISION_EXTRA) ?: return
         val pendingResult = goAsync()
         val application = context.applicationContext as AgentknockApplication
