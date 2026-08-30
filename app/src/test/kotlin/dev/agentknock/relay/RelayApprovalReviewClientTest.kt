@@ -61,6 +61,11 @@ class RelayApprovalReviewClientTest {
                 instructions.getValue("secrets").jsonObject
                     .getValue("github").jsonPrimitive.content,
             )
+            assertEquals(
+                JsonNull,
+                instructions.getValue("secrets").jsonObject
+                    .getValue("git-signing"),
+            )
             val facts = body.getValue("facts").jsonObject
             assertEquals("git", facts.getValue("client").jsonPrimitive.content)
             assertEquals("invocation", facts.getValue("operation").jsonPrimitive.content)
@@ -193,6 +198,7 @@ class RelayApprovalReviewClientTest {
             client = "Use only for work on this repository.",
             secrets = mapOf(
                 "github" to "Allow reading issues but not publishing releases.",
+                "git-signing" to null,
             ),
         ),
         facts = ApprovalReviewFacts(

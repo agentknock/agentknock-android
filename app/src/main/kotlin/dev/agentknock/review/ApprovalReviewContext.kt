@@ -206,17 +206,23 @@ private fun approvalReviewInstructions(
 ): ApprovalReviewInstructions {
     val policiesById = policies.associateBy(SecretApprovalPolicy::secretId)
     val secretInstructions = evaluation.secrets
-        .filter { it.action == ApprovalAction.ASK_AI }
-        .associateTo(linkedMapOf()) { secret ->
-            val policy = checkNotNull(policiesById[secret.secretId]) {
-                "Missing approval policy for ${secret.secretName}"
-            }
-            require(secret.secretName in decisionSecretNames) {
-                "AI review is not deciding ${secret.secretName}"
-            }
-            secret.secretName to policy.instructions
+        .filter {
+            it.secretName in decisionSecretNames &&
+                (it.action == ApprovalAction.ASK_AI || it.action == ApprovalAction.APPROVE)
         }
-    require(secretInstructions.isNotEmpty()) { "AI review has no secrets to review" }
+        .associateTo(linkedMapOf()) { secret ->
+            secret.secretName to when (secret.action) {
+                ApprovalAction.ASK_AI -> {
+                    val policy = checkNotNull(policiesById[secret.secretId]) {
+                        "Missing approval policy for ${secret.secretName}"
+                    }
+                    policy.instructions
+                }
+                ApprovalAction.APPROVE -> null
+                else -> error("Secret is outside the AI review instruction scope")
+            }
+        }
+    require(secretInstructions.values.any { it != null }) { "AI review has no secrets to review" }
 
     return ApprovalReviewInstructions(
         general = deviceInstructions,

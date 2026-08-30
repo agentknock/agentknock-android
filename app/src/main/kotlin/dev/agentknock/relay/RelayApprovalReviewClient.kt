@@ -27,7 +27,7 @@ internal data class ApprovalReviewRequest(
 internal data class ApprovalReviewInstructions(
     val general: String,
     val client: String,
-    val secrets: Map<String, String>,
+    val secrets: Map<String, String?>,
 )
 
 @Serializable

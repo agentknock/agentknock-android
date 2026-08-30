@@ -112,7 +112,10 @@ class ApprovalReviewContextTest {
         assertEquals("Protect production systems.", request.instructions.general)
         assertEquals("This client is used for development.", request.instructions.client)
         assertEquals(
-            mapOf("aws-read-only" to "Allow inspection but not changes."),
+            mapOf(
+                "aws-read-only" to "Allow inspection but not changes.",
+                "git-signing" to null,
+            ),
             request.instructions.secrets,
         )
         assertEquals("survo", request.facts.client)
@@ -162,6 +165,12 @@ class ApprovalReviewContextTest {
         val wire = WIRE_JSON.encodeToString(request)
         val payload = Json.parseToJsonElement(wire).jsonObject
         assertEquals(setOf("instructions", "facts", "evidence"), payload.keys)
+        assertEquals(
+            JsonNull,
+            payload.getValue("instructions").jsonObject
+                .getValue("secrets").jsonObject
+                .getValue("git-signing"),
+        )
         assertEquals(
             setOf("client", "operation", "secrets"),
             payload.getValue("facts").jsonObject.keys,
