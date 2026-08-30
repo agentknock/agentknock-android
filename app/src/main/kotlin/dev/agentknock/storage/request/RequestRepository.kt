@@ -67,6 +67,7 @@ import dev.agentknock.storage.secret.SshSecretUploadResult
 import dev.agentknock.storage.secret.GitSignatureResult
 import dev.agentknock.storage.secret.SSH_PRIVATE_KEY_FORMAT
 import dev.agentknock.storage.secret.ENVIRONMENT_SECRET_TYPE
+import dev.agentknock.storage.secret.EnvironmentVariableSelection
 import dev.agentknock.storage.secret.SSH_SECRET_TYPE
 import dev.agentknock.storage.secret.SecretRepository
 import dev.agentknock.storage.secret.SecretApprovalMode
@@ -368,6 +369,23 @@ internal data class SecretUseRequestDetails(
     val error: String?,
     val decidedAt: Long?,
 )
+
+private fun InvocationRequestMessage.environmentSelections(): Map<String, EnvironmentVariableSelection> =
+    secretDelivery.mapNotNull { (secret, delivery) ->
+        delivery.environment?.let { environment ->
+            secret to EnvironmentVariableSelection(
+                only = environment.only,
+                omit = environment.omit,
+            )
+        }
+    }.toMap()
+
+private fun List<SecretMetadata>.environmentSelections(): Map<String, EnvironmentVariableSelection> =
+    filter { it.type == ENVIRONMENT_SECRET_TYPE }.associate { secret ->
+        secret.name to EnvironmentVariableSelection(
+            only = secret.environmentVariableNames.toSet(),
+        )
+    }
 
 internal data class SecretUploadRequestDetails(
     val state: SecretUploadRequestState,
@@ -1831,9 +1849,13 @@ internal class RequestRepository(
                 return SecretUseDecisionResult.NotPending
             }
             val requestedSecrets = decodeStringList(secretUseRequest.secretsJson)
-            val latestDescription = secrets.describeRequestedSecrets(requestedSecrets)
             val storedSecrets = json.decodeFromString<List<SecretMetadata>>(
                 secretUseRequest.secretDetailsJson,
+            )
+            val environmentSelections = storedSecrets.environmentSelections()
+            val latestDescription = secrets.describeRequestedSecrets(
+                requestedSecrets,
+                environmentSelections,
             )
             val storedMissingSecrets = decodeStringList(secretUseRequest.missingSecretsJson)
             val protectedNames = latestDescription.reviewMetadata
@@ -1893,7 +1915,7 @@ internal class RequestRepository(
                 return SecretUseDecisionResult.SecretsChanged
             }
             val availableSecrets = when (
-                val result = secrets.requestedSecrets(requestedSecrets)
+                val result = secrets.requestedSecrets(requestedSecrets, environmentSelections)
             ) {
                 is RequestedSecretsResult.Available -> result.secrets
                 is RequestedSecretsResult.MissingSecrets -> {
@@ -1901,6 +1923,16 @@ internal class RequestRepository(
                 }
                 is RequestedSecretsResult.ConflictingVariable -> {
                     return SecretUseDecisionResult.ConflictingVariable(result.name)
+                }
+                is RequestedSecretsResult.MissingEnvironmentVariables -> {
+                    return SecretUseDecisionResult.Invalid(
+                        "Secret ${result.secretName} has no ${result.names.joinToString()} variable.",
+                    )
+                }
+                is RequestedSecretsResult.EnvironmentOptionsForSshSecret -> {
+                    return SecretUseDecisionResult.Invalid(
+                        "Secret ${result.secretName} is not an environment-variable secret.",
+                    )
                 }
                 RequestedSecretsResult.MultipleSshKeys -> {
                     return SecretUseDecisionResult.Invalid(
@@ -2931,8 +2963,9 @@ internal class RequestRepository(
         val contents = runCatching {
             invocationProtocol.decodeRequest(opened.plaintext)
         }.getOrNull() ?: return null
-        val description = secrets.describeRequestedSecrets(contents.secrets)
-        val requestedSecrets = secrets.requestedSecrets(contents.secrets)
+        val environmentSelections = contents.environmentSelections()
+        val description = secrets.describeRequestedSecrets(contents.secrets, environmentSelections)
+        val requestedSecrets = secrets.requestedSecrets(contents.secrets, environmentSelections)
         val automaticDenial = automaticSecretUseDenial(requestedSecrets)
         val protectedSecretNames = description.reviewMetadata
             .filter { secret ->
@@ -3027,12 +3060,12 @@ internal class RequestRepository(
             null
         }
         val currentDescription = if (needsAiReview) {
-            secrets.describeRequestedSecrets(contents.secrets)
+            secrets.describeRequestedSecrets(contents.secrets, environmentSelections)
         } else {
             description
         }
         val currentRequestedSecrets = if (needsAiReview) {
-            secrets.requestedSecrets(contents.secrets)
+            secrets.requestedSecrets(contents.secrets, environmentSelections)
         } else {
             requestedSecrets
         }
@@ -3719,6 +3752,12 @@ internal class RequestRepository(
         is RequestedSecretsResult.ConflictingVariable ->
             InvocationDenialReason.INVALID_REQUEST to
                 "Requested secrets provide conflicting values for the environment variable ${result.name}."
+        is RequestedSecretsResult.MissingEnvironmentVariables ->
+            InvocationDenialReason.INVALID_REQUEST to
+                "Secret ${result.secretName} has no ${result.names.joinToString()} variable."
+        is RequestedSecretsResult.EnvironmentOptionsForSshSecret ->
+            InvocationDenialReason.INVALID_REQUEST to
+                "Secret ${result.secretName} is not an environment-variable secret."
         RequestedSecretsResult.MultipleSshKeys ->
             InvocationDenialReason.INVALID_REQUEST to
                 "A request can use at most one SSH key."

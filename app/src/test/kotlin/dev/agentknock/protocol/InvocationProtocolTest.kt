@@ -40,6 +40,13 @@ class InvocationProtocolTest {
         assertEquals(testClientSoftware("0.2.0", "0.1.0"), request.clientSoftware)
         assertArrayEquals(ByteArray(32), request.invocationToken)
         assertEquals(listOf("aws-read-only", "common"), request.secrets)
+        assertEquals(
+            mapOf(
+                "aws-read-only" to InvocationSecretDelivery(),
+                "common" to InvocationSecretDelivery(),
+            ),
+            request.secretDelivery,
+        )
         assertEquals("Inspect production logs", request.reason)
         assertEquals("aws", request.operation.command)
         assertEquals(listOf("logs", "tail", "service"), request.operation.arguments)
@@ -136,15 +143,18 @@ class InvocationProtocolTest {
         )
     }
 
-    @Test(expected = IllegalArgumentException::class)
-    fun `rejects delivery options until they are supported`() {
-        protocol.decodeRequest(
+    @Test
+    fun `decodes only and omit environment delivery options`() {
+        val request = protocol.decodeRequest(
             """
             {
               ${testClientSoftwareFields("0.3.0", "0.1.0")},
               "method":"Invocation",
               "invocation_token":"AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA=",
-              "secrets":{"github":{"environment":{"only":["GH_TOKEN"]}}},
+              "secrets":{
+                "github":{"environment":{"only":["GH_HOST","GH_TOKEN"]}},
+                "cloudflare":{"environment":{"omit":["CF_ACCOUNT_ID"]}}
+              },
               "operation":{
                 "type":"exec",
                 "command":"gh",
@@ -159,6 +169,42 @@ class InvocationProtocolTest {
               "launcher_chain":[]
             }
             """.trimIndent().encodeToByteArray(),
+        )
+
+        assertEquals(
+            mapOf(
+                "github" to InvocationSecretDelivery(
+                    InvocationEnvironmentDelivery(only = setOf("GH_HOST", "GH_TOKEN")),
+                ),
+                "cloudflare" to InvocationSecretDelivery(
+                    InvocationEnvironmentDelivery(omit = setOf("CF_ACCOUNT_ID")),
+                ),
+            ),
+            request.secretDelivery,
+        )
+    }
+
+    @Test(expected = IllegalArgumentException::class)
+    fun `rejects combining only and omit`() {
+        decodeWithSecrets(
+            """{"test":{"environment":{"only":["TOKEN"],"omit":["OTHER"]}}}""",
+        )
+    }
+
+    @Test(expected = IllegalArgumentException::class)
+    fun `rejects an empty only set`() {
+        decodeWithSecrets("""{"test":{"environment":{"only":[]}}}""")
+    }
+
+    @Test(expected = IllegalArgumentException::class)
+    fun `rejects invalid environment names`() {
+        decodeWithSecrets("""{"test":{"environment":{"omit":["BAD=NAME"]}}}""")
+    }
+
+    private fun decodeWithSecrets(secrets: String) {
+        protocol.decodeRequest(
+            """{${testClientSoftwareFields("0.3.0", "0.1.0")},"method":"Invocation","invocation_token":"AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA=","secrets":$secrets,"operation":{"type":"exec","command":"env","arguments":[],"working_directory":"/tmp","executable_path":"/bin/env","executable_mode":"BINARY","stdin":"TERMINAL","stdout":"TERMINAL","stderr":"TERMINAL"},"launcher_chain":[]}"""
+                .encodeToByteArray(),
         )
     }
 }

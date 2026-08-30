@@ -404,6 +404,77 @@ class SecretRepositoryTest {
     }
 
     @Test
+    fun `environment selection limits values metadata and sensitivity`() = runTest {
+        val fixture = Fixture()
+        val secret = fixture.createSecret("github")
+        fixture.createVariable(secret, "GH_HOST", "github.com", false)
+        fixture.createVariable(secret, "GH_TOKEN", "secret", true)
+        fixture.createVariable(secret, "UNRELATED", "hidden", true)
+
+        val onlyHost = mapOf(
+            "github" to EnvironmentVariableSelection(only = setOf("GH_HOST")),
+        )
+        val description = fixture.repository.describeRequestedSecrets(
+            listOf("github"),
+            onlyHost,
+        )
+        assertEquals(listOf("GH_HOST"), description.secrets.single().environmentVariableNames)
+        assertEquals(
+            listOf("GH_HOST"),
+            description.reviewMetadata.single().environmentVariables.map { it.name },
+        )
+        assertFalse(description.containsSensitiveMaterial)
+
+        val requested = fixture.repository.requestedSecrets(listOf("github"), onlyHost)
+        check(requested is RequestedSecretsResult.Available)
+        assertEquals(
+            mapOf("GH_HOST" to "github.com"),
+            (requested.secrets.getValue("github") as SecretValues.Environment).environment,
+        )
+
+        val omitted = fixture.repository.requestedSecrets(
+            listOf("github"),
+            mapOf("github" to EnvironmentVariableSelection(omit = setOf("GH_TOKEN", "ABSENT"))),
+        )
+        check(omitted is RequestedSecretsResult.Available)
+        assertEquals(
+            mapOf("GH_HOST" to "github.com", "UNRELATED" to "hidden"),
+            (omitted.secrets.getValue("github") as SecretValues.Environment).environment,
+        )
+    }
+
+    @Test
+    fun `environment selection rejects missing exact variables and SSH options`() = runTest {
+        val fixture = Fixture()
+        val environment = fixture.createSecret("environment")
+        fixture.createVariable(environment, "TOKEN", "secret", true)
+        val key = fixture.repository.generateSshKey("git@example")
+        fixture.repository.createSshSecret("git-signing", "", key)
+
+        assertEquals(
+            RequestedSecretsResult.MissingEnvironmentVariables(
+                secretName = "environment",
+                names = listOf("MISSING"),
+            ),
+            fixture.repository.requestedSecrets(
+                listOf("environment"),
+                mapOf(
+                    "environment" to EnvironmentVariableSelection(
+                        only = setOf("TOKEN", "MISSING"),
+                    ),
+                ),
+            ),
+        )
+        assertEquals(
+            RequestedSecretsResult.EnvironmentOptionsForSshSecret("git-signing"),
+            fixture.repository.requestedSecrets(
+                listOf("git-signing"),
+                mapOf("git-signing" to EnvironmentVariableSelection(omit = setOf("TOKEN"))),
+            ),
+        )
+    }
+
+    @Test
     fun `only sensitive environment values require approval`() = runTest {
         val fixture = Fixture()
         val public = fixture.createSecret("public-context")

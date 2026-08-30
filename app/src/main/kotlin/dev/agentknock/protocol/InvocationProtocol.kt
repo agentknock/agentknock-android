@@ -4,9 +4,12 @@ import kotlinx.serialization.SerialName
 import kotlinx.serialization.Serializable
 import kotlinx.serialization.encodeToString
 import kotlinx.serialization.json.Json
+import kotlinx.serialization.json.JsonArray
+import kotlinx.serialization.json.JsonElement
 import kotlinx.serialization.json.JsonObject
+import kotlinx.serialization.json.JsonPrimitive
 import kotlinx.serialization.json.buildJsonObject
-import kotlinx.serialization.json.jsonObject
+import kotlinx.serialization.json.jsonPrimitive
 import kotlinx.serialization.json.put
 import java.util.Base64
 
@@ -14,9 +17,19 @@ internal data class InvocationRequestMessage(
     val clientSoftware: ClientSoftware,
     val invocationToken: ByteArray,
     val secrets: List<String>,
+    val secretDelivery: Map<String, InvocationSecretDelivery> = emptyMap(),
     val reason: String?,
     val operation: InvocationExecOperation,
     val launcherChain: List<String>,
+)
+
+internal data class InvocationSecretDelivery(
+    val environment: InvocationEnvironmentDelivery? = null,
+)
+
+internal data class InvocationEnvironmentDelivery(
+    val only: Set<String>? = null,
+    val omit: Set<String> = emptySet(),
 )
 
 internal data class InvocationExecOperation(
@@ -81,10 +94,8 @@ internal class InvocationProtocol(
         require(request.secrets.keys.none(String::isEmpty)) {
             "Secret use request has an empty secret"
         }
-        request.secrets.values.forEach { options ->
-            require(options.jsonObject.isEmpty()) {
-                "Environment delivery options are not supported"
-            }
+        val secretDelivery = request.secrets.mapValues { (secret, options) ->
+            decodeSecretDelivery(secret, options)
         }
         require(request.operation.type == EXEC_OPERATION_TYPE) { "Unsupported operation type" }
         val invocationToken = runCatching {
@@ -97,6 +108,7 @@ internal class InvocationProtocol(
             clientSoftware = clientSoftware,
             invocationToken = invocationToken,
             secrets = request.secrets.keys.toList(),
+            secretDelivery = secretDelivery,
             reason = request.reason,
             operation = InvocationExecOperation(
                 command = request.operation.command,
@@ -189,6 +201,55 @@ internal class InvocationProtocol(
                 put("type", TYPE_SSH)
                 put("public_key", publicKey)
             }
+        }
+    }
+
+    private fun decodeSecretDelivery(
+        secret: String,
+        value: JsonElement,
+    ): InvocationSecretDelivery {
+        val options = value as? JsonObject
+            ?: throw IllegalArgumentException("Secret delivery options must be an object")
+        require(options.keys.all { it == "environment" }) {
+            "Unsupported delivery option for secret $secret"
+        }
+        val environment = options["environment"]?.let { decodeEnvironmentDelivery(secret, it) }
+        return InvocationSecretDelivery(environment)
+    }
+
+    private fun decodeEnvironmentDelivery(
+        secret: String,
+        value: JsonElement,
+    ): InvocationEnvironmentDelivery {
+        val options = value as? JsonObject
+            ?: throw IllegalArgumentException("Environment delivery options must be an object")
+        require(options.keys.all { it == "only" || it == "omit" }) {
+            "Unsupported environment delivery option for secret $secret"
+        }
+        val only = options["only"]?.let { decodeEnvironmentNames("only", it) }
+        val omit = options["omit"]?.let { decodeEnvironmentNames("omit", it) }.orEmpty()
+        require(only == null || only.isNotEmpty()) { "Secret $secret has an empty only set" }
+        require(only == null || omit.isEmpty()) { "Secret $secret uses both only and omit" }
+        return InvocationEnvironmentDelivery(only = only, omit = omit)
+    }
+
+    private fun decodeEnvironmentNames(option: String, value: JsonElement): Set<String> {
+        val array = value as? JsonArray
+            ?: throw IllegalArgumentException("Environment $option must be an array")
+        val names = array.map { element ->
+            require(element is JsonPrimitive && element.isString) {
+                "Environment $option must contain strings"
+            }
+            element.jsonPrimitive.content
+                .also(::requireValidEnvironmentName)
+        }
+        require(names.size == names.distinct().size) { "Environment $option contains duplicates" }
+        return names.toSet()
+    }
+
+    private fun requireValidEnvironmentName(name: String) {
+        require(name.isNotEmpty() && '=' !in name && '\u0000' !in name) {
+            "Invalid environment variable name"
         }
     }
 }

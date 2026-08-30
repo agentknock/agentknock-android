@@ -289,6 +289,11 @@ internal data class SecretIdentity(
     val name: String,
 )
 
+internal data class EnvironmentVariableSelection(
+    val only: Set<String>? = null,
+    val omit: Set<String> = emptySet(),
+)
+
 internal sealed interface SecretValues {
     val description: String
 
@@ -309,6 +314,13 @@ internal sealed interface RequestedSecretsResult {
     data class MissingSecrets(val names: List<String>) : RequestedSecretsResult
 
     data class ConflictingVariable(val name: String) : RequestedSecretsResult
+
+    data class MissingEnvironmentVariables(
+        val secretName: String,
+        val names: List<String>,
+    ) : RequestedSecretsResult
+
+    data class EnvironmentOptionsForSshSecret(val secretName: String) : RequestedSecretsResult
 
     data object MultipleSshKeys : RequestedSecretsResult
 
@@ -340,9 +352,15 @@ internal sealed interface GitSignatureResult {
 internal interface RequestedSecretSource {
     suspend fun listSecretsForClient(): List<SecretMetadata>
 
-    suspend fun describeRequestedSecrets(names: List<String>): RequestedSecretDescription
+    suspend fun describeRequestedSecrets(
+        names: List<String>,
+        environmentSelections: Map<String, EnvironmentVariableSelection> = emptyMap(),
+    ): RequestedSecretDescription
 
-    suspend fun requestedSecrets(names: List<String>): RequestedSecretsResult
+    suspend fun requestedSecrets(
+        names: List<String>,
+        environmentSelections: Map<String, EnvironmentVariableSelection> = emptyMap(),
+    ): RequestedSecretsResult
 }
 
 internal class SecretRepository(
@@ -1196,6 +1214,7 @@ internal class SecretRepository(
 
     override suspend fun describeRequestedSecrets(
         names: List<String>,
+        environmentSelections: Map<String, EnvironmentVariableSelection>,
     ): RequestedSecretDescription {
         val requestedNames = names.distinct()
         val secrets = if (requestedNames.isEmpty()) {
@@ -1210,6 +1229,16 @@ internal class SecretRepository(
             dao.getEnvironmentVariablesForSecrets(secrets.map(SecretEntity::id))
         }
         val variablesBySecret = variables.groupBy(EnvironmentVariableEntity::secretId)
+        fun selectedVariables(secret: SecretEntity): List<EnvironmentVariableEntity> {
+            val selection = environmentSelections[secret.name]
+            return variablesBySecret[secret.id].orEmpty().filter { variable ->
+                when {
+                    selection?.only != null -> variable.name in selection.only
+                    selection != null -> variable.name !in selection.omit
+                    else -> true
+                }
+            }
+        }
         val sshKeysBySecret = if (secrets.isEmpty()) {
             emptyMap()
         } else {
@@ -1224,8 +1253,7 @@ internal class SecretRepository(
                             name = secret.name,
                             description = secret.description,
                             type = ENVIRONMENT_SECRET_TYPE,
-                            environmentVariableNames = variablesBySecret[secret.id]
-                                .orEmpty()
+                            environmentVariableNames = selectedVariables(secret)
                                 .map(EnvironmentVariableEntity::name)
                                 .sorted(),
                         )
@@ -1251,8 +1279,7 @@ internal class SecretRepository(
                             description = secret.description,
                             type = ENVIRONMENT_SECRET_TYPE,
                             instructions = secret.instructions,
-                            environmentVariables = variablesBySecret[secret.id]
-                                .orEmpty()
+                            environmentVariables = selectedVariables(secret)
                                 .sortedBy(EnvironmentVariableEntity::name)
                                 .map { variable ->
                                     EnvironmentVariableReviewMetadata(
@@ -1294,11 +1321,17 @@ internal class SecretRepository(
                 }
             },
             missingSecrets = requestedNames.filterNot(secretByName::containsKey),
-            containsSensitiveMaterial = variables.any(EnvironmentVariableEntity::sensitive),
+            containsSensitiveMaterial = secrets.any { secret ->
+                secret.type == ENVIRONMENT_SECRET_TYPE &&
+                    selectedVariables(secret).any(EnvironmentVariableEntity::sensitive)
+            },
         )
     }
 
-    override suspend fun requestedSecrets(names: List<String>): RequestedSecretsResult {
+    override suspend fun requestedSecrets(
+        names: List<String>,
+        environmentSelections: Map<String, EnvironmentVariableSelection>,
+    ): RequestedSecretsResult {
         val requestedNames = names.distinct()
         if (requestedNames.isEmpty()) {
             return RequestedSecretsResult.MissingSecrets(emptyList())
@@ -1314,13 +1347,39 @@ internal class SecretRepository(
         if (secrets.any { it.type != ENVIRONMENT_SECRET_TYPE && it.type != SSH_SECRET_TYPE }) {
             return RequestedSecretsResult.UnsupportedSecretType
         }
+        secrets.firstOrNull { secret ->
+            secret.type == SSH_SECRET_TYPE && environmentSelections[secret.name] != null
+        }?.let { secret ->
+            return RequestedSecretsResult.EnvironmentOptionsForSshSecret(secret.name)
+        }
 
         val variables = dao.getEnvironmentVariablesForSecrets(secrets.map(SecretEntity::id))
+        val variablesBySecret = variables.groupBy(EnvironmentVariableEntity::secretId)
+        for (secret in secrets.filter { it.type == ENVIRONMENT_SECRET_TYPE }) {
+            val only = environmentSelections[secret.name]?.only ?: continue
+            val available = variablesBySecret[secret.id].orEmpty()
+                .mapTo(mutableSetOf(), EnvironmentVariableEntity::name)
+            val missingVariables = (only - available).sorted()
+            if (missingVariables.isNotEmpty()) {
+                return RequestedSecretsResult.MissingEnvironmentVariables(
+                    secretName = secret.name,
+                    names = missingVariables,
+                )
+            }
+        }
         val combinedEnvironment = sortedMapOf<String, String>()
         val secretEnvironments = secrets.associate { secret ->
             secret.id to sortedMapOf<String, String>()
         }
         for (variable in variables) {
+            val secret = secrets.first { it.id == variable.secretId }
+            val selection = environmentSelections[secret.name]
+            val selected = when {
+                selection?.only != null -> variable.name in selection.only
+                selection != null -> variable.name !in selection.omit
+                else -> true
+            }
+            if (!selected) continue
             val value = when (val decrypted = decrypt(variable)) {
                 is DecryptionResult.Plaintext -> try {
                     decrypted.value.decodeToString(throwOnInvalidSequence = true)
