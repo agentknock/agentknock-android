@@ -95,7 +95,8 @@ import dev.agentknock.storage.approval.ApprovalEvaluation
 import dev.agentknock.storage.approval.RequestedSecretApproval
 import dev.agentknock.storage.approval.requiresAiReview
 import dev.agentknock.storage.approval.isFullyApproved
-import dev.agentknock.storage.audit.AuditCategory
+import dev.agentknock.storage.audit.AuditEventType
+import dev.agentknock.storage.audit.AuditDecisionSource
 import dev.agentknock.storage.audit.AuditOutcome
 import dev.agentknock.storage.audit.AuditRecord
 import dev.agentknock.storage.audit.AuditSink
@@ -1772,16 +1773,16 @@ internal class RequestRepository(
         if (pairing.relayClientState != event.state.wireName && !activated) {
             audit.record(
                 AuditRecord(
-                    category = AuditCategory.CLIENT,
-                    title = when (event.state) {
-                        RelayClientState.ACTIVE -> "Client resumed"
-                        RelayClientState.SUSPENDED -> "Client suspended"
-                        RelayClientState.REVOKED -> "Client revoked"
-                        RelayClientState.PENDING -> "Client pending"
+                    type = when (event.state) {
+                        RelayClientState.ACTIVE -> AuditEventType.CLIENT_RESUMED
+                        RelayClientState.SUSPENDED -> AuditEventType.CLIENT_SUSPENDED
+                        RelayClientState.REVOKED -> AuditEventType.CLIENT_REVOKED
+                        RelayClientState.PENDING -> AuditEventType.CLIENT_PENDING
                     },
-                    detail = pairing.friendlyName ?: pairing.hostname ?: pairing.clientId,
                     outcome = AuditOutcome.CHANGED,
+                    subject = pairing.auditClientName(),
                     clientId = pairing.clientId,
+                    clientName = pairing.auditClientName(),
                 ),
             )
         }
@@ -1926,11 +1927,12 @@ internal class RequestRepository(
                 val pairing = pairingForRequest(request)
                 audit.record(
                     AuditRecord(
-                        category = AuditCategory.CLIENT,
-                        title = "Client removal unconfirmed",
-                        detail = pairing?.friendlyName ?: pairing?.hostname.orEmpty(),
+                        type = AuditEventType.CLIENT_REMOVAL_UNCONFIRMED,
                         outcome = AuditOutcome.FAILED,
+                        subject = pairing?.auditClientName(),
+                        detail = message,
                         clientId = pairing?.clientId,
+                        clientName = pairing?.auditClientName(),
                         relayRequestId = request.relayRequestId,
                     ),
                 )
@@ -1987,10 +1989,12 @@ internal class RequestRepository(
             }
             audit.record(
                 AuditRecord(
-                    category = AuditCategory.PAIRING,
-                    title = if (verified) "Pairing code accepted" else "Pairing rejected",
+                    type = AuditEventType.PAIRING_DECIDED,
                     outcome = if (verified) AuditOutcome.APPROVED else AuditOutcome.REJECTED,
+                    decisionSource = AuditDecisionSource.USER,
+                    subject = pairing.auditClientName(),
                     clientId = pairing.clientId,
+                    clientName = pairing.auditClientName(),
                     relayRequestId = request.relayRequestId,
                 ),
             )
@@ -2034,10 +2038,12 @@ internal class RequestRepository(
         )
         audit.record(
             AuditRecord(
-                category = AuditCategory.PAIRING,
-                title = "Pairing rejected",
+                type = AuditEventType.PAIRING_DECIDED,
                 outcome = AuditOutcome.REJECTED,
+                decisionSource = AuditDecisionSource.USER,
+                subject = pairing.auditClientName(),
                 clientId = pairing.clientId,
+                clientName = pairing.auditClientName(),
                 relayRequestId = request.relayRequestId,
             ),
         )
@@ -2250,6 +2256,7 @@ internal class RequestRepository(
                 providedSecretsJson = json.encodeToString(
                     approvalReviewSecretFacts(latestDescription, availableSecrets),
                 ),
+                decisionSource = temporaryGrant?.decisionSource ?: DECISION_SOURCE_USER,
                 authorization = authorization,
             )
             if (decisionResult == SecretUseDecisionResult.Decided && temporaryGrant != null) {
@@ -2378,20 +2385,16 @@ internal class RequestRepository(
         if (!persisted) return SecretUseDecisionResult.SecretsChanged
         audit.record(
             AuditRecord(
-                category = AuditCategory.SECRET_USE,
-                title = when {
-                    decision == SecretUseDecision.APPROVED -> "Secret use approved"
-                    decisionSource == DECISION_SOURCE_POLICY ->
-                        "Secret use denied by approval settings"
-                    else -> "Secret use denied"
-                },
-                detail = decodeStringList(secretUseRequest.secretsJson).joinToString(),
+                type = AuditEventType.SECRET_USE_DECIDED,
                 outcome = if (decision == SecretUseDecision.APPROVED) {
                     AuditOutcome.APPROVED
                 } else {
                     AuditOutcome.DENIED
                 },
+                decisionSource = decisionSource.toAuditDecisionSource(),
+                subject = decodeStringList(secretUseRequest.secretsJson).joinToString(),
                 clientId = secretUseRequest.clientId,
+                clientName = pairing.auditClientName(),
                 relayRequestId = request.relayRequestId,
             ),
         )
@@ -2523,6 +2526,7 @@ internal class RequestRepository(
                 invocation = invocation,
                 decision = SecretUseDecision.APPROVED,
                 responsePlaintext = gitSignProtocol.approvedResponse(signature),
+                decisionSource = temporaryGrant?.decisionSource ?: DECISION_SOURCE_USER,
                 authorization = authorization,
             )
             if (decisionResult == GitSignDecisionResult.Decided && temporaryGrant != null) {
@@ -2664,20 +2668,16 @@ internal class RequestRepository(
         if (!persisted) return GitSignDecisionResult.ApprovalChanged
         audit.record(
             AuditRecord(
-                category = AuditCategory.GIT_SIGN,
-                title = when {
-                    decision == SecretUseDecision.APPROVED -> "Git signature approved"
-                    decisionSource == DECISION_SOURCE_POLICY ->
-                        "Git signature denied by approval settings"
-                    else -> "Git signature denied"
-                },
-                detail = gitSign.secretName,
+                type = AuditEventType.GIT_SIGN_DECIDED,
                 outcome = if (decision == SecretUseDecision.APPROVED) {
                     AuditOutcome.APPROVED
                 } else {
                     AuditOutcome.DENIED
                 },
+                decisionSource = decisionSource.toAuditDecisionSource(),
+                subject = gitSign.secretName,
                 clientId = invocation.clientId,
+                clientName = pairing.auditClientName(),
                 relayRequestId = request.relayRequestId,
             ),
         )
@@ -2827,6 +2827,7 @@ internal class RequestRepository(
             invocation = invocation,
             decision = SecretUseDecision.APPROVED,
             responsePlaintext = sshAuthenticationProtocol.approvedResponse(signature),
+            decisionSource = temporaryGrant?.decisionSource ?: DECISION_SOURCE_USER,
             authorization = description.authorizationCommitment(listOf(policy)),
         )
         if (result == SshAuthenticationDecisionResult.Decided && temporaryGrant != null) {
@@ -2963,20 +2964,18 @@ internal class RequestRepository(
         if (!persisted) return SshAuthenticationDecisionResult.ApprovalChanged
         audit.record(
             AuditRecord(
-                category = AuditCategory.SSH_AUTHENTICATE,
-                title = when {
-                    decision == SecretUseDecision.APPROVED -> "SSH authentication approved"
-                    decisionSource == DECISION_SOURCE_POLICY ->
-                        "SSH authentication denied by approval settings"
-                    else -> "SSH authentication denied"
-                },
-                detail = "${authentication.username} · ${authentication.secretName}",
+                type = AuditEventType.SSH_AUTHENTICATION_DECIDED,
                 outcome = if (decision == SecretUseDecision.APPROVED) {
                     AuditOutcome.APPROVED
                 } else {
                     AuditOutcome.DENIED
                 },
+                decisionSource = decisionSource.toAuditDecisionSource(),
+                subject = authentication.secretName,
+                context = authentication.username,
+                detail = message,
                 clientId = invocation.clientId,
+                clientName = pairing.auditClientName(),
                 relayRequestId = request.relayRequestId,
             ),
         )
@@ -3121,15 +3120,13 @@ internal class RequestRepository(
         )
         audit.record(
             AuditRecord(
-                category = AuditCategory.SECRET_UPLOAD,
-                title = "Secret upload approved",
-                detail = if (uploadRequest.uploadedName == approvedName.trim()) {
-                    approvedName.trim()
-                } else {
-                    "${uploadRequest.uploadedName} → ${approvedName.trim()}"
-                },
+                type = AuditEventType.SECRET_UPLOAD_DECIDED,
                 outcome = AuditOutcome.APPROVED,
+                decisionSource = AuditDecisionSource.USER,
+                subject = approvedName.trim(),
+                detail = uploadRequest.uploadedName.takeUnless { it == approvedName.trim() },
                 clientId = uploadRequest.clientId,
+                clientName = uploadRequest.clientName,
                 relayRequestId = request.relayRequestId,
             ),
         )
@@ -3206,11 +3203,12 @@ internal class RequestRepository(
             )
             audit.record(
                 AuditRecord(
-                    category = AuditCategory.SECRET_UPLOAD,
-                    title = "Secret upload rejected",
-                    detail = upload.uploadedName,
+                    type = AuditEventType.SECRET_UPLOAD_DECIDED,
                     outcome = AuditOutcome.REJECTED,
+                    decisionSource = AuditDecisionSource.USER,
+                    subject = upload.uploadedName,
                     clientId = upload.clientId,
+                    clientName = upload.clientName,
                     relayRequestId = request.relayRequestId,
                 ),
             )
@@ -3226,11 +3224,12 @@ internal class RequestRepository(
             dao.updatePairing(pairing.copy(friendlyName = trimmed, updatedAt = currentTimeMillis()))
             audit.record(
                 AuditRecord(
-                    category = AuditCategory.CLIENT,
-                    title = "Client renamed",
-                    detail = trimmed,
+                    type = AuditEventType.CLIENT_RENAMED,
                     outcome = AuditOutcome.CHANGED,
+                    subject = trimmed,
+                    detail = pairing.auditClientName().takeUnless { it == trimmed },
                     clientId = clientId,
+                    clientName = trimmed,
                 ),
             )
             ClientChangeResult.CHANGED
@@ -3249,11 +3248,11 @@ internal class RequestRepository(
         )
         audit.record(
             AuditRecord(
-                category = AuditCategory.CLIENT,
-                title = "Client instructions changed",
-                detail = pairing.friendlyName ?: pairing.hostname ?: pairing.clientId,
+                type = AuditEventType.CLIENT_INSTRUCTIONS_CHANGED,
                 outcome = AuditOutcome.CHANGED,
+                subject = pairing.auditClientName(),
                 clientId = clientId,
+                clientName = pairing.auditClientName(),
             ),
         )
         ClientChangeResult.CHANGED
@@ -3816,22 +3815,16 @@ internal class RequestRepository(
         } else {
             dao.updateSecretUseRequest(finalRequest, finalSecretUse)
         }
-        if (aiReview != null && automaticDecision == null) {
+        if (aiReview != null) {
             audit.record(
                 AuditRecord(
-                    category = AuditCategory.SECRET_USE,
-                    title = if (aiReview.decision == AiReviewDecision.ASK_USER) {
-                        "AI review deferred to user"
-                    } else {
-                        "AI review unavailable"
-                    },
-                    detail = aiReview.explanation.orEmpty(),
-                    outcome = if (aiReview.failure == null) {
-                        AuditOutcome.RECEIVED
-                    } else {
-                        AuditOutcome.FAILED
-                    },
+                    type = AuditEventType.SECRET_USE_AI_REVIEWED,
+                    outcome = aiReview.auditOutcome(),
+                    decisionSource = AuditDecisionSource.AI_REVIEW,
+                    subject = contents.secrets.joinToString(),
+                    detail = aiReview.auditExplanation(),
                     clientId = pairing.clientId,
+                    clientName = pairing.auditClientName(),
                     relayRequestId = relayRequestId,
                 ),
             )
@@ -3839,37 +3832,35 @@ internal class RequestRepository(
         if (automaticDecision != null) {
             audit.record(
                 AuditRecord(
-                    category = AuditCategory.SECRET_USE,
-                    title = when {
-                        automaticDecision == SecretUseDecision.APPROVED ->
-                            if (currentDescription.containsSensitiveMaterial) {
-                                if (aiApprovalUsed && temporaryAccessUsed) {
-                                    "Secret use approved by AI review and temporary access"
-                                } else if (aiApproved) {
-                                    "Secret use approved by AI review"
-                                } else if (temporaryAccessUsed) {
-                                    "Secret use approved using temporary access"
-                                } else {
-                                    "Secret use approved automatically"
-                                }
-                            } else {
-                                "Non-sensitive data provided automatically"
-                            }
-                        aiDenial != null -> "Secret use denied by AI review"
-                        policyDenial != null -> "Secret use denied by approval settings"
-                        else -> "Secret use rejected automatically"
-                    },
-                    detail = when {
-                        aiReview != null && (aiApprovalUsed || aiDenial != null) ->
-                            aiReview.auditExplanation()
-                        else -> denial?.second ?: contents.secrets.joinToString()
-                    },
+                    type = AuditEventType.SECRET_USE_DECIDED,
                     outcome = when {
                         automaticDecision == SecretUseDecision.APPROVED -> AuditOutcome.APPROVED
-                        policyDenial != null || aiDenial != null -> AuditOutcome.DENIED
-                        else -> AuditOutcome.REJECTED
+                        denial?.first == InvocationDenialReason.INVALID_REQUEST ->
+                            AuditOutcome.REJECTED
+                        aiDenial != null || policyDenial != null -> AuditOutcome.DENIED
+                        else -> AuditOutcome.FAILED
+                    },
+                    decisionSource = when {
+                        automaticDecision == SecretUseDecision.APPROVED &&
+                            !currentDescription.containsSensitiveMaterial ->
+                            AuditDecisionSource.NON_SENSITIVE
+                        denial?.first == InvocationDenialReason.INVALID_REQUEST ->
+                            AuditDecisionSource.VALIDATION
+                        aiApprovalUsed && temporaryAccessUsed -> AuditDecisionSource.MIXED
+                        aiApproved || aiDenial != null -> AuditDecisionSource.AI_REVIEW
+                        temporaryAccessUsed -> AuditDecisionSource.TEMPORARY_ACCESS
+                        policyDenial != null || allProtectedUsesApproved ->
+                            AuditDecisionSource.APPROVAL_SETTINGS
+                        else -> null
+                    },
+                    subject = contents.secrets.joinToString(),
+                    detail = if (aiReview != null && (aiApprovalUsed || aiDenial != null)) {
+                        aiReview.auditExplanation()
+                    } else {
+                        denial?.second
                     },
                     clientId = pairing.clientId,
+                    clientName = pairing.auditClientName(),
                     relayRequestId = relayRequestId,
                 ),
             )
@@ -3889,11 +3880,47 @@ internal class RequestRepository(
     ) {
         audit.record(
             AuditRecord(
-                category = AuditCategory.SECRET_USE,
-                title = "Secret use requested",
-                detail = contents.secrets.joinToString(),
+                type = AuditEventType.SECRET_USE_RECEIVED,
                 outcome = AuditOutcome.RECEIVED,
+                subject = contents.secrets.joinToString(),
                 clientId = pairing.clientId,
+                clientName = pairing.auditClientName(),
+                relayRequestId = relayRequestId,
+            ),
+        )
+    }
+
+    private suspend fun recordGitSignRequested(
+        pairing: PairingEntity,
+        relayRequestId: String,
+        secretName: String,
+    ) {
+        audit.record(
+            AuditRecord(
+                type = AuditEventType.GIT_SIGN_RECEIVED,
+                outcome = AuditOutcome.RECEIVED,
+                subject = secretName,
+                clientId = pairing.clientId,
+                clientName = pairing.auditClientName(),
+                relayRequestId = relayRequestId,
+            ),
+        )
+    }
+
+    private suspend fun recordSshAuthenticationRequested(
+        pairing: PairingEntity,
+        relayRequestId: String,
+        secretName: String,
+        username: String,
+    ) {
+        audit.record(
+            AuditRecord(
+                type = AuditEventType.SSH_AUTHENTICATION_RECEIVED,
+                outcome = AuditOutcome.RECEIVED,
+                subject = secretName,
+                context = username,
+                clientId = pairing.clientId,
+                clientName = pairing.auditClientName(),
                 relayRequestId = relayRequestId,
             ),
         )
@@ -4002,7 +4029,9 @@ internal class RequestRepository(
                     requestSecret = acceptedSecrets.requestSecret,
                     currentPairingSecret = acceptedSecrets.currentPairingSecret,
                     previousPairingSecret = acceptedSecrets.previousPairingSecret,
-                )
+                ).also {
+                    recordGitSignRequested(pairing, relayRequestId, contents.secret)
+                }
             } catch (failure: Throwable) {
                 aiReviewInFlight.update { it - relayRequestId }
                 throw failure
@@ -4080,14 +4109,15 @@ internal class RequestRepository(
                 null
             },
         )
-        if (
+        val approvalSettingsDenied =
             denial == null &&
             evaluation?.secrets?.any { it.action == ApprovalAction.DENY } == true
-        ) {
+        if (approvalSettingsDenied) {
             denial = InvocationDenialReason.POLICY_DENIED to
                 "Approval settings denied use of the SSH key."
         }
-        if (denial == null && aiReview?.decision == AiReviewDecision.DENY) {
+        val aiDenied = denial == null && aiReview?.decision == AiReviewDecision.DENY
+        if (aiDenied) {
             denial = InvocationDenialReason.POLICY_DENIED to
                 "AI review denied use of the SSH key."
         }
@@ -4193,6 +4223,7 @@ internal class RequestRepository(
                 )
             }
             if (automaticDecision == SecretUseDecision.APPROVED && inserted == null) return null
+            recordGitSignRequested(pairing, relayRequestId, contents.secret)
         } else if (automaticDecision == SecretUseDecision.APPROVED) {
             val updated = dao.updateGitSignRequestIfAuthorized(
                 request = finalRequest,
@@ -4206,58 +4237,59 @@ internal class RequestRepository(
         } else {
             dao.updateGitSignRequest(finalRequest, finalGitSign)
         }
-        if (aiReview != null && automaticDecision == null) {
+        if (aiReview != null) {
             audit.record(
                 AuditRecord(
-                    category = AuditCategory.GIT_SIGN,
-                    title = if (aiReview.decision == AiReviewDecision.ASK_USER) {
-                        "AI review deferred Git signing to user"
-                    } else {
-                        "AI review unavailable for Git signing"
-                    },
-                    detail = aiReview.explanation.orEmpty(),
-                    outcome = if (aiReview.failure == null) {
-                        AuditOutcome.RECEIVED
-                    } else {
-                        AuditOutcome.FAILED
-                    },
+                    type = AuditEventType.GIT_SIGN_AI_REVIEWED,
+                    outcome = aiReview.auditOutcome(),
+                    decisionSource = AuditDecisionSource.AI_REVIEW,
+                    subject = contents.secret,
+                    detail = aiReview.auditExplanation(),
                     clientId = pairing.clientId,
+                    clientName = pairing.auditClientName(),
                     relayRequestId = relayRequestId,
                 ),
             )
         }
-        audit.record(
-            AuditRecord(
-                category = AuditCategory.GIT_SIGN,
-                title = when {
-                    signature != null && aiReview?.decision == AiReviewDecision.APPROVE ->
-                        "Git signature approved by AI review"
-                    signature != null && temporaryAccessUsed ->
-                        "Git signature approved using temporary access"
-                    signature != null -> "Git signature approved automatically"
-                    denial != null && aiReview?.decision == AiReviewDecision.DENY ->
-                        "Git signature denied by AI review"
-                    denial != null -> "Git signature rejected automatically"
-                    else -> "Git signature requested"
-                },
-                detail = if (
-                    aiReview != null &&
-                    (signature != null || denial != null) &&
-                    aiReview.decision != AiReviewDecision.ASK_USER
-                ) {
-                    aiReview.auditExplanation()
-                } else {
-                    contents.secret
-                },
-                outcome = when {
-                    signature != null -> AuditOutcome.APPROVED
-                    denial != null -> AuditOutcome.DENIED
-                    else -> AuditOutcome.RECEIVED
-                },
-                clientId = pairing.clientId,
-                relayRequestId = relayRequestId,
-            ),
-        )
+        if (automaticDecision != null) {
+            audit.record(
+                AuditRecord(
+                    type = AuditEventType.GIT_SIGN_DECIDED,
+                    outcome = when {
+                        signature != null -> AuditOutcome.APPROVED
+                        aiDenied || approvalSettingsDenied -> AuditOutcome.DENIED
+                        denial?.first == InvocationDenialReason.INVALID_REQUEST ->
+                            AuditOutcome.REJECTED
+                        else -> AuditOutcome.FAILED
+                    },
+                    decisionSource = when {
+                        signature != null && aiReview?.decision == AiReviewDecision.APPROVE &&
+                            temporaryAccessUsed -> AuditDecisionSource.MIXED
+                        signature != null && aiReview?.decision == AiReviewDecision.APPROVE ->
+                            AuditDecisionSource.AI_REVIEW
+                        signature != null && temporaryAccessUsed ->
+                            AuditDecisionSource.TEMPORARY_ACCESS
+                        signature != null -> AuditDecisionSource.APPROVAL_SETTINGS
+                        aiDenied -> AuditDecisionSource.AI_REVIEW
+                        approvalSettingsDenied -> AuditDecisionSource.APPROVAL_SETTINGS
+                        denial?.first == InvocationDenialReason.INVALID_REQUEST ->
+                            AuditDecisionSource.VALIDATION
+                        else -> null
+                    },
+                    subject = contents.secret,
+                    detail = if (
+                        aiReview != null && aiReview.decision != AiReviewDecision.ASK_USER
+                    ) {
+                        aiReview.auditExplanation()
+                    } else {
+                        denial?.second
+                    },
+                    clientId = pairing.clientId,
+                    clientName = pairing.auditClientName(),
+                    relayRequestId = relayRequestId,
+                ),
+            )
+        }
         return ProcessedRelayMessage(response)
         } finally {
             pendingRequestId?.let {
@@ -4382,7 +4414,14 @@ internal class RequestRepository(
                     requestSecret = acceptedSecrets.requestSecret,
                     currentPairingSecret = acceptedSecrets.currentPairingSecret,
                     previousPairingSecret = acceptedSecrets.previousPairingSecret,
-                )
+                ).also {
+                    recordSshAuthenticationRequested(
+                        pairing = pairing,
+                        relayRequestId = relayRequestId,
+                        secretName = contents.secret,
+                        username = messageDetails.username,
+                    )
+                }
             } catch (failure: Throwable) {
                 aiReviewInFlight.update { it - relayRequestId }
                 throw failure
@@ -4461,19 +4500,22 @@ internal class RequestRepository(
                     null
                 },
             )
-            if (
+            val approvalSettingsDenied =
                 denial == null &&
                 evaluation?.secrets?.any { it.action == ApprovalAction.DENY } == true
-            ) {
+            if (approvalSettingsDenied) {
                 denial = InvocationDenialReason.POLICY_DENIED to
                     "Approval settings denied SSH authentication."
             }
-            if (denial == null && aiReview?.decision == AiReviewDecision.DENY) {
+            val aiDenied = denial == null && aiReview?.decision == AiReviewDecision.DENY
+            if (aiDenied) {
                 denial = InvocationDenialReason.POLICY_DENIED to
                     "AI review denied SSH authentication."
             }
             val shouldApprove = !aiInputsChanged && denial == null &&
                 evaluation?.isFullyApproved(aiReview?.decision) == true
+            val temporaryAccessUsed = evaluation?.secrets
+                ?.any { it.temporaryAccessExpiresAt != null } == true
             var signature: ByteArray? = null
             if (shouldApprove) {
                 when (
@@ -4578,6 +4620,12 @@ internal class RequestRepository(
                 if (automaticDecision == SecretUseDecision.APPROVED && inserted == null) {
                     return null
                 }
+                recordSshAuthenticationRequested(
+                    pairing = pairing,
+                    relayRequestId = relayRequestId,
+                    secretName = contents.secret,
+                    username = messageDetails.username,
+                )
             } else if (automaticDecision == SecretUseDecision.APPROVED) {
                 val updated = dao.updateSshAuthenticationRequestIfAuthorized(
                     request = finalRequest,
@@ -4591,30 +4639,57 @@ internal class RequestRepository(
             } else {
                 dao.updateSshAuthenticationRequest(finalRequest, finalAuthentication)
             }
-            audit.record(
-                AuditRecord(
-                    category = AuditCategory.SSH_AUTHENTICATE,
-                    title = when {
-                        signature != null && aiReview?.decision == AiReviewDecision.APPROVE ->
-                            "SSH authentication approved by AI review"
-                        signature != null -> "SSH authentication approved automatically"
-                        denial != null && aiReview?.decision == AiReviewDecision.DENY ->
-                            "SSH authentication denied by AI review"
-                        denial != null -> "SSH authentication rejected automatically"
-                        else -> "SSH authentication requested"
-                    },
-                    detail = aiReview?.takeIf {
-                        automaticDecision != null && it.decision != AiReviewDecision.ASK_USER
-                    }?.auditExplanation() ?: "${contents.secret} as ${messageDetails.username}",
-                    outcome = when {
-                        signature != null -> AuditOutcome.APPROVED
-                        denial != null -> AuditOutcome.DENIED
-                        else -> AuditOutcome.RECEIVED
-                    },
-                    clientId = pairing.clientId,
-                    relayRequestId = relayRequestId,
-                ),
-            )
+            if (aiReview != null) {
+                audit.record(
+                    AuditRecord(
+                        type = AuditEventType.SSH_AUTHENTICATION_AI_REVIEWED,
+                        outcome = aiReview.auditOutcome(),
+                        decisionSource = AuditDecisionSource.AI_REVIEW,
+                        subject = contents.secret,
+                        context = messageDetails.username,
+                        detail = aiReview.auditExplanation(),
+                        clientId = pairing.clientId,
+                        clientName = pairing.auditClientName(),
+                        relayRequestId = relayRequestId,
+                    ),
+                )
+            }
+            if (automaticDecision != null) {
+                audit.record(
+                    AuditRecord(
+                        type = AuditEventType.SSH_AUTHENTICATION_DECIDED,
+                        outcome = when {
+                            signature != null -> AuditOutcome.APPROVED
+                            aiDenied || approvalSettingsDenied -> AuditOutcome.DENIED
+                            denial?.first == InvocationDenialReason.INVALID_REQUEST ->
+                                AuditOutcome.REJECTED
+                            else -> AuditOutcome.FAILED
+                        },
+                        decisionSource = when {
+                            signature != null && aiReview?.decision == AiReviewDecision.APPROVE &&
+                                temporaryAccessUsed -> AuditDecisionSource.MIXED
+                            signature != null && aiReview?.decision == AiReviewDecision.APPROVE ->
+                                AuditDecisionSource.AI_REVIEW
+                            signature != null && temporaryAccessUsed ->
+                                AuditDecisionSource.TEMPORARY_ACCESS
+                            signature != null -> AuditDecisionSource.APPROVAL_SETTINGS
+                            aiDenied -> AuditDecisionSource.AI_REVIEW
+                            approvalSettingsDenied -> AuditDecisionSource.APPROVAL_SETTINGS
+                            denial?.first == InvocationDenialReason.INVALID_REQUEST ->
+                                AuditDecisionSource.VALIDATION
+                            else -> null
+                        },
+                        subject = contents.secret,
+                        context = messageDetails.username,
+                        detail = aiReview?.takeIf {
+                            it.decision != AiReviewDecision.ASK_USER
+                        }?.auditExplanation() ?: denial?.second,
+                        clientId = pairing.clientId,
+                        clientName = pairing.auditClientName(),
+                        relayRequestId = relayRequestId,
+                    ),
+                )
+            }
             return ProcessedRelayMessage(response)
         } finally {
             pendingRequestId?.let { aiReviewInFlight.update { it - relayRequestId } }
@@ -4864,11 +4939,12 @@ internal class RequestRepository(
         )
         audit.record(
             AuditRecord(
-                category = AuditCategory.SECRET_LIST,
-                title = "Secret list requested",
-                detail = "${secretMetadata.size} secrets",
+                type = AuditEventType.SECRET_LIST_RECEIVED,
                 outcome = AuditOutcome.RECEIVED,
+                subject = "${secretMetadata.size} secrets",
+                detail = secretMetadata.joinToString { "${it.name} (${it.type})" },
                 clientId = pairing.clientId,
+                clientName = pairing.auditClientName(),
                 relayRequestId = relayRequestId,
             ),
         )
@@ -5058,19 +5134,17 @@ internal class RequestRepository(
         )
         audit.record(
             AuditRecord(
-                category = AuditCategory.SECRET_UPLOAD,
-                title = if (prepared.error == null) {
-                    "Secret upload received"
-                } else {
-                    "Secret upload rejected automatically"
-                },
-                detail = prepared.error ?: contents.name,
+                type = AuditEventType.SECRET_UPLOAD_RECEIVED,
                 outcome = if (prepared.error == null) {
                     AuditOutcome.RECEIVED
                 } else {
                     AuditOutcome.REJECTED
                 },
+                decisionSource = prepared.error?.let { AuditDecisionSource.VALIDATION },
+                subject = contents.name,
+                detail = prepared.error,
                 clientId = pairing.clientId,
+                clientName = pairing.auditClientName(),
                 relayRequestId = relayRequestId,
             ),
         )
@@ -5173,11 +5247,12 @@ internal class RequestRepository(
         )
         audit.record(
             AuditRecord(
-                category = AuditCategory.VERIFICATION,
-                title = "Request rejected",
-                detail = code.message,
+                type = AuditEventType.REQUEST_REJECTED,
                 outcome = AuditOutcome.REJECTED,
+                decisionSource = AuditDecisionSource.VALIDATION,
+                detail = code.message,
                 clientId = pairing.clientId,
+                clientName = pairing.auditClientName(),
                 relayRequestId = relayRequestId,
             ),
         )
@@ -5256,8 +5331,7 @@ internal class RequestRepository(
         )
         audit.record(
             AuditRecord(
-                category = AuditCategory.PAIRING,
-                title = "Pairing requested",
+                type = AuditEventType.PAIRING_REQUESTED,
                 outcome = AuditOutcome.RECEIVED,
                 clientId = message.clientId,
                 relayRequestId = message.requestId,
@@ -5472,10 +5546,11 @@ internal class RequestRepository(
         )
         audit.record(
             AuditRecord(
-                category = AuditCategory.PAIRING,
-                title = "Pairing completed",
+                type = AuditEventType.PAIRING_COMPLETED,
                 outcome = AuditOutcome.COMPLETED,
+                subject = pairing.auditClientName(),
                 clientId = pairing.clientId,
+                clientName = pairing.auditClientName(),
                 relayRequestId = rootRequest.relayRequestId,
             ),
         )
@@ -5616,11 +5691,13 @@ internal class RequestRepository(
         )
         audit.record(
             AuditRecord(
-                category = if (valid) AuditCategory.SECRET_LIST else AuditCategory.VERIFICATION,
-                title = if (valid) "Secret list delivered" else "Secret list confirmation failed",
-                detail = "${json.decodeFromString<List<SecretMetadata>>(secretListRequest.secretsJson).size} secrets",
+                type = AuditEventType.SECRET_LIST_COMPLETED,
                 outcome = if (valid) AuditOutcome.COMPLETED else AuditOutcome.FAILED,
+                subject = "${json.decodeFromString<List<SecretMetadata>>(secretListRequest.secretsJson).size} secrets",
+                detail = if (valid) null else decoded.exceptionOrNull()?.message
+                    ?: "Secret list completion did not match the request.",
                 clientId = secretListRequest.clientId,
+                clientName = pairing.auditClientName(),
                 relayRequestId = request.relayRequestId,
             ),
         )
@@ -5678,19 +5755,13 @@ internal class RequestRepository(
         )
         audit.record(
             AuditRecord(
-                category = if (valid) {
-                    AuditCategory.SECRET_UPLOAD
-                } else {
-                    AuditCategory.VERIFICATION
-                },
-                title = if (valid) {
-                    "Client received upload result"
-                } else {
-                    "Secret upload confirmation failed"
-                },
-                detail = upload.uploadedName,
+                type = AuditEventType.SECRET_UPLOAD_COMPLETED,
                 outcome = if (valid) AuditOutcome.COMPLETED else AuditOutcome.FAILED,
+                subject = upload.uploadedName,
+                detail = if (valid) null else decoded.exceptionOrNull()?.message
+                    ?: "The client completion did not match the received upload.",
                 clientId = upload.clientId,
+                clientName = upload.clientName,
                 relayRequestId = request.relayRequestId,
             ),
         )
@@ -5718,8 +5789,8 @@ internal class RequestRepository(
                 completion = completion,
             )
         }.getOrNull() ?: return null
-        val verified = runCatching { pairingRemoveProtocol.decodeCompletion(plaintext) }.isSuccess
-        if (verified) {
+        val verification = runCatching { pairingRemoveProtocol.decodeCompletion(plaintext) }
+        if (verification.isSuccess) {
             completePairingRemoval(request, pairing, completion)
         } else {
             val now = currentTimeMillis()
@@ -5734,10 +5805,13 @@ internal class RequestRepository(
             )
             audit.record(
                 AuditRecord(
-                    category = AuditCategory.VERIFICATION,
-                    title = "Client removal confirmation failed",
+                    type = AuditEventType.CLIENT_REMOVAL_CONFIRMATION_FAILED,
                     outcome = AuditOutcome.FAILED,
+                    subject = pairing.auditClientName(),
+                    detail = verification.exceptionOrNull()?.message
+                        ?: "Client removal completion could not be verified.",
                     clientId = pairing.clientId,
+                    clientName = pairing.auditClientName(),
                     relayRequestId = request.relayRequestId,
                 ),
             )
@@ -5778,11 +5852,11 @@ internal class RequestRepository(
         if (firstCompletion) {
             audit.record(
                 AuditRecord(
-                    category = AuditCategory.CLIENT,
-                    title = "Client unpaired itself",
-                    detail = pairing.friendlyName ?: pairing.hostname ?: pairing.clientId,
+                    type = AuditEventType.CLIENT_UNPAIRED_ITSELF,
                     outcome = AuditOutcome.COMPLETED,
+                    subject = pairing.auditClientName(),
                     clientId = pairing.clientId,
+                    clientName = pairing.auditClientName(),
                     relayRequestId = request.relayRequestId,
                 ),
             )
@@ -5891,22 +5965,26 @@ internal class RequestRepository(
         )
         audit.record(
             AuditRecord(
-                category = if (valid) AuditCategory.SECRET_USE else AuditCategory.VERIFICATION,
-                title = when {
-                    !valid -> "Secret use confirmation failed"
-                    completionResult is InvocationCompletion.Approved ->
-                        "Client received secret data"
-                    completionResult is InvocationCompletion.Denied -> "Client received denial"
-                    else -> "Secret use aborted"
-                },
-                detail = decodeStringList(secretUseRequest.secretsJson).joinToString(),
+                type = AuditEventType.SECRET_USE_COMPLETED,
                 outcome = when {
                     !valid -> AuditOutcome.FAILED
+                    completionResult is InvocationCompletion.Approved -> AuditOutcome.COMPLETED
                     completionResult is InvocationCompletion.Denied -> AuditOutcome.DENIED
-                    completionResult is InvocationCompletion.Aborted -> AuditOutcome.ABORTED
-                    else -> AuditOutcome.COMPLETED
+                    else -> AuditOutcome.ABORTED
+                },
+                subject = decodeStringList(secretUseRequest.secretsJson).joinToString(),
+                detail = if (!valid) {
+                    decoded.exceptionOrNull()?.message
+                        ?: "Secret use completion did not match the device decision."
+                } else {
+                    when (completionResult) {
+                        is InvocationCompletion.Denied -> completionResult.message
+                        is InvocationCompletion.Aborted -> completionResult.message
+                        else -> null
+                    }
                 },
                 clientId = secretUseRequest.clientId,
+                clientName = secretUseRequest.clientName,
                 relayRequestId = request.relayRequestId,
             ),
         )
@@ -6009,23 +6087,26 @@ internal class RequestRepository(
         )
         audit.record(
             AuditRecord(
-                category = if (valid) AuditCategory.GIT_SIGN else AuditCategory.VERIFICATION,
-                title = when {
-                    !valid -> "Git signature confirmation failed"
-                    completionResult is GitSignCompletion.Approved ->
-                        "Client received signature"
-                    completionResult is GitSignCompletion.Denied ->
-                        "Client received signature denial"
-                    else -> "Git signature request aborted"
-                },
-                detail = gitSign.secretName,
+                type = AuditEventType.GIT_SIGN_COMPLETED,
                 outcome = when {
                     !valid -> AuditOutcome.FAILED
+                    completionResult is GitSignCompletion.Approved -> AuditOutcome.COMPLETED
                     completionResult is GitSignCompletion.Denied -> AuditOutcome.DENIED
-                    completionResult is GitSignCompletion.Aborted -> AuditOutcome.ABORTED
-                    else -> AuditOutcome.COMPLETED
+                    else -> AuditOutcome.ABORTED
+                },
+                subject = gitSign.secretName,
+                detail = if (!valid) {
+                    decoded.exceptionOrNull()?.message
+                        ?: "Git signing completion did not match the device decision."
+                } else {
+                    when (completionResult) {
+                        is GitSignCompletion.Denied -> completionResult.message
+                        is GitSignCompletion.Aborted -> completionResult.message
+                        else -> null
+                    }
                 },
                 clientId = invocation.clientId,
+                clientName = invocation.clientName,
                 relayRequestId = request.relayRequestId,
             ),
         )
@@ -6130,27 +6211,28 @@ internal class RequestRepository(
         )
         audit.record(
             AuditRecord(
-                category = if (valid) {
-                    AuditCategory.SSH_AUTHENTICATE
-                } else {
-                    AuditCategory.VERIFICATION
-                },
-                title = when {
-                    !valid -> "SSH authentication confirmation failed"
-                    completionResult is SshAuthenticationCompletion.Approved ->
-                        "Client received SSH signature"
-                    completionResult is SshAuthenticationCompletion.Denied ->
-                        "Client received SSH authentication denial"
-                    else -> "SSH authentication request aborted"
-                },
-                detail = "${authentication.username} · ${authentication.secretName}",
+                type = AuditEventType.SSH_AUTHENTICATION_COMPLETED,
                 outcome = when {
                     !valid -> AuditOutcome.FAILED
+                    completionResult is SshAuthenticationCompletion.Approved ->
+                        AuditOutcome.COMPLETED
                     completionResult is SshAuthenticationCompletion.Denied -> AuditOutcome.DENIED
-                    completionResult is SshAuthenticationCompletion.Aborted -> AuditOutcome.ABORTED
-                    else -> AuditOutcome.COMPLETED
+                    else -> AuditOutcome.ABORTED
+                },
+                subject = authentication.secretName,
+                context = authentication.username,
+                detail = if (!valid) {
+                    decoded.exceptionOrNull()?.message
+                        ?: "SSH authentication completion did not match the device decision."
+                } else {
+                    when (completionResult) {
+                        is SshAuthenticationCompletion.Denied -> completionResult.message
+                        is SshAuthenticationCompletion.Aborted -> completionResult.message
+                        else -> null
+                    }
                 },
                 clientId = invocation.clientId,
+                clientName = invocation.clientName,
                 relayRequestId = request.relayRequestId,
             ),
         )
@@ -6194,14 +6276,12 @@ internal class RequestRepository(
         )
         audit.record(
             AuditRecord(
-                category = if (accepted) AuditCategory.PAIRING else AuditCategory.VERIFICATION,
-                title = if (accepted) {
-                    "Client confirmed pairing"
-                } else {
-                    "Client pairing confirmation was not understood"
-                },
+                type = AuditEventType.PAIRING_CONFIRMATION_RECEIVED,
                 outcome = if (accepted) AuditOutcome.COMPLETED else AuditOutcome.FAILED,
+                subject = pairing.auditClientName(),
+                detail = if (accepted) null else "The client did not accept the pairing.",
                 clientId = pairing.clientId,
+                clientName = pairing.auditClientName(),
                 relayRequestId = finishRequest.relayRequestId,
             ),
         )
@@ -6828,6 +6908,29 @@ private fun AiReview.auditExplanation(): String = explanation
     ?.replace("`", "")
     ?.takeIf(String::isNotBlank)
     ?: "AI review did not provide an explanation."
+
+private fun AiReview.auditOutcome(): AuditOutcome = when {
+    failure != null -> AuditOutcome.FAILED
+    decision == AiReviewDecision.APPROVE -> AuditOutcome.APPROVED
+    decision == AiReviewDecision.DENY -> AuditOutcome.DENIED
+    decision == AiReviewDecision.ASK_USER -> AuditOutcome.DEFERRED
+    else -> AuditOutcome.FAILED
+}
+
+private fun PairingEntity.auditClientName(): String =
+    sequenceOf(friendlyName, hostname, clientId)
+        .filterNotNull()
+        .first(String::isNotBlank)
+
+private fun String.toAuditDecisionSource(): AuditDecisionSource = when (this) {
+    "user" -> AuditDecisionSource.USER
+    "policy" -> AuditDecisionSource.APPROVAL_SETTINGS
+    "ai" -> AuditDecisionSource.AI_REVIEW
+    "non_sensitive" -> AuditDecisionSource.NON_SENSITIVE
+    "temporary_access" -> AuditDecisionSource.TEMPORARY_ACCESS
+    "mixed" -> AuditDecisionSource.MIXED
+    else -> error("Unknown decision source: $this")
+}
 
 private enum class RequestKind(val storedName: String) {
     PAIRING("pairing"),

@@ -2,7 +2,7 @@
   "formatVersion": 1,
   "database": {
     "version": 1,
-    "identityHash": "7ac4aa30dbc8b689c22615a4ec71f742",
+    "identityHash": "c64e98cf2191042d1b0ba8375289da2f",
     "entities": [
       {
         "tableName": "vault_keys",
@@ -2357,7 +2357,7 @@
       },
       {
         "tableName": "audit_events",
-        "createSql": "CREATE TABLE IF NOT EXISTS `${TABLE_NAME}` (`id` INTEGER PRIMARY KEY AUTOINCREMENT NOT NULL, `occurred_at` INTEGER NOT NULL, `category` TEXT NOT NULL, `title` TEXT NOT NULL, `detail` TEXT NOT NULL, `outcome` TEXT NOT NULL, `client_id` TEXT, `relay_request_id` TEXT)",
+        "createSql": "CREATE TABLE IF NOT EXISTS `${TABLE_NAME}` (`id` INTEGER PRIMARY KEY AUTOINCREMENT NOT NULL, `occurred_at` INTEGER NOT NULL, `event_type` TEXT NOT NULL, `subject` TEXT, `context` TEXT, `detail` TEXT, `outcome` TEXT NOT NULL, `decision_source` TEXT, `expires_at` INTEGER, `client_id` TEXT, `client_name` TEXT, `relay_request_id` TEXT)",
         "fields": [
           {
             "fieldPath": "id",
@@ -2372,22 +2372,25 @@
             "notNull": true
           },
           {
-            "fieldPath": "category",
-            "columnName": "category",
+            "fieldPath": "eventType",
+            "columnName": "event_type",
             "affinity": "TEXT",
             "notNull": true
           },
           {
-            "fieldPath": "title",
-            "columnName": "title",
-            "affinity": "TEXT",
-            "notNull": true
+            "fieldPath": "subject",
+            "columnName": "subject",
+            "affinity": "TEXT"
+          },
+          {
+            "fieldPath": "context",
+            "columnName": "context",
+            "affinity": "TEXT"
           },
           {
             "fieldPath": "detail",
             "columnName": "detail",
-            "affinity": "TEXT",
-            "notNull": true
+            "affinity": "TEXT"
           },
           {
             "fieldPath": "outcome",
@@ -2396,8 +2399,23 @@
             "notNull": true
           },
           {
+            "fieldPath": "decisionSource",
+            "columnName": "decision_source",
+            "affinity": "TEXT"
+          },
+          {
+            "fieldPath": "expiresAt",
+            "columnName": "expires_at",
+            "affinity": "INTEGER"
+          },
+          {
             "fieldPath": "clientId",
             "columnName": "client_id",
+            "affinity": "TEXT"
+          },
+          {
+            "fieldPath": "clientName",
+            "columnName": "client_name",
             "affinity": "TEXT"
           },
           {
@@ -2416,7 +2434,7 @@
     ],
     "setupQueries": [
       "CREATE TABLE IF NOT EXISTS room_master_table (id INTEGER PRIMARY KEY,identity_hash TEXT)",
-      "INSERT OR REPLACE INTO room_master_table (id,identity_hash) VALUES(42, '7ac4aa30dbc8b689c22615a4ec71f742')"
+      "INSERT OR REPLACE INTO room_master_table (id,identity_hash) VALUES(42, 'c64e98cf2191042d1b0ba8375289da2f')"
     ]
   }
 }

@@ -7,8 +7,6 @@ import dev.agentknock.AgentknockApplication
 import dev.agentknock.storage.FactoryResetResult
 import dev.agentknock.storage.crypto.VaultProtection
 import dev.agentknock.storage.audit.AuditEvent
-import dev.agentknock.storage.request.ClientSummary
-import dev.agentknock.storage.request.InboxRequestSummary
 import dev.agentknock.storage.vault.DeviceConfiguration
 import kotlinx.coroutines.ExperimentalCoroutinesApi
 import kotlinx.coroutines.flow.MutableStateFlow
@@ -44,16 +42,6 @@ internal class SettingsViewModel(application: Application) : AndroidViewModel(ap
         )
     }.stateIn(viewModelScope, SharingStarted.Eagerly, DataCounts())
     val auditEvents: StateFlow<List<AuditEvent>> = container.audit.observeEvents().stateIn(
-        viewModelScope,
-        SharingStarted.Eagerly,
-        emptyList(),
-    )
-    val clients: StateFlow<List<ClientSummary>> = container.requests.observeClients().stateIn(
-        viewModelScope,
-        SharingStarted.Eagerly,
-        emptyList(),
-    )
-    val requests: StateFlow<List<InboxRequestSummary>> = container.requests.observeRequests().stateIn(
         viewModelScope,
         SharingStarted.Eagerly,
         emptyList(),

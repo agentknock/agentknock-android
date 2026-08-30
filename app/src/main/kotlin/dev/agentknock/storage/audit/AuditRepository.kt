@@ -3,26 +3,75 @@ package dev.agentknock.storage.audit
 import kotlinx.coroutines.flow.Flow
 import kotlinx.coroutines.flow.map
 
-internal enum class AuditCategory(
-    val storedName: String,
-    val displayName: String = storedName.replace('_', ' ').replaceFirstChar(Char::uppercase),
-) {
-    PAIRING("pairing"),
-    SECRET_USE("secret_use"),
-    GIT_SIGN("git_sign"),
-    SSH_AUTHENTICATE("ssh_authenticate", "SSH authentication"),
-    SECRET_LIST("secret_list"),
-    SECRET_UPLOAD("secret_upload"),
-    CLIENT("client"),
-    SECRET("secret"),
-    DEVICE("device"),
-    VERIFICATION("verification"),
-    APPROVAL("approval"),
-    // Old events retain their stored value, but use the current product terminology.
-    RULE("rule", "Approval"),
+internal enum class AuditEventType(val code: String) {
+    CLIENT_RESUMED("client_resumed"),
+    CLIENT_SUSPENDED("client_suspended"),
+    CLIENT_REVOKED("client_revoked"),
+    CLIENT_PENDING("client_pending"),
+    CLIENT_REMOVAL_UNCONFIRMED("client_removal_unconfirmed"),
+    CLIENT_RENAMED("client_renamed"),
+    CLIENT_INSTRUCTIONS_CHANGED("client_instructions_changed"),
+    CLIENT_REMOVAL_CONFIRMATION_FAILED("client_removal_confirmation_failed"),
+    CLIENT_UNPAIRED_ITSELF("client_unpaired_itself"),
+
+    PAIRING_DECIDED("pairing_decided"),
+    PAIRING_REQUESTED("pairing_requested"),
+    PAIRING_COMPLETED("pairing_completed"),
+    PAIRING_CONFIRMATION_RECEIVED("pairing_confirmation_received"),
+
+    SECRET_USE_RECEIVED("secret_use_received"),
+    SECRET_USE_AI_REVIEWED("secret_use_ai_reviewed"),
+    SECRET_USE_DECIDED("secret_use_decided"),
+    SECRET_USE_COMPLETED("secret_use_completed"),
+
+    GIT_SIGN_RECEIVED("git_sign_received"),
+    GIT_SIGN_AI_REVIEWED("git_sign_ai_reviewed"),
+    GIT_SIGN_DECIDED("git_sign_decided"),
+    GIT_SIGN_COMPLETED("git_sign_completed"),
+
+    SSH_AUTHENTICATION_RECEIVED("ssh_authentication_received"),
+    SSH_AUTHENTICATION_AI_REVIEWED("ssh_authentication_ai_reviewed"),
+    SSH_AUTHENTICATION_DECIDED("ssh_authentication_decided"),
+    SSH_AUTHENTICATION_COMPLETED("ssh_authentication_completed"),
+
+    SECRET_LIST_RECEIVED("secret_list_received"),
+    SECRET_LIST_COMPLETED("secret_list_completed"),
+
+    SECRET_UPLOAD_RECEIVED("secret_upload_received"),
+    SECRET_UPLOAD_DECIDED("secret_upload_decided"),
+    SECRET_UPLOAD_COMPLETED("secret_upload_completed"),
+
+    REQUEST_REJECTED("request_rejected"),
+
+    SECRET_APPROVAL_MODE_CHANGED("secret_approval_mode_changed"),
+    SECRET_INSTRUCTIONS_CHANGED("secret_instructions_changed"),
+    CLIENT_APPROVAL_OVERRIDE_CHANGED("client_approval_override_changed"),
+    TEMPORARY_ACCESS_ALLOWED("temporary_access_allowed"),
+    TEMPORARY_ACCESS_ENDED("temporary_access_ended"),
+    SECRET_CREATED("secret_created"),
+    SSH_KEY_CREATED("ssh_key_created"),
+    SSH_KEY_REPLACED("ssh_key_replaced"),
+    SSH_PUBLIC_KEY_COMMENT_UPDATED("ssh_public_key_comment_updated"),
+    SECRET_UPDATED("secret_updated"),
+    SECRET_DELETED("secret_deleted"),
+    ENVIRONMENT_VARIABLE_ADDED("environment_variable_added"),
+    ENVIRONMENT_VARIABLE_UPDATED("environment_variable_updated"),
+    ENVIRONMENT_VARIABLE_DELETED("environment_variable_deleted"),
+
+    NEW_PAIRINGS_RESUMED("new_pairings_resumed"),
+    NEW_PAIRINGS_PAUSED("new_pairings_paused"),
+    PAIRING_ADDRESS_CLAIMED("pairing_address_claimed"),
+    PAIRING_ADDRESS_CHANGED("pairing_address_changed"),
+    GENERAL_AI_REVIEW_INSTRUCTIONS_CHANGED("general_ai_review_instructions_changed"),
+    ;
+
+    companion object {
+        fun fromCode(code: String): AuditEventType =
+            checkNotNull(entries.find { it.code == code }) { "Unknown audit event type: $code" }
+    }
 }
 
-internal enum class AuditOutcome(val storedName: String) {
+internal enum class AuditOutcome(val code: String) {
     RECEIVED("received"),
     APPROVED("approved"),
     DENIED("denied"),
@@ -31,25 +80,56 @@ internal enum class AuditOutcome(val storedName: String) {
     COMPLETED("completed"),
     CHANGED("changed"),
     FAILED("failed"),
+    DEFERRED("deferred"),
+    ;
+
+    companion object {
+        fun fromCode(code: String): AuditOutcome =
+            checkNotNull(entries.find { it.code == code }) { "Unknown audit outcome: $code" }
+    }
+}
+
+internal enum class AuditDecisionSource(val code: String) {
+    USER("user"),
+    APPROVAL_SETTINGS("approval_settings"),
+    AI_REVIEW("ai_review"),
+    TEMPORARY_ACCESS("temporary_access"),
+    MIXED("mixed"),
+    NON_SENSITIVE("non_sensitive"),
+    VALIDATION("validation"),
+    ;
+
+    companion object {
+        fun fromCode(code: String): AuditDecisionSource =
+            checkNotNull(entries.find { it.code == code }) { "Unknown audit decision source: $code" }
+    }
 }
 
 internal data class AuditRecord(
-    val category: AuditCategory,
-    val title: String,
-    val detail: String = "",
+    val type: AuditEventType,
     val outcome: AuditOutcome,
+    val decisionSource: AuditDecisionSource? = null,
+    val subject: String? = null,
+    val context: String? = null,
+    val detail: String? = null,
+    val expiresAt: Long? = null,
     val clientId: String? = null,
+    val clientName: String? = null,
     val relayRequestId: String? = null,
 )
 
 internal data class AuditEvent(
     val id: Long,
     val occurredAt: Long,
-    val category: AuditCategory,
-    val title: String,
-    val detail: String,
+    val type: AuditEventType,
     val outcome: AuditOutcome,
+    val decisionSource: AuditDecisionSource?,
+    val subject: String?,
+    val context: String?,
+    val detail: String?,
+    val expiresAt: Long?,
     val clientId: String?,
+    val clientName: String?,
     val relayRequestId: String?,
 )
 
@@ -78,55 +158,37 @@ internal class AuditRepository(
         dao.insertAndPrune(
             event = AuditEventEntity(
                 occurredAt = now,
-                category = record.category.storedName,
-                title = record.title,
+                eventType = record.type.code,
+                subject = record.subject,
+                context = record.context,
                 detail = record.detail,
-                outcome = record.outcome.storedName,
+                outcome = record.outcome.code,
+                decisionSource = record.decisionSource?.code,
+                expiresAt = record.expiresAt,
                 clientId = record.clientId,
+                clientName = record.clientName,
                 relayRequestId = record.relayRequestId,
             ),
             cutoff = now - RETENTION_MILLIS,
         )
     }
 
-    private fun AuditEventEntity.toModel() = AuditEvent(
+    private fun AuditEventEntity.toModel(): AuditEvent = AuditEvent(
         id = id,
         occurredAt = occurredAt,
-        category = checkNotNull(AuditCategory.entries.find { it.storedName == category }),
-        title = storedAuditTitle(title),
+        type = AuditEventType.fromCode(eventType),
+        outcome = AuditOutcome.fromCode(outcome),
+        decisionSource = decisionSource?.let(AuditDecisionSource::fromCode),
+        subject = subject,
+        context = context,
         detail = detail,
-        outcome = storedAuditOutcome(outcome, title),
+        expiresAt = expiresAt,
         clientId = clientId,
+        clientName = clientName,
         relayRequestId = relayRequestId,
     )
 
     private companion object {
         const val RETENTION_MILLIS = 365L * 24 * 60 * 60 * 1000
     }
-}
-
-internal fun storedAuditOutcome(outcome: String, title: String): AuditOutcome = when {
-    // Releases before the aborted outcome was introduced stored an authenticated client abort
-    // as completed. Preserve those rows while presenting their real result.
-    outcome == AuditOutcome.COMPLETED.storedName && title.contains("aborted", ignoreCase = true) ->
-        AuditOutcome.ABORTED
-    else -> checkNotNull(AuditOutcome.entries.find { it.storedName == outcome })
-}
-
-internal fun storedAuditTitle(title: String): String = when (title) {
-    "Non-sensitive secret use delivered" -> "Non-sensitive data provided automatically"
-    "Secret upload receipt confirmed",
-    "Client confirmed upload receipt" -> "Client received upload result"
-    "Secret use delivered",
-    "Client confirmed secret data received" -> "Client received secret data"
-    "Git signature delivered",
-    "Client confirmed signature received" -> "Client received signature"
-    "Secret use denial confirmed",
-    "Client confirmed denial received",
-    "Client confirmed secret use was denied" -> "Client received denial"
-    "Git signature denial confirmed",
-    "Client confirmed signature denial received",
-    "Client confirmed Git signature was denied" -> "Client received signature denial"
-    "Authenticated request rejected" -> "Request rejected"
-    else -> title
 }

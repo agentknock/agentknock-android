@@ -10,7 +10,7 @@ import dev.agentknock.storage.crypto.EncryptionBinding
 import dev.agentknock.storage.crypto.EncryptionLocation
 import dev.agentknock.storage.crypto.VaultKeyManager
 import dev.agentknock.storage.crypto.VaultKeyPurpose
-import dev.agentknock.storage.audit.AuditCategory
+import dev.agentknock.storage.audit.AuditEventType
 import dev.agentknock.storage.audit.AuditOutcome
 import dev.agentknock.storage.audit.AuditRecord
 import dev.agentknock.storage.audit.AuditSink
@@ -278,14 +278,13 @@ internal class VaultRepository(
                 ) {
                     audit.record(
                         AuditRecord(
-                            category = AuditCategory.DEVICE,
-                            title = if (previous == null) {
-                                "Pairing address claimed"
+                            type = if (previous == null) {
+                                AuditEventType.PAIRING_ADDRESS_CLAIMED
                             } else {
-                                "Pairing address changed"
+                                AuditEventType.PAIRING_ADDRESS_CHANGED
                             },
-                            detail = candidate.address,
                             outcome = AuditOutcome.CHANGED,
+                            subject = candidate.address,
                         ),
                     )
                     ClaimPairingAddressResult.Claimed
@@ -319,9 +318,7 @@ internal class VaultRepository(
         if (updated) {
             audit.record(
                 AuditRecord(
-                    category = AuditCategory.APPROVAL,
-                    title = "General AI review instructions changed",
-                    detail = "",
+                    type = AuditEventType.GENERAL_AI_REVIEW_INSTRUCTIONS_CHANGED,
                     outcome = AuditOutcome.CHANGED,
                 ),
             )

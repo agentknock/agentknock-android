@@ -51,11 +51,8 @@ import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
 import androidx.compose.foundation.shape.RoundedCornerShape
 import dev.agentknock.presentation.formatTimestamp
-import dev.agentknock.storage.audit.AuditCategory
 import dev.agentknock.storage.audit.AuditEvent
 import dev.agentknock.storage.audit.AuditOutcome
-import dev.agentknock.storage.request.ClientSummary
-import dev.agentknock.storage.request.InboxRequestSummary
 import dev.agentknock.ui.components.InformationRow
 import dev.agentknock.ui.components.InformationSurface
 import dev.agentknock.ui.theme.agentknockColors
@@ -75,19 +72,11 @@ private enum class AuditFilter(val label: String) {
 internal fun AuditBrowser(
     events: List<AuditEvent>,
     selected: AuditEvent?,
-    clients: List<ClientSummary>,
-    requests: List<InboxRequestSummary>,
     onBack: () -> Unit,
     onOpen: (Long) -> Unit,
     report: (String) -> Unit,
     modifier: Modifier,
 ) {
-    val clientNames = clients.associate { it.clientId to it.name }
-    val requestClientNames = requests.mapNotNull { request ->
-        request.relayRequestId?.let { it to request.clientName }
-    }.toMap()
-    fun clientName(event: AuditEvent): String? =
-        event.clientId?.let(clientNames::get) ?: event.relayRequestId?.let(requestClientNames::get)
     BoxWithConstraints(modifier) {
         val twoPane = maxWidth >= 720.dp
         if (twoPane) {
@@ -97,8 +86,6 @@ internal fun AuditBrowser(
                     selectedEventId = selected?.id,
                     onBack = onBack,
                     onOpen = onOpen,
-                    clientNames = clientNames,
-                    requestClientNames = requestClientNames,
                     modifier = Modifier.width(360.dp).fillMaxHeight(),
                 )
                 VerticalDivider()
@@ -112,7 +99,6 @@ internal fun AuditBrowser(
                 } else {
                     AuditDetail(
                         event = selected,
-                        clientName = clientName(selected),
                         report = report,
                         onBack = onBack,
                         showBack = false,
@@ -126,14 +112,11 @@ internal fun AuditBrowser(
                 selectedEventId = null,
                 onBack = onBack,
                 onOpen = onOpen,
-                clientNames = clientNames,
-                requestClientNames = requestClientNames,
                 modifier = Modifier.fillMaxSize(),
             )
         } else {
             AuditDetail(
                 event = selected,
-                clientName = clientName(selected),
                 report = report,
                 onBack = onBack,
                 showBack = true,
@@ -147,8 +130,6 @@ internal fun AuditBrowser(
 private fun AuditList(
     events: List<AuditEvent>,
     selectedEventId: Long?,
-    clientNames: Map<String, String>,
-    requestClientNames: Map<String, String>,
     onBack: () -> Unit,
     onOpen: (Long) -> Unit,
     modifier: Modifier,
@@ -207,8 +188,6 @@ private fun AuditList(
                         val index = dayEvents.indexOf(event)
                         AuditTimelineRow(
                             event = event,
-                            clientName = event.clientId?.let(clientNames::get)
-                                ?: event.relayRequestId?.let(requestClientNames::get),
                             selected = event.id == selectedEventId,
                             firstInDay = index == 0,
                             lastInDay = index == dayEvents.lastIndex,
@@ -227,13 +206,13 @@ private fun AuditList(
 @Composable
 private fun AuditTimelineRow(
     event: AuditEvent,
-    clientName: String?,
     selected: Boolean,
     firstInDay: Boolean,
     lastInDay: Boolean,
     onClick: () -> Unit,
 ) {
-    val context = event.contextLine(clientName)
+    val context = event.contextLine()
+    val presentation = event.presentation()
     val accent = event.outcome.accentColor()
     val timeline = MaterialTheme.colorScheme.outlineVariant
     val rowShape: Shape = RoundedCornerShape(12.dp)
@@ -275,13 +254,13 @@ private fun AuditTimelineRow(
             verticalArrangement = Arrangement.spacedBy(3.dp),
         ) {
             Text(
-                event.title,
+                presentation.title,
                 style = MaterialTheme.typography.bodyLarge,
                 maxLines = 2,
                 overflow = TextOverflow.Ellipsis,
             )
             Text(
-                context ?: event.category.displayName,
+                context ?: presentation.category.displayName,
                 style = MaterialTheme.typography.bodySmall,
                 color = MaterialTheme.colorScheme.onSurfaceVariant,
                 maxLines = 2,
@@ -294,13 +273,13 @@ private fun AuditTimelineRow(
 @Composable
 private fun AuditDetail(
     event: AuditEvent,
-    clientName: String?,
     report: (String) -> Unit,
     onBack: () -> Unit,
     showBack: Boolean,
     modifier: Modifier,
 ) {
     val context = LocalContext.current
+    val presentation = event.presentation()
     fun copy(label: String, value: String) {
         context.getSystemService(ClipboardManager::class.java).setPrimaryClip(
             ClipData.newPlainText(label, value),
@@ -339,17 +318,34 @@ private fun AuditDetail(
                             )
                         }
                     }
-                    Text(event.title, style = MaterialTheme.typography.headlineSmall)
+                    Text(presentation.title, style = MaterialTheme.typography.headlineSmall)
                 }
-                val detail = event.displayDetail().takeIf(String::isNotBlank)
-                val distinctClientName = clientName?.takeUnless { it == detail }
-                if (detail != null || distinctClientName != null) {
+                val distinctClientName = event.clientName
+                    ?.takeIf(String::isNotBlank)
+                    ?.takeUnless { it == event.subject }
+                if (
+                    event.subject != null || event.context != null || event.detail != null ||
+                    distinctClientName != null || event.decisionSource != null ||
+                    event.expiresAt != null
+                ) {
                     InformationSurface {
-                        detail?.let {
-                            InformationRow(event.detailLabel(), detail)
+                        event.subject?.let {
+                            InformationRow(presentation.subjectLabel ?: "Subject", it)
+                        }
+                        event.context?.let {
+                            InformationRow(presentation.contextLabel ?: "Context", it)
+                        }
+                        event.detail?.let {
+                            InformationRow(presentation.detailLabel ?: "Details", it)
                         }
                         distinctClientName?.let {
                             InformationRow("Client", it)
+                        }
+                        event.decisionSource?.let {
+                            InformationRow("Decision source", it.displayName())
+                        }
+                        event.expiresAt?.let {
+                            InformationRow("Valid until", formatTimestamp(it))
                         }
                     }
                 }
@@ -390,76 +386,20 @@ private fun CopyTextButton(onClick: () -> Unit) {
     )
 }
 
-private fun AuditEvent.contextLine(clientName: String?): String? {
-    val detail = displayDetail()
-    val detailContext = detail.takeIf(String::isNotBlank)?.let { "${detailLabel()}: $it" }
-    val clientContext = clientName?.takeUnless { it == detail }?.let { "Client: $it" }
-    return listOfNotNull(detailContext, clientContext).joinToString(" · ").ifBlank { null }
-}
-
-private fun AuditEvent.displayDetail(): String {
-    val displayed = when (category) {
-        AuditCategory.SECRET_UPLOAD -> {
-            val transportVerb = listOf("create ", "replace ", "update ")
-                .firstOrNull(detail::startsWith)
-            transportVerb?.let(detail::removePrefix) ?: detail
-        }
-        AuditCategory.SECRET_LIST -> detail.substringBefore(" sent to ")
-        AuditCategory.VERIFICATION -> when (detail) {
-            "INVALID_REQUEST" -> "The request could not be understood."
-            "UNSUPPORTED_METHOD" -> "The requested operation is not supported."
-            "INVALID_STATE" -> "The requested operation is not available in the current state."
-            else -> detail
-        }
-        else -> when {
-            title.startsWith("Temporary access") -> detail.temporaryAccessDetail()
-            title.contains("AI review", ignoreCase = true) &&
-                detail.startsWith("AI review ", ignoreCase = true) ->
-                detail.drop("AI review ".length).replaceFirstChar(Char::uppercase)
-            else -> detail
-        }
+private fun AuditEvent.contextLine(): String? {
+    val presentation = presentation()
+    val subjectContext = subject?.let { value ->
+        presentation.subjectLabel?.let { label -> "$label: $value" } ?: value
     }
-    return displayed
-        .replace("**", "")
-        .replace("`", "")
-        .trim()
-}
-
-private fun AuditEvent.detailLabel(): String = when (category) {
-    AuditCategory.PAIRING,
-    AuditCategory.CLIENT,
-    -> "Client"
-    AuditCategory.SECRET -> when {
-        title.startsWith("Environment variable") -> "Environment variable"
-        else -> "Secret"
+    val eventContext = context?.let { value ->
+        presentation.contextLabel?.let { label -> "$label: $value" } ?: value
     }
-    AuditCategory.SECRET_USE -> when {
-        title.startsWith("Temporary access", ignoreCase = true) -> "Access"
-        title.contains("AI review", ignoreCase = true) -> "AI review"
-        title.contains("rejected", ignoreCase = true) -> "Reason"
-        else -> "Secrets"
-    }
-    AuditCategory.GIT_SIGN -> when {
-        title.contains("AI review", ignoreCase = true) -> "AI review"
-        title.contains("rejected", ignoreCase = true) -> "Reason"
-        else -> "SSH key"
-    }
-    AuditCategory.SSH_AUTHENTICATE -> when {
-        title.contains("AI review", ignoreCase = true) -> "AI review"
-        title.contains("denied", ignoreCase = true) -> "Reason"
-        else -> "SSH authentication"
-    }
-    AuditCategory.SECRET_LIST -> "Result"
-    AuditCategory.SECRET_UPLOAD -> if (title.contains("automatically", ignoreCase = true)) {
-        "Reason"
-    } else {
-        "Upload"
-    }
-    AuditCategory.DEVICE -> if (title.contains("address", ignoreCase = true)) "Pairing address" else "Change"
-    AuditCategory.VERIFICATION -> "Reason"
-    AuditCategory.APPROVAL,
-    AuditCategory.RULE,
-    -> "Approval"
+    val displayedClient = clientName?.takeIf(String::isNotBlank)
+        ?: clientId?.let { id -> if (id.length > 8) "…${id.takeLast(6)}" else id }
+    val clientContext = displayedClient?.takeUnless { it == subject }?.let { "Client: $it" }
+    return listOfNotNull(subjectContext, eventContext, clientContext)
+        .joinToString(" · ")
+        .ifBlank { null }
 }
 
 private fun AuditOutcome.displayName(): String = when (this) {
@@ -471,6 +411,7 @@ private fun AuditOutcome.displayName(): String = when (this) {
     AuditOutcome.COMPLETED -> "Completed"
     AuditOutcome.CHANGED -> "Changed"
     AuditOutcome.FAILED -> "Failed"
+    AuditOutcome.DEFERRED -> "Needs user review"
 }
 
 @Composable
@@ -483,31 +424,18 @@ private fun AuditOutcome.accentColor(): Color = when (this) {
     else -> MaterialTheme.colorScheme.onSurfaceVariant
 }
 
-private fun AuditFilter.matches(event: AuditEvent): Boolean = when (this) {
-    AuditFilter.ALL -> true
-    AuditFilter.SECRET_USE -> event.outcome == AuditOutcome.APPROVED &&
-        (event.category == AuditCategory.SECRET_USE || event.category == AuditCategory.GIT_SIGN) &&
-        (
-            event.title.startsWith("Secret use approved", ignoreCase = true) ||
-                event.title.startsWith("Git signature approved", ignoreCase = true)
-        ) &&
-        !event.title.startsWith("Non-sensitive", ignoreCase = true)
-    AuditFilter.UPLOADS -> event.category == AuditCategory.SECRET_UPLOAD
-    AuditFilter.PAIRINGS -> event.category == AuditCategory.PAIRING
-    AuditFilter.CHANGES -> event.category == AuditCategory.SECRET ||
-        event.category == AuditCategory.CLIENT || event.category == AuditCategory.DEVICE ||
-        event.category == AuditCategory.APPROVAL ||
-        event.category == AuditCategory.RULE
-}
-
-private fun String.temporaryAccessDetail(): String {
-    val normalized = replace("environment values", "secret values")
-    val marker = " · expires "
-    val instantText = normalized.substringAfterLast(marker, missingDelimiterValue = "")
-    if (instantText.isEmpty()) return normalized
-    val expiresAt = runCatching { Instant.parse(instantText).toEpochMilli() }.getOrNull()
-        ?: return normalized
-    return normalized.substringBeforeLast(marker) + " · until " + formatTimestamp(expiresAt)
+private fun AuditFilter.matches(event: AuditEvent): Boolean {
+    val presentation = event.presentation()
+    return when (this) {
+        AuditFilter.ALL -> true
+        AuditFilter.SECRET_USE -> presentation.sensitiveUse
+        AuditFilter.UPLOADS -> presentation.category == AuditCategory.SECRET_UPLOAD
+        AuditFilter.PAIRINGS -> presentation.category == AuditCategory.PAIRING
+        AuditFilter.CHANGES -> presentation.category == AuditCategory.SECRET ||
+            presentation.category == AuditCategory.CLIENT ||
+            presentation.category == AuditCategory.DEVICE ||
+            presentation.category == AuditCategory.APPROVAL
+    }
 }
 
 private val auditDateFormatter = DateTimeFormatter.ofPattern("yyyy-MM-dd")

@@ -722,7 +722,11 @@ class SecretRepositoryTest {
                 overridden.instructions,
             )
 
-            fixture.repository.setClientApprovalOverride(secretId, "workstation", null)
+            fixture.repository.setClientApprovalOverride(
+                secretId,
+                "workstation",
+                null,
+            )
             val inherited = fixture.repository
                 .approvalPoliciesForNames(
                     listOf("github"),

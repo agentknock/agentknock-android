@@ -2,7 +2,7 @@ package dev.agentknock.storage.vault
 
 import dev.agentknock.relay.RelayDeviceManagementClient
 import dev.agentknock.relay.RelayDeviceManagementResult
-import dev.agentknock.storage.audit.AuditCategory
+import dev.agentknock.storage.audit.AuditEventType
 import dev.agentknock.storage.audit.AuditOutcome
 import dev.agentknock.storage.audit.AuditRecord
 import dev.agentknock.storage.audit.AuditSink
@@ -47,8 +47,11 @@ internal class DeviceManagementRepository(
                 )
                 audit.record(
                     AuditRecord(
-                        category = AuditCategory.DEVICE,
-                        title = if (enabled) "New pairings resumed" else "New pairings paused",
+                        type = if (enabled) {
+                            AuditEventType.NEW_PAIRINGS_RESUMED
+                        } else {
+                            AuditEventType.NEW_PAIRINGS_PAUSED
+                        },
                         outcome = AuditOutcome.CHANGED,
                     ),
                 )

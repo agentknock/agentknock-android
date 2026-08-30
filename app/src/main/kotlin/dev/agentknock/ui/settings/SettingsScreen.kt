@@ -123,8 +123,6 @@ internal fun SettingsScreen(
     val configuration by viewModel.configuration.collectAsStateWithLifecycle()
     val counts by viewModel.dataCounts.collectAsStateWithLifecycle()
     val auditEvents by viewModel.auditEvents.collectAsStateWithLifecycle()
-    val clients by viewModel.clients.collectAsStateWithLifecycle()
-    val requests by viewModel.requests.collectAsStateWithLifecycle()
     val selectedAudit by viewModel.selectedAuditEvent.collectAsStateWithLifecycle()
     val pushState by viewModel.pushRegistrationState.collectAsStateWithLifecycle()
     val protection by viewModel.vaultProtection.collectAsStateWithLifecycle()
@@ -204,8 +202,6 @@ internal fun SettingsScreen(
                 SettingsPage.AUDIT -> AuditBrowser(
                     events = auditEvents,
                     selected = selectedAudit,
-                    clients = clients,
-                    requests = requests,
                     onBack = ::back,
                     onOpen = viewModel::selectAuditEvent,
                     report = { message -> scope.launch { snackbar.showSnackbar(message) } },

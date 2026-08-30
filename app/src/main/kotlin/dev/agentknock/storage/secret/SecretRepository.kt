@@ -7,7 +7,8 @@ import dev.agentknock.storage.crypto.EncryptionBinding
 import dev.agentknock.storage.crypto.EncryptionLocation
 import dev.agentknock.storage.crypto.VaultKeyManager
 import dev.agentknock.storage.crypto.VaultKeyPurpose
-import dev.agentknock.storage.audit.AuditCategory
+import dev.agentknock.storage.audit.AuditEventType
+import dev.agentknock.storage.audit.AuditDecisionSource
 import dev.agentknock.storage.audit.AuditOutcome
 import dev.agentknock.storage.audit.AuditRecord
 import dev.agentknock.storage.audit.AuditSink
@@ -569,10 +570,10 @@ internal class SecretRepository(
         }
         audit.record(
             AuditRecord(
-                category = AuditCategory.SECRET,
-                title = "Secret approval mode changed",
-                detail = secret.name,
+                type = AuditEventType.SECRET_APPROVAL_MODE_CHANGED,
                 outcome = AuditOutcome.CHANGED,
+                subject = secret.name,
+                detail = mode.auditName(),
             ),
         )
         return SaveSecretResult.SAVED
@@ -587,10 +588,9 @@ internal class SecretRepository(
         }
         audit.record(
             AuditRecord(
-                category = AuditCategory.SECRET,
-                title = "Secret instructions changed",
-                detail = secret.name,
+                type = AuditEventType.SECRET_INSTRUCTIONS_CHANGED,
                 outcome = AuditOutcome.CHANGED,
+                subject = secret.name,
             ),
         )
         return SaveSecretResult.SAVED
@@ -615,10 +615,10 @@ internal class SecretRepository(
         }
         audit.record(
             AuditRecord(
-                category = AuditCategory.SECRET,
-                title = "Client approval override changed",
-                detail = secret.name,
+                type = AuditEventType.CLIENT_APPROVAL_OVERRIDE_CHANGED,
                 outcome = AuditOutcome.CHANGED,
+                subject = secret.name,
+                detail = mode?.auditName() ?: "Use default",
                 clientId = clientId,
             ),
         )
@@ -659,11 +659,12 @@ internal class SecretRepository(
             runCatching {
                 audit.record(
                     AuditRecord(
-                        category = AuditCategory.SECRET_USE,
-                        title = "Temporary access allowed",
-                        detail = "${policy.secretName} · ${operation.auditName()} · expires " +
-                            Instant.ofEpochMilli(expiresAt),
+                        type = AuditEventType.TEMPORARY_ACCESS_ALLOWED,
                         outcome = AuditOutcome.APPROVED,
+                        decisionSource = AuditDecisionSource.USER,
+                        subject = policy.secretName,
+                        detail = operation.auditName(),
+                        expiresAt = expiresAt,
                         clientId = clientId,
                     ),
                 )
@@ -682,10 +683,10 @@ internal class SecretRepository(
         if (deleted) {
             audit.record(
                 AuditRecord(
-                    category = AuditCategory.SECRET_USE,
-                    title = "Temporary access ended",
-                    detail = "${secret?.name.orEmpty()} · ${operation.auditName()}",
+                    type = AuditEventType.TEMPORARY_ACCESS_ENDED,
                     outcome = AuditOutcome.CHANGED,
+                    subject = secret?.name,
+                    detail = operation.auditName(),
                     clientId = clientId,
                 ),
             )
@@ -727,10 +728,9 @@ internal class SecretRepository(
         )
         audit.record(
             AuditRecord(
-                category = AuditCategory.SECRET,
-                title = "Secret created",
-                detail = name,
+                type = AuditEventType.SECRET_CREATED,
                 outcome = AuditOutcome.CHANGED,
+                subject = name,
             ),
         )
         return CreateSecretResult.Created(id)
@@ -757,10 +757,9 @@ internal class SecretRepository(
         dao.insertSshSecret(secret, sshKeyEntity(id, privateKey, now))
         audit.record(
             AuditRecord(
-                category = AuditCategory.SECRET,
-                title = "SSH key created",
-                detail = name,
+                type = AuditEventType.SSH_KEY_CREATED,
                 outcome = AuditOutcome.CHANGED,
+                subject = name,
             ),
         )
         return CreateSecretResult.Created(id)
@@ -778,10 +777,9 @@ internal class SecretRepository(
         )
         audit.record(
             AuditRecord(
-                category = AuditCategory.SECRET,
-                title = "SSH key replaced",
-                detail = secret.name,
+                type = AuditEventType.SSH_KEY_REPLACED,
                 outcome = AuditOutcome.CHANGED,
+                subject = secret.name,
             ),
         )
         return SaveSshSecretResult.Saved(id)
@@ -801,10 +799,9 @@ internal class SecretRepository(
         }
         audit.record(
             AuditRecord(
-                category = AuditCategory.SECRET,
-                title = "SSH public key comment updated",
-                detail = secret.name,
+                type = AuditEventType.SSH_PUBLIC_KEY_COMMENT_UPDATED,
                 outcome = AuditOutcome.CHANGED,
+                subject = secret.name,
             ),
         )
         return SaveSshSecretResult.Saved(id)
@@ -819,10 +816,10 @@ internal class SecretRepository(
         }
         audit.record(
             AuditRecord(
-                category = AuditCategory.SECRET,
-                title = "Secret updated",
-                detail = name,
+                type = AuditEventType.SECRET_UPDATED,
                 outcome = AuditOutcome.CHANGED,
+                subject = name,
+                detail = existing.name.takeUnless { it == name },
             ),
         )
         return SaveSecretResult.SAVED
@@ -833,10 +830,9 @@ internal class SecretRepository(
         dao.deleteSecret(secret)
         audit.record(
             AuditRecord(
-                category = AuditCategory.SECRET,
-                title = "Secret deleted",
-                detail = secret.name,
+                type = AuditEventType.SECRET_DELETED,
                 outcome = AuditOutcome.CHANGED,
+                subject = secret.name,
             ),
         )
         return true
@@ -879,10 +875,10 @@ internal class SecretRepository(
         )
         audit.record(
             AuditRecord(
-                category = AuditCategory.SECRET,
-                title = "Environment variable added",
-                detail = "$name in ${dao.getSecret(secretId)?.name.orEmpty()}",
+                type = AuditEventType.ENVIRONMENT_VARIABLE_ADDED,
                 outcome = AuditOutcome.CHANGED,
+                subject = name,
+                detail = dao.getSecret(secretId)?.name,
             ),
         )
         return CreateEnvironmentVariableResult.Created(id)
@@ -958,10 +954,10 @@ internal class SecretRepository(
         if (rowsUpdated != 1) return SaveEnvironmentVariableResult.NOT_FOUND
         audit.record(
             AuditRecord(
-                category = AuditCategory.SECRET,
-                title = "Environment variable updated",
-                detail = name,
+                type = AuditEventType.ENVIRONMENT_VARIABLE_UPDATED,
                 outcome = AuditOutcome.CHANGED,
+                subject = name,
+                detail = dao.getSecret(existing.secretId)?.name,
             ),
         )
         return SaveEnvironmentVariableResult.SAVED
@@ -972,10 +968,10 @@ internal class SecretRepository(
         dao.deleteEnvironmentVariable(variable, secretUpdatedAt = currentTimeMillis())
         audit.record(
             AuditRecord(
-                category = AuditCategory.SECRET,
-                title = "Environment variable deleted",
-                detail = variable.name,
+                type = AuditEventType.ENVIRONMENT_VARIABLE_DELETED,
                 outcome = AuditOutcome.CHANGED,
+                subject = variable.name,
+                detail = dao.getSecret(variable.secretId)?.name,
             ),
         )
         return true
@@ -1758,4 +1754,12 @@ private fun TemporaryAccessOperation.auditName(): String = when (this) {
     TemporaryAccessOperation.INVOCATION -> "secret values"
     TemporaryAccessOperation.GIT_SIGN -> "Git signing"
     TemporaryAccessOperation.SSH_AUTHENTICATE -> "SSH authentication"
+}
+
+private fun SecretApprovalMode.auditName(): String = when (this) {
+    SecretApprovalMode.APPROVE -> "Approve automatically"
+    SecretApprovalMode.ASK_AI -> "Ask AI"
+    SecretApprovalMode.TEMPORARY -> "Ask with 4-hour option"
+    SecretApprovalMode.ASK_ME -> "Ask every time"
+    SecretApprovalMode.DENY -> "Always deny"
 }
