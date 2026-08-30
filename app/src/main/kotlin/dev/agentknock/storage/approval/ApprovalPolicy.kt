@@ -13,7 +13,7 @@ internal enum class ApprovalAction(val precedence: Int) {
 internal data class RequestedSecretApproval(
     val id: String,
     val name: String,
-    val defaultAction: ApprovalAction = ApprovalAction.ASK_ME,
+    val defaultAction: ApprovalAction,
     val temporaryAccessEligible: Boolean = false,
     val temporaryAccessExpiresAt: Long? = null,
     val revision: Long? = null,
@@ -24,9 +24,6 @@ internal data class SecretApprovalEvaluation(
     val secretId: String,
     val secretName: String,
     val action: ApprovalAction,
-    // Kept so evaluations saved by builds with command rules remain readable.
-    val matchedRuleIds: Set<String> = emptySet(),
-    val decisiveRuleIds: Set<String> = emptySet(),
     val temporaryAccessEligible: Boolean = false,
     val temporaryAccessExpiresAt: Long? = null,
     val revision: Long? = null,
@@ -60,8 +57,6 @@ internal data class AiReview(
 internal data class ApprovalEvaluation(
     val action: ApprovalAction,
     val secrets: List<SecretApprovalEvaluation>,
-    // Kept so evaluations saved by builds with command rules remain readable.
-    val invalidRuleData: Boolean = false,
     val aiReview: AiReview? = null,
 )
 

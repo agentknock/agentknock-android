@@ -1,34 +1,9 @@
 package dev.agentknock.storage.approval
 
-import kotlinx.serialization.json.Json
 import org.junit.Assert.assertEquals
-import org.junit.Assert.assertNull
 import org.junit.Test
 
 class ApprovalPolicyEvaluatorTest {
-    @Test
-    fun `stored evaluations from before AI review decode without migration`() {
-        val evaluation = Json.decodeFromString<ApprovalEvaluation>(
-            """{
-                "action":"ASK_AI",
-                "secrets":[{
-                    "secretId":"id",
-                    "secretName":"github",
-                    "action":"ASK_AI",
-                    "matchedRuleIds":["old-rule"],
-                    "decisiveRuleIds":["old-rule"]
-                }],
-                "invalidRuleData":false
-            }""".trimIndent(),
-        )
-
-        assertEquals(ApprovalAction.ASK_AI, evaluation.action)
-        assertEquals(setOf("old-rule"), evaluation.secrets.single().matchedRuleIds)
-        assertEquals(setOf("old-rule"), evaluation.secrets.single().decisiveRuleIds)
-        assertNull(evaluation.secrets.single().revision)
-        assertNull(evaluation.aiReview)
-    }
-
     @Test
     fun `each requested secret keeps its effective approval mode`() {
         val evaluation = ApprovalPolicyEvaluator.evaluate(
