@@ -1,8 +1,8 @@
 {
   "formatVersion": 1,
   "database": {
-    "version": 13,
-    "identityHash": "1ee17e2a715aa9e3071d8b96a1c81990",
+    "version": 1,
+    "identityHash": "7ac4aa30dbc8b689c22615a4ec71f742",
     "entities": [
       {
         "tableName": "vault_keys",
@@ -533,7 +533,7 @@
       },
       {
         "tableName": "device_identities",
-        "createSql": "CREATE TABLE IF NOT EXISTS `${TABLE_NAME}` (`id` TEXT NOT NULL, `role` TEXT NOT NULL, `address` TEXT NOT NULL, `address_id` TEXT NOT NULL, `device_id` TEXT NOT NULL, `device_public_key` BLOB NOT NULL, `created_at` INTEGER NOT NULL, `claimed_at` INTEGER, `pairing_enabled` INTEGER NOT NULL, `instructions` TEXT NOT NULL, PRIMARY KEY(`id`))",
+        "createSql": "CREATE TABLE IF NOT EXISTS `${TABLE_NAME}` (`id` TEXT NOT NULL, `role` TEXT NOT NULL, `address` TEXT NOT NULL, `address_id` TEXT NOT NULL, `device_id` TEXT NOT NULL, `device_public_key` BLOB NOT NULL, `created_at` INTEGER NOT NULL, `claimed_at` INTEGER, `claim_attempted_at` INTEGER, `pairing_enabled` INTEGER NOT NULL, `instructions` TEXT NOT NULL, PRIMARY KEY(`id`))",
         "fields": [
           {
             "fieldPath": "id",
@@ -580,6 +580,11 @@
           {
             "fieldPath": "claimedAt",
             "columnName": "claimed_at",
+            "affinity": "INTEGER"
+          },
+          {
+            "fieldPath": "claimAttemptedAt",
+            "columnName": "claim_attempted_at",
             "affinity": "INTEGER"
           },
           {
@@ -2407,148 +2412,11 @@
             "id"
           ]
         }
-      },
-      {
-        "tableName": "approval_rules",
-        "createSql": "CREATE TABLE IF NOT EXISTS `${TABLE_NAME}` (`id` TEXT NOT NULL, `name` TEXT NOT NULL, `action` TEXT NOT NULL, `client_id` TEXT NOT NULL, `secret_ids_json` TEXT NOT NULL, `command_json` TEXT NOT NULL, `command_match` TEXT NOT NULL, `executable_path` TEXT, `executable_hash` TEXT, `working_directory` TEXT, `source_request_id` INTEGER, `enabled` INTEGER NOT NULL, `created_at` INTEGER NOT NULL, `updated_at` INTEGER NOT NULL, `expires_at` INTEGER, `last_matched_at` INTEGER, `match_count` INTEGER NOT NULL, PRIMARY KEY(`id`))",
-        "fields": [
-          {
-            "fieldPath": "id",
-            "columnName": "id",
-            "affinity": "TEXT",
-            "notNull": true
-          },
-          {
-            "fieldPath": "name",
-            "columnName": "name",
-            "affinity": "TEXT",
-            "notNull": true
-          },
-          {
-            "fieldPath": "action",
-            "columnName": "action",
-            "affinity": "TEXT",
-            "notNull": true
-          },
-          {
-            "fieldPath": "clientId",
-            "columnName": "client_id",
-            "affinity": "TEXT",
-            "notNull": true
-          },
-          {
-            "fieldPath": "secretIdsJson",
-            "columnName": "secret_ids_json",
-            "affinity": "TEXT",
-            "notNull": true
-          },
-          {
-            "fieldPath": "commandJson",
-            "columnName": "command_json",
-            "affinity": "TEXT",
-            "notNull": true
-          },
-          {
-            "fieldPath": "commandMatch",
-            "columnName": "command_match",
-            "affinity": "TEXT",
-            "notNull": true
-          },
-          {
-            "fieldPath": "executablePath",
-            "columnName": "executable_path",
-            "affinity": "TEXT"
-          },
-          {
-            "fieldPath": "executableHash",
-            "columnName": "executable_hash",
-            "affinity": "TEXT"
-          },
-          {
-            "fieldPath": "workingDirectory",
-            "columnName": "working_directory",
-            "affinity": "TEXT"
-          },
-          {
-            "fieldPath": "sourceRequestId",
-            "columnName": "source_request_id",
-            "affinity": "INTEGER"
-          },
-          {
-            "fieldPath": "enabled",
-            "columnName": "enabled",
-            "affinity": "INTEGER",
-            "notNull": true
-          },
-          {
-            "fieldPath": "createdAt",
-            "columnName": "created_at",
-            "affinity": "INTEGER",
-            "notNull": true
-          },
-          {
-            "fieldPath": "updatedAt",
-            "columnName": "updated_at",
-            "affinity": "INTEGER",
-            "notNull": true
-          },
-          {
-            "fieldPath": "expiresAt",
-            "columnName": "expires_at",
-            "affinity": "INTEGER"
-          },
-          {
-            "fieldPath": "lastMatchedAt",
-            "columnName": "last_matched_at",
-            "affinity": "INTEGER"
-          },
-          {
-            "fieldPath": "matchCount",
-            "columnName": "match_count",
-            "affinity": "INTEGER",
-            "notNull": true
-          }
-        ],
-        "primaryKey": {
-          "autoGenerate": false,
-          "columnNames": [
-            "id"
-          ]
-        },
-        "indices": [
-          {
-            "name": "index_approval_rules_client_id",
-            "unique": false,
-            "columnNames": [
-              "client_id"
-            ],
-            "orders": [],
-            "createSql": "CREATE INDEX IF NOT EXISTS `index_approval_rules_client_id` ON `${TABLE_NAME}` (`client_id`)"
-          },
-          {
-            "name": "index_approval_rules_enabled",
-            "unique": false,
-            "columnNames": [
-              "enabled"
-            ],
-            "orders": [],
-            "createSql": "CREATE INDEX IF NOT EXISTS `index_approval_rules_enabled` ON `${TABLE_NAME}` (`enabled`)"
-          },
-          {
-            "name": "index_approval_rules_expires_at",
-            "unique": false,
-            "columnNames": [
-              "expires_at"
-            ],
-            "orders": [],
-            "createSql": "CREATE INDEX IF NOT EXISTS `index_approval_rules_expires_at` ON `${TABLE_NAME}` (`expires_at`)"
-          }
-        ]
       }
     ],
     "setupQueries": [
       "CREATE TABLE IF NOT EXISTS room_master_table (id INTEGER PRIMARY KEY,identity_hash TEXT)",
-      "INSERT OR REPLACE INTO room_master_table (id,identity_hash) VALUES(42, '1ee17e2a715aa9e3071d8b96a1c81990')"
+      "INSERT OR REPLACE INTO room_master_table (id,identity_hash) VALUES(42, '7ac4aa30dbc8b689c22615a4ec71f742')"
     ]
   }
 }

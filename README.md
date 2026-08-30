@@ -34,6 +34,6 @@ internal testing track:
 4. Run `./publish-internal`.
 
 The release name is derived from the application version and version code.
-Room schema 6 is the compatibility baseline. Published schemas from version 6
-onward are retained permanently, and published builds must never use a
-destructive migration fallback.
+Room schema 1 is the compatibility baseline for releases using the current
+app-signing key. Every subsequently published schema is retained permanently,
+and published builds must never use a destructive migration fallback.

@@ -26,7 +26,6 @@ import dev.agentknock.storage.request.SecretUploadEnvironmentVariableEntity
 import dev.agentknock.storage.request.SecretUploadSshKeyEntity
 import dev.agentknock.storage.request.RequestDao
 import dev.agentknock.storage.request.RequestSecretEntity
-import dev.agentknock.storage.rule.ApprovalRuleEntity
 import dev.agentknock.storage.vault.VaultDao
 import dev.agentknock.storage.vault.DeviceIdentityEntity
 import dev.agentknock.storage.vault.VaultSecretEntity
@@ -53,9 +52,8 @@ import dev.agentknock.storage.vault.VaultSecretEntity
         SecretUploadEnvironmentVariableEntity::class,
         SecretUploadSshKeyEntity::class,
         AuditEventEntity::class,
-        ApprovalRuleEntity::class,
     ],
-    version = 14,
+    version = 1,
     exportSchema = true,
 )
 internal abstract class AgentknockDatabase : RoomDatabase() {
@@ -75,16 +73,6 @@ internal abstract class AgentknockDatabase : RoomDatabase() {
         fun create(context: Context): AgentknockDatabase =
             Room.databaseBuilder(context, AgentknockDatabase::class.java, NAME)
                 .setJournalMode(JournalMode.WRITE_AHEAD_LOGGING)
-                .addMigrations(
-                    MIGRATION_6_7,
-                    MIGRATION_7_8,
-                    MIGRATION_8_9,
-                    MIGRATION_9_10,
-                    MIGRATION_10_11,
-                    MIGRATION_11_12,
-                    MIGRATION_12_13,
-                    MIGRATION_13_14,
-                )
                 .build()
     }
 }
