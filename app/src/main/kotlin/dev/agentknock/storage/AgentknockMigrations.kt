@@ -278,3 +278,37 @@ internal val MIGRATION_11_12 = Migration(11, 12) { connection ->
             "ON `temporary_access_grants` (`client_id`)",
     )
 }
+
+internal val MIGRATION_12_13 = Migration(12, 13) { connection ->
+    connection.execSQL(
+        """
+        CREATE TABLE IF NOT EXISTS `ssh_authentication_requests` (
+            `request_id` INTEGER NOT NULL,
+            `state` TEXT NOT NULL,
+            `secret_name` TEXT NOT NULL,
+            `message` BLOB NOT NULL,
+            `username` TEXT NOT NULL,
+            `method` TEXT NOT NULL,
+            `algorithm` TEXT NOT NULL,
+            `host_key_algorithm` TEXT,
+            `host_key_fingerprint` TEXT,
+            `approval_evaluation_json` TEXT,
+            `decision` TEXT,
+            `completion_result` TEXT,
+            `completion_reason` TEXT,
+            `completion_message` TEXT,
+            `error` TEXT,
+            `created_at` INTEGER NOT NULL,
+            `updated_at` INTEGER NOT NULL,
+            `decided_at` INTEGER,
+            `completed_at` INTEGER,
+            PRIMARY KEY(`request_id`),
+            FOREIGN KEY(`request_id`) REFERENCES `inbox_requests`(`id`) ON UPDATE NO ACTION ON DELETE CASCADE
+        )
+        """.trimIndent(),
+    )
+    connection.execSQL(
+        "CREATE INDEX IF NOT EXISTS `index_ssh_authentication_requests_state` " +
+            "ON `ssh_authentication_requests` (`state`)",
+    )
+}

@@ -13,6 +13,7 @@ import dev.agentknock.storage.audit.AuditRecord
 import dev.agentknock.storage.audit.AuditSink
 import dev.agentknock.storage.audit.NoOpAuditSink
 import dev.agentknock.protocol.SecretUploadMode
+import dev.agentknock.protocol.SshSignatureAlgorithm
 import java.util.UUID
 import java.util.Base64
 import java.security.MessageDigest
@@ -45,6 +46,7 @@ internal enum class SecretApprovalMode(
 internal enum class TemporaryAccessOperation(val storedName: String) {
     INVOCATION("invocation"),
     GIT_SIGN("git_sign"),
+    SSH_AUTHENTICATE("ssh_authenticate"),
 }
 
 internal fun String.toTemporaryAccessOperation(): TemporaryAccessOperation =
@@ -361,6 +363,17 @@ internal sealed interface GitSignatureResult {
     data object SecretCorrupted : GitSignatureResult
 
     data object UnsupportedEncryption : GitSignatureResult
+}
+
+internal sealed interface SshAuthenticationSignatureResult {
+    data class Signed(val signature: ByteArray) : SshAuthenticationSignatureResult
+
+    data object NotFound : SshAuthenticationSignatureResult
+    data object WrongType : SshAuthenticationSignatureResult
+    data object KeyChanged : SshAuthenticationSignatureResult
+    data object SecretUnavailable : SshAuthenticationSignatureResult
+    data object SecretCorrupted : SshAuthenticationSignatureResult
+    data object UnsupportedEncryption : SshAuthenticationSignatureResult
 }
 
 internal interface RequestedSecretSource {
@@ -1507,6 +1520,40 @@ internal class SecretRepository(
         return GitSignatureResult.Signed(signature)
     }
 
+    suspend fun signSshAuthentication(
+        secretName: String,
+        expectedPublicKey: String,
+        message: ByteArray,
+        algorithm: SshSignatureAlgorithm,
+    ): SshAuthenticationSignatureResult {
+        val secret = dao.getSecretsByName(listOf(secretName)).singleOrNull()
+            ?: return SshAuthenticationSignatureResult.NotFound
+        if (secret.type != SSH_SECRET_TYPE) return SshAuthenticationSignatureResult.WrongType
+        val row = dao.getSshKey(secret.id) ?: return SshAuthenticationSignatureResult.SecretCorrupted
+        val currentPublic = runCatching { publicKey(row) }
+            .getOrElse { return SshAuthenticationSignatureResult.SecretCorrupted }
+        val expectedPublic = runCatching { sshKeys.importOpenSshPublicKey(expectedPublicKey) }
+            .getOrElse { return SshAuthenticationSignatureResult.SecretCorrupted }
+        if (!MessageDigest.isEqual(currentPublic.blob(), expectedPublic.blob())) {
+            return SshAuthenticationSignatureResult.KeyChanged
+        }
+        val privateKey = when (val decrypted = decryptSshKey(row)) {
+            is DecryptionResult.Plaintext -> decrypted.value
+            DecryptionResult.KeyUnavailable -> return SshAuthenticationSignatureResult.SecretUnavailable
+            DecryptionResult.AuthenticationFailed -> return SshAuthenticationSignatureResult.SecretCorrupted
+            DecryptionResult.UnsupportedFormat -> return SshAuthenticationSignatureResult.UnsupportedEncryption
+        }
+        val key = runCatching {
+            sshKeys.fromStored(row.algorithm, privateKey, row.publicKey, row.comment)
+        }.getOrElse { return SshAuthenticationSignatureResult.SecretCorrupted }
+        val signature = runCatching {
+            withContext(cryptographyDispatcher) {
+                sshKeys.signSshAuthentication(key, message, algorithm)
+            }
+        }.getOrElse { return SshAuthenticationSignatureResult.SecretCorrupted }
+        return SshAuthenticationSignatureResult.Signed(signature)
+    }
+
     private suspend fun encrypt(
         id: String,
         secretId: String,
@@ -1687,4 +1734,5 @@ internal class SecretRepository(
 private fun TemporaryAccessOperation.auditName(): String = when (this) {
     TemporaryAccessOperation.INVOCATION -> "secret values"
     TemporaryAccessOperation.GIT_SIGN -> "Git signing"
+    TemporaryAccessOperation.SSH_AUTHENTICATE -> "SSH authentication"
 }

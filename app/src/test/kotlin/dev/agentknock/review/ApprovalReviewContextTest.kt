@@ -9,6 +9,9 @@ import dev.agentknock.protocol.GitSignRepository
 import dev.agentknock.protocol.InvocationExecOperation
 import dev.agentknock.protocol.InvocationRequestMessage
 import dev.agentknock.protocol.SoftwareInfo
+import dev.agentknock.protocol.SshAuthenticationMessageDetails
+import dev.agentknock.protocol.SshAuthenticationMethod
+import dev.agentknock.protocol.SshSignatureAlgorithm
 import dev.agentknock.relay.ApprovalReviewEnvironmentSecretFacts
 import dev.agentknock.relay.ApprovalReviewEnvironmentVariableFacts
 import dev.agentknock.relay.ApprovalReviewEnvironmentDestination
@@ -304,6 +307,66 @@ class ApprovalReviewContextTest {
         assertFalse(wire.contains("invocation-id-not-for-the-reviewer"))
         assertFalse(wire.contains("public-key"))
         assertFalse(wire.contains("fingerprint"))
+        assertFalse(wire.contains("private SSH description"))
+    }
+
+    @Test
+    fun `builds SSH authentication review with remote identity and parent context`() {
+        val request = approvalReviewSshAuthenticationRequest(
+            pairing = pairing(),
+            secretName = "production-ssh",
+            details = SshAuthenticationMessageDetails(
+                username = "deploy",
+                method = SshAuthenticationMethod.HOST_BOUND,
+                algorithm = SshSignatureAlgorithm.ED25519,
+                hostKeyAlgorithm = "ssh-ed25519",
+                hostKeyFingerprint = "SHA256:server-fingerprint",
+            ),
+            invocation = storedInvocation(),
+            invocationSecrets = linkedMapOf(
+                "production-ssh" to ApprovalReviewSshSecretFacts(provides = "public_key"),
+            ),
+            parentElapsedSeconds = 37,
+            evaluation = ApprovalEvaluation(
+                action = ApprovalAction.ASK_AI,
+                secrets = listOf(
+                    secretEvaluation("ssh-id", "production-ssh", ApprovalAction.ASK_AI),
+                ),
+            ),
+            policies = listOf(
+                policy(
+                    id = "ssh-id",
+                    name = "production-ssh",
+                    mode = SecretApprovalMode.ASK_AI,
+                    instructions = "Authenticate only as deploy on production hosts.",
+                ),
+            ),
+            deviceInstructions = "Protect production systems.",
+        )
+
+        assertEquals(ApprovalReviewOperation.SSH_AUTHENTICATE, request.facts.operation)
+        assertEquals("production-ssh", request.facts.secret)
+        assertEquals("deploy", request.evidence.sshAuthentication?.username)
+        assertEquals("publickey-hostbound-v00@openssh.com", request.evidence.sshAuthentication?.method)
+        assertEquals("SHA256:server-fingerprint", request.evidence.sshAuthentication?.hostKeyFingerprint)
+        assertEquals(37L, request.parentFacts?.elapsedSeconds)
+        assertEquals(
+            listOf("git", "commit", "-S", "-m", "Sign this commit"),
+            request.parentEvidence?.command?.argv,
+        )
+
+        val wire = WIRE_JSON.encodeToString(request)
+        val payload = Json.parseToJsonElement(wire).jsonObject
+        assertEquals(
+            setOf("instructions", "facts", "evidence", "parent_facts", "parent_evidence"),
+            payload.keys,
+        )
+        assertEquals(
+            setOf("ssh_authentication"),
+            payload.getValue("evidence").jsonObject.keys,
+        )
+        assertFalse(wire.contains("message"))
+        assertFalse(wire.contains("invocation_token"))
         assertFalse(wire.contains("private SSH description"))
     }
 

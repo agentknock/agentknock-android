@@ -9,6 +9,7 @@ import dev.agentknock.storage.request.InboxRequestDetails
 import dev.agentknock.storage.request.InboxRequestSummary
 import dev.agentknock.storage.request.RequestSyncResult
 import dev.agentknock.storage.request.GitSignDecisionResult
+import dev.agentknock.storage.request.SshAuthenticationDecisionResult
 import dev.agentknock.ui.requestHistory
 import kotlinx.coroutines.ExperimentalCoroutinesApi
 import kotlinx.coroutines.flow.MutableStateFlow
@@ -85,6 +86,27 @@ internal class RequestsViewModel(application: Application) : AndroidViewModel(ap
     suspend fun allowGitSignTemporarily(requestId: Long): GitSignDecisionResult {
         container.localStorage.await()
         return repository.allowGitSignTemporarily(requestId)
+    }
+
+    suspend fun approveSshAuthenticationRequest(
+        requestId: Long,
+    ): SshAuthenticationDecisionResult {
+        container.localStorage.await()
+        return repository.approveSshAuthenticationRequest(requestId)
+    }
+
+    suspend fun denySshAuthenticationRequest(
+        requestId: Long,
+    ): SshAuthenticationDecisionResult {
+        container.localStorage.await()
+        return repository.denySshAuthenticationRequest(requestId)
+    }
+
+    suspend fun allowSshAuthenticationTemporarily(
+        requestId: Long,
+    ): SshAuthenticationDecisionResult {
+        container.localStorage.await()
+        return repository.allowSshAuthenticationTemporarily(requestId)
     }
 
 }

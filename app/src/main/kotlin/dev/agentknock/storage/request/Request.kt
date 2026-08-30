@@ -390,6 +390,61 @@ internal data class GitSignRequestEntity(
 )
 
 @Entity(
+    tableName = "ssh_authentication_requests",
+    foreignKeys = [
+        ForeignKey(
+            entity = InboxRequestEntity::class,
+            parentColumns = ["id"],
+            childColumns = ["request_id"],
+            onDelete = ForeignKey.CASCADE,
+            onUpdate = ForeignKey.NO_ACTION,
+        ),
+    ],
+    indices = [Index(value = ["state"])],
+)
+internal data class SshAuthenticationRequestEntity(
+    @PrimaryKey
+    @ColumnInfo(name = "request_id")
+    val requestId: Long,
+    @ColumnInfo(name = "state")
+    val state: String,
+    @ColumnInfo(name = "secret_name")
+    val secretName: String,
+    @ColumnInfo(name = "message")
+    val message: ByteArray,
+    @ColumnInfo(name = "username")
+    val username: String,
+    @ColumnInfo(name = "method")
+    val method: String,
+    @ColumnInfo(name = "algorithm")
+    val algorithm: String,
+    @ColumnInfo(name = "host_key_algorithm")
+    val hostKeyAlgorithm: String?,
+    @ColumnInfo(name = "host_key_fingerprint")
+    val hostKeyFingerprint: String?,
+    @ColumnInfo(name = "approval_evaluation_json")
+    val approvalEvaluationJson: String?,
+    @ColumnInfo(name = "decision")
+    val decision: String?,
+    @ColumnInfo(name = "completion_result")
+    val completionResult: String?,
+    @ColumnInfo(name = "completion_reason")
+    val completionReason: String?,
+    @ColumnInfo(name = "completion_message")
+    val completionMessage: String?,
+    @ColumnInfo(name = "error")
+    val error: String?,
+    @ColumnInfo(name = "created_at")
+    val createdAt: Long,
+    @ColumnInfo(name = "updated_at")
+    val updatedAt: Long,
+    @ColumnInfo(name = "decided_at")
+    val decidedAt: Long?,
+    @ColumnInfo(name = "completed_at")
+    val completedAt: Long?,
+)
+
+@Entity(
     tableName = "secret_list_requests",
     foreignKeys = [
         ForeignKey(
@@ -637,6 +692,9 @@ internal interface RequestDao {
     @Query("SELECT * FROM git_sign_requests ORDER BY request_id DESC")
     fun observeGitSignRequests(): Flow<List<GitSignRequestEntity>>
 
+    @Query("SELECT * FROM ssh_authentication_requests ORDER BY request_id DESC")
+    fun observeSshAuthenticationRequests(): Flow<List<SshAuthenticationRequestEntity>>
+
     @Query("SELECT * FROM secret_list_requests ORDER BY request_id DESC")
     fun observeSecretListRequests(): Flow<List<SecretListRequestEntity>>
 
@@ -654,6 +712,9 @@ internal interface RequestDao {
 
     @Query("SELECT * FROM git_sign_requests WHERE request_id = :requestId")
     fun observeGitSignRequest(requestId: Long): Flow<GitSignRequestEntity?>
+
+    @Query("SELECT * FROM ssh_authentication_requests WHERE request_id = :requestId")
+    fun observeSshAuthenticationRequest(requestId: Long): Flow<SshAuthenticationRequestEntity?>
 
     @Query("SELECT * FROM secret_list_requests WHERE request_id = :requestId")
     fun observeSecretListRequest(requestId: Long): Flow<SecretListRequestEntity?>
@@ -720,6 +781,9 @@ internal interface RequestDao {
     @Query("SELECT * FROM git_sign_requests WHERE request_id = :requestId")
     suspend fun getGitSignRequest(requestId: Long): GitSignRequestEntity?
 
+    @Query("SELECT * FROM ssh_authentication_requests WHERE request_id = :requestId")
+    suspend fun getSshAuthenticationRequest(requestId: Long): SshAuthenticationRequestEntity?
+
     @Query("SELECT * FROM secret_list_requests WHERE request_id = :requestId")
     suspend fun getSecretListRequest(requestId: Long): SecretListRequestEntity?
 
@@ -781,6 +845,9 @@ internal interface RequestDao {
     suspend fun insertGitSignRequestRow(request: GitSignRequestEntity)
 
     @Insert
+    suspend fun insertSshAuthenticationRequestRow(request: SshAuthenticationRequestEntity)
+
+    @Insert
     suspend fun insertSecretListRequestRow(request: SecretListRequestEntity)
 
     @Insert
@@ -811,6 +878,9 @@ internal interface RequestDao {
 
     @Update
     suspend fun updateGitSignRequestRow(request: GitSignRequestEntity): Int
+
+    @Update
+    suspend fun updateSshAuthenticationRequestRow(request: SshAuthenticationRequestEntity): Int
 
     @Update
     suspend fun updateSecretListRequestRow(request: SecretListRequestEntity): Int
@@ -1001,6 +1071,21 @@ internal interface RequestDao {
     }
 
     @Transaction
+    suspend fun insertSshAuthenticationRequest(
+        request: InboxRequestEntity,
+        authentication: SshAuthenticationRequestEntity,
+        requestSecret: RequestSecretEntity,
+        currentPairingSecret: PairingSecretEntity?,
+        previousPairingSecret: PairingSecretEntity?,
+    ): Long {
+        val requestId = insertRequest(request)
+        insertSshAuthenticationRequestRow(authentication.copy(requestId = requestId))
+        storeAcceptedSecrets(requestId, requestSecret, currentPairingSecret, previousPairingSecret)
+        trimCompletedHistory()
+        return requestId
+    }
+
+    @Transaction
     suspend fun insertSecretUseRequestIfAuthorized(
         request: InboxRequestEntity,
         secretUseRequest: SecretUseRequestEntity,
@@ -1038,6 +1123,28 @@ internal interface RequestDao {
         return insertGitSignRequest(
             request,
             gitSignRequest,
+            requestSecret,
+            currentPairingSecret,
+            previousPairingSecret,
+        )
+    }
+
+    @Transaction
+    suspend fun insertSshAuthenticationRequestIfAuthorized(
+        request: InboxRequestEntity,
+        authentication: SshAuthenticationRequestEntity,
+        requestSecret: RequestSecretEntity,
+        currentPairingSecret: PairingSecretEntity?,
+        previousPairingSecret: PairingSecretEntity?,
+        authorization: AuthorizationCommitment,
+        clientId: String,
+        operation: String,
+        now: Long,
+    ): Long? {
+        if (!authorizationMatches(authorization, clientId, operation, now)) return null
+        return insertSshAuthenticationRequest(
+            request,
+            authentication,
             requestSecret,
             currentPairingSecret,
             previousPairingSecret,
@@ -1192,6 +1299,31 @@ internal interface RequestDao {
     ): Boolean {
         if (!authorizationMatches(authorization, clientId, operation, now)) return false
         updateGitSignRequest(request, gitSignRequest)
+        return true
+    }
+
+
+    @Transaction
+    suspend fun updateSshAuthenticationRequest(
+        request: InboxRequestEntity,
+        authentication: SshAuthenticationRequestEntity,
+    ) {
+        check(updateRequest(request) == 1)
+        check(updateSshAuthenticationRequestRow(authentication) == 1)
+        trimCompletedHistory()
+    }
+
+    @Transaction
+    suspend fun updateSshAuthenticationRequestIfAuthorized(
+        request: InboxRequestEntity,
+        authentication: SshAuthenticationRequestEntity,
+        authorization: AuthorizationCommitment,
+        clientId: String,
+        operation: String,
+        now: Long,
+    ): Boolean {
+        if (!authorizationMatches(authorization, clientId, operation, now)) return false
+        updateSshAuthenticationRequest(request, authentication)
         return true
     }
 

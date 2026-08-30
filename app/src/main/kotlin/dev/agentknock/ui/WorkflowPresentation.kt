@@ -7,7 +7,11 @@ import dev.agentknock.storage.request.PairingState
 import dev.agentknock.storage.request.SecretUploadRequestState
 
 internal fun List<InboxRequestSummary>.requestHistory(): List<InboxRequestSummary> =
-    filter { it.kind == InboxRequestKind.SECRET_USE || it.kind == InboxRequestKind.GIT_SIGN }
+    filter {
+        it.kind == InboxRequestKind.SECRET_USE ||
+            it.kind == InboxRequestKind.GIT_SIGN ||
+            it.kind == InboxRequestKind.SSH_AUTHENTICATE
+    }
 
 internal fun List<InboxRequestSummary>.pendingPairings(): List<InboxRequestSummary> =
     filter { summary ->

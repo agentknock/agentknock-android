@@ -444,6 +444,11 @@ private fun AuditEvent.detailLabel(): String = when (category) {
         title.contains("rejected", ignoreCase = true) -> "Reason"
         else -> "SSH key"
     }
+    AuditCategory.SSH_AUTHENTICATE -> when {
+        title.contains("AI review", ignoreCase = true) -> "AI review"
+        title.contains("denied", ignoreCase = true) -> "Reason"
+        else -> "SSH authentication"
+    }
     AuditCategory.SECRET_LIST -> "Result"
     AuditCategory.SECRET_UPLOAD -> if (title.contains("automatically", ignoreCase = true)) {
         "Reason"

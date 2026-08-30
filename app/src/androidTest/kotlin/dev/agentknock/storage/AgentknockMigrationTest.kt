@@ -466,4 +466,56 @@ class AgentknockMigrationTest {
             }
         }
     }
+
+    @Test
+    fun migration12To13PreservesRequestsAndAddsSshAuthentication() = runTest {
+        helper.createDatabase(12).use { database ->
+            database.execSQL(
+                """
+                INSERT INTO inbox_requests (
+                    id, relay_request_id, parent_request_id, kind, state, listed,
+                    request_json, response_json, completion_json, received_at, updated_at,
+                    completed_at, request_acknowledged_at, response_acknowledged_at,
+                    completion_acknowledged_at
+                ) VALUES (
+                    1, '01ARZ3NDEKTSV4RRFFQ69G5FAV', NULL, 'secret_use', 'completed', 1,
+                    '{}', NULL, NULL, 1, 2, 2, NULL, NULL, NULL
+                )
+                """.trimIndent(),
+            )
+        }
+
+        helper.runMigrationsAndValidate(13, listOf(MIGRATION_12_13)).use { database ->
+            database.prepare(
+                "SELECT kind, state FROM inbox_requests WHERE id = 1",
+            ).use { statement ->
+                assertTrue(statement.step())
+                assertEquals("secret_use", statement.getText(0))
+                assertEquals("completed", statement.getText(1))
+            }
+            database.execSQL(
+                """
+                INSERT INTO ssh_authentication_requests (
+                    request_id, state, secret_name, message, username, method, algorithm,
+                    host_key_algorithm, host_key_fingerprint, approval_evaluation_json,
+                    decision, completion_result, completion_reason, completion_message,
+                    error, created_at, updated_at, decided_at, completed_at
+                ) VALUES (
+                    1, 'approval_pending', 'production-ssh', X'0102', 'deploy',
+                    'publickey', 'ssh-ed25519', NULL, NULL, NULL, NULL, NULL, NULL, NULL,
+                    NULL, 3, 3, NULL, NULL
+                )
+                """.trimIndent(),
+            )
+            database.prepare(
+                "SELECT secret_name, username, message FROM ssh_authentication_requests " +
+                    "WHERE request_id = 1",
+            ).use { statement ->
+                assertTrue(statement.step())
+                assertEquals("production-ssh", statement.getText(0))
+                assertEquals("deploy", statement.getText(1))
+                assertArrayEquals(byteArrayOf(1, 2), statement.getBlob(2))
+            }
+        }
+    }
 }

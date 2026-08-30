@@ -123,6 +123,10 @@ import dev.agentknock.storage.request.GitSignCompletionResult
 import dev.agentknock.storage.request.GitSignDecisionResult
 import dev.agentknock.storage.request.GitSignRequestDetails
 import dev.agentknock.storage.request.GitSignRequestState
+import dev.agentknock.storage.request.SshAuthenticationCompletionResult
+import dev.agentknock.storage.request.SshAuthenticationDecisionResult
+import dev.agentknock.storage.request.SshAuthenticationRequestDetails
+import dev.agentknock.storage.request.SshAuthenticationRequestState
 import dev.agentknock.storage.request.InboxRequestDetails
 import dev.agentknock.storage.request.InboxRequestKind
 import dev.agentknock.storage.request.InboxRequestState
@@ -176,6 +180,10 @@ internal fun RequestsScreen(
                 request.gitSignState == GitSignRequestState.APPROVAL_PENDING -> {
                     report(viewModel.approveGitSignRequest(request.id).message())
                 }
+                request.sshAuthenticationState ==
+                    SshAuthenticationRequestState.APPROVAL_PENDING -> {
+                    report(viewModel.approveSshAuthenticationRequest(request.id).message())
+                }
             }
         }
     }
@@ -188,6 +196,10 @@ internal fun RequestsScreen(
                 }
                 request.gitSignState == GitSignRequestState.APPROVAL_PENDING -> {
                     report(viewModel.denyGitSignRequest(request.id).message())
+                }
+                request.sshAuthenticationState ==
+                    SshAuthenticationRequestState.APPROVAL_PENDING -> {
+                    report(viewModel.denySshAuthenticationRequest(request.id).message())
                 }
             }
         }
@@ -315,6 +327,28 @@ private fun RequestDetail(
             },
             modifier = modifier,
         )
+    } else if (request.sshAuthentication != null) {
+        SshAuthenticationDetail(
+            request = request,
+            onBack = onBack,
+            showBack = showBack,
+            onApprove = {
+                scope.launch {
+                    report(viewModel.approveSshAuthenticationRequest(request.id).message())
+                }
+            },
+            onDeny = {
+                scope.launch {
+                    report(viewModel.denySshAuthenticationRequest(request.id).message())
+                }
+            },
+            onAllowTemporarily = {
+                scope.launch {
+                    report(viewModel.allowSshAuthenticationTemporarily(request.id).message())
+                }
+            },
+            modifier = modifier,
+        )
     } else {
         MissingDetail(onBack = onBack, showBack = showBack, modifier = modifier)
     }
@@ -410,7 +444,7 @@ private fun RequestList(
                 ) {
                     Text("No requests yet", style = MaterialTheme.typography.titleLarge)
                     Text(
-                        "Secret use and Git signing requests will appear here.",
+                        "Secret use, Git signing, and SSH authentication requests will appear here.",
                         color = MaterialTheme.colorScheme.onSurfaceVariant,
                     )
                 }
@@ -446,11 +480,14 @@ private fun RequestRow(
 ) {
     val canApprove = request.userDecisionAvailable && (
         request.secretUseState == SecretUseRequestState.APPROVAL_PENDING ||
-            request.gitSignState == GitSignRequestState.APPROVAL_PENDING
+            request.gitSignState == GitSignRequestState.APPROVAL_PENDING ||
+            request.sshAuthenticationState ==
+            SshAuthenticationRequestState.APPROVAL_PENDING
         )
     val canReject = request.canReject() && (
         request.userDecisionAvailable ||
             request.secretUseState == null && request.gitSignState == null
+                && request.sshAuthenticationState == null
         )
     val rejectLabel = "Deny once"
     val swipeState = rememberSwipeToDismissBoxState(
@@ -596,7 +633,10 @@ private fun RequestRowContent(
                     modifier = Modifier.padding(top = 2.dp),
                 )
             }
-            request.command?.takeUnless { request.kind == InboxRequestKind.GIT_SIGN }?.let {
+            request.command?.takeUnless {
+                request.kind == InboxRequestKind.GIT_SIGN ||
+                    request.kind == InboxRequestKind.SSH_AUTHENTICATE
+            }?.let {
                 Text(
                     renderShellCommand(it, request.arguments),
                     style = MaterialTheme.typography.titleMedium,
@@ -614,7 +654,11 @@ private fun RequestRowContent(
                     overflow = TextOverflow.Ellipsis,
                 )
             }
-            if (request.kind == InboxRequestKind.GIT_SIGN && request.command != null) {
+            if (
+                (request.kind == InboxRequestKind.GIT_SIGN ||
+                    request.kind == InboxRequestKind.SSH_AUTHENTICATE) &&
+                request.command != null
+            ) {
                 Text(
                     "Triggered by ${renderShellCommand(request.command, request.arguments)}",
                     style = MaterialTheme.typography.bodySmall,
@@ -1163,6 +1207,8 @@ private fun temporaryAccessScope(
         "For any command, $clientName can receive protected values from:"
     TemporaryAccessOperation.GIT_SIGN ->
         "For any repository, $clientName can request Git signatures from:"
+    TemporaryAccessOperation.SSH_AUTHENTICATE ->
+        "For any SSH server, $clientName can request SSH authentication from:"
 }
 
 private fun ApprovalEvaluation?.temporaryGrantSecretNames(
@@ -1369,6 +1415,166 @@ private fun GitSignDetail(
             clientName = signing.clientName,
             secretNames = temporarySecretNames,
             operation = TemporaryAccessOperation.GIT_SIGN,
+            approvesOtherUsesOnce = false,
+            onConfirm = {
+                confirmTemporaryAccess = false
+                onAllowTemporarily()
+            },
+            onDismiss = { confirmTemporaryAccess = false },
+        )
+    }
+}
+
+@Composable
+private fun SshAuthenticationDetail(
+    request: InboxRequestDetails,
+    onBack: () -> Unit,
+    showBack: Boolean,
+    onApprove: () -> Unit,
+    onDeny: () -> Unit,
+    onAllowTemporarily: () -> Unit,
+    modifier: Modifier,
+) {
+    val authentication = checkNotNull(request.sshAuthentication)
+    val pending = authentication.state == SshAuthenticationRequestState.APPROVAL_PENDING
+    val aiReviewInFlight = !request.userDecisionAvailable
+    val temporarySecretNames = authentication.approvalEvaluation.temporaryGrantSecretNames(
+        aiReviewInFlight,
+    )
+    var confirmTemporaryAccess by remember(request.id) { mutableStateOf(false) }
+    DetailPage(
+        title = "SSH authentication",
+        onBack = onBack,
+        modifier = modifier,
+        showBack = showBack,
+        scrollResetKey = authentication.state to authentication.completionResult,
+        bottomContent = if (pending && request.userDecisionAvailable) {
+            {
+                Surface(
+                    color = MaterialTheme.colorScheme.surfaceContainerLow,
+                    tonalElevation = 3.dp,
+                ) {
+                    RequestDecisionButtons(
+                        approveLabel = "Authenticate once",
+                        approveEnabled = true,
+                        temporaryAccessAvailable = temporarySecretNames.isNotEmpty(),
+                        onDeny = onDeny,
+                        onApprove = onApprove,
+                        onAllowTemporarily = { confirmTemporaryAccess = true },
+                    )
+                }
+            }
+        } else {
+            null
+        },
+    ) {
+        InformationSurface {
+            StatusLine(
+                if (aiReviewInFlight) {
+                    "AI review in progress"
+                } else {
+                    authentication.statusLabel()
+                },
+                error = authentication.state ==
+                    SshAuthenticationRequestState.VERIFICATION_FAILED,
+                attention = pending && request.userDecisionAvailable,
+                subdued = aiReviewInFlight ||
+                    authentication.decision == SecretUseDecision.DENIED ||
+                    authentication.completionResult ==
+                    SshAuthenticationCompletionResult.DENIED ||
+                    authentication.completionResult ==
+                    SshAuthenticationCompletionResult.ABORTED,
+            )
+            ClientIdentity(authentication.clientName)
+            SecretIdentities(listOf(authentication.secretName))
+            InformationRow("Received", formatTimestamp(request.receivedAt))
+        }
+
+        if (
+            pending && (
+                authentication.approvalEvaluation?.aiReview != null ||
+                    authentication.approvalEvaluation?.secrets
+                        ?.any { it.action == ApprovalAction.ASK_AI } == true
+                )
+        ) {
+            AiReviewNotice(authentication.approvalEvaluation.aiReview, aiReviewInFlight)
+        }
+        if (!pending) SshAuthenticationOutcome(authentication)
+
+        InformationSurface {
+            InformationRow("Remote account", authentication.username)
+            InformationRow(
+                "Method",
+                when (authentication.method.wireName) {
+                    "publickey" -> "Public-key authentication"
+                    else -> "Host-bound public-key authentication"
+                },
+            )
+            InformationRow("Signature", authentication.algorithm.wireName)
+            authentication.hostKeyAlgorithm?.let { InformationRow("Host key", it) }
+            authentication.hostKeyFingerprint?.let {
+                InformationRow("Host fingerprint", it, monospace = true)
+            }
+        }
+
+        Surface(
+            color = MaterialTheme.colorScheme.surfaceContainerLow,
+            shape = MaterialTheme.shapes.large,
+            modifier = Modifier.fillMaxWidth(),
+        ) {
+            Column(
+                Modifier.padding(16.dp),
+                verticalArrangement = Arrangement.spacedBy(8.dp),
+            ) {
+                Text("Triggered by", style = MaterialTheme.typography.labelLarge)
+                SelectionContainer {
+                    Text(
+                        renderShellCommand(authentication.command, authentication.arguments),
+                        fontFamily = FontFamily.Monospace,
+                    )
+                }
+                authentication.reason?.takeIf(String::isNotBlank)?.let {
+                    HorizontalDivider()
+                    Text(
+                        "Why this command says it needs the key",
+                        style = MaterialTheme.typography.labelLarge,
+                    )
+                    Text(it, style = MaterialTheme.typography.bodyMedium)
+                    Text(
+                        "Reported by the requesting client; not verified by Agentknock.",
+                        style = MaterialTheme.typography.bodySmall,
+                        color = MaterialTheme.colorScheme.onSurfaceVariant,
+                    )
+                }
+            }
+        }
+
+        if (pending) {
+            Text(
+                "Agentknock signs the SSH authentication request on this device. " +
+                    "The private key is never sent to the client.",
+                style = MaterialTheme.typography.bodySmall,
+                color = MaterialTheme.colorScheme.onSurfaceVariant,
+            )
+        }
+
+        Disclosure("Technical details") {
+            authentication.clientSoftware?.let { software ->
+                DetailValue("Client software", renderSoftware(software.application))
+                if (software.library != software.application) {
+                    DetailValue("Agentknock library", renderSoftware(software.library))
+                }
+            }
+            DetailValue("Client ID", authentication.clientId, true)
+            DetailValue("Invocation request ID", authentication.invocationRequestId, true)
+            DetailValue("Authentication request ID", request.relayRequestId, true)
+        }
+    }
+    if (confirmTemporaryAccess) {
+        TemporaryAccessConfirmation(
+            clientName = authentication.clientName,
+            secretNames = temporarySecretNames,
+            operation = TemporaryAccessOperation.SSH_AUTHENTICATE,
             approvesOtherUsesOnce = false,
             onConfirm = {
                 confirmTemporaryAccess = false
@@ -2378,7 +2584,8 @@ private fun StatusLine(
 @Composable
 private fun RequestStatusBadge(request: InboxRequestSummary) {
     val error = request.secretUseState == SecretUseRequestState.VERIFICATION_FAILED ||
-        request.gitSignState == GitSignRequestState.VERIFICATION_FAILED
+        request.gitSignState == GitSignRequestState.VERIFICATION_FAILED ||
+        request.sshAuthenticationState == SshAuthenticationRequestState.VERIFICATION_FAILED
     val rejected = request.wasRejected()
     val actionRequired = request.state == InboxRequestState.ACTION_REQUIRED &&
         request.userDecisionAvailable
@@ -2441,7 +2648,8 @@ private enum class NoticeTone {
 private fun InboxRequestSummary.statusLabel(): String = when {
     !userDecisionAvailable && (
         secretUseState == SecretUseRequestState.APPROVAL_PENDING ||
-            gitSignState == GitSignRequestState.APPROVAL_PENDING
+            gitSignState == GitSignRequestState.APPROVAL_PENDING ||
+            sshAuthenticationState == SshAuthenticationRequestState.APPROVAL_PENDING
         ) -> "AI reviewing"
     secretUseState != null -> secretUseStatusLabel(
         secretUseState,
@@ -2453,6 +2661,11 @@ private fun InboxRequestSummary.statusLabel(): String = when {
         gitSignResult,
         gitSignCompletionReason,
     )
+    sshAuthenticationState != null -> sshAuthenticationStatusLabel(
+        sshAuthenticationState,
+        sshAuthenticationResult,
+        sshAuthenticationCompletionReason,
+    )
     state == InboxRequestState.ACTION_REQUIRED -> "Needs attention"
     state == InboxRequestState.WAITING -> "Waiting"
     else -> "Completed"
@@ -2460,35 +2673,65 @@ private fun InboxRequestSummary.statusLabel(): String = when {
 
 private fun InboxRequestSummary.canReject(): Boolean =
     secretUseState == SecretUseRequestState.APPROVAL_PENDING ||
-        gitSignState == GitSignRequestState.APPROVAL_PENDING
+        gitSignState == GitSignRequestState.APPROVAL_PENDING ||
+        sshAuthenticationState == SshAuthenticationRequestState.APPROVAL_PENDING
 
 private fun InboxRequestSummary.wasRejected(): Boolean =
     secretUseDecision == SecretUseDecision.DENIED ||
         secretUseResult == InvocationCompletionResult.DENIED ||
         gitSignDecision == SecretUseDecision.DENIED ||
-        gitSignResult == GitSignCompletionResult.DENIED
+        gitSignResult == GitSignCompletionResult.DENIED ||
+        sshAuthenticationDecision == SecretUseDecision.DENIED ||
+        sshAuthenticationResult == SshAuthenticationCompletionResult.DENIED
 
 private fun InboxRequestSummary.wasAborted(): Boolean =
     secretUseResult == InvocationCompletionResult.ABORTED ||
-        gitSignResult == GitSignCompletionResult.ABORTED
+        gitSignResult == GitSignCompletionResult.ABORTED ||
+        sshAuthenticationResult == SshAuthenticationCompletionResult.ABORTED
 
 private fun InboxRequestSummary.hasVerificationFailure(): Boolean =
     secretUseState == SecretUseRequestState.VERIFICATION_FAILED ||
-        gitSignState == GitSignRequestState.VERIFICATION_FAILED
+        gitSignState == GitSignRequestState.VERIFICATION_FAILED ||
+        sshAuthenticationState == SshAuthenticationRequestState.VERIFICATION_FAILED
 
 private fun InboxRequestSummary.wasAccepted(): Boolean =
     secretUseResult == InvocationCompletionResult.APPROVED ||
-        gitSignResult == GitSignCompletionResult.APPROVED
+        gitSignResult == GitSignCompletionResult.APPROVED ||
+        sshAuthenticationResult == SshAuthenticationCompletionResult.APPROVED
 
 private fun InboxRequestSummary.hasInvalidSecretReference(): Boolean =
     secretUseCompletionReason == "INVALID_REQUEST" ||
-        gitSignCompletionReason == "INVALID_REQUEST"
+        gitSignCompletionReason == "INVALID_REQUEST" ||
+        sshAuthenticationCompletionReason == "INVALID_REQUEST"
 
 private fun GitSignRequestDetails.statusLabel(): String = gitSignStatusLabel(
     state,
     completionResult,
     completionReason,
 )
+
+private fun SshAuthenticationRequestDetails.statusLabel(): String =
+    sshAuthenticationStatusLabel(state, completionResult, completionReason)
+
+private fun sshAuthenticationStatusLabel(
+    state: SshAuthenticationRequestState,
+    result: SshAuthenticationCompletionResult?,
+    completionReason: String?,
+): String = when (state) {
+    SshAuthenticationRequestState.APPROVAL_PENDING -> "Needs approval"
+    SshAuthenticationRequestState.WAITING_FOR_COMPLETION -> "Waiting for client"
+    SshAuthenticationRequestState.VERIFICATION_FAILED -> "Verification failed"
+    SshAuthenticationRequestState.COMPLETED -> when (result) {
+        SshAuthenticationCompletionResult.APPROVED -> "Authenticated"
+        SshAuthenticationCompletionResult.DENIED -> if (completionReason == "INVALID_REQUEST") {
+            "Invalid request"
+        } else {
+            "Denied"
+        }
+        SshAuthenticationCompletionResult.ABORTED -> "Aborted"
+        null -> "Completed"
+    }
+}
 
 internal fun shouldShowDecisionHistory(
     verificationFailed: Boolean,
@@ -2578,6 +2821,76 @@ private fun GitSignOutcome(signing: GitSignRequestDetails) {
                 signing.decision == SecretUseDecision.DENIED -> "You denied it."
                 temporaryAccessUntil != null -> "You signed it and allowed temporary access."
                 else -> "You signed it once."
+            },
+        )
+    }
+}
+
+@Composable
+private fun SshAuthenticationOutcome(authentication: SshAuthenticationRequestDetails) {
+    val temporaryAccessUntil = authentication.approvalEvaluation?.secrets
+        ?.mapNotNull { it.temporaryAccessExpiresAt }
+        ?.maxOrNull()
+    val aiReview = authentication.approvalEvaluation?.aiReview
+    when {
+        authentication.state == SshAuthenticationRequestState.VERIFICATION_FAILED -> Notice(
+            "Authentication could not be confirmed",
+            authentication.error ?: "The client confirmation was invalid.",
+            NoticeTone.DANGER,
+        )
+        authentication.completionResult == SshAuthenticationCompletionResult.APPROVED -> Notice(
+            "Authentication signed",
+            "The SSH signature was delivered to the client.",
+            NoticeTone.SUCCESS,
+        )
+        authentication.completionResult == SshAuthenticationCompletionResult.DENIED -> Notice(
+            if (authentication.completionReason == "INVALID_REQUEST") {
+                "Invalid request"
+            } else {
+                "Authentication denied"
+            },
+            authentication.completionMessage ?: "No SSH signature was created.",
+            NoticeTone.SUBDUED,
+        )
+        authentication.completionResult == SshAuthenticationCompletionResult.ABORTED -> Notice(
+            "Request ended",
+            authentication.completionMessage ?: "The client ended the SSH authentication request.",
+            NoticeTone.NEUTRAL,
+        )
+        authentication.state == SshAuthenticationRequestState.WAITING_FOR_COMPLETION &&
+            authentication.decision == SecretUseDecision.APPROVED -> Notice(
+            "Authentication signed",
+            "Waiting for the client to confirm receipt.",
+            NoticeTone.SUCCESS,
+        )
+        authentication.state == SshAuthenticationRequestState.WAITING_FOR_COMPLETION -> Notice(
+            "Authentication denied",
+            authentication.completionMessage ?: "Waiting for the client to confirm the denial.",
+            NoticeTone.SUBDUED,
+        )
+    }
+    if (shouldShowDecisionHistory(
+            verificationFailed = authentication.state ==
+                SshAuthenticationRequestState.VERIFICATION_FAILED,
+            completionReason = authentication.completionReason,
+        )
+    ) {
+        temporaryAccessUntil?.let {
+            Notice(
+                "Temporary SSH access",
+                "SSH authentication from this client is allowed through ${formatTimestamp(it)}.",
+                NoticeTone.SUCCESS,
+            )
+        }
+        HistoricalAiReview(
+            review = aiReview,
+            decision = authentication.decision,
+            humanResolution = when {
+                aiReview?.decision != AiReviewDecision.ASK_USER -> null
+                authentication.decision == SecretUseDecision.DENIED -> "You denied it."
+                temporaryAccessUntil != null ->
+                    "You authenticated it and allowed temporary access."
+                else -> "You authenticated it once."
             },
         )
     }
@@ -2695,6 +3008,33 @@ private fun GitSignDecisionResult.message(): String = when (this) {
         "Temporary access is no longer available"
     GitSignDecisionResult.TemporaryAccessNotStarted ->
         "Signature approved once, but temporary access could not be started"
+}
+
+private fun SshAuthenticationDecisionResult.message(): String = when (this) {
+    SshAuthenticationDecisionResult.Decided -> "Decision saved"
+    SshAuthenticationDecisionResult.NotPending ->
+        "This SSH authentication request no longer needs a decision"
+    SshAuthenticationDecisionResult.NotFound ->
+        "SSH authentication request is no longer available"
+    SshAuthenticationDecisionResult.InvocationUnavailable ->
+        "The original command request is unavailable"
+    SshAuthenticationDecisionResult.PairingUnavailable -> "The paired client is unavailable"
+    SshAuthenticationDecisionResult.ApprovalChanged ->
+        "The SSH key or approval setting changed; review the request again"
+    SshAuthenticationDecisionResult.KeyChanged ->
+        "The SSH key changed or was renamed after the command began; start the command again"
+    SshAuthenticationDecisionResult.InvalidMessage ->
+        "The SSH authentication data changed or is invalid; start the command again"
+    SshAuthenticationDecisionResult.SecretUnavailable ->
+        "The SSH private key is unavailable on this device"
+    SshAuthenticationDecisionResult.SecretCorrupted ->
+        "The SSH private key could not be authenticated"
+    SshAuthenticationDecisionResult.UnsupportedEncryption ->
+        "The SSH private key uses unsupported encryption"
+    SshAuthenticationDecisionResult.TemporaryAccessUnavailable ->
+        "Temporary access is no longer available"
+    SshAuthenticationDecisionResult.TemporaryAccessNotStarted ->
+        "Authentication approved once, but temporary access could not be started"
 }
 
 internal fun SecretUploadDecisionResult.message(): String = when (this) {

@@ -1162,6 +1162,7 @@ private fun RelayClientState.successMessage(): String = when (this) {
 private fun TemporaryAccessOperation.displayName(): String = when (this) {
     TemporaryAccessOperation.INVOCATION -> "Secret values for any command"
     TemporaryAccessOperation.GIT_SIGN -> "Git signing for any repository"
+    TemporaryAccessOperation.SSH_AUTHENTICATE -> "SSH authentication for any server"
 }
 
 private fun DeviceManagementResult.message(enabled: Boolean): String = when (this) {

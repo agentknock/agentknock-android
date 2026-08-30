@@ -52,6 +52,9 @@ internal enum class ApprovalReviewOperation {
 
     @SerialName("git_sign")
     GIT_SIGN,
+
+    @SerialName("ssh_authenticate")
+    SSH_AUTHENTICATE,
 }
 
 @Serializable
@@ -101,6 +104,17 @@ internal data class ApprovalReviewEvidence(
     val command: ApprovalReviewCommandEvidence? = null,
     @SerialName("signed_content") val signedContent: String? = null,
     val repository: ApprovalReviewGitRepositoryEvidence? = null,
+    @SerialName("ssh_authentication")
+    val sshAuthentication: ApprovalReviewSshAuthenticationEvidence? = null,
+)
+
+@Serializable
+internal data class ApprovalReviewSshAuthenticationEvidence(
+    val username: String,
+    val method: String,
+    val algorithm: String,
+    @SerialName("host_key_algorithm") val hostKeyAlgorithm: String? = null,
+    @SerialName("host_key_fingerprint") val hostKeyFingerprint: String? = null,
 )
 
 @Serializable

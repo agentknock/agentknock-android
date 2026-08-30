@@ -1,5 +1,7 @@
 package dev.agentknock.storage.secret
 
+import dev.agentknock.protocol.SshSignatureAlgorithm
+import dev.agentknock.protocol.sshSignatureBlob
 import java.io.ByteArrayInputStream
 import java.io.ByteArrayOutputStream
 import java.io.DataInputStream
@@ -207,6 +209,28 @@ internal class SshKeyCodec(
         val armored = Base64.getMimeEncoder(76, "\n".encodeToByteArray())
             .encodeToString(gitSignature)
         return "$SSHSIG_PEM_BEGIN\n$armored\n$SSHSIG_PEM_END\n"
+    }
+
+    fun signSshAuthentication(
+        privateKey: SshPrivateKey,
+        message: ByteArray,
+        algorithm: SshSignatureAlgorithm,
+    ): ByteArray {
+        val validated = fromStored(
+            privateKey.algorithm.storedName,
+            privateKey.privateKey,
+            privateKey.publicKey,
+            privateKey.comment,
+        )
+        require(
+            validated.algorithm == SshKeyAlgorithm.ED25519 &&
+                algorithm == SshSignatureAlgorithm.ED25519,
+        ) { "SSH signature algorithm does not match the key" }
+        val signer = Ed25519Signer().apply {
+            init(true, Ed25519PrivateKeyParameters(validated.privateKey))
+            update(message, 0, message.size)
+        }
+        return sshSignatureBlob(algorithm, signer.generateSignature())
     }
 
     private fun parseEd25519PrivateBlock(

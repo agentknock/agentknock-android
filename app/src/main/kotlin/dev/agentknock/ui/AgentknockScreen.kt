@@ -109,6 +109,7 @@ internal fun AgentknockScreen(
             MainSection.REQUESTS -> requestSummaries.actionRequiredCount(
                 InboxRequestKind.SECRET_USE,
                 InboxRequestKind.GIT_SIGN,
+                InboxRequestKind.SSH_AUTHENTICATE,
             )
             MainSection.SECRETS -> requestSummaries.actionRequiredCount(InboxRequestKind.SECRET_UPLOAD)
             MainSection.CLIENTS -> requestSummaries.actionRequiredCount(InboxRequestKind.PAIRING)
@@ -140,6 +141,7 @@ internal fun AgentknockScreen(
                 when (requestSummaries.firstOrNull { it.id == requestId }?.kind ?: return@LaunchedEffect) {
                     InboxRequestKind.SECRET_USE -> MainSection.REQUESTS
                     InboxRequestKind.GIT_SIGN -> MainSection.REQUESTS
+                    InboxRequestKind.SSH_AUTHENTICATE -> MainSection.REQUESTS
                     InboxRequestKind.SECRET_UPLOAD -> MainSection.SECRETS
                     InboxRequestKind.PAIRING -> MainSection.CLIENTS
                 }

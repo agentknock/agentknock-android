@@ -10,6 +10,7 @@ internal enum class AuditCategory(
     PAIRING("pairing"),
     SECRET_USE("secret_use"),
     GIT_SIGN("git_sign"),
+    SSH_AUTHENTICATE("ssh_authenticate", "SSH authentication"),
     SECRET_LIST("secret_list"),
     SECRET_UPLOAD("secret_upload"),
     CLIENT("client"),

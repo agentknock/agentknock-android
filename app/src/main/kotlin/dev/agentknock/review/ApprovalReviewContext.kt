@@ -3,6 +3,7 @@ package dev.agentknock.review
 import dev.agentknock.protocol.GitSignHead
 import dev.agentknock.protocol.GitSignRequestMessage
 import dev.agentknock.protocol.InvocationRequestMessage
+import dev.agentknock.protocol.SshAuthenticationMessageDetails
 import dev.agentknock.relay.ApprovalReviewCommandEvidence
 import dev.agentknock.relay.ApprovalReviewEnvironmentSecretFacts
 import dev.agentknock.relay.ApprovalReviewEnvironmentVariableFacts
@@ -20,6 +21,7 @@ import dev.agentknock.relay.ApprovalReviewParentFacts
 import dev.agentknock.relay.ApprovalReviewRequest
 import dev.agentknock.relay.ApprovalReviewSecretFacts
 import dev.agentknock.relay.ApprovalReviewSshSecretFacts
+import dev.agentknock.relay.ApprovalReviewSshAuthenticationEvidence
 import dev.agentknock.storage.request.PairingEntity
 import dev.agentknock.storage.request.SecretUseRequestEntity
 import dev.agentknock.storage.approval.ApprovalAction
@@ -128,6 +130,60 @@ internal fun approvalReviewGitSignRequest(
                     },
                 )
             },
+        ),
+        parentEvidence = ApprovalReviewEvidence(
+            reason = invocation.reason,
+            command = ApprovalReviewCommandEvidence(
+                argv = listOf(invocation.command) + decodeStringList(invocation.argumentsJson),
+                workingDirectory = invocation.workingDirectory,
+                resolvedExecutable = invocation.executablePath,
+                launcherChain = decodeStringList(invocation.launcherChainJson),
+            ),
+        ),
+    )
+}
+
+internal fun approvalReviewSshAuthenticationRequest(
+    pairing: PairingEntity,
+    secretName: String,
+    details: SshAuthenticationMessageDetails,
+    invocation: SecretUseRequestEntity,
+    invocationSecrets: Map<String, ApprovalReviewSecretFacts>,
+    parentElapsedSeconds: Long,
+    evaluation: ApprovalEvaluation,
+    policies: List<SecretApprovalPolicy>,
+    deviceInstructions: String,
+): ApprovalReviewRequest {
+    require(invocationSecrets[secretName] is ApprovalReviewSshSecretFacts) {
+        "SSH authentication review requires an SSH secret from the parent invocation"
+    }
+    require(parentElapsedSeconds >= 0) { "Parent elapsed time is negative" }
+    return ApprovalReviewRequest(
+        instructions = approvalReviewInstructions(
+            pairing = pairing,
+            deviceInstructions = deviceInstructions,
+            decisionSecretNames = setOf(secretName),
+            evaluation = evaluation,
+            policies = policies,
+        ),
+        facts = ApprovalReviewFacts(
+            client = pairing.approvalReviewClientName(),
+            operation = ApprovalReviewOperation.SSH_AUTHENTICATE,
+            secret = secretName,
+        ),
+        parentFacts = ApprovalReviewParentFacts(
+            operation = ApprovalReviewOperation.INVOCATION,
+            elapsedSeconds = parentElapsedSeconds,
+            secrets = invocationSecrets,
+        ),
+        evidence = ApprovalReviewEvidence(
+            sshAuthentication = ApprovalReviewSshAuthenticationEvidence(
+                username = details.username,
+                method = details.method.wireName,
+                algorithm = details.algorithm.wireName,
+                hostKeyAlgorithm = details.hostKeyAlgorithm,
+                hostKeyFingerprint = details.hostKeyFingerprint,
+            ),
         ),
         parentEvidence = ApprovalReviewEvidence(
             reason = invocation.reason,

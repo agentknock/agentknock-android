@@ -1,5 +1,6 @@
 package dev.agentknock.storage.secret
 
+import dev.agentknock.protocol.SshSignatureAlgorithm
 import java.io.ByteArrayInputStream
 import java.io.DataInputStream
 import java.security.MessageDigest
@@ -117,6 +118,26 @@ class SshKeyCodecTest {
         val verifier = Ed25519Signer().apply {
             init(false, Ed25519PublicKeyParameters(key.publicKey))
             update(signedData, 0, signedData.size)
+        }
+        assertTrue(verifier.verifySignature(signature))
+    }
+
+    @Test
+    fun `creates a valid Ed25519 SSH authentication signature blob`() {
+        val key = codec.importOpenSshPrivateKey(TEST_PRIVATE_KEY)
+        val message = "exact SSH authentication packet".encodeToByteArray()
+
+        val blob = DataInputStream(
+            ByteArrayInputStream(
+                codec.signSshAuthentication(key, message, SshSignatureAlgorithm.ED25519),
+            ),
+        )
+        assertEquals("ssh-ed25519", blob.readSshString())
+        val signature = blob.readSshBytes()
+        assertEquals(0, blob.available())
+        val verifier = Ed25519Signer().apply {
+            init(false, Ed25519PublicKeyParameters(key.publicKey))
+            update(message, 0, message.size)
         }
         assertTrue(verifier.verifySignature(signature))
     }
