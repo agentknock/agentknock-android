@@ -222,13 +222,7 @@ internal fun SettingsScreen(
                 SettingsPage.FACTORY_RESET -> FactoryReset(
                     onBack = ::back,
                     state = factoryReset,
-                    startReset = {
-                        authenticate(
-                            "Confirm factory reset",
-                            viewModel::startFactoryReset,
-                            { message -> scope.launch { snackbar.showSnackbar(message) } },
-                        )
-                    },
+                    startReset = viewModel::startFactoryReset,
                     confirmLocalClear = viewModel::confirmLocalClear,
                     cancelLocalClear = viewModel::cancelLocalClear,
                     consumeClearFailure = viewModel::consumeClearFailure,

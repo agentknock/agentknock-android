@@ -35,7 +35,6 @@ import dev.agentknock.storage.request.InvocationRequests
 import dev.agentknock.storage.request.SecretManagementRequests
 import dev.agentknock.storage.device.DeviceIdentityRepository
 import dev.agentknock.storage.device.DeviceManagementRepository
-import dev.agentknock.storage.device.DeviceManagementResult
 import dev.agentknock.subscription.SubscriptionRepository
 import dev.agentknock.ui.auth.AuthenticationSession
 import kotlinx.coroutines.CancellationException
@@ -248,7 +247,7 @@ internal class ApplicationContainer(application: Application) {
         factoryResetInProgress = true
         try {
             requestConnection.pauseAndJoin()
-            return deviceManagement.deleteRemoteDevice() == DeviceManagementResult.Changed
+            return deviceManagement.deleteRemoteDevice()
         } catch (cancelled: CancellationException) {
             cancelFactoryReset()
             throw cancelled

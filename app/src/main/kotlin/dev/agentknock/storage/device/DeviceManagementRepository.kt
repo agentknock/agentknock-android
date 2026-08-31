@@ -74,25 +74,12 @@ internal class DeviceManagementRepository(
         }
     }
 
-    suspend fun deleteRemoteDevice(): DeviceManagementResult {
-        val active = when (val lookup = authorizationLookup()) {
-            is AuthorizationLookup.Available -> lookup.authorization
-            is AuthorizationLookup.Failed -> return lookup.result
-        }
-        return when (
-            val result = relay.deleteDevice(active.deviceId, active.deviceToken)
-        ) {
-            is RelayEndpointResult.Success -> DeviceManagementResult.Changed
-            is RelayEndpointResult.Rejected -> DeviceManagementResult.Rejected(
-                result.status,
-                result.code,
-                result.message,
-            )
-            is RelayEndpointResult.Unavailable -> {
-                DeviceManagementResult.Unavailable(result.cause.message)
-            }
-            RelayEndpointResult.InvalidResponse -> DeviceManagementResult.InvalidResponse
-        }
+    suspend fun deleteRemoteDevice(): Boolean {
+        val active = (
+            deviceAuthorization.activeDeviceAuthorization()
+                as? RelayDeviceAuthorizationResult.Available
+            )?.authorization ?: return false
+        return relay.deleteDevice(active.deviceId, active.deviceToken) is RelayEndpointResult.Success
     }
 
     private suspend fun authorizationLookup(): AuthorizationLookup =
