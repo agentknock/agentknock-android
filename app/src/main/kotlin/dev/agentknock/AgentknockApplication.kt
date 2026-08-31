@@ -30,6 +30,7 @@ import dev.agentknock.storage.request.RequestMaterialStore
 import dev.agentknock.storage.request.persistentRelayRetryDeadline
 import dev.agentknock.storage.request.AiReviewCoordinator
 import dev.agentknock.storage.request.ClientRepository
+import dev.agentknock.storage.request.GitSigningRequests
 import dev.agentknock.storage.request.InvocationRequests
 import dev.agentknock.storage.request.SecretManagementRequests
 import dev.agentknock.storage.device.DeviceIdentityRepository
@@ -153,6 +154,12 @@ internal class ApplicationContainer(application: Application) {
         audit = audit,
         writeTransaction = writeTransaction,
     )
+    private val gitSigningRequests = GitSigningRequests(
+        dao = database.requestDao(),
+        secrets = secrets,
+        audit = audit,
+        writeTransaction = writeTransaction,
+    )
 
     val requests: RequestRepository = RequestRepository(
         dao = database.requestDao(),
@@ -162,6 +169,7 @@ internal class ApplicationContainer(application: Application) {
         clients = clients,
         secretManagement = secretManagement,
         invocationRequests = invocationRequests,
+        gitSigningRequests = gitSigningRequests,
         approvalReviewer = HttpRelayApprovalReviewClient(
             RelayHttpTransport(approvalReviewHttpClient(httpClient)),
         ),

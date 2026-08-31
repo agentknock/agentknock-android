@@ -364,6 +364,8 @@ internal data class GitSignRequestEntity(
     val approvalEvaluationJson: String?,
     @ColumnInfo(name = "decision")
     val decision: String?,
+    @ColumnInfo(name = "decision_source")
+    val decisionSource: String?,
     @ColumnInfo(name = "completion_result")
     val completionResult: String?,
     @ColumnInfo(name = "completion_reason")
@@ -838,6 +840,20 @@ internal interface RequestDao {
     @Query(
         """
         DELETE FROM request_psks
+        WHERE request_id = :requestId
+          AND EXISTS (
+            SELECT 1 FROM inbox_requests
+            WHERE id = :requestId
+              AND kind = 'git_sign'
+              AND completed_at IS NOT NULL
+          )
+        """,
+    )
+    suspend fun deleteTerminalGitSignRequestPsk(requestId: String): Int
+
+    @Query(
+        """
+        DELETE FROM request_psks
         WHERE request_id IN (
             SELECT id FROM inbox_requests WHERE completion_json IS NOT NULL
         )
@@ -1178,31 +1194,6 @@ internal interface RequestDao {
     }
 
     @Transaction
-    suspend fun insertGitSignRequestIfAuthorized(
-        request: InboxRequestEntity,
-        gitSignRequest: GitSignRequestEntity,
-        client: ClientEntity,
-        requestPsk: RequestPskEntity,
-        currentClientPsk: ClientPskEntity?,
-        previousClientPsk: ClientPskEntity?,
-        authorization: AuthorizationCommitment,
-        clientId: String,
-        operation: String,
-        now: Long,
-    ): Boolean {
-        if (!authorizationMatches(authorization, clientId, operation, now)) return false
-        insertGitSignRequest(
-            request,
-            gitSignRequest,
-            client,
-            requestPsk,
-            currentClientPsk,
-            previousClientPsk,
-        )
-        return true
-    }
-
-    @Transaction
     suspend fun insertSshAuthenticationRequestIfAuthorized(
         request: InboxRequestEntity,
         authentication: SshAuthenticationRequestEntity,
@@ -1432,15 +1423,26 @@ internal interface RequestDao {
         authorization: AuthorizationCommitment,
         clientId: String,
         operation: String,
+        expectedState: String,
         now: Long,
     ): ConditionalRequestUpdate {
         if (!canAdvanceRequest(request.id, request.deviceIdentityId)) {
             return ConditionalRequestUpdate.UNAVAILABLE
         }
+        val currentRequest = getRequestById(request.id)
+            ?: return ConditionalRequestUpdate.UNAVAILABLE
+        val currentGitSignRequest = getGitSignRequest(request.id)
+            ?: return ConditionalRequestUpdate.UNAVAILABLE
+        if (
+            currentRequest.state != expectedState ||
+            currentGitSignRequest.decision != null
+        ) {
+            return ConditionalRequestUpdate.UNAVAILABLE
+        }
         if (!authorizationMatches(authorization, clientId, operation, now)) {
             check(
                 updateRequest(
-                    request.copy(
+                    currentRequest.copy(
                         state = "action_required",
                         responseJson = null,
                         completedAt = null,
@@ -1449,8 +1451,9 @@ internal interface RequestDao {
             )
             check(
                 updateGitSignRequestRow(
-                    gitSignRequest.copy(
+                    currentGitSignRequest.copy(
                         decision = null,
+                        decisionSource = null,
                         completionResult = null,
                         completionReason = null,
                         completionMessage = null,

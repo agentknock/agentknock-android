@@ -189,6 +189,13 @@ class RequestRepositorySlotTest {
             writeTransaction = RoomWriteTransaction(database),
             currentTimeMillis = { now },
         )
+        val gitSigningRequests = GitSigningRequests(
+            dao = database.requestDao(),
+            secrets = secrets,
+            audit = audit,
+            writeTransaction = RoomWriteTransaction(database),
+            currentTimeMillis = { now },
+        )
         repository = RequestRepository(
             dao = database.requestDao(),
             material = requestMaterial,
@@ -197,6 +204,7 @@ class RequestRepositorySlotTest {
             clients = clients,
             secretManagement = secretManagement,
             invocationRequests = invocationRequests,
+            gitSigningRequests = gitSigningRequests,
             approvalReviewer = approvalReviewer,
             relay = relay,
             aiReviews = AiReviewCoordinator(reviewScope),

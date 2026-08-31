@@ -19,6 +19,7 @@ internal const val DECISION_SOURCE_AI = "ai"
 internal const val DECISION_SOURCE_NON_SENSITIVE = "non_sensitive"
 internal const val DECISION_SOURCE_TEMPORARY_ACCESS = "temporary_access"
 internal const val DECISION_SOURCE_MIXED = "mixed"
+internal const val DECISION_SOURCE_VALIDATION = "validation"
 internal const val TEMPORARY_ACCESS_DURATION_MILLIS = 4 * 60 * 60 * 1_000L
 
 internal fun InvocationRequestMessage.environmentSelections():
@@ -95,5 +96,6 @@ internal fun String.toAuditDecisionSource(): AuditDecisionSource = when (this) {
     DECISION_SOURCE_NON_SENSITIVE -> AuditDecisionSource.NON_SENSITIVE
     DECISION_SOURCE_TEMPORARY_ACCESS -> AuditDecisionSource.TEMPORARY_ACCESS
     DECISION_SOURCE_MIXED -> AuditDecisionSource.MIXED
+    DECISION_SOURCE_VALIDATION -> AuditDecisionSource.VALIDATION
     else -> error("Unknown decision source: $this")
 }

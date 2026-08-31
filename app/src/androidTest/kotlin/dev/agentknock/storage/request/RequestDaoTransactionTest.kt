@@ -854,16 +854,15 @@ class RequestDaoTransactionTest {
                 stale,
                 CLIENT_ID,
                 "git_sign",
+                "reviewing",
                 10,
             ),
         )
         assertEquals("action_required", dao.getRequestById(gitRequestId)?.state)
         assertNull(dao.getRequestById(gitRequestId)?.responseJson)
         assertNull(dao.getGitSignRequest(gitRequestId)?.decision)
-        assertEquals(
-            "{\"review\":\"refreshed\"}",
-            dao.getGitSignRequest(gitRequestId)?.approvalEvaluationJson,
-        )
+        assertNull(dao.getGitSignRequest(gitRequestId)?.decisionSource)
+        assertNull(dao.getGitSignRequest(gitRequestId)?.approvalEvaluationJson)
 
         val sshRequestId = "$INVOCATION_REQUEST_ID-ssh"
         dao.insertRequest(
@@ -973,6 +972,7 @@ class RequestDaoTransactionTest {
         repositoryJson = null,
         approvalEvaluationJson = null,
         decision = null,
+        decisionSource = null,
         completionResult = null,
         completionReason = null,
         completionMessage = null,

@@ -2,7 +2,7 @@
   "formatVersion": 1,
   "database": {
     "version": 1,
-    "identityHash": "18b07fe2ba02e6c0dbb6bdc3433d16ba",
+    "identityHash": "b7db1b0ec76a5b66ab5febf4239f8021",
     "entities": [
       {
         "tableName": "vault_keys",
@@ -1476,7 +1476,7 @@
       },
       {
         "tableName": "git_sign_requests",
-        "createSql": "CREATE TABLE IF NOT EXISTS `${TABLE_NAME}` (`request_id` TEXT NOT NULL, `secret_name` TEXT NOT NULL, `message` BLOB NOT NULL, `repository_json` TEXT, `approval_evaluation_json` TEXT, `decision` TEXT, `completion_result` TEXT, `completion_reason` TEXT, `completion_message` TEXT, `decided_at` INTEGER, PRIMARY KEY(`request_id`), FOREIGN KEY(`request_id`) REFERENCES `inbox_requests`(`id`) ON UPDATE NO ACTION ON DELETE CASCADE )",
+        "createSql": "CREATE TABLE IF NOT EXISTS `${TABLE_NAME}` (`request_id` TEXT NOT NULL, `secret_name` TEXT NOT NULL, `message` BLOB NOT NULL, `repository_json` TEXT, `approval_evaluation_json` TEXT, `decision` TEXT, `decision_source` TEXT, `completion_result` TEXT, `completion_reason` TEXT, `completion_message` TEXT, `decided_at` INTEGER, PRIMARY KEY(`request_id`), FOREIGN KEY(`request_id`) REFERENCES `inbox_requests`(`id`) ON UPDATE NO ACTION ON DELETE CASCADE )",
         "fields": [
           {
             "fieldPath": "requestId",
@@ -1509,6 +1509,11 @@
           {
             "fieldPath": "decision",
             "columnName": "decision",
+            "affinity": "TEXT"
+          },
+          {
+            "fieldPath": "decisionSource",
+            "columnName": "decision_source",
             "affinity": "TEXT"
           },
           {
@@ -2045,7 +2050,7 @@
     ],
     "setupQueries": [
       "CREATE TABLE IF NOT EXISTS room_master_table (id INTEGER PRIMARY KEY,identity_hash TEXT)",
-      "INSERT OR REPLACE INTO room_master_table (id,identity_hash) VALUES(42, '18b07fe2ba02e6c0dbb6bdc3433d16ba')"
+      "INSERT OR REPLACE INTO room_master_table (id,identity_hash) VALUES(42, 'b7db1b0ec76a5b66ab5febf4239f8021')"
     ]
   }
 }
