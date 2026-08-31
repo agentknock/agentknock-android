@@ -93,13 +93,6 @@ internal class AuthenticationSession(context: Context) {
         handler.postDelayed(lockSession, BACKGROUND_GRACE_MILLIS)
     }
 
-    fun reset() {
-        handler.removeCallbacks(lockSession)
-        preferences.edit().remove(MODE_KEY).apply()
-        _mode.value = DeviceAuthenticationMode.default
-        _authenticated.value = false
-    }
-
     private fun readMode(): DeviceAuthenticationMode {
         val storedName = preferences.getString(MODE_KEY, null)
             ?: return DeviceAuthenticationMode.default

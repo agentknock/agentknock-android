@@ -48,7 +48,6 @@ import androidx.lifecycle.Lifecycle
 import androidx.lifecycle.LifecycleEventObserver
 import androidx.lifecycle.compose.LocalLifecycleOwner
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
-import androidx.lifecycle.viewmodel.compose.viewModel
 import dev.agentknock.R
 import dev.agentknock.storage.request.SecretUploadRequestState
 import dev.agentknock.storage.secret.CreateEnvironmentVariableResult
@@ -77,7 +76,7 @@ internal fun SecretsScreen(
     onOpenSettings: () -> Unit,
     onTopLevelChanged: (Boolean) -> Unit,
     aiReviewActive: Boolean,
-    viewModel: SecretsViewModel = viewModel(),
+    viewModel: SecretsViewModel,
 ) {
     val secrets by viewModel.secrets.collectAsStateWithLifecycle()
     val clients by viewModel.clients.collectAsStateWithLifecycle()

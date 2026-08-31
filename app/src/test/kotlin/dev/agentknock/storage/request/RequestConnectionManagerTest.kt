@@ -388,31 +388,6 @@ class RequestConnectionManagerTest {
     }
 
     @Test
-    fun `runtime reset clears status and requires paused admission`() = runTest {
-        val manager = manager(
-            synchronizeOnce = { RequestSyncResult.RelayRejected(401, "old-device") },
-        )
-        manager.synchronizeOnce()
-        assertEquals(
-            RequestSyncResult.RelayRejected(401, "old-device"),
-            manager.lastSyncResult.value,
-        )
-
-        var rejected = false
-        try {
-            manager.resetRuntimeState()
-        } catch (_: IllegalStateException) {
-            rejected = true
-        }
-        assertTrue(rejected)
-        manager.pauseAndJoin()
-        manager.resetRuntimeState()
-
-        assertNull(manager.lastSyncResult.value)
-        assertFalse(manager.syncing.value)
-    }
-
-    @Test
     fun `terminal result stops retries until an explicit refresh`() = runTest {
         var attempts = 0
         val manager = manager(

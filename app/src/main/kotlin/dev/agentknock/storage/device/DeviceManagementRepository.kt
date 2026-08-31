@@ -24,14 +24,13 @@ internal class DeviceManagementRepository(
     private val deviceAuthorization: RelayDeviceAuthorizationSource,
     private val relay: RelayDeviceManagementClient,
     private val audit: AuditSink,
-    private val deviceOperations: DeviceOperationGate,
 ) {
-    suspend fun setPairingEnabled(enabled: Boolean): DeviceManagementResult = deviceOperations.run {
+    suspend fun setPairingEnabled(enabled: Boolean): DeviceManagementResult {
         val active = when (val lookup = authorizationLookup()) {
             is AuthorizationLookup.Available -> lookup.authorization
-            is AuthorizationLookup.Failed -> return@run lookup.result
+            is AuthorizationLookup.Failed -> return lookup.result
         }
-        when (
+        return when (
             val result = relay.setPairingEnabled(
                 deviceId = active.deviceId,
                 deviceToken = active.deviceToken,
@@ -70,7 +69,6 @@ internal class DeviceManagementRepository(
         }
     }
 
-    /** Factory reset calls this while holding the shared [DeviceOperationGate]. */
     suspend fun deleteRemoteDevice(): DeviceManagementResult {
         val active = when (val lookup = authorizationLookup()) {
             is AuthorizationLookup.Available -> lookup.authorization

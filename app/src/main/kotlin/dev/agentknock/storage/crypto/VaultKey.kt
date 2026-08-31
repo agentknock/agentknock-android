@@ -147,38 +147,6 @@ internal class VaultKeyManager(
         return VaultProtection.Available(backings)
     }
 
-    /**
-     * Erases persisted vault state and managed aliases, leaving initialization to startup.
-     * Both callbacks run behind the initialization barrier so storage maintenance cannot race a
-     * caller recreating active vault metadata.
-     */
-    suspend fun erase(
-        clearData: suspend () -> Unit,
-        afterKeyDeletion: suspend () -> Unit,
-    ) {
-        initializationMutex.withLock {
-            try {
-                clearData()
-            } finally {
-                initialization = null
-            }
-            var cleanupFailure: Throwable? = null
-            try {
-                withContext(NonCancellable + keyStoreDispatcher) {
-                    deleteAllManagedKeys()
-                }
-            } catch (failure: Throwable) {
-                cleanupFailure = failure
-            }
-            try {
-                afterKeyDeletion()
-            } catch (failure: Throwable) {
-                cleanupFailure?.addSuppressed(failure) ?: run { cleanupFailure = failure }
-            }
-            cleanupFailure?.let { throw it }
-        }
-    }
-
     private suspend fun createAndActivateKey(
         purpose: VaultKeyPurpose,
     ): ActiveVaultKey = withContext(NonCancellable) {
@@ -222,19 +190,4 @@ internal class VaultKeyManager(
     private suspend fun keyAvailableInStore(keyId: String): Boolean =
         withContext(keyStoreDispatcher) { keyStore.get(keyId) != null }
 
-    private fun deleteAllManagedKeys() {
-        var failure: Throwable? = null
-        keyStore.managedKeyIds().forEach { keyId ->
-            try {
-                keyStore.delete(keyId)
-            } catch (deleteFailure: Throwable) {
-                if (failure == null) {
-                    failure = deleteFailure
-                } else {
-                    failure.addSuppressed(deleteFailure)
-                }
-            }
-        }
-        failure?.let { throw it }
-    }
 }

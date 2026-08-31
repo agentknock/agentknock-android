@@ -1,6 +1,7 @@
 package dev.agentknock.storage.request
 
 import kotlinx.coroutines.CompletableDeferred
+import kotlinx.coroutines.ExperimentalCoroutinesApi
 import kotlinx.coroutines.awaitCancellation
 import kotlinx.coroutines.test.runCurrent
 import kotlinx.coroutines.test.runTest
@@ -8,33 +9,23 @@ import org.junit.Assert.assertFalse
 import org.junit.Assert.assertTrue
 import org.junit.Test
 
+@OptIn(ExperimentalCoroutinesApi::class)
 class AiReviewCoordinatorTest {
     @Test
-    fun `pause cancels admitted reviews and refuses late work until resumed`() = runTest {
+    fun `only one live review is admitted for a request`() = runTest {
         val coordinator = AiReviewCoordinator(backgroundScope)
         val started = CompletableDeferred<Unit>()
-        val cancelled = CompletableDeferred<Unit>()
 
         assertTrue(
-            coordinator.launch("first") {
+            coordinator.launch("request") {
                 started.complete(Unit)
-                try {
-                    awaitCancellation()
-                } finally {
-                    cancelled.complete(Unit)
-                }
+                awaitCancellation()
             },
         )
         runCurrent()
         started.await()
 
-        coordinator.pauseAndCancel()
-
-        assertTrue(cancelled.isCompleted)
-        assertFalse(coordinator.launch("late") {})
-
-        coordinator.resume()
-        assertTrue(coordinator.launch("after-resume") {})
-        runCurrent()
+        assertFalse(coordinator.launch("request") {})
+        assertTrue(coordinator.launch("other-request") {})
     }
 }

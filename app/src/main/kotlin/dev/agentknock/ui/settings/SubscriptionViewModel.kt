@@ -1,9 +1,8 @@
 package dev.agentknock.ui.settings
 
-import android.app.Application
-import androidx.lifecycle.AndroidViewModel
+import androidx.lifecycle.ViewModel
 import androidx.lifecycle.viewModelScope
-import dev.agentknock.AgentknockApplication
+import dev.agentknock.subscription.SubscriptionRepository
 import dev.agentknock.subscription.SubscriptionResult
 import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.flow.MutableStateFlow
@@ -33,8 +32,10 @@ internal data class SubscriptionUiState(
     val notice: SubscriptionNotice? = null,
 )
 
-internal class SubscriptionViewModel(application: Application) : AndroidViewModel(application) {
-    private val container = (application as AgentknockApplication).container
+internal class SubscriptionViewModel(
+    private val repository: SubscriptionRepository,
+    private val awaitStorageReady: suspend () -> Unit,
+) : ViewModel() {
     private val operations = Mutex()
     private val _state = MutableStateFlow(SubscriptionUiState())
 
@@ -45,8 +46,8 @@ internal class SubscriptionViewModel(application: Application) : AndroidViewMode
             operations.withLock {
                 _state.update { it.copy(refreshing = true) }
                 val result = try {
-                    container.localStorage.await()
-                    container.subscription.status()
+                    awaitStorageReady()
+                    repository.status()
                 } catch (cancelled: CancellationException) {
                     throw cancelled
                 } catch (_: Exception) {
@@ -67,8 +68,8 @@ internal class SubscriptionViewModel(application: Application) : AndroidViewMode
             operations.withLock {
                 _state.update { it.copy(redeeming = true, notice = null) }
                 val result = try {
-                    container.localStorage.await()
-                    container.subscription.redeem(redemptionToken)
+                    awaitStorageReady()
+                    repository.redeem(redemptionToken)
                 } catch (cancelled: CancellationException) {
                     throw cancelled
                 } catch (_: Exception) {

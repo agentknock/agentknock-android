@@ -10,8 +10,6 @@ import dev.agentknock.push.RequestNotifications
 import dev.agentknock.push.PushSynchronizationWorker
 import dev.agentknock.push.RequestNotificationCoordinator
 import dev.agentknock.storage.AgentknockDatabase
-import dev.agentknock.storage.FactoryResetCoordinator
-import dev.agentknock.storage.LocalStorageInitializer
 import dev.agentknock.storage.audit.AuditRepository
 import dev.agentknock.storage.crypto.AesGcmEncryption
 import dev.agentknock.storage.crypto.AndroidEncryptionKeyStore
@@ -29,12 +27,15 @@ import dev.agentknock.storage.request.RequestConnectionManager
 import dev.agentknock.storage.request.AiReviewCoordinator
 import dev.agentknock.storage.device.DeviceIdentityRepository
 import dev.agentknock.storage.device.DeviceManagementRepository
-import dev.agentknock.storage.device.DeviceOperationGate
+import dev.agentknock.storage.device.DeviceManagementResult
 import dev.agentknock.subscription.SubscriptionRepository
 import dev.agentknock.ui.auth.AuthenticationSession
+import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.CoroutineScope
+import kotlinx.coroutines.CoroutineStart
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.SupervisorJob
+import kotlinx.coroutines.async
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.flow.collect
 import okhttp3.OkHttpClient
@@ -75,8 +76,11 @@ internal class ApplicationContainer(application: Application) {
         .build()
     private val applicationScope = CoroutineScope(SupervisorJob() + Dispatchers.IO)
     private val relayHttp = RelayHttpTransport(httpClient)
-    private val deviceOperations = DeviceOperationGate()
     private var scheduleRequestSynchronization: () -> Unit
+
+    @Volatile
+    var factoryResetInProgress = false
+        private set
 
     val audit = AuditRepository(database.auditDao())
 
@@ -93,7 +97,6 @@ internal class ApplicationContainer(application: Application) {
         encryption = encryption,
         relay = HttpRelayClaimClient(relayHttp),
         audit = audit,
-        deviceOperations = deviceOperations,
     )
 
     val pushRegistration = PushRegistrationRepository(
@@ -111,7 +114,6 @@ internal class ApplicationContainer(application: Application) {
         deviceAuthorization = deviceIdentity,
         relay = HttpRelayDeviceManagementClient(relayHttp),
         audit = audit,
-        deviceOperations = deviceOperations,
     )
 
     private val aiReviews = AiReviewCoordinator(applicationScope)
@@ -142,13 +144,12 @@ internal class ApplicationContainer(application: Application) {
         currentRequests = requests::pendingNotifications,
         displayRequests = { RequestNotifications.showRequests(application, it) },
         displayWake = { RequestNotifications.showWake(application) },
-        clear = { RequestNotifications.clear(application) },
     )
 
     // Every worker, UI mutation, and connection entry point awaits this same initialization.
     // Recovering REVIEWING here is race-free: no relay synchronization can begin before storage
     // is ready, and process-local review jobs do not survive application creation.
-    val localStorage = LocalStorageInitializer(applicationScope) {
+    val localStorage = applicationScope.async(start = CoroutineStart.LAZY) {
         initializeLocalStorage(application)
     }
 
@@ -207,52 +208,22 @@ internal class ApplicationContainer(application: Application) {
         }
     }
 
-    val factoryReset = FactoryResetCoordinator(
-        deleteRemoteDevice = deviceManagement::deleteRemoteDevice,
-        awaitReady = localStorage::await,
-        awaitReadyForRecovery = localStorage::awaitSettled,
-        pauseRuntime = {
-            requestNotifications.pauseAndClear()
+    suspend fun beginFactoryReset(): Boolean {
+        factoryResetInProgress = true
+        try {
             requestConnection.pauseAndJoin()
-            aiReviews.pauseAndCancel()
-        },
-        recoverInterruptedWork = { requests.recoverInterruptedAiReviews() },
-        clearLocalState = { markIrreversiblyCleared ->
-            var roomCleared = false
-            try {
-                requests.resetRuntimeState {
-                    try {
-                        vaultKeyManager.erase(
-                            clearData = {
-                                database.resetDao().clearAllData()
-                                roomCleared = true
-                                markIrreversiblyCleared()
-                            },
-                            afterKeyDeletion = {
-                                // Room reclaims deleted pages before fresh vault metadata exists.
-                                database.clearAllTables()
-                            },
-                        )
-                    } catch (failure: Throwable) {
-                        if (!roomCleared) throw failure
-                        Log.e("Agentknock", "Post-reset cleanup was incomplete", failure)
-                    }
-                }
-            } finally {
-                if (roomCleared) {
-                    requestConnection.resetRuntimeState()
-                    authentication.reset()
-                }
-            }
-        },
-        resumeRuntime = { localStateCleared ->
-            if (localStateCleared) localStorage.restart()
-            requestNotifications.resume(refresh = !localStateCleared)
-            aiReviews.resume()
-            requestConnection.resume()
-        },
-        deviceOperations = deviceOperations,
-    )
+            return deviceManagement.deleteRemoteDevice() == DeviceManagementResult.Changed
+        } catch (cancelled: CancellationException) {
+            cancelFactoryReset()
+            throw cancelled
+        }
+    }
+
+    fun cancelFactoryReset() {
+        if (!factoryResetInProgress) return
+        factoryResetInProgress = false
+        requestConnection.resume()
+    }
 
     private var started = false
 }

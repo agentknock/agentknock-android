@@ -1,13 +1,13 @@
 package dev.agentknock.ui.requests
 
-import android.app.Application
-import androidx.lifecycle.AndroidViewModel
+import androidx.lifecycle.ViewModel
 import androidx.lifecycle.viewModelScope
-import dev.agentknock.AgentknockApplication
 import dev.agentknock.storage.request.SecretUseDecisionResult
 import dev.agentknock.storage.request.InboxRequestDetails
 import dev.agentknock.storage.request.InboxRequestSummary
 import dev.agentknock.storage.request.RequestSyncResult
+import dev.agentknock.storage.request.RequestConnectionManager
+import dev.agentknock.storage.request.RequestRepository
 import dev.agentknock.storage.request.GitSignDecisionResult
 import dev.agentknock.storage.request.SshAuthenticationDecisionResult
 import dev.agentknock.ui.requestHistory
@@ -22,10 +22,11 @@ import kotlinx.coroutines.flow.map
 import kotlinx.coroutines.flow.stateIn
 
 @OptIn(ExperimentalCoroutinesApi::class)
-internal class RequestsViewModel(application: Application) : AndroidViewModel(application) {
-    private val container = (application as AgentknockApplication).container
-    private val repository = container.requests
-    private val connection = container.requestConnection
+internal class RequestsViewModel(
+    private val repository: RequestRepository,
+    private val connection: RequestConnectionManager,
+    private val awaitStorageReady: suspend () -> Unit,
+) : ViewModel() {
     private val selectedRequestId = MutableStateFlow<String?>(null)
 
     val allRequests: StateFlow<List<InboxRequestSummary>> = repository.observeRequests().stateIn(
@@ -59,53 +60,53 @@ internal class RequestsViewModel(application: Application) : AndroidViewModel(ap
     }
 
     suspend fun approveSecretUseRequest(requestId: String): SecretUseDecisionResult {
-        container.localStorage.await()
+        awaitStorageReady()
         return repository.approveSecretUseRequest(requestId)
     }
 
     suspend fun denySecretUseRequest(requestId: String): SecretUseDecisionResult {
-        container.localStorage.await()
+        awaitStorageReady()
         return repository.denySecretUseRequest(requestId)
     }
 
     suspend fun allowSecretUseTemporarily(requestId: String): SecretUseDecisionResult {
-        container.localStorage.await()
+        awaitStorageReady()
         return repository.allowSecretUseTemporarily(requestId)
     }
 
     suspend fun approveGitSignRequest(requestId: String): GitSignDecisionResult {
-        container.localStorage.await()
+        awaitStorageReady()
         return repository.approveGitSignRequest(requestId)
     }
 
     suspend fun denyGitSignRequest(requestId: String): GitSignDecisionResult {
-        container.localStorage.await()
+        awaitStorageReady()
         return repository.denyGitSignRequest(requestId)
     }
 
     suspend fun allowGitSignTemporarily(requestId: String): GitSignDecisionResult {
-        container.localStorage.await()
+        awaitStorageReady()
         return repository.allowGitSignTemporarily(requestId)
     }
 
     suspend fun approveSshAuthenticationRequest(
         requestId: String,
     ): SshAuthenticationDecisionResult {
-        container.localStorage.await()
+        awaitStorageReady()
         return repository.approveSshAuthenticationRequest(requestId)
     }
 
     suspend fun denySshAuthenticationRequest(
         requestId: String,
     ): SshAuthenticationDecisionResult {
-        container.localStorage.await()
+        awaitStorageReady()
         return repository.denySshAuthenticationRequest(requestId)
     }
 
     suspend fun allowSshAuthenticationTemporarily(
         requestId: String,
     ): SshAuthenticationDecisionResult {
-        container.localStorage.await()
+        awaitStorageReady()
         return repository.allowSshAuthenticationTemporarily(requestId)
     }
 

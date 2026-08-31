@@ -72,7 +72,6 @@ import androidx.compose.ui.text.font.FontFamily
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
-import androidx.lifecycle.viewmodel.compose.viewModel
 import dev.agentknock.presentation.formatTimestamp
 import dev.agentknock.presentation.formatRelativeTime
 import dev.agentknock.presentation.formatPlatformName
@@ -105,7 +104,7 @@ internal fun ClientsScreen(
     onOpenSettings: () -> Unit,
     onChangePairingAddress: () -> Unit,
     onTopLevelChanged: (Boolean) -> Unit,
-    viewModel: ClientsViewModel = viewModel(),
+    viewModel: ClientsViewModel,
 ) {
     val clients by viewModel.clients.collectAsStateWithLifecycle()
     val pendingPairings by viewModel.pendingPairings.collectAsStateWithLifecycle()

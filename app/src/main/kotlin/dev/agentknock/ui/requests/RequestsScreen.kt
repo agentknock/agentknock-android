@@ -27,7 +27,6 @@ import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.unit.dp
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
-import androidx.lifecycle.viewmodel.compose.viewModel
 import dev.agentknock.storage.request.GitSignRequestState
 import dev.agentknock.storage.request.InboxRequestDetails
 import dev.agentknock.storage.request.InboxRequestSummary
@@ -41,7 +40,7 @@ internal fun RequestsScreen(
     onOpenSettings: () -> Unit,
     notificationsEnabled: Boolean,
     onTopLevelChanged: (Boolean) -> Unit,
-    viewModel: RequestsViewModel = viewModel(),
+    viewModel: RequestsViewModel,
 ) {
     val requests by viewModel.requests.collectAsStateWithLifecycle()
     val selection by viewModel.selection.collectAsStateWithLifecycle()

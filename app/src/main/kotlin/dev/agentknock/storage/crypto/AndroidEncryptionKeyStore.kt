@@ -33,8 +33,6 @@ internal interface EncryptionKeyStore : EncryptionKeySource {
     fun importKey(keyId: String, keyMaterial: ByteArray): GeneratedEncryptionKey
 
     fun delete(keyId: String)
-
-    fun managedKeyIds(): List<String>
 }
 
 internal class AndroidEncryptionKeyStore(
@@ -57,11 +55,6 @@ internal class AndroidEncryptionKeyStore(
     override fun delete(keyId: String) {
         keyStore.deleteEntry(alias(keyId))
     }
-
-    @Synchronized
-    override fun managedKeyIds(): List<String> = keyStore.aliases().asSequence().toList()
-        .filter { it.startsWith(ALIAS_PREFIX) }
-        .map { it.removePrefix(ALIAS_PREFIX) }
 
     @Synchronized
     override fun generate(keyId: String): GeneratedEncryptionKey {

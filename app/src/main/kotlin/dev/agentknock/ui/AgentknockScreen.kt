@@ -44,6 +44,7 @@ import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.res.stringResource
 import androidx.compose.ui.unit.dp
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
+import androidx.lifecycle.ViewModelProvider
 import androidx.lifecycle.viewmodel.compose.viewModel
 import dev.agentknock.R
 import dev.agentknock.RequestNavigation
@@ -55,6 +56,7 @@ import dev.agentknock.ui.secrets.SecretsViewModel
 import dev.agentknock.ui.requests.RequestsScreen
 import dev.agentknock.ui.requests.RequestsViewModel
 import dev.agentknock.ui.settings.SettingsScreen
+import dev.agentknock.ui.settings.SettingsViewModel
 import dev.agentknock.ui.settings.SubscriptionViewModel
 import dev.agentknock.ui.settings.SubscriptionAccess
 import dev.agentknock.ui.device.DeviceSetupScreen
@@ -79,12 +81,13 @@ internal fun AgentknockScreen(
     consumeSubscriptionNavigation: (SubscriptionNavigation) -> Unit,
     notificationStateGeneration: StateFlow<Long>,
     requestNotificationPermission: () -> Unit,
-    onFactoryResetCompleted: () -> Unit,
-    deviceSetupViewModel: DeviceSetupViewModel = viewModel(),
-    requestsViewModel: RequestsViewModel = viewModel(),
-    secretsViewModel: SecretsViewModel = viewModel(),
-    clientsViewModel: ClientsViewModel = viewModel(),
-    subscriptionViewModel: SubscriptionViewModel = viewModel(),
+    viewModelFactory: ViewModelProvider.Factory,
+    deviceSetupViewModel: DeviceSetupViewModel = viewModel(factory = viewModelFactory),
+    requestsViewModel: RequestsViewModel = viewModel(factory = viewModelFactory),
+    secretsViewModel: SecretsViewModel = viewModel(factory = viewModelFactory),
+    clientsViewModel: ClientsViewModel = viewModel(factory = viewModelFactory),
+    subscriptionViewModel: SubscriptionViewModel = viewModel(factory = viewModelFactory),
+    settingsViewModel: SettingsViewModel = viewModel(factory = viewModelFactory),
 ) {
     val authenticationMode by authentication.mode.collectAsStateWithLifecycle()
     val sessionAuthenticated by authentication.authenticated.collectAsStateWithLifecycle()
@@ -203,8 +206,8 @@ internal fun AgentknockScreen(
             requestNotificationPermission = requestNotificationPermission,
             openPlanInitially = openPlanInitially,
             onPlanOpened = { openPlanInitially = false },
-            onFactoryResetCompleted = onFactoryResetCompleted,
             subscriptionViewModel = subscriptionViewModel,
+            viewModel = settingsViewModel,
         )
         current.active == null || !current.active.credentialsAvailable -> DeviceSetupScreen(
             configuration = current,

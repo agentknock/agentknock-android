@@ -234,14 +234,6 @@ internal class RequestConnectionManager(
         if (scheduleReconciliation) scheduleBackgroundSynchronization()
     }
 
-    /** Clears status associated with the erased device while session admission is paused. */
-    fun resetRuntimeState() {
-        check(paused) { "The connection must be paused before its device state is reset" }
-        demand.update { it.copy(stoppedOnTerminalResult = false) }
-        _syncing.value = false
-        _lastSyncResult.value = null
-    }
-
     private fun startOneShotLocked(): ActiveSession.OneShot {
         val session = ActiveSession.OneShot()
         val job = scope.launch(start = CoroutineStart.LAZY) {

@@ -1,9 +1,7 @@
 package dev.agentknock.ui.secrets
 
-import android.app.Application
-import androidx.lifecycle.AndroidViewModel
+import androidx.lifecycle.ViewModel
 import androidx.lifecycle.viewModelScope
-import dev.agentknock.AgentknockApplication
 import dev.agentknock.storage.request.InboxRequestDetails
 import dev.agentknock.storage.request.InboxRequestSummary
 import dev.agentknock.storage.request.ClientSummary
@@ -24,6 +22,9 @@ import dev.agentknock.storage.secret.SaveEnvironmentVariableResult
 import dev.agentknock.storage.secret.SaveSecretResult
 import dev.agentknock.ui.pendingSecretUploads
 import dev.agentknock.storage.device.DeviceConfiguration
+import dev.agentknock.storage.device.DeviceIdentityRepository
+import dev.agentknock.storage.request.RequestRepository
+import dev.agentknock.storage.secret.SecretRepository
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.SharingStarted
 import kotlinx.coroutines.flow.StateFlow
@@ -35,10 +36,12 @@ import kotlinx.coroutines.flow.stateIn
 import kotlinx.coroutines.ExperimentalCoroutinesApi
 
 @OptIn(ExperimentalCoroutinesApi::class)
-internal class SecretsViewModel(application: Application) : AndroidViewModel(application) {
-    private val container = (application as AgentknockApplication).container
-    private val repository = container.secrets
-    private val requests = container.requests
+internal class SecretsViewModel(
+    private val repository: SecretRepository,
+    private val requests: RequestRepository,
+    private val deviceIdentity: DeviceIdentityRepository,
+    private val awaitStorageReady: suspend () -> Unit,
+) : ViewModel() {
     private val selectedSecretId = MutableStateFlow<String?>(null)
     private val selectedUploadRequestId = MutableStateFlow<String?>(null)
     private val secretEditorState = MutableStateFlow<SecretEditorState?>(null)
@@ -63,7 +66,7 @@ internal class SecretsViewModel(application: Application) : AndroidViewModel(app
         initialValue = emptyList(),
     )
 
-    val configuration: StateFlow<DeviceConfiguration?> = container.deviceIdentity
+    val configuration: StateFlow<DeviceConfiguration?> = deviceIdentity
         .observeConfiguration()
         .stateIn(
             scope = viewModelScope,
@@ -223,7 +226,7 @@ internal class SecretsViewModel(application: Application) : AndroidViewModel(app
         repository.saveInstructions(id, instructions)
 
     suspend fun saveGeneralInstructions(instructions: String): Boolean =
-        container.deviceIdentity.saveInstructions(instructions)
+        deviceIdentity.saveInstructions(instructions)
 
     suspend fun setClientApprovalOverride(
         secretId: String,
@@ -281,12 +284,12 @@ internal class SecretsViewModel(application: Application) : AndroidViewModel(app
         requestId: String,
         approvedName: String,
     ): SecretUploadDecisionResult {
-        container.localStorage.await()
+        awaitStorageReady()
         return requests.approveSecretUpload(requestId, approvedName)
     }
 
     suspend fun rejectSecretUpload(requestId: String): SecretUploadDecisionResult {
-        container.localStorage.await()
+        awaitStorageReady()
         return requests.rejectSecretUpload(requestId)
     }
 
@@ -294,7 +297,7 @@ internal class SecretsViewModel(application: Application) : AndroidViewModel(app
         requestId: String,
         variableId: String,
     ): SecretUploadVariableValue {
-        container.localStorage.await()
+        awaitStorageReady()
         return requests.readSecretUploadVariable(requestId, variableId)
     }
 
@@ -303,7 +306,7 @@ internal class SecretsViewModel(application: Application) : AndroidViewModel(app
         variableId: String,
         sensitive: Boolean,
     ): Boolean {
-        container.localStorage.await()
+        awaitStorageReady()
         return requests.setSecretUploadVariableSensitivity(requestId, variableId, sensitive)
     }
 }

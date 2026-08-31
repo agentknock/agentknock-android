@@ -1,13 +1,11 @@
 package dev.agentknock.ui.device
 
-import android.app.Application
-import androidx.lifecycle.AndroidViewModel
+import androidx.lifecycle.ViewModel
 import androidx.lifecycle.viewModelScope
-import dev.agentknock.AgentknockApplication
-import dev.agentknock.R
 import dev.agentknock.protocol.PairingAddressGenerator
 import dev.agentknock.storage.device.ClaimPairingAddressResult
 import dev.agentknock.storage.device.DeviceConfiguration
+import dev.agentknock.storage.device.DeviceIdentityRepository
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.SharingStarted
 import kotlinx.coroutines.flow.StateFlow
@@ -16,14 +14,11 @@ import kotlinx.coroutines.flow.stateIn
 import kotlinx.coroutines.sync.Mutex
 import kotlinx.coroutines.sync.withLock
 
-internal class DeviceSetupViewModel(application: Application) : AndroidViewModel(application) {
-    private val container = (application as AgentknockApplication).container
-    private val repository = container.deviceIdentity
-    private val addressGenerator = PairingAddressGenerator(
-        application.resources.openRawResource(R.raw.pairing_address_words)
-            .bufferedReader()
-            .use { reader -> reader.readLines() },
-    )
+internal class DeviceSetupViewModel(
+    private val repository: DeviceIdentityRepository,
+    private val addressGenerator: PairingAddressGenerator,
+    private val refreshConnection: () -> Unit,
+) : ViewModel() {
     private val operationMutex = Mutex()
     private val _claiming = MutableStateFlow(false)
     private val _lastClaimResult = MutableStateFlow<ClaimPairingAddressResult?>(null)
@@ -72,6 +67,6 @@ internal class DeviceSetupViewModel(application: Application) : AndroidViewModel
 
     private fun handleClaimResult(result: ClaimPairingAddressResult) {
         _lastClaimResult.value = result
-        if (result == ClaimPairingAddressResult.Claimed) container.requestConnection.refresh()
+        if (result == ClaimPairingAddressResult.Claimed) refreshConnection()
     }
 }

@@ -45,17 +45,19 @@ import java.util.concurrent.TimeUnit
 @SuppressLint("MissingFirebaseInstanceTokenRefresh")
 class AgentknockMessagingService : FirebaseMessagingService() {
     override fun onRegistered(installationId: String) {
+        if ((application as AgentknockApplication).container.factoryResetInProgress) return
         PushRegistrationWorker.enqueue(this, installationId)
     }
 
     override fun onMessageReceived(message: RemoteMessage) {
         if (message.data["type"] != WAKE_MESSAGE_TYPE) return
+        val container = (application as AgentknockApplication).container
+        if (container.factoryResetInProgress) return
 
         val foreground =
             ProcessLifecycleOwner.get().lifecycle.currentState.isAtLeast(
                 Lifecycle.State.STARTED,
             )
-        val container = (application as AgentknockApplication).container
         if (!foreground) container.requestNotifications.showWake()
         // Usually the foreground socket already covers the wake. Announcing it is still required:
         // a visible session may have stopped on a terminal device result and needs new work to
@@ -73,7 +75,9 @@ class PushRegistrationWorker(
             ?.takeIf(String::isNotEmpty)
             ?: return Result.failure()
         val container = (applicationContext as AgentknockApplication).container
+        if (container.factoryResetInProgress) return Result.success()
         container.localStorage.await()
+        if (container.factoryResetInProgress) return Result.success()
         return when (val result = container.pushRegistration.register(firebaseInstallationId)) {
             PushRegistrationResult.Registered,
             PushRegistrationResult.NoDevice,
@@ -128,7 +132,9 @@ class PushSynchronizationWorker(
 ) : CoroutineWorker(applicationContext, parameters) {
     override suspend fun doWork(): Result {
         val container = (applicationContext as AgentknockApplication).container
+        if (container.factoryResetInProgress) return Result.success()
         container.localStorage.await()
+        if (container.factoryResetInProgress) return Result.success()
         return when (val synchronization = container.requestConnection.synchronizeOnce()) {
             dev.agentknock.storage.request.OneShotSynchronizationResult.Covered -> Result.success()
             is dev.agentknock.storage.request.OneShotSynchronizationResult.Completed -> when (
@@ -295,14 +301,6 @@ internal object RequestNotifications {
             }
             manager.notify(request.requestId, REQUEST_NOTIFICATION_ID, builder.build())
         }
-    }
-
-    fun clear(context: Context) {
-        val manager = context.getSystemService(NotificationManager::class.java)
-        manager.cancel(WAKE_NOTIFICATION_ID)
-        manager.activeNotifications
-            .filter { it.id == REQUEST_NOTIFICATION_ID }
-            .forEach { manager.cancel(it.tag, REQUEST_NOTIFICATION_ID) }
     }
 
     private fun decisionAction(

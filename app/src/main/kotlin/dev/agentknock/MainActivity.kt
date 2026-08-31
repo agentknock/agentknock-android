@@ -12,6 +12,7 @@ import androidx.fragment.app.FragmentActivity
 import dev.agentknock.push.RequestNotifications
 import dev.agentknock.subscription.SubscriptionRedemptionLink
 import dev.agentknock.ui.AgentknockScreen
+import dev.agentknock.ui.agentknockViewModelFactory
 import dev.agentknock.ui.auth.DeviceAuthenticator
 import dev.agentknock.ui.theme.AgentknockTheme
 import kotlinx.coroutines.flow.MutableStateFlow
@@ -105,7 +106,9 @@ class MainActivity : FragmentActivity() {
         enableEdgeToEdge()
         handleIntent(intent)
         val authenticator = DeviceAuthenticator(this)
-        val authentication = (application as AgentknockApplication).container.authentication
+        val container = (application as AgentknockApplication).container
+        val authentication = container.authentication
+        val viewModelFactory = agentknockViewModelFactory(application, container)
         setContent {
             AgentknockTheme {
                 AgentknockScreen(
@@ -117,14 +120,10 @@ class MainActivity : FragmentActivity() {
                     consumeSubscriptionNavigation = navigation::consumeSubscription,
                     notificationStateGeneration = notificationStateGeneration,
                     requestNotificationPermission = ::requestNotificationPermission,
-                    onFactoryResetCompleted = ::restartAfterFactoryReset,
+                    viewModelFactory = viewModelFactory,
                 )
             }
         }
-    }
-
-    private fun restartAfterFactoryReset() {
-        startActivity(Intent.makeRestartActivityTask(componentName))
     }
 
     override fun onResume() {

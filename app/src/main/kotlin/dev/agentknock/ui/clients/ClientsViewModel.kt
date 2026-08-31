@@ -1,9 +1,7 @@
 package dev.agentknock.ui.clients
 
-import android.app.Application
-import androidx.lifecycle.AndroidViewModel
+import androidx.lifecycle.ViewModel
 import androidx.lifecycle.viewModelScope
-import dev.agentknock.AgentknockApplication
 import dev.agentknock.relay.RelayClientState
 import dev.agentknock.storage.request.ClientChangeResult
 import dev.agentknock.storage.request.ClientDetails
@@ -12,7 +10,11 @@ import dev.agentknock.storage.request.InboxRequestDetails
 import dev.agentknock.storage.request.InboxRequestSummary
 import dev.agentknock.storage.request.PairingDecisionResult
 import dev.agentknock.storage.device.DeviceConfiguration
+import dev.agentknock.storage.device.DeviceIdentityRepository
+import dev.agentknock.storage.device.DeviceManagementRepository
 import dev.agentknock.storage.device.DeviceManagementResult
+import dev.agentknock.storage.request.RequestRepository
+import dev.agentknock.storage.secret.SecretRepository
 import dev.agentknock.storage.secret.TemporaryAccessGrant
 import dev.agentknock.storage.secret.TemporaryAccessOperation
 import dev.agentknock.ui.pendingPairings
@@ -27,9 +29,13 @@ import kotlinx.coroutines.flow.map
 import kotlinx.coroutines.flow.stateIn
 
 @OptIn(ExperimentalCoroutinesApi::class)
-internal class ClientsViewModel(application: Application) : AndroidViewModel(application) {
-    private val container = (application as AgentknockApplication).container
-    private val repository = container.requests
+internal class ClientsViewModel(
+    private val repository: RequestRepository,
+    private val secrets: SecretRepository,
+    private val deviceIdentity: DeviceIdentityRepository,
+    private val deviceManagement: DeviceManagementRepository,
+    private val awaitStorageReady: suspend () -> Unit,
+) : ViewModel() {
     private val selectedClientId = MutableStateFlow<String?>(null)
     private val selectedPairingRequestId = MutableStateFlow<String?>(null)
 
@@ -50,7 +56,7 @@ internal class ClientsViewModel(application: Application) : AndroidViewModel(app
     val temporaryAccessGrants: StateFlow<List<TemporaryAccessGrant>> = selectedClientId
         .flatMapLatest { clientId ->
             clientId?.let { selected ->
-                container.secrets.observeTemporaryAccessGrants().map { grants ->
+                secrets.observeTemporaryAccessGrants().map { grants ->
                     grants.filter { it.clientId == selected }
                 }
             } ?: flowOf(emptyList())
@@ -74,7 +80,7 @@ internal class ClientsViewModel(application: Application) : AndroidViewModel(app
             started = SharingStarted.Eagerly,
             initialValue = null,
         )
-    val configuration: StateFlow<DeviceConfiguration?> = container.deviceIdentity
+    val configuration: StateFlow<DeviceConfiguration?> = deviceIdentity
         .observeConfiguration()
         .stateIn(
             scope = viewModelScope,
@@ -102,26 +108,26 @@ internal class ClientsViewModel(application: Application) : AndroidViewModel(app
         repository.setClientState(clientId, state)
 
     suspend fun setPairingEnabled(enabled: Boolean): DeviceManagementResult =
-        container.deviceManagement.setPairingEnabled(enabled)
+        deviceManagement.setPairingEnabled(enabled)
 
     suspend fun endTemporaryAccess(
         secretId: String,
         clientId: String,
         operation: TemporaryAccessOperation,
-    ): Boolean = container.secrets.endTemporaryAccess(secretId, clientId, operation)
+    ): Boolean = secrets.endTemporaryAccess(secretId, clientId, operation)
 
     suspend fun chooseSas(requestId: String, selectedIndex: Int?): PairingDecisionResult {
-        container.localStorage.await()
+        awaitStorageReady()
         return repository.chooseSas(requestId, selectedIndex)
     }
 
     suspend fun isMatchingPendingSas(requestId: String, selectedIndex: Int): Boolean {
-        container.localStorage.await()
+        awaitStorageReady()
         return repository.isMatchingPendingSas(requestId, selectedIndex)
     }
 
     suspend fun rejectPairing(requestId: String): PairingDecisionResult {
-        container.localStorage.await()
+        awaitStorageReady()
         return repository.rejectPairing(requestId)
     }
 }

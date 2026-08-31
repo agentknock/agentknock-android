@@ -53,7 +53,6 @@ import androidx.compose.material3.IconButton
 import androidx.compose.material3.ListItem
 import androidx.compose.material3.ListItemDefaults
 import androidx.compose.material3.MaterialTheme
-import androidx.compose.material3.OutlinedButton
 import androidx.compose.material3.OutlinedTextField
 import androidx.compose.material3.RadioButton
 import androidx.compose.material3.Scaffold
@@ -85,10 +84,8 @@ import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
 import androidx.core.content.ContextCompat
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
-import androidx.lifecycle.viewmodel.compose.viewModel
 import dev.agentknock.BuildConfig
 import dev.agentknock.push.RequestNotifications
-import dev.agentknock.storage.FactoryResetResult
 import dev.agentknock.storage.crypto.EncryptionKeyBacking
 import dev.agentknock.storage.crypto.VaultProtection
 import dev.agentknock.storage.device.DeviceIdentity
@@ -121,9 +118,8 @@ internal fun SettingsScreen(
     requestNotificationPermission: () -> Unit,
     openPlanInitially: Boolean,
     onPlanOpened: () -> Unit,
-    onFactoryResetCompleted: () -> Unit,
     subscriptionViewModel: SubscriptionViewModel,
-    viewModel: SettingsViewModel = viewModel(),
+    viewModel: SettingsViewModel,
 ) {
     var page by rememberSaveable { mutableStateOf(SettingsPage.OVERVIEW) }
     val configuration by viewModel.configuration.collectAsStateWithLifecycle()
@@ -153,8 +149,15 @@ internal fun SettingsScreen(
             } else {
                 page = SettingsPage.OVERVIEW
             }
-            SettingsPage.FACTORY_RESET -> if (factoryReset != FactoryResetUiState.Working) {
-                page = SettingsPage.SECURITY_BACKUP
+            SettingsPage.FACTORY_RESET -> when (factoryReset) {
+                FactoryResetUiState.Working -> Unit
+                FactoryResetUiState.ConfirmLocalClear -> {
+                    viewModel.cancelLocalClear()
+                    page = SettingsPage.SECURITY_BACKUP
+                }
+                FactoryResetUiState.Idle,
+                FactoryResetUiState.ClearFailed,
+                -> page = SettingsPage.SECURITY_BACKUP
             }
             else -> page = SettingsPage.OVERVIEW
         }
@@ -219,15 +222,16 @@ internal fun SettingsScreen(
                 SettingsPage.FACTORY_RESET -> FactoryReset(
                     onBack = ::back,
                     state = factoryReset,
-                    startReset = { localOnly ->
+                    startReset = {
                         authenticate(
                             "Confirm factory reset",
-                            { viewModel.startFactoryReset(localOnly) },
+                            viewModel::startFactoryReset,
                             { message -> scope.launch { snackbar.showSnackbar(message) } },
                         )
                     },
-                    consumeResult = viewModel::consumeFactoryResetResult,
-                    onReset = onFactoryResetCompleted,
+                    confirmLocalClear = viewModel::confirmLocalClear,
+                    cancelLocalClear = viewModel::cancelLocalClear,
+                    consumeClearFailure = viewModel::consumeClearFailure,
                     report = { message -> scope.launch { snackbar.showSnackbar(message) } },
                     modifier = modifier,
                 )
@@ -695,52 +699,41 @@ private fun About(
 private fun FactoryReset(
     onBack: () -> Unit,
     state: FactoryResetUiState,
-    startReset: (Boolean) -> Unit,
-    consumeResult: () -> Unit,
-    onReset: () -> Unit,
+    startReset: () -> Unit,
+    confirmLocalClear: () -> Unit,
+    cancelLocalClear: () -> Unit,
+    consumeClearFailure: () -> Unit,
     report: (String) -> Unit,
     modifier: Modifier,
 ) {
     var phrase by rememberSaveable { mutableStateOf("") }
-    var allowLocalOnly by rememberSaveable { mutableStateOf(false) }
     val working = state == FactoryResetUiState.Working
 
     LaunchedEffect(state) {
-        when (state) {
-            FactoryResetUiState.Idle,
-            FactoryResetUiState.Working,
-            -> Unit
-            is FactoryResetUiState.Finished -> {
-                consumeResult()
-                when (state.result) {
-                    FactoryResetResult.Reset -> onReset()
-                    FactoryResetResult.NoDevice -> {
-                        allowLocalOnly = true
-                        report("No active relay device is available. Nothing was erased.")
-                    }
-                    is FactoryResetResult.RemoteRejected -> {
-                        allowLocalOnly = true
-                        report("The relay rejected deletion. Nothing was erased.")
-                    }
-                    is FactoryResetResult.RemoteUnavailable -> {
-                        allowLocalOnly = true
-                        report("The relay is unavailable. Nothing was erased.")
-                    }
-                    FactoryResetResult.InvalidRemoteResponse -> {
-                        allowLocalOnly = true
-                        report("Relay deletion could not be confirmed. Nothing was erased.")
-                    }
-                    FactoryResetResult.DeviceCredentialsUnavailable -> {
-                        allowLocalOnly = true
-                        report("Relay authentication is unavailable. Nothing was erased.")
-                    }
-                }
-            }
-            FactoryResetUiState.Failed -> {
-                consumeResult()
-                report("Factory reset did not complete. Reopen Agentknock and check its state before trying again.")
-            }
+        if (state == FactoryResetUiState.ClearFailed) {
+            consumeClearFailure()
+            report("Android could not clear Agentknock's app data. Clear its storage from Android settings.")
         }
+    }
+
+    if (state == FactoryResetUiState.ConfirmLocalClear) {
+        AlertDialog(
+            onDismissRequest = cancelLocalClear,
+            title = { Text("Relay deletion not confirmed") },
+            text = {
+                Text(
+                    "Clearing Agentknock now may leave the old device registration on the relay. Clear all app data anyway?",
+                )
+            },
+            confirmButton = {
+                TextButton(onClick = confirmLocalClear) {
+                    Text("Clear app data", color = MaterialTheme.colorScheme.error)
+                }
+            },
+            dismissButton = {
+                TextButton(onClick = cancelLocalClear) { Text("Cancel") }
+            },
+        )
     }
 
     Column(modifier) {
@@ -765,7 +758,7 @@ private fun FactoryReset(
             }
             Text("Setup starts again with a new device identity and pairing address. Every client must pair again.")
             Text(
-                "If relay deletion cannot be confirmed, nothing is erased unless you explicitly choose a local-only reset. Factory reset does not fix temporary connection problems.",
+                "If relay deletion cannot be confirmed, you will be asked again before any app data is cleared. Factory reset does not fix temporary connection problems.",
                 color = MaterialTheme.colorScheme.onSurfaceVariant,
             )
             Text("Type RESET AGENTKNOCK to confirm.", style = MaterialTheme.typography.titleMedium)
@@ -784,7 +777,7 @@ private fun FactoryReset(
                 ),
             )
             Button(
-                onClick = { startReset(false) },
+                onClick = startReset,
                 enabled = phrase == "RESET AGENTKNOCK" && !working,
                 modifier = Modifier.fillMaxWidth(),
                 colors = ButtonDefaults.buttonColors(
@@ -797,17 +790,6 @@ private fun FactoryReset(
                 } else {
                     Text("Erase and reset Agentknock")
                 }
-            }
-            if (allowLocalOnly) {
-                Text(
-                    "Remote deletion was not confirmed. Resetting only this app may leave inaccessible relay state until automatic cleanup.",
-                    color = MaterialTheme.colorScheme.error,
-                )
-                OutlinedButton(
-                    onClick = { startReset(true) },
-                    enabled = !working,
-                    modifier = Modifier.fillMaxWidth(),
-                ) { Text("Reset this app anyway", color = MaterialTheme.colorScheme.error) }
             }
         }
     }

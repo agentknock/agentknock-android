@@ -969,34 +969,6 @@ class RequestRepositorySlotTest {
     }
 
     @Test
-    fun runtimeResetHoldsTheRequestMutationBarrierAcrossStorageClear() = runTest {
-        establishActivePairing()
-        val clearStarted = CompletableDeferred<Unit>()
-        val finishClear = CompletableDeferred<Unit>()
-        val reset = async(Dispatchers.Default) {
-            repository.resetRuntimeState {
-                clearStarted.complete(Unit)
-                finishClear.await()
-                database.resetDao().clearAllData()
-            }
-        }
-        clearStarted.await()
-        val mutation = async(Dispatchers.Default) {
-            repository.saveClientInstructions(CLIENT_ID, "A stale post-reset instruction")
-        }
-
-        val prematureResult = withContext(Dispatchers.Default.limitedParallelism(1)) {
-            withTimeoutOrNull(250) { mutation.await() }
-        }
-        assertNull(prematureResult)
-        finishClear.complete(Unit)
-        reset.await()
-
-        assertEquals(ClientChangeResult.NOT_FOUND, mutation.await())
-        assertTrue(database.auditDao().observeEvents().first().isEmpty())
-    }
-
-    @Test
     fun secretUploadApprovalCommitsSecretDecisionAuditAndStagingDeletionTogether() = runTest {
         receiveEnvironmentSecretUpload()
 
@@ -1801,5 +1773,4 @@ private class MemoryEncryptionKeyStore : EncryptionKeyStore {
         keys.remove(keyId)
     }
 
-    override fun managedKeyIds(): List<String> = keys.keys.toList()
 }

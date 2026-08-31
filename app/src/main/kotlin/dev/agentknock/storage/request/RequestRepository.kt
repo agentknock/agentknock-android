@@ -1152,15 +1152,6 @@ internal class RequestRepository(
         dao.recoverInterruptedAiReviews(currentTimeMillis())
     }
 
-    suspend fun resetRuntimeState(clearStorage: suspend () -> Unit) = operationMutex.withLock {
-        clearStorage()
-        while (pendingChanges.tryReceive().isSuccess) {
-            // Drop process-local wakeups whose durable state was erased with storage.
-        }
-        _pushRegistrationState.value = null
-        _inboxChanges.tryEmit(Unit)
-    }
-
     suspend fun sync(): RequestSyncResult = runConnection(keepConnected = false)
 
     suspend fun listen(
