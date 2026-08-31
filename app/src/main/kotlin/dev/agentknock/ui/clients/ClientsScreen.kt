@@ -5,17 +5,14 @@ package dev.agentknock.ui.clients
 import android.content.ClipData
 import android.content.ClipboardManager
 import androidx.compose.foundation.BorderStroke
-import androidx.activity.compose.BackHandler
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
-import androidx.compose.foundation.layout.BoxWithConstraints
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.PaddingValues
 import androidx.compose.foundation.layout.Spacer
 import androidx.compose.foundation.layout.WindowInsets
-import androidx.compose.foundation.layout.fillMaxHeight
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.padding
@@ -55,10 +52,9 @@ import androidx.compose.material3.Surface
 import androidx.compose.material3.Text
 import androidx.compose.material3.TextButton
 import androidx.compose.material3.TopAppBar
-import androidx.compose.material3.VerticalDivider
 import androidx.compose.runtime.Composable
-import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.getValue
+import androidx.compose.runtime.key
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
 import androidx.compose.runtime.rememberCoroutineScope
@@ -90,6 +86,7 @@ import dev.agentknock.storage.device.DeviceIdentity
 import dev.agentknock.storage.device.DeviceManagementResult
 import dev.agentknock.storage.secret.TemporaryAccessGrant
 import dev.agentknock.storage.secret.TemporaryAccessOperation
+import dev.agentknock.ui.components.AdaptiveListDetail
 import dev.agentknock.ui.components.InformationRow
 import dev.agentknock.ui.components.InformationSurface
 import dev.agentknock.ui.components.TonalIcon
@@ -110,115 +107,32 @@ internal fun ClientsScreen(
 ) {
     val clients by viewModel.clients.collectAsStateWithLifecycle()
     val pendingPairings by viewModel.pendingPairings.collectAsStateWithLifecycle()
-    val selection by viewModel.selection.collectAsStateWithLifecycle()
-    val pairingSelection by viewModel.pairingSelection.collectAsStateWithLifecycle()
-    val selectedClient by viewModel.selectedClient.collectAsStateWithLifecycle()
-    val temporaryAccessGrants by viewModel.temporaryAccessGrants.collectAsStateWithLifecycle()
-    val selectedPairing by viewModel.selectedPairing.collectAsStateWithLifecycle()
+    val pane by viewModel.pane.collectAsStateWithLifecycle()
     val configuration by viewModel.configuration.collectAsStateWithLifecycle()
     val snackbar = remember { SnackbarHostState() }
     val scope = rememberCoroutineScope()
-    var loadedClientId by remember { mutableStateOf<String?>(null) }
-    var loadedPairingRequestId by remember { mutableStateOf<String?>(null) }
-
-    LaunchedEffect(selection, selectedClient?.clientId) {
-        when {
-            selection != null && selectedClient?.clientId == selection ->
-                loadedClientId = selection
-            selection != null && loadedClientId == selection && selectedClient == null ->
-                viewModel.selectClient(null)
-        }
-    }
-
-    LaunchedEffect(pairingSelection, selectedPairing?.id) {
-        when {
-            pairingSelection != null && selectedPairing?.id == pairingSelection ->
-                loadedPairingRequestId = pairingSelection
-            pairingSelection != null &&
-                loadedPairingRequestId == pairingSelection &&
-                selectedPairing == null -> viewModel.selectPairing(null)
-        }
-    }
 
     fun report(message: String) {
         scope.launch { snackbar.showSnackbar(message) }
-    }
-
-    val selectedPairingDetails =
-        (selectedPairing?.content as? InboxRequestContent.Pairing)?.details
-    LaunchedEffect(pairingSelection, selectedPairingDetails?.pairingState) {
-        val pairing = selectedPairingDetails ?: return@LaunchedEffect
-        if (pairingSelection != null) {
-            when (pairing.pairingState) {
-                PairingState.COMPLETED -> {
-                    viewModel.selectPairing(null)
-                    viewModel.selectClient(pairing.clientId)
-                }
-                PairingState.REJECTED -> viewModel.selectPairing(null)
-                else -> Unit
-            }
-        }
     }
 
     Scaffold(
         snackbarHost = { SnackbarHost(snackbar) },
         contentWindowInsets = WindowInsets(0, 0, 0, 0),
     ) { padding ->
-        BoxWithConstraints(Modifier.fillMaxSize().padding(padding)) {
-            val twoPane = maxWidth >= 720.dp
-            val hasSelection = selection != null || pairingSelection != null
-            LaunchedEffect(hasSelection, twoPane) {
-                onTopLevelChanged(twoPane || !hasSelection)
-            }
-            if (twoPane) {
-                Row(Modifier.fillMaxSize()) {
-                    ClientList(
-                        clients = clients,
-                        pendingPairings = pendingPairings,
-                        selectedClientId = selection,
-                        selectedPairingRequestId = pairingSelection,
-                        identity = configuration?.active,
-                        onOpen = viewModel::selectClient,
-                        onOpenPairing = viewModel::selectPairing,
-                        onChangePairingAddress = onChangePairingAddress,
-                        onSetPairingEnabled = { enabled ->
-                            scope.launch { report(viewModel.setPairingEnabled(enabled).message(enabled)) }
-                        },
-                        onOpenSettings = onOpenSettings,
-                        report = ::report,
-                        modifier = Modifier.width(320.dp).fillMaxHeight(),
-                    )
-                    VerticalDivider()
-                    if (!hasSelection) {
-                        EmptyClientSelection(Modifier.weight(1f).fillMaxHeight())
-                    } else if (pairingSelection != null) {
-                        PairingSelectionDetail(
-                            request = selectedPairing,
-                            authorizeProtectedAction = authorizeProtectedAction,
-                            viewModel = viewModel,
-                            report = ::report,
-                            onBack = { viewModel.selectPairing(null) },
-                            showBack = false,
-                            modifier = Modifier.weight(1f).fillMaxHeight(),
-                        )
-                    } else {
-                        ClientSelectionDetail(
-                            client = selectedClient,
-                            temporaryAccessGrants = temporaryAccessGrants,
-                            viewModel = viewModel,
-                            report = ::report,
-                            onBack = { viewModel.selectClient(null) },
-                            showBack = false,
-                            modifier = Modifier.weight(1f).fillMaxHeight(),
-                        )
-                    }
-                }
-            } else if (!hasSelection) {
+        AdaptiveListDetail(
+            hasDetail = pane.selection != ClientSelection.None,
+            listWidth = 320.dp,
+            onBack = viewModel::clearSelection,
+            onTopLevelChanged = onTopLevelChanged,
+            modifier = Modifier.fillMaxSize().padding(padding),
+            list = { listModifier ->
                 ClientList(
                     clients = clients,
                     pendingPairings = pendingPairings,
-                    selectedClientId = selection,
-                    selectedPairingRequestId = pairingSelection,
+                    selectedClientId = (pane.selection as? ClientSelection.Client)?.clientId,
+                    selectedPairingRequestId =
+                        (pane.selection as? ClientSelection.Pairing)?.requestId,
                     identity = configuration?.active,
                     onOpen = viewModel::selectClient,
                     onOpenPairing = viewModel::selectPairing,
@@ -228,38 +142,66 @@ internal fun ClientsScreen(
                     },
                     onOpenSettings = onOpenSettings,
                     report = ::report,
-                    modifier = Modifier.fillMaxSize(),
+                    modifier = listModifier,
                 )
-            } else if (pairingSelection != null) {
-                BackHandler { viewModel.selectPairing(null) }
-                PairingSelectionDetail(
-                    request = selectedPairing,
+            },
+            emptyDetail = { detailModifier -> EmptyClientSelection(detailModifier) },
+            detail = { showBack, detailModifier ->
+                ClientSelectionPane(
+                    pane = pane,
                     authorizeProtectedAction = authorizeProtectedAction,
                     viewModel = viewModel,
                     report = ::report,
-                    onBack = { viewModel.selectPairing(null) },
-                    showBack = true,
-                    modifier = Modifier.fillMaxSize(),
+                    showBack = showBack,
+                    modifier = detailModifier,
                 )
-            } else {
-                BackHandler { viewModel.selectClient(null) }
-                ClientSelectionDetail(
-                    client = selectedClient,
-                    temporaryAccessGrants = temporaryAccessGrants,
-                    viewModel = viewModel,
-                    report = ::report,
-                    onBack = { viewModel.selectClient(null) },
-                    showBack = true,
-                    modifier = Modifier.fillMaxSize(),
-                )
-            }
+            },
+        )
+    }
+}
+
+@Composable
+private fun ClientSelectionPane(
+    pane: ClientPaneState,
+    authorizeProtectedAction: (String, () -> Unit, (String) -> Unit) -> Unit,
+    viewModel: ClientsViewModel,
+    report: (String) -> Unit,
+    showBack: Boolean,
+    modifier: Modifier,
+) {
+    when (pane) {
+        ClientPaneState.Empty -> EmptyClientSelection(modifier)
+        is ClientPaneState.Loading,
+        is ClientPaneState.Missing,
+        -> Box(modifier, contentAlignment = Alignment.Center) { CircularProgressIndicator() }
+        is ClientPaneState.Client -> key(pane.details.clientId) {
+            ClientSelectionDetail(
+                client = pane.details,
+                temporaryAccessGrants = pane.temporaryAccess,
+                viewModel = viewModel,
+                report = report,
+                onBack = viewModel::clearSelection,
+                showBack = showBack,
+                modifier = modifier,
+            )
+        }
+        is ClientPaneState.Pairing -> key(pane.request.id) {
+            PairingSelectionDetail(
+                request = pane.request,
+                authorizeProtectedAction = authorizeProtectedAction,
+                viewModel = viewModel,
+                report = report,
+                onBack = viewModel::clearSelection,
+                showBack = showBack,
+                modifier = modifier,
+            )
         }
     }
 }
 
 @Composable
 private fun PairingSelectionDetail(
-    request: InboxRequestDetails?,
+    request: InboxRequestDetails,
     authorizeProtectedAction: (String, () -> Unit, (String) -> Unit) -> Unit,
     viewModel: ClientsViewModel,
     report: (String) -> Unit,
@@ -268,11 +210,7 @@ private fun PairingSelectionDetail(
     modifier: Modifier,
 ) {
     val scope = rememberCoroutineScope()
-    val pairing = (request?.content as? InboxRequestContent.Pairing)?.details
-    if (request == null || pairing == null) {
-        Box(modifier, contentAlignment = Alignment.Center) { CircularProgressIndicator() }
-        return
-    }
+    val pairing = (request.content as InboxRequestContent.Pairing).details
     PairingRequestDetail(
         request = request,
         onBack = onBack,
@@ -301,7 +239,7 @@ private fun PairingSelectionDetail(
         onReject = {
             scope.launch {
                 report(viewModel.rejectPairing(request.id).message())
-                viewModel.selectPairing(null)
+                viewModel.clearSelection(ClientSelection.Pairing(request.id))
             }
         },
         modifier = modifier,
@@ -310,7 +248,7 @@ private fun PairingSelectionDetail(
 
 @Composable
 private fun ClientSelectionDetail(
-    client: ClientDetails?,
+    client: ClientDetails,
     temporaryAccessGrants: List<TemporaryAccessGrant>,
     viewModel: ClientsViewModel,
     report: (String) -> Unit,
@@ -319,10 +257,6 @@ private fun ClientSelectionDetail(
     modifier: Modifier,
 ) {
     val scope = rememberCoroutineScope()
-    if (client == null) {
-        Box(modifier, contentAlignment = Alignment.Center) { CircularProgressIndicator() }
-        return
-    }
     ClientDetail(
         client = client,
         temporaryAccessGrants = temporaryAccessGrants,
@@ -344,7 +278,7 @@ private fun ClientSelectionDetail(
             scope.launch {
                 val result = viewModel.setState(client.clientId, state)
                 if (result == ClientChangeResult.CHANGED && state == RelayClientState.REVOKED) {
-                    viewModel.selectClient(null)
+                    viewModel.clearSelection(ClientSelection.Client(client.clientId))
                 }
                 report(
                     if (result == ClientChangeResult.CHANGED) {

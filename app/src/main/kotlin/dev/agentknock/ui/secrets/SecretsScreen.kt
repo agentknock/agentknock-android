@@ -9,18 +9,13 @@ import android.os.Build
 import android.os.Handler
 import android.os.Looper
 import android.os.PersistableBundle
-import androidx.activity.compose.BackHandler
 import androidx.activity.compose.LocalActivity
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
-import androidx.compose.foundation.layout.BoxWithConstraints
 import androidx.compose.foundation.layout.Column
-import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.WindowInsets
-import androidx.compose.foundation.layout.fillMaxHeight
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.padding
-import androidx.compose.foundation.layout.width
 import androidx.compose.material3.AlertDialog
 import androidx.compose.material3.CircularProgressIndicator
 import androidx.compose.material3.MaterialTheme
@@ -29,11 +24,11 @@ import androidx.compose.material3.SnackbarHost
 import androidx.compose.material3.SnackbarHostState
 import androidx.compose.material3.Text
 import androidx.compose.material3.TextButton
-import androidx.compose.material3.VerticalDivider
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.DisposableEffect
 import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.getValue
+import androidx.compose.runtime.key
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
 import androidx.compose.runtime.rememberCoroutineScope
@@ -49,8 +44,6 @@ import androidx.lifecycle.LifecycleEventObserver
 import androidx.lifecycle.compose.LocalLifecycleOwner
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import dev.agentknock.R
-import dev.agentknock.storage.request.InboxRequestContent
-import dev.agentknock.storage.request.SecretUploadRequestState
 import dev.agentknock.storage.secret.CreateEnvironmentVariableResult
 import dev.agentknock.storage.secret.CreateSecretResult
 import dev.agentknock.storage.secret.EnvironmentVariableMetadata
@@ -60,12 +53,14 @@ import dev.agentknock.storage.secret.SaveEnvironmentVariableResult
 import dev.agentknock.storage.secret.SaveSecretResult
 import dev.agentknock.storage.secret.SaveSshSecretResult
 import dev.agentknock.storage.secret.SecretDetails
+import dev.agentknock.ui.components.AdaptiveListDetail
 import kotlinx.coroutines.launch
 import java.util.UUID
 
-// Measured after the app-wide navigation rail, so this corresponds to an
-// expanded (roughly 840 dp) top-level window.
-private val twoPaneWidth = 720.dp
+private data class PendingVariableDeletion(
+    val variable: EnvironmentVariableMetadata,
+    val editorSession: Long,
+)
 
 @Composable
 internal fun SecretsScreen(
@@ -83,70 +78,45 @@ internal fun SecretsScreen(
     val clients by viewModel.clients.collectAsStateWithLifecycle()
     val configuration by viewModel.configuration.collectAsStateWithLifecycle()
     val pendingUploads by viewModel.pendingUploads.collectAsStateWithLifecycle()
-    val selection by viewModel.selection.collectAsStateWithLifecycle()
-    val uploadSelection by viewModel.uploadSelection.collectAsStateWithLifecycle()
-    val selectedSecret by viewModel.selectedSecret.collectAsStateWithLifecycle()
-    val selectedUpload by viewModel.selectedUpload.collectAsStateWithLifecycle()
-    val secretEditor by viewModel.secretEditor.collectAsStateWithLifecycle()
-    val variableEditor by viewModel.variableEditor.collectAsStateWithLifecycle()
-    val sshKeyEditor by viewModel.sshKeyEditor.collectAsStateWithLifecycle()
+    val content by viewModel.content.collectAsStateWithLifecycle()
+    val editor by viewModel.editor.collectAsStateWithLifecycle()
     val scope = rememberCoroutineScope()
     val snackbar = remember { SnackbarHostState() }
     val context = LocalContext.current
     val resources = LocalResources.current
     var secretPendingDeletion by remember { mutableStateOf<SecretDetails?>(null) }
-    var variablePendingDeletion by remember { mutableStateOf<EnvironmentVariableMetadata?>(null) }
+    var variablePendingDeletion by remember { mutableStateOf<PendingVariableDeletion?>(null) }
     var revealedValues by remember { mutableStateOf<Map<String, String>>(emptyMap()) }
     val lifecycle = LocalLifecycleOwner.current.lifecycle
     val activity = LocalActivity.current
 
     DisposableEffect(lifecycle, activity) {
-        fun clearSensitiveEditor() {
-            val editor = viewModel.variableEditor.value
-            if (editor?.variable?.sensitive == true || editor?.sensitive == true) {
-                viewModel.updateVariableEditor(null)
-            }
-            if (viewModel.sshKeyEditor.value != null) {
-                viewModel.updateSshKeyEditor(null)
-            }
-            val secretEditor = viewModel.secretEditor.value
-            if (secretEditor?.sshPrivateKeyText?.isNotEmpty() == true ||
-                secretEditor?.preparedSshKey != null
-            ) {
-                viewModel.updateSecretEditor(null)
-            }
-        }
         val observer = LifecycleEventObserver { _, event ->
             if (
                 event == Lifecycle.Event.ON_STOP &&
                 activity?.isChangingConfigurations != true
             ) {
                 revealedValues = emptyMap()
-                clearSensitiveEditor()
+                viewModel.clearSensitiveEditor()
             }
         }
         lifecycle.addObserver(observer)
         onDispose {
             lifecycle.removeObserver(observer)
-            if (activity?.isChangingConfigurations != true) clearSensitiveEditor()
+            if (activity?.isChangingConfigurations != true) viewModel.clearSensitiveEditor()
         }
     }
 
-    LaunchedEffect(selection, uploadSelection) {
+    val target = when (val selected = content) {
+        SecretsContent.List -> null
+        is SecretsContent.Loading -> selected.target
+        is SecretsContent.Stored -> SecretTarget.Stored(selected.details.id)
+        is SecretsContent.Upload -> SecretTarget.Upload(selected.request.id)
+    }
+    LaunchedEffect(target) {
         revealedValues = emptyMap()
-    }
-
-    val selectedUploadDetails =
-        (selectedUpload?.content as? InboxRequestContent.SecretUpload)?.details
-    LaunchedEffect(uploadSelection, selectedUploadDetails?.state) {
-        if (
-            uploadSelection != null &&
-            selectedUploadDetails?.state?.let {
-                it != SecretUploadRequestState.REVIEW_PENDING
-            } == true
-        ) {
-            viewModel.selectUpload(null)
-        }
+        secretPendingDeletion = null
+        variablePendingDeletion = null
     }
 
     fun report(message: String) {
@@ -183,9 +153,14 @@ internal fun SecretsScreen(
             revealedValues -= variable.id
             return
         }
-        val action: () -> Unit = {
+        val action: () -> Unit = action@{
+            val epoch = viewModel.beginSecretRead(variable.secretId) ?: return@action
             scope.launch {
-                readValue(variable)?.let { value -> revealedValues += variable.id to value }
+                if (!viewModel.secretReadIsCurrent(variable.secretId, epoch)) return@launch
+                val value = readValue(variable) ?: return@launch
+                if (viewModel.secretReadIsCurrent(variable.secretId, epoch)) {
+                    revealedValues += variable.id to value
+                }
             }
         }
         if (variable.sensitive) {
@@ -200,9 +175,12 @@ internal fun SecretsScreen(
     }
 
     fun copy(variable: EnvironmentVariableMetadata) {
-        val action: () -> Unit = {
+        val action: () -> Unit = action@{
+            val epoch = viewModel.beginSecretRead(variable.secretId) ?: return@action
             scope.launch {
+                if (!viewModel.secretReadIsCurrent(variable.secretId, epoch)) return@launch
                 val value = readValue(variable) ?: return@launch
+                if (!viewModel.secretReadIsCurrent(variable.secretId, epoch)) return@launch
                 copyToClipboard(context, variable.name, value, variable.sensitive)
                 report(
                     resources.getString(
@@ -232,9 +210,12 @@ internal fun SecretsScreen(
             viewModel.startEditingEnvironmentVariable(variable, null)
             return
         }
-        val action: () -> Unit = {
+        val action: () -> Unit = action@{
+            val epoch = viewModel.beginSecretRead(variable.secretId) ?: return@action
             scope.launch {
-                readValue(variable)?.let { value ->
+                if (!viewModel.secretReadIsCurrent(variable.secretId, epoch)) return@launch
+                val value = readValue(variable) ?: return@launch
+                if (viewModel.secretReadIsCurrent(variable.secretId, epoch)) {
                     viewModel.startEditingEnvironmentVariable(variable, value)
                 }
             }
@@ -344,76 +325,31 @@ internal fun SecretsScreen(
         }
     }
 
+    fun clearSelection() {
+        when (target) {
+            null -> Unit
+            is SecretTarget.Stored -> viewModel.selectSecret(null)
+            is SecretTarget.Upload -> viewModel.selectUpload(null)
+        }
+    }
+
     Scaffold(
         snackbarHost = { SnackbarHost(snackbar) },
         contentWindowInsets = WindowInsets(0, 0, 0, 0),
     ) { padding ->
-        BoxWithConstraints(
-            modifier = Modifier
-                .fillMaxSize()
-                .padding(padding),
-        ) {
-            val twoPane = maxWidth >= twoPaneWidth
-            val secret = selectedSecret
-            val hasSelection = selection != null || uploadSelection != null
-            LaunchedEffect(hasSelection, secretEditor, variableEditor, sshKeyEditor, twoPane) {
-                onTopLevelChanged(
-                    (twoPane || !hasSelection) &&
-                        secretEditor == null &&
-                        variableEditor == null &&
-                        sshKeyEditor == null,
-                )
-            }
-            if (twoPane) {
-                Row(Modifier.fillMaxSize()) {
-                    SecretList(
-                        secrets = secrets,
-                        pendingUploads = pendingUploads,
-                        selectedSecretId = selection,
-                        selectedUploadRequestId = uploadSelection,
-                        onSelect = viewModel::selectSecret,
-                        onSelectUpload = viewModel::selectUpload,
-                        onCreate = viewModel::startNewSecret,
-                        generalInstructions = configuration?.active?.instructions.orEmpty(),
-                        aiReviewActive = aiReviewActive,
-                        onSaveGeneralInstructions = ::saveGeneralInstructions,
-                        onOpenSettings = onOpenSettings,
-                        modifier = Modifier
-                            .width(320.dp)
-                            .fillMaxHeight(),
-                    )
-                    VerticalDivider()
-                    if (!hasSelection) {
-                        EmptySecretSelection(Modifier.weight(1f).fillMaxHeight())
-                    } else if (uploadSelection != null) {
-                        SecretUploadSelectionDetail(
-                            request = selectedUpload,
-                            authorizeProtectedAction = authorizeProtectedAction,
-                            viewModel = viewModel,
-                            report = ::report,
-                            onBack = { viewModel.selectUpload(null) },
-                            showBack = false,
-                            modifier = Modifier.weight(1f).fillMaxHeight(),
-                        )
-                    } else if (secret == null) {
-                        Loading(Modifier.weight(1f).fillMaxHeight())
-                    } else {
-                        SecretDetail(
-                            secret = secret,
-                            clients = clients,
-                            revealedValues = revealedValues,
-                            showBack = false,
-                            actions = secretDetailActions(secret, onBack = {}),
-                            modifier = Modifier.weight(1f),
-                        )
-                    }
-                }
-            } else if (!hasSelection) {
+        AdaptiveListDetail(
+            hasDetail = content !is SecretsContent.List,
+            listWidth = 320.dp,
+            onBack = ::clearSelection,
+            onTopLevelChanged = onTopLevelChanged,
+            obscured = editor !is SecretsEditor.None,
+            modifier = Modifier.fillMaxSize().padding(padding),
+            list = { listModifier ->
                 SecretList(
                     secrets = secrets,
                     pendingUploads = pendingUploads,
-                    selectedSecretId = null,
-                    selectedUploadRequestId = null,
+                    selectedSecretId = (target as? SecretTarget.Stored)?.id,
+                    selectedUploadRequestId = (target as? SecretTarget.Upload)?.requestId,
                     onSelect = viewModel::selectSecret,
                     onSelectUpload = viewModel::selectUpload,
                     onCreate = viewModel::startNewSecret,
@@ -421,237 +357,211 @@ internal fun SecretsScreen(
                     aiReviewActive = aiReviewActive,
                     onSaveGeneralInstructions = ::saveGeneralInstructions,
                     onOpenSettings = onOpenSettings,
-                    modifier = Modifier.fillMaxSize(),
+                    modifier = listModifier,
                 )
-            } else if (uploadSelection != null) {
-                BackHandler { viewModel.selectUpload(null) }
-                SecretUploadSelectionDetail(
-                    request = selectedUpload,
-                    authorizeProtectedAction = authorizeProtectedAction,
-                    viewModel = viewModel,
-                    report = ::report,
-                    onBack = { viewModel.selectUpload(null) },
-                    showBack = true,
-                    modifier = Modifier.fillMaxSize(),
-                )
-            } else if (secret == null) {
-                Loading(Modifier.fillMaxSize())
-            } else {
-                BackHandler { viewModel.selectSecret(null) }
-                SecretDetail(
-                    secret = secret,
-                    clients = clients,
-                    revealedValues = revealedValues,
-                    showBack = true,
-                    actions = secretDetailActions(
-                        secret,
-                        onBack = { viewModel.selectSecret(null) },
-                    ),
-                    modifier = Modifier.fillMaxSize(),
-                )
-            }
-        }
-    }
-
-    secretEditor?.let { editor ->
-        SecretEditorScreen(
-            editor = editor,
-            onEditorChange = viewModel::updateSecretEditor,
-            onDismiss = { viewModel.updateSecretEditor(null) },
-            onPrepareSshKey = {
-                scope.launch {
-                    runCatching {
-                        when (editor.sshInputMode) {
-                            SshKeyInputMode.GENERATE -> viewModel.generateSshKey(
-                                editor.sshAlgorithm,
-                                editor.sshComment,
-                            )
-                            SshKeyInputMode.IMPORT -> viewModel.importSshKey(editor.sshPrivateKeyText)
-                        }
-                    }.onSuccess { key ->
-                        viewModel.updateSecretEditor(
-                            editor.copy(preparedSshKey = key, sshError = null),
+            },
+            emptyDetail = { detailModifier -> EmptySecretSelection(detailModifier) },
+            detail = { showBack, detailModifier ->
+                when (val selected = content) {
+                    SecretsContent.List -> EmptySecretSelection(detailModifier)
+                    is SecretsContent.Loading -> Loading(detailModifier)
+                    is SecretsContent.Upload -> key(selected.request.id) {
+                        SecretUploadSelectionDetail(
+                            request = selected.request,
+                            authorizeProtectedAction = authorizeProtectedAction,
+                            viewModel = viewModel,
+                            report = ::report,
+                            onBack = ::clearSelection,
+                            showBack = showBack,
+                            modifier = detailModifier,
                         )
-                    }.onFailure { error ->
-                        viewModel.updateSecretEditor(
-                            editor.copy(
-                                preparedSshKey = null,
-                                sshError = error.message ?: "The private key is not valid",
+                    }
+                    is SecretsContent.Stored -> key(selected.details.id) {
+                        SecretDetail(
+                            secret = selected.details,
+                            clients = clients,
+                            revealedValues = revealedValues,
+                            showBack = showBack,
+                            actions = secretDetailActions(
+                                selected.details,
+                                onBack = { if (showBack) clearSelection() },
                             ),
+                            modifier = detailModifier,
                         )
                     }
                 }
             },
-            onSave = { name, description ->
-                scope.launch {
-                    val error = if (editor.secret == null) {
-                        when (
-                            val result = if (editor.type == SSH_SECRET_TYPE) {
-                                viewModel.createSshSecret(
-                                    name,
-                                    description,
-                                    checkNotNull(editor.preparedSshKey),
+        )
+    }
+
+    when (val activeEditor = editor) {
+        SecretsEditor.None -> Unit
+        is SecretsEditor.Secret -> {
+            val editorState = activeEditor.state
+            SecretEditorScreen(
+                editor = editorState,
+                onEditorChange = { viewModel.updateSecretEditor(activeEditor.session, it) },
+                onDismiss = { viewModel.closeEditor(activeEditor.session) },
+                onPrepareSshKey = viewModel::prepareSecretSshKey,
+                onSave = { name, description ->
+                    scope.launch {
+                        if (!viewModel.editorIsCurrent(activeEditor)) return@launch
+                        val error = if (editorState.secret == null) {
+                            when (
+                                val result = if (editorState.type == SSH_SECRET_TYPE) {
+                                    viewModel.createSshSecret(
+                                        name,
+                                        description,
+                                        checkNotNull(editorState.preparedSshKey),
+                                    )
+                                } else {
+                                    viewModel.createSecret(name, description)
+                                }
+                            ) {
+                                is CreateSecretResult.Created -> {
+                                    viewModel.showCreatedSecretIfEditorCurrent(
+                                        activeEditor,
+                                        result.id,
+                                    )
+                                    null
+                                }
+                                CreateSecretResult.NameInUse -> resources.getString(
+                                    R.string.secret_name_in_use,
                                 )
-                            } else {
-                                viewModel.createSecret(name, description)
                             }
-                        ) {
-                            is CreateSecretResult.Created -> {
-                                viewModel.updateSecretEditor(null)
-                                viewModel.selectSecret(result.id)
-                                null
+                        } else {
+                            when (
+                                viewModel.saveSecret(editorState.secret.id, name, description)
+                            ) {
+                                SaveSecretResult.SAVED -> {
+                                    viewModel.closeEditorIfCurrent(activeEditor)
+                                    null
+                                }
+                                SaveSecretResult.NAME_IN_USE -> resources.getString(
+                                    R.string.secret_name_in_use,
+                                )
+                                SaveSecretResult.NOT_FOUND -> resources.getString(
+                                    R.string.secret_not_found,
+                                )
                             }
-                            CreateSecretResult.NameInUse -> resources.getString(
-                                R.string.secret_name_in_use,
-                            )
                         }
-                    } else {
+                        if (error != null && viewModel.editorIsCurrent(activeEditor)) report(error)
+                    }
+                },
+                snackbar = snackbar,
+            )
+        }
+        is SecretsEditor.SshKey -> {
+            val editorState = activeEditor.state
+            SshKeyEditorScreen(
+                editor = editorState,
+                onEditorChange = { viewModel.updateSshKeyEditor(activeEditor.session, it) },
+                onDismiss = { viewModel.closeEditor(activeEditor.session) },
+                onPrepare = viewModel::prepareReplacementSshKey,
+                onReplace = {
+                    scope.launch {
+                        if (!viewModel.editorIsCurrent(activeEditor)) return@launch
                         when (
-                            viewModel.saveSecret(editor.secret.id, name, description)
+                            viewModel.replaceSshKey(
+                                editorState.secretId,
+                                checkNotNull(editorState.preparedKey),
+                            )
                         ) {
-                            SaveSecretResult.SAVED -> {
-                                viewModel.updateSecretEditor(null)
-                                null
+                            is SaveSshSecretResult.Saved -> {
+                                viewModel.closeEditorIfCurrent(activeEditor)
+                                report("SSH key replaced")
                             }
-                            SaveSecretResult.NAME_IN_USE -> resources.getString(
-                                R.string.secret_name_in_use,
-                            )
-                            SaveSecretResult.NOT_FOUND -> resources.getString(
-                                R.string.secret_not_found,
-                            )
+                            else -> report("SSH key could not be replaced")
                         }
                     }
-                    error?.let(::report)
-                }
-            },
-            snackbar = snackbar,
-        )
-    }
-
-    sshKeyEditor?.let { editor ->
-        SshKeyEditorScreen(
-            editor = editor,
-            onEditorChange = viewModel::updateSshKeyEditor,
-            onDismiss = { viewModel.updateSshKeyEditor(null) },
-            onPrepare = {
-                scope.launch {
-                    runCatching {
-                        when (editor.inputMode) {
-                            SshKeyInputMode.GENERATE -> viewModel.generateSshKey(
-                                editor.algorithm,
-                                editor.comment,
-                            )
-                            SshKeyInputMode.IMPORT -> viewModel.importSshKey(editor.privateKeyText)
+                },
+                snackbar = snackbar,
+            )
+        }
+        is SecretsEditor.Variable -> {
+            val editorState = activeEditor.state
+            val variable = editorState.variable
+            EnvironmentVariableEditorScreen(
+                editor = editorState,
+                onEditorChange = { viewModel.updateVariableEditor(activeEditor.session, it) },
+                onDismiss = { viewModel.closeEditor(activeEditor.session) },
+                onDelete = variable?.let {
+                    { variablePendingDeletion = PendingVariableDeletion(it, activeEditor.session) }
+                },
+                onSave = { name, value, sensitive, notes, replaceValue ->
+                    val save: suspend () -> Unit = save@{
+                        if (!viewModel.editorIsCurrent(activeEditor)) return@save
+                        val error = if (editorState.variable == null) {
+                            when (
+                                viewModel.createEnvironmentVariable(
+                                    secretId = editorState.secretId,
+                                    name = name,
+                                    value = value,
+                                    sensitive = sensitive,
+                                    notes = notes,
+                                )
+                            ) {
+                                is CreateEnvironmentVariableResult.Created -> {
+                                    viewModel.closeEditorIfCurrent(activeEditor)
+                                    null
+                                }
+                                CreateEnvironmentVariableResult.NameInUse -> resources.getString(
+                                    R.string.variable_name_in_use,
+                                )
+                                CreateEnvironmentVariableResult.SecretNotFound -> resources.getString(
+                                    R.string.secret_not_found,
+                                )
+                            }
+                        } else {
+                            when (
+                                viewModel.saveEnvironmentVariable(
+                                    id = editorState.variable.id,
+                                    name = name,
+                                    sensitive = sensitive,
+                                    notes = notes,
+                                    replacementValue = value.takeIf { replaceValue },
+                                )
+                            ) {
+                                SaveEnvironmentVariableResult.SAVED -> {
+                                    viewModel.closeEditorIfCurrent(activeEditor)
+                                    revealedValues -= editorState.variable.id
+                                    null
+                                }
+                                SaveEnvironmentVariableResult.NAME_IN_USE -> resources.getString(
+                                    R.string.variable_name_in_use,
+                                )
+                                SaveEnvironmentVariableResult.NOT_FOUND -> resources.getString(
+                                    R.string.variable_not_found,
+                                )
+                                SaveEnvironmentVariableResult.VALUE_UNAVAILABLE -> resources.getString(
+                                    R.string.stored_value_unavailable,
+                                )
+                                SaveEnvironmentVariableResult.VALUE_CORRUPTED -> resources.getString(
+                                    R.string.stored_value_corrupted,
+                                )
+                                SaveEnvironmentVariableResult.UNSUPPORTED_FORMAT -> resources.getString(
+                                    R.string.stored_value_unsupported,
+                                )
+                            }
                         }
-                    }.onSuccess { key ->
-                        viewModel.updateSshKeyEditor(
-                            editor.copy(preparedKey = key, error = null),
-                        )
-                    }.onFailure { error ->
-                        viewModel.updateSshKeyEditor(
-                            editor.copy(
-                                preparedKey = null,
-                                error = error.message ?: "The private key is not valid",
+                        if (error != null && viewModel.editorIsCurrent(activeEditor)) report(error)
+                    }
+                    val weakensProtection = !sensitive && editorState.variable?.sensitive != false
+                    if (weakensProtection) {
+                        afterProtection(
+                            resources.getString(
+                                R.string.confirm_mark_variable_non_sensitive,
+                                name,
                             ),
+                            save,
                         )
-                    }
-                }
-            },
-            onReplace = {
-                scope.launch {
-                    when (
-                        viewModel.replaceSshKey(editor.secretId, checkNotNull(editor.preparedKey))
-                    ) {
-                        is SaveSshSecretResult.Saved -> {
-                            viewModel.updateSshKeyEditor(null)
-                            report("SSH key replaced")
-                        }
-                        else -> report("SSH key could not be replaced")
-                    }
-                }
-            },
-            snackbar = snackbar,
-        )
-    }
-
-    variableEditor?.let { editor ->
-        val variable = editor.variable
-        EnvironmentVariableEditorScreen(
-            editor = editor,
-            onEditorChange = viewModel::updateVariableEditor,
-            onDismiss = { viewModel.updateVariableEditor(null) },
-            onDelete = variable?.let {
-                { variablePendingDeletion = it }
-            },
-            onSave = { name, value, sensitive, notes, replaceValue ->
-                val save: suspend () -> Unit = {
-                    val error = if (editor.variable == null) {
-                        when (
-                            viewModel.createEnvironmentVariable(
-                                secretId = editor.secretId,
-                                name = name,
-                                value = value,
-                                sensitive = sensitive,
-                                notes = notes,
-                            )
-                        ) {
-                            is CreateEnvironmentVariableResult.Created -> {
-                                viewModel.updateVariableEditor(null)
-                                null
-                            }
-                            CreateEnvironmentVariableResult.NameInUse -> resources.getString(
-                                R.string.variable_name_in_use,
-                            )
-                            CreateEnvironmentVariableResult.SecretNotFound -> resources.getString(
-                                R.string.secret_not_found,
-                            )
-                        }
                     } else {
-                        when (
-                            viewModel.saveEnvironmentVariable(
-                                id = editor.variable.id,
-                                name = name,
-                                sensitive = sensitive,
-                                notes = notes,
-                                replacementValue = value.takeIf { replaceValue },
-                            )
-                        ) {
-                            SaveEnvironmentVariableResult.SAVED -> {
-                                viewModel.updateVariableEditor(null)
-                                revealedValues -= editor.variable.id
-                                null
-                            }
-                            SaveEnvironmentVariableResult.NAME_IN_USE -> resources.getString(
-                                R.string.variable_name_in_use,
-                            )
-                            SaveEnvironmentVariableResult.NOT_FOUND -> resources.getString(
-                                R.string.variable_not_found,
-                            )
-                            SaveEnvironmentVariableResult.VALUE_UNAVAILABLE -> resources.getString(
-                                R.string.stored_value_unavailable,
-                            )
-                            SaveEnvironmentVariableResult.VALUE_CORRUPTED -> resources.getString(
-                                R.string.stored_value_corrupted,
-                            )
-                            SaveEnvironmentVariableResult.UNSUPPORTED_FORMAT -> resources.getString(
-                                R.string.stored_value_unsupported,
-                            )
-                        }
+                        scope.launch { save() }
                     }
-                    error?.let(::report)
-                }
-                val weakensProtection = !sensitive && editor.variable?.sensitive != false
-                if (weakensProtection) {
-                    afterProtection(
-                        resources.getString(R.string.confirm_mark_variable_non_sensitive, name),
-                        save,
-                    )
-                } else {
-                    scope.launch { save() }
-                }
-            },
-            snackbar = snackbar,
-        )
+                },
+                snackbar = snackbar,
+            )
+        }
     }
 
     secretPendingDeletion?.let { secret ->
@@ -672,7 +582,8 @@ internal fun SecretsScreen(
         )
     }
 
-    variablePendingDeletion?.let { variable ->
+    variablePendingDeletion?.let { pending ->
+        val variable = pending.variable
         DeleteDialog(
             title = stringResource(R.string.delete_variable_question, variable.name),
             explanation = stringResource(R.string.delete_variable_explanation),
@@ -681,7 +592,7 @@ internal fun SecretsScreen(
                 variablePendingDeletion = null
                 scope.launch {
                     if (viewModel.deleteEnvironmentVariable(variable.id)) {
-                        viewModel.updateVariableEditor(null)
+                        viewModel.closeEditor(pending.editorSession)
                         revealedValues -= variable.id
                         report(resources.getString(R.string.variable_deleted))
                     } else {

@@ -2,25 +2,19 @@
 
 package dev.agentknock.ui.requests
 
-import androidx.activity.compose.BackHandler
 import androidx.compose.foundation.layout.Box
-import androidx.compose.foundation.layout.BoxWithConstraints
-import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.WindowInsets
-import androidx.compose.foundation.layout.fillMaxHeight
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.padding
-import androidx.compose.foundation.layout.width
 import androidx.compose.material3.CircularProgressIndicator
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.Scaffold
 import androidx.compose.material3.SnackbarHost
 import androidx.compose.material3.SnackbarHostState
 import androidx.compose.material3.Text
-import androidx.compose.material3.VerticalDivider
 import androidx.compose.runtime.Composable
-import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.getValue
+import androidx.compose.runtime.key
 import androidx.compose.runtime.remember
 import androidx.compose.runtime.rememberCoroutineScope
 import androidx.compose.ui.Alignment
@@ -34,6 +28,7 @@ import dev.agentknock.storage.request.InboxRequestDetails
 import dev.agentknock.storage.request.InboxRequestStatus
 import dev.agentknock.storage.request.InboxRequestSummary
 import dev.agentknock.storage.request.RequestSyncResult
+import dev.agentknock.ui.components.AdaptiveListDetail
 import kotlinx.coroutines.launch
 
 @Composable
@@ -45,7 +40,6 @@ internal fun RequestsScreen(
 ) {
     val requests by viewModel.requests.collectAsStateWithLifecycle()
     val selection by viewModel.selection.collectAsStateWithLifecycle()
-    val selectedRequest by viewModel.selectedRequest.collectAsStateWithLifecycle()
     val syncing by viewModel.syncing.collectAsStateWithLifecycle()
     val lastSyncResult by viewModel.lastSyncResult.collectAsStateWithLifecycle()
     val snackbar = remember { SnackbarHostState() }
@@ -97,48 +91,16 @@ internal fun RequestsScreen(
         snackbarHost = { SnackbarHost(snackbar) },
         contentWindowInsets = WindowInsets(0, 0, 0, 0),
     ) { padding ->
-        BoxWithConstraints(Modifier.fillMaxSize().padding(padding)) {
-            // The app-wide navigation rail already consumes part of an expanded window.
-            // Switch on the remaining content width so unfolded phones get a useful
-            // list-detail layout without hovering around the breakpoint.
-            val twoPane = maxWidth >= 720.dp
-            LaunchedEffect(selection, twoPane) {
-                onTopLevelChanged(twoPane || selection == null)
-            }
-            if (twoPane) {
-                Row(Modifier.fillMaxSize()) {
-                    RequestList(
-                        requests = requests,
-                        selectedRequestId = selection,
-                        syncing = syncing,
-                        syncProblem = lastSyncResult.problemMessage(),
-                        onRefresh = viewModel::refresh,
-                        onShowSyncProblem = ::report,
-                        onOpenSettings = onOpenSettings,
-                        notificationsEnabled = notificationsEnabled,
-                        onOpen = viewModel::selectRequest,
-                        onApprove = ::approve,
-                        onReject = ::reject,
-                        modifier = Modifier.width(360.dp).fillMaxHeight(),
-                    )
-                    VerticalDivider()
-                    if (selection == null) {
-                        EmptyRequestSelection(Modifier.weight(1f).fillMaxHeight())
-                    } else {
-                        RequestDetail(
-                            request = selectedRequest,
-                            viewModel = viewModel,
-                            report = ::report,
-                            onBack = { viewModel.selectRequest(null) },
-                            showBack = false,
-                            modifier = Modifier.weight(1f).fillMaxHeight(),
-                        )
-                    }
-                }
-            } else if (selection == null) {
+        AdaptiveListDetail(
+            hasDetail = selection != RequestPaneState.Empty,
+            listWidth = 360.dp,
+            onBack = { viewModel.selectRequest(null) },
+            onTopLevelChanged = onTopLevelChanged,
+            modifier = Modifier.fillMaxSize().padding(padding),
+            list = { listModifier ->
                 RequestList(
                     requests = requests,
-                    selectedRequestId = selection,
+                    selectedRequestId = selection.requestId,
                     syncing = syncing,
                     syncProblem = lastSyncResult.problemMessage(),
                     onRefresh = viewModel::refresh,
@@ -148,26 +110,54 @@ internal fun RequestsScreen(
                     onOpen = viewModel::selectRequest,
                     onApprove = ::approve,
                     onReject = ::reject,
-                    modifier = Modifier.fillMaxSize(),
+                    modifier = listModifier,
                 )
-            } else {
-                BackHandler { viewModel.selectRequest(null) }
-                RequestDetail(
-                    request = selectedRequest,
+            },
+            emptyDetail = { detailModifier -> EmptyRequestSelection(detailModifier) },
+            detail = { showBack, detailModifier ->
+                RequestSelectionDetail(
+                    selection = selection,
                     viewModel = viewModel,
                     report = ::report,
                     onBack = { viewModel.selectRequest(null) },
-                    showBack = true,
-                    modifier = Modifier.fillMaxSize(),
+                    showBack = showBack,
+                    modifier = detailModifier,
                 )
-            }
+            },
+        )
+    }
+}
+
+@Composable
+private fun RequestSelectionDetail(
+    selection: RequestPaneState,
+    viewModel: RequestsViewModel,
+    report: (String) -> Unit,
+    onBack: () -> Unit,
+    showBack: Boolean,
+    modifier: Modifier,
+) {
+    when (selection) {
+        RequestPaneState.Empty,
+        is RequestPaneState.Loading,
+        -> Box(modifier, contentAlignment = Alignment.Center) { CircularProgressIndicator() }
+        is RequestPaneState.Missing -> MissingRequestDetail(onBack, showBack, modifier)
+        is RequestPaneState.Ready -> key(selection.requestId) {
+            RequestDetail(
+                request = selection.request,
+                viewModel = viewModel,
+                report = report,
+                onBack = onBack,
+                showBack = showBack,
+                modifier = modifier,
+            )
         }
     }
 }
 
 @Composable
 private fun RequestDetail(
-    request: InboxRequestDetails?,
+    request: InboxRequestDetails,
     viewModel: RequestsViewModel,
     report: (String) -> Unit,
     onBack: () -> Unit,
@@ -175,10 +165,6 @@ private fun RequestDetail(
     modifier: Modifier,
 ) {
     val scope = rememberCoroutineScope()
-    if (request == null) {
-        Box(modifier, contentAlignment = Alignment.Center) { CircularProgressIndicator() }
-        return
-    }
     when (request.content) {
         is InboxRequestContent.SecretUse -> InvocationRequestDetail(
             request = request,

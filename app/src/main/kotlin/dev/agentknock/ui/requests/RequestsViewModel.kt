@@ -16,11 +16,28 @@ import kotlinx.coroutines.ExperimentalCoroutinesApi
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.SharingStarted
 import kotlinx.coroutines.flow.StateFlow
-import kotlinx.coroutines.flow.asStateFlow
 import kotlinx.coroutines.flow.flatMapLatest
 import kotlinx.coroutines.flow.flowOf
 import kotlinx.coroutines.flow.map
+import kotlinx.coroutines.flow.onStart
 import kotlinx.coroutines.flow.stateIn
+
+internal sealed interface RequestPaneState {
+    val requestId: String?
+
+    data object Empty : RequestPaneState {
+        override val requestId: String? = null
+    }
+
+    data class Loading(override val requestId: String) : RequestPaneState
+
+    data class Ready(
+        override val requestId: String,
+        val request: InboxRequestDetails,
+    ) : RequestPaneState
+
+    data class Missing(override val requestId: String) : RequestPaneState
+}
 
 @OptIn(ExperimentalCoroutinesApi::class)
 internal class RequestsViewModel(
@@ -43,13 +60,23 @@ internal class RequestsViewModel(
             started = SharingStarted.Eagerly,
             initialValue = emptyList(),
         )
-    val selection: StateFlow<String?> = selectedRequestId.asStateFlow()
-    val selectedRequest: StateFlow<InboxRequestDetails?> = selectedRequestId
-        .flatMapLatest { id -> id?.let(inbox::observeRequest) ?: flowOf(null) }
+    val selection: StateFlow<RequestPaneState> = selectedRequestId
+        .flatMapLatest { id ->
+            if (id == null) {
+                flowOf(RequestPaneState.Empty)
+            } else {
+                inbox.observeRequest(id)
+                    .map { request ->
+                        request?.let { RequestPaneState.Ready(id, it) }
+                            ?: RequestPaneState.Missing(id)
+                    }
+                    .onStart { emit(RequestPaneState.Loading(id)) }
+            }
+        }
         .stateIn(
             scope = viewModelScope,
             started = SharingStarted.Eagerly,
-            initialValue = null,
+            initialValue = RequestPaneState.Empty,
         )
     val syncing: StateFlow<Boolean> = connection.syncing
     val lastSyncResult: StateFlow<RequestSyncResult?> = connection.lastSyncResult
