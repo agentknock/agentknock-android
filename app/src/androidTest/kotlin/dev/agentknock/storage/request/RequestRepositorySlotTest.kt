@@ -37,10 +37,13 @@ import dev.agentknock.storage.secret.SecretApprovalMode
 import dev.agentknock.storage.secret.SaveSecretResult
 import dev.agentknock.storage.secret.SecretRepository
 import dev.agentknock.storage.secret.SshKeyAlgorithm
+import dev.agentknock.storage.secret.SshPrivateKey
 import dev.agentknock.storage.device.RelayDeviceCredentialSource
 import dev.agentknock.storage.device.RelayDeviceCredentials
 import dev.agentknock.storage.device.RelayDeviceCredentialsResult
 import dev.agentknock.storage.device.DeviceIdentityEntity
+import java.io.ByteArrayOutputStream
+import java.io.DataOutputStream
 import java.math.BigInteger
 import java.security.SecureRandom
 import java.util.ArrayDeque
@@ -1269,6 +1272,327 @@ class RequestRepositorySlotTest {
         assertTrue(afterReplay.responseAcknowledged)
     }
 
+    @Test
+    fun approvedGitSigningCompletesAndDiscardsItsRequestKey() = runTest {
+        val invocation = establishSigningInvocation()
+        val exchange = pairedExchange(
+            requestId = GIT_SIGN_REQUEST_ID,
+            clientPsk = invocation.clientPsk,
+            requestPlaintext = gitSignPlaintext(invocation.token),
+            completionPlaintext = approvedCompletionPlaintext(),
+        )
+        connect(
+            relayState(INVOCATION_REQUEST_ID),
+            requestEvent(GIT_SIGN_REQUEST_ID, exchange.request),
+            RelayDeviceEvent.CaughtUp,
+        )
+        assertEquals(RequestSyncResult.Success, repository.sync())
+        assertEquals(
+            InboxRequestState.ACTION_REQUIRED.storedName,
+            database.requestDao().getRequestById(GIT_SIGN_REQUEST_ID)?.state,
+        )
+
+        now += 1
+        assertEquals(
+            GitSignDecisionResult.Decided,
+            repository.approveGitSignRequest(GIT_SIGN_REQUEST_ID),
+        )
+        val decided = checkNotNull(database.requestDao().getRequestById(GIT_SIGN_REQUEST_ID))
+        assertEquals(InboxRequestState.WAITING.storedName, decided.state)
+        assertNotNull(decided.responseJson)
+        assertEquals(
+            ApprovalDecision.APPROVED.storedName,
+            database.requestDao().getGitSignRequest(GIT_SIGN_REQUEST_ID)?.decision,
+        )
+
+        now += 1
+        connect(
+            relayState(INVOCATION_REQUEST_ID),
+            relayState(GIT_SIGN_REQUEST_ID),
+            completionEvent(GIT_SIGN_REQUEST_ID, exchange.completion),
+            RelayDeviceEvent.CaughtUp,
+        )
+        assertEquals(RequestSyncResult.Success, repository.sync())
+
+        val completed = checkNotNull(database.requestDao().getRequestById(GIT_SIGN_REQUEST_ID))
+        val completedSigning = checkNotNull(
+            database.requestDao().getGitSignRequest(GIT_SIGN_REQUEST_ID),
+        )
+        assertEquals(InboxRequestState.COMPLETED.storedName, completed.state)
+        assertEquals(ApprovalCompletionResult.APPROVED.storedName, completedSigning.completionResult)
+        assertTrue(completed.responseAcknowledged)
+        assertTrue(completed.completionAcknowledged)
+        assertNull(database.requestDao().getRequestPsk(GIT_SIGN_REQUEST_ID))
+    }
+
+    @Test
+    fun deniedSshAuthenticationReplaysExactlyAndAcceptsMatchingCompletion() = runTest {
+        val invocation = establishSigningInvocation()
+        val exchange = pairedExchange(
+            requestId = SSH_AUTHENTICATION_REQUEST_ID,
+            clientPsk = invocation.clientPsk,
+            requestPlaintext = sshAuthenticationPlaintext(invocation.token, invocation.key),
+            completionPlaintext = deniedSshAuthenticationCompletionPlaintext(),
+        )
+        connect(
+            relayState(INVOCATION_REQUEST_ID),
+            requestEvent(SSH_AUTHENTICATION_REQUEST_ID, exchange.request),
+            RelayDeviceEvent.CaughtUp,
+        )
+        assertEquals(RequestSyncResult.Success, repository.sync())
+
+        val received = checkNotNull(
+            database.requestDao().getRequestById(SSH_AUTHENTICATION_REQUEST_ID),
+        )
+        val authentication = checkNotNull(
+            database.requestDao().getSshAuthenticationRequest(SSH_AUTHENTICATION_REQUEST_ID),
+        )
+        assertEquals(INVOCATION_REQUEST_ID, received.parentRequestId)
+        assertEquals(InboxRequestState.ACTION_REQUIRED.storedName, received.state)
+        assertEquals("git-signing", authentication.secretName)
+        assertEquals("deploy", authentication.username)
+        assertEquals("publickey", authentication.method)
+        assertEquals("ssh-ed25519", authentication.algorithm)
+
+        now += 1
+        assertEquals(
+            SshAuthenticationDecisionResult.Decided,
+            repository.denySshAuthenticationRequest(SSH_AUTHENTICATION_REQUEST_ID),
+        )
+        val denied = checkNotNull(
+            database.requestDao().getRequestById(SSH_AUTHENTICATION_REQUEST_ID),
+        )
+        val persistedResponse = Json.parseToJsonElement(checkNotNull(denied.responseJson))
+
+        now += 1
+        val replay = connect(
+            relayState(INVOCATION_REQUEST_ID),
+            requestEvent(SSH_AUTHENTICATION_REQUEST_ID, exchange.request),
+            relayState(SSH_AUTHENTICATION_REQUEST_ID),
+            completionEvent(SSH_AUTHENTICATION_REQUEST_ID, exchange.completion),
+            RelayDeviceEvent.CaughtUp,
+        )
+        assertEquals(RequestSyncResult.Success, repository.sync())
+
+        assertEquals(
+            listOf(persistedResponse, persistedResponse),
+            replay.sentFrames.filterIsInstance<RelayDeviceFrame.Response>().map { it.payload },
+        )
+        val completed = checkNotNull(
+            database.requestDao().getRequestById(SSH_AUTHENTICATION_REQUEST_ID),
+        )
+        val completedAuthentication = checkNotNull(
+            database.requestDao().getSshAuthenticationRequest(SSH_AUTHENTICATION_REQUEST_ID),
+        )
+        assertEquals(InboxRequestState.COMPLETED.storedName, completed.state)
+        assertEquals(ApprovalDecision.DENIED.storedName, completedAuthentication.decision)
+        assertEquals(
+            ApprovalCompletionResult.DENIED.storedName,
+            completedAuthentication.completionResult,
+        )
+        assertEquals("USER_DENIED", completedAuthentication.completionReason)
+        assertNull(database.requestDao().getRequestPsk(SSH_AUTHENTICATION_REQUEST_ID))
+    }
+
+    @Test
+    fun approvedSshAuthenticationCompletesWithTheSameSecretAndParent() = runTest {
+        val invocation = establishSigningInvocation()
+        val exchange = pairedExchange(
+            requestId = SSH_AUTHENTICATION_REQUEST_ID,
+            clientPsk = invocation.clientPsk,
+            requestPlaintext = sshAuthenticationPlaintext(invocation.token, invocation.key),
+            completionPlaintext = approvedCompletionPlaintext(),
+        )
+        connect(
+            relayState(INVOCATION_REQUEST_ID),
+            requestEvent(SSH_AUTHENTICATION_REQUEST_ID, exchange.request),
+            RelayDeviceEvent.CaughtUp,
+        )
+        assertEquals(RequestSyncResult.Success, repository.sync())
+
+        now += 1
+        assertEquals(
+            SshAuthenticationDecisionResult.Decided,
+            repository.approveSshAuthenticationRequest(SSH_AUTHENTICATION_REQUEST_ID),
+        )
+        val decided = checkNotNull(
+            database.requestDao().getSshAuthenticationRequest(SSH_AUTHENTICATION_REQUEST_ID),
+        )
+        assertEquals(ApprovalDecision.APPROVED.storedName, decided.decision)
+
+        now += 1
+        connect(
+            relayState(INVOCATION_REQUEST_ID),
+            relayState(SSH_AUTHENTICATION_REQUEST_ID),
+            completionEvent(SSH_AUTHENTICATION_REQUEST_ID, exchange.completion),
+            RelayDeviceEvent.CaughtUp,
+        )
+        assertEquals(RequestSyncResult.Success, repository.sync())
+
+        val completed = checkNotNull(
+            database.requestDao().getRequestById(SSH_AUTHENTICATION_REQUEST_ID),
+        )
+        val completedAuthentication = checkNotNull(
+            database.requestDao().getSshAuthenticationRequest(SSH_AUTHENTICATION_REQUEST_ID),
+        )
+        assertEquals(INVOCATION_REQUEST_ID, completed.parentRequestId)
+        assertEquals(InboxRequestState.COMPLETED.storedName, completed.state)
+        assertEquals(
+            ApprovalCompletionResult.APPROVED.storedName,
+            completedAuthentication.completionResult,
+        )
+        assertNull(database.requestDao().getRequestPsk(SSH_AUTHENTICATION_REQUEST_ID))
+    }
+
+    @Test
+    fun secretListReplayUsesPersistedResponseAndAuthenticatedCompletion() = runTest {
+        val clientPsk = establishActivePairing()
+        createSigningSecret()
+        val exchange = pairedExchange(
+            requestId = SECRET_LIST_REQUEST_ID,
+            clientPsk = clientPsk,
+            requestPlaintext = secretListPlaintext(),
+            completionPlaintext = clientSoftwarePlaintext(),
+        )
+        val interrupted = connect(
+            requestEvent(SECRET_LIST_REQUEST_ID, exchange.request),
+            RelayDeviceEvent.Failed("connection lost after secret list response"),
+        )
+        assertEquals(
+            RequestSyncResult.RelayUnavailable("connection lost after secret list response"),
+            repository.sync(),
+        )
+        val stored = checkNotNull(database.requestDao().getRequestById(SECRET_LIST_REQUEST_ID))
+        val persistedResponse = Json.parseToJsonElement(checkNotNull(stored.responseJson))
+        assertEquals(RequestKind.SECRET_LIST.storedName, stored.kind)
+        assertEquals(
+            listOf(persistedResponse),
+            interrupted.sentFrames.filterIsInstance<RelayDeviceFrame.Response>().map { it.payload },
+        )
+
+        now += 1
+        val replay = connect(
+            relayState(SECRET_LIST_REQUEST_ID),
+            requestEvent(SECRET_LIST_REQUEST_ID, exchange.request),
+            RelayDeviceEvent.Receipt(
+                CLIENT_ID,
+                SECRET_LIST_REQUEST_ID,
+                RelayMessageKind.RESPONSE,
+            ),
+            completionEvent(SECRET_LIST_REQUEST_ID, exchange.completion),
+            RelayDeviceEvent.CaughtUp,
+        )
+        assertEquals(RequestSyncResult.Success, repository.sync())
+
+        assertEquals(
+            listOf(persistedResponse, persistedResponse),
+            replay.sentFrames.filterIsInstance<RelayDeviceFrame.Response>().map { it.payload },
+        )
+        val completed = checkNotNull(database.requestDao().getRequestById(SECRET_LIST_REQUEST_ID))
+        assertEquals(stored.receivedAt, completed.receivedAt)
+        assertEquals(InboxRequestState.COMPLETED.storedName, completed.state)
+        assertEquals(exchange.completion.toString(), completed.completionJson)
+        assertNull(database.requestDao().getRequestPsk(SECRET_LIST_REQUEST_ID))
+    }
+
+    @Test
+    fun completedSecretUploadRemainsPendingUntilTheUserRejectsIt() = runTest {
+        val clientPsk = establishActivePairing()
+        val exchange = pairedExchange(
+            requestId = UPLOAD_REQUEST_ID,
+            clientPsk = clientPsk,
+            requestPlaintext = environmentUploadPlaintext(),
+            completionPlaintext = receivedUploadCompletionPlaintext(),
+        )
+        connect(
+            requestEvent(UPLOAD_REQUEST_ID, exchange.request),
+            RelayDeviceEvent.Receipt(CLIENT_ID, UPLOAD_REQUEST_ID, RelayMessageKind.RESPONSE),
+            completionEvent(UPLOAD_REQUEST_ID, exchange.completion),
+            RelayDeviceEvent.CaughtUp,
+        )
+        assertEquals(RequestSyncResult.Success, repository.sync())
+
+        val awaitingDecision = checkNotNull(database.requestDao().getRequestById(UPLOAD_REQUEST_ID))
+        val pendingUpload = checkNotNull(
+            database.requestDao().getSecretUploadRequest(UPLOAD_REQUEST_ID),
+        )
+        assertEquals(InboxRequestState.ACTION_REQUIRED.storedName, awaitingDecision.state)
+        assertNotNull(awaitingDecision.completionJson)
+        assertNull(awaitingDecision.completedAt)
+        assertNull(pendingUpload.decision)
+        assertEquals(
+            1,
+            database.requestDao().getSecretUploadEnvironmentVariables(UPLOAD_REQUEST_ID).size,
+        )
+        assertNull(database.requestDao().getRequestPsk(UPLOAD_REQUEST_ID))
+
+        now += 1
+        assertEquals(
+            SecretUploadDecisionResult.Rejected,
+            repository.rejectSecretUpload(UPLOAD_REQUEST_ID),
+        )
+
+        val rejected = checkNotNull(database.requestDao().getRequestById(UPLOAD_REQUEST_ID))
+        val rejectedUpload = checkNotNull(
+            database.requestDao().getSecretUploadRequest(UPLOAD_REQUEST_ID),
+        )
+        assertEquals(InboxRequestState.COMPLETED.storedName, rejected.state)
+        assertEquals("rejected", rejectedUpload.decision)
+        assertNotNull(rejected.completedAt)
+        assertTrue(
+            database.requestDao().getSecretUploadEnvironmentVariables(UPLOAD_REQUEST_ID).isEmpty(),
+        )
+        assertTrue(database.secretDao().getSecretsByName(listOf("uploaded-secret")).isEmpty())
+    }
+
+    @Test
+    fun rejectedSecretUploadWaitsForAuthenticatedClientCompletion() = runTest {
+        val clientPsk = establishActivePairing()
+        val exchange = pairedExchange(
+            requestId = UPLOAD_REQUEST_ID,
+            clientPsk = clientPsk,
+            requestPlaintext = environmentUploadPlaintext(),
+            completionPlaintext = receivedUploadCompletionPlaintext(),
+        )
+        connect(
+            requestEvent(UPLOAD_REQUEST_ID, exchange.request),
+            RelayDeviceEvent.Receipt(CLIENT_ID, UPLOAD_REQUEST_ID, RelayMessageKind.RESPONSE),
+            RelayDeviceEvent.CaughtUp,
+        )
+        assertEquals(RequestSyncResult.Success, repository.sync())
+
+        now += 1
+        assertEquals(
+            SecretUploadDecisionResult.Rejected,
+            repository.rejectSecretUpload(UPLOAD_REQUEST_ID),
+        )
+        val awaitingCompletion = checkNotNull(
+            database.requestDao().getRequestById(UPLOAD_REQUEST_ID),
+        )
+        assertEquals(InboxRequestState.WAITING.storedName, awaitingCompletion.state)
+        assertNull(awaitingCompletion.completionJson)
+        assertNull(awaitingCompletion.completedAt)
+        assertNotNull(database.requestDao().getRequestPsk(UPLOAD_REQUEST_ID))
+        assertTrue(
+            database.requestDao().getSecretUploadEnvironmentVariables(UPLOAD_REQUEST_ID).isEmpty(),
+        )
+
+        now += 1
+        connect(
+            relayState(UPLOAD_REQUEST_ID),
+            completionEvent(UPLOAD_REQUEST_ID, exchange.completion),
+            RelayDeviceEvent.CaughtUp,
+        )
+        assertEquals(RequestSyncResult.Success, repository.sync())
+
+        val completed = checkNotNull(database.requestDao().getRequestById(UPLOAD_REQUEST_ID))
+        assertEquals(InboxRequestState.COMPLETED.storedName, completed.state)
+        assertEquals(exchange.completion.toString(), completed.completionJson)
+        assertNotNull(completed.completedAt)
+        assertNull(database.requestDao().getRequestPsk(UPLOAD_REQUEST_ID))
+        assertTrue(database.secretDao().getSecretsByName(listOf("uploaded-secret")).isEmpty())
+    }
+
     private suspend fun establishActivePairing(): ByteArray {
         val material = verifyPairingSas()
 
@@ -1304,6 +1628,32 @@ class RequestRepositorySlotTest {
         assertEquals("active", client.relayClientState)
         assertNotNull(database.requestDao().getClientPsk(CLIENT_ID, "current"))
         return material.clientPsk
+    }
+
+    private suspend fun establishSigningInvocation(): SigningInvocation {
+        val clientPsk = establishActivePairing()
+        val key = createSigningSecret()
+        val token = ByteArray(32) { (0x70 + it).toByte() }
+        val request = pairedRequest(
+            requestId = INVOCATION_REQUEST_ID,
+            clientPsk = clientPsk,
+            plaintext = invocationPlaintext(token),
+        )
+        connect(
+            requestEvent(INVOCATION_REQUEST_ID, request),
+            RelayDeviceEvent.Acknowledgement(
+                CLIENT_ID,
+                INVOCATION_REQUEST_ID,
+                RelayMessageKind.RESPONSE,
+            ),
+            RelayDeviceEvent.CaughtUp,
+        )
+        assertEquals(RequestSyncResult.Success, repository.sync())
+        assertEquals(
+            ApprovalDecision.APPROVED.storedName,
+            database.requestDao().getSecretUseRequest(INVOCATION_REQUEST_ID)?.decision,
+        )
+        return SigningInvocation(clientPsk, token, key)
     }
 
     private suspend fun receiveEnvironmentSecretUpload() {
@@ -1416,12 +1766,13 @@ class RequestRepositorySlotTest {
                 .encodeToByteArray(),
         )
 
-    private suspend fun createSigningSecret() {
+    private suspend fun createSigningSecret(): SshPrivateKey {
         val key = secrets.generateSshKey(SshKeyAlgorithm.ED25519, "characterization@test")
         assertTrue(
             secrets.createSshSecret("git-signing", "Signing key", key) is
                 CreateSecretResult.Created,
         )
+        return key
     }
 
     private suspend fun createAiEnvironmentSecret(): String {
@@ -1456,6 +1807,17 @@ class RequestRepositorySlotTest {
         clientId = CLIENT_ID,
         requestId = requestId,
         kind = RelayMessageKind.REQUEST,
+        payload = payload,
+        addressId = null,
+    )
+
+    private fun completionEvent(
+        requestId: String,
+        payload: JsonElement,
+    ) = RelayDeviceEvent.Message(
+        clientId = CLIENT_ID,
+        requestId = requestId,
+        kind = RelayMessageKind.COMPLETION,
         payload = payload,
         addressId = null,
     )
@@ -1517,6 +1879,60 @@ class RequestRepositorySlotTest {
     private fun gitSignPlaintext(token: ByteArray): ByteArray =
         """{${clientSoftwareFields()},"method":"GitSign","invocation_id":"$INVOCATION_REQUEST_ID","invocation_token":"${BASE64.encodeToString(token)}","secret":"git-signing","message":"${BASE64.encodeToString("commit to sign".encodeToByteArray())}","repository":{"remote":"git@example.test:repo.git","worktree":"/tmp/project"}}"""
             .encodeToByteArray()
+
+    private fun sshAuthenticationPlaintext(
+        token: ByteArray,
+        key: SshPrivateKey,
+    ): ByteArray {
+        val publicKeyBlob = sshStrings(
+            key.algorithm.publicName.encodeToByteArray(),
+            key.publicKey,
+        )
+        val message = ByteArrayOutputStream().use { bytes ->
+            DataOutputStream(bytes).use { output ->
+                output.writeSshString("session identifier".encodeToByteArray())
+                output.writeByte(50)
+                output.writeSshString("deploy".encodeToByteArray())
+                output.writeSshString("ssh-connection".encodeToByteArray())
+                output.writeSshString("publickey".encodeToByteArray())
+                output.writeByte(1)
+                output.writeSshString(key.algorithm.publicName.encodeToByteArray())
+                output.writeSshString(publicKeyBlob)
+            }
+            bytes.toByteArray()
+        }
+        return """{${clientSoftwareFields()},"method":"SshAuthenticate","invocation_id":"$INVOCATION_REQUEST_ID","invocation_token":"${BASE64.encodeToString(token)}","secret":"git-signing","message":"${BASE64.encodeToString(message)}"}"""
+            .encodeToByteArray()
+    }
+
+    private fun secretListPlaintext(): ByteArray =
+        """{${clientSoftwareFields()},"method":"SecretList"}""".encodeToByteArray()
+
+    private fun clientSoftwarePlaintext(): ByteArray =
+        """{${clientSoftwareFields()}}""".encodeToByteArray()
+
+    private fun approvedCompletionPlaintext(): ByteArray =
+        """{${clientSoftwareFields()},"result":"APPROVED"}""".encodeToByteArray()
+
+    private fun deniedSshAuthenticationCompletionPlaintext(): ByteArray =
+        """{${clientSoftwareFields()},"result":"DENIED","reason":"USER_DENIED","message":"SSH authentication denied on device."}"""
+            .encodeToByteArray()
+
+    private fun receivedUploadCompletionPlaintext(): ByteArray =
+        """{${clientSoftwareFields()},"result":"RECEIVED"}""".encodeToByteArray()
+
+    private fun sshStrings(vararg values: ByteArray): ByteArray =
+        ByteArrayOutputStream().use { bytes ->
+            DataOutputStream(bytes).use { output ->
+                values.forEach { value -> output.writeSshString(value) }
+            }
+            bytes.toByteArray()
+        }
+
+    private fun DataOutputStream.writeSshString(value: ByteArray) {
+        writeInt(value.size)
+        write(value)
+    }
 
     private fun unsupportedPlaintext(): ByteArray =
         """{${clientSoftwareFields()},"method":"FutureMethod"}""".encodeToByteArray()
@@ -1666,6 +2082,8 @@ class RequestRepositorySlotTest {
         const val UPLOAD_REQUEST_ID = "01K2EP16NWNAGJYF8J1Q2V6P44"
         const val AI_INVOCATION_REQUEST_ID = "01K2EP16NWNAGJYF8J1Q2V6P45"
         const val INTERRUPTED_REVIEW_REQUEST_ID = "01K2EP16NWNAGJYF8J1Q2V6P46"
+        const val SSH_AUTHENTICATION_REQUEST_ID = "01K2EP16NWNAGJYF8J1Q2V6P47"
+        const val SECRET_LIST_REQUEST_ID = "01K2EP16NWNAGJYF8J1Q2V6P48"
         const val ULID_ALPHABET = "0123456789ABCDEFGHJKMNPQRSTVWXYZ"
         val EMPTY = ByteArray(0)
         val VERSION_INFO = "agentknock-v1".encodeToByteArray() + ByteArray(3)
@@ -1693,6 +2111,12 @@ private data class PairingMaterial(
 private data class PairedExchange(
     val request: JsonElement,
     val completion: JsonElement,
+)
+
+private data class SigningInvocation(
+    val clientPsk: ByteArray,
+    val token: ByteArray,
+    val key: SshPrivateKey,
 )
 
 private class StaticCredentialSource(
