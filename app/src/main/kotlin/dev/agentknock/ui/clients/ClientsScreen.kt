@@ -116,6 +116,95 @@ internal fun ClientsScreen(
         scope.launch { snackbar.showSnackbar(message) }
     }
 
+    fun chooseSas(request: InboxRequestDetails, choice: Int?) {
+        val pairing = (request.content as? InboxRequestContent.Pairing)?.details ?: return
+        if (choice == null) {
+            scope.launch { report(viewModel.chooseSas(request.id, null).message()) }
+            return
+        }
+        scope.launch {
+            if (viewModel.isMatchingPendingSas(request.id, choice)) {
+                authorizeProtectedAction(
+                    "Accept ${pairing.clientName}",
+                    {
+                        scope.launch {
+                            report(viewModel.chooseSas(request.id, choice).message())
+                        }
+                    },
+                    ::report,
+                )
+            } else {
+                report(viewModel.chooseSas(request.id, choice).message())
+            }
+        }
+    }
+
+    fun rejectPairing(requestId: String) {
+        scope.launch {
+            report(viewModel.rejectPairing(requestId).message())
+            viewModel.clearSelection(ClientSelection.Pairing(requestId))
+        }
+    }
+
+    fun renameClient(clientId: String, name: String) {
+        scope.launch {
+            val result = viewModel.rename(clientId, name.trim())
+            report(
+                if (result == ClientChangeResult.CHANGED) {
+                    "Client renamed"
+                } else {
+                    "Client is no longer available"
+                },
+            )
+        }
+    }
+
+    fun setClientState(clientId: String, state: RelayClientState) {
+        scope.launch {
+            val result = viewModel.setState(clientId, state)
+            if (result == ClientChangeResult.CHANGED && state == RelayClientState.REVOKED) {
+                viewModel.clearSelection(ClientSelection.Client(clientId))
+            }
+            report(
+                if (result == ClientChangeResult.CHANGED) {
+                    state.successMessage()
+                } else {
+                    "Client state could not be changed"
+                },
+            )
+        }
+    }
+
+    fun saveClientInstructions(clientId: String, instructions: String) {
+        scope.launch {
+            val result = viewModel.saveInstructions(clientId, instructions)
+            report(
+                if (result == ClientChangeResult.CHANGED) {
+                    "Instructions updated"
+                } else {
+                    "Instructions could not be updated"
+                },
+            )
+        }
+    }
+
+    fun endTemporaryAccess(clientId: String, grant: TemporaryAccessGrant) {
+        scope.launch {
+            val ended = viewModel.endTemporaryAccess(
+                grant.secretId,
+                clientId,
+                grant.operation,
+            )
+            report(
+                if (ended) {
+                    "Temporary access ended"
+                } else {
+                    "Temporary access had already ended"
+                },
+            )
+        }
+    }
+
     Scaffold(
         snackbarHost = { SnackbarHost(snackbar) },
         contentWindowInsets = WindowInsets(0, 0, 0, 0),
@@ -149,9 +238,13 @@ internal fun ClientsScreen(
             detail = { showBack, detailModifier ->
                 ClientSelectionPane(
                     pane = pane,
-                    authorizeProtectedAction = authorizeProtectedAction,
-                    viewModel = viewModel,
-                    report = ::report,
+                    onChooseSas = ::chooseSas,
+                    onRejectPairing = ::rejectPairing,
+                    onRenameClient = ::renameClient,
+                    onSetClientState = ::setClientState,
+                    onSaveClientInstructions = ::saveClientInstructions,
+                    onEndTemporaryAccess = ::endTemporaryAccess,
+                    onBack = viewModel::clearSelection,
                     showBack = showBack,
                     modifier = detailModifier,
                 )
@@ -163,9 +256,13 @@ internal fun ClientsScreen(
 @Composable
 private fun ClientSelectionPane(
     pane: ClientPaneState,
-    authorizeProtectedAction: (String, () -> Unit, (String) -> Unit) -> Unit,
-    viewModel: ClientsViewModel,
-    report: (String) -> Unit,
+    onChooseSas: (InboxRequestDetails, Int?) -> Unit,
+    onRejectPairing: (String) -> Unit,
+    onRenameClient: (String, String) -> Unit,
+    onSetClientState: (String, RelayClientState) -> Unit,
+    onSaveClientInstructions: (String, String) -> Unit,
+    onEndTemporaryAccess: (String, TemporaryAccessGrant) -> Unit,
+    onBack: () -> Unit,
     showBack: Boolean,
     modifier: Modifier,
 ) {
@@ -178,9 +275,11 @@ private fun ClientSelectionPane(
             ClientSelectionDetail(
                 client = pane.details,
                 temporaryAccessGrants = pane.temporaryAccess,
-                viewModel = viewModel,
-                report = report,
-                onBack = viewModel::clearSelection,
+                onRenameClient = onRenameClient,
+                onSetClientState = onSetClientState,
+                onSaveClientInstructions = onSaveClientInstructions,
+                onEndTemporaryAccess = onEndTemporaryAccess,
+                onBack = onBack,
                 showBack = showBack,
                 modifier = modifier,
             )
@@ -188,10 +287,9 @@ private fun ClientSelectionPane(
         is ClientPaneState.Pairing -> key(pane.request.id) {
             PairingSelectionDetail(
                 request = pane.request,
-                authorizeProtectedAction = authorizeProtectedAction,
-                viewModel = viewModel,
-                report = report,
-                onBack = viewModel::clearSelection,
+                onChooseSas = onChooseSas,
+                onRejectPairing = onRejectPairing,
+                onBack = onBack,
                 showBack = showBack,
                 modifier = modifier,
             )
@@ -202,46 +300,18 @@ private fun ClientSelectionPane(
 @Composable
 private fun PairingSelectionDetail(
     request: InboxRequestDetails,
-    authorizeProtectedAction: (String, () -> Unit, (String) -> Unit) -> Unit,
-    viewModel: ClientsViewModel,
-    report: (String) -> Unit,
+    onChooseSas: (InboxRequestDetails, Int?) -> Unit,
+    onRejectPairing: (String) -> Unit,
     onBack: () -> Unit,
     showBack: Boolean,
     modifier: Modifier,
 ) {
-    val scope = rememberCoroutineScope()
-    val pairing = (request.content as InboxRequestContent.Pairing).details
     PairingRequestDetail(
         request = request,
         onBack = onBack,
         showBack = showBack,
-        onChooseSas = { choice ->
-            if (choice == null) {
-                scope.launch { report(viewModel.chooseSas(request.id, null).message()) }
-            } else {
-                scope.launch {
-                    if (viewModel.isMatchingPendingSas(request.id, choice)) {
-                        authorizeProtectedAction(
-                            "Accept ${pairing.clientName}",
-                            {
-                                scope.launch {
-                                    report(viewModel.chooseSas(request.id, choice).message())
-                                }
-                            },
-                            report,
-                        )
-                    } else {
-                        report(viewModel.chooseSas(request.id, choice).message())
-                    }
-                }
-            }
-        },
-        onReject = {
-            scope.launch {
-                report(viewModel.rejectPairing(request.id).message())
-                viewModel.clearSelection(ClientSelection.Pairing(request.id))
-            }
-        },
+        onChooseSas = { choice -> onChooseSas(request, choice) },
+        onReject = { onRejectPairing(request.id) },
         modifier = modifier,
     )
 }
@@ -250,71 +320,25 @@ private fun PairingSelectionDetail(
 private fun ClientSelectionDetail(
     client: ClientDetails,
     temporaryAccessGrants: List<TemporaryAccessGrant>,
-    viewModel: ClientsViewModel,
-    report: (String) -> Unit,
+    onRenameClient: (String, String) -> Unit,
+    onSetClientState: (String, RelayClientState) -> Unit,
+    onSaveClientInstructions: (String, String) -> Unit,
+    onEndTemporaryAccess: (String, TemporaryAccessGrant) -> Unit,
     onBack: () -> Unit,
     showBack: Boolean,
     modifier: Modifier,
 ) {
-    val scope = rememberCoroutineScope()
     ClientDetail(
         client = client,
         temporaryAccessGrants = temporaryAccessGrants,
         onBack = onBack,
         showBack = showBack,
-        onRename = { name ->
-            scope.launch {
-                val result = viewModel.rename(client.clientId, name.trim())
-                report(
-                    if (result == ClientChangeResult.CHANGED) {
-                        "Client renamed"
-                    } else {
-                        "Client is no longer available"
-                    },
-                )
-            }
-        },
-        onSetState = { state ->
-            scope.launch {
-                val result = viewModel.setState(client.clientId, state)
-                if (result == ClientChangeResult.CHANGED && state == RelayClientState.REVOKED) {
-                    viewModel.clearSelection(ClientSelection.Client(client.clientId))
-                }
-                report(
-                    if (result == ClientChangeResult.CHANGED) {
-                        state.successMessage()
-                    } else {
-                        "Client state could not be changed"
-                    },
-                )
-            }
-        },
+        onRename = { name -> onRenameClient(client.clientId, name) },
+        onSetState = { state -> onSetClientState(client.clientId, state) },
         onSaveInstructions = { instructions ->
-            scope.launch {
-                val result = viewModel.saveInstructions(client.clientId, instructions)
-                report(
-                    if (result == ClientChangeResult.CHANGED) {
-                        "Instructions updated"
-                    } else {
-                        "Instructions could not be updated"
-                    },
-                )
-            }
+            onSaveClientInstructions(client.clientId, instructions)
         },
-        onEndTemporaryAccess = { grant ->
-            scope.launch {
-                val ended = viewModel.endTemporaryAccess(
-                    grant.secretId,
-                    client.clientId,
-                    grant.operation,
-                )
-                report(if (ended) {
-                    "Temporary access ended"
-                } else {
-                    "Temporary access had already ended"
-                })
-            }
-        },
+        onEndTemporaryAccess = { grant -> onEndTemporaryAccess(client.clientId, grant) },
         modifier = modifier,
     )
 }

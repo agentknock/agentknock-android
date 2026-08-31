@@ -87,6 +87,51 @@ internal fun RequestsScreen(
         }
     }
 
+    fun approveRequest(request: InboxRequestDetails) {
+        scope.launch {
+            val result = when (request.content) {
+                is InboxRequestContent.SecretUse ->
+                    viewModel.approveSecretUseRequest(request.id).message()
+                is InboxRequestContent.GitSign ->
+                    viewModel.approveGitSignRequest(request.id).message()
+                is InboxRequestContent.SshAuthentication ->
+                    viewModel.approveSshAuthenticationRequest(request.id).message()
+                else -> return@launch
+            }
+            report(result)
+        }
+    }
+
+    fun denyRequest(request: InboxRequestDetails) {
+        scope.launch {
+            val result = when (request.content) {
+                is InboxRequestContent.SecretUse ->
+                    viewModel.denySecretUseRequest(request.id).message()
+                is InboxRequestContent.GitSign ->
+                    viewModel.denyGitSignRequest(request.id).message()
+                is InboxRequestContent.SshAuthentication ->
+                    viewModel.denySshAuthenticationRequest(request.id).message()
+                else -> return@launch
+            }
+            report(result)
+        }
+    }
+
+    fun allowRequestTemporarily(request: InboxRequestDetails) {
+        scope.launch {
+            val result = when (request.content) {
+                is InboxRequestContent.SecretUse ->
+                    viewModel.allowSecretUseTemporarily(request.id).message()
+                is InboxRequestContent.GitSign ->
+                    viewModel.allowGitSignTemporarily(request.id).message()
+                is InboxRequestContent.SshAuthentication ->
+                    viewModel.allowSshAuthenticationTemporarily(request.id).message()
+                else -> return@launch
+            }
+            report(result)
+        }
+    }
+
     Scaffold(
         snackbarHost = { SnackbarHost(snackbar) },
         contentWindowInsets = WindowInsets(0, 0, 0, 0),
@@ -117,8 +162,9 @@ internal fun RequestsScreen(
             detail = { showBack, detailModifier ->
                 RequestSelectionDetail(
                     selection = selection,
-                    viewModel = viewModel,
-                    report = ::report,
+                    onApprove = ::approveRequest,
+                    onDeny = ::denyRequest,
+                    onAllowTemporarily = ::allowRequestTemporarily,
                     onBack = { viewModel.selectRequest(null) },
                     showBack = showBack,
                     modifier = detailModifier,
@@ -131,8 +177,9 @@ internal fun RequestsScreen(
 @Composable
 private fun RequestSelectionDetail(
     selection: RequestPaneState,
-    viewModel: RequestsViewModel,
-    report: (String) -> Unit,
+    onApprove: (InboxRequestDetails) -> Unit,
+    onDeny: (InboxRequestDetails) -> Unit,
+    onAllowTemporarily: (InboxRequestDetails) -> Unit,
     onBack: () -> Unit,
     showBack: Boolean,
     modifier: Modifier,
@@ -145,8 +192,9 @@ private fun RequestSelectionDetail(
         is RequestPaneState.Ready -> key(selection.requestId) {
             RequestDetail(
                 request = selection.request,
-                viewModel = viewModel,
-                report = report,
+                onApprove = onApprove,
+                onDeny = onDeny,
+                onAllowTemporarily = onAllowTemporarily,
                 onBack = onBack,
                 showBack = showBack,
                 modifier = modifier,
@@ -158,69 +206,39 @@ private fun RequestSelectionDetail(
 @Composable
 private fun RequestDetail(
     request: InboxRequestDetails,
-    viewModel: RequestsViewModel,
-    report: (String) -> Unit,
+    onApprove: (InboxRequestDetails) -> Unit,
+    onDeny: (InboxRequestDetails) -> Unit,
+    onAllowTemporarily: (InboxRequestDetails) -> Unit,
     onBack: () -> Unit,
     showBack: Boolean,
     modifier: Modifier,
 ) {
-    val scope = rememberCoroutineScope()
     when (request.content) {
         is InboxRequestContent.SecretUse -> InvocationRequestDetail(
             request = request,
             onBack = onBack,
             showBack = showBack,
-            onApprove = {
-                scope.launch {
-                    report(viewModel.approveSecretUseRequest(request.id).message())
-                }
-            },
-            onDeny = {
-                scope.launch { report(viewModel.denySecretUseRequest(request.id).message()) }
-            },
-            onAllowTemporarily = {
-                scope.launch {
-                    report(viewModel.allowSecretUseTemporarily(request.id).message())
-                }
-            },
+            onApprove = { onApprove(request) },
+            onDeny = { onDeny(request) },
+            onAllowTemporarily = { onAllowTemporarily(request) },
             modifier = modifier,
         )
         is InboxRequestContent.GitSign -> GitSignRequestDetail(
             request = request,
             onBack = onBack,
             showBack = showBack,
-            onApprove = {
-                scope.launch { report(viewModel.approveGitSignRequest(request.id).message()) }
-            },
-            onDeny = {
-                scope.launch { report(viewModel.denyGitSignRequest(request.id).message()) }
-            },
-            onAllowTemporarily = {
-                scope.launch {
-                    report(viewModel.allowGitSignTemporarily(request.id).message())
-                }
-            },
+            onApprove = { onApprove(request) },
+            onDeny = { onDeny(request) },
+            onAllowTemporarily = { onAllowTemporarily(request) },
             modifier = modifier,
         )
         is InboxRequestContent.SshAuthentication -> SshAuthenticationRequestDetail(
             request = request,
             onBack = onBack,
             showBack = showBack,
-            onApprove = {
-                scope.launch {
-                    report(viewModel.approveSshAuthenticationRequest(request.id).message())
-                }
-            },
-            onDeny = {
-                scope.launch {
-                    report(viewModel.denySshAuthenticationRequest(request.id).message())
-                }
-            },
-            onAllowTemporarily = {
-                scope.launch {
-                    report(viewModel.allowSshAuthenticationTemporarily(request.id).message())
-                }
-            },
+            onApprove = { onApprove(request) },
+            onDeny = { onDeny(request) },
+            onAllowTemporarily = { onAllowTemporarily(request) },
             modifier = modifier,
         )
         else -> MissingRequestDetail(onBack, showBack, modifier)
