@@ -453,6 +453,7 @@ class RequestDaoTransactionTest {
                 id = "secret",
                 name = "github",
                 description = "",
+                type = "environment",
                 createdAt = 1,
                 updatedAt = 1,
             ),
@@ -540,6 +541,8 @@ class RequestDaoTransactionTest {
                 descriptionProvided = false,
                 description = null,
                 secretType = "environment",
+                targetSecretId = null,
+                targetSecretRevision = null,
                 summaryJson = "{\"variableNames\":[\"TOKEN\"]}",
                 intakeError = null,
                 decidedAt = null,
@@ -621,10 +624,8 @@ class RequestDaoTransactionTest {
         assertFalse(dao.authorizationMatches(commitment, CLIENT_ID, "invocation", 999))
         secretDao.deleteClientApprovalOverride("secret", CLIENT_ID)
 
-        val secret = checkNotNull(secretDao.getSecret("secret"))
-        secretDao.updateSecret(secret.copy(revision = 5))
+        secretDao.updateSecretInstructions("secret", "changed", updatedAt = 5)
         assertFalse(dao.authorizationMatches(commitment, CLIENT_ID, "invocation", 999))
-        secretDao.updateSecret(secret)
 
         val client = checkNotNull(dao.getClient(CLIENT_ID))
         dao.updateClient(client.copy(relayClientState = "suspended"))
@@ -898,6 +899,8 @@ class RequestDaoTransactionTest {
         descriptionProvided = false,
         description = null,
         secretType = "environment",
+        targetSecretId = null,
+        targetSecretRevision = null,
         summaryJson = "{\"variableNames\":[]}",
         intakeError = null,
         decidedAt = decision?.let { 1L },

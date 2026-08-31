@@ -8,13 +8,20 @@ import org.junit.Test
 class RelayFrameCodecTest {
     private val codec = RelayFrameCodec()
 
+    @Test(expected = IllegalStateException::class)
+    fun `rejects a malformed optional inactive kind`() {
+        codec.decode(
+            """{"type":"inactive","client_id":"client","request_id":"request","kind":{}}""",
+        )
+    }
+
     @Test
     fun `encodes every device frame with the websocket contract`() {
         val payload = Json.parseToJsonElement("""{"result":"APPROVED"}""")
 
         assertEquals(
             """{"type":"message","client_id":"$CLIENT_ID","request_id":"$REQUEST_ID","kind":"response","payload":{"result":"APPROVED"}}""",
-            codec.encode(RelayDeviceFrame.Message(CLIENT_ID, REQUEST_ID, payload)),
+            codec.encode(RelayDeviceFrame.Response(CLIENT_ID, REQUEST_ID, payload)),
         )
         assertEquals(
             """{"type":"ack","client_id":"$CLIENT_ID","request_id":"$REQUEST_ID","kind":"request"}""",

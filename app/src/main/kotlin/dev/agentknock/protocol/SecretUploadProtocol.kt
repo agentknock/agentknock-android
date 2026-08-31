@@ -26,7 +26,7 @@ internal data class SecretUploadRequestMessage(
 internal sealed interface SecretUploadContents {
     data class Environment(val variables: Map<String, String>) : SecretUploadContents
 
-    data class Ssh(val privateKey: String?) : SecretUploadContents
+    data class Ssh(val privateKey: String) : SecretUploadContents
 }
 
 internal data class SecretUploadCompletion(
@@ -47,9 +47,9 @@ internal class SecretUploadProtocol(
             TYPE_ENVIRONMENT -> SecretUploadContents.Environment(
                 secret.getValue("variables").jsonObject.mapValues { (_, value) ->
                     value.jsonObject.requiredString("value")
-                },
+                }.also { require(it.isNotEmpty()) { "Environment upload has no variables" } },
             )
-            TYPE_SSH -> SecretUploadContents.Ssh(secret.optionalString("private_key"))
+            TYPE_SSH -> SecretUploadContents.Ssh(secret.requiredString("private_key"))
             else -> error("Unsupported secret type")
         }
         return SecretUploadRequestMessage(

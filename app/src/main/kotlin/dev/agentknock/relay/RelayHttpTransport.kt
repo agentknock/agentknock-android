@@ -4,9 +4,10 @@ import java.io.IOException
 import kotlinx.coroutines.CoroutineDispatcher
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.runInterruptible
-import kotlinx.serialization.SerialName
-import kotlinx.serialization.Serializable
 import kotlinx.serialization.json.Json
+import kotlinx.serialization.json.JsonObject
+import kotlinx.serialization.json.JsonPrimitive
+import kotlinx.serialization.json.jsonObject
 import okhttp3.MediaType.Companion.toMediaType
 import okhttp3.OkHttpClient
 import okhttp3.Request
@@ -53,13 +54,11 @@ internal class RelayHttpTransport(
                     if (response.isSuccessful) {
                         RelayHttpResult.Success(responseBody)
                     } else {
-                        val error = runCatching {
-                            json.decodeFromString<RelayErrorResponse>(responseBody)
-                        }.getOrNull()
+                        val error = decodeRelayError(responseBody, json)
                         RelayHttpResult.Rejected(
                             status = response.code,
-                            code = error?.code,
-                            message = error?.message,
+                            code = error.code,
+                            message = error.message,
                         )
                     }
                 }
@@ -74,8 +73,21 @@ internal class RelayHttpTransport(
     }
 }
 
-@Serializable
-private data class RelayErrorResponse(
-    @SerialName("error") val code: String,
-    val message: String,
+internal data class RelayError(
+    val code: String?,
+    val message: String?,
 )
+
+internal fun decodeRelayError(
+    encoded: String,
+    json: Json = Json { ignoreUnknownKeys = true },
+): RelayError {
+    val body = runCatching { json.parseToJsonElement(encoded).jsonObject }.getOrNull()
+    return RelayError(
+        code = body.stringMember("error"),
+        message = body.stringMember("message"),
+    )
+}
+
+private fun JsonObject?.stringMember(name: String): String? =
+    (this?.get(name) as? JsonPrimitive)?.takeIf(JsonPrimitive::isString)?.content

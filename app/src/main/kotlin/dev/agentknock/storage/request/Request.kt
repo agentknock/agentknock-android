@@ -452,6 +452,10 @@ internal data class SecretUploadRequestEntity(
     val description: String?,
     @ColumnInfo(name = "secret_type")
     val secretType: String,
+    @ColumnInfo(name = "target_secret_id")
+    val targetSecretId: String?,
+    @ColumnInfo(name = "target_secret_revision")
+    val targetSecretRevision: Long?,
     @ColumnInfo(name = "summary_json")
     val summaryJson: String,
     @ColumnInfo(name = "intake_error")

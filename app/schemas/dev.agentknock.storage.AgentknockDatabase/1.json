@@ -2,7 +2,7 @@
   "formatVersion": 1,
   "database": {
     "version": 1,
-    "identityHash": "08390e6f4c5251e9a5163613ade02430",
+    "identityHash": "b99ba9b7d34144e0238abfb643154361",
     "entities": [
       {
         "tableName": "vault_keys",
@@ -1689,7 +1689,7 @@
       },
       {
         "tableName": "secret_upload_requests",
-        "createSql": "CREATE TABLE IF NOT EXISTS `${TABLE_NAME}` (`request_id` TEXT NOT NULL, `decision` TEXT, `mode` TEXT NOT NULL, `uploaded_name` TEXT NOT NULL, `approved_name` TEXT, `description_provided` INTEGER NOT NULL, `description` TEXT, `secret_type` TEXT NOT NULL, `summary_json` TEXT NOT NULL, `intake_error` TEXT, `decided_at` INTEGER, PRIMARY KEY(`request_id`), FOREIGN KEY(`request_id`) REFERENCES `inbox_requests`(`id`) ON UPDATE NO ACTION ON DELETE CASCADE )",
+        "createSql": "CREATE TABLE IF NOT EXISTS `${TABLE_NAME}` (`request_id` TEXT NOT NULL, `decision` TEXT, `mode` TEXT NOT NULL, `uploaded_name` TEXT NOT NULL, `approved_name` TEXT, `description_provided` INTEGER NOT NULL, `description` TEXT, `secret_type` TEXT NOT NULL, `target_secret_id` TEXT, `target_secret_revision` INTEGER, `summary_json` TEXT NOT NULL, `intake_error` TEXT, `decided_at` INTEGER, PRIMARY KEY(`request_id`), FOREIGN KEY(`request_id`) REFERENCES `inbox_requests`(`id`) ON UPDATE NO ACTION ON DELETE CASCADE )",
         "fields": [
           {
             "fieldPath": "requestId",
@@ -1735,6 +1735,16 @@
             "columnName": "secret_type",
             "affinity": "TEXT",
             "notNull": true
+          },
+          {
+            "fieldPath": "targetSecretId",
+            "columnName": "target_secret_id",
+            "affinity": "TEXT"
+          },
+          {
+            "fieldPath": "targetSecretRevision",
+            "columnName": "target_secret_revision",
+            "affinity": "INTEGER"
           },
           {
             "fieldPath": "summaryJson",
@@ -2058,7 +2068,7 @@
     ],
     "setupQueries": [
       "CREATE TABLE IF NOT EXISTS room_master_table (id INTEGER PRIMARY KEY,identity_hash TEXT)",
-      "INSERT OR REPLACE INTO room_master_table (id,identity_hash) VALUES(42, '08390e6f4c5251e9a5163613ade02430')"
+      "INSERT OR REPLACE INTO room_master_table (id,identity_hash) VALUES(42, 'b99ba9b7d34144e0238abfb643154361')"
     ]
   }
 }

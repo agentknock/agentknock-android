@@ -52,7 +52,7 @@ class SecretUploadProtocolTest {
               ${testClientSoftwareFields("0.2.0", "0.1.0")},
               "method":"SecretUpload",
               "mode":"CREATE",
-              "secret":{"name":"new","type":"environment","variables":{}}
+              "secret":{"name":"new","type":"environment","variables":{"TOKEN":{"value":"value"}}}
             }
             """.trimIndent().encodeToByteArray(),
         )
@@ -96,7 +96,7 @@ class SecretUploadProtocolTest {
                 "name":"existing",
                 "description":null,
                 "type":"environment",
-                "variables":{}
+                "variables":{"TOKEN":{"value":"value"}}
               }
             }
             """.trimIndent().encodeToByteArray(),
@@ -109,14 +109,30 @@ class SecretUploadProtocolTest {
     @Test
     fun `rejects non-string fields instead of coercing them`() {
         val invalidRequests = listOf(
-            """{"app_info":{"name":"agentknock","version":2},"lib_info":{"name":"agentknock","version":"0.1.0"},"method":"SecretUpload","mode":"CREATE","secret":{"name":"new","type":"environment","variables":{}}}""",
+            """{"app_info":{"name":"agentknock","version":2},"lib_info":{"name":"agentknock","version":"0.1.0"},"method":"SecretUpload","mode":"CREATE","secret":{"name":"new","type":"environment","variables":{"TOKEN":{"value":"value"}}}}""",
             """{${testClientSoftwareFields("0.2.0", "0.1.0")},"method":"SecretUpload","mode":"CREATE","secret":{"name":"new","type":"environment","variables":{"TOKEN":{"value":false}}}}""",
-            """{${testClientSoftwareFields("0.2.0", "0.1.0")},"method":"SecretUpload","mode":"CREATE","secret":{"name":"new","description":3,"type":"environment","variables":{}}}""",
+            """{${testClientSoftwareFields("0.2.0", "0.1.0")},"method":"SecretUpload","mode":"CREATE","secret":{"name":"new","description":3,"type":"environment","variables":{"TOKEN":{"value":"value"}}}}""",
         )
 
         invalidRequests.forEach { request ->
             assertTrue(
                 "Expected a non-string field to be rejected: $request",
+                runCatching { protocol.decodeRequest(request.encodeToByteArray()) }.isFailure,
+            )
+        }
+    }
+
+    @Test
+    fun `rejects structurally empty uploads`() {
+        val invalidRequests = listOf(
+            """{${testClientSoftwareFields("0.3.0", "0.1.0")},"method":"SecretUpload","mode":"UPDATE","secret":{"name":"environment","type":"environment","variables":{}}}""",
+            """{${testClientSoftwareFields("0.3.0", "0.1.0")},"method":"SecretUpload","mode":"UPDATE","secret":{"name":"ssh","type":"ssh"}}""",
+            """{${testClientSoftwareFields("0.3.0", "0.1.0")},"method":"SecretUpload","mode":"UPDATE","secret":{"name":"ssh","type":"ssh","private_key":null}}""",
+        )
+
+        invalidRequests.forEach { request ->
+            assertTrue(
+                "Expected an empty upload to be rejected: $request",
                 runCatching { protocol.decodeRequest(request.encodeToByteArray()) }.isFailure,
             )
         }

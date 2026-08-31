@@ -64,6 +64,23 @@ class RelayHttpTransportTest {
         }
     }
 
+    @Test
+    fun `ignores malformed members in a relay error body`() = runTest {
+        MockWebServer().use { server ->
+            server.start()
+            server.enqueue(
+                MockResponse.Builder().code(400)
+                    .body("""{"error":7,"message":{"unexpected":true}}""")
+                    .build(),
+            )
+
+            assertEquals(
+                RelayHttpResult.Rejected(400, null, null),
+                transport(server).post("v1/test", "{}"),
+            )
+        }
+    }
+
     private fun transport(server: MockWebServer) = RelayHttpTransport(
         client = OkHttpClient(),
         relayUrl = server.url("/").toString(),

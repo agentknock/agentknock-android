@@ -4,6 +4,7 @@ import kotlinx.coroutines.CompletableDeferred
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.test.runTest
 import kotlinx.coroutines.withContext
+import kotlinx.coroutines.withTimeout
 import mockwebserver3.MockResponse
 import mockwebserver3.MockWebServer
 import okhttp3.OkHttpClient
@@ -11,10 +12,38 @@ import okhttp3.Response
 import okhttp3.WebSocket
 import okhttp3.WebSocketListener
 import org.junit.Assert.assertEquals
+import org.junit.Assert.assertFalse
 import org.junit.Assert.assertTrue
 import org.junit.Test
 
 class RelayDeviceClientTest {
+    @Test
+    fun `bounds queued relay events and terminates on overflow`() = runTest {
+        var overflowed = false
+        val buffer = RelayEventBuffer(capacity = 1)
+
+        assertTrue(buffer.offer(RelayDeviceEvent.CaughtUp) { overflowed = true })
+        assertFalse(buffer.offer(RelayDeviceEvent.CaughtUp) { overflowed = true })
+
+        assertTrue(overflowed)
+        assertEquals(
+            RelayDeviceEvent.Failed("Relay event backlog exceeded its safe limit."),
+            buffer.events.receive(),
+        )
+        assertTrue(buffer.events.receiveCatching().isClosed)
+    }
+
+    @Test
+    fun `closes the relay event stream after its terminal event`() = runTest {
+        val buffer = RelayEventBuffer(capacity = 1)
+        buffer.finish(RelayDeviceEvent.Closed(1000, "done")) {
+            error("Terminal event should fit")
+        }
+
+        assertEquals(RelayDeviceEvent.Closed(1000, "done"), buffer.events.receive())
+        assertTrue(buffer.events.receiveCatching().isClosed)
+    }
+
     @Test
     fun `reports a rejected websocket upgrade`() = runTest {
         MockWebServer().use { server ->
@@ -37,6 +66,30 @@ class RelayDeviceClientTest {
                     message = "bad token",
                 ),
                 client.connect(DEVICE_ID, DEVICE_TOKEN),
+            )
+        }
+    }
+
+    @Test
+    fun `a malformed websocket rejection cannot strand connection setup`() = runTest {
+        MockWebServer().use { server ->
+            server.start()
+            server.enqueue(
+                MockResponse.Builder()
+                    .code(401)
+                    .body("""{"error":7,"message":{"unexpected":true}}""")
+                    .build(),
+            )
+            val client = WebSocketRelayDeviceClient(
+                client = OkHttpClient(),
+                relayUrl = server.url("/").toString(),
+            )
+
+            assertEquals(
+                RelayDeviceConnectionResult.Rejected(401, null, null),
+                withContext(Dispatchers.IO) {
+                    withTimeout(5_000) { client.connect(DEVICE_ID, DEVICE_TOKEN) }
+                },
             )
         }
     }

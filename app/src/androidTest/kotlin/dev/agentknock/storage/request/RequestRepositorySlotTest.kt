@@ -445,7 +445,7 @@ class RequestRepositorySlotTest {
         assertEquals(RequestSyncResult.Success, repository.sync())
         assertTrue(
             replay.sentFrames.contains(
-                RelayDeviceFrame.Message(CLIENT_ID, FINISH_REQUEST_ID, persistedResponse),
+                RelayDeviceFrame.Response(CLIENT_ID, FINISH_REQUEST_ID, persistedResponse),
             ),
         )
     }
@@ -519,7 +519,7 @@ class RequestRepositorySlotTest {
                     INVOCATION_REQUEST_ID,
                     RelayMessageKind.REQUEST,
                 ),
-                RelayDeviceFrame.Message(CLIENT_ID, INVOCATION_REQUEST_ID, persistedResponse),
+                RelayDeviceFrame.Response(CLIENT_ID, INVOCATION_REQUEST_ID, persistedResponse),
             ),
             interrupted.sentFrames,
         )
@@ -550,14 +550,14 @@ class RequestRepositorySlotTest {
 
         assertEquals(
             listOf(
-                RelayDeviceFrame.Message(CLIENT_ID, INVOCATION_REQUEST_ID, persistedResponse),
+                RelayDeviceFrame.Response(CLIENT_ID, INVOCATION_REQUEST_ID, persistedResponse),
                 RelayDeviceFrame.Resume(CLIENT_ID, INVOCATION_REQUEST_ID),
                 RelayDeviceFrame.Acknowledgement(
                     CLIENT_ID,
                     INVOCATION_REQUEST_ID,
                     RelayMessageKind.REQUEST,
                 ),
-                RelayDeviceFrame.Message(CLIENT_ID, INVOCATION_REQUEST_ID, persistedResponse),
+                RelayDeviceFrame.Response(CLIENT_ID, INVOCATION_REQUEST_ID, persistedResponse),
             ),
             replay.sentFrames,
         )
@@ -778,7 +778,7 @@ class RequestRepositorySlotTest {
         assertEquals(RequestSyncResult.Success, repository.sync())
         assertEquals(
             listOf(
-                RelayDeviceFrame.Message(CLIENT_ID, GIT_SIGN_REQUEST_ID, persistedResponse),
+                RelayDeviceFrame.Response(CLIENT_ID, GIT_SIGN_REQUEST_ID, persistedResponse),
                 RelayDeviceFrame.Resume(CLIENT_ID, INVOCATION_REQUEST_ID),
                 RelayDeviceFrame.Resume(CLIENT_ID, GIT_SIGN_REQUEST_ID),
                 RelayDeviceFrame.Acknowledgement(
@@ -786,7 +786,7 @@ class RequestRepositorySlotTest {
                     GIT_SIGN_REQUEST_ID,
                     RelayMessageKind.REQUEST,
                 ),
-                RelayDeviceFrame.Message(CLIENT_ID, GIT_SIGN_REQUEST_ID, persistedResponse),
+                RelayDeviceFrame.Response(CLIENT_ID, GIT_SIGN_REQUEST_ID, persistedResponse),
             ),
             replay.sentFrames,
         )
@@ -983,7 +983,7 @@ class RequestRepositorySlotTest {
     )
 
     private fun invocationPlaintext(token: ByteArray): ByteArray =
-        """{${clientSoftwareFields()},"method":"Invocation","secrets":{"git-signing":{}},"operation":{"type":"exec","command":"git","arguments":["commit"],"working_directory":"/tmp/project","executable_path":"/usr/bin/git","executable_mode":"direct","stdin":"TERMINAL","stdout":"TERMINAL","stderr":"TERMINAL"},"launcher_chain":[],"invocation_token":"${BASE64.encodeToString(token)}"}"""
+        """{${clientSoftwareFields()},"method":"Invocation","secrets":{"git-signing":{}},"operation":{"type":"exec","command":"git","arguments":["commit"],"working_directory":"/tmp/project","executable_path":"/usr/bin/git","executable_mode":"BINARY","stdin":"TERMINAL","stdout":"TERMINAL","stderr":"TERMINAL"},"launcher_chain":[],"invocation_token":"${BASE64.encodeToString(token)}"}"""
             .encodeToByteArray()
 
     private fun gitSignPlaintext(token: ByteArray): ByteArray =

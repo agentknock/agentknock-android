@@ -125,15 +125,19 @@ class SecretRepositoryTest {
 
         val before = fixture.dao.sshKeys.value.single()
         val secondKey = fixture.repository.generateSshKey(SshKeyAlgorithm.ED25519, "second@example")
+        val replaceUpload = SshSecretUpload(
+            mode = SecretUploadMode.REPLACE,
+            name = "production-ssh",
+            descriptionProvided = false,
+            description = null,
+            privateKey = secondKey,
+        )
+        val replacePlan = fixture.repository.describeSshSecretUpload(replaceUpload)
+        check(replacePlan is SshSecretUploadResult.Valid)
         val replace = fixture.repository.applySshSecretUpload(
-            SshSecretUpload(
-                mode = SecretUploadMode.REPLACE,
-                name = "production-ssh",
-                descriptionProvided = false,
-                description = null,
-                privateKey = secondKey,
-            ),
+            replaceUpload,
             approvedName = "ignored-for-existing-secret",
+            target = replacePlan.summary.target,
         )
         check(replace is ApplySshSecretUploadResult.Applied)
 
@@ -406,11 +410,13 @@ class SecretRepositoryTest {
                 SecretMetadata(
                     name = "first",
                     description = "",
+                    type = ENVIRONMENT_SECRET_TYPE,
                     environmentVariableNames = listOf("FIRST_REGION", "SHARED_TOKEN"),
                 ),
                 SecretMetadata(
                     name = "second",
                     description = "",
+                    type = ENVIRONMENT_SECRET_TYPE,
                     environmentVariableNames = listOf("SHARED_TOKEN"),
                 ),
             ),
@@ -681,6 +687,10 @@ class SecretRepositoryTest {
                 ),
             ),
             approvedName = "ignored-for-existing-secret",
+            target = SecretUploadTarget(
+                secretId,
+                checkNotNull(fixture.dao.getSecret(secretId)).revision,
+            ),
         )
 
         assertTrue(result is ApplyEnvironmentSecretUploadResult.Applied)
@@ -989,6 +999,7 @@ class SecretRepositoryTest {
         val result = fixture.repository.applyEnvironmentSecretUpload(
             upload,
             approvedName = "ignored-for-existing-secret",
+            target = description.summary.target,
         )
 
         assertTrue(result is ApplyEnvironmentSecretUploadResult.Applied)
@@ -999,6 +1010,99 @@ class SecretRepositoryTest {
             EnvironmentVariableValue.Available("new-token"),
             fixture.repository.readEnvironmentVariableValue(tokenId),
         )
+    }
+
+    @Test
+    fun `update upload preserves a description edited after review`() = runTest {
+        val fixture = Fixture()
+        val secretId = fixture.createSecret("production")
+        fixture.createVariable(secretId, "TOKEN", "old", true)
+        val upload = EnvironmentSecretUpload(
+            mode = SecretUploadMode.UPDATE,
+            name = "production",
+            descriptionProvided = false,
+            description = null,
+            variables = mapOf("TOKEN" to "new"),
+        )
+        val plan = fixture.repository.describeEnvironmentSecretUpload(upload)
+        check(plan is EnvironmentSecretUploadResult.Valid)
+        assertEquals(
+            SaveSecretResult.SAVED,
+            fixture.repository.saveSecret(secretId, "production", "Edited on the phone"),
+        )
+
+        val result = fixture.repository.applyEnvironmentSecretUpload(
+            upload,
+            approvedName = "ignored",
+            target = plan.summary.target,
+        )
+
+        assertTrue(result is ApplyEnvironmentSecretUploadResult.Applied)
+        assertEquals(
+            "Edited on the phone",
+            fixture.repository.observeSecret(secretId).first()?.description,
+        )
+    }
+
+    @Test
+    fun `an upload cannot retarget after its secret is renamed`() = runTest {
+        val fixture = Fixture()
+        val originalId = fixture.createSecret("production")
+        val originalVariable = fixture.createVariable(originalId, "TOKEN", "old", true)
+        val upload = EnvironmentSecretUpload(
+            mode = SecretUploadMode.UPDATE,
+            name = "production",
+            descriptionProvided = false,
+            description = null,
+            variables = mapOf("TOKEN" to "uploaded"),
+        )
+        val plan = fixture.repository.describeEnvironmentSecretUpload(upload)
+        check(plan is EnvironmentSecretUploadResult.Valid)
+
+        assertEquals(SaveSecretResult.SAVED, fixture.repository.saveSecret(originalId, "archive", ""))
+        val replacementId = fixture.createSecret("production")
+        val replacementVariable = fixture.createVariable(replacementId, "TOKEN", "replacement", true)
+
+        val result = fixture.repository.applyEnvironmentSecretUpload(
+            upload,
+            approvedName = "ignored",
+            target = plan.summary.target,
+        )
+
+        assertTrue(result is ApplyEnvironmentSecretUploadResult.Invalid)
+        assertEquals(
+            EnvironmentVariableValue.Available("old"),
+            fixture.repository.readEnvironmentVariableValue(originalVariable),
+        )
+        assertEquals(
+            EnvironmentVariableValue.Available("replacement"),
+            fixture.repository.readEnvironmentVariableValue(replacementVariable),
+        )
+    }
+
+    @Test
+    fun `an authorization revision invalidates a pending upload`() = runTest {
+        val fixture = Fixture()
+        val secretId = fixture.createSecret("production")
+        fixture.createVariable(secretId, "TOKEN", "old", true)
+        val upload = EnvironmentSecretUpload(
+            mode = SecretUploadMode.UPDATE,
+            name = "production",
+            descriptionProvided = false,
+            description = null,
+            variables = mapOf("TOKEN" to "uploaded"),
+        )
+        val plan = fixture.repository.describeEnvironmentSecretUpload(upload)
+        check(plan is EnvironmentSecretUploadResult.Valid)
+        fixture.repository.saveInstructions(secretId, "Only for production deploys")
+
+        val result = fixture.repository.applyEnvironmentSecretUpload(
+            upload,
+            approvedName = "ignored",
+            target = plan.summary.target,
+        )
+
+        assertTrue(result is ApplyEnvironmentSecretUploadResult.Invalid)
     }
 
     private class Fixture(keyId: String = "storage-key") {
@@ -1180,12 +1284,7 @@ private class FakeSecretDao : SecretDao {
     override suspend fun clientCanReceiveTemporaryAccess(clientId: String): Boolean =
         temporaryAccessClientAvailable
 
-    override suspend fun getEnvironmentVariablesForSecrets(
-        secretIds: List<String>,
-    ): List<EnvironmentVariableEntity> = variables.value.filter { it.secretId in secretIds }
-
-    override suspend fun getSshKeysForSecrets(secretIds: List<String>): List<SshKeyEntity> =
-        sshKeys.value.filter { it.secretId in secretIds }
+    override suspend fun getSshKeys(): List<SshKeyEntity> = sshKeys.value.sortedBy { it.secretId }
 
     override suspend fun secretNameInUse(name: String, excludingId: String): Boolean =
         secrets.value.any { it.name == name && it.id != excludingId }
@@ -1203,11 +1302,49 @@ private class FakeSecretDao : SecretDao {
         secrets.value += secret
     }
 
-    override suspend fun updateSecret(secret: SecretEntity): Int {
-        if (secrets.value.none { it.id == secret.id }) return 0
-        secrets.value = secrets.value.map { if (it.id == secret.id) secret else it }
+    override suspend fun updateSecretMetadataIfCurrent(
+        secretId: String,
+        expectedRevision: Long,
+        expectedType: String,
+        name: String,
+        description: String,
+        updatedAt: Long,
+    ): Int {
+        val current = secrets.value.singleOrNull {
+            it.id == secretId && it.revision == expectedRevision && it.type == expectedType
+        } ?: return 0
+        if (secrets.value.any { it.id != secretId && it.name == name }) return 0
+        val revision = if (current.name == name) current.revision else current.revision + 1
+        secrets.value = secrets.value.map {
+            if (it.id == secretId) {
+                current.copy(
+                    name = name,
+                    description = description,
+                    updatedAt = updatedAt,
+                    revision = revision,
+                )
+            } else {
+                it
+            }
+        }
         return 1
     }
+
+    override suspend fun reviseSecretForUploadIfCurrent(
+        secretId: String,
+        expectedRevision: Long,
+        expectedName: String,
+        expectedType: String,
+        description: String,
+        updatedAt: Long,
+    ): Int = updateSecretForUpload(
+        secretId,
+        expectedRevision,
+        expectedName,
+        expectedType,
+        description,
+        updatedAt,
+    )
 
     override suspend fun updateSecretApprovalMode(
         secretId: String,
@@ -1330,9 +1467,34 @@ private class FakeSecretDao : SecretDao {
         sshKeys.value += key
     }
 
-    override suspend fun updateSshKeyRow(key: SshKeyEntity): Int {
-        if (sshKeys.value.none { it.secretId == key.secretId }) return 0
-        sshKeys.value = sshKeys.value.map { if (it.secretId == key.secretId) key else it }
+    override suspend fun updateSshKeyMaterialRow(
+        secretId: String,
+        algorithm: String,
+        publicKey: ByteArray,
+        comment: String,
+        privateKeyFormat: String,
+        encryptionFormat: Int,
+        encryptionKeyId: String,
+        nonce: ByteArray,
+        ciphertext: ByteArray,
+        materialUpdatedAt: Long,
+    ): Int {
+        val current = sshKeys.value.singleOrNull { it.secretId == secretId } ?: return 0
+        directlyReplaceSshKey(
+            current.copy(
+                algorithm = algorithm,
+                publicKey = publicKey,
+                comment = comment,
+                privateKeyFormat = privateKeyFormat,
+                encryptedPrivateKey = current.encryptedPrivateKey.copy(
+                    formatVersion = encryptionFormat,
+                    keyId = encryptionKeyId,
+                    nonce = nonce,
+                    ciphertext = ciphertext,
+                ),
+                materialUpdatedAt = materialUpdatedAt,
+            ),
+        )
         return 1
     }
 
@@ -1353,9 +1515,66 @@ private class FakeSecretDao : SecretDao {
         variables.value += variable
     }
 
-    override suspend fun updateEnvironmentVariableRow(variable: EnvironmentVariableEntity): Int {
-        if (variables.value.none { it.id == variable.id }) return 0
-        directlyReplaceVariable(variable)
+    override suspend fun updateEnvironmentVariableMaterialRow(
+        variableId: String,
+        secretId: String,
+        name: String,
+        sensitive: Boolean,
+        notes: String,
+        encryptionFormat: Int,
+        encryptionKeyId: String,
+        nonce: ByteArray,
+        ciphertext: ByteArray,
+        updatedAt: Long,
+        valueUpdatedAt: Long,
+    ): Int {
+        val current = variables.value.singleOrNull {
+            it.id == variableId && it.secretId == secretId
+        } ?: return 0
+        directlyReplaceVariable(
+            current.copy(
+                name = name,
+                sensitive = sensitive,
+                notes = notes,
+                encryptedValue = current.encryptedValue.copy(
+                    formatVersion = encryptionFormat,
+                    keyId = encryptionKeyId,
+                    nonce = nonce,
+                    ciphertext = ciphertext,
+                ),
+                updatedAt = updatedAt,
+                valueUpdatedAt = valueUpdatedAt,
+            ),
+        )
+        return 1
+    }
+
+    override suspend fun updateUploadedEnvironmentVariableRow(
+        variableId: String,
+        secretId: String,
+        sensitive: Boolean,
+        encryptionFormat: Int,
+        encryptionKeyId: String,
+        nonce: ByteArray,
+        ciphertext: ByteArray,
+        updatedAt: Long,
+    ): Int {
+        val current = variables.value.singleOrNull {
+            it.id == variableId && it.secretId == secretId
+        } ?: return 0
+        directlyReplaceVariable(
+            current.copy(
+                sensitive = sensitive,
+                encryptedValue = current.encryptedValue.copy(
+                    formatVersion = encryptionFormat,
+                    keyId = encryptionKeyId,
+                    nonce = nonce,
+                    ciphertext = ciphertext,
+                ),
+                updatedAt = updatedAt,
+                valueUpdatedAt = updatedAt,
+            ),
+        )
         return 1
     }
 
@@ -1400,6 +1619,25 @@ private class FakeSecretDao : SecretDao {
         }
     }
 
+    override suspend fun reviseSecretIfCurrent(
+        secretId: String,
+        expectedRevision: Long,
+        expectedType: String,
+        updatedAt: Long,
+    ): Int {
+        val current = secrets.value.singleOrNull {
+            it.id == secretId && it.revision == expectedRevision && it.type == expectedType
+        } ?: return 0
+        secrets.value = secrets.value.map {
+            if (it.id == secretId) {
+                current.copy(updatedAt = maxOf(current.updatedAt, updatedAt), revision = current.revision + 1)
+            } else {
+                it
+            }
+        }
+        return 1
+    }
+
     override suspend fun deleteAllEnvironmentVariables(secretId: String): Int {
         val before = variables.value.size
         variables.value = variables.value.filterNot { it.secretId == secretId }
@@ -1423,5 +1661,31 @@ private class FakeSecretDao : SecretDao {
 
     fun directlyReplaceSshKey(key: SshKeyEntity) {
         sshKeys.value = sshKeys.value.map { if (it.secretId == key.secretId) key else it }
+    }
+
+    private fun updateSecretForUpload(
+        secretId: String,
+        expectedRevision: Long,
+        expectedName: String,
+        expectedType: String,
+        description: String,
+        updatedAt: Long,
+    ): Int {
+        val current = secrets.value.singleOrNull {
+            it.id == secretId && it.revision == expectedRevision &&
+                it.name == expectedName && it.type == expectedType
+        } ?: return 0
+        secrets.value = secrets.value.map {
+            if (it.id == secretId) {
+                current.copy(
+                    description = description,
+                    updatedAt = maxOf(current.updatedAt, updatedAt),
+                    revision = current.revision + 1,
+                )
+            } else {
+                it
+            }
+        }
+        return 1
     }
 }

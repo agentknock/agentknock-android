@@ -393,6 +393,8 @@ class DeviceIdentityRetentionTest {
         descriptionProvided = false,
         description = null,
         secretType = "environment",
+        targetSecretId = null,
+        targetSecretRevision = null,
         summaryJson = "{\"variableNames\":[\"TOKEN\"]}",
         intakeError = null,
         decidedAt = decision?.let { 20 },

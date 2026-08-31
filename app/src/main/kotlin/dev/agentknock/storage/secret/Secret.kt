@@ -12,7 +12,6 @@ import androidx.room3.OnConflictStrategy
 import androidx.room3.PrimaryKey
 import androidx.room3.Query
 import androidx.room3.Transaction
-import androidx.room3.Update
 import dev.agentknock.storage.crypto.VaultKeyEntity
 import dev.agentknock.storage.crypto.EncryptedValue
 import dev.agentknock.storage.request.ClientEntity
@@ -31,7 +30,7 @@ internal data class SecretEntity(
     @ColumnInfo(name = "description")
     val description: String,
     @ColumnInfo(name = "type")
-    val type: String = "environment",
+    val type: String,
     @ColumnInfo(name = "created_at")
     val createdAt: Long,
     @ColumnInfo(name = "updated_at")
@@ -43,6 +42,9 @@ internal data class SecretEntity(
     @ColumnInfo(name = "instructions")
     val instructions: String = "",
 )
+
+internal val SecretEntity.secretType: SecretType
+    get() = SecretType.fromStoredName(type)
 
 @Entity(
     tableName = "secret_client_approval_overrides",
@@ -210,7 +212,7 @@ internal data class SecretSummaryRow(
     @ColumnInfo(name = "description")
     val description: String,
     @ColumnInfo(name = "type")
-    val type: String = "environment",
+    val type: String,
     @ColumnInfo(name = "created_at")
     val createdAt: Long,
     @ColumnInfo(name = "updated_at")
@@ -264,6 +266,18 @@ internal data class SshKeyMetadataRow(
     @ColumnInfo(name = "material_updated_at")
     val materialUpdatedAt: Long,
 )
+
+/** A transactionally consistent view of every usable secret and its typed content. */
+internal data class SecretSnapshot(
+    val secrets: List<SecretEntity>,
+    val environmentVariables: List<EnvironmentVariableEntity>,
+    val sshKeys: List<SshKeyEntity>,
+) {
+    val secretsByName: Map<String, SecretEntity> = secrets.associateBy(SecretEntity::name)
+    val variablesBySecret: Map<String, List<EnvironmentVariableEntity>> =
+        environmentVariables.groupBy(EnvironmentVariableEntity::secretId)
+    val sshKeysBySecret: Map<String, SshKeyEntity> = sshKeys.associateBy(SshKeyEntity::secretId)
+}
 
 @Dao
 internal interface SecretDao {
@@ -400,13 +414,15 @@ internal interface SecretDao {
     )
     suspend fun clientCanReceiveTemporaryAccess(clientId: String): Boolean
 
-    @Query("SELECT * FROM environment_variables WHERE secret_id IN (:secretIds)")
-    suspend fun getEnvironmentVariablesForSecrets(
-        secretIds: List<String>,
-    ): List<EnvironmentVariableEntity>
+    @Query("SELECT * FROM ssh_keys ORDER BY secret_id")
+    suspend fun getSshKeys(): List<SshKeyEntity>
 
-    @Query("SELECT * FROM ssh_keys WHERE secret_id IN (:secretIds)")
-    suspend fun getSshKeysForSecrets(secretIds: List<String>): List<SshKeyEntity>
+    @Transaction
+    suspend fun getSecretSnapshot(): SecretSnapshot = SecretSnapshot(
+        secrets = getSecrets(),
+        environmentVariables = getEnvironmentVariables(),
+        sshKeys = getSshKeys(),
+    )
 
     @Query("SELECT EXISTS(SELECT 1 FROM secrets WHERE name = :name AND id != :excludingId)")
     suspend fun secretNameInUse(name: String, excludingId: String): Boolean
@@ -429,8 +445,19 @@ internal interface SecretDao {
     @Insert
     suspend fun insertSecret(secret: SecretEntity)
 
-    @Update
-    suspend fun updateSecret(secret: SecretEntity): Int
+    @Query(
+        "UPDATE secrets SET name = :name, description = :description, updated_at = :updatedAt, " +
+            "revision = revision + CASE WHEN name = :name THEN 0 ELSE 1 END " +
+            "WHERE id = :secretId AND revision = :expectedRevision AND type = :expectedType",
+    )
+    suspend fun updateSecretMetadataIfCurrent(
+        secretId: String,
+        expectedRevision: Long,
+        expectedType: String,
+        name: String,
+        description: String,
+        updatedAt: Long,
+    ): Int
 
     @Query(
         "UPDATE secrets SET approval_mode = :approvalMode, updated_at = :updatedAt, " +
@@ -449,6 +476,21 @@ internal interface SecretDao {
     suspend fun updateSecretInstructions(
         secretId: String,
         instructions: String,
+        updatedAt: Long,
+    ): Int
+
+    @Query(
+        "UPDATE secrets SET description = :description, updated_at = MAX(updated_at, :updatedAt), " +
+            "revision = revision + 1 " +
+            "WHERE id = :secretId AND revision = :expectedRevision AND name = :expectedName " +
+            "AND type = :expectedType",
+    )
+    suspend fun reviseSecretForUploadIfCurrent(
+        secretId: String,
+        expectedRevision: Long,
+        expectedName: String,
+        expectedType: String,
+        description: String,
         updatedAt: Long,
     ): Int
 
@@ -539,12 +581,30 @@ internal interface SecretDao {
     @Insert
     suspend fun insertEnvironmentVariableRow(variable: EnvironmentVariableEntity)
 
-    @Update
-    suspend fun updateEnvironmentVariableRow(variable: EnvironmentVariableEntity): Int
+    @Query(
+        "UPDATE environment_variables SET name = :name, sensitive = :sensitive, notes = :notes, " +
+            "encryption_format = :encryptionFormat, encryption_key_id = :encryptionKeyId, " +
+            "nonce = :nonce, ciphertext = :ciphertext, updated_at = :updatedAt, " +
+            "value_updated_at = :valueUpdatedAt WHERE id = :variableId AND secret_id = :secretId",
+    )
+    suspend fun updateEnvironmentVariableMaterialRow(
+        variableId: String,
+        secretId: String,
+        name: String,
+        sensitive: Boolean,
+        notes: String,
+        encryptionFormat: Int,
+        encryptionKeyId: String,
+        nonce: ByteArray,
+        ciphertext: ByteArray,
+        updatedAt: Long,
+        valueUpdatedAt: Long,
+    ): Int
 
     @Query(
         "UPDATE environment_variables SET notes = :notes, updated_at = :updatedAt " +
-            "WHERE id = :variableId AND secret_id = :secretId",
+            "WHERE id = :variableId AND secret_id = :secretId " +
+            "AND EXISTS (SELECT 1 FROM secrets WHERE id = :secretId AND type = 'environment')",
     )
     suspend fun updateEnvironmentVariableNotesRow(
         variableId: String,
@@ -559,11 +619,45 @@ internal interface SecretDao {
     @Insert
     suspend fun insertSshKeyRow(key: SshKeyEntity)
 
-    @Update
-    suspend fun updateSshKeyRow(key: SshKeyEntity): Int
+    @Query(
+        "UPDATE ssh_keys SET algorithm = :algorithm, public_key = :publicKey, comment = :comment, " +
+            "private_key_format = :privateKeyFormat, encryption_format = :encryptionFormat, " +
+            "encryption_key_id = :encryptionKeyId, nonce = :nonce, ciphertext = :ciphertext, " +
+            "material_updated_at = :materialUpdatedAt WHERE secret_id = :secretId",
+    )
+    suspend fun updateSshKeyMaterialRow(
+        secretId: String,
+        algorithm: String,
+        publicKey: ByteArray,
+        comment: String,
+        privateKeyFormat: String,
+        encryptionFormat: Int,
+        encryptionKeyId: String,
+        nonce: ByteArray,
+        ciphertext: ByteArray,
+        materialUpdatedAt: Long,
+    ): Int
 
     @Query("UPDATE ssh_keys SET comment = :comment WHERE secret_id = :secretId")
     suspend fun updateSshKeyCommentRow(secretId: String, comment: String): Int
+
+    @Query(
+        "UPDATE environment_variables SET sensitive = :sensitive, " +
+            "encryption_format = :encryptionFormat, encryption_key_id = :encryptionKeyId, " +
+            "nonce = :nonce, ciphertext = :ciphertext, " +
+            "updated_at = :updatedAt, value_updated_at = :updatedAt " +
+            "WHERE id = :variableId AND secret_id = :secretId",
+    )
+    suspend fun updateUploadedEnvironmentVariableRow(
+        variableId: String,
+        secretId: String,
+        sensitive: Boolean,
+        encryptionFormat: Int,
+        encryptionKeyId: String,
+        nonce: ByteArray,
+        ciphertext: ByteArray,
+        updatedAt: Long,
+    ): Int
 
     @Query("UPDATE secrets SET updated_at = MAX(updated_at, :updatedAt) WHERE id = :secretId")
     suspend fun touchSecret(secretId: String, updatedAt: Long)
@@ -573,6 +667,17 @@ internal interface SecretDao {
             "WHERE id = :secretId",
     )
     suspend fun reviseSecret(secretId: String, updatedAt: Long)
+
+    @Query(
+        "UPDATE secrets SET updated_at = MAX(updated_at, :updatedAt), revision = revision + 1 " +
+            "WHERE id = :secretId AND revision = :expectedRevision AND type = :expectedType",
+    )
+    suspend fun reviseSecretIfCurrent(
+        secretId: String,
+        expectedRevision: Long,
+        expectedType: String,
+        updatedAt: Long,
+    ): Int
 
     @Query("DELETE FROM environment_variables WHERE secret_id = :secretId")
     suspend fun deleteAllEnvironmentVariables(secretId: String): Int
@@ -594,6 +699,17 @@ internal interface SecretDao {
     }
 
     @Transaction
+    suspend fun setSecretInstructions(
+        secretId: String,
+        instructions: String,
+        updatedAt: Long,
+    ): Boolean {
+        if (updateSecretInstructions(secretId, instructions, updatedAt) != 1) return false
+        deleteTemporaryAccessGrantsForSecret(secretId)
+        return true
+    }
+
+    @Transaction
     suspend fun updateSecretMetadata(
         secretId: String,
         name: String,
@@ -602,16 +718,16 @@ internal interface SecretDao {
     ): Boolean {
         val current = getSecret(secretId) ?: return false
         val nameChanged = name != current.name
-        check(
-            updateSecret(
-                current.copy(
-                    name = name,
-                    description = description,
-                    updatedAt = updatedAt,
-                    revision = if (nameChanged) current.revision + 1 else current.revision,
-                ),
-            ) == 1,
-        )
+        if (
+            updateSecretMetadataIfCurrent(
+                secretId = secretId,
+                expectedRevision = current.revision,
+                expectedType = current.type,
+                name = name,
+                description = description,
+                updatedAt = updatedAt,
+            ) != 1
+        ) return false
         if (nameChanged) deleteTemporaryAccessGrantsForSecret(secretId)
         return true
     }
@@ -619,33 +735,82 @@ internal interface SecretDao {
     @Transaction
     suspend fun upsertClientApprovalOverrideAndDeleteTemporaryAccess(
         override: SecretClientApprovalOverrideEntity,
+        updatedAt: Long,
     ) {
         upsertClientApprovalOverride(override)
         deleteTemporaryAccessGrantsForSecretClient(override.secretId, override.clientId)
+        reviseSecret(override.secretId, updatedAt)
     }
 
     @Transaction
     suspend fun deleteClientApprovalOverrideAndTemporaryAccess(
         secretId: String,
         clientId: String,
+        updatedAt: Long,
     ) {
-        deleteClientApprovalOverride(secretId, clientId)
+        val deleted = deleteClientApprovalOverride(secretId, clientId)
         deleteTemporaryAccessGrantsForSecretClient(secretId, clientId)
+        if (deleted == 1) reviseSecret(secretId, updatedAt)
     }
 
     @Transaction
-    suspend fun insertEnvironmentVariable(variable: EnvironmentVariableEntity) {
-        deleteTemporaryAccessGrantsForSecret(variable.secretId)
+    suspend fun insertEnvironmentVariableIfCurrent(
+        variable: EnvironmentVariableEntity,
+        expectedSecretRevision: Long,
+    ): Boolean {
+        val secret = getSecret(variable.secretId) ?: return false
+        if (
+            secret.secretType != SecretType.ENVIRONMENT ||
+            secret.revision != expectedSecretRevision
+        ) return false
         insertEnvironmentVariableRow(variable)
-        reviseSecret(variable.secretId, variable.updatedAt)
+        check(
+            reviseSecretIfCurrent(
+                variable.secretId,
+                expectedSecretRevision,
+                SecretType.ENVIRONMENT.storedName,
+                variable.updatedAt,
+            ) == 1,
+        )
+        deleteTemporaryAccessGrantsForSecret(variable.secretId)
+        return true
     }
 
     @Transaction
-    suspend fun updateEnvironmentVariable(variable: EnvironmentVariableEntity): Int {
+    suspend fun updateEnvironmentVariableIfCurrent(
+        variable: EnvironmentVariableEntity,
+        expectedSecretRevision: Long,
+    ): Boolean {
+        val secret = getSecret(variable.secretId) ?: return false
+        if (
+            secret.secretType != SecretType.ENVIRONMENT ||
+            secret.revision != expectedSecretRevision
+        ) return false
+        if (
+            updateEnvironmentVariableMaterialRow(
+                variableId = variable.id,
+                secretId = variable.secretId,
+                name = variable.name,
+                sensitive = variable.sensitive,
+                notes = variable.notes,
+                encryptionFormat = variable.encryptedValue.formatVersion,
+                encryptionKeyId = variable.encryptedValue.keyId,
+                nonce = variable.encryptedValue.nonce,
+                ciphertext = variable.encryptedValue.ciphertext,
+                updatedAt = variable.updatedAt,
+                valueUpdatedAt = variable.valueUpdatedAt,
+            ) != 1
+        ) return false
+        check(
+            reviseSecretIfCurrent(
+                variable.secretId,
+                expectedSecretRevision,
+                SecretType.ENVIRONMENT.storedName,
+                variable.updatedAt,
+            ) == 1,
+        )
         deleteTemporaryAccessGrantsForSecret(variable.secretId)
-        val updated = updateEnvironmentVariableRow(variable)
-        if (updated == 1) reviseSecret(variable.secretId, variable.updatedAt)
-        return updated
+        return true
     }
 
     @Transaction
@@ -655,6 +820,7 @@ internal interface SecretDao {
         notes: String,
         updatedAt: Long,
     ): Int {
+        if (getSecret(secretId)?.secretType != SecretType.ENVIRONMENT) return 0
         val updated = updateEnvironmentVariableNotesRow(
             variableId = variableId,
             secretId = secretId,
@@ -666,90 +832,71 @@ internal interface SecretDao {
     }
 
     @Transaction
-    suspend fun deleteEnvironmentVariable(
+    suspend fun deleteEnvironmentVariableIfCurrent(
         variable: EnvironmentVariableEntity,
+        expectedSecretRevision: Long,
         secretUpdatedAt: Long,
-    ) {
-        deleteTemporaryAccessGrantsForSecret(variable.secretId)
+    ): Boolean {
+        val secret = getSecret(variable.secretId) ?: return false
+        if (
+            secret.secretType != SecretType.ENVIRONMENT ||
+            secret.revision != expectedSecretRevision
+        ) return false
         deleteEnvironmentVariableRow(variable)
-        reviseSecret(variable.secretId, secretUpdatedAt)
-    }
-
-    @Transaction
-    suspend fun applyEnvironmentSecret(
-        secret: SecretEntity,
-        variables: List<EnvironmentVariableEntity>,
-        replaceVariables: Boolean,
-    ) {
-        deleteTemporaryAccessGrantsForSecret(secret.id)
-        val current = getSecret(secret.id)
-        if (current == null) {
-            insertSecret(secret.copy(revision = 1))
-        } else {
-            check(
-                updateSecret(
-                    secret.copy(
-                        createdAt = current.createdAt,
-                        revision = current.revision + 1,
-                        approvalMode = current.approvalMode,
-                        instructions = current.instructions,
-                    ),
-                ) == 1,
-            )
-        }
-        if (replaceVariables) {
-            if (variables.isEmpty()) {
-                deleteAllEnvironmentVariables(secret.id)
-            } else {
-                deleteEnvironmentVariablesExcept(secret.id, variables.map { it.name })
-            }
-        }
-        variables.forEach { variable ->
-            if (getEnvironmentVariable(variable.id) == null) {
-                insertEnvironmentVariableRow(variable)
-            } else {
-                check(updateEnvironmentVariableRow(variable) == 1)
-            }
-        }
+        check(
+            reviseSecretIfCurrent(
+                variable.secretId,
+                expectedSecretRevision,
+                SecretType.ENVIRONMENT.storedName,
+                secretUpdatedAt,
+            ) == 1,
+        )
+        deleteTemporaryAccessGrantsForSecret(variable.secretId)
+        return true
     }
 
     @Transaction
     suspend fun insertSshSecret(secret: SecretEntity, key: SshKeyEntity) {
+        require(secret.secretType == SecretType.SSH)
+        require(key.secretId == secret.id)
         insertSecret(secret)
         insertSshKeyRow(key)
     }
 
     @Transaction
-    suspend fun applySshSecret(secret: SecretEntity, key: SshKeyEntity) {
-        deleteTemporaryAccessGrantsForSecret(secret.id)
-        val current = getSecret(secret.id)
-        if (current == null) {
-            insertSecret(secret.copy(revision = 1))
-            insertSshKeyRow(key)
-        } else {
-            check(
-                updateSecret(
-                    secret.copy(
-                        createdAt = current.createdAt,
-                        revision = current.revision + 1,
-                        approvalMode = current.approvalMode,
-                        instructions = current.instructions,
-                    ),
-                ) == 1,
-            )
-            if (getSshKey(secret.id) == null) {
-                insertSshKeyRow(key)
-            } else {
-                check(updateSshKeyRow(key) == 1)
-            }
+    suspend fun updateSshKeyIfCurrent(
+        key: SshKeyEntity,
+        expectedSecretRevision: Long,
+        secretUpdatedAt: Long,
+    ): Boolean {
+        val secret = getSecret(key.secretId) ?: return false
+        if (secret.secretType != SecretType.SSH || secret.revision != expectedSecretRevision) {
+            return false
         }
-    }
-
-    @Transaction
-    suspend fun updateSshKey(key: SshKeyEntity, secretUpdatedAt: Long) {
+        if (
+            updateSshKeyMaterialRow(
+                secretId = key.secretId,
+                algorithm = key.algorithm,
+                publicKey = key.publicKey,
+                comment = key.comment,
+                privateKeyFormat = key.privateKeyFormat,
+                encryptionFormat = key.encryptedPrivateKey.formatVersion,
+                encryptionKeyId = key.encryptedPrivateKey.keyId,
+                nonce = key.encryptedPrivateKey.nonce,
+                ciphertext = key.encryptedPrivateKey.ciphertext,
+                materialUpdatedAt = key.materialUpdatedAt,
+            ) != 1
+        ) return false
+        check(
+            reviseSecretIfCurrent(
+                key.secretId,
+                expectedSecretRevision,
+                SecretType.SSH.storedName,
+                secretUpdatedAt,
+            ) == 1,
+        )
         deleteTemporaryAccessGrantsForSecret(key.secretId)
-        check(updateSshKeyRow(key) == 1)
-        reviseSecret(key.secretId, secretUpdatedAt)
+        return true
     }
 
     @Transaction
@@ -758,8 +905,126 @@ internal interface SecretDao {
         comment: String,
         secretUpdatedAt: Long,
     ): Boolean {
+        if (getSecret(secretId)?.secretType != SecretType.SSH) return false
         if (updateSshKeyCommentRow(secretId, comment) != 1) return false
         touchSecret(secretId, secretUpdatedAt)
+        return true
+    }
+
+    @Transaction
+    suspend fun applyEnvironmentUploadIfCurrent(
+        target: SecretUploadTarget?,
+        expectedName: String,
+        secret: SecretEntity,
+        variables: List<EnvironmentVariableEntity>,
+        replaceVariables: Boolean,
+        preserveCurrentDescription: Boolean,
+    ): Boolean {
+        require(secret.secretType == SecretType.ENVIRONMENT)
+        require(variables.all { it.secretId == secret.id })
+        require(!preserveCurrentDescription || target != null)
+        val current = target?.let { getSecret(it.secretId) }
+        if (target == null) {
+            if (getSecretsByName(listOf(secret.name)).isNotEmpty()) return false
+            insertSecret(secret.copy(revision = 1))
+        } else {
+            if (
+                current == null || current.id != secret.id || current.name != expectedName ||
+                current.revision != target.revision || current.secretType != SecretType.ENVIRONMENT
+            ) return false
+            if (
+                reviseSecretForUploadIfCurrent(
+                    secretId = current.id,
+                    expectedRevision = target.revision,
+                    expectedName = expectedName,
+                    expectedType = SecretType.ENVIRONMENT.storedName,
+                    description = if (preserveCurrentDescription) {
+                        current.description
+                    } else {
+                        secret.description
+                    },
+                    updatedAt = secret.updatedAt,
+                ) != 1
+            ) return false
+            deleteTemporaryAccessGrantsForSecret(current.id)
+        }
+        if (replaceVariables) {
+            if (variables.isEmpty()) deleteAllEnvironmentVariables(secret.id)
+            else deleteEnvironmentVariablesExcept(secret.id, variables.map { it.name })
+        }
+        variables.forEach { variable ->
+            val existing = getEnvironmentVariable(variable.id)
+            if (existing == null) {
+                insertEnvironmentVariableRow(variable)
+            } else {
+                check(existing.secretId == secret.id)
+                check(
+                    updateUploadedEnvironmentVariableRow(
+                        variableId = variable.id,
+                        secretId = secret.id,
+                        sensitive = variable.sensitive,
+                        encryptionFormat = variable.encryptedValue.formatVersion,
+                        encryptionKeyId = variable.encryptedValue.keyId,
+                        nonce = variable.encryptedValue.nonce,
+                        ciphertext = variable.encryptedValue.ciphertext,
+                        updatedAt = variable.updatedAt,
+                    ) == 1,
+                )
+            }
+        }
+        return true
+    }
+
+    @Transaction
+    suspend fun applySshUploadIfCurrent(
+        target: SecretUploadTarget?,
+        expectedName: String,
+        secret: SecretEntity,
+        key: SshKeyEntity,
+        preserveCurrentDescription: Boolean,
+    ): Boolean {
+        require(secret.secretType == SecretType.SSH)
+        require(key.secretId == secret.id)
+        require(!preserveCurrentDescription || target != null)
+        val current = target?.let { getSecret(it.secretId) }
+        if (target == null) {
+            if (getSecretsByName(listOf(secret.name)).isNotEmpty()) return false
+            insertSecret(secret.copy(revision = 1))
+            insertSshKeyRow(key)
+            return true
+        }
+        if (
+            current == null || current.id != secret.id || current.name != expectedName ||
+            current.revision != target.revision || current.secretType != SecretType.SSH
+        ) return false
+        val metadataUpdated = reviseSecretForUploadIfCurrent(
+            secretId = current.id,
+            expectedRevision = target.revision,
+            expectedName = expectedName,
+            expectedType = SecretType.SSH.storedName,
+            description = if (preserveCurrentDescription) {
+                current.description
+            } else {
+                secret.description
+            },
+            updatedAt = secret.updatedAt,
+        )
+        if (metadataUpdated != 1) return false
+        deleteTemporaryAccessGrantsForSecret(current.id)
+        check(
+            updateSshKeyMaterialRow(
+                secretId = key.secretId,
+                algorithm = key.algorithm,
+                publicKey = key.publicKey,
+                comment = key.comment,
+                privateKeyFormat = key.privateKeyFormat,
+                encryptionFormat = key.encryptedPrivateKey.formatVersion,
+                encryptionKeyId = key.encryptedPrivateKey.keyId,
+                nonce = key.encryptedPrivateKey.nonce,
+                ciphertext = key.encryptedPrivateKey.ciphertext,
+                materialUpdatedAt = key.materialUpdatedAt,
+            ) == 1,
+        )
         return true
     }
 }

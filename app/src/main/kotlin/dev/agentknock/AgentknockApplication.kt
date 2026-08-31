@@ -126,12 +126,7 @@ internal class ApplicationContainer(application: Application) {
         deviceCredentials = deviceIdentity,
         secrets = secrets,
         approvalReviewer = HttpRelayApprovalReviewClient(
-            RelayHttpTransport(
-                httpClient.newBuilder()
-                    .readTimeout(45, TimeUnit.SECONDS)
-                    .callTimeout(60, TimeUnit.SECONDS)
-                    .build(),
-            ),
+            RelayHttpTransport(approvalReviewHttpClient(httpClient)),
         ),
         relay = WebSocketRelayDeviceClient(httpClient),
         keyManager = vaultKeyManager,
@@ -174,6 +169,14 @@ internal class ApplicationContainer(application: Application) {
         deviceManagement = deviceManagement,
     )
 }
+
+internal fun approvalReviewHttpClient(base: OkHttpClient): OkHttpClient = base.newBuilder()
+    // AI review is billable and not idempotent. A durable request coordinator decides whether
+    // one logical review was attempted; OkHttp must not silently repeat it.
+    .retryOnConnectionFailure(false)
+    .readTimeout(45, TimeUnit.SECONDS)
+    .callTimeout(60, TimeUnit.SECONDS)
+    .build()
 
 internal suspend fun initializeTemporaryAccessStorage(
     marker: File,

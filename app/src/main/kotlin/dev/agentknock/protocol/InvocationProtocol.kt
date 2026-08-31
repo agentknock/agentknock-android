@@ -40,11 +40,39 @@ internal data class InvocationExecOperation(
     val workingDirectory: String,
     val executablePath: String,
     val executableHash: String?,
-    val executableMode: String,
-    val stdin: String,
-    val stdout: String,
-    val stderr: String,
+    val executableMode: InvocationExecutableMode,
+    val stdin: InvocationStreamKind,
+    val stdout: InvocationStreamKind,
+    val stderr: InvocationStreamKind,
 )
+
+internal enum class InvocationExecutableMode(val wireName: String) {
+    BINARY("BINARY"),
+    SCRIPT("SCRIPT"),
+    ;
+
+    companion object {
+        fun fromWireName(value: String): InvocationExecutableMode = entries.singleOrNull {
+            it.wireName == value
+        } ?: throw IllegalArgumentException("Unsupported executable mode")
+    }
+}
+
+internal enum class InvocationStreamKind(val wireName: String) {
+    TERMINAL("TERMINAL"),
+    NULL_DEVICE("NULL_DEVICE"),
+    PIPE("PIPE"),
+    SOCKET("SOCKET"),
+    REGULAR_FILE("REGULAR_FILE"),
+    UNKNOWN("UNKNOWN"),
+    ;
+
+    companion object {
+        fun fromWireName(value: String): InvocationStreamKind = entries.singleOrNull {
+            it.wireName == value
+        } ?: throw IllegalArgumentException("Unsupported standard-stream kind")
+    }
+}
 
 internal sealed interface InvocationResponseSecret {
     val description: String
@@ -103,6 +131,9 @@ internal class InvocationProtocol(
             "An invocation can send only one environment variable to standard input"
         }
         require(request.operation.type == EXEC_OPERATION_TYPE) { "Unsupported operation type" }
+        require(request.launcherChain.size <= MAX_LAUNCHER_CHAIN_LENGTH) {
+            "Launcher chain contains more than $MAX_LAUNCHER_CHAIN_LENGTH entries"
+        }
         val invocationToken = runCatching {
             Base64.getDecoder().decode(request.invocationToken)
         }.getOrElse { throw IllegalArgumentException("Invalid invocation token", it) }
@@ -120,11 +151,13 @@ internal class InvocationProtocol(
                 arguments = request.operation.arguments,
                 workingDirectory = request.operation.workingDirectory,
                 executablePath = request.operation.executablePath,
-                executableHash = request.operation.executableHash,
-                executableMode = request.operation.executableMode,
-                stdin = request.operation.stdin,
-                stdout = request.operation.stdout,
-                stderr = request.operation.stderr,
+                executableHash = request.operation.executableHash?.let(::decodeExecutableHash),
+                executableMode = InvocationExecutableMode.fromWireName(
+                    request.operation.executableMode,
+                ),
+                stdin = InvocationStreamKind.fromWireName(request.operation.stdin),
+                stdout = InvocationStreamKind.fromWireName(request.operation.stdout),
+                stderr = InvocationStreamKind.fromWireName(request.operation.stderr),
             ),
             launcherChain = request.launcherChain,
         )
@@ -186,6 +219,8 @@ internal class InvocationProtocol(
         private const val RESULT_DENIED = "DENIED"
         private const val RESULT_ABORTED = "ABORTED"
         private const val INVOCATION_TOKEN_BYTES = 32
+        private const val EXECUTABLE_HASH_BYTES = 32
+        private const val MAX_LAUNCHER_CHAIN_LENGTH = 4
     }
 
     private fun InvocationResponseSecret.toWire(): JsonObject = buildJsonObject {
@@ -215,9 +250,6 @@ internal class InvocationProtocol(
     ): InvocationSecretDelivery {
         val options = value as? JsonObject
             ?: throw IllegalArgumentException("Secret delivery options must be an object")
-        require(options.keys.all { it == "environment" }) {
-            "Unsupported delivery option for secret $secret"
-        }
         val environment = options["environment"]?.let { decodeEnvironmentDelivery(secret, it) }
         return InvocationSecretDelivery(environment)
     }
@@ -228,15 +260,9 @@ internal class InvocationProtocol(
     ): InvocationEnvironmentDelivery {
         val options = value as? JsonObject
             ?: throw IllegalArgumentException("Environment delivery options must be an object")
-        require(
-            options.keys.all {
-                it == "only" || it == "omit" || it == "rename" || it == "stdin"
-            },
-        ) {
-            "Unsupported environment delivery option for secret $secret"
-        }
         val only = options["only"]?.let { decodeEnvironmentNames("only", it) }
-        val omit = options["omit"]?.let { decodeEnvironmentNames("omit", it) }.orEmpty()
+        val omitted = options["omit"]?.let { decodeEnvironmentNames("omit", it) }
+        val omit = omitted.orEmpty()
         val rename = options["rename"]?.let(::decodeEnvironmentRename).orEmpty()
         val stdin = options["stdin"]?.let { value ->
             require(value is JsonPrimitive && value.isString) {
@@ -245,6 +271,7 @@ internal class InvocationProtocol(
             value.content.also(::requireValidEnvironmentName)
         }
         require(only == null || only.isNotEmpty()) { "Secret $secret has an empty only set" }
+        require(omitted == null || omitted.isNotEmpty()) { "Secret $secret has an empty omit set" }
         require(only == null || omit.isEmpty()) { "Secret $secret uses both only and omit" }
         require(only == null || rename.keys.all(only::contains)) {
             "Secret $secret renames a variable not selected by only"
@@ -299,6 +326,15 @@ internal class InvocationProtocol(
             }
             destination.content.also(::requireValidEnvironmentName)
         }
+    }
+
+    private fun decodeExecutableHash(value: String): String {
+        val decoded = runCatching { Base64.getDecoder().decode(value) }
+            .getOrElse { throw IllegalArgumentException("Invalid executable hash", it) }
+        require(decoded.size == EXECUTABLE_HASH_BYTES) {
+            "Executable hash must be $EXECUTABLE_HASH_BYTES bytes"
+        }
+        return Base64.getEncoder().encodeToString(decoded)
     }
 }
 

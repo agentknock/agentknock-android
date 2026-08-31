@@ -74,6 +74,7 @@ import dev.agentknock.storage.secret.SshKeyCodec
 import dev.agentknock.storage.secret.SshPrivateKey
 import dev.agentknock.storage.secret.SshSecretUpload
 import dev.agentknock.storage.secret.SshSecretUploadResult
+import dev.agentknock.storage.secret.SecretUploadTarget
 import dev.agentknock.storage.secret.GitSignatureResult
 import dev.agentknock.storage.secret.SshAuthenticationSignatureResult
 import dev.agentknock.storage.secret.SshKeyAlgorithm
@@ -150,6 +151,7 @@ internal data class SecretUploadSummarySnapshot(
 private data class PreparedSecretUpload(
     val type: String,
     val summary: SecretUploadSummarySnapshot,
+    val target: SecretUploadTarget? = null,
     val environmentVariables: List<SecretUploadEnvironmentVariableEntity> = emptyList(),
     val sshKey: SecretUploadSshKeyEntity? = null,
     val error: String? = null,
@@ -562,8 +564,6 @@ internal sealed interface RequestSyncResult {
     data class RelayRejected(val status: Int, val message: String?) : RequestSyncResult
 
     data class RelayUnavailable(val message: String?) : RequestSyncResult
-
-    data object InvalidRelayResponse : RequestSyncResult
 }
 
 private sealed interface SynchronizationInput {
@@ -1365,9 +1365,6 @@ internal class RequestRepository(
             is RelayDeviceConnectionResult.Unavailable -> {
                 return@withLock RequestSyncResult.RelayUnavailable(result.message)
             }
-            RelayDeviceConnectionResult.InvalidResponse -> {
-                return@withLock RequestSyncResult.InvalidRelayResponse
-            }
         }
 
         try {
@@ -1505,7 +1502,7 @@ internal class RequestRepository(
                         if (update?.response != null) {
                             if (
                                 !connection.send(
-                                    RelayDeviceFrame.Message(
+                                    RelayDeviceFrame.Response(
                                         event.clientId,
                                         event.requestId,
                                         update.response,
@@ -1643,7 +1640,7 @@ internal class RequestRepository(
                 if (request.deviceIdentityId != credentials.deviceIdentityId) continue
                 if (
                     !connection.send(
-                        RelayDeviceFrame.Message(
+                        RelayDeviceFrame.Response(
                             clientId = request.clientId,
                             requestId = request.id,
                             payload = json.parseToJsonElement(checkNotNull(request.responseJson)),
@@ -2018,10 +2015,11 @@ internal class RequestRepository(
                 secretUseRequest.secretDetailsJson,
             )
             val environmentSelections = storedSecrets.environmentSelections()
-            val latestDescription = secrets.describeRequestedSecrets(
+            val latestResolution = secrets.resolveRequestedSecrets(
                 requestedSecrets,
                 environmentSelections,
             )
+            val latestDescription = latestResolution.description
             val storedMissingSecrets = decodeStringList(secretUseRequest.missingSecretsJson)
             val protectedNames = latestDescription.reviewMetadata
                 .filter { secret ->
@@ -2079,7 +2077,7 @@ internal class RequestRepository(
                 return SecretUseDecisionResult.SecretsChanged
             }
             val availableSecrets = when (
-                val result = secrets.requestedSecrets(requestedSecrets, environmentSelections)
+                val result = latestResolution.values
             ) {
                 is RequestedSecretsResult.Available -> result.secrets
                 is RequestedSecretsResult.MissingSecrets -> {
@@ -3010,7 +3008,13 @@ internal class RequestRepository(
                     variables = values,
                     variableSensitivity = variableRows.associate { it.name to it.sensitive },
                 )
-                when (val result = secrets.applyEnvironmentSecretUpload(upload, approvedName.trim())) {
+                when (
+                    val result = secrets.applyEnvironmentSecretUpload(
+                        upload,
+                        approvedName.trim(),
+                        uploadRequest.target(),
+                    )
+                ) {
                     is ApplyEnvironmentSecretUploadResult.Invalid -> {
                         return@withLock SecretUploadDecisionResult.Invalid(result.message)
                     }
@@ -3020,7 +3024,7 @@ internal class RequestRepository(
             SSH_SECRET_TYPE -> {
                 val keyRow = dao.getSecretUploadSshKey(requestId)
                 val privateKey = if (keyRow == null) {
-                    null
+                    return@withLock SecretUploadDecisionResult.SecretCorrupted
                 } else {
                     val plaintext = when (
                         val result = decryptSecretUploadSshKey(request, keyRow)
@@ -3054,7 +3058,13 @@ internal class RequestRepository(
                     description = uploadRequest.description,
                     privateKey = privateKey,
                 )
-                when (val result = secrets.applySshSecretUpload(upload, approvedName.trim())) {
+                when (
+                    val result = secrets.applySshSecretUpload(
+                        upload,
+                        approvedName.trim(),
+                        uploadRequest.target(),
+                    )
+                ) {
                     is ApplySshSecretUploadResult.Invalid -> {
                         return@withLock SecretUploadDecisionResult.Invalid(result.message)
                     }
@@ -3498,8 +3508,9 @@ internal class RequestRepository(
             invocationProtocol.decodeRequest(opened.plaintext)
         }.getOrNull() ?: return null
         val environmentSelections = contents.environmentSelections()
-        val description = secrets.describeRequestedSecrets(contents.secrets, environmentSelections)
-        val requestedSecrets = secrets.requestedSecrets(contents.secrets, environmentSelections)
+        val resolution = secrets.resolveRequestedSecrets(contents.secrets, environmentSelections)
+        val description = resolution.description
+        val requestedSecrets = resolution.values
         val automaticDenial = automaticSecretUseDenial(requestedSecrets)
         val protectedSecretNames = description.reviewMetadata
             .filter { secret ->
@@ -3608,16 +3619,13 @@ internal class RequestRepository(
         } else {
             null
         }
-        val currentDescription = if (needsAiReview) {
-            secrets.describeRequestedSecrets(contents.secrets, environmentSelections)
+        val currentResolution = if (needsAiReview) {
+            secrets.resolveRequestedSecrets(contents.secrets, environmentSelections)
         } else {
-            description
+            resolution
         }
-        val currentRequestedSecrets = if (needsAiReview) {
-            secrets.requestedSecrets(contents.secrets, environmentSelections)
-        } else {
-            requestedSecrets
-        }
+        val currentDescription = currentResolution.description
+        val currentRequestedSecrets = currentResolution.values
         val currentAutomaticDenial = automaticSecretUseDenial(currentRequestedSecrets)
         val availableSecrets =
             (currentRequestedSecrets as? RequestedSecretsResult.Available)?.secrets
@@ -5034,6 +5042,7 @@ internal class RequestRepository(
             secretUploadProtocol.decodeRequest(opened.plaintext)
         }.getOrNull() ?: return null
         val now = currentTimeMillis()
+        val requestedTarget = secrets.targetForSecretUpload(contents.mode, contents.name)
         val prepared = when (val uploadContents = contents.contents) {
             is SecretUploadContents.Environment -> {
                 val upload = EnvironmentSecretUpload(
@@ -5046,6 +5055,7 @@ internal class RequestRepository(
                 when (val validation = secrets.describeEnvironmentSecretUpload(upload)) {
                     is EnvironmentSecretUploadResult.Valid -> PreparedSecretUpload(
                         type = ENVIRONMENT_SECRET_TYPE,
+                        target = validation.summary.target,
                         summary = SecretUploadSummarySnapshot(
                             variableNames = uploadContents.variables.keys.sorted(),
                             addedVariables = validation.summary.addedVariables,
@@ -5065,6 +5075,7 @@ internal class RequestRepository(
                     )
                     is EnvironmentSecretUploadResult.Invalid -> PreparedSecretUpload(
                         type = ENVIRONMENT_SECRET_TYPE,
+                        target = validation.target,
                         summary = SecretUploadSummarySnapshot(
                             variableNames = uploadContents.variables.keys.sorted(),
                         ),
@@ -5073,19 +5084,18 @@ internal class RequestRepository(
                 }
             }
             is SecretUploadContents.Ssh -> {
-                val parsedKey = uploadContents.privateKey?.let { encoded ->
-                    runCatching {
-                        withContext(cryptographyDispatcher) {
-                            sshKeys.importOpenSshPrivateKey(encoded)
-                        }
+                val parsedKey = runCatching {
+                    withContext(cryptographyDispatcher) {
+                        sshKeys.importOpenSshPrivateKey(uploadContents.privateKey)
                     }
                 }
-                val parseError = parsedKey?.exceptionOrNull()?.message
-                val privateKey = parsedKey?.getOrNull()
+                val parseError = parsedKey.exceptionOrNull()?.message
+                val privateKey = parsedKey.getOrNull()
                 if (parseError != null) {
                     PreparedSecretUpload(
                         type = SSH_SECRET_TYPE,
                         summary = SecretUploadSummarySnapshot(),
+                        target = requestedTarget,
                         error = parseError,
                     )
                 } else {
@@ -5094,11 +5104,12 @@ internal class RequestRepository(
                         name = contents.name,
                         descriptionProvided = contents.descriptionProvided,
                         description = contents.description,
-                        privateKey = privateKey,
+                        privateKey = checkNotNull(privateKey),
                     )
                     when (val validation = secrets.describeSshSecretUpload(upload)) {
                         is SshSecretUploadResult.Valid -> PreparedSecretUpload(
                             type = SSH_SECRET_TYPE,
+                            target = validation.summary.target,
                             summary = SecretUploadSummarySnapshot(
                                 publicKey = validation.summary.publicKey,
                                 fingerprint = validation.summary.fingerprint,
@@ -5106,16 +5117,15 @@ internal class RequestRepository(
                                 previousFingerprint = validation.summary.previousFingerprint,
                                 keyChanged = validation.summary.keyChanged,
                             ),
-                            sshKey = privateKey?.let {
-                                encryptSecretUploadSshKey(
-                                    relayRequestId,
-                                    pairing.clientId,
-                                    it,
-                                )
-                            },
+                            sshKey = encryptSecretUploadSshKey(
+                                relayRequestId,
+                                pairing.clientId,
+                                checkNotNull(privateKey),
+                            ),
                         )
                         is SshSecretUploadResult.Invalid -> PreparedSecretUpload(
                             type = SSH_SECRET_TYPE,
+                            target = validation.target,
                             summary = SecretUploadSummarySnapshot(),
                             error = validation.message,
                         )
@@ -5178,6 +5188,8 @@ internal class RequestRepository(
                 descriptionProvided = contents.descriptionProvided,
                 description = contents.description,
                 secretType = prepared.type,
+                targetSecretId = prepared.target?.secretId,
+                targetSecretRevision = prepared.target?.revision,
                 summaryJson = json.encodeToString(prepared.summary),
                 intakeError = prepared.error,
                 decidedAt = if (prepared.error != null) now else null,
@@ -5506,10 +5518,10 @@ internal class RequestRepository(
         workingDirectory = contents.operation.workingDirectory,
         executablePath = contents.operation.executablePath,
         executableHash = contents.operation.executableHash,
-        executableMode = contents.operation.executableMode,
-        stdinKind = contents.operation.stdin,
-        stdoutKind = contents.operation.stdout,
-        stderrKind = contents.operation.stderr,
+        executableMode = contents.operation.executableMode.wireName,
+        stdinKind = contents.operation.stdin.wireName,
+        stdoutKind = contents.operation.stdout.wireName,
+        stderrKind = contents.operation.stderr.wireName,
         launcherChainJson = encodeStringList(contents.launcherChain),
         decision = null,
         decisionSource = null,
@@ -6889,6 +6901,15 @@ private fun PairingAttemptEntity.auditClientName(): String =
         .first(String::isNotBlank)
 
 private fun ClientEntity.auditClientName(): String = name
+
+private fun SecretUploadRequestEntity.target(): SecretUploadTarget? = when {
+    targetSecretId == null && targetSecretRevision == null -> null
+    targetSecretId != null && targetSecretRevision != null -> SecretUploadTarget(
+        targetSecretId,
+        targetSecretRevision,
+    )
+    else -> error("Incomplete secret upload target")
+}
 
 private fun String.toAuditDecisionSource(): AuditDecisionSource = when (this) {
     "user" -> AuditDecisionSource.USER

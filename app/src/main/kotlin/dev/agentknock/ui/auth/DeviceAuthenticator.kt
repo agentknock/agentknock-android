@@ -13,8 +13,7 @@ import androidx.fragment.app.FragmentActivity
 internal class DeviceAuthenticator(
     private val activity: FragmentActivity,
 ) {
-    private var onSuccess: (() -> Unit)? = null
-    private var onError: ((String) -> Unit)? = null
+    private val attempt = AuthenticationAttempt()
 
     private val deviceCredentialLauncher = activity.registerForActivityResult(
         ActivityResultContracts.StartActivityForResult(),
@@ -47,8 +46,10 @@ internal class DeviceAuthenticator(
         onSuccess: () -> Unit,
         onError: (String) -> Unit,
     ) {
-        this.onSuccess = onSuccess
-        this.onError = onError
+        if (!attempt.start(onSuccess, onError)) {
+            onError("Another authentication is already in progress")
+            return
+        }
 
         if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.R) {
             authenticateWithBiometricPrompt(title)
@@ -95,19 +96,37 @@ internal class DeviceAuthenticator(
     }
 
     private fun completeSuccessfully() {
-        val callback = onSuccess
-        clearCallbacks()
-        callback?.invoke()
+        attempt.succeed()
     }
 
     private fun completeWithError(message: String) {
-        val callback = onError
-        clearCallbacks()
-        callback?.invoke(message)
+        attempt.fail(message)
+    }
+}
+
+internal class AuthenticationAttempt {
+    private var callbacks: Callbacks? = null
+
+    fun start(onSuccess: () -> Unit, onError: (String) -> Unit): Boolean {
+        if (callbacks != null) return false
+        callbacks = Callbacks(onSuccess, onError)
+        return true
     }
 
-    private fun clearCallbacks() {
-        onSuccess = null
-        onError = null
+    fun succeed() {
+        val current = callbacks ?: return
+        callbacks = null
+        current.onSuccess()
     }
+
+    fun fail(message: String) {
+        val current = callbacks ?: return
+        callbacks = null
+        current.onError(message)
+    }
+
+    private data class Callbacks(
+        val onSuccess: () -> Unit,
+        val onError: (String) -> Unit,
+    )
 }

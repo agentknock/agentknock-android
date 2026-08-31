@@ -143,9 +143,7 @@ class PushSynchronizationWorker(
                 )
                 Result.success()
             }
-            is RequestSyncResult.RelayUnavailable,
-            RequestSyncResult.InvalidRelayResponse,
-            -> Result.retry()
+            is RequestSyncResult.RelayUnavailable -> Result.retry()
             is RequestSyncResult.RelayRejected -> Result.failure()
         }
     }

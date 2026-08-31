@@ -7,9 +7,11 @@ import java.io.DataInputStream
 import java.io.DataOutputStream
 import java.math.BigInteger
 import java.security.KeyPairGenerator
+import java.security.KeyFactory
 import java.security.MessageDigest
 import java.security.Signature
 import java.security.interfaces.RSAPrivateCrtKey
+import java.security.spec.RSAPrivateCrtKeySpec
 import java.util.Base64
 import org.bouncycastle.crypto.params.Ed25519PublicKeyParameters
 import org.bouncycastle.crypto.signers.Ed25519Signer
@@ -126,6 +128,81 @@ class SshKeyCodecTest {
             codec.importOpenSshPrivateKey(encrypted)
         }
         assertEquals("Encrypted SSH private keys are not supported", error.message)
+    }
+
+    @Test
+    fun `rejects noncanonical OpenSSH none-cipher padding`() {
+        val lines = TEST_PRIVATE_KEY.lines()
+        val decoded = Base64.getDecoder().decode(lines.drop(1).dropLast(1).joinToString(""))
+        decoded[decoded.lastIndex] = 0
+        val encoded = Base64.getMimeEncoder(70, "\n".encodeToByteArray()).encodeToString(decoded)
+        val tampered = "-----BEGIN OPENSSH PRIVATE KEY-----\n$encoded\n" +
+            "-----END OPENSSH PRIVATE KEY-----"
+
+        val error = assertThrows(IllegalArgumentException::class.java) {
+            codec.importOpenSshPrivateKey(tampered)
+        }
+        assertEquals("Invalid OpenSSH private key padding", error.message)
+    }
+
+    @Test
+    fun `rejects RSA private material with inconsistent CRT exponents`() {
+        val key = codec.importOpenSshPrivateKey(rsaFixture().privateKey)
+        val privateKey = KeyFactory.getInstance("RSA").generatePrivate(
+            java.security.spec.PKCS8EncodedKeySpec(key.privateKey),
+        ) as RSAPrivateCrtKey
+        val inconsistent = KeyFactory.getInstance("RSA").generatePrivate(
+            RSAPrivateCrtKeySpec(
+                privateKey.modulus,
+                privateKey.publicExponent,
+                privateKey.privateExponent.add(BigInteger.TWO),
+                privateKey.primeP,
+                privateKey.primeQ,
+                privateKey.primeExponentP,
+                privateKey.primeExponentQ,
+                privateKey.crtCoefficient,
+            ),
+        ).encoded
+
+        assertThrows(IllegalArgumentException::class.java) {
+            codec.fromStored(
+                SshKeyAlgorithm.RSA.storedName,
+                inconsistent,
+                key.publicKey,
+                key.comment,
+            )
+        }
+    }
+
+    @Test
+    fun `rejects an invalid RSA public exponent`() {
+        val fixture = rsaFixture()
+        val privateKey = fixture.keyPair.private as RSAPrivateCrtKey
+        val blob = ByteArrayOutputStream().use { bytes ->
+            DataOutputStream(bytes).use { output ->
+                output.writeSshString("ssh-rsa".encodeToByteArray())
+                output.writeMpint(BigInteger.TWO)
+                output.writeMpint(privateKey.modulus)
+            }
+            bytes.toByteArray()
+        }
+        val encoded = "ssh-rsa ${Base64.getEncoder().encodeToString(blob)} invalid@test"
+
+        val error = assertThrows(IllegalArgumentException::class.java) {
+            codec.importOpenSshPublicKey(encoded)
+        }
+        assertEquals("Invalid RSA public exponent", error.message)
+    }
+
+    @Test
+    fun `rejects oversized PEM before Base64 decoding`() {
+        val oversized = "-----BEGIN OPENSSH PRIVATE KEY-----\n" +
+            "A".repeat(310_000) + "\n-----END OPENSSH PRIVATE KEY-----"
+
+        val error = assertThrows(IllegalArgumentException::class.java) {
+            codec.importOpenSshPrivateKey(oversized)
+        }
+        assertEquals("The OpenSSH private key is too large", error.message)
     }
 
     @Test

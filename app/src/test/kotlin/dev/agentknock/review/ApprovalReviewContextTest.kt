@@ -7,7 +7,9 @@ import dev.agentknock.protocol.GitSignChangedPath
 import dev.agentknock.protocol.GitSignHead
 import dev.agentknock.protocol.GitSignRepository
 import dev.agentknock.protocol.InvocationExecOperation
+import dev.agentknock.protocol.InvocationExecutableMode
 import dev.agentknock.protocol.InvocationRequestMessage
+import dev.agentknock.protocol.InvocationStreamKind
 import dev.agentknock.protocol.SoftwareInfo
 import dev.agentknock.protocol.SshAuthenticationMessageDetails
 import dev.agentknock.protocol.SshAuthenticationMethod
@@ -62,10 +64,10 @@ class ApprovalReviewContextTest {
                     workingDirectory = "/work/infrastructure",
                     executablePath = "/nix/store/aws/bin/aws",
                     executableHash = "not-useful-to-the-reviewer",
-                    executableMode = "BINARY",
-                    stdin = "TERMINAL",
-                    stdout = "PIPE",
-                    stderr = "TERMINAL",
+                    executableMode = InvocationExecutableMode.BINARY,
+                    stdin = InvocationStreamKind.TERMINAL,
+                    stdout = InvocationStreamKind.PIPE,
+                    stderr = InvocationStreamKind.TERMINAL,
                 ),
                 launcherChain = listOf("/bin/bash", "/bin/codex"),
             ),
