@@ -79,6 +79,7 @@ internal fun AgentknockScreen(
     consumeSubscriptionNavigation: (SubscriptionNavigation) -> Unit,
     notificationStateGeneration: StateFlow<Long>,
     requestNotificationPermission: () -> Unit,
+    onFactoryResetCompleted: () -> Unit,
     deviceSetupViewModel: DeviceSetupViewModel = viewModel(),
     requestsViewModel: RequestsViewModel = viewModel(),
     secretsViewModel: SecretsViewModel = viewModel(),
@@ -191,12 +192,27 @@ internal fun AgentknockScreen(
         current == null -> Box(Modifier.fillMaxSize(), contentAlignment = Alignment.Center) {
             CircularProgressIndicator()
         }
+        showSettings -> SettingsScreen(
+            onClose = { showSettings = false },
+            authenticate = authenticate,
+            authenticationMode = authenticationMode,
+            onAuthenticationModeChange = { mode, onError ->
+                authentication.changeMode(mode, authenticate, onError)
+            },
+            notificationStateGeneration = notificationRefreshGeneration,
+            requestNotificationPermission = requestNotificationPermission,
+            openPlanInitially = openPlanInitially,
+            onPlanOpened = { openPlanInitially = false },
+            onFactoryResetCompleted = onFactoryResetCompleted,
+            subscriptionViewModel = subscriptionViewModel,
+        )
         current.active == null || !current.active.credentialsAvailable -> DeviceSetupScreen(
             configuration = current,
             onDone = current.active?.takeIf { it.credentialsAvailable }?.let {
                 { section = MainSection.REQUESTS }
             },
             onDeviceClaimed = { offerNotifications = true },
+            onOpenSettings = { showSettings = true },
             viewModel = deviceSetupViewModel,
         )
         showAddressEditor -> DeviceSetupScreen(
@@ -207,18 +223,6 @@ internal fun AgentknockScreen(
             changeAddressInitially = true,
             onDeviceClaimed = {},
             viewModel = deviceSetupViewModel,
-        )
-        showSettings -> SettingsScreen(
-            onClose = { showSettings = false },
-            authenticationMode = authenticationMode,
-            onAuthenticationModeChange = { mode, onError ->
-                authentication.changeMode(mode, authenticate, onError)
-            },
-            notificationStateGeneration = notificationRefreshGeneration,
-            requestNotificationPermission = requestNotificationPermission,
-            openPlanInitially = openPlanInitially,
-            onPlanOpened = { openPlanInitially = false },
-            subscriptionViewModel = subscriptionViewModel,
         )
         else -> BoxWithConstraints(Modifier.fillMaxSize()) {
             val useNavigationRail = maxWidth >= 600.dp

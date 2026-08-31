@@ -15,6 +15,7 @@ import org.junit.Assert.assertEquals
 import org.junit.Assert.assertFalse
 import org.junit.Assert.assertTrue
 import org.junit.Test
+import java.net.ServerSocket
 
 class RelayDeviceClientTest {
     @Test
@@ -92,6 +93,74 @@ class RelayDeviceClientTest {
                 },
             )
         }
+    }
+
+    @Test
+    fun `classifies transient websocket upgrade failures as unavailable`() = runTest {
+        MockWebServer().use { server ->
+            server.start()
+            listOf(408, 425, 500, 599).forEach { status ->
+                server.enqueue(MockResponse.Builder().code(status).build())
+            }
+            val client = WebSocketRelayDeviceClient(
+                client = OkHttpClient(),
+                relayUrl = server.url("/").toString(),
+            )
+
+            listOf(408, 425, 500, 599).forEach { status ->
+                assertEquals(
+                    RelayDeviceConnectionResult.Unavailable(
+                        message = "Relay is temporarily unavailable (HTTP $status).",
+                    ),
+                    withContext(Dispatchers.IO) {
+                        withTimeout(5_000) { client.connect(DEVICE_ID, DEVICE_TOKEN) }
+                    },
+                )
+            }
+        }
+    }
+
+    @Test
+    fun `preserves transient relay message`() = runTest {
+        MockWebServer().use { server ->
+            server.start()
+            server.enqueue(
+                MockResponse.Builder()
+                    .code(429)
+                    .addHeader("Retry-After", "17")
+                    .body("""{"error":"RATE_LIMITED","message":"try again later"}""")
+                    .build(),
+            )
+            val client = WebSocketRelayDeviceClient(
+                client = OkHttpClient(),
+                relayUrl = server.url("/").toString(),
+            )
+
+            assertEquals(
+                RelayDeviceConnectionResult.Unavailable(
+                    message = "try again later",
+                ),
+                withContext(Dispatchers.IO) {
+                    withTimeout(5_000) { client.connect(DEVICE_ID, DEVICE_TOKEN) }
+                },
+            )
+        }
+    }
+
+    @Test
+    fun `classifies a network failure before upgrade as unavailable`() = runTest {
+        val unusedPort = ServerSocket(0).use { it.localPort }
+        val client = WebSocketRelayDeviceClient(
+            client = OkHttpClient(),
+            relayUrl = "http://127.0.0.1:$unusedPort",
+        )
+
+        val result = withContext(Dispatchers.IO) {
+            withTimeout(5_000) { client.connect(DEVICE_ID, DEVICE_TOKEN) }
+        }
+
+        assertTrue(result is RelayDeviceConnectionResult.Unavailable)
+        assertTrue((result as RelayDeviceConnectionResult.Unavailable).message?.isNotBlank() == true)
     }
 
     @Test

@@ -15,8 +15,14 @@ import dev.agentknock.relay.RelayDeviceFrame
 import dev.agentknock.relay.RelayExchangeState
 import dev.agentknock.relay.RelayMessageKind
 import dev.agentknock.relay.RelayMessageState
+import dev.agentknock.relay.RelayPushRegistrationState
+import dev.agentknock.relay.RelayApprovalReviewClient
+import dev.agentknock.relay.RelayApprovalReviewDecision
+import dev.agentknock.relay.RelayApprovalReviewResult
+import dev.agentknock.relay.ApprovalReviewRequest
 import dev.agentknock.storage.AgentknockDatabase
 import dev.agentknock.storage.audit.AuditRepository
+import dev.agentknock.storage.approval.AiReviewDecision
 import dev.agentknock.storage.crypto.AesGcmEncryption
 import dev.agentknock.storage.crypto.EncryptionKeyBacking
 import dev.agentknock.storage.crypto.EncryptionKeyStore
@@ -24,6 +30,9 @@ import dev.agentknock.storage.crypto.GeneratedEncryptionKey
 import dev.agentknock.storage.crypto.VaultKeyManager
 import dev.agentknock.storage.crypto.VaultKeyPurpose
 import dev.agentknock.storage.secret.CreateSecretResult
+import dev.agentknock.storage.secret.CreateEnvironmentVariableResult
+import dev.agentknock.storage.secret.SecretApprovalMode
+import dev.agentknock.storage.secret.SaveSecretResult
 import dev.agentknock.storage.secret.SecretRepository
 import dev.agentknock.storage.secret.SshKeyAlgorithm
 import dev.agentknock.storage.device.RelayDeviceCredentialSource
@@ -37,10 +46,21 @@ import java.util.Base64
 import javax.crypto.SecretKey
 import javax.crypto.spec.SecretKeySpec
 import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.CompletableDeferred
+import kotlinx.coroutines.CoroutineScope
+import kotlinx.coroutines.SupervisorJob
+import kotlinx.coroutines.async
+import kotlinx.coroutines.cancel
+import kotlinx.coroutines.delay
 import kotlinx.coroutines.channels.Channel
 import kotlinx.coroutines.channels.ReceiveChannel
 import kotlinx.coroutines.flow.first
+import kotlinx.coroutines.flow.filterNotNull
+import kotlinx.coroutines.flow.filter
 import kotlinx.coroutines.test.runTest
+import kotlinx.coroutines.withContext
+import kotlinx.coroutines.withTimeout
+import kotlinx.coroutines.withTimeoutOrNull
 import kotlinx.serialization.json.Json
 import kotlinx.serialization.json.JsonElement
 import org.bouncycastle.crypto.digests.SHA256Digest
@@ -65,7 +85,11 @@ class RequestRepositorySlotTest {
     private lateinit var repository: RequestRepository
     private lateinit var secrets: SecretRepository
     private lateinit var credentials: RelayDeviceCredentials
+    private lateinit var credentialSource: StaticCredentialSource
     private lateinit var protocolRandom: SwitchableSecureRandom
+    private lateinit var reviewScope: CoroutineScope
+    private lateinit var approvalReviewer: ControllableApprovalReviewer
+    private var synchronizationRequests = 0
     private var now = CLIENT_ID.timestamp()
 
     @Before
@@ -117,14 +141,21 @@ class RequestRepositorySlotTest {
         )
         protocolRandom = SwitchableSecureRandom()
         val audit = AuditRepository(database.auditDao(), currentTimeMillis = { now })
+        reviewScope = CoroutineScope(SupervisorJob() + Dispatchers.Unconfined)
+        approvalReviewer = ControllableApprovalReviewer()
+        credentialSource = StaticCredentialSource(credentials)
+        synchronizationRequests = 0
         repository = RequestRepository(
             database = database,
             dao = database.requestDao(),
-            deviceCredentials = StaticCredentialSource(credentials),
+            deviceCredentials = credentialSource,
             secrets = secrets,
+            approvalReviewer = approvalReviewer,
             relay = relay,
             keyManager = keyManager,
             encryption = encryption,
+            aiReviews = AiReviewCoordinator(reviewScope),
+            scheduleSynchronization = { synchronizationRequests += 1 },
             audit = audit,
             pairingProtocol = PairingProtocol(random = protocolRandom),
             currentTimeMillis = { now },
@@ -134,6 +165,7 @@ class RequestRepositorySlotTest {
 
     @After
     fun tearDown() {
+        reviewScope.cancel()
         database.close()
     }
 
@@ -575,6 +607,393 @@ class RequestRepositorySlotTest {
         assertEquals(stored.receivedAt, afterReplay.receivedAt)
         assertEquals(stored.responseJson, afterReplay.responseJson)
         assertNotNull(afterReplay.responseAcknowledgedAt)
+    }
+
+    @Test
+    fun suspendedAiReviewDoesNotBlockAcknowledgementAnotherEventOrDuplicateReplay() = runTest {
+        val clientPsk = establishActivePairing()
+        createAiEnvironmentSecret()
+        val token = ByteArray(32) { (0x20 + it).toByte() }
+        val request = pairedRequest(
+            requestId = AI_INVOCATION_REQUEST_ID,
+            clientPsk = clientPsk,
+            plaintext = aiInvocationPlaintext(token),
+        )
+        val first = connect(
+            requestEvent(AI_INVOCATION_REQUEST_ID, request),
+            RelayDeviceEvent.PushRegistration(RelayPushRegistrationState.REGISTERED),
+            RelayDeviceEvent.CaughtUp,
+        )
+
+        assertEquals(RequestSyncResult.Success, repository.sync())
+
+        val reviewing = checkNotNull(
+            database.requestDao().getRequestById(AI_INVOCATION_REQUEST_ID),
+        )
+        assertEquals(InboxRequestState.REVIEWING.storedName, reviewing.state)
+        assertNotNull(reviewing.requestAcknowledgedAt)
+        assertEquals(1, approvalReviewer.callCount)
+        assertEquals(
+            RelayPushRegistrationState.REGISTERED,
+            repository.pushRegistrationState.value,
+        )
+        assertTrue(
+            first.sentFrames.contains(
+                RelayDeviceFrame.Acknowledgement(
+                    CLIENT_ID,
+                    AI_INVOCATION_REQUEST_ID,
+                    RelayMessageKind.REQUEST,
+                ),
+            ),
+        )
+
+        connect(
+            relayState(AI_INVOCATION_REQUEST_ID),
+            requestEvent(AI_INVOCATION_REQUEST_ID, request),
+            RelayDeviceEvent.CaughtUp,
+        )
+        assertEquals(RequestSyncResult.Success, repository.sync())
+        assertEquals(1, approvalReviewer.callCount)
+        assertEquals(
+            InboxRequestState.REVIEWING.storedName,
+            database.requestDao().getRequestById(AI_INVOCATION_REQUEST_ID)?.state,
+        )
+
+        approvalReviewer.complete(
+            RelayApprovalReviewResult.Reviewed(
+                decision = RelayApprovalReviewDecision.ASK_USER,
+                explanation = "The request needs a human decision.",
+            ),
+        )
+        val reviewed = awaitAsynchronousWork {
+            repository.observeRequest(AI_INVOCATION_REQUEST_ID)
+                .filterNotNull()
+                .filter {
+                    it.state == InboxRequestState.ACTION_REQUIRED &&
+                        it.secretUse?.approvalEvaluation?.aiReview != null
+                }
+                .first()
+        }
+        assertEquals(
+            AiReviewDecision.ASK_USER,
+            reviewed.secretUse?.approvalEvaluation?.aiReview?.decision,
+        )
+        assertEquals(1, approvalReviewer.callCount)
+    }
+
+    @Test
+    fun aiReviewCompletionRevalidatesChangedApprovalSettings() = runTest {
+        val clientPsk = establishActivePairing()
+        val secretId = createAiEnvironmentSecret()
+        val token = ByteArray(32) { (0x21 + it).toByte() }
+        val request = pairedRequest(
+            requestId = AI_INVOCATION_REQUEST_ID,
+            clientPsk = clientPsk,
+            plaintext = aiInvocationPlaintext(token),
+        )
+        connect(
+            requestEvent(AI_INVOCATION_REQUEST_ID, request),
+            RelayDeviceEvent.CaughtUp,
+        )
+        assertEquals(RequestSyncResult.Success, repository.sync())
+        assertEquals(SaveSecretResult.SAVED, secrets.saveApprovalMode(secretId, SecretApprovalMode.ASK_ME))
+
+        approvalReviewer.complete(
+            RelayApprovalReviewResult.Reviewed(
+                decision = RelayApprovalReviewDecision.APPROVE,
+                explanation = "The original settings allow this request.",
+            ),
+        )
+        val reviewed = awaitAsynchronousWork {
+            repository.observeRequest(AI_INVOCATION_REQUEST_ID)
+                .filterNotNull()
+                .filter {
+                    it.state == InboxRequestState.ACTION_REQUIRED &&
+                        it.secretUse?.approvalEvaluation?.aiReview != null
+                }
+                .first()
+        }
+        assertNull(database.requestDao().getRequestById(AI_INVOCATION_REQUEST_ID)?.responseJson)
+        assertEquals(
+            AiReviewDecision.ASK_USER,
+            reviewed.secretUse?.approvalEvaluation?.aiReview?.decision,
+        )
+        assertTrue(
+            reviewed.secretUse?.approvalEvaluation?.aiReview?.explanation
+                ?.contains("changed during AI review") == true,
+        )
+    }
+
+    @Test
+    fun aiApprovalSchedulesAndDeliversItsDurableResponse() = runTest {
+        val clientPsk = establishActivePairing()
+        createAiEnvironmentSecret()
+        val request = pairedRequest(
+            requestId = AI_INVOCATION_REQUEST_ID,
+            clientPsk = clientPsk,
+            plaintext = aiInvocationPlaintext(ByteArray(32) { (0x22 + it).toByte() }),
+        )
+        connect(
+            requestEvent(AI_INVOCATION_REQUEST_ID, request),
+            RelayDeviceEvent.CaughtUp,
+        )
+        assertEquals(RequestSyncResult.Success, repository.sync())
+        val synchronizationsBeforeReview = synchronizationRequests
+
+        approvalReviewer.complete(
+            RelayApprovalReviewResult.Reviewed(
+                decision = RelayApprovalReviewDecision.APPROVE,
+                explanation = "The request follows the supplied instructions.",
+            ),
+        )
+        val stored = awaitAsynchronousWork {
+            database.requestDao().observeRequest(AI_INVOCATION_REQUEST_ID)
+                .filterNotNull()
+                .filter { it.responseJson != null }
+                .first()
+        }
+        val persistedResponse = Json.parseToJsonElement(checkNotNull(stored.responseJson))
+        awaitAsynchronousWork {
+            while (synchronizationRequests <= synchronizationsBeforeReview) delay(1)
+        }
+        assertTrue(synchronizationRequests > synchronizationsBeforeReview)
+        assertTrue(repository.hasPendingRelayWork())
+
+        val delivery = connect(
+            requestEvent(AI_INVOCATION_REQUEST_ID, request),
+            RelayDeviceEvent.Acknowledgement(
+                CLIENT_ID,
+                AI_INVOCATION_REQUEST_ID,
+                RelayMessageKind.RESPONSE,
+            ),
+            relayState(AI_INVOCATION_REQUEST_ID),
+            RelayDeviceEvent.CaughtUp,
+        )
+        assertEquals(RequestSyncResult.Success, repository.sync())
+        assertTrue(
+            delivery.sentFrames.contains(
+                RelayDeviceFrame.Response(
+                    CLIENT_ID,
+                    AI_INVOCATION_REQUEST_ID,
+                    persistedResponse,
+                ),
+            ),
+        )
+        assertNotNull(
+            database.requestDao().getRequestById(AI_INVOCATION_REQUEST_ID)
+                ?.responseAcknowledgedAt,
+        )
+    }
+
+    @Test
+    fun aiReviewEscalatesWhenClientInstructionsChange() = runTest {
+        val clientPsk = establishActivePairing()
+        createAiEnvironmentSecret()
+        val request = pairedRequest(
+            requestId = AI_INVOCATION_REQUEST_ID,
+            clientPsk = clientPsk,
+            plaintext = aiInvocationPlaintext(ByteArray(32) { (0x23 + it).toByte() }),
+        )
+        connect(
+            requestEvent(AI_INVOCATION_REQUEST_ID, request),
+            RelayDeviceEvent.CaughtUp,
+        )
+        assertEquals(RequestSyncResult.Success, repository.sync())
+        assertEquals(
+            ClientChangeResult.CHANGED,
+            repository.saveClientInstructions(
+                CLIENT_ID,
+                "Never deploy to production from this client.",
+            ),
+        )
+
+        approvalReviewer.complete(
+            RelayApprovalReviewResult.Reviewed(
+                decision = RelayApprovalReviewDecision.APPROVE,
+                explanation = "The original instructions allow the request.",
+            ),
+        )
+        val reviewed = awaitAsynchronousWork {
+            repository.observeRequest(AI_INVOCATION_REQUEST_ID)
+                .filterNotNull()
+                .filter {
+                    it.state == InboxRequestState.ACTION_REQUIRED &&
+                        it.secretUse?.approvalEvaluation?.aiReview != null
+                }
+                .first()
+        }
+        assertNull(database.requestDao().getRequestById(AI_INVOCATION_REQUEST_ID)?.responseJson)
+        assertEquals(
+            AiReviewDecision.ASK_USER,
+            reviewed.secretUse?.approvalEvaluation?.aiReview?.decision,
+        )
+        assertTrue(
+            reviewed.secretUse?.approvalEvaluation?.aiReview?.explanation
+                ?.contains("instructions") == true,
+        )
+    }
+
+    @Test
+    fun aiApprovalEscalatesWhenDeviceInstructionsChange() = runTest {
+        assertAiReviewEscalatesWhenDeviceInstructionsChange(
+            RelayApprovalReviewDecision.APPROVE,
+        )
+    }
+
+    @Test
+    fun aiDenialEscalatesWhenDeviceInstructionsChange() = runTest {
+        assertAiReviewEscalatesWhenDeviceInstructionsChange(
+            RelayApprovalReviewDecision.DENY,
+        )
+    }
+
+    private suspend fun assertAiReviewEscalatesWhenDeviceInstructionsChange(
+        decision: RelayApprovalReviewDecision,
+    ) {
+        val clientPsk = establishActivePairing()
+        createAiEnvironmentSecret()
+        val request = pairedRequest(
+            requestId = AI_INVOCATION_REQUEST_ID,
+            clientPsk = clientPsk,
+            plaintext = aiInvocationPlaintext(ByteArray(32) { (0x25 + it).toByte() }),
+        )
+        connect(
+            requestEvent(AI_INVOCATION_REQUEST_ID, request),
+            RelayDeviceEvent.CaughtUp,
+        )
+        assertEquals(RequestSyncResult.Success, repository.sync())
+        credentialSource.credentials = credentials.copy(
+            instructions = "Never use production credentials for experiments.",
+        )
+
+        approvalReviewer.complete(
+            RelayApprovalReviewResult.Reviewed(
+                decision = decision,
+                explanation = "The original device instructions determine this verdict.",
+            ),
+        )
+        val reviewed = awaitAsynchronousWork {
+            repository.observeRequest(AI_INVOCATION_REQUEST_ID)
+                .filterNotNull()
+                .filter {
+                    it.state == InboxRequestState.ACTION_REQUIRED &&
+                        it.secretUse?.approvalEvaluation?.aiReview != null
+                }
+                .first()
+        }
+
+        assertNull(database.requestDao().getRequestById(AI_INVOCATION_REQUEST_ID)?.responseJson)
+        assertEquals(
+            AiReviewDecision.ASK_USER,
+            reviewed.secretUse?.approvalEvaluation?.aiReview?.decision,
+        )
+        assertTrue(
+            reviewed.secretUse?.approvalEvaluation?.aiReview?.explanation
+                ?.contains("instructions") == true,
+        )
+    }
+
+    @Test
+    fun aiApprovalDeniesIfClientWasRevokedDuringReview() = runTest {
+        val clientPsk = establishActivePairing()
+        createAiEnvironmentSecret()
+        val request = pairedRequest(
+            requestId = AI_INVOCATION_REQUEST_ID,
+            clientPsk = clientPsk,
+            plaintext = aiInvocationPlaintext(ByteArray(32) { (0x24 + it).toByte() }),
+        )
+        connect(
+            requestEvent(AI_INVOCATION_REQUEST_ID, request),
+            RelayDeviceEvent.CaughtUp,
+        )
+        assertEquals(RequestSyncResult.Success, repository.sync())
+        assertEquals(
+            ClientChangeResult.CHANGED,
+            repository.setClientState(CLIENT_ID, RelayClientState.REVOKED),
+        )
+        val synchronizationsBeforeReview = synchronizationRequests
+
+        approvalReviewer.complete(
+            RelayApprovalReviewResult.Reviewed(
+                decision = RelayApprovalReviewDecision.APPROVE,
+                explanation = "The original client state allows the request.",
+            ),
+        )
+        val stored = awaitAsynchronousWork {
+            database.requestDao().observeRequest(AI_INVOCATION_REQUEST_ID)
+                .filterNotNull()
+                .filter { it.responseJson != null }
+                .first()
+        }
+        val secretUse = checkNotNull(
+            database.requestDao().getSecretUseRequest(AI_INVOCATION_REQUEST_ID),
+        )
+        assertEquals(SecretUseDecision.DENIED.storedName, secretUse.decision)
+        assertEquals(InboxRequestState.WAITING.storedName, stored.state)
+        assertTrue(synchronizationRequests > synchronizationsBeforeReview)
+    }
+
+    @Test
+    fun startupRecoveryEscalatesInterruptedReviewWithoutCallingReviewer() = runTest {
+        database.requestDao().insertRequest(
+            InboxRequestEntity(
+                id = INTERRUPTED_REVIEW_REQUEST_ID,
+                parentRequestId = null,
+                deviceIdentityId = DEVICE_IDENTITY_ID,
+                clientId = CLIENT_ID,
+                clientNameSnapshot = "Interrupted client",
+                clientSoftwareJson = null,
+                kind = "secret_use",
+                state = InboxRequestState.REVIEWING.storedName,
+                listed = true,
+                requestJson = "{}",
+                responseJson = null,
+                completionJson = null,
+                error = null,
+                receivedAt = now,
+                updatedAt = now,
+                completedAt = null,
+                requestAcknowledgedAt = now,
+                responseAcknowledgedAt = null,
+                completionAcknowledgedAt = null,
+            ),
+        )
+
+        now += 1
+        assertEquals(1, repository.recoverInterruptedAiReviews())
+        assertEquals(
+            InboxRequestState.ACTION_REQUIRED.storedName,
+            database.requestDao().getRequestById(INTERRUPTED_REVIEW_REQUEST_ID)?.state,
+        )
+        assertEquals(0, approvalReviewer.callCount)
+    }
+
+    @Test
+    fun runtimeResetHoldsTheRequestMutationBarrierAcrossStorageClear() = runTest {
+        establishActivePairing()
+        val clearStarted = CompletableDeferred<Unit>()
+        val finishClear = CompletableDeferred<Unit>()
+        val reset = async(Dispatchers.Default) {
+            repository.resetRuntimeState {
+                clearStarted.complete(Unit)
+                finishClear.await()
+                database.resetDao().clearAllData()
+            }
+        }
+        clearStarted.await()
+        val mutation = async(Dispatchers.Default) {
+            repository.saveClientInstructions(CLIENT_ID, "A stale post-reset instruction")
+        }
+
+        val prematureResult = withContext(Dispatchers.Default.limitedParallelism(1)) {
+            withTimeoutOrNull(250) { mutation.await() }
+        }
+        assertNull(prematureResult)
+        finishClear.complete(Unit)
+        reset.await()
+
+        assertEquals(ClientChangeResult.NOT_FOUND, mutation.await())
+        assertTrue(database.auditDao().observeEvents().first().isEmpty())
     }
 
     @Test
@@ -1020,6 +1439,31 @@ class RequestRepositorySlotTest {
         )
     }
 
+    private suspend fun createAiEnvironmentSecret(): String {
+        val created = secrets.createEnvironmentSecret("deployment", "Deployment credentials")
+        val secretId = (created as CreateSecretResult.Created).id
+        assertTrue(
+            secrets.createEnvironmentVariable(
+                secretId = secretId,
+                name = "DEPLOY_TOKEN",
+                value = "secret-token",
+                sensitive = true,
+                notes = "",
+            ) is CreateEnvironmentVariableResult.Created,
+        )
+        assertEquals(
+            SaveSecretResult.SAVED,
+            secrets.saveApprovalMode(secretId, SecretApprovalMode.ASK_AI),
+        )
+        return secretId
+    }
+
+    private suspend fun <T> awaitAsynchronousWork(block: suspend () -> T): T = withContext(
+        Dispatchers.Default.limitedParallelism(1),
+    ) {
+        withTimeout(5_000) { block() }
+    }
+
     private fun connect(vararg events: RelayDeviceEvent): TestRelayDeviceConnection =
         TestRelayDeviceConnection(events.toList()).also(relay::enqueue)
 
@@ -1080,6 +1524,10 @@ class RequestRepositorySlotTest {
 
     private fun invocationPlaintext(token: ByteArray): ByteArray =
         """{${clientSoftwareFields()},"method":"Invocation","secrets":{"git-signing":{}},"operation":{"type":"exec","command":"git","arguments":["commit"],"working_directory":"/tmp/project","executable_path":"/usr/bin/git","executable_mode":"BINARY","stdin":"TERMINAL","stdout":"TERMINAL","stderr":"TERMINAL"},"launcher_chain":[],"invocation_token":"${BASE64.encodeToString(token)}"}"""
+            .encodeToByteArray()
+
+    private fun aiInvocationPlaintext(token: ByteArray): ByteArray =
+        """{${clientSoftwareFields()},"method":"Invocation","secrets":{"deployment":{}},"operation":{"type":"exec","command":"deploy","arguments":["production"],"working_directory":"/tmp/project","executable_path":"/usr/bin/deploy","executable_mode":"BINARY","stdin":"TERMINAL","stdout":"TERMINAL","stderr":"TERMINAL"},"launcher_chain":[],"invocation_token":"${BASE64.encodeToString(token)}"}"""
             .encodeToByteArray()
 
     private fun gitSignPlaintext(token: ByteArray): ByteArray =
@@ -1232,6 +1680,8 @@ class RequestRepositorySlotTest {
         const val UNSUPPORTED_REQUEST_ID = "01K2EP16NWNAGJYF8J1Q2V6P42"
         const val REMOVE_REQUEST_ID = "01K2EP16NWNAGJYF8J1Q2V6P43"
         const val UPLOAD_REQUEST_ID = "01K2EP16NWNAGJYF8J1Q2V6P44"
+        const val AI_INVOCATION_REQUEST_ID = "01K2EP16NWNAGJYF8J1Q2V6P45"
+        const val INTERRUPTED_REVIEW_REQUEST_ID = "01K2EP16NWNAGJYF8J1Q2V6P46"
         const val ULID_ALPHABET = "0123456789ABCDEFGHJKMNPQRSTVWXYZ"
         val EMPTY = ByteArray(0)
         val VERSION_INFO = "agentknock-v1".encodeToByteArray() + ByteArray(3)
@@ -1262,7 +1712,7 @@ private data class PairedExchange(
 )
 
 private class StaticCredentialSource(
-    private val credentials: RelayDeviceCredentials,
+    var credentials: RelayDeviceCredentials,
 ) : RelayDeviceCredentialSource {
     override suspend fun activeDeviceCredentials() =
         RelayDeviceCredentialsResult.Available(credentials)
@@ -1280,6 +1730,26 @@ private class QueuedRelayDeviceClient : RelayDeviceClient {
 
     override suspend fun connect(deviceId: String, deviceToken: String) =
         RelayDeviceConnectionResult.Connected(connections.removeFirst())
+}
+
+private class ControllableApprovalReviewer : RelayApprovalReviewClient {
+    private val results = Channel<RelayApprovalReviewResult>(Channel.UNLIMITED)
+
+    var callCount: Int = 0
+        private set
+
+    override suspend fun review(
+        deviceId: String,
+        deviceToken: String,
+        request: ApprovalReviewRequest,
+    ): RelayApprovalReviewResult {
+        callCount += 1
+        return results.receive()
+    }
+
+    fun complete(result: RelayApprovalReviewResult) {
+        results.trySend(result).getOrThrow()
+    }
 }
 
 private class TestRelayDeviceConnection(events: List<RelayDeviceEvent>) : RelayDeviceConnection {

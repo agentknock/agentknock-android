@@ -8,6 +8,7 @@ import dev.agentknock.storage.FactoryResetResult
 import dev.agentknock.storage.crypto.VaultProtection
 import dev.agentknock.storage.audit.AuditEvent
 import dev.agentknock.storage.device.DeviceConfiguration
+import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.ExperimentalCoroutinesApi
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.SharingStarted
@@ -24,11 +25,19 @@ internal data class DataCounts(
     val clients: Int = 0,
 )
 
+internal sealed interface FactoryResetUiState {
+    data object Idle : FactoryResetUiState
+    data object Working : FactoryResetUiState
+    data class Finished(val result: FactoryResetResult) : FactoryResetUiState
+    data object Failed : FactoryResetUiState
+}
+
 @OptIn(ExperimentalCoroutinesApi::class)
 internal class SettingsViewModel(application: Application) : AndroidViewModel(application) {
     private val container = (application as AgentknockApplication).container
     private val selectedAuditId = MutableStateFlow<Long?>(null)
     private val _vaultProtection = MutableStateFlow<VaultProtection?>(null)
+    private val _factoryReset = MutableStateFlow<FactoryResetUiState>(FactoryResetUiState.Idle)
 
     val configuration: StateFlow<DeviceConfiguration?> = container.deviceIdentity
         .observeConfiguration()
@@ -53,6 +62,7 @@ internal class SettingsViewModel(application: Application) : AndroidViewModel(ap
     }.stateIn(viewModelScope, SharingStarted.Eagerly, null)
     val pushRegistrationState = container.requests.pushRegistrationState
     val vaultProtection: StateFlow<VaultProtection?> = _vaultProtection.asStateFlow()
+    val factoryReset: StateFlow<FactoryResetUiState> = _factoryReset.asStateFlow()
 
     init {
         viewModelScope.launch {
@@ -65,13 +75,29 @@ internal class SettingsViewModel(application: Application) : AndroidViewModel(ap
         selectedAuditId.value = id
     }
 
-    suspend fun factoryReset(localOnly: Boolean): FactoryResetResult {
-        val result = if (localOnly) {
-            container.factoryReset.resetLocalOnly()
-        } else {
-            container.factoryReset.reset()
+    fun startFactoryReset(localOnly: Boolean) {
+        if (_factoryReset.value == FactoryResetUiState.Working) return
+        _factoryReset.value = FactoryResetUiState.Working
+        viewModelScope.launch {
+            _factoryReset.value = try {
+                FactoryResetUiState.Finished(
+                    if (localOnly) {
+                        container.factoryReset.resetLocalOnly()
+                    } else {
+                        container.factoryReset.reset()
+                    },
+                )
+            } catch (cancelled: CancellationException) {
+                throw cancelled
+            } catch (_: Exception) {
+                FactoryResetUiState.Failed
+            }
         }
-        if (result == FactoryResetResult.Reset) container.authentication.reset()
-        return result
+    }
+
+    fun consumeFactoryResetResult() {
+        if (_factoryReset.value != FactoryResetUiState.Working) {
+            _factoryReset.value = FactoryResetUiState.Idle
+        }
     }
 }

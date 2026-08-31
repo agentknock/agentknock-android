@@ -110,12 +110,18 @@ private enum class SettingsPage {
 @Composable
 internal fun SettingsScreen(
     onClose: () -> Unit,
+    authenticate: (
+        title: String,
+        onSuccess: () -> Unit,
+        onError: (String) -> Unit,
+    ) -> Unit,
     authenticationMode: DeviceAuthenticationMode,
     onAuthenticationModeChange: (DeviceAuthenticationMode, (String) -> Unit) -> Unit,
     notificationStateGeneration: Long,
     requestNotificationPermission: () -> Unit,
     openPlanInitially: Boolean,
     onPlanOpened: () -> Unit,
+    onFactoryResetCompleted: () -> Unit,
     subscriptionViewModel: SubscriptionViewModel,
     viewModel: SettingsViewModel = viewModel(),
 ) {
@@ -126,6 +132,7 @@ internal fun SettingsScreen(
     val selectedAudit by viewModel.selectedAuditEvent.collectAsStateWithLifecycle()
     val pushState by viewModel.pushRegistrationState.collectAsStateWithLifecycle()
     val protection by viewModel.vaultProtection.collectAsStateWithLifecycle()
+    val factoryReset by viewModel.factoryReset.collectAsStateWithLifecycle()
     val subscription by subscriptionViewModel.state.collectAsStateWithLifecycle()
     val snackbar = remember { SnackbarHostState() }
     val scope = rememberCoroutineScope()
@@ -146,7 +153,9 @@ internal fun SettingsScreen(
             } else {
                 page = SettingsPage.OVERVIEW
             }
-            SettingsPage.FACTORY_RESET -> page = SettingsPage.SECURITY_BACKUP
+            SettingsPage.FACTORY_RESET -> if (factoryReset != FactoryResetUiState.Working) {
+                page = SettingsPage.SECURITY_BACKUP
+            }
             else -> page = SettingsPage.OVERVIEW
         }
     }
@@ -209,7 +218,16 @@ internal fun SettingsScreen(
                 )
                 SettingsPage.FACTORY_RESET -> FactoryReset(
                     onBack = ::back,
-                    reset = viewModel::factoryReset,
+                    state = factoryReset,
+                    startReset = { localOnly ->
+                        authenticate(
+                            "Confirm factory reset",
+                            { viewModel.startFactoryReset(localOnly) },
+                            { message -> scope.launch { snackbar.showSnackbar(message) } },
+                        )
+                    },
+                    consumeResult = viewModel::consumeFactoryResetResult,
+                    onReset = onFactoryResetCompleted,
                     report = { message -> scope.launch { snackbar.showSnackbar(message) } },
                     modifier = modifier,
                 )
@@ -676,47 +694,57 @@ private fun About(
 @Composable
 private fun FactoryReset(
     onBack: () -> Unit,
-    reset: suspend (Boolean) -> FactoryResetResult,
+    state: FactoryResetUiState,
+    startReset: (Boolean) -> Unit,
+    consumeResult: () -> Unit,
+    onReset: () -> Unit,
     report: (String) -> Unit,
     modifier: Modifier,
 ) {
     var phrase by rememberSaveable { mutableStateOf("") }
-    var working by remember { mutableStateOf(false) }
-    var allowLocalOnly by remember { mutableStateOf(false) }
-    val scope = rememberCoroutineScope()
+    var allowLocalOnly by rememberSaveable { mutableStateOf(false) }
+    val working = state == FactoryResetUiState.Working
 
-    fun start(localOnly: Boolean) {
-        scope.launch {
-            working = true
-            when (val result = reset(localOnly)) {
-                FactoryResetResult.Reset -> Unit
-                FactoryResetResult.NoDevice -> {
-                    allowLocalOnly = true
-                    report("The relay device could not be found. Nothing was erased.")
-                }
-                is FactoryResetResult.RemoteRejected -> {
-                    allowLocalOnly = true
-                    report("The relay rejected deletion. Nothing was erased.")
-                }
-                is FactoryResetResult.RemoteUnavailable -> {
-                    allowLocalOnly = true
-                    report("The relay is unavailable. Nothing was erased.")
-                }
-                FactoryResetResult.InvalidRemoteResponse -> {
-                    allowLocalOnly = true
-                    report("Relay deletion could not be confirmed. Nothing was erased.")
-                }
-                FactoryResetResult.DeviceCredentialsUnavailable -> {
-                    allowLocalOnly = true
-                    report("Relay authentication is unavailable. Nothing was erased.")
+    LaunchedEffect(state) {
+        when (state) {
+            FactoryResetUiState.Idle,
+            FactoryResetUiState.Working,
+            -> Unit
+            is FactoryResetUiState.Finished -> {
+                consumeResult()
+                when (state.result) {
+                    FactoryResetResult.Reset -> onReset()
+                    FactoryResetResult.NoDevice -> {
+                        allowLocalOnly = true
+                        report("No active relay device is available. Nothing was erased.")
+                    }
+                    is FactoryResetResult.RemoteRejected -> {
+                        allowLocalOnly = true
+                        report("The relay rejected deletion. Nothing was erased.")
+                    }
+                    is FactoryResetResult.RemoteUnavailable -> {
+                        allowLocalOnly = true
+                        report("The relay is unavailable. Nothing was erased.")
+                    }
+                    FactoryResetResult.InvalidRemoteResponse -> {
+                        allowLocalOnly = true
+                        report("Relay deletion could not be confirmed. Nothing was erased.")
+                    }
+                    FactoryResetResult.DeviceCredentialsUnavailable -> {
+                        allowLocalOnly = true
+                        report("Relay authentication is unavailable. Nothing was erased.")
+                    }
                 }
             }
-            working = false
+            FactoryResetUiState.Failed -> {
+                consumeResult()
+                report("Factory reset did not complete. Reopen Agentknock and check its state before trying again.")
+            }
         }
     }
 
     Column(modifier) {
-        PageTopBar("Factory reset Agentknock", onBack)
+        PageTopBar("Factory reset Agentknock", onBack = { if (!working) onBack() })
         Column(
             Modifier.verticalScroll(rememberScrollState()).imePadding().padding(20.dp),
             verticalArrangement = Arrangement.spacedBy(18.dp),
@@ -744,6 +772,7 @@ private fun FactoryReset(
             OutlinedTextField(
                 value = phrase,
                 onValueChange = { phrase = it },
+                enabled = !working,
                 label = { Text("Confirmation phrase") },
                 supportingText = { Text("Enter the phrase exactly as shown, including spaces.") },
                 modifier = Modifier.fillMaxWidth(),
@@ -755,7 +784,7 @@ private fun FactoryReset(
                 ),
             )
             Button(
-                onClick = { start(false) },
+                onClick = { startReset(false) },
                 enabled = phrase == "RESET AGENTKNOCK" && !working,
                 modifier = Modifier.fillMaxWidth(),
                 colors = ButtonDefaults.buttonColors(
@@ -775,7 +804,7 @@ private fun FactoryReset(
                     color = MaterialTheme.colorScheme.error,
                 )
                 OutlinedButton(
-                    onClick = { start(true) },
+                    onClick = { startReset(true) },
                     enabled = !working,
                     modifier = Modifier.fillMaxWidth(),
                 ) { Text("Reset this app anyway", color = MaterialTheme.colorScheme.error) }

@@ -118,6 +118,7 @@ internal class DeviceIdentityRepository(
     private val keyManager: VaultKeyManager,
     private val encryption: AesGcmEncryption,
     private val relay: RelayClaimClient,
+    private val deviceOperations: DeviceOperationGate,
     private val audit: AuditSink = NoOpAuditSink,
     private val newId: () -> String = { UUID.randomUUID().toString() },
     private val currentTimeMillis: () -> Long = System::currentTimeMillis,
@@ -156,7 +157,11 @@ internal class DeviceIdentityRepository(
         )
     }
 
-    suspend fun stageAndClaim(address: String): ClaimPairingAddressResult {
+    suspend fun stageAndClaim(address: String): ClaimPairingAddressResult = deviceOperations.run {
+        stageAndClaimLocked(address)
+    }
+
+    private suspend fun stageAndClaimLocked(address: String): ClaimPairingAddressResult {
         require(DeviceProtocol.validPairingAddress(address)) { "Invalid pairing address" }
         val active = dao.getIdentity(DeviceIdentityRole.ACTIVE.storedName)
         if (active?.address == address) {
@@ -174,7 +179,7 @@ internal class DeviceIdentityRepository(
                     ) == 1,
                 )
             }
-            return claimCandidate()
+            return claimCandidateLocked()
         }
 
         val device = if (active == null) {
@@ -194,7 +199,7 @@ internal class DeviceIdentityRepository(
             device = device,
             settings = active,
         )
-        return claimCandidate()
+        return claimCandidateLocked()
     }
 
     private suspend fun stageCandidate(
@@ -237,7 +242,11 @@ internal class DeviceIdentityRepository(
         return identity
     }
 
-    suspend fun claimCandidate(): ClaimPairingAddressResult {
+    suspend fun claimCandidate(): ClaimPairingAddressResult = deviceOperations.run {
+        claimCandidateLocked()
+    }
+
+    private suspend fun claimCandidateLocked(): ClaimPairingAddressResult {
         var candidate = dao.getIdentity(DeviceIdentityRole.CANDIDATE.storedName)
             ?: return ClaimPairingAddressResult.NoCandidate
         val previous = dao.getIdentity(DeviceIdentityRole.ACTIVE.storedName)
@@ -345,11 +354,11 @@ internal class DeviceIdentityRepository(
         }
     }
 
-    suspend fun discardCandidate() {
+    suspend fun discardCandidate() = deviceOperations.run {
         dao.deleteIdentity(DeviceIdentityRole.CANDIDATE.storedName)
     }
 
-    suspend fun saveInstructions(instructions: String): Boolean {
+    suspend fun saveInstructions(instructions: String): Boolean = deviceOperations.run {
         val normalized = instructions.trim()
         val updated = dao.updateActiveInstructions(
             activeRole = DeviceIdentityRole.ACTIVE.storedName,
@@ -363,7 +372,7 @@ internal class DeviceIdentityRepository(
                 ),
             )
         }
-        return updated
+        updated
     }
 
     override suspend fun activeDeviceCredentials(): RelayDeviceCredentialsResult {

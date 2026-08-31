@@ -542,15 +542,17 @@ internal data class AuthorizationPolicyCommitment(
     val temporaryAccessExpiresAt: Long?,
 )
 
-internal data class AuthorizationDeviceInstructionsCommitment(
+internal data class AuthorizationInstructionsCommitment(
     val deviceIdentityId: String,
-    val instructions: String,
+    val deviceInstructions: String,
+    val clientId: String,
+    val clientInstructions: String,
 )
 
 internal data class AuthorizationCommitment(
     val secretRevisions: Map<String, Long>,
     val policies: Map<String, AuthorizationPolicyCommitment>,
-    val deviceInstructions: AuthorizationDeviceInstructionsCommitment? = null,
+    val instructions: AuthorizationInstructionsCommitment? = null,
 )
 
 internal enum class ConditionalRequestUpdate {
@@ -671,6 +673,28 @@ internal interface RequestDao {
 
     @Query("SELECT * FROM inbox_requests WHERE id = :id")
     suspend fun getRequestById(id: String): InboxRequestEntity?
+
+    @Query(
+        """
+        UPDATE inbox_requests
+        SET state = 'action_required', updated_at = MAX(updated_at, :recoveredAt)
+        WHERE state = 'reviewing'
+        """,
+    )
+    suspend fun recoverInterruptedAiReviews(recoveredAt: Long): Int
+
+    @Query(
+        """
+        UPDATE inbox_requests
+        SET state = 'action_required', updated_at = MAX(updated_at, :recoveredAt)
+        WHERE id = :requestId AND request_json = :requestJson AND state = 'reviewing'
+        """,
+    )
+    suspend fun recoverInterruptedAiReview(
+        requestId: String,
+        requestJson: String,
+        recoveredAt: Long,
+    ): Int
 
     @Query("SELECT EXISTS(SELECT 1 FROM device_identities WHERE id = :id AND role = 'active')")
     suspend fun isActiveIdentity(id: String): Boolean
@@ -1503,10 +1527,12 @@ internal interface RequestDao {
         ) {
             return false
         }
-        authorization.deviceInstructions?.let { expected ->
+        authorization.instructions?.let { expected ->
             if (
                 getAuthorizationDeviceInstructions(expected.deviceIdentityId) !=
-                expected.instructions
+                expected.deviceInstructions ||
+                expected.clientId != clientId ||
+                client.instructions != expected.clientInstructions
             ) {
                 return false
             }

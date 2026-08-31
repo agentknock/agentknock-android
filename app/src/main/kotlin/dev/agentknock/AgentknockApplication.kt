@@ -7,8 +7,11 @@ import com.google.firebase.messaging.FirebaseMessaging
 import dev.agentknock.network.AgentknockUserAgentInterceptor
 import dev.agentknock.push.PushRegistrationRepository
 import dev.agentknock.push.RequestNotifications
+import dev.agentknock.push.PushSynchronizationWorker
+import dev.agentknock.push.RequestNotificationCoordinator
 import dev.agentknock.storage.AgentknockDatabase
-import dev.agentknock.storage.FactoryResetRepository
+import dev.agentknock.storage.FactoryResetCoordinator
+import dev.agentknock.storage.LocalStorageInitializer
 import dev.agentknock.storage.audit.AuditRepository
 import dev.agentknock.storage.crypto.AesGcmEncryption
 import dev.agentknock.storage.crypto.AndroidEncryptionKeyStore
@@ -23,16 +26,17 @@ import dev.agentknock.relay.RelayHttpTransport
 import dev.agentknock.relay.WebSocketRelayDeviceClient
 import dev.agentknock.storage.request.RequestRepository
 import dev.agentknock.storage.request.RequestConnectionManager
+import dev.agentknock.storage.request.AiReviewCoordinator
 import dev.agentknock.storage.device.DeviceIdentityRepository
 import dev.agentknock.storage.device.DeviceManagementRepository
+import dev.agentknock.storage.device.DeviceOperationGate
 import dev.agentknock.subscription.SubscriptionRepository
 import dev.agentknock.ui.auth.AuthenticationSession
 import kotlinx.coroutines.CoroutineScope
-import kotlinx.coroutines.CoroutineStart
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.SupervisorJob
-import kotlinx.coroutines.async
 import kotlinx.coroutines.launch
+import kotlinx.coroutines.flow.collect
 import okhttp3.OkHttpClient
 import java.io.File
 import java.util.concurrent.TimeUnit
@@ -43,9 +47,11 @@ class AgentknockApplication : Application() {
 
     override fun onCreate() {
         super.onCreate()
-        container = ApplicationContainer(this)
+        val createdContainer = ApplicationContainer(this)
+        container = createdContainer
         RequestNotifications.createChannel(this)
-        ProcessLifecycleOwner.get().lifecycle.addObserver(container.requestConnection)
+        ProcessLifecycleOwner.get().lifecycle.addObserver(createdContainer.requestConnection)
+        createdContainer.start()
     }
 }
 
@@ -69,23 +75,8 @@ internal class ApplicationContainer(application: Application) {
         .build()
     private val applicationScope = CoroutineScope(SupervisorJob() + Dispatchers.IO)
     private val relayHttp = RelayHttpTransport(httpClient)
-
-    // Every future worker and messaging entry point must await this before using local state.
-    val localStorage = applicationScope.async(start = CoroutineStart.DEFAULT) {
-        vaultKeyManager.initialize()
-        val temporaryAccessMarker = application.noBackupFilesDir.resolve(
-            "temporary_access_initialized_v1",
-        )
-        initializeTemporaryAccessStorage(
-            marker = temporaryAccessMarker,
-            now = System.currentTimeMillis(),
-            clearAll = { database.secretDao().deleteAllTemporaryAccessGrants() },
-            clearExpired = { now ->
-                database.secretDao().deleteExpiredTemporaryAccessGrants(now)
-            },
-        )
-        database.requestDao().discardDecidedSecretUploadValues()
-    }
+    private val deviceOperations = DeviceOperationGate()
+    private var scheduleRequestSynchronization: () -> Unit
 
     val audit = AuditRepository(database.auditDao())
 
@@ -102,6 +93,7 @@ internal class ApplicationContainer(application: Application) {
         encryption = encryption,
         relay = HttpRelayClaimClient(relayHttp),
         audit = audit,
+        deviceOperations = deviceOperations,
     )
 
     val pushRegistration = PushRegistrationRepository(
@@ -119,9 +111,12 @@ internal class ApplicationContainer(application: Application) {
         deviceAuthorization = deviceIdentity,
         relay = HttpRelayDeviceManagementClient(relayHttp),
         audit = audit,
+        deviceOperations = deviceOperations,
     )
 
-    val requests = RequestRepository(
+    private val aiReviews = AiReviewCoordinator(applicationScope)
+
+    val requests: RequestRepository = RequestRepository(
         database = database,
         dao = database.requestDao(),
         deviceCredentials = deviceIdentity,
@@ -132,6 +127,8 @@ internal class ApplicationContainer(application: Application) {
         relay = WebSocketRelayDeviceClient(httpClient),
         keyManager = vaultKeyManager,
         encryption = encryption,
+        aiReviews = aiReviews,
+        scheduleSynchronization = { scheduleRequestSynchronization() },
         audit = audit,
         requestPushRegistration = {
             FirebaseMessaging.getInstance().register().addOnFailureListener { failure ->
@@ -140,35 +137,124 @@ internal class ApplicationContainer(application: Application) {
         },
     )
 
-    val requestConnection = RequestConnectionManager(
+    val requestNotifications = RequestNotificationCoordinator(
         scope = applicationScope,
+        currentRequests = requests::pendingNotifications,
+        displayRequests = { RequestNotifications.showRequests(application, it) },
+        displayWake = { RequestNotifications.showWake(application) },
+        clear = { RequestNotifications.clear(application) },
+    )
+
+    // Every worker, UI mutation, and connection entry point awaits this same initialization.
+    // Recovering REVIEWING here is race-free: no relay synchronization can begin before storage
+    // is ready, and process-local review jobs do not survive application creation.
+    val localStorage = LocalStorageInitializer(applicationScope) {
+        initializeLocalStorage(application)
+    }
+
+    private suspend fun initializeLocalStorage(application: Application) {
+        vaultKeyManager.initialize()
+        initializeTemporaryAccessStorage(
+            marker = application.noBackupFilesDir.resolve("temporary_access_initialized_v1"),
+            now = System.currentTimeMillis(),
+            clearAll = { database.secretDao().deleteAllTemporaryAccessGrants() },
+            clearExpired = { now -> database.secretDao().deleteExpiredTemporaryAccessGrants(now) },
+        )
+        database.requestDao().discardDecidedSecretUploadValues()
+        requests.recoverInterruptedAiReviews()
+        if (requests.hasPendingRelayWork()) {
+            requestConnection.requestSynchronization()
+        }
+    }
+
+    val requestConnection: RequestConnectionManager = RequestConnectionManager(
+        scope = applicationScope,
+        synchronizeOnce = {
+            localStorage.await()
+            requests.sync()
+        },
         listen = { onCaughtUp ->
             localStorage.await()
             requests.listen(
                 onCaughtUp = {
                     onCaughtUp()
                     applicationScope.launch {
-                        RequestNotifications.showRequests(
-                            application,
-                            requests.pendingNotifications(),
-                        )
+                        requestNotifications.refresh()
                     }
                 },
                 onInboxChanged = {
-                    RequestNotifications.showRequests(
-                        application,
-                        requests.pendingNotifications(),
-                    )
+                    requestNotifications.refresh()
                 },
             )
         },
+        scheduleBackgroundSynchronization = {
+            PushSynchronizationWorker.enqueue(application)
+        },
     )
 
-    val factoryReset = FactoryResetRepository(
-        database = database,
-        encryptionKeys = vaultKeyManager,
-        deviceManagement = deviceManagement,
+    init {
+        scheduleRequestSynchronization = requestConnection::requestSynchronization
+    }
+
+    fun start() {
+        check(!started) { "The application container was already started" }
+        started = true
+        localStorage.start()
+        applicationScope.launch {
+            requests.inboxChanges.collect {
+                requestNotifications.refresh()
+            }
+        }
+    }
+
+    val factoryReset = FactoryResetCoordinator(
+        deleteRemoteDevice = deviceManagement::deleteRemoteDevice,
+        awaitReady = localStorage::await,
+        awaitReadyForRecovery = localStorage::awaitSettled,
+        pauseRuntime = {
+            requestNotifications.pauseAndClear()
+            requestConnection.pauseAndJoin()
+            aiReviews.pauseAndCancel()
+        },
+        recoverInterruptedWork = { requests.recoverInterruptedAiReviews() },
+        clearLocalState = { markIrreversiblyCleared ->
+            var roomCleared = false
+            try {
+                requests.resetRuntimeState {
+                    try {
+                        vaultKeyManager.erase(
+                            clearData = {
+                                database.resetDao().clearAllData()
+                                roomCleared = true
+                                markIrreversiblyCleared()
+                            },
+                            afterKeyDeletion = {
+                                // Room reclaims deleted pages before fresh vault metadata exists.
+                                database.clearAllTables()
+                            },
+                        )
+                    } catch (failure: Throwable) {
+                        if (!roomCleared) throw failure
+                        Log.e("Agentknock", "Post-reset cleanup was incomplete", failure)
+                    }
+                }
+            } finally {
+                if (roomCleared) {
+                    requestConnection.resetRuntimeState()
+                    authentication.reset()
+                }
+            }
+        },
+        resumeRuntime = { localStateCleared ->
+            if (localStateCleared) localStorage.restart()
+            requestNotifications.resume(refresh = !localStateCleared)
+            aiReviews.resume()
+            requestConnection.resume()
+        },
+        deviceOperations = deviceOperations,
     )
+
+    private var started = false
 }
 
 internal fun approvalReviewHttpClient(base: OkHttpClient): OkHttpClient = base.newBuilder()

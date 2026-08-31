@@ -170,6 +170,7 @@ class DeviceIdentityRepositoryTest {
             keyManager = restoredKeyManager,
             encryption = AesGcmEncryption(restoredKeyStore),
             relay = fixture.relay,
+            deviceOperations = DeviceOperationGate(),
             newId = { "restored-candidate" },
             currentTimeMillis = { 10_001L },
             cryptographyDispatcher = UnconfinedTestDispatcher(testScheduler),
@@ -323,6 +324,7 @@ class DeviceIdentityRepositoryTest {
             keyManager = replacementManager,
             encryption = AesGcmEncryption(replacementKeys),
             relay = fixture.relay,
+            deviceOperations = DeviceOperationGate(),
             cryptographyDispatcher = UnconfinedTestDispatcher(testScheduler),
         )
 
@@ -353,6 +355,7 @@ class DeviceIdentityRepositoryTest {
             keyManager = replacementManager,
             encryption = AesGcmEncryption(replacementKeys),
             relay = fixture.relay,
+            deviceOperations = DeviceOperationGate(),
             currentTimeMillis = { 1_000L },
             cryptographyDispatcher = UnconfinedTestDispatcher(testScheduler),
         )
@@ -401,6 +404,7 @@ class DeviceIdentityRepositoryTest {
             keyManager = keyManager,
             encryption = AesGcmEncryption(keyStore),
             relay = relay,
+            deviceOperations = DeviceOperationGate(),
             newId = { "id-${++id}" },
             currentTimeMillis = { ++time },
             cryptographyDispatcher = dispatcher,

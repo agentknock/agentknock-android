@@ -117,9 +117,14 @@ class MainActivity : FragmentActivity() {
                     consumeSubscriptionNavigation = navigation::consumeSubscription,
                     notificationStateGeneration = notificationStateGeneration,
                     requestNotificationPermission = ::requestNotificationPermission,
+                    onFactoryResetCompleted = ::restartAfterFactoryReset,
                 )
             }
         }
+    }
+
+    private fun restartAfterFactoryReset() {
+        startActivity(Intent.makeRestartActivityTask(componentName))
     }
 
     override fun onResume() {

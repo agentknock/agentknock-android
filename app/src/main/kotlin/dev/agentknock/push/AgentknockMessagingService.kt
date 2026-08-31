@@ -51,17 +51,16 @@ class AgentknockMessagingService : FirebaseMessagingService() {
     override fun onMessageReceived(message: RemoteMessage) {
         if (message.data["type"] != WAKE_MESSAGE_TYPE) return
 
-        if (
+        val foreground =
             ProcessLifecycleOwner.get().lifecycle.currentState.isAtLeast(
                 Lifecycle.State.STARTED,
             )
-        ) {
-            // The foreground websocket already receives this request. Restarting it here can
-            // cancel work that the websocket started, including an in-flight AI review.
-            return
-        }
-        RequestNotifications.showWake(this)
-        PushSynchronizationWorker.enqueue(this)
+        val container = (application as AgentknockApplication).container
+        if (!foreground) container.requestNotifications.showWake()
+        // Usually the foreground socket already covers the wake. Announcing it is still required:
+        // a visible session may have stopped on a terminal device result and needs new work to
+        // make it eligible to connect again.
+        container.requestConnection.requestSynchronization()
     }
 }
 
@@ -130,21 +129,28 @@ class PushSynchronizationWorker(
     override suspend fun doWork(): Result {
         val container = (applicationContext as AgentknockApplication).container
         container.localStorage.await()
-        return when (container.requests.sync()) {
-            RequestSyncResult.Success,
-            RequestSyncResult.NoDevice,
-            RequestSyncResult.DeviceCredentialsUnavailable,
-            RequestSyncResult.DeviceCredentialsCorrupted,
-            RequestSyncResult.UnsupportedDeviceCredentialEncryption,
-            -> {
-                RequestNotifications.showRequests(
-                    applicationContext,
-                    container.requests.pendingNotifications(),
-                )
-                Result.success()
+        return when (val synchronization = container.requestConnection.synchronizeOnce()) {
+            dev.agentknock.storage.request.OneShotSynchronizationResult.Covered -> Result.success()
+            is dev.agentknock.storage.request.OneShotSynchronizationResult.Completed -> when (
+                synchronization.result
+            ) {
+                RequestSyncResult.Success,
+                RequestSyncResult.NoDevice,
+                RequestSyncResult.DeviceCredentialsUnavailable,
+                RequestSyncResult.DeviceCredentialsCorrupted,
+                RequestSyncResult.UnsupportedDeviceCredentialEncryption,
+                -> {
+                    container.requestNotifications.refresh()
+                    Result.success()
+                }
+                is RequestSyncResult.RelayUnavailable -> Result.retry()
+                is RequestSyncResult.RelayRejected -> {
+                    // The domain failure is already exposed by RequestConnectionManager. Mark the
+                    // scheduling attempt complete so APPEND_OR_REPLACE successors are not failed
+                    // merely because an earlier synchronization was rejected.
+                    Result.success()
+                }
             }
-            is RequestSyncResult.RelayUnavailable -> Result.retry()
-            is RequestSyncResult.RelayRejected -> Result.failure()
         }
     }
 
@@ -154,12 +160,12 @@ class PushSynchronizationWorker(
         fun enqueue(context: Context) {
             val request = OneTimeWorkRequestBuilder<PushSynchronizationWorker>()
                 .setConstraints(networkConstraints())
-                .setExpedited(OutOfQuotaPolicy.RUN_AS_NON_EXPEDITED_WORK_REQUEST)
                 .setBackoffCriteria(BackoffPolicy.EXPONENTIAL, 10, TimeUnit.SECONDS)
+                .setExpedited(OutOfQuotaPolicy.RUN_AS_NON_EXPEDITED_WORK_REQUEST)
                 .build()
             WorkManager.getInstance(context).enqueueUniqueWork(
                 WORK_NAME,
-                ExistingWorkPolicy.KEEP,
+                ExistingWorkPolicy.APPEND_OR_REPLACE,
                 request,
             )
         }
@@ -291,6 +297,14 @@ internal object RequestNotifications {
         }
     }
 
+    fun clear(context: Context) {
+        val manager = context.getSystemService(NotificationManager::class.java)
+        manager.cancel(WAKE_NOTIFICATION_ID)
+        manager.activeNotifications
+            .filter { it.id == REQUEST_NOTIFICATION_ID }
+            .forEach { manager.cancel(it.tag, REQUEST_NOTIFICATION_ID) }
+    }
+
     private fun decisionAction(
         context: Context,
         requestId: String,
@@ -385,18 +399,14 @@ class RequestNotificationActionReceiver : BroadcastReceiver() {
         CoroutineScope(SupervisorJob() + Dispatchers.IO).launch {
             try {
                 application.container.localStorage.await()
-                when (decision) {
-                    RequestNotifications.APPROVE_DECISION ->
-                        application.container.requests.approvePendingRequest(requestId)
-                    RequestNotifications.DENY_DECISION ->
-                        application.container.requests.denyPendingRequest(requestId)
-                    else -> return@launch
+                application.container.requestNotifications.performAction {
+                    when (decision) {
+                        RequestNotifications.APPROVE_DECISION ->
+                            application.container.requests.approvePendingRequest(requestId)
+                        RequestNotifications.DENY_DECISION ->
+                            application.container.requests.denyPendingRequest(requestId)
+                    }
                 }
-                RequestNotifications.showRequests(
-                    context,
-                    application.container.requests.pendingNotifications(),
-                )
-                PushSynchronizationWorker.enqueue(context)
             } finally {
                 pendingResult.finish()
             }

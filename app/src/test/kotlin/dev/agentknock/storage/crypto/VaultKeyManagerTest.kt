@@ -3,6 +3,10 @@ package dev.agentknock.storage.crypto
 import javax.crypto.KeyGenerator
 import javax.crypto.SecretKey
 import javax.crypto.spec.SecretKeySpec
+import kotlinx.coroutines.CompletableDeferred
+import kotlinx.coroutines.ExperimentalCoroutinesApi
+import kotlinx.coroutines.async
+import kotlinx.coroutines.test.runCurrent
 import kotlinx.coroutines.test.runTest
 import org.junit.Assert.assertEquals
 import org.junit.Assert.assertFalse
@@ -11,6 +15,7 @@ import org.junit.Assert.assertSame
 import org.junit.Assert.assertTrue
 import org.junit.Test
 
+@OptIn(ExperimentalCoroutinesApi::class)
 class VaultKeyManagerTest {
     @Test
     fun `creates separate keys for secret values and device state`() = runTest {
@@ -156,12 +161,19 @@ class VaultKeyManagerTest {
         manager.initialize()
         keyStore.generate("orphan-key")
 
-        manager.reset { dao.keys.clear() }
+        manager.erase(
+            clearData = { dao.keys.clear() },
+            afterKeyDeletion = {},
+        )
 
         assertEquals(
             setOf("secret-key", "device-key", "orphan-key"),
             keyStore.deletedKeyIds.toSet(),
         )
+        assertTrue(keyStore.managedKeyIds().isEmpty())
+
+        manager.initialize()
+
         assertEquals(
             setOf("new-secret-key", "new-device-key"),
             keyStore.managedKeyIds().toSet(),
@@ -183,13 +195,57 @@ class VaultKeyManagerTest {
         val before = manager.initialize()
         keyStore.deleteFailures += "secret-key"
 
-        runCatching { manager.reset { dao.keys.clear() } }
+        runCatching {
+            manager.erase(
+                clearData = { dao.keys.clear() },
+                afterKeyDeletion = {},
+            )
+        }
             .onSuccess { error("Reset unexpectedly succeeded") }
         keyStore.deleteFailures.clear()
         val after = manager.initialize()
 
         assertNotSame(before, after)
         assertEquals("new-secret-key", after.activeKeys[VaultKeyPurpose.SECRET_VALUES]?.id)
+    }
+
+    @Test
+    fun `storage maintenance blocks fresh vault initialization`() = runTest {
+        val dao = FakeVaultKeyDao()
+        val keyStore = FakeEncryptionKeyStore()
+        val manager = manager(
+            dao,
+            keyStore,
+            "secret-key",
+            "device-key",
+            "new-secret-key",
+            "new-device-key",
+        )
+        manager.initialize()
+        val maintenanceStarted = CompletableDeferred<Unit>()
+        val finishMaintenance = CompletableDeferred<Unit>()
+
+        val erase = async {
+            manager.erase(
+                clearData = { dao.keys.clear() },
+                afterKeyDeletion = {
+                    maintenanceStarted.complete(Unit)
+                    finishMaintenance.await()
+                    assertTrue(dao.keys.isEmpty())
+                },
+            )
+        }
+        maintenanceStarted.await()
+        val initialize = async { manager.initialize() }
+        runCurrent()
+
+        assertFalse(initialize.isCompleted)
+        finishMaintenance.complete(Unit)
+        erase.await()
+        val fresh = initialize.await()
+
+        assertEquals("new-secret-key", fresh.activeKeys[VaultKeyPurpose.SECRET_VALUES]?.id)
+        assertEquals("new-device-key", fresh.activeKeys[VaultKeyPurpose.DEVICE_STATE]?.id)
     }
 
     private fun manager(

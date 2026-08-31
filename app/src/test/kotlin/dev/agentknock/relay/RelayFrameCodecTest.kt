@@ -96,7 +96,7 @@ class RelayFrameCodecTest {
         val error = codec.decode(
             """{"type":"error","error":"BUSY","message":"retry","retryable":true,"retry_after_ms":250}""",
         )
-        assertTrue(error is RelayDeviceEvent.Error && error.retryAfterMillis == 250L)
+        assertTrue(error is RelayDeviceEvent.Error && error.retryable)
     }
 
     private companion object {

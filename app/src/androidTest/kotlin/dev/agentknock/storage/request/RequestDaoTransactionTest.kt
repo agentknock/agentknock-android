@@ -633,7 +633,7 @@ class RequestDaoTransactionTest {
     }
 
     @Test
-    fun authorizationCommitmentRejectsChangedDeviceInstructions() = runTest {
+    fun authorizationCommitmentRejectsChangedDeviceOrClientInstructions() = runTest {
         insertActivePairing()
         database.deviceIdentityDao().updateActiveInstructions(
             activeRole = "active",
@@ -642,9 +642,11 @@ class RequestDaoTransactionTest {
         val commitment = AuthorizationCommitment(
             secretRevisions = emptyMap(),
             policies = emptyMap(),
-            deviceInstructions = AuthorizationDeviceInstructionsCommitment(
+            instructions = AuthorizationInstructionsCommitment(
                 deviceIdentityId = DEVICE_IDENTITY_ID,
-                instructions = "Allow repository inspection.",
+                deviceInstructions = "Allow repository inspection.",
+                clientId = CLIENT_ID,
+                clientInstructions = "",
             ),
         )
 
@@ -654,6 +656,14 @@ class RequestDaoTransactionTest {
             activeRole = "active",
             instructions = "Ask before every use.",
         )
+        assertFalse(dao.authorizationMatches(commitment, CLIENT_ID, "invocation", 1))
+
+        database.deviceIdentityDao().updateActiveInstructions(
+            activeRole = "active",
+            instructions = "Allow repository inspection.",
+        )
+        val client = checkNotNull(dao.getClient(CLIENT_ID))
+        dao.updateClient(client.copy(instructions = "Only inspect public repositories."))
         assertFalse(dao.authorizationMatches(commitment, CLIENT_ID, "invocation", 1))
     }
 

@@ -147,18 +147,36 @@ internal class VaultKeyManager(
         return VaultProtection.Available(backings)
     }
 
-    suspend fun reset(clearData: suspend () -> Unit) {
+    /**
+     * Erases persisted vault state and managed aliases, leaving initialization to startup.
+     * Both callbacks run behind the initialization barrier so storage maintenance cannot race a
+     * caller recreating active vault metadata.
+     */
+    suspend fun erase(
+        clearData: suspend () -> Unit,
+        afterKeyDeletion: suspend () -> Unit,
+    ) {
         initializationMutex.withLock {
             try {
                 clearData()
             } finally {
                 initialization = null
             }
-            withContext(NonCancellable + keyStoreDispatcher) {
-                deleteAllManagedKeys()
+            var cleanupFailure: Throwable? = null
+            try {
+                withContext(NonCancellable + keyStoreDispatcher) {
+                    deleteAllManagedKeys()
+                }
+            } catch (failure: Throwable) {
+                cleanupFailure = failure
             }
+            try {
+                afterKeyDeletion()
+            } catch (failure: Throwable) {
+                cleanupFailure?.addSuppressed(failure) ?: run { cleanupFailure = failure }
+            }
+            cleanupFailure?.let { throw it }
         }
-        initialize()
     }
 
     private suspend fun createAndActivateKey(

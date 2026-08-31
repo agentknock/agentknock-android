@@ -16,7 +16,6 @@ import kotlinx.serialization.json.booleanOrNull
 import kotlinx.serialization.json.buildJsonObject
 import kotlinx.serialization.json.jsonObject
 import kotlinx.serialization.json.jsonPrimitive
-import kotlinx.serialization.json.longOrNull
 import okhttp3.OkHttpClient
 import okhttp3.Request
 import okhttp3.Response
@@ -131,7 +130,6 @@ internal sealed interface RelayDeviceEvent {
         val code: String,
         val message: String,
         val retryable: Boolean,
-        val retryAfterMillis: Long?,
         val clientId: String?,
         val requestId: String?,
         val kind: RelayMessageKind?,
@@ -154,7 +152,6 @@ internal sealed interface RelayDeviceConnectionResult {
     ) : RelayDeviceConnectionResult
 
     data class Unavailable(val message: String?) : RelayDeviceConnectionResult
-
 }
 
 internal interface RelayDeviceConnection {
@@ -173,11 +170,16 @@ internal interface RelayDeviceClient {
 }
 
 internal class WebSocketRelayDeviceClient(
-    private val client: OkHttpClient,
+    client: OkHttpClient,
     private val relayUrl: String = DEFAULT_RELAY_URL,
     private val codec: RelayFrameCodec = RelayFrameCodec(),
     private val eventBufferCapacity: Int = MAXIMUM_PENDING_EVENTS,
 ) : RelayDeviceClient {
+    private val client = client.newBuilder()
+        // The application connection manager owns retry timing.
+        .retryOnConnectionFailure(false)
+        .build()
+
     override suspend fun connect(
         deviceId: String,
         deviceToken: String,
@@ -261,10 +263,18 @@ internal class WebSocketRelayDeviceClient(
         response: Response?,
     ): RelayDeviceConnectionResult {
         if (response == null) {
-            return RelayDeviceConnectionResult.Unavailable(throwable.message)
+            return RelayDeviceConnectionResult.Unavailable(
+                throwable.message ?: "Could not connect to the relay.",
+            )
         }
         val body = runCatching { response.body.string() }.getOrNull()
         val error = body?.let(::decodeRelayError)
+        if (response.code.isTemporarilyUnavailable()) {
+            return RelayDeviceConnectionResult.Unavailable(
+                message = error?.message
+                    ?: "Relay is temporarily unavailable (HTTP ${response.code}).",
+            )
+        }
         return RelayDeviceConnectionResult.Rejected(
             status = response.code,
             code = error?.code,
@@ -272,6 +282,9 @@ internal class WebSocketRelayDeviceClient(
         )
     }
 }
+
+private fun Int.isTemporarilyUnavailable(): Boolean =
+    this == 408 || this == 425 || this == 429 || this in 500..599
 
 internal class RelayEventBuffer(capacity: Int) {
     private val channel: Channel<RelayDeviceEvent>
@@ -442,7 +455,6 @@ internal class RelayFrameCodec(
                 message = frame.requiredString("message"),
                 retryable = frame["retryable"]?.jsonPrimitive?.booleanOrNull
                     ?: error("Missing relay retryable flag"),
-                retryAfterMillis = frame["retry_after_ms"]?.jsonPrimitive?.longOrNull,
                 clientId = frame.optionalString("client_id"),
                 requestId = frame.optionalString("request_id"),
                 kind = frame.optionalString("kind")?.toMessageKind(),

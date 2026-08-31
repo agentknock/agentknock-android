@@ -33,6 +33,7 @@ import androidx.compose.material3.TopAppBar
 import androidx.compose.material3.Icon
 import androidx.compose.material3.IconButton
 import androidx.compose.material.icons.Icons
+import androidx.compose.material.icons.outlined.Settings
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.getValue
@@ -69,6 +70,7 @@ internal fun DeviceSetupScreen(
     onDone: (() -> Unit)?,
     changeAddressInitially: Boolean = false,
     onDeviceClaimed: () -> Unit,
+    onOpenSettings: (() -> Unit)? = null,
     viewModel: DeviceSetupViewModel,
 ) {
     val claiming by viewModel.claiming.collectAsStateWithLifecycle()
@@ -127,6 +129,13 @@ internal fun DeviceSetupScreen(
                 navigationIcon = {
                     if (changeAddressInitially && onDone != null) {
                         NavigationBackButton(onDone)
+                    }
+                },
+                actions = {
+                    onOpenSettings?.let { openSettings ->
+                        IconButton(onClick = openSettings) {
+                            Icon(Icons.Outlined.Settings, contentDescription = "Settings")
+                        }
                     }
                 },
             )

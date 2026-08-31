@@ -113,17 +113,19 @@ import dev.agentknock.storage.device.RelayDeviceCredentialSource
 import java.util.UUID
 import java.util.Base64
 import java.security.MessageDigest
+import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.CoroutineDispatcher
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.NonCancellable
 import kotlinx.coroutines.channels.Channel
 import kotlinx.coroutines.flow.Flow
+import kotlinx.coroutines.flow.MutableSharedFlow
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.StateFlow
+import kotlinx.coroutines.flow.asSharedFlow
 import kotlinx.coroutines.flow.asStateFlow
 import kotlinx.coroutines.flow.combine
 import kotlinx.coroutines.flow.map
-import kotlinx.coroutines.flow.update
 import kotlinx.coroutines.flow.first
 import kotlinx.coroutines.selects.select
 import kotlinx.coroutines.sync.Mutex
@@ -677,6 +679,8 @@ internal class RequestRepository(
     private val relay: RelayDeviceClient,
     private val keyManager: VaultKeyManager,
     private val encryption: AesGcmEncryption,
+    private val aiReviews: AiReviewCoordinator,
+    private val scheduleSynchronization: () -> Unit,
     private val audit: AuditSink = NoOpAuditSink,
     private val sshKeys: SshKeyCodec = SshKeyCodec(),
     private val requestPushRegistration: () -> Unit = {},
@@ -694,13 +698,14 @@ internal class RequestRepository(
     private val cryptographyDispatcher: CoroutineDispatcher = Dispatchers.IO,
 ) {
     private val operationMutex = Mutex()
-    private val connectionMutex = Mutex()
     private val pendingChanges = Channel<Unit>(Channel.CONFLATED)
+    private val _inboxChanges = MutableSharedFlow<Unit>(extraBufferCapacity = 1)
     private val _pushRegistrationState = MutableStateFlow<RelayPushRegistrationState?>(null)
-    private val aiReviewInFlight = MutableStateFlow<Set<String>>(emptySet())
 
     val pushRegistrationState: StateFlow<RelayPushRegistrationState?> =
         _pushRegistrationState.asStateFlow()
+
+    val inboxChanges: Flow<Unit> = _inboxChanges.asSharedFlow()
 
     fun observeRequests(): Flow<List<InboxRequestSummary>> {
         val visibleRequests = combine(
@@ -874,11 +879,10 @@ internal class RequestRepository(
                 else -> null
             }
         }
-    }.combine(aiReviewInFlight) { requests, inFlight ->
+    }.map { requests ->
         requests.map { request ->
             request.copy(
-                userDecisionAvailable = request.state == InboxRequestState.ACTION_REQUIRED &&
-                    request.id !in inFlight,
+                userDecisionAvailable = request.state == InboxRequestState.ACTION_REQUIRED,
             )
         }
     }
@@ -1079,12 +1083,12 @@ internal class RequestRepository(
                 ),
             )
         }
-        .combine(aiReviewInFlight) { details, inFlight ->
+        .map { details ->
             details?.copy(
                 userDecisionAvailable = (
                     details.pairing != null ||
                         details.state == InboxRequestState.ACTION_REQUIRED
-                    ) && details.id !in inFlight,
+                    ),
             )
         }
 
@@ -1144,6 +1148,19 @@ internal class RequestRepository(
 
     suspend fun clearCompletedHistory(): Int = dao.clearCompletedHistory()
 
+    suspend fun recoverInterruptedAiReviews(): Int = operationMutex.withLock {
+        dao.recoverInterruptedAiReviews(currentTimeMillis())
+    }
+
+    suspend fun resetRuntimeState(clearStorage: suspend () -> Unit) = operationMutex.withLock {
+        clearStorage()
+        while (pendingChanges.tryReceive().isSuccess) {
+            // Drop process-local wakeups whose durable state was erased with storage.
+        }
+        _pushRegistrationState.value = null
+        _inboxChanges.tryEmit(Unit)
+    }
+
     suspend fun sync(): RequestSyncResult = runConnection(keepConnected = false)
 
     suspend fun listen(
@@ -1183,7 +1200,7 @@ internal class RequestRepository(
                             RequestNotificationDetail("Command", command),
                             RequestNotificationDetail("Secrets", secretNames),
                         ),
-                        decisionAvailable = request.id !in aiReviewInFlight.value,
+                        decisionAvailable = true,
                     )
                 }
                 RequestKind.GIT_SIGN.storedName -> {
@@ -1217,7 +1234,7 @@ internal class RequestRepository(
                                 ),
                             ),
                         ),
-                        decisionAvailable = request.id !in aiReviewInFlight.value,
+                        decisionAvailable = true,
                     )
                 }
                 RequestKind.SSH_AUTHENTICATE.storedName -> {
@@ -1251,7 +1268,7 @@ internal class RequestRepository(
                                 renderSingleLineText(authentication.username),
                             ),
                         ),
-                        decisionAvailable = request.id !in aiReviewInFlight.value,
+                        decisionAvailable = true,
                     )
                 }
                 RequestKind.PAIRING.storedName -> {
@@ -1345,24 +1362,76 @@ internal class RequestRepository(
 
     fun requestSync() {
         pendingChanges.trySend(Unit)
+        scheduleSynchronization()
+    }
+
+    suspend fun hasPendingRelayWork(): Boolean = operationMutex.withLock {
+        dao.getUnacknowledgedResponses().isNotEmpty() ||
+            dao.getUnsettledRequests().any { it.requestAcknowledgedAt != null } ||
+            dao.getClients().any { client ->
+                client.desiredRelayClientState != null &&
+                    client.desiredRelayClientState != client.relayClientState
+            } ||
+            dao.getPairingAttempts().any { attempt ->
+                attempt.desiredRelayClientState != null &&
+                    attempt.desiredRelayClientState != attempt.relayClientState
+            }
+    }
+
+    private fun launchAiReview(
+        requestId: String,
+        requestJson: String,
+        review: suspend () -> AiReview,
+        complete: suspend (AiReview) -> Unit,
+    ): Boolean = aiReviews.launch(requestId) {
+        try {
+            val result = review()
+            operationMutex.withLock {
+                val current = dao.getRequestById(requestId)
+                if (
+                    current?.requestJson == requestJson &&
+                    current.state == InboxRequestState.REVIEWING.storedName
+                ) {
+                    complete(result)
+                    dao.recoverInterruptedAiReview(
+                        requestId = requestId,
+                        requestJson = requestJson,
+                        recoveredAt = currentTimeMillis(),
+                    )
+                }
+            }
+        } catch (cancelled: CancellationException) {
+            throw cancelled
+        } catch (_: Throwable) {
+            operationMutex.withLock {
+                dao.recoverInterruptedAiReview(
+                    requestId = requestId,
+                    requestJson = requestJson,
+                    recoveredAt = currentTimeMillis(),
+                )
+            }
+        } finally {
+            requestSync()
+            _inboxChanges.tryEmit(Unit)
+        }
     }
 
     private suspend fun runConnection(
         keepConnected: Boolean,
         onCaughtUp: () -> Unit = {},
         onInboxChanged: suspend () -> Unit = {},
-    ): RequestSyncResult = connectionMutex.withLock {
+    ): RequestSyncResult {
         val credentials = when (val result = deviceCredentials.activeDeviceCredentials()) {
             is RelayDeviceCredentialsResult.Available -> result.credentials
-            RelayDeviceCredentialsResult.Missing -> return@withLock RequestSyncResult.NoDevice
+            RelayDeviceCredentialsResult.Missing -> return RequestSyncResult.NoDevice
             RelayDeviceCredentialsResult.CredentialsUnavailable -> {
-                return@withLock RequestSyncResult.DeviceCredentialsUnavailable
+                return RequestSyncResult.DeviceCredentialsUnavailable
             }
             RelayDeviceCredentialsResult.CredentialsCorrupted -> {
-                return@withLock RequestSyncResult.DeviceCredentialsCorrupted
+                return RequestSyncResult.DeviceCredentialsCorrupted
             }
             RelayDeviceCredentialsResult.UnsupportedEncryption -> {
-                return@withLock RequestSyncResult.UnsupportedDeviceCredentialEncryption
+                return RequestSyncResult.UnsupportedDeviceCredentialEncryption
             }
         }
 
@@ -1374,14 +1443,14 @@ internal class RequestRepository(
         ) {
             is RelayDeviceConnectionResult.Connected -> result.connection
             is RelayDeviceConnectionResult.Rejected -> {
-                return@withLock RequestSyncResult.RelayRejected(result.status, result.message)
+                return RequestSyncResult.RelayRejected(result.status, result.message)
             }
             is RelayDeviceConnectionResult.Unavailable -> {
-                return@withLock RequestSyncResult.RelayUnavailable(result.message)
+                return RequestSyncResult.RelayUnavailable(result.message)
             }
         }
 
-        try {
+        return try {
             synchronize(
                 credentials = credentials,
                 connection = connection,
@@ -1458,11 +1527,7 @@ internal class RequestRepository(
                 }
                 continue
             }
-            // Finish an event once it starts changing local state, even if the foreground
-            // connection is refreshed or enters its background grace period. An invocation can
-            // already be persisted while its AI review is still in flight.
-            val failure = withContext(NonCancellable) {
-                operationMutex.withLock {
+            val failure = operationMutex.withLock {
                     when (event) {
                     is RelayDeviceEvent.Message -> {
                         val update = when (event.kind) {
@@ -1588,7 +1653,6 @@ internal class RequestRepository(
                         RequestSyncResult.RelayUnavailable(event.message)
                     }
                         RelayDeviceEvent.CaughtUp -> null
-                    }
                 }
             }
             if (failure != null) return failure
@@ -2137,8 +2201,7 @@ internal class RequestRepository(
                 val aiCanEscalateToTemporaryAccess =
                     storedEvaluation.aiReview?.decision == AiReviewDecision.ASK_USER ||
                         storedEvaluation.aiReview?.failure != null ||
-                        (storedEvaluation.aiReview == null &&
-                            request.id !in aiReviewInFlight.value)
+                        storedEvaluation.aiReview == null
                 val protectedNames = latestDescription.reviewMetadata
                     .filter { secret ->
                         secret.type == ENVIRONMENT_SECRET_TYPE &&
@@ -2451,8 +2514,7 @@ internal class RequestRepository(
                 val aiCanEscalateToTemporaryAccess =
                     storedEvaluation.aiReview?.decision == AiReviewDecision.ASK_USER ||
                         storedEvaluation.aiReview?.failure != null ||
-                        (storedEvaluation.aiReview == null &&
-                            request.id !in aiReviewInFlight.value)
+                        storedEvaluation.aiReview == null
                 val eligible = secretEvaluation.temporaryAccessExpiresAt == null &&
                     when (policy.mode) {
                         SecretApprovalMode.TEMPORARY ->
@@ -2756,8 +2818,7 @@ internal class RequestRepository(
             val aiCanEscalateToTemporaryAccess =
                 storedEvaluation.aiReview?.decision == AiReviewDecision.ASK_USER ||
                     storedEvaluation.aiReview?.failure != null ||
-                    (storedEvaluation.aiReview == null &&
-                        request.id !in aiReviewInFlight.value)
+                    storedEvaluation.aiReview == null
             val eligible = secretEvaluation.temporaryAccessExpiresAt == null &&
                 when (policy.mode) {
                     SecretApprovalMode.TEMPORARY ->
@@ -2958,13 +3019,6 @@ internal class RequestRepository(
                 existing.requestJson != requestPayload.toString()
             ) {
                 return null
-            }
-            if (existing.state == InboxRequestState.REVIEWING.storedName) {
-                existing = existing.copy(
-                    state = InboxRequestState.ACTION_REQUIRED.storedName,
-                    updatedAt = currentTimeMillis(),
-                )
-                check(dao.updateRequest(existing) == 1)
             }
             return ProcessedRelayMessage(
                 response = existing.responseJson?.let(json::parseToJsonElement),
@@ -3627,44 +3681,15 @@ internal class RequestRepository(
             // metadata, public SSH material, and values explicitly marked non-sensitive only.
             providedSecretsJson = initialProvidedSecretsJson,
         )
-        val pendingRequestId = if (needsAiReview) {
-            aiReviewInFlight.update { it + relayRequestId }
-            try {
-                dao.insertSecretUseRequest(
-                    request = initialRequest,
-                    secretUseRequest = initialSecretUse,
-                    client = pairing.copy(
-                        clientSoftwareJson = encodeClientSoftware(contents.clientSoftware),
-                        lastSeenAt = now,
-                        updatedAt = now,
-                    ),
-                    requestPsk = acceptedSecrets.requestPsk,
-                    currentClientPsk = acceptedSecrets.currentClientPsk,
-                    previousClientPsk = acceptedSecrets.previousClientPsk,
-                )
-                recordSecretUseRequested(pairing, relayRequestId, contents)
-                relayRequestId
-            } catch (failure: Throwable) {
-                aiReviewInFlight.update { it - relayRequestId }
-                throw failure
-            }
-        } else {
-            null
-        }
-        try {
-        val reviewResult = if (needsAiReview) {
-            requestAiReview(
-                pairing = pairing,
-                contents = contents,
-                description = description,
-                values = checkNotNull(initialAvailableSecrets),
-                evaluation = initialApprovalEvaluation,
-                policies = approvalPolicies,
-                credentials = credentials,
-            )
-        } else {
-            null
-        }
+        suspend fun finishReview(
+            reviewResult: AiReview?,
+            requestAlreadyInserted: Boolean,
+        ): ProcessedRelayMessage? {
+        val currentClient = if (needsAiReview) dao.getClient(pairing.clientId) else pairing
+        val clientUnavailable = currentClient == null ||
+            currentClient.deviceIdentityId != pairing.deviceIdentityId ||
+            currentClient.relayClientState == RelayClientState.REVOKED.wireName ||
+            currentClient.desiredRelayClientState == RelayClientState.REVOKED.wireName
         val currentResolution = if (needsAiReview) {
             secrets.resolveRequestedSecrets(contents.secrets, environmentSelections)
         } else {
@@ -3701,22 +3726,24 @@ internal class RequestRepository(
             initialApprovalEvaluation
         }
         val currentCredentials = if (needsAiReview) {
-            credentialsForClient(pairing, credentials)
+            currentClient?.let { credentialsForClient(it) }
         } else {
             credentials
         }
         val aiInputsChanged = needsAiReview && (
-            currentAutomaticDenial != null ||
+            clientUnavailable ||
+                currentAutomaticDenial != null ||
                 !description.hasSameSecretRevisions(currentDescription) ||
                 currentApprovalEvaluation == null ||
                 !checkNotNull(initialApprovalEvaluation)
                     .hasSameSecretPolicies(currentApprovalEvaluation) ||
-                currentCredentials?.instructions != credentials.instructions
+                currentCredentials?.instructions != credentials.instructions ||
+                currentClient.instructions != pairing.instructions
             )
         val aiReview = if (aiInputsChanged) {
             AiReview(
                 decision = AiReviewDecision.ASK_USER,
-                explanation = "The secret or approval settings changed during AI review.",
+                explanation = "The client, secret, instructions, or approval settings changed during AI review.",
             )
         } else {
             reviewResult
@@ -3728,11 +3755,13 @@ internal class RequestRepository(
         })?.copy(aiReview = aiReview)
         val authorization = currentDescription.authorizationCommitment(
             policies = currentApprovalPolicies,
-            deviceInstructions = if (needsAiReview) {
+            instructions = if (needsAiReview) {
                 currentCredentials?.let { current ->
-                    AuthorizationDeviceInstructionsCommitment(
+                    AuthorizationInstructionsCommitment(
                         deviceIdentityId = current.deviceIdentityId,
-                        instructions = current.instructions,
+                        deviceInstructions = current.instructions,
+                        clientId = checkNotNull(currentClient).clientId,
+                        clientInstructions = currentClient.instructions,
                     )
                 }
             } else {
@@ -3760,7 +3789,13 @@ internal class RequestRepository(
             ?.any { it.temporaryAccessExpiresAt != null } == true
         val aiApprovalUsed = approvalEvaluation?.secrets
             ?.any { it.action == ApprovalAction.ASK_AI } == true && aiApproved
-        val denial = currentAutomaticDenial ?: policyDenial ?: aiDenial
+        val clientDenial = if (clientUnavailable) {
+            InvocationDenialReason.OTHER to
+                "The paired client is no longer available."
+        } else {
+            null
+        }
+        val denial = currentAutomaticDenial ?: clientDenial ?: policyDenial ?: aiDenial
         val responsePlaintext = when {
             denial != null -> invocationProtocol.deniedResponse(denial.first, denial.second)
             allProtectedUsesApproved -> {
@@ -3802,7 +3837,12 @@ internal class RequestRepository(
             else -> null
         }
         val decidedAt = currentTimeMillis()
-        val finalRequest = initialRequest.copy(
+        val requestToUpdate = if (requestAlreadyInserted) {
+            dao.getRequestById(relayRequestId) ?: return null
+        } else {
+            initialRequest
+        }
+        val finalRequest = requestToUpdate.copy(
             state = reviewedRequestState(response != null).storedName,
             responseJson = response?.toString(),
             updatedAt = decidedAt,
@@ -3853,7 +3893,7 @@ internal class RequestRepository(
                 decidedAt = decidedAt,
             )
         }
-        if (pendingRequestId == null) {
+        if (!requestAlreadyInserted) {
             val inserted = if (automaticDecision == SecretUseDecision.APPROVED) {
                 dao.insertSecretUseRequestIfAuthorized(
                     request = finalRequest,
@@ -3956,11 +3996,44 @@ internal class RequestRepository(
             )
         }
         return ProcessedRelayMessage(response)
-        } finally {
-            pendingRequestId?.let {
-                aiReviewInFlight.update { it - relayRequestId }
-            }
         }
+
+        if (!needsAiReview) return finishReview(null, requestAlreadyInserted = false)
+
+        withContext(NonCancellable) {
+            dao.insertSecretUseRequest(
+                request = initialRequest,
+                secretUseRequest = initialSecretUse,
+                client = pairing.copy(
+                    clientSoftwareJson = encodeClientSoftware(contents.clientSoftware),
+                    lastSeenAt = now,
+                    updatedAt = now,
+                ),
+                requestPsk = acceptedSecrets.requestPsk,
+                currentClientPsk = acceptedSecrets.currentClientPsk,
+                previousClientPsk = acceptedSecrets.previousClientPsk,
+            )
+            check(
+                launchAiReview(
+                    requestId = relayRequestId,
+                    requestJson = initialRequest.requestJson,
+                    review = {
+                        requestAiReview(
+                            pairing = pairing,
+                            contents = contents,
+                            description = description,
+                            values = checkNotNull(initialAvailableSecrets),
+                            evaluation = initialApprovalEvaluation,
+                            policies = approvalPolicies,
+                            credentials = credentials,
+                        )
+                    },
+                    complete = { finishReview(it, requestAlreadyInserted = true) },
+                ),
+            )
+            recordSecretUseRequested(pairing, relayRequestId, contents)
+        }
+        return ProcessedRelayMessage()
     }
 
     private suspend fun recordSecretUseRequested(
@@ -4114,48 +4187,15 @@ internal class RequestRepository(
             completionMessage = null,
             decidedAt = null,
         )
-        val pendingRequestId = if (needsAiReview) {
-            aiReviewInFlight.update { it + relayRequestId }
-            try {
-                dao.insertGitSignRequest(
-                    request = initialRequest,
-                    gitSignRequest = initialGitSign,
-                    client = pairing.copy(
-                        clientSoftwareJson = encodeClientSoftware(contents.clientSoftware),
-                        lastSeenAt = now,
-                        updatedAt = now,
-                    ),
-                    requestPsk = acceptedSecrets.requestPsk,
-                    currentClientPsk = acceptedSecrets.currentClientPsk,
-                    previousClientPsk = acceptedSecrets.previousClientPsk,
-                )
-                recordGitSignRequested(pairing, relayRequestId, contents.secret)
-                relayRequestId
-            } catch (failure: Throwable) {
-                aiReviewInFlight.update { it - relayRequestId }
-                throw failure
-            }
-        } else {
-            null
-        }
-        try {
-        val reviewResult = if (needsAiReview) {
-            requestGitSignAiReview(
-                pairing = pairing,
-                contents = contents,
-                invocation = invocation,
-                parentElapsedSeconds = if (now >= invocationRequest.receivedAt) {
-                    (now - invocationRequest.receivedAt) / 1_000
-                } else {
-                    null
-                },
-                evaluation = initialEvaluation,
-                policies = approvalPolicies,
-                credentials = credentials,
-            )
-        } else {
-            null
-        }
+        suspend fun finishReview(
+            reviewResult: AiReview?,
+            requestAlreadyInserted: Boolean,
+        ): ProcessedRelayMessage? {
+        val currentClient = if (needsAiReview) dao.getClient(pairing.clientId) else pairing
+        val clientUnavailable = currentClient == null ||
+            currentClient.deviceIdentityId != pairing.deviceIdentityId ||
+            currentClient.relayClientState == RelayClientState.REVOKED.wireName ||
+            currentClient.desiredRelayClientState == RelayClientState.REVOKED.wireName
         val currentDescription = if (needsAiReview) {
             secrets.describeRequestedSecrets(listOf(contents.secret))
         } else {
@@ -4180,19 +4220,21 @@ internal class RequestRepository(
             initialEvaluation
         }
         val currentCredentials = if (needsAiReview) {
-            credentialsForClient(pairing, credentials)
+            currentClient?.let { credentialsForClient(it) }
         } else {
             credentials
         }
         val aiInputsChanged = needsAiReview && (
-            currentEvaluation == null ||
+            clientUnavailable ||
+                currentEvaluation == null ||
                 !checkNotNull(initialEvaluation).hasSameSecretPolicies(currentEvaluation) ||
-                currentCredentials?.instructions != credentials.instructions
+                currentCredentials?.instructions != credentials.instructions ||
+                currentClient.instructions != pairing.instructions
             )
         val aiReview = if (aiInputsChanged) {
             AiReview(
                 decision = AiReviewDecision.ASK_USER,
-                explanation = "The SSH key or approval settings changed during AI review.",
+                explanation = "The client, SSH key, instructions, or approval settings changed during AI review.",
             )
         } else {
             reviewResult
@@ -4201,17 +4243,23 @@ internal class RequestRepository(
             ?.copy(aiReview = aiReview)
         val authorization = currentDescription.authorizationCommitment(
             policies = currentPolicies,
-            deviceInstructions = if (needsAiReview) {
+            instructions = if (needsAiReview) {
                 currentCredentials?.let { current ->
-                    AuthorizationDeviceInstructionsCommitment(
+                    AuthorizationInstructionsCommitment(
                         deviceIdentityId = current.deviceIdentityId,
-                        instructions = current.instructions,
+                        deviceInstructions = current.instructions,
+                        clientId = checkNotNull(currentClient).clientId,
+                        clientInstructions = currentClient.instructions,
                     )
                 }
             } else {
                 null
             },
         )
+        if (clientUnavailable && denial == null) {
+            denial = InvocationDenialReason.OTHER to
+                "The paired client is no longer available."
+        }
         val approvalSettingsDenied =
             denial == null &&
             evaluation?.secrets?.any { it.action == ApprovalAction.DENY } == true
@@ -4279,7 +4327,12 @@ internal class RequestRepository(
             denial != null -> SecretUseDecision.DENIED
             else -> null
         }
-        val finalRequest = initialRequest.copy(
+        val requestToUpdate = if (requestAlreadyInserted) {
+            dao.getRequestById(relayRequestId) ?: return null
+        } else {
+            initialRequest
+        }
+        val finalRequest = requestToUpdate.copy(
             state = reviewedRequestState(response != null).storedName,
             responseJson = response?.toString(),
             updatedAt = decidedAt,
@@ -4291,7 +4344,7 @@ internal class RequestRepository(
             completionMessage = denial?.second,
             decidedAt = automaticDecision?.let { decidedAt },
         )
-        if (pendingRequestId == null) {
+        if (!requestAlreadyInserted) {
             val inserted = if (automaticDecision == SecretUseDecision.APPROVED) {
                 dao.insertGitSignRequestIfAuthorized(
                     request = finalRequest,
@@ -4397,11 +4450,48 @@ internal class RequestRepository(
             )
         }
         return ProcessedRelayMessage(response)
-        } finally {
-            pendingRequestId?.let {
-                aiReviewInFlight.update { it - relayRequestId }
-            }
         }
+
+        if (!needsAiReview) return finishReview(null, requestAlreadyInserted = false)
+
+        withContext(NonCancellable) {
+            dao.insertGitSignRequest(
+                request = initialRequest,
+                gitSignRequest = initialGitSign,
+                client = pairing.copy(
+                    clientSoftwareJson = encodeClientSoftware(contents.clientSoftware),
+                    lastSeenAt = now,
+                    updatedAt = now,
+                ),
+                requestPsk = acceptedSecrets.requestPsk,
+                currentClientPsk = acceptedSecrets.currentClientPsk,
+                previousClientPsk = acceptedSecrets.previousClientPsk,
+            )
+            check(
+                launchAiReview(
+                    requestId = relayRequestId,
+                    requestJson = initialRequest.requestJson,
+                    review = {
+                        requestGitSignAiReview(
+                            pairing = pairing,
+                            contents = contents,
+                            invocation = invocation,
+                            parentElapsedSeconds = if (now >= invocationRequest.receivedAt) {
+                                (now - invocationRequest.receivedAt) / 1_000
+                            } else {
+                                null
+                            },
+                            evaluation = initialEvaluation,
+                            policies = approvalPolicies,
+                            credentials = credentials,
+                        )
+                    },
+                    complete = { finishReview(it, requestAlreadyInserted = true) },
+                ),
+            )
+            recordGitSignRequested(pairing, relayRequestId, contents.secret)
+        }
+        return ProcessedRelayMessage()
     }
 
     private suspend fun processSshAuthenticationRequest(
@@ -4515,54 +4605,15 @@ internal class RequestRepository(
             completionMessage = null,
             decidedAt = null,
         )
-        val pendingRequestId = if (needsAiReview) {
-            aiReviewInFlight.update { it + relayRequestId }
-            try {
-                dao.insertSshAuthenticationRequest(
-                    request = initialRequest,
-                    authentication = initialAuthentication,
-                    client = pairing.copy(
-                        clientSoftwareJson = encodeClientSoftware(contents.clientSoftware),
-                        lastSeenAt = now,
-                        updatedAt = now,
-                    ),
-                    requestPsk = acceptedSecrets.requestPsk,
-                    currentClientPsk = acceptedSecrets.currentClientPsk,
-                    previousClientPsk = acceptedSecrets.previousClientPsk,
-                )
-                recordSshAuthenticationRequested(
-                    pairing = pairing,
-                    relayRequestId = relayRequestId,
-                    secretName = contents.secret,
-                    username = messageDetails.username,
-                )
-                relayRequestId
-            } catch (failure: Throwable) {
-                aiReviewInFlight.update { it - relayRequestId }
-                throw failure
-            }
-        } else {
-            null
-        }
-        try {
-            val reviewResult = if (needsAiReview) {
-                requestSshAuthenticationAiReview(
-                    pairing = pairing,
-                    contents = contents,
-                    messageDetails = messageDetails,
-                    invocation = invocation,
-                    parentElapsedSeconds = if (now >= invocationRequest.receivedAt) {
-                        (now - invocationRequest.receivedAt) / 1_000
-                    } else {
-                        null
-                    },
-                    evaluation = checkNotNull(initialEvaluation),
-                    policies = approvalPolicies,
-                    credentials = credentials,
-                )
-            } else {
-                null
-            }
+        suspend fun finishReview(
+            reviewResult: AiReview?,
+            requestAlreadyInserted: Boolean,
+        ): ProcessedRelayMessage? {
+            val currentClient = if (needsAiReview) dao.getClient(pairing.clientId) else pairing
+            val clientUnavailable = currentClient == null ||
+                currentClient.deviceIdentityId != pairing.deviceIdentityId ||
+                currentClient.relayClientState == RelayClientState.REVOKED.wireName ||
+                currentClient.desiredRelayClientState == RelayClientState.REVOKED.wireName
             val currentDescription = if (needsAiReview) {
                 secrets.describeRequestedSecrets(listOf(contents.secret))
             } else {
@@ -4587,19 +4638,21 @@ internal class RequestRepository(
                 initialEvaluation
             }
             val currentCredentials = if (needsAiReview) {
-                credentialsForClient(pairing, credentials)
+                currentClient?.let { credentialsForClient(it) }
             } else {
                 credentials
             }
             val aiInputsChanged = needsAiReview && (
-                currentEvaluation == null ||
+                clientUnavailable ||
+                    currentEvaluation == null ||
                     !checkNotNull(initialEvaluation).hasSameSecretPolicies(currentEvaluation) ||
-                    currentCredentials?.instructions != credentials.instructions
+                    currentCredentials?.instructions != credentials.instructions ||
+                    currentClient.instructions != pairing.instructions
                 )
             val aiReview = if (aiInputsChanged) {
                 AiReview(
                     decision = AiReviewDecision.ASK_USER,
-                    explanation = "The SSH key or approval settings changed during AI review.",
+                    explanation = "The client, SSH key, instructions, or approval settings changed during AI review.",
                 )
             } else {
                 reviewResult
@@ -4608,17 +4661,23 @@ internal class RequestRepository(
                 ?.copy(aiReview = aiReview)
             val authorization = currentDescription.authorizationCommitment(
                 policies = currentPolicies,
-                deviceInstructions = if (needsAiReview) {
+                instructions = if (needsAiReview) {
                     currentCredentials?.let { current ->
-                        AuthorizationDeviceInstructionsCommitment(
+                        AuthorizationInstructionsCommitment(
                             deviceIdentityId = current.deviceIdentityId,
-                            instructions = current.instructions,
+                            deviceInstructions = current.instructions,
+                            clientId = checkNotNull(currentClient).clientId,
+                            clientInstructions = currentClient.instructions,
                         )
                     }
                 } else {
                     null
                 },
             )
+            if (clientUnavailable && denial == null) {
+                denial = InvocationDenialReason.OTHER to
+                    "The paired client is no longer available."
+            }
             val approvalSettingsDenied =
                 denial == null &&
                 evaluation?.secrets?.any { it.action == ApprovalAction.DENY } == true
@@ -4690,7 +4749,12 @@ internal class RequestRepository(
                 denial != null -> SecretUseDecision.DENIED
                 else -> null
             }
-            val finalRequest = initialRequest.copy(
+            val requestToUpdate = if (requestAlreadyInserted) {
+                dao.getRequestById(relayRequestId) ?: return null
+            } else {
+                initialRequest
+            }
+            val finalRequest = requestToUpdate.copy(
                 state = reviewedRequestState(response != null).storedName,
                 responseJson = response?.toString(),
                 updatedAt = decidedAt,
@@ -4702,7 +4766,7 @@ internal class RequestRepository(
                 completionMessage = denial?.second,
                 decidedAt = automaticDecision?.let { decidedAt },
             )
-            if (pendingRequestId == null) {
+            if (!requestAlreadyInserted) {
                 val inserted = if (automaticDecision == SecretUseDecision.APPROVED) {
                     dao.insertSshAuthenticationRequestIfAuthorized(
                         request = finalRequest,
@@ -4813,9 +4877,54 @@ internal class RequestRepository(
                 )
             }
             return ProcessedRelayMessage(response)
-        } finally {
-            pendingRequestId?.let { aiReviewInFlight.update { it - relayRequestId } }
         }
+
+        if (!needsAiReview) return finishReview(null, requestAlreadyInserted = false)
+
+        withContext(NonCancellable) {
+            dao.insertSshAuthenticationRequest(
+                request = initialRequest,
+                authentication = initialAuthentication,
+                client = pairing.copy(
+                    clientSoftwareJson = encodeClientSoftware(contents.clientSoftware),
+                    lastSeenAt = now,
+                    updatedAt = now,
+                ),
+                requestPsk = acceptedSecrets.requestPsk,
+                currentClientPsk = acceptedSecrets.currentClientPsk,
+                previousClientPsk = acceptedSecrets.previousClientPsk,
+            )
+            check(
+                launchAiReview(
+                    requestId = relayRequestId,
+                    requestJson = initialRequest.requestJson,
+                    review = {
+                        requestSshAuthenticationAiReview(
+                            pairing = pairing,
+                            contents = contents,
+                            messageDetails = messageDetails,
+                            invocation = invocation,
+                            parentElapsedSeconds = if (now >= invocationRequest.receivedAt) {
+                                (now - invocationRequest.receivedAt) / 1_000
+                            } else {
+                                null
+                            },
+                            evaluation = checkNotNull(initialEvaluation),
+                            policies = approvalPolicies,
+                            credentials = credentials,
+                        )
+                    },
+                    complete = { finishReview(it, requestAlreadyInserted = true) },
+                ),
+            )
+            recordSshAuthenticationRequested(
+                pairing = pairing,
+                relayRequestId = relayRequestId,
+                secretName = contents.secret,
+                username = messageDetails.username,
+            )
+        }
+        return ProcessedRelayMessage()
     }
 
     private suspend fun automaticSecretUseDenial(
@@ -6328,11 +6437,7 @@ internal class RequestRepository(
         }
     }
 
-    private suspend fun credentialsForClient(
-        client: ClientEntity,
-        active: RelayDeviceCredentials,
-    ): RelayDeviceCredentials? {
-        if (client.deviceIdentityId == active.deviceIdentityId) return active
+    private suspend fun credentialsForClient(client: ClientEntity): RelayDeviceCredentials? {
         return when (val result = deviceCredentials.deviceCredentials(client.deviceIdentityId)) {
             is RelayDeviceCredentialsResult.Available -> result.credentials
             else -> null
@@ -6885,7 +6990,7 @@ internal class RequestRepository(
 
     private fun RequestedSecretDescription.authorizationCommitment(
         policies: List<SecretApprovalPolicy>,
-        deviceInstructions: AuthorizationDeviceInstructionsCommitment? = null,
+        instructions: AuthorizationInstructionsCommitment? = null,
     ): AuthorizationCommitment = AuthorizationCommitment(
         secretRevisions = reviewMetadata.associate { secret ->
             secret.id to secret.revision
@@ -6896,7 +7001,7 @@ internal class RequestRepository(
                 temporaryAccessExpiresAt = policy.temporaryAccessExpiresAt,
             )
         },
-        deviceInstructions = deviceInstructions,
+        instructions = instructions,
     )
 
     private fun RequestedSecretDescription.hasSameSecretRevisions(
