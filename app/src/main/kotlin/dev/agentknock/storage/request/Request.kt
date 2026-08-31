@@ -915,6 +915,9 @@ internal interface RequestDao {
     @Query("DELETE FROM client_psks WHERE client_id = :clientId AND slot = :slot")
     suspend fun deleteClientPsk(clientId: String, slot: String): Int
 
+    @Query("DELETE FROM client_psks WHERE slot = 'previous' AND stored_at < :storedBefore")
+    suspend fun deleteExpiredPreviousClientPsks(storedBefore: Long): Int
+
     @Query("DELETE FROM client_psks WHERE client_id = :clientId")
     suspend fun deleteClientPsks(clientId: String): Int
 

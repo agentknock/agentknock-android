@@ -429,6 +429,39 @@ class RequestDaoTransactionTest {
     }
 
     @Test
+    fun expiredPreviousClientPsksAreDeletedWithoutTouchingCurrentOrOverlappingKeys() = runTest {
+        val overlapCutoff = 1_000L
+        val secondClientId = "second-client"
+        dao.insertClient(activeClient())
+        dao.insertClient(activeClient().copy(clientId = secondClientId))
+        dao.insertClientPsk(
+            clientPsk(CURRENT_SLOT, byteArrayOf(1)).copy(storedAt = overlapCutoff - 1),
+        )
+        dao.insertClientPsk(
+            clientPsk(PREVIOUS_SLOT, byteArrayOf(2)).copy(storedAt = overlapCutoff - 1),
+        )
+        dao.insertClientPsk(
+            clientPsk(CURRENT_SLOT, byteArrayOf(3)).copy(
+                clientId = secondClientId,
+                storedAt = overlapCutoff - 1,
+            ),
+        )
+        dao.insertClientPsk(
+            clientPsk(PREVIOUS_SLOT, byteArrayOf(4)).copy(
+                clientId = secondClientId,
+                storedAt = overlapCutoff,
+            ),
+        )
+
+        assertEquals(1, dao.deleteExpiredPreviousClientPsks(overlapCutoff))
+
+        assertNotNull(dao.getClientPsk(CLIENT_ID, CURRENT_SLOT))
+        assertNull(dao.getClientPsk(CLIENT_ID, PREVIOUS_SLOT))
+        assertNotNull(dao.getClientPsk(secondClientId, CURRENT_SLOT))
+        assertNotNull(dao.getClientPsk(secondClientId, PREVIOUS_SLOT))
+    }
+
+    @Test
     fun settledParentRequestsArePrunedOnlyAfterTheirChildren() = runTest {
         val parent = rootRequest().copy(
             id = "parent-request",

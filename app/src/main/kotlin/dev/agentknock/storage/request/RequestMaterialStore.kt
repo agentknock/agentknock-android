@@ -209,6 +209,11 @@ internal class RequestMaterialStore(
         return decryptClientPsk(client, ClientPskSlot.PREVIOUS)
     }
 
+    suspend fun deleteExpiredPreviousClientPsks(): Int =
+        dao.deleteExpiredPreviousClientPsks(
+            storedBefore = currentTimeMillis() - PREVIOUS_PSK_OVERLAP_MILLIS,
+        )
+
     suspend fun withEncryptedPendingPsk(
         attempt: PairingAttemptEntity,
         request: InboxRequestEntity,

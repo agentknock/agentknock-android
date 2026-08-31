@@ -170,6 +170,7 @@ internal class ApplicationContainer(application: Application) {
         )
         database.requestDao().discardDecidedSecretUploadValues()
         database.requestDao().deleteCompletedRequestPsks()
+        requestMaterial.deleteExpiredPreviousClientPsks()
         requests.recoverInterruptedAiReviews()
         if (requests.hasPendingRelayWork()) {
             requestConnection.requestSynchronization()
