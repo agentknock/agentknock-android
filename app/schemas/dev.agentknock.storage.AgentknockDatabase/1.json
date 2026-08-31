@@ -2,11 +2,11 @@
   "formatVersion": 1,
   "database": {
     "version": 1,
-    "identityHash": "b99ba9b7d34144e0238abfb643154361",
+    "identityHash": "cbe9e48a155423757ba9d24d8906466a",
     "entities": [
       {
         "tableName": "vault_keys",
-        "createSql": "CREATE TABLE IF NOT EXISTS `${TABLE_NAME}` (`id` TEXT NOT NULL, `purpose` TEXT NOT NULL, `active` INTEGER NOT NULL, `created_at` INTEGER NOT NULL, `backing` TEXT NOT NULL, `wrapping_format` INTEGER, `recovery_root_id` TEXT, `wrapping_nonce` BLOB, `wrapped_key` BLOB, PRIMARY KEY(`id`))",
+        "createSql": "CREATE TABLE IF NOT EXISTS `${TABLE_NAME}` (`id` TEXT NOT NULL, `purpose` TEXT NOT NULL, `active` INTEGER NOT NULL, `created_at` INTEGER NOT NULL, `backing` TEXT NOT NULL, PRIMARY KEY(`id`))",
         "fields": [
           {
             "fieldPath": "id",
@@ -37,26 +37,6 @@
             "columnName": "backing",
             "affinity": "TEXT",
             "notNull": true
-          },
-          {
-            "fieldPath": "wrapping.formatVersion",
-            "columnName": "wrapping_format",
-            "affinity": "INTEGER"
-          },
-          {
-            "fieldPath": "wrapping.recoveryRootId",
-            "columnName": "recovery_root_id",
-            "affinity": "TEXT"
-          },
-          {
-            "fieldPath": "wrapping.nonce",
-            "columnName": "wrapping_nonce",
-            "affinity": "BLOB"
-          },
-          {
-            "fieldPath": "wrapping.ciphertext",
-            "columnName": "wrapped_key",
-            "affinity": "BLOB"
           }
         ],
         "primaryKey": {
@@ -2068,7 +2048,7 @@
     ],
     "setupQueries": [
       "CREATE TABLE IF NOT EXISTS room_master_table (id INTEGER PRIMARY KEY,identity_hash TEXT)",
-      "INSERT OR REPLACE INTO room_master_table (id,identity_hash) VALUES(42, 'b99ba9b7d34144e0238abfb643154361')"
+      "INSERT OR REPLACE INTO room_master_table (id,identity_hash) VALUES(42, 'cbe9e48a155423757ba9d24d8906466a')"
     ]
   }
 }

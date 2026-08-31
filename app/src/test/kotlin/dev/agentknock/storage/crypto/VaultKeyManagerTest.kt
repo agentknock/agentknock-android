@@ -2,7 +2,6 @@ package dev.agentknock.storage.crypto
 
 import javax.crypto.KeyGenerator
 import javax.crypto.SecretKey
-import javax.crypto.spec.SecretKeySpec
 import kotlinx.coroutines.test.runTest
 import org.junit.Assert.assertEquals
 import org.junit.Assert.assertFalse
@@ -33,7 +32,6 @@ class VaultKeyManagerTest {
             ),
             dao.activeKeyIds(),
         )
-        assertTrue(dao.keys.all { it.wrapping == null })
     }
 
     @Test
@@ -215,13 +213,6 @@ internal class FakeEncryptionKeyStore : EncryptionKeyStore {
         }
         generatedKeyIds += keyId
         check(keyId !in generateFailuresAfterInsert) { "Generation failed for $keyId" }
-        return GeneratedEncryptionKey(EncryptionKeyBacking.SOFTWARE)
-    }
-
-    override fun importKey(keyId: String, keyMaterial: ByteArray): GeneratedEncryptionKey {
-        check(keyId !in keys)
-        require(keyMaterial.size == 16)
-        keys[keyId] = SecretKeySpec(keyMaterial.copyOf(), "AES")
         return GeneratedEncryptionKey(EncryptionKeyBacking.SOFTWARE)
     }
 

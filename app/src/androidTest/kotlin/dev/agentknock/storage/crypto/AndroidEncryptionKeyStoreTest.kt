@@ -12,14 +12,13 @@ import org.junit.runner.RunWith
 @RunWith(AndroidJUnit4::class)
 class AndroidEncryptionKeyStoreTest {
     @Test
-    fun importsAnAes128VaultKeyAsNonExportableKeyMaterial() {
+    fun generatesANonExportableAes128VaultKey() {
         val context = InstrumentationRegistry.getInstrumentation().targetContext
         val keyStore = AndroidEncryptionKeyStore(context.packageManager)
         val keyId = "instrumentation-${UUID.randomUUID()}"
-        val keyMaterial = ByteArray(16) { (it + 1).toByte() }
 
         try {
-            keyStore.importKey(keyId, keyMaterial)
+            keyStore.generate(keyId)
 
             assertTrue(keyStore.get(keyId) != null)
             assertNull(keyStore.get(keyId)?.encoded)
@@ -33,7 +32,6 @@ class AndroidEncryptionKeyStoreTest {
             assertArrayEquals(plaintext, (decrypted as DecryptionResult.Plaintext).value)
         } finally {
             keyStore.delete(keyId)
-            keyMaterial.fill(0)
         }
     }
 }

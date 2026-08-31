@@ -2,7 +2,6 @@ package dev.agentknock.storage.crypto
 
 import androidx.room3.ColumnInfo
 import androidx.room3.Dao
-import androidx.room3.Embedded
 import androidx.room3.Entity
 import androidx.room3.Index
 import androidx.room3.Insert
@@ -38,8 +37,6 @@ internal data class VaultKeyEntity(
     val createdAt: Long,
     @ColumnInfo(name = "backing")
     val backing: String,
-    @Embedded
-    val wrapping: WrappedVaultKey? = null,
 )
 
 @Dao
