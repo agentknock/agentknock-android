@@ -542,12 +542,14 @@ internal data class AuthorizationInstructionsCommitment(
     val deviceIdentityId: String,
     val deviceInstructions: String,
     val clientId: String,
+    val clientName: String,
     val clientInstructions: String,
 )
 
 internal data class AuthorizationCommitment(
     val secretRevisions: Map<String, Long>,
     val policies: Map<String, AuthorizationPolicyCommitment>,
+    val expectedAbsentSecretNames: Set<String> = emptySet(),
     val instructions: AuthorizationInstructionsCommitment? = null,
 )
 
@@ -732,6 +734,9 @@ internal interface RequestDao {
     @Query("SELECT * FROM secrets WHERE id IN (:secretIds)")
     suspend fun getAuthorizationSecrets(secretIds: List<String>): List<SecretEntity>
 
+    @Query("SELECT EXISTS(SELECT 1 FROM secrets WHERE name = :name)")
+    suspend fun authorizationSecretExists(name: String): Boolean
+
     @Query(
         "SELECT instructions FROM device_identities " +
             "WHERE id = :deviceIdentityId AND role = 'active'",
@@ -815,6 +820,20 @@ internal interface RequestDao {
         """,
     )
     suspend fun deleteCompletedRequestPsk(requestId: String): Int
+
+    @Query(
+        """
+        DELETE FROM request_psks
+        WHERE request_id = :requestId
+          AND EXISTS (
+            SELECT 1 FROM inbox_requests
+            WHERE id = :requestId
+              AND kind = 'secret_use'
+              AND completed_at IS NOT NULL
+          )
+        """,
+    )
+    suspend fun deleteTerminalInvocationRequestPsk(requestId: String): Int
 
     @Query(
         """
@@ -1159,31 +1178,6 @@ internal interface RequestDao {
     }
 
     @Transaction
-    suspend fun insertSecretUseRequestIfAuthorized(
-        request: InboxRequestEntity,
-        secretUseRequest: SecretUseRequestEntity,
-        client: ClientEntity,
-        requestPsk: RequestPskEntity,
-        currentClientPsk: ClientPskEntity?,
-        previousClientPsk: ClientPskEntity?,
-        authorization: AuthorizationCommitment,
-        clientId: String,
-        operation: String,
-        now: Long,
-    ): Boolean {
-        if (!authorizationMatches(authorization, clientId, operation, now)) return false
-        insertSecretUseRequest(
-            request,
-            secretUseRequest,
-            client,
-            requestPsk,
-            currentClientPsk,
-            previousClientPsk,
-        )
-        return true
-    }
-
-    @Transaction
     suspend fun insertGitSignRequestIfAuthorized(
         request: InboxRequestEntity,
         gitSignRequest: GitSignRequestEntity,
@@ -1386,9 +1380,13 @@ internal interface RequestDao {
             return ConditionalRequestUpdate.UNAVAILABLE
         }
         if (!authorizationMatches(authorization, clientId, operation, now)) {
+            val currentRequest = getRequestById(request.id)
+                ?: return ConditionalRequestUpdate.UNAVAILABLE
+            val currentSecretUseRequest = getSecretUseRequest(request.id)
+                ?: return ConditionalRequestUpdate.UNAVAILABLE
             check(
                 updateRequest(
-                    request.copy(
+                    currentRequest.copy(
                         state = "action_required",
                         responseJson = null,
                         completedAt = null,
@@ -1397,7 +1395,7 @@ internal interface RequestDao {
             )
             check(
                 updateSecretUseRequestRow(
-                    secretUseRequest.copy(
+                    currentSecretUseRequest.copy(
                         decision = null,
                         decisionSource = null,
                         completionResult = null,
@@ -1541,11 +1539,16 @@ internal interface RequestDao {
             if (
                 getAuthorizationDeviceInstructions(expected.deviceIdentityId) !=
                 expected.deviceInstructions ||
+                client.deviceIdentityId != expected.deviceIdentityId ||
                 expected.clientId != clientId ||
+                client.name != expected.clientName ||
                 client.instructions != expected.clientInstructions
             ) {
                 return false
             }
+        }
+        for (name in authorization.expectedAbsentSecretNames) {
+            if (authorizationSecretExists(name)) return false
         }
         val secretIds = authorization.secretRevisions.keys
         if (!secretIds.containsAll(authorization.policies.keys)) return false

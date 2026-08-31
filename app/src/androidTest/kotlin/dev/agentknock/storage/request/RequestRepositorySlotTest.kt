@@ -25,6 +25,7 @@ import dev.agentknock.storage.AgentknockDatabase
 import dev.agentknock.storage.RoomWriteTransaction
 import dev.agentknock.storage.audit.AuditRepository
 import dev.agentknock.storage.approval.AiReviewDecision
+import dev.agentknock.storage.approval.ApprovalEvaluation
 import dev.agentknock.storage.crypto.AesGcmEncryption
 import dev.agentknock.storage.crypto.EncryptionKeyBacking
 import dev.agentknock.storage.crypto.EncryptionKeyStore
@@ -34,6 +35,7 @@ import dev.agentknock.storage.crypto.VaultKeyPurpose
 import dev.agentknock.storage.secret.CreateSecretResult
 import dev.agentknock.storage.secret.CreateEnvironmentVariableResult
 import dev.agentknock.storage.secret.SecretApprovalMode
+import dev.agentknock.storage.secret.SecretMetadata
 import dev.agentknock.storage.secret.SaveSecretResult
 import dev.agentknock.storage.secret.SecretRepository
 import dev.agentknock.storage.secret.SshKeyAlgorithm
@@ -68,6 +70,7 @@ import kotlinx.coroutines.withTimeout
 import kotlinx.coroutines.withTimeoutOrNull
 import kotlinx.serialization.json.Json
 import kotlinx.serialization.json.JsonElement
+import kotlinx.serialization.decodeFromString
 import org.bouncycastle.crypto.digests.SHA256Digest
 import org.bouncycastle.crypto.generators.HKDFBytesGenerator
 import org.bouncycastle.crypto.hpke.HPKE
@@ -137,13 +140,14 @@ class RequestRepositorySlotTest {
         )
         relay = QueuedRelayDeviceClient()
         val audit = AuditRepository(database.auditDao(), currentTimeMillis = { now })
+        var nextSecretId = 0
         secrets = SecretRepository(
             dao = database.secretDao(),
             keyManager = keyManager,
             encryption = encryption,
             audit = audit,
             writeTransaction = RoomWriteTransaction(database),
-            newId = { "secret-id" },
+            newId = { "secret-id-${nextSecretId++}" },
             currentTimeMillis = { now },
             cryptographyDispatcher = Dispatchers.Unconfined,
         )
@@ -176,6 +180,13 @@ class RequestRepositorySlotTest {
             currentTimeMillis = { now },
             cryptographyDispatcher = Dispatchers.Unconfined,
         )
+        val invocationRequests = InvocationRequests(
+            dao = database.requestDao(),
+            secrets = secrets,
+            audit = audit,
+            writeTransaction = RoomWriteTransaction(database),
+            currentTimeMillis = { now },
+        )
         repository = RequestRepository(
             dao = database.requestDao(),
             material = requestMaterial,
@@ -183,6 +194,7 @@ class RequestRepositorySlotTest {
             secrets = secrets,
             clients = clients,
             secretManagement = secretManagement,
+            invocationRequests = invocationRequests,
             approvalReviewer = approvalReviewer,
             relay = relay,
             aiReviews = AiReviewCoordinator(reviewScope),
@@ -900,6 +912,48 @@ class RequestRepositorySlotTest {
         )
     }
 
+    @Test
+    fun aiApprovalEscalatesWhenClientNameChanges() = runTest {
+        val clientPsk = establishActivePairing()
+        createAiEnvironmentSecret()
+        val request = pairedRequest(
+            requestId = AI_INVOCATION_REQUEST_ID,
+            clientPsk = clientPsk,
+            plaintext = aiInvocationPlaintext(ByteArray(32) { (0x26 + it).toByte() }),
+        )
+        connect(
+            requestEvent(AI_INVOCATION_REQUEST_ID, request),
+            RelayDeviceEvent.CaughtUp,
+        )
+        assertEquals(RequestSyncResult.Success, repository.sync())
+        assertEquals(
+            ClientChangeResult.CHANGED,
+            repository.renameClient(CLIENT_ID, "Renamed during review"),
+        )
+
+        approvalReviewer.complete(
+            RelayApprovalReviewResult.Reviewed(
+                decision = RelayApprovalReviewDecision.APPROVE,
+                explanation = "The original client name influenced this verdict.",
+            ),
+        )
+        val reviewed = awaitAsynchronousWork {
+            inbox.observeRequest(AI_INVOCATION_REQUEST_ID)
+                .filterNotNull()
+                .filter {
+                    it.state == InboxRequestState.ACTION_REQUIRED &&
+                        it.secretUse?.approvalEvaluation?.aiReview != null
+                }
+                .first()
+        }
+
+        assertNull(database.requestDao().getRequestById(AI_INVOCATION_REQUEST_ID)?.responseJson)
+        assertEquals(
+            AiReviewDecision.ASK_USER,
+            reviewed.secretUse?.approvalEvaluation?.aiReview?.decision,
+        )
+    }
+
     private suspend fun assertAiReviewEscalatesWhenDeviceInstructionsChange(
         decision: RelayApprovalReviewDecision,
     ) {
@@ -915,8 +969,14 @@ class RequestRepositorySlotTest {
             RelayDeviceEvent.CaughtUp,
         )
         assertEquals(RequestSyncResult.Success, repository.sync())
-        credentialSource.credentials = credentials.copy(
-            instructions = "Never use production credentials for experiments.",
+        val changedInstructions = "Never use production credentials for experiments."
+        credentialSource.credentials = credentials.copy(instructions = changedInstructions)
+        assertEquals(
+            1,
+            database.deviceIdentityDao().updateActiveInstructions(
+                activeRole = "active",
+                instructions = changedInstructions,
+            ),
         )
 
         approvalReviewer.complete(
@@ -947,7 +1007,7 @@ class RequestRepositorySlotTest {
     }
 
     @Test
-    fun aiApprovalDeniesIfClientWasRevokedDuringReview() = runTest {
+    fun aiReviewDefersIfClientWasRevokedDuringReview() = runTest {
         val clientPsk = establishActivePairing()
         createAiEnvironmentSecret()
         val request = pairedRequest(
@@ -975,18 +1035,50 @@ class RequestRepositorySlotTest {
         val stored = awaitAsynchronousWork {
             database.requestDao().observeRequest(AI_INVOCATION_REQUEST_ID)
                 .filterNotNull()
-                .filter { it.responseJson != null }
+                .filter { it.state == InboxRequestState.ACTION_REQUIRED.storedName }
                 .first()
         }
         val secretUse = checkNotNull(
             database.requestDao().getSecretUseRequest(AI_INVOCATION_REQUEST_ID),
         )
-        assertEquals(ApprovalDecision.DENIED.storedName, secretUse.decision)
-        assertEquals(InboxRequestState.WAITING.storedName, stored.state)
+        assertNull(secretUse.decision)
+        assertNull(
+            Json.decodeFromString<ApprovalEvaluation>(
+                checkNotNull(secretUse.approvalEvaluationJson),
+            ).aiReview,
+        )
+        assertNull(stored.responseJson)
         awaitAsynchronousWork {
             while (synchronizationRequests <= synchronizationsBeforeReview) delay(1)
         }
         assertTrue(synchronizationRequests > synchronizationsBeforeReview)
+    }
+
+    @Test
+    fun pendingUnrestrictedInvocationReopensItsExactDeliverySelection() = runTest {
+        assertPendingInvocationSelectionAfterVariableAdded(
+            delivery = "{}",
+            initialVariableNames = listOf("ORIGINAL"),
+            expectedVariableNames = listOf("ADDED", "ORIGINAL"),
+        )
+    }
+
+    @Test
+    fun pendingInvocationPreservesOmittedVariablesWhenASecretChanges() = runTest {
+        assertPendingInvocationSelectionAfterVariableAdded(
+            delivery = """{"environment":{"omit":["OMITTED"]}}""",
+            initialVariableNames = listOf("ORIGINAL", "OMITTED"),
+            expectedVariableNames = listOf("ADDED", "ORIGINAL"),
+        )
+    }
+
+    @Test
+    fun pendingInvocationPreservesExplicitOnlyWhenASecretChanges() = runTest {
+        assertPendingInvocationSelectionAfterVariableAdded(
+            delivery = """{"environment":{"only":["ORIGINAL"]}}""",
+            initialVariableNames = listOf("ORIGINAL"),
+            expectedVariableNames = listOf("ORIGINAL"),
+        )
     }
 
     @Test
@@ -1108,6 +1200,49 @@ class RequestRepositorySlotTest {
             pairingRequest(ByteArray(32) { it.toByte() }).toString(),
             database.requestDao().getRequestById(CLIENT_ID)?.requestJson,
         )
+    }
+
+    @Test
+    fun sameClientRequestAndPayloadFromAnotherIdentityIsNotTreatedAsReplay() = runTest {
+        database.deviceIdentityDao().insertIdentity(
+            DeviceIdentityEntity(
+                id = RETIRED_DEVICE_IDENTITY_ID,
+                role = "retired",
+                address = "retired-address",
+                deviceId = "01K2ENXDTW1P3XAR4J7V7C9D0J",
+                createdAt = now - 1,
+            ),
+        )
+        val payload = Json.parseToJsonElement("""{"same":"payload"}""")
+        val stored = InboxRequestEntity(
+            id = UNSUPPORTED_REQUEST_ID,
+            parentRequestId = null,
+            deviceIdentityId = RETIRED_DEVICE_IDENTITY_ID,
+            clientId = CLIENT_ID,
+            clientNameSnapshot = "Retired identity client",
+            clientSoftwareJson = null,
+            kind = "unsupported",
+            state = InboxRequestState.WAITING.storedName,
+            listed = false,
+            requestJson = payload.toString(),
+            responseJson = """{"old":"response"}""",
+            completionJson = null,
+            error = null,
+            receivedAt = now - 1,
+            completedAt = null,
+            requestAcknowledged = true,
+            responseAcknowledged = false,
+            completionAcknowledged = false,
+        )
+        database.requestDao().insertRequest(stored)
+        val collision = connect(
+            requestEvent(UNSUPPORTED_REQUEST_ID, payload),
+            RelayDeviceEvent.CaughtUp,
+        )
+
+        assertEquals(RequestSyncResult.Success, repository.sync())
+        assertTrue(collision.sentFrames.isEmpty())
+        assertEquals(stored, database.requestDao().getRequestById(UNSUPPORTED_REQUEST_ID))
     }
 
     @Test
@@ -1831,6 +1966,68 @@ class RequestRepositorySlotTest {
         return secretId
     }
 
+    private suspend fun assertPendingInvocationSelectionAfterVariableAdded(
+        delivery: String,
+        initialVariableNames: List<String>,
+        expectedVariableNames: List<String>,
+    ) {
+        val clientPsk = establishActivePairing()
+        val created = secrets.createEnvironmentSecret(
+            name = "selection",
+            description = "Selection regression",
+        )
+        val secretId = (created as CreateSecretResult.Created).id
+        initialVariableNames.forEach { name ->
+            assertTrue(
+                secrets.createEnvironmentVariable(
+                    secretId = secretId,
+                    name = name,
+                    value = "value-$name",
+                    sensitive = true,
+                    notes = "",
+                ) is CreateEnvironmentVariableResult.Created,
+            )
+        }
+        val token = ByteArray(32) { (0x45 + it).toByte() }
+        val request = pairedRequest(
+            requestId = AI_INVOCATION_REQUEST_ID,
+            clientPsk = clientPsk,
+            plaintext = environmentSelectionInvocationPlaintext(token, delivery),
+        )
+        connect(
+            requestEvent(AI_INVOCATION_REQUEST_ID, request),
+            RelayDeviceEvent.CaughtUp,
+        )
+        assertEquals(RequestSyncResult.Success, repository.sync())
+        assertEquals(
+            InboxRequestState.ACTION_REQUIRED.storedName,
+            database.requestDao().getRequestById(AI_INVOCATION_REQUEST_ID)?.state,
+        )
+
+        now += 1
+        assertTrue(
+            secrets.createEnvironmentVariable(
+                secretId = secretId,
+                name = "ADDED",
+                value = "new-sensitive-value",
+                sensitive = true,
+                notes = "",
+            ) is CreateEnvironmentVariableResult.Created,
+        )
+
+        assertEquals(
+            InvocationDecisionResult.SecretsChanged,
+            repository.approveSecretUseRequest(AI_INVOCATION_REQUEST_ID),
+        )
+        val stored = checkNotNull(
+            database.requestDao().getSecretUseRequest(AI_INVOCATION_REQUEST_ID),
+        )
+        val metadata = Json.decodeFromString<List<SecretMetadata>>(stored.secretDetailsJson)
+            .single()
+        assertEquals(expectedVariableNames, metadata.environmentVariableNames.sorted())
+        assertNull(database.requestDao().getRequestById(AI_INVOCATION_REQUEST_ID)?.responseJson)
+    }
+
     private suspend fun <T> awaitAsynchronousWork(block: suspend () -> T): T = withContext(
         Dispatchers.Default.limitedParallelism(1),
     ) {
@@ -1911,6 +2108,13 @@ class RequestRepositorySlotTest {
 
     private fun aiInvocationPlaintext(token: ByteArray): ByteArray =
         """{${clientSoftwareFields()},"method":"Invocation","secrets":{"deployment":{}},"operation":{"type":"exec","command":"deploy","arguments":["production"],"working_directory":"/tmp/project","executable_path":"/usr/bin/deploy","executable_mode":"BINARY","stdin":"TERMINAL","stdout":"TERMINAL","stderr":"TERMINAL"},"launcher_chain":[],"invocation_token":"${BASE64.encodeToString(token)}"}"""
+            .encodeToByteArray()
+
+    private fun environmentSelectionInvocationPlaintext(
+        token: ByteArray,
+        delivery: String,
+    ): ByteArray =
+        """{${clientSoftwareFields()},"method":"Invocation","secrets":{"selection":$delivery},"operation":{"type":"exec","command":"deploy","arguments":[],"working_directory":"/tmp/project","executable_path":"/usr/bin/deploy","executable_mode":"BINARY","stdin":"TERMINAL","stdout":"TERMINAL","stderr":"TERMINAL"},"launcher_chain":[],"invocation_token":"${BASE64.encodeToString(token)}"}"""
             .encodeToByteArray()
 
     private fun gitSignPlaintext(token: ByteArray): ByteArray =
@@ -2106,6 +2310,7 @@ class RequestRepositorySlotTest {
 
     private companion object {
         const val DEVICE_IDENTITY_ID = "device-identity"
+        const val RETIRED_DEVICE_IDENTITY_ID = "retired-device-identity"
         const val ADDRESS = "write-leader-hungry"
         const val ADDRESS_ID = "0123456789abcdef0123456789abcdef"
         const val DEVICE_ID = "01K2ENXDTW1P3XAR4J7V7C9D0H"

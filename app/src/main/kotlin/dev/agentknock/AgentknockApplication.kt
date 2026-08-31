@@ -30,6 +30,7 @@ import dev.agentknock.storage.request.RequestMaterialStore
 import dev.agentknock.storage.request.persistentRelayRetryDeadline
 import dev.agentknock.storage.request.AiReviewCoordinator
 import dev.agentknock.storage.request.ClientRepository
+import dev.agentknock.storage.request.InvocationRequests
 import dev.agentknock.storage.request.SecretManagementRequests
 import dev.agentknock.storage.device.DeviceIdentityRepository
 import dev.agentknock.storage.device.DeviceManagementRepository
@@ -146,6 +147,12 @@ internal class ApplicationContainer(application: Application) {
         audit = audit,
         writeTransaction = writeTransaction,
     )
+    private val invocationRequests = InvocationRequests(
+        dao = database.requestDao(),
+        secrets = secrets,
+        audit = audit,
+        writeTransaction = writeTransaction,
+    )
 
     val requests: RequestRepository = RequestRepository(
         dao = database.requestDao(),
@@ -154,6 +161,7 @@ internal class ApplicationContainer(application: Application) {
         secrets = secrets,
         clients = clients,
         secretManagement = secretManagement,
+        invocationRequests = invocationRequests,
         approvalReviewer = HttpRelayApprovalReviewClient(
             RelayHttpTransport(approvalReviewHttpClient(httpClient)),
         ),

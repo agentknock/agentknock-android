@@ -429,6 +429,35 @@ class RequestDaoTransactionTest {
     }
 
     @Test
+    fun startupRequestPskCleanupRequiresAStoredCompletion() = runTest {
+        val requestId = "completed-pairing-finish"
+        dao.insertRequest(
+            rootRequest().copy(
+                id = requestId,
+                kind = RequestKind.PAIRING_FINISH.storedName,
+                state = "completed",
+                completionJson = null,
+                completedAt = 5,
+            ),
+        )
+        dao.insertRequestPsk(requestPsk(requestId))
+        val completedRequestId = "request-with-completion"
+        dao.insertRequest(
+            rootRequest().copy(
+                id = completedRequestId,
+                completionJson = "{}",
+            ),
+        )
+        dao.insertRequestPsk(requestPsk(completedRequestId))
+
+        assertEquals(1, dao.deleteCompletedRequestPsks())
+        assertNotNull(dao.getRequestPsk(requestId))
+        assertNull(dao.getRequestPsk(completedRequestId))
+        assertEquals(0, dao.deleteTerminalInvocationRequestPsk(requestId))
+        assertNotNull(dao.getRequestPsk(requestId))
+    }
+
+    @Test
     fun expiredPreviousClientPsksAreDeletedWithoutTouchingCurrentOrOverlappingKeys() = runTest {
         val overlapCutoff = 1_000L
         val secondClientId = "second-client"
@@ -687,6 +716,7 @@ class RequestDaoTransactionTest {
                 deviceIdentityId = DEVICE_IDENTITY_ID,
                 deviceInstructions = "Allow repository inspection.",
                 clientId = CLIENT_ID,
+                clientName = "Test client",
                 clientInstructions = "",
             ),
         )
@@ -705,6 +735,36 @@ class RequestDaoTransactionTest {
         )
         val client = checkNotNull(dao.getClient(CLIENT_ID))
         dao.updateClient(client.copy(instructions = "Only inspect public repositories."))
+        assertFalse(dao.authorizationMatches(commitment, CLIENT_ID, "invocation", 1))
+
+        dao.updateClient(client.copy(name = "Renamed client"))
+        assertFalse(dao.authorizationMatches(commitment, CLIENT_ID, "invocation", 1))
+    }
+
+    @Test
+    fun authorizationCommitmentChecksManySecretsExpectedToRemainAbsent() = runTest {
+        insertActivePairing()
+        val absentNames = (0 until 1_100).map { "absent-secret-$it" }.toSet()
+        val commitment = AuthorizationCommitment(
+            secretRevisions = emptyMap(),
+            policies = emptyMap(),
+            expectedAbsentSecretNames = absentNames,
+        )
+
+        assertTrue(dao.authorizationMatches(commitment, CLIENT_ID, "invocation", 1))
+        database.secretDao().insertSecret(
+            SecretEntity(
+                id = "new-secret-id",
+                name = absentNames.last(),
+                description = "",
+                type = "environment",
+                createdAt = 1,
+                updatedAt = 1,
+                revision = 1,
+                approvalMode = "approve",
+            ),
+        )
+
         assertFalse(dao.authorizationMatches(commitment, CLIENT_ID, "invocation", 1))
     }
 
@@ -766,8 +826,8 @@ class RequestDaoTransactionTest {
         val fallbackInvocation = checkNotNull(dao.getSecretUseRequest(requestId))
         assertNull(fallbackInvocation.decision)
         assertNull(fallbackInvocation.decisionSource)
-        assertEquals("{\"github\":{}}", fallbackInvocation.providedSecretsJson)
-        assertEquals("{\"review\":\"refreshed\"}", fallbackInvocation.approvalEvaluationJson)
+        assertNull(fallbackInvocation.providedSecretsJson)
+        assertNull(fallbackInvocation.approvalEvaluationJson)
 
         val gitRequestId = "$INVOCATION_REQUEST_ID-git"
         dao.insertRequest(
