@@ -629,8 +629,8 @@ private fun About(
                         SettingsGroupDivider()
                         SettingsRow(
                             title = "Privacy notice",
-                            summary = "Privacy information on agentknock.dev",
-                            onClick = { open("privacy notice", "https://agentknock.dev/privacy/") },
+                            summary = "agentknock.dev/privacy",
+                            onClick = { open("privacy notice", "https://agentknock.dev/privacy") },
                             external = true,
                         )
                         SettingsGroupDivider()
