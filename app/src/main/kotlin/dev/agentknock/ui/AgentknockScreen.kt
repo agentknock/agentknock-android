@@ -39,6 +39,7 @@ import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
 import androidx.compose.runtime.saveable.rememberSaveable
+import androidx.compose.runtime.saveable.rememberSaveableStateHolder
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
@@ -98,9 +99,8 @@ internal fun AgentknockScreen(
     val sessionAuthenticated by authentication.authenticated.collectAsStateWithLifecycle()
     val configuration by deviceSetupViewModel.configuration.collectAsStateWithLifecycle()
     var section by rememberSaveable { mutableStateOf(MainSection.REQUESTS) }
-    var showSettings by rememberSaveable { mutableStateOf(false) }
-    var showAddressEditor by rememberSaveable { mutableStateOf(false) }
-    var openPlanInitially by remember { mutableStateOf(false) }
+    var destination by rememberSaveable { mutableStateOf(RootDestination.MAIN) }
+    val mainStateHolder = rememberSaveableStateHolder()
     var showNavigation by rememberSaveable { mutableStateOf(true) }
     var offerNotifications by rememberSaveable { mutableStateOf(false) }
     val requestNavigationTarget by requestNavigation.collectAsStateWithLifecycle()
@@ -167,8 +167,7 @@ internal fun AgentknockScreen(
             }
         }
         section = targetSection
-        showSettings = false
-        showAddressEditor = false
+        destination = RootDestination.MAIN
         when (targetSection) {
             MainSection.REQUESTS -> requestsViewModel.selectRequest(requestId)
             MainSection.SECRETS -> secretsViewModel.selectUpload(requestId)
@@ -190,9 +189,7 @@ internal fun AgentknockScreen(
         ) {
             return@LaunchedEffect
         }
-        showSettings = true
-        showAddressEditor = false
-        openPlanInitially = true
+        destination = RootDestination.PLAN
         when (target) {
             is SubscriptionNavigation.Redemption -> subscriptionViewModel.redeem(target.token)
             SubscriptionNavigation.InvalidLink -> subscriptionViewModel.reportInvalidLink()
@@ -215,8 +212,9 @@ internal fun AgentknockScreen(
         current == null -> Box(Modifier.fillMaxSize(), contentAlignment = Alignment.Center) {
             CircularProgressIndicator()
         }
-        showSettings -> SettingsScreen(
-            onClose = { showSettings = false },
+        destination == RootDestination.SETTINGS ||
+            destination == RootDestination.PLAN -> SettingsScreen(
+            onClose = { destination = RootDestination.MAIN },
             authenticate = authenticate,
             authenticationMode = authenticationMode,
             onAuthenticationModeChange = { mode, onError ->
@@ -224,8 +222,12 @@ internal fun AgentknockScreen(
             },
             notificationStateGeneration = notificationRefreshGeneration,
             requestNotificationPermission = requestNotificationPermission,
-            openPlanInitially = openPlanInitially,
-            onPlanOpened = { openPlanInitially = false },
+            openPlanInitially = destination == RootDestination.PLAN,
+            onPlanOpened = {
+                if (destination == RootDestination.PLAN) {
+                    destination = RootDestination.SETTINGS
+                }
+            },
             subscriptionViewModel = subscriptionViewModel,
             viewModel = settingsViewModel,
         )
@@ -235,72 +237,78 @@ internal fun AgentknockScreen(
                 { section = MainSection.REQUESTS }
             },
             onDeviceClaimed = { offerNotifications = true },
-            onOpenSettings = { showSettings = true },
+            onOpenSettings = { destination = RootDestination.SETTINGS },
             viewModel = deviceSetupViewModel,
         )
-        showAddressEditor -> DeviceSetupScreen(
+        destination == RootDestination.ADDRESS_EDITOR -> DeviceSetupScreen(
             configuration = current,
             onDone = {
-                showAddressEditor = false
+                destination = RootDestination.MAIN
             },
             changeAddressInitially = true,
             onDeviceClaimed = {},
             viewModel = deviceSetupViewModel,
         )
-        else -> BoxWithConstraints(Modifier.fillMaxSize()) {
-            val useNavigationRail = maxWidth >= 600.dp
-            LaunchedEffect(useNavigationRail) {
-                if (useNavigationRail) showNavigation = true
-            }
-            if (useNavigationRail) {
-                Row(Modifier.fillMaxSize().windowInsetsPadding(WindowInsets.navigationBars)) {
-                    if (showNavigation) {
-                        MainNavigationRail(
-                            section = section,
-                            actionRequiredCounts = actionRequiredCounts,
-                            onSelect = { section = it },
-                        )
-                    }
-                    MainContent(
-                        section = section,
-                        authorizeProtectedAction = ::authorizeProtectedAction,
-                        onOpenSettings = { showSettings = true },
-                        onChangePairingAddress = { showAddressEditor = true },
-                        notificationsEnabled = notificationsEnabled,
-                        aiReviewActive = subscription.access == SubscriptionAccess.ACTIVE,
-                        onTopLevelChanged = { showNavigation = true },
-                        requestsViewModel = requestsViewModel,
-                        secretsViewModel = secretsViewModel,
-                        clientsViewModel = clientsViewModel,
-                        modifier = Modifier.weight(1f),
-                    )
+        else -> mainStateHolder.SaveableStateProvider(section.name) {
+            BoxWithConstraints(Modifier.fillMaxSize()) {
+                val useNavigationRail = maxWidth >= 600.dp
+                LaunchedEffect(useNavigationRail) {
+                    if (useNavigationRail) showNavigation = true
                 }
-            } else {
-                Scaffold(
-                    contentWindowInsets = WindowInsets.navigationBars,
-                    bottomBar = {
+                if (useNavigationRail) {
+                    Row(Modifier.fillMaxSize().windowInsetsPadding(WindowInsets.navigationBars)) {
                         if (showNavigation) {
-                            MainNavigationBar(
+                            MainNavigationRail(
                                 section = section,
                                 actionRequiredCounts = actionRequiredCounts,
                                 onSelect = { section = it },
                             )
                         }
-                    },
-                ) { padding ->
-                    MainContent(
-                        section = section,
-                        authorizeProtectedAction = ::authorizeProtectedAction,
-                        onOpenSettings = { showSettings = true },
-                        onChangePairingAddress = { showAddressEditor = true },
-                        notificationsEnabled = notificationsEnabled,
-                        aiReviewActive = subscription.access == SubscriptionAccess.ACTIVE,
-                        onTopLevelChanged = { showNavigation = it },
-                        requestsViewModel = requestsViewModel,
-                        secretsViewModel = secretsViewModel,
-                        clientsViewModel = clientsViewModel,
-                        modifier = Modifier.fillMaxSize().padding(padding),
-                    )
+                        MainContent(
+                            section = section,
+                            authorizeProtectedAction = ::authorizeProtectedAction,
+                            onOpenSettings = { destination = RootDestination.SETTINGS },
+                            onChangePairingAddress = {
+                                destination = RootDestination.ADDRESS_EDITOR
+                            },
+                            notificationsEnabled = notificationsEnabled,
+                            aiReviewActive = subscription.access == SubscriptionAccess.ACTIVE,
+                            onTopLevelChanged = { showNavigation = true },
+                            requestsViewModel = requestsViewModel,
+                            secretsViewModel = secretsViewModel,
+                            clientsViewModel = clientsViewModel,
+                            modifier = Modifier.weight(1f),
+                        )
+                    }
+                } else {
+                    Scaffold(
+                        contentWindowInsets = WindowInsets.navigationBars,
+                        bottomBar = {
+                            if (showNavigation) {
+                                MainNavigationBar(
+                                    section = section,
+                                    actionRequiredCounts = actionRequiredCounts,
+                                    onSelect = { section = it },
+                                )
+                            }
+                        },
+                    ) { padding ->
+                        MainContent(
+                            section = section,
+                            authorizeProtectedAction = ::authorizeProtectedAction,
+                            onOpenSettings = { destination = RootDestination.SETTINGS },
+                            onChangePairingAddress = {
+                                destination = RootDestination.ADDRESS_EDITOR
+                            },
+                            notificationsEnabled = notificationsEnabled,
+                            aiReviewActive = subscription.access == SubscriptionAccess.ACTIVE,
+                            onTopLevelChanged = { showNavigation = it },
+                            requestsViewModel = requestsViewModel,
+                            secretsViewModel = secretsViewModel,
+                            clientsViewModel = clientsViewModel,
+                            modifier = Modifier.fillMaxSize().padding(padding),
+                        )
+                    }
                 }
             }
         }
@@ -487,4 +495,11 @@ private enum class MainSection {
     REQUESTS,
     SECRETS,
     CLIENTS,
+}
+
+private enum class RootDestination {
+    MAIN,
+    SETTINGS,
+    PLAN,
+    ADDRESS_EDITOR,
 }
