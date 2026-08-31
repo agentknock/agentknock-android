@@ -1,7 +1,9 @@
 package dev.agentknock.storage.device
 
 import dev.agentknock.relay.RelayClaimClient
+import dev.agentknock.relay.RelayClaimOutcome
 import dev.agentknock.relay.RelayClaimResult
+import dev.agentknock.relay.RelayEndpointResult
 import dev.agentknock.storage.crypto.AesGcmEncryption
 import dev.agentknock.storage.crypto.FakeEncryptionKeyStore
 import dev.agentknock.storage.crypto.FakeVaultKeyDao
@@ -64,8 +66,8 @@ class DeviceIdentityRepositoryTest {
     @Test
     fun `retries an ambiguous claim with the persisted identity and token`() = runTest {
         val fixture = Fixture(UnconfinedTestDispatcher(testScheduler))
-        fixture.relay.results += RelayClaimResult.Unavailable(IOException("offline"))
-        fixture.relay.results += RelayClaimResult.Claimed
+        fixture.relay.results += RelayEndpointResult.Unavailable(IOException("offline"))
+        fixture.relay.results += RelayEndpointResult.Success(RelayClaimOutcome.CLAIMED)
 
         assertTrue(
             fixture.repository.stageAndClaim("amber-river-maple") is
@@ -90,7 +92,9 @@ class DeviceIdentityRepositoryTest {
     @Test
     fun `a different address reuses the existing candidate material`() = runTest {
         val fixture = Fixture(UnconfinedTestDispatcher(testScheduler))
-        fixture.relay.results += RelayClaimResult.AddressUnavailable
+        fixture.relay.results += RelayEndpointResult.Success(
+            RelayClaimOutcome.ADDRESS_UNAVAILABLE,
+        )
 
         assertEquals(
             ClaimPairingAddressResult.AddressUnavailable,
@@ -126,7 +130,9 @@ class DeviceIdentityRepositoryTest {
             fixture.repository.stageAndClaim("amber-river-maple"),
         )
         val active = fixture.dao.identities.value.single()
-        fixture.relay.results += RelayClaimResult.AddressUnavailable
+        fixture.relay.results += RelayEndpointResult.Success(
+            RelayClaimOutcome.ADDRESS_UNAVAILABLE,
+        )
         assertEquals(
             ClaimPairingAddressResult.AddressUnavailable,
             fixture.repository.stageAndClaim("silent-forest-cloud"),
@@ -145,7 +151,9 @@ class DeviceIdentityRepositoryTest {
     @Test
     fun `an undecryptable restored candidate is replaced even after a claim attempt`() = runTest {
         val fixture = Fixture(UnconfinedTestDispatcher(testScheduler))
-        fixture.relay.results += RelayClaimResult.AddressUnavailable
+        fixture.relay.results += RelayEndpointResult.Success(
+            RelayClaimOutcome.ADDRESS_UNAVAILABLE,
+        )
         assertEquals(
             ClaimPairingAddressResult.AddressUnavailable,
             fixture.repository.stageAndClaim("amber-river-maple"),
@@ -192,7 +200,7 @@ class DeviceIdentityRepositoryTest {
     @Test
     fun `refreshes an unattempted initial device id after it becomes stale`() = runTest {
         val fixture = Fixture(UnconfinedTestDispatcher(testScheduler))
-        fixture.relay.results += RelayClaimResult.Unavailable(IOException("offline"))
+        fixture.relay.results += RelayEndpointResult.Unavailable(IOException("offline"))
 
         assertTrue(
             fixture.repository.stageAndClaim("amber-river-maple") is
@@ -227,7 +235,9 @@ class DeviceIdentityRepositoryTest {
             fixture.repository.stageAndClaim("amber-river-maple"),
         )
         val activeId = fixture.dao.identities.value.single().id
-        fixture.relay.results += RelayClaimResult.AddressUnavailable
+        fixture.relay.results += RelayEndpointResult.Success(
+            RelayClaimOutcome.ADDRESS_UNAVAILABLE,
+        )
 
         assertEquals(
             ClaimPairingAddressResult.AddressUnavailable,
@@ -430,7 +440,11 @@ private class FakeRelayClaimClient : RelayClaimClient {
         provideAttestation: Boolean,
     ): RelayClaimResult {
         claims += RecordedClaim(deviceId, addressId, deviceToken, provideAttestation)
-        return if (results.isEmpty()) RelayClaimResult.Claimed else results.removeFirst()
+        return if (results.isEmpty()) {
+            RelayEndpointResult.Success(RelayClaimOutcome.CLAIMED)
+        } else {
+            results.removeFirst()
+        }
     }
 }
 

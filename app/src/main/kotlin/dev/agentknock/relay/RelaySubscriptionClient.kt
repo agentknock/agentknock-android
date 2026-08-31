@@ -1,6 +1,5 @@
 package dev.agentknock.relay
 
-import java.io.IOException
 import kotlinx.coroutines.CoroutineDispatcher
 import kotlinx.coroutines.Dispatchers
 import kotlinx.serialization.SerialName
@@ -8,19 +7,9 @@ import kotlinx.serialization.Serializable
 import kotlinx.serialization.json.Json
 import okhttp3.OkHttpClient
 
-internal sealed interface RelaySubscriptionResult {
-    data class Status(val active: Boolean) : RelaySubscriptionResult
+internal data class RelaySubscriptionStatus(val active: Boolean)
 
-    data class Rejected(
-        val status: Int,
-        val code: String?,
-        val message: String?,
-    ) : RelaySubscriptionResult
-
-    data class Unavailable(val cause: IOException) : RelaySubscriptionResult
-
-    data object InvalidResponse : RelaySubscriptionResult
-}
+internal typealias RelaySubscriptionResult = RelayEndpointResult<RelaySubscriptionStatus>
 
 internal interface RelaySubscriptionClient {
     suspend fun status(
@@ -74,22 +63,12 @@ internal class HttpRelaySubscriptionClient(
         path: String,
         deviceToken: String,
         body: String,
-    ): RelaySubscriptionResult = when (
-        val result = transport.post(path, body, bearerToken = deviceToken)
-    ) {
-        is RelayHttpResult.Success -> runCatching {
-            json.decodeFromString<SubscriptionStatusResponse>(result.body)
-        }.fold(
-            onSuccess = { RelaySubscriptionResult.Status(it.active) },
-            onFailure = { RelaySubscriptionResult.InvalidResponse },
-        )
-        is RelayHttpResult.Rejected -> RelaySubscriptionResult.Rejected(
-            status = result.status,
-            code = result.code,
-            message = result.message,
-        )
-        is RelayHttpResult.Unavailable -> RelaySubscriptionResult.Unavailable(result.cause)
-    }
+    ): RelaySubscriptionResult = transport.post(path, body, bearerToken = deviceToken)
+        .decodeSuccess { encoded ->
+            RelaySubscriptionStatus(
+                active = json.decodeFromString<SubscriptionStatusResponse>(encoded).active,
+            )
+        }
 }
 
 @Serializable

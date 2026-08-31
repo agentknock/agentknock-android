@@ -1,6 +1,5 @@
 package dev.agentknock.relay
 
-import java.io.IOException
 import kotlinx.coroutines.CoroutineDispatcher
 import kotlinx.coroutines.Dispatchers
 import kotlinx.serialization.SerialName
@@ -8,19 +7,7 @@ import kotlinx.serialization.Serializable
 import kotlinx.serialization.json.Json
 import okhttp3.OkHttpClient
 
-internal sealed interface RelayDeviceManagementResult {
-    data object Changed : RelayDeviceManagementResult
-
-    data class Rejected(
-        val status: Int,
-        val code: String?,
-        val message: String?,
-    ) : RelayDeviceManagementResult
-
-    data class Unavailable(val cause: IOException) : RelayDeviceManagementResult
-
-    data object InvalidResponse : RelayDeviceManagementResult
-}
+internal typealias RelayDeviceManagementResult = RelayEndpointResult<Unit>
 
 internal interface RelayDeviceManagementClient {
     suspend fun setPairingEnabled(
@@ -70,23 +57,10 @@ internal class HttpRelayDeviceManagementClient(
         deviceToken: String,
         body: String,
         validResponse: (String) -> Boolean,
-    ): RelayDeviceManagementResult = when (
-        val result = transport.post(path, body, bearerToken = deviceToken)
-    ) {
-        is RelayHttpResult.Success -> if (
-            runCatching { validResponse(result.body) }.getOrDefault(false)
-        ) {
-            RelayDeviceManagementResult.Changed
-        } else {
-            RelayDeviceManagementResult.InvalidResponse
+    ): RelayDeviceManagementResult = transport.post(path, body, bearerToken = deviceToken)
+        .decodeSuccess { encoded ->
+            require(validResponse(encoded))
         }
-        is RelayHttpResult.Rejected -> RelayDeviceManagementResult.Rejected(
-            status = result.status,
-            code = result.code,
-            message = result.message,
-        )
-        is RelayHttpResult.Unavailable -> RelayDeviceManagementResult.Unavailable(result.cause)
-    }
 }
 
 @Serializable

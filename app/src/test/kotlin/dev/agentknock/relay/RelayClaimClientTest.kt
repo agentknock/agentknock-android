@@ -47,7 +47,10 @@ class RelayClaimClientTest {
                 provideAttestation = true,
             )
 
-            assertEquals(RelayClaimResult.Claimed, result)
+            assertEquals(
+                RelayEndpointResult.Success(RelayClaimOutcome.CLAIMED),
+                result,
+            )
             val request = server.takeRequest()
             assertEquals("POST", request.method)
             assertEquals("/v1/device/$DEVICE_ID/claim", request.target)
@@ -103,7 +106,42 @@ class RelayClaimClientTest {
             )
 
             assertEquals(
-                RelayClaimResult.AddressUnavailable,
+                RelayEndpointResult.Success(RelayClaimOutcome.ADDRESS_UNAVAILABLE),
+                client.claim(
+                    DEVICE_ID,
+                    ADDRESS_ID,
+                    DEVICE_TOKEN,
+                    provideAttestation = true,
+                ),
+            )
+        }
+    }
+
+    @Test
+    fun `rejects a successful claim response for another device`() = runTest {
+        MockWebServer().use { server ->
+            server.start()
+            server.enqueue(
+                MockResponse.Builder()
+                    .code(200)
+                    .body("{\"claimed\":true,\"device_id\":\"another-device\"}")
+                    .build(),
+            )
+            server.enqueue(
+                MockResponse.Builder()
+                    .code(200)
+                    .body("{\"address_id\":\"$ADDRESS_ID\"}")
+                    .build(),
+            )
+            val client = HttpRelayClaimClient(
+                client = OkHttpClient(),
+                relayUrl = server.url("/").toString(),
+                dispatcher = UnconfinedTestDispatcher(testScheduler),
+                attestationProvider = attestationProvider(),
+            )
+
+            assertEquals(
+                RelayEndpointResult.InvalidResponse,
                 client.claim(
                     DEVICE_ID,
                     ADDRESS_ID,
@@ -140,7 +178,7 @@ class RelayClaimClientTest {
             )
 
             assertEquals(
-                RelayClaimResult.Claimed,
+                RelayEndpointResult.Success(RelayClaimOutcome.CLAIMED),
                 client.claim(
                     DEVICE_ID,
                     ADDRESS_ID,

@@ -1,5 +1,6 @@
 package dev.agentknock.subscription
 
+import dev.agentknock.relay.RelayEndpointResult
 import dev.agentknock.relay.RelaySubscriptionClient
 import dev.agentknock.relay.RelaySubscriptionResult
 import dev.agentknock.storage.device.RelayDeviceAuthorizationResult
@@ -58,8 +59,8 @@ internal class SubscriptionRepository(
 }
 
 private fun RelaySubscriptionResult.toSubscriptionResult(): SubscriptionResult = when (this) {
-    is RelaySubscriptionResult.Status -> SubscriptionResult.Status(active)
-    is RelaySubscriptionResult.Rejected -> SubscriptionResult.Rejected(status, code, message)
-    is RelaySubscriptionResult.Unavailable -> SubscriptionResult.Unavailable(cause.message)
-    RelaySubscriptionResult.InvalidResponse -> SubscriptionResult.InvalidRelayResponse
+    is RelayEndpointResult.Success -> SubscriptionResult.Status(value.active)
+    is RelayEndpointResult.Rejected -> SubscriptionResult.Rejected(status, code, message)
+    is RelayEndpointResult.Unavailable -> SubscriptionResult.Unavailable(cause.message)
+    RelayEndpointResult.InvalidResponse -> SubscriptionResult.InvalidRelayResponse
 }

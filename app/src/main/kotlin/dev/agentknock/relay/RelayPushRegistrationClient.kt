@@ -1,6 +1,5 @@
 package dev.agentknock.relay
 
-import java.io.IOException
 import kotlinx.coroutines.CoroutineDispatcher
 import kotlinx.coroutines.Dispatchers
 import kotlinx.serialization.SerialName
@@ -8,19 +7,7 @@ import kotlinx.serialization.Serializable
 import kotlinx.serialization.json.Json
 import okhttp3.OkHttpClient
 
-internal sealed interface RelayPushRegistrationResult {
-    data object Registered : RelayPushRegistrationResult
-
-    data class Rejected(
-        val status: Int,
-        val code: String?,
-        val message: String?,
-    ) : RelayPushRegistrationResult
-
-    data class Unavailable(val cause: IOException) : RelayPushRegistrationResult
-
-    data object InvalidResponse : RelayPushRegistrationResult
-}
+internal typealias RelayPushRegistrationResult = RelayEndpointResult<Unit>
 
 internal interface RelayPushRegistrationClient {
     suspend fun register(
@@ -50,31 +37,15 @@ internal class HttpRelayPushRegistrationClient(
             PushRegistrationRequest.serializer(),
             PushRegistrationRequest(firebaseInstallationId),
         )
-        return when (
-            val result = transport.post(
-                path = "v1/device/$deviceId/push",
-                body = body,
-                bearerToken = deviceToken,
-            )
-        ) {
-            is RelayHttpResult.Success -> {
-                val registered = runCatching {
-                    json.decodeFromString<PushRegistrationResponse>(result.body).state ==
-                        RelayPushRegistrationState.REGISTERED.wireName
-                }.getOrDefault(false)
-                if (registered) {
-                    RelayPushRegistrationResult.Registered
-                } else {
-                    RelayPushRegistrationResult.InvalidResponse
-                }
+        return transport.post(
+            path = "v1/device/$deviceId/push",
+            body = body,
+            bearerToken = deviceToken,
+        )
+            .decodeSuccess { encoded ->
+                val response = json.decodeFromString<PushRegistrationResponse>(encoded)
+                require(response.state == RelayPushRegistrationState.REGISTERED.wireName)
             }
-            is RelayHttpResult.Rejected -> RelayPushRegistrationResult.Rejected(
-                status = result.status,
-                code = result.code,
-                message = result.message,
-            )
-            is RelayHttpResult.Unavailable -> RelayPushRegistrationResult.Unavailable(result.cause)
-        }
     }
 }
 

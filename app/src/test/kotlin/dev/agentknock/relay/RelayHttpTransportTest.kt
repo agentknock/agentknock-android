@@ -20,7 +20,7 @@ class RelayHttpTransportTest {
             val transport = transport(server)
 
             assertEquals(
-                RelayHttpResult.Success("response"),
+                RelayEndpointResult.Success("response"),
                 transport.post("v1/test", "{}", bearerToken = "device-token"),
             )
 
@@ -44,7 +44,7 @@ class RelayHttpTransportTest {
             )
 
             assertEquals(
-                RelayHttpResult.Rejected(409, "CONFLICT", "Already exists"),
+                RelayEndpointResult.Rejected(409, "CONFLICT", "Already exists"),
                 transport(server).post("v1/test", "{}"),
             )
         }
@@ -56,7 +56,7 @@ class RelayHttpTransportTest {
             server.start()
             server.enqueue(MockResponse.Builder().code(503).body("not json").build())
 
-            val result = transport(server).post("v1/test", "{}") as RelayHttpResult.Rejected
+            val result = transport(server).post("v1/test", "{}") as RelayEndpointResult.Rejected
 
             assertEquals(503, result.status)
             assertNull(result.code)
@@ -75,7 +75,7 @@ class RelayHttpTransportTest {
             )
 
             assertEquals(
-                RelayHttpResult.Rejected(400, null, null),
+                RelayEndpointResult.Rejected(400, null, null),
                 transport(server).post("v1/test", "{}"),
             )
         }

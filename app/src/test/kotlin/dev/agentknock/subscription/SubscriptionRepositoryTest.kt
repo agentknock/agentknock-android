@@ -1,7 +1,9 @@
 package dev.agentknock.subscription
 
+import dev.agentknock.relay.RelayEndpointResult
 import dev.agentknock.relay.RelaySubscriptionClient
 import dev.agentknock.relay.RelaySubscriptionResult
+import dev.agentknock.relay.RelaySubscriptionStatus
 import dev.agentknock.storage.device.RelayDeviceAuthorization
 import dev.agentknock.storage.device.RelayDeviceAuthorizationResult
 import dev.agentknock.storage.device.RelayDeviceAuthorizationSource
@@ -12,7 +14,9 @@ import org.junit.Test
 class SubscriptionRepositoryTest {
     @Test
     fun `gets status with active device credentials`() = runTest {
-        val relay = FakeRelay(statusResult = RelaySubscriptionResult.Status(active = true))
+        val relay = FakeRelay(
+            statusResult = RelayEndpointResult.Success(RelaySubscriptionStatus(active = true)),
+        )
         val repository = SubscriptionRepository(availableAuthorization, relay)
 
         assertEquals(SubscriptionResult.Status(active = true), repository.status())
@@ -21,7 +25,9 @@ class SubscriptionRepositoryTest {
 
     @Test
     fun `redeems with active device credentials`() = runTest {
-        val relay = FakeRelay(redeemResult = RelaySubscriptionResult.Status(active = true))
+        val relay = FakeRelay(
+            redeemResult = RelayEndpointResult.Success(RelaySubscriptionStatus(active = true)),
+        )
         val repository = SubscriptionRepository(availableAuthorization, relay)
 
         assertEquals(
@@ -55,9 +61,9 @@ class SubscriptionRepositoryTest {
 
     private class FakeRelay(
         private val statusResult: RelaySubscriptionResult =
-            RelaySubscriptionResult.Status(active = false),
+            RelayEndpointResult.Success(RelaySubscriptionStatus(active = false)),
         private val redeemResult: RelaySubscriptionResult =
-            RelaySubscriptionResult.Status(active = false),
+            RelayEndpointResult.Success(RelaySubscriptionStatus(active = false)),
     ) : RelaySubscriptionClient {
         var statusCredentials: Pair<String, String>? = null
         var redemption: Triple<String, String, String>? = null

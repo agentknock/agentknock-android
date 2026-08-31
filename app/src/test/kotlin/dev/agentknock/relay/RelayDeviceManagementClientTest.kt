@@ -26,7 +26,7 @@ class RelayDeviceManagementClientTest {
             val client = client(server)
 
             assertEquals(
-                RelayDeviceManagementResult.Changed,
+                RelayEndpointResult.Success(Unit),
                 client.setPairingEnabled(DEVICE_ID, DEVICE_TOKEN, enabled = false),
             )
 
@@ -49,7 +49,7 @@ class RelayDeviceManagementClientTest {
             val client = client(server)
 
             assertEquals(
-                RelayDeviceManagementResult.Changed,
+                RelayEndpointResult.Success(Unit),
                 client.deleteDevice(DEVICE_ID, DEVICE_TOKEN),
             )
 
@@ -58,6 +58,22 @@ class RelayDeviceManagementClientTest {
             assertEquals("/v1/device/$DEVICE_ID/delete", request.target)
             assertEquals("Bearer $DEVICE_TOKEN", request.headers["Authorization"])
             assertEquals("{}", checkNotNull(request.body).utf8())
+        }
+    }
+
+    @Test
+    fun `rejects a successful response that did not apply the requested change`() = runTest {
+        MockWebServer().use { server ->
+            server.start()
+            server.enqueue(
+                MockResponse.Builder().code(200)
+                    .body("""{"pairing_enabled":true}""").build(),
+            )
+
+            assertEquals(
+                RelayEndpointResult.InvalidResponse,
+                client(server).setPairingEnabled(DEVICE_ID, DEVICE_TOKEN, enabled = false),
+            )
         }
     }
 

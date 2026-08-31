@@ -1,5 +1,6 @@
 package dev.agentknock.push
 
+import dev.agentknock.relay.RelayEndpointResult
 import dev.agentknock.relay.RelayPushRegistrationClient
 import dev.agentknock.relay.RelayPushRegistrationResult
 import dev.agentknock.storage.device.RelayDeviceAuthorizationResult
@@ -52,16 +53,16 @@ internal class PushRegistrationRepository(
                 firebaseInstallationId = firebaseInstallationId,
             )
         ) {
-            RelayPushRegistrationResult.Registered -> PushRegistrationResult.Registered
-            is RelayPushRegistrationResult.Rejected -> PushRegistrationResult.RelayRejected(
+            is RelayEndpointResult.Success -> PushRegistrationResult.Registered
+            is RelayEndpointResult.Rejected -> PushRegistrationResult.RelayRejected(
                 status = result.status,
                 code = result.code,
                 message = result.message,
             )
-            is RelayPushRegistrationResult.Unavailable -> {
+            is RelayEndpointResult.Unavailable -> {
                 PushRegistrationResult.RelayUnavailable(result.cause.message)
             }
-            RelayPushRegistrationResult.InvalidResponse -> {
+            RelayEndpointResult.InvalidResponse -> {
                 PushRegistrationResult.InvalidRelayResponse
             }
         }

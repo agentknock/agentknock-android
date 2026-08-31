@@ -2,6 +2,7 @@ package dev.agentknock.storage.device
 
 import dev.agentknock.relay.RelayDeviceManagementClient
 import dev.agentknock.relay.RelayDeviceManagementResult
+import dev.agentknock.relay.RelayEndpointResult
 import dev.agentknock.storage.audit.AuditEventType
 import dev.agentknock.storage.audit.AuditOutcome
 import dev.agentknock.storage.audit.AuditRecord
@@ -37,7 +38,7 @@ internal class DeviceManagementRepository(
                 enabled = enabled,
             )
         ) {
-            RelayDeviceManagementResult.Changed -> {
+            is RelayEndpointResult.Success -> {
                 check(
                     deviceIdentityDao.updatePairingEnabled(
                         identityId = active.deviceIdentityId,
@@ -57,15 +58,15 @@ internal class DeviceManagementRepository(
                 )
                 DeviceManagementResult.Changed
             }
-            is RelayDeviceManagementResult.Rejected -> DeviceManagementResult.Rejected(
+            is RelayEndpointResult.Rejected -> DeviceManagementResult.Rejected(
                 result.status,
                 result.code,
                 result.message,
             )
-            is RelayDeviceManagementResult.Unavailable -> {
+            is RelayEndpointResult.Unavailable -> {
                 DeviceManagementResult.Unavailable(result.cause.message)
             }
-            RelayDeviceManagementResult.InvalidResponse -> DeviceManagementResult.InvalidResponse
+            RelayEndpointResult.InvalidResponse -> DeviceManagementResult.InvalidResponse
         }
     }
 
@@ -77,16 +78,16 @@ internal class DeviceManagementRepository(
         return when (
             val result = relay.deleteDevice(active.deviceId, active.deviceToken)
         ) {
-            RelayDeviceManagementResult.Changed -> DeviceManagementResult.Changed
-            is RelayDeviceManagementResult.Rejected -> DeviceManagementResult.Rejected(
+            is RelayEndpointResult.Success -> DeviceManagementResult.Changed
+            is RelayEndpointResult.Rejected -> DeviceManagementResult.Rejected(
                 result.status,
                 result.code,
                 result.message,
             )
-            is RelayDeviceManagementResult.Unavailable -> {
+            is RelayEndpointResult.Unavailable -> {
                 DeviceManagementResult.Unavailable(result.cause.message)
             }
-            RelayDeviceManagementResult.InvalidResponse -> DeviceManagementResult.InvalidResponse
+            RelayEndpointResult.InvalidResponse -> DeviceManagementResult.InvalidResponse
         }
     }
 

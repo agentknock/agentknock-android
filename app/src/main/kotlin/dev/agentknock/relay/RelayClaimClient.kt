@@ -1,6 +1,5 @@
 package dev.agentknock.relay
 
-import java.io.IOException
 import kotlinx.coroutines.CoroutineDispatcher
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.withContext
@@ -9,21 +8,12 @@ import kotlinx.serialization.Serializable
 import kotlinx.serialization.json.Json
 import okhttp3.OkHttpClient
 
-internal sealed interface RelayClaimResult {
-    data object Claimed : RelayClaimResult
-
-    data object AddressUnavailable : RelayClaimResult
-
-    data class Rejected(
-        val status: Int,
-        val code: String?,
-        val message: String?,
-    ) : RelayClaimResult
-
-    data class Unavailable(val cause: IOException) : RelayClaimResult
-
-    data object InvalidResponse : RelayClaimResult
+internal enum class RelayClaimOutcome {
+    CLAIMED,
+    ADDRESS_UNAVAILABLE,
 }
+
+internal typealias RelayClaimResult = RelayEndpointResult<RelayClaimOutcome>
 
 internal interface RelayClaimClient {
     suspend fun claim(
@@ -70,50 +60,40 @@ internal class HttpRelayClaimClient(
                 },
             ),
         )
-        val claimResult = transport.post(
-            path = "v1/device/$deviceId/claim",
-            body = claimBody,
-        )
-        when (claimResult) {
-            is RelayHttpResult.Success -> {
-                val valid = runCatching {
-                    val response = json.decodeFromString<DeviceClaimResponse>(claimResult.body)
-                    response.claimed && response.deviceId == deviceId
-                }.getOrDefault(false)
-                if (!valid) return@withContext RelayClaimResult.InvalidResponse
+        when (
+            val claimResult = transport.post(
+                path = "v1/device/$deviceId/claim",
+                body = claimBody,
+            ).decodeSuccess { body ->
+                val response = json.decodeFromString<DeviceClaimResponse>(body)
+                require(response.claimed && response.deviceId == deviceId)
             }
-            is RelayHttpResult.Rejected -> return@withContext RelayClaimResult.Rejected(
-                claimResult.status,
-                claimResult.code,
-                claimResult.message,
-            )
-            is RelayHttpResult.Unavailable -> {
-                return@withContext RelayClaimResult.Unavailable(claimResult.cause)
-            }
+        ) {
+            is RelayEndpointResult.Success -> Unit
+            is RelayEndpointResult.Rejected -> return@withContext claimResult
+            is RelayEndpointResult.Unavailable -> return@withContext claimResult
+            RelayEndpointResult.InvalidResponse ->
+                return@withContext RelayEndpointResult.InvalidResponse
         }
 
         val addressBody = json.encodeToString(DeviceAddressRequest(addressId))
-        when (
-            val result = transport.post(
-                path = "v1/device/$deviceId/address",
-                body = addressBody,
-                bearerToken = deviceToken,
-            )
+        val addressResult = transport.post(
+            path = "v1/device/$deviceId/address",
+            body = addressBody,
+            bearerToken = deviceToken,
+        )
+        if (
+            addressResult is RelayEndpointResult.Rejected &&
+            addressResult.status == 409 &&
+            addressResult.code == ADDRESS_ALREADY_CLAIMED
         ) {
-            is RelayHttpResult.Success -> {
-                val valid = runCatching {
-                    json.decodeFromString<DeviceAddressResponse>(result.body).addressId == addressId
-                }.getOrDefault(false)
-                if (valid) RelayClaimResult.Claimed else RelayClaimResult.InvalidResponse
+            RelayEndpointResult.Success(RelayClaimOutcome.ADDRESS_UNAVAILABLE)
+        } else {
+            addressResult.decodeSuccess { body ->
+                val response = json.decodeFromString<DeviceAddressResponse>(body)
+                require(response.addressId == addressId)
+                RelayClaimOutcome.CLAIMED
             }
-            is RelayHttpResult.Rejected -> {
-                if (result.status == 409 && result.code == ADDRESS_ALREADY_CLAIMED) {
-                    RelayClaimResult.AddressUnavailable
-                } else {
-                    RelayClaimResult.Rejected(result.status, result.code, result.message)
-                }
-            }
-            is RelayHttpResult.Unavailable -> RelayClaimResult.Unavailable(result.cause)
         }
     }
 }

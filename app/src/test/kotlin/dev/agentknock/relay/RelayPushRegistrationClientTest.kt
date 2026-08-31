@@ -31,7 +31,7 @@ class RelayPushRegistrationClientTest {
             )
 
             assertEquals(
-                RelayPushRegistrationResult.Registered,
+                RelayEndpointResult.Success(Unit),
                 client.register(DEVICE_ID, DEVICE_TOKEN, FIREBASE_INSTALLATION_ID),
             )
 
@@ -43,6 +43,29 @@ class RelayPushRegistrationClientTest {
             assertEquals(
                 FIREBASE_INSTALLATION_ID,
                 body.getValue("fid").jsonPrimitive.content,
+            )
+        }
+    }
+
+    @Test
+    fun `rejects an unexpected successful registration response`() = runTest {
+        MockWebServer().use { server ->
+            server.start()
+            server.enqueue(
+                MockResponse.Builder()
+                    .code(200)
+                    .body("""{"push_registration":"pending"}""")
+                    .build(),
+            )
+            val client = HttpRelayPushRegistrationClient(
+                client = OkHttpClient(),
+                relayUrl = server.url("/").toString(),
+                dispatcher = UnconfinedTestDispatcher(testScheduler),
+            )
+
+            assertEquals(
+                RelayEndpointResult.InvalidResponse,
+                client.register(DEVICE_ID, DEVICE_TOKEN, FIREBASE_INSTALLATION_ID),
             )
         }
     }

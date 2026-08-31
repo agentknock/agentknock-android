@@ -2,7 +2,9 @@ package dev.agentknock.storage.device
 
 import dev.agentknock.protocol.DeviceProtocol
 import dev.agentknock.relay.RelayClaimClient
+import dev.agentknock.relay.RelayClaimOutcome
 import dev.agentknock.relay.RelayClaimResult
+import dev.agentknock.relay.RelayEndpointResult
 import dev.agentknock.storage.crypto.AesGcmEncryption
 import dev.agentknock.storage.crypto.DecryptionResult
 import dev.agentknock.storage.crypto.EncryptionBinding
@@ -306,42 +308,45 @@ internal class DeviceIdentityRepository(
                 provideAttestation = previous?.deviceId != candidate.deviceId,
             )
         ) {
-            RelayClaimResult.Claimed -> {
-                if (
-                    dao.promoteCandidate(
-                        candidateId = candidate.id,
-                        claimedAt = currentTimeMillis(),
-                        activeRole = DeviceIdentityRole.ACTIVE.storedName,
-                        candidateRole = DeviceIdentityRole.CANDIDATE.storedName,
-                        retiredRole = DeviceIdentityRole.RETIRED.storedName,
-                    )
-                ) {
-                    audit.record(
-                        AuditRecord(
-                            type = if (previous == null) {
-                                AuditEventType.PAIRING_ADDRESS_CLAIMED
-                            } else {
-                                AuditEventType.PAIRING_ADDRESS_CHANGED
-                            },
-                            outcome = AuditOutcome.CHANGED,
-                            subject = candidate.address,
-                        ),
-                    )
-                    ClaimPairingAddressResult.Claimed
-                } else {
-                    ClaimPairingAddressResult.NoCandidate
+            is RelayEndpointResult.Success -> when (result.value) {
+                RelayClaimOutcome.CLAIMED -> {
+                    if (
+                        dao.promoteCandidate(
+                            candidateId = candidate.id,
+                            claimedAt = currentTimeMillis(),
+                            activeRole = DeviceIdentityRole.ACTIVE.storedName,
+                            candidateRole = DeviceIdentityRole.CANDIDATE.storedName,
+                            retiredRole = DeviceIdentityRole.RETIRED.storedName,
+                        )
+                    ) {
+                        audit.record(
+                            AuditRecord(
+                                type = if (previous == null) {
+                                    AuditEventType.PAIRING_ADDRESS_CLAIMED
+                                } else {
+                                    AuditEventType.PAIRING_ADDRESS_CHANGED
+                                },
+                                outcome = AuditOutcome.CHANGED,
+                                subject = candidate.address,
+                            ),
+                        )
+                        ClaimPairingAddressResult.Claimed
+                    } else {
+                        ClaimPairingAddressResult.NoCandidate
+                    }
                 }
+                RelayClaimOutcome.ADDRESS_UNAVAILABLE ->
+                    ClaimPairingAddressResult.AddressUnavailable
             }
-            RelayClaimResult.AddressUnavailable -> ClaimPairingAddressResult.AddressUnavailable
-            is RelayClaimResult.Rejected -> ClaimPairingAddressResult.RelayRejected(
+            is RelayEndpointResult.Rejected -> ClaimPairingAddressResult.RelayRejected(
                 status = result.status,
                 code = result.code,
                 message = result.message,
             )
-            is RelayClaimResult.Unavailable -> ClaimPairingAddressResult.RelayUnavailable(
+            is RelayEndpointResult.Unavailable -> ClaimPairingAddressResult.RelayUnavailable(
                 result.cause.message,
             )
-            RelayClaimResult.InvalidResponse -> ClaimPairingAddressResult.InvalidRelayResponse
+            RelayEndpointResult.InvalidResponse -> ClaimPairingAddressResult.InvalidRelayResponse
         }
     }
 

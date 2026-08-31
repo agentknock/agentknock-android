@@ -15,16 +15,31 @@ import okhttp3.RequestBody.Companion.toRequestBody
 
 internal const val DEFAULT_RELAY_URL = "https://relay.agentknock.dev/"
 
-internal sealed interface RelayHttpResult {
-    data class Success(val body: String) : RelayHttpResult
+internal sealed interface RelayEndpointResult<out T> {
+    data class Success<T>(val value: T) : RelayEndpointResult<T>
 
     data class Rejected(
         val status: Int,
         val code: String?,
         val message: String?,
-    ) : RelayHttpResult
+    ) : RelayEndpointResult<Nothing>
 
-    data class Unavailable(val cause: IOException) : RelayHttpResult
+    data class Unavailable(val cause: IOException) : RelayEndpointResult<Nothing>
+
+    data object InvalidResponse : RelayEndpointResult<Nothing>
+}
+
+internal inline fun <T> RelayEndpointResult<String>.decodeSuccess(
+    crossinline decode: (String) -> T,
+): RelayEndpointResult<T> = when (this) {
+    is RelayEndpointResult.Success -> try {
+        RelayEndpointResult.Success<T>(decode(value))
+    } catch (_: Exception) {
+        RelayEndpointResult.InvalidResponse
+    }
+    is RelayEndpointResult.Rejected -> RelayEndpointResult.Rejected(status, code, message)
+    is RelayEndpointResult.Unavailable -> RelayEndpointResult.Unavailable(cause)
+    RelayEndpointResult.InvalidResponse -> RelayEndpointResult.InvalidResponse
 }
 
 internal class RelayHttpTransport(
@@ -39,7 +54,7 @@ internal class RelayHttpTransport(
         path: String,
         body: String,
         bearerToken: String? = null,
-    ): RelayHttpResult {
+    ): RelayEndpointResult<String> {
         val request = Request.Builder()
             .url("$baseUrl/${path.trimStart('/')}")
             .apply {
@@ -52,10 +67,10 @@ internal class RelayHttpTransport(
                 client.newCall(request).execute().use { response ->
                     val responseBody = response.body.string()
                     if (response.isSuccessful) {
-                        RelayHttpResult.Success(responseBody)
+                        RelayEndpointResult.Success(responseBody)
                     } else {
                         val error = decodeRelayError(responseBody, json)
-                        RelayHttpResult.Rejected(
+                        RelayEndpointResult.Rejected(
                             status = response.code,
                             code = error.code,
                             message = error.message,
@@ -64,7 +79,7 @@ internal class RelayHttpTransport(
                 }
             }
         } catch (exception: IOException) {
-            RelayHttpResult.Unavailable(exception)
+            RelayEndpointResult.Unavailable(exception)
         }
     }
 

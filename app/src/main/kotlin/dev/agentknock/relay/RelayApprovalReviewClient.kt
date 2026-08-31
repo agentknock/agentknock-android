@@ -202,8 +202,8 @@ internal class HttpRelayApprovalReviewClient(
             bearerToken = deviceToken,
         )
     ) {
-        is RelayHttpResult.Success -> runCatching {
-            val value = json.decodeFromString<ApprovalReviewResponse>(result.body)
+        is RelayEndpointResult.Success -> runCatching {
+            val value = json.decodeFromString<ApprovalReviewResponse>(result.value)
             val decision = when (value.decision) {
                 "approve" -> RelayApprovalReviewDecision.APPROVE
                 "deny" -> RelayApprovalReviewDecision.DENY
@@ -215,12 +215,13 @@ internal class HttpRelayApprovalReviewClient(
             }
             RelayApprovalReviewResult.Reviewed(decision, value.explanation)
         }.getOrElse { RelayApprovalReviewResult.InvalidResponse }
-        is RelayHttpResult.Rejected -> RelayApprovalReviewResult.Rejected(
+        is RelayEndpointResult.Rejected -> RelayApprovalReviewResult.Rejected(
             status = result.status,
             code = result.code,
             message = result.message,
         )
-        is RelayHttpResult.Unavailable -> RelayApprovalReviewResult.Unavailable(result.cause)
+        is RelayEndpointResult.Unavailable -> RelayApprovalReviewResult.Unavailable(result.cause)
+        RelayEndpointResult.InvalidResponse -> RelayApprovalReviewResult.InvalidResponse
     }
 }
 

@@ -22,7 +22,7 @@ class RelaySubscriptionClientTest {
             val client = client(server)
 
             assertEquals(
-                RelaySubscriptionResult.Status(active = false),
+                RelayEndpointResult.Success(RelaySubscriptionStatus(active = false)),
                 client.status(DEVICE_ID, DEVICE_TOKEN),
             )
 
@@ -42,7 +42,7 @@ class RelaySubscriptionClientTest {
             val client = client(server)
 
             assertEquals(
-                RelaySubscriptionResult.Status(active = true),
+                RelayEndpointResult.Success(RelaySubscriptionStatus(active = true)),
                 client.redeem(DEVICE_ID, DEVICE_TOKEN, REDEMPTION_TOKEN),
             )
 
@@ -66,7 +66,7 @@ class RelaySubscriptionClientTest {
             server.enqueue(MockResponse.Builder().code(200).body("{}").build())
 
             assertEquals(
-                RelaySubscriptionResult.InvalidResponse,
+                RelayEndpointResult.InvalidResponse,
                 client(server).status(DEVICE_ID, DEVICE_TOKEN),
             )
         }
