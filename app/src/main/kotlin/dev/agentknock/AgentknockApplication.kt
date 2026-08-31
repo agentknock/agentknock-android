@@ -23,6 +23,7 @@ import dev.agentknock.relay.HttpRelayDeviceManagementClient
 import dev.agentknock.relay.RelayHttpTransport
 import dev.agentknock.relay.WebSocketRelayDeviceClient
 import dev.agentknock.storage.request.RequestRepository
+import dev.agentknock.storage.request.RequestInbox
 import dev.agentknock.storage.request.RequestConnectionManager
 import dev.agentknock.storage.request.RequestMaterialStore
 import dev.agentknock.storage.request.AiReviewCoordinator
@@ -124,6 +125,8 @@ internal class ApplicationContainer(application: Application) {
         encryption = encryption,
     )
 
+    val requestInbox = RequestInbox(database.requestDao())
+
     val requests: RequestRepository = RequestRepository(
         database = database,
         dao = database.requestDao(),
@@ -146,7 +149,7 @@ internal class ApplicationContainer(application: Application) {
 
     val requestNotifications = RequestNotificationCoordinator(
         scope = applicationScope,
-        currentRequests = requests::pendingNotifications,
+        currentRequests = requestInbox::pendingNotifications,
         displayRequests = { RequestNotifications.showRequests(application, it) },
         displayWake = { RequestNotifications.showWake(application) },
     )

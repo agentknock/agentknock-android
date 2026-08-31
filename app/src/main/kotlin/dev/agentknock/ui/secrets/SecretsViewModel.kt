@@ -24,6 +24,7 @@ import dev.agentknock.ui.pendingSecretUploads
 import dev.agentknock.storage.device.DeviceConfiguration
 import dev.agentknock.storage.device.DeviceIdentityRepository
 import dev.agentknock.storage.request.RequestRepository
+import dev.agentknock.storage.request.RequestInbox
 import dev.agentknock.storage.secret.SecretRepository
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.SharingStarted
@@ -39,6 +40,7 @@ import kotlinx.coroutines.ExperimentalCoroutinesApi
 internal class SecretsViewModel(
     private val repository: SecretRepository,
     private val requests: RequestRepository,
+    private val inbox: RequestInbox,
     private val deviceIdentity: DeviceIdentityRepository,
     private val awaitStorageReady: suspend () -> Unit,
 ) : ViewModel() {
@@ -74,7 +76,7 @@ internal class SecretsViewModel(
             initialValue = null,
         )
 
-    val pendingUploads: StateFlow<List<InboxRequestSummary>> = requests.observeRequests()
+    val pendingUploads: StateFlow<List<InboxRequestSummary>> = inbox.observeRequests()
         .map(List<InboxRequestSummary>::pendingSecretUploads)
         .stateIn(
             scope = viewModelScope,
@@ -83,7 +85,7 @@ internal class SecretsViewModel(
         )
 
     val selectedUpload: StateFlow<InboxRequestDetails?> = selectedUploadRequestId
-        .flatMapLatest { id -> id?.let(requests::observeRequest) ?: flowOf(null) }
+        .flatMapLatest { id -> id?.let(inbox::observeRequest) ?: flowOf(null) }
         .stateIn(
             scope = viewModelScope,
             started = SharingStarted.Eagerly,

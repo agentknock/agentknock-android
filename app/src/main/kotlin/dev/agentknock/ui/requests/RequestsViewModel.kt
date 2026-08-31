@@ -8,6 +8,7 @@ import dev.agentknock.storage.request.InboxRequestSummary
 import dev.agentknock.storage.request.RequestSyncResult
 import dev.agentknock.storage.request.RequestConnectionManager
 import dev.agentknock.storage.request.RequestRepository
+import dev.agentknock.storage.request.RequestInbox
 import dev.agentknock.storage.request.GitSignDecisionResult
 import dev.agentknock.storage.request.SshAuthenticationDecisionResult
 import dev.agentknock.ui.requestHistory
@@ -24,12 +25,13 @@ import kotlinx.coroutines.flow.stateIn
 @OptIn(ExperimentalCoroutinesApi::class)
 internal class RequestsViewModel(
     private val repository: RequestRepository,
+    private val inbox: RequestInbox,
     private val connection: RequestConnectionManager,
     private val awaitStorageReady: suspend () -> Unit,
 ) : ViewModel() {
     private val selectedRequestId = MutableStateFlow<String?>(null)
 
-    val allRequests: StateFlow<List<InboxRequestSummary>> = repository.observeRequests().stateIn(
+    val allRequests: StateFlow<List<InboxRequestSummary>> = inbox.observeRequests().stateIn(
         scope = viewModelScope,
         started = SharingStarted.Eagerly,
         initialValue = emptyList(),
@@ -43,7 +45,7 @@ internal class RequestsViewModel(
         )
     val selection: StateFlow<String?> = selectedRequestId.asStateFlow()
     val selectedRequest: StateFlow<InboxRequestDetails?> = selectedRequestId
-        .flatMapLatest { id -> id?.let(repository::observeRequest) ?: flowOf(null) }
+        .flatMapLatest { id -> id?.let(inbox::observeRequest) ?: flowOf(null) }
         .stateIn(
             scope = viewModelScope,
             started = SharingStarted.Eagerly,

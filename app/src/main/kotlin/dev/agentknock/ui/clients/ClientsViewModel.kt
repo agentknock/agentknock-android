@@ -14,6 +14,7 @@ import dev.agentknock.storage.device.DeviceIdentityRepository
 import dev.agentknock.storage.device.DeviceManagementRepository
 import dev.agentknock.storage.device.DeviceManagementResult
 import dev.agentknock.storage.request.RequestRepository
+import dev.agentknock.storage.request.RequestInbox
 import dev.agentknock.storage.secret.SecretRepository
 import dev.agentknock.storage.secret.TemporaryAccessGrant
 import dev.agentknock.storage.secret.TemporaryAccessOperation
@@ -31,6 +32,7 @@ import kotlinx.coroutines.flow.stateIn
 @OptIn(ExperimentalCoroutinesApi::class)
 internal class ClientsViewModel(
     private val repository: RequestRepository,
+    private val inbox: RequestInbox,
     private val secrets: SecretRepository,
     private val deviceIdentity: DeviceIdentityRepository,
     private val deviceManagement: DeviceManagementRepository,
@@ -66,7 +68,7 @@ internal class ClientsViewModel(
             started = SharingStarted.Eagerly,
             initialValue = emptyList(),
         )
-    val pendingPairings: StateFlow<List<InboxRequestSummary>> = repository.observeRequests()
+    val pendingPairings: StateFlow<List<InboxRequestSummary>> = inbox.observeRequests()
         .map(List<InboxRequestSummary>::pendingPairings)
         .stateIn(
             scope = viewModelScope,
@@ -74,7 +76,7 @@ internal class ClientsViewModel(
             initialValue = emptyList(),
         )
     val selectedPairing: StateFlow<InboxRequestDetails?> = selectedPairingRequestId
-        .flatMapLatest { id -> id?.let(repository::observeRequest) ?: flowOf(null) }
+        .flatMapLatest { id -> id?.let(inbox::observeRequest) ?: flowOf(null) }
         .stateIn(
             scope = viewModelScope,
             started = SharingStarted.Eagerly,

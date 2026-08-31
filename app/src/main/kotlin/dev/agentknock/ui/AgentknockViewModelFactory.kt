@@ -38,6 +38,7 @@ internal fun agentknockViewModelFactory(
         initializer {
             RequestsViewModel(
                 repository = container.requests,
+                inbox = container.requestInbox,
                 connection = container.requestConnection,
                 awaitStorageReady = awaitStorageReady,
             )
@@ -46,6 +47,7 @@ internal fun agentknockViewModelFactory(
             SecretsViewModel(
                 repository = container.secrets,
                 requests = container.requests,
+                inbox = container.requestInbox,
                 deviceIdentity = container.deviceIdentity,
                 awaitStorageReady = awaitStorageReady,
             )
@@ -53,6 +55,7 @@ internal fun agentknockViewModelFactory(
         initializer {
             ClientsViewModel(
                 repository = container.requests,
+                inbox = container.requestInbox,
                 secrets = container.secrets,
                 deviceIdentity = container.deviceIdentity,
                 deviceManagement = container.deviceManagement,

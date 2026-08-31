@@ -84,6 +84,7 @@ class RequestRepositorySlotTest {
     private lateinit var database: AgentknockDatabase
     private lateinit var relay: QueuedRelayDeviceClient
     private lateinit var repository: RequestRepository
+    private lateinit var inbox: RequestInbox
     private lateinit var secrets: SecretRepository
     private lateinit var credentials: RelayDeviceCredentials
     private lateinit var credentialSource: StaticCredentialSource
@@ -146,6 +147,7 @@ class RequestRepositorySlotTest {
         approvalReviewer = ControllableApprovalReviewer()
         credentialSource = StaticCredentialSource(credentials)
         synchronizationRequests = 0
+        inbox = RequestInbox(database.requestDao())
         repository = RequestRepository(
             database = database,
             dao = database.requestDao(),
@@ -674,7 +676,7 @@ class RequestRepositorySlotTest {
             ),
         )
         val reviewed = awaitAsynchronousWork {
-            repository.observeRequest(AI_INVOCATION_REQUEST_ID)
+            inbox.observeRequest(AI_INVOCATION_REQUEST_ID)
                 .filterNotNull()
                 .filter {
                     it.state == InboxRequestState.ACTION_REQUIRED &&
@@ -713,7 +715,7 @@ class RequestRepositorySlotTest {
             ),
         )
         val reviewed = awaitAsynchronousWork {
-            repository.observeRequest(AI_INVOCATION_REQUEST_ID)
+            inbox.observeRequest(AI_INVOCATION_REQUEST_ID)
                 .filterNotNull()
                 .filter {
                     it.state == InboxRequestState.ACTION_REQUIRED &&
@@ -822,7 +824,7 @@ class RequestRepositorySlotTest {
             ),
         )
         val reviewed = awaitAsynchronousWork {
-            repository.observeRequest(AI_INVOCATION_REQUEST_ID)
+            inbox.observeRequest(AI_INVOCATION_REQUEST_ID)
                 .filterNotNull()
                 .filter {
                     it.state == InboxRequestState.ACTION_REQUIRED &&
@@ -881,7 +883,7 @@ class RequestRepositorySlotTest {
             ),
         )
         val reviewed = awaitAsynchronousWork {
-            repository.observeRequest(AI_INVOCATION_REQUEST_ID)
+            inbox.observeRequest(AI_INVOCATION_REQUEST_ID)
                 .filterNotNull()
                 .filter {
                     it.state == InboxRequestState.ACTION_REQUIRED &&
