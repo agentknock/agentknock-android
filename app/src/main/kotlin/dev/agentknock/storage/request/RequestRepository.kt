@@ -1,6 +1,5 @@
 package dev.agentknock.storage.request
 
-import androidx.room3.withWriteTransaction
 import dev.agentknock.protocol.InvocationCompletion
 import dev.agentknock.protocol.ClientSoftware
 import dev.agentknock.protocol.InvocationDenialReason
@@ -14,13 +13,8 @@ import dev.agentknock.protocol.PairedRequestErrorCode
 import dev.agentknock.protocol.PairedRequestProtocol
 import dev.agentknock.protocol.PairingProtocol
 import dev.agentknock.protocol.PairingRemoveProtocol
-import dev.agentknock.protocol.SecretListSecret
 import dev.agentknock.protocol.SecretListProtocol
-import dev.agentknock.protocol.SecretListRequestMessage
-import dev.agentknock.protocol.SecretUploadMode
 import dev.agentknock.protocol.SecretUploadProtocol
-import dev.agentknock.protocol.SecretUploadContents
-import dev.agentknock.protocol.SecretUploadRequestMessage
 import dev.agentknock.protocol.SshAuthenticationCompletion
 import dev.agentknock.protocol.SshAuthenticationMessageDetails
 import dev.agentknock.protocol.SshAuthenticationProtocol
@@ -43,26 +37,13 @@ import dev.agentknock.relay.RelayExchangeState
 import dev.agentknock.relay.RelayMessageKind
 import dev.agentknock.relay.RelayMessageState
 import dev.agentknock.relay.RelayPushRegistrationState
-import dev.agentknock.storage.crypto.DecryptionResult
-import dev.agentknock.storage.AgentknockDatabase
 import dev.agentknock.storage.runCatchingNonCancellation
 import dev.agentknock.protocol.InvocationResponseSecret
 import dev.agentknock.storage.secret.RequestedSecretsResult
 import dev.agentknock.storage.secret.SecretMetadata
 import dev.agentknock.storage.secret.SecretValues
 import dev.agentknock.storage.secret.RequestedSecretDescription
-import dev.agentknock.storage.secret.ApplyEnvironmentSecretUploadResult
-import dev.agentknock.storage.secret.ApplySshSecretUploadResult
-import dev.agentknock.storage.secret.EnvironmentSecretUploadPreparation
-import dev.agentknock.storage.secret.EnvironmentSecretUpload
-import dev.agentknock.storage.secret.EnvironmentSecretUploadResult
 import dev.agentknock.storage.secret.SshKeyCodec
-import dev.agentknock.storage.secret.SshSecretUpload
-import dev.agentknock.storage.secret.SshSecretUploadPreparation
-import dev.agentknock.storage.secret.SshSecretUploadResult
-import dev.agentknock.storage.secret.SecretUploadTarget
-import dev.agentknock.storage.secret.PreparedEnvironmentSecretUpload
-import dev.agentknock.storage.secret.PreparedSshSecretUpload
 import dev.agentknock.storage.secret.GitSignatureResult
 import dev.agentknock.storage.secret.SshAuthenticationSignatureResult
 import dev.agentknock.storage.secret.ENVIRONMENT_SECRET_TYPE
@@ -110,51 +91,6 @@ import kotlinx.serialization.builtins.ListSerializer
 import kotlinx.serialization.builtins.serializer
 import kotlinx.serialization.decodeFromString
 import kotlinx.serialization.encodeToString
-import kotlinx.serialization.Serializable
-
-@Serializable
-internal data class SecretUploadSummarySnapshot(
-    val variableNames: List<String> = emptyList(),
-    val addedVariables: List<String> = emptyList(),
-    val changedVariables: List<String> = emptyList(),
-    val unchangedVariables: List<String> = emptyList(),
-    val removedVariables: List<String> = emptyList(),
-    val publicKey: String? = null,
-    val fingerprint: String? = null,
-    val previousPublicKey: String? = null,
-    val previousFingerprint: String? = null,
-    val keyChanged: Boolean = false,
-)
-
-private data class PreparedSecretUpload(
-    val type: String,
-    val summary: SecretUploadSummarySnapshot,
-    val target: SecretUploadTarget? = null,
-    val environmentVariables: List<SecretUploadEnvironmentVariableEntity> = emptyList(),
-    val sshKey: SecretUploadSshKeyEntity? = null,
-    val error: String? = null,
-)
-
-private sealed interface PreparedSecretUploadApproval {
-    data class Environment(val upload: PreparedEnvironmentSecretUpload) :
-        PreparedSecretUploadApproval
-
-    data class Ssh(val upload: PreparedSshSecretUpload) : PreparedSecretUploadApproval
-}
-
-internal data class SecretUploadLifecycle(
-    val state: InboxRequestState,
-    val completed: Boolean,
-)
-
-internal fun secretUploadLifecycle(
-    decision: String?,
-    transportFinished: Boolean,
-): SecretUploadLifecycle = when {
-    decision == null -> SecretUploadLifecycle(InboxRequestState.ACTION_REQUIRED, false)
-    !transportFinished -> SecretUploadLifecycle(InboxRequestState.WAITING, false)
-    else -> SecretUploadLifecycle(InboxRequestState.COMPLETED, true)
-}
 
 internal fun reviewedRequestState(responseAvailable: Boolean): InboxRequestState =
     if (responseAvailable) InboxRequestState.WAITING else InboxRequestState.ACTION_REQUIRED
@@ -209,14 +145,6 @@ private fun List<SecretMetadata>.environmentSelections(): Map<String, Environmen
             stdin = secret.environmentVariableStdin,
         )
     }
-
-internal sealed interface SecretUploadVariableValue {
-    data class Available(val value: String) : SecretUploadVariableValue
-    data object NotFound : SecretUploadVariableValue
-    data object Unavailable : SecretUploadVariableValue
-    data object Corrupted : SecretUploadVariableValue
-    data object UnsupportedEncryption : SecretUploadVariableValue
-}
 
 internal sealed interface RequestSyncResult {
     data object Success : RequestSyncResult
@@ -275,17 +203,6 @@ internal sealed interface InvocationDecisionResult {
     data object TemporaryAccessNotStarted : InvocationDecisionResult
 }
 
-internal sealed interface SecretUploadDecisionResult {
-    data class Approved(val secretId: String) : SecretUploadDecisionResult
-    data object Rejected : SecretUploadDecisionResult
-    data object NotPending : SecretUploadDecisionResult
-    data object NotFound : SecretUploadDecisionResult
-    data class Invalid(val message: String) : SecretUploadDecisionResult
-    data object SecretUnavailable : SecretUploadDecisionResult
-    data object SecretCorrupted : SecretUploadDecisionResult
-    data object UnsupportedEncryption : SecretUploadDecisionResult
-}
-
 internal sealed interface GitSignDecisionResult {
     data object Decided : GitSignDecisionResult
     data object NotPending : GitSignDecisionResult
@@ -318,12 +235,12 @@ internal sealed interface SshAuthenticationDecisionResult {
 }
 
 internal class RequestRepository(
-    private val database: AgentknockDatabase,
     private val dao: RequestDao,
     private val material: RequestMaterialStore,
     private val deviceCredentials: RelayDeviceCredentialSource,
     private val secrets: SecretRepository,
     private val clients: ClientRepository,
+    private val secretManagement: SecretManagementRequests,
     private val approvalReviewer: RelayApprovalReviewClient,
     private val relay: RelayDeviceClient,
     private val aiReviews: AiReviewCoordinator,
@@ -336,8 +253,6 @@ internal class RequestRepository(
     private val invocationProtocol: InvocationProtocol = InvocationProtocol(),
     private val gitSignProtocol: GitSignProtocol = GitSignProtocol(),
     private val sshAuthenticationProtocol: SshAuthenticationProtocol = SshAuthenticationProtocol(),
-    private val secretListProtocol: SecretListProtocol = SecretListProtocol(),
-    private val secretUploadProtocol: SecretUploadProtocol = SecretUploadProtocol(),
     private val pairingRemoveProtocol: PairingRemoveProtocol = PairingRemoveProtocol(),
     private val json: Json = Json,
     private val newId: () -> String = { UUID.randomUUID().toString() },
@@ -888,29 +803,10 @@ internal class RequestRepository(
                 )
             }
             RequestKind.SECRET_LIST.storedName -> {
-                dao.updateSecretListRequest(
-                    request.copy(
-                        state = InboxRequestState.COMPLETED.storedName,
-                        error = message,
-                        completedAt = now,
-                    ),
-                )
+                secretManagement.expireSecretList(request, message, now)
             }
             RequestKind.SECRET_UPLOAD.storedName -> {
-                val upload = dao.getSecretUploadRequest(request.id) ?: return
-                val pending = upload.decision == null
-                dao.updateSecretUploadRequest(
-                    request.copy(
-                        state = if (pending) {
-                            InboxRequestState.ACTION_REQUIRED.storedName
-                        } else {
-                            InboxRequestState.COMPLETED.storedName
-                        },
-                        error = message,
-                        completedAt = if (pending) null else now,
-                    ),
-                    upload,
-                )
+                secretManagement.expireSecretUpload(request, message, now)
             }
             RequestKind.PAIRING_REMOVE.storedName -> {
                 dao.updateRequest(
@@ -2005,213 +1901,14 @@ internal class RequestRepository(
         requestId: String,
         approvedName: String,
     ): SecretUploadDecisionResult = operationMutex.withLock {
-        val request = dao.getRequestById(requestId)
-            ?: return@withLock SecretUploadDecisionResult.NotFound
-        val uploadRequest = dao.getSecretUploadRequest(requestId)
-            ?: return@withLock SecretUploadDecisionResult.NotFound
-        if (
-            request.state != InboxRequestState.ACTION_REQUIRED.storedName ||
-            uploadRequest.decision != null
-        ) {
-            return@withLock SecretUploadDecisionResult.NotPending
-        }
-        val finalName = approvedName.trim()
-        val preparedUpload = when (uploadRequest.secretType) {
-            ENVIRONMENT_SECRET_TYPE -> {
-                val values = sortedMapOf<String, String>()
-                val variableRows = dao.getSecretUploadEnvironmentVariables(requestId)
-                for (variable in variableRows) {
-                    when (
-                        val result = material.decryptSecretUploadEnvironmentVariable(request, variable)
-                    ) {
-                        is DecryptionResult.Plaintext -> {
-                            values[variable.name] = runCatching {
-                                result.value.decodeToString(throwOnInvalidSequence = true)
-                            }.getOrElse {
-                                return@withLock SecretUploadDecisionResult.SecretCorrupted
-                            }
-                        }
-                        DecryptionResult.KeyUnavailable -> {
-                            return@withLock SecretUploadDecisionResult.SecretUnavailable
-                        }
-                        DecryptionResult.AuthenticationFailed -> {
-                            return@withLock SecretUploadDecisionResult.SecretCorrupted
-                        }
-                        DecryptionResult.UnsupportedFormat -> {
-                            return@withLock SecretUploadDecisionResult.UnsupportedEncryption
-                        }
-                    }
-                }
-                val upload = EnvironmentSecretUpload(
-                    mode = SecretUploadMode.entries.single { it.wireName == uploadRequest.mode },
-                    name = uploadRequest.uploadedName,
-                    descriptionProvided = uploadRequest.descriptionProvided,
-                    description = uploadRequest.description,
-                    variables = values,
-                    variableSensitivity = variableRows.associate { it.name to it.sensitive },
-                )
-                when (
-                    val result = secrets.prepareEnvironmentSecretUpload(
-                        upload,
-                        finalName,
-                        uploadRequest.target(),
-                    )
-                ) {
-                    is EnvironmentSecretUploadPreparation.Invalid -> {
-                        return@withLock SecretUploadDecisionResult.Invalid(result.message)
-                    }
-                    is EnvironmentSecretUploadPreparation.Ready ->
-                        PreparedSecretUploadApproval.Environment(result.upload)
-                }
-            }
-            SSH_SECRET_TYPE -> {
-                val keyRow = dao.getSecretUploadSshKey(requestId)
-                val privateKey = if (keyRow == null) {
-                    return@withLock SecretUploadDecisionResult.SecretCorrupted
-                } else {
-                    val plaintext = when (
-                        val result = material.decryptSecretUploadSshKey(request, keyRow)
-                    ) {
-                        is DecryptionResult.Plaintext -> result.value
-                        DecryptionResult.KeyUnavailable -> {
-                            return@withLock SecretUploadDecisionResult.SecretUnavailable
-                        }
-                        DecryptionResult.AuthenticationFailed -> {
-                            return@withLock SecretUploadDecisionResult.SecretCorrupted
-                        }
-                        DecryptionResult.UnsupportedFormat -> {
-                            return@withLock SecretUploadDecisionResult.UnsupportedEncryption
-                        }
-                    }
-                    runCatching {
-                        sshKeys.fromStored(
-                            keyRow.algorithm,
-                            plaintext,
-                            keyRow.publicKey,
-                            keyRow.comment,
-                        )
-                    }.getOrElse {
-                        return@withLock SecretUploadDecisionResult.SecretCorrupted
-                    }
-                }
-                val upload = SshSecretUpload(
-                    mode = SecretUploadMode.entries.single { it.wireName == uploadRequest.mode },
-                    name = uploadRequest.uploadedName,
-                    descriptionProvided = uploadRequest.descriptionProvided,
-                    description = uploadRequest.description,
-                    privateKey = privateKey,
-                )
-                when (
-                    val result = secrets.prepareSshSecretUpload(
-                        upload,
-                        finalName,
-                        uploadRequest.target(),
-                    )
-                ) {
-                    is SshSecretUploadPreparation.Invalid -> {
-                        return@withLock SecretUploadDecisionResult.Invalid(result.message)
-                    }
-                    is SshSecretUploadPreparation.Ready ->
-                        PreparedSecretUploadApproval.Ssh(result.upload)
-                }
-            }
-            else -> return@withLock SecretUploadDecisionResult.Invalid(
-                "Unsupported secret type.",
-            )
-        }
-        val now = currentTimeMillis()
-        val transportFinished = request.completionJson != null || request.error != null
-        val lifecycle = secretUploadLifecycle(
-            SecretUploadRequestState.APPROVED.storedName,
-            transportFinished,
-        )
-        val updatedRequest = request.copy(
-            state = lifecycle.state.storedName,
-            listed = false,
-            completedAt = if (lifecycle.completed) request.completedAt ?: now else null,
-        )
-        val decidedUpload = uploadRequest.copy(
-            decision = SecretUploadRequestState.APPROVED.storedName,
-            approvedName = finalName,
-            decidedAt = now,
-        )
-        val auditRecords = listOf(
-            AuditRecord(
-                type = AuditEventType.SECRET_UPLOAD_DECIDED,
-                outcome = AuditOutcome.APPROVED,
-                decisionSource = AuditDecisionSource.USER,
-                subject = finalName,
-                detail = uploadRequest.uploadedName.takeUnless { it == finalName },
-                clientId = request.clientId,
-                clientName = request.clientNameSnapshot,
-                relayRequestId = request.id,
-            ),
-        )
-        database.withWriteTransaction {
-            val secretId = when (preparedUpload) {
-                is PreparedSecretUploadApproval.Environment -> when (
-                    val applied = secrets.applyPreparedEnvironmentSecretUpload(
-                        preparedUpload.upload,
-                    )
-                ) {
-                    is ApplyEnvironmentSecretUploadResult.Applied -> applied.secretId
-                    is ApplyEnvironmentSecretUploadResult.Invalid -> {
-                        return@withWriteTransaction SecretUploadDecisionResult.Invalid(
-                            applied.message,
-                        )
-                    }
-                }
-                is PreparedSecretUploadApproval.Ssh -> when (
-                    val applied = secrets.applyPreparedSshSecretUpload(preparedUpload.upload)
-                ) {
-                    is ApplySshSecretUploadResult.Applied -> applied.secretId
-                    is ApplySshSecretUploadResult.Invalid -> {
-                        return@withWriteTransaction SecretUploadDecisionResult.Invalid(
-                            applied.message,
-                        )
-                    }
-                }
-            }
-            dao.updateSecretUploadRequest(
-                request = updatedRequest,
-                secretUpload = decidedUpload,
-                discardUploadedValues = true,
-            )
-            audit.append(auditRecords, now)
-            SecretUploadDecisionResult.Approved(secretId)
-        }
+        secretManagement.approveSecretUpload(requestId, approvedName)
     }
 
     suspend fun readSecretUploadVariable(
         requestId: String,
         variableId: String,
     ): SecretUploadVariableValue = operationMutex.withLock {
-        val request = dao.getRequestById(requestId)
-            ?: return@withLock SecretUploadVariableValue.NotFound
-        val upload = dao.getSecretUploadRequest(requestId)
-            ?: return@withLock SecretUploadVariableValue.NotFound
-        if (
-            request.state != InboxRequestState.ACTION_REQUIRED.storedName ||
-            upload.decision != null
-        ) {
-            return@withLock SecretUploadVariableValue.NotFound
-        }
-        val variable = dao.getSecretUploadEnvironmentVariables(requestId).find {
-            it.id == variableId
-        }
-            ?: return@withLock SecretUploadVariableValue.NotFound
-        when (
-            val result = material.decryptSecretUploadEnvironmentVariable(request, variable)
-        ) {
-            is DecryptionResult.Plaintext -> runCatching {
-                SecretUploadVariableValue.Available(
-                    result.value.decodeToString(throwOnInvalidSequence = true),
-                )
-            }.getOrDefault(SecretUploadVariableValue.Corrupted)
-            DecryptionResult.KeyUnavailable -> SecretUploadVariableValue.Unavailable
-            DecryptionResult.AuthenticationFailed -> SecretUploadVariableValue.Corrupted
-            DecryptionResult.UnsupportedFormat -> SecretUploadVariableValue.UnsupportedEncryption
-        }
+        secretManagement.readSecretUploadVariable(requestId, variableId)
     }
 
     suspend fun setSecretUploadVariableSensitivity(
@@ -2219,64 +1916,11 @@ internal class RequestRepository(
         variableId: String,
         sensitive: Boolean,
     ): Boolean = operationMutex.withLock {
-        val request = dao.getRequestById(requestId) ?: return@withLock false
-        val upload = dao.getSecretUploadRequest(requestId) ?: return@withLock false
-        if (
-            request.state != InboxRequestState.ACTION_REQUIRED.storedName ||
-            upload.decision != null
-        ) {
-            return@withLock false
-        }
-        val variable = dao.getSecretUploadEnvironmentVariables(requestId).find {
-            it.id == variableId
-        }
-            ?: return@withLock false
-        dao.updateSecretUploadEnvironmentVariable(variable.copy(sensitive = sensitive)) == 1
+        secretManagement.setSecretUploadVariableSensitivity(requestId, variableId, sensitive)
     }
 
     suspend fun rejectSecretUpload(requestId: String): SecretUploadDecisionResult =
-        operationMutex.withLock {
-            val request = dao.getRequestById(requestId)
-                ?: return@withLock SecretUploadDecisionResult.NotFound
-            val upload = dao.getSecretUploadRequest(requestId)
-                ?: return@withLock SecretUploadDecisionResult.NotFound
-            if (
-                request.state != InboxRequestState.ACTION_REQUIRED.storedName ||
-                upload.decision != null
-            ) {
-                return@withLock SecretUploadDecisionResult.NotPending
-            }
-            val now = currentTimeMillis()
-            val transportFinished = request.completionJson != null || request.error != null
-            val lifecycle = secretUploadLifecycle(
-                SecretUploadRequestState.REJECTED.storedName,
-                transportFinished,
-            )
-            dao.updateSecretUploadRequest(
-                request = request.copy(
-                    state = lifecycle.state.storedName,
-                    listed = false,
-                    completedAt = if (lifecycle.completed) request.completedAt ?: now else null,
-                ),
-                secretUpload = upload.copy(
-                    decision = SecretUploadRequestState.REJECTED.storedName,
-                    decidedAt = now,
-                ),
-                discardUploadedValues = true,
-            )
-            audit.record(
-                AuditRecord(
-                    type = AuditEventType.SECRET_UPLOAD_DECIDED,
-                    outcome = AuditOutcome.REJECTED,
-                    decisionSource = AuditDecisionSource.USER,
-                    subject = upload.uploadedName,
-                    clientId = request.clientId,
-                    clientName = request.clientNameSnapshot,
-                    relayRequestId = request.id,
-                ),
-            )
-            SecretUploadDecisionResult.Rejected
-        }
+        operationMutex.withLock { secretManagement.rejectSecretUpload(requestId) }
 
     suspend fun renameClient(clientId: String, name: String): ClientChangeResult =
         operationMutex.withLock { clients.rename(clientId, name) }
@@ -4011,73 +3655,26 @@ internal class RequestRepository(
         acceptedSecrets: AcceptedRequestPsks,
         credentials: RelayDeviceCredentials,
     ): ProcessedRelayMessage? {
-        val contents = runCatching {
-            secretListProtocol.decodeRequest(opened.plaintext)
-        }.getOrNull() ?: return null
-        val secretMetadata = secrets.listSecretsForClient()
-        val responsePlaintext = secretListProtocol.response(
-            secretMetadata.associateTo(sortedMapOf()) { secret ->
-                secret.name to SecretListSecret(
-                    description = secret.description,
-                    type = secret.type,
-                    environmentVariableNames = secret.environmentVariableNames,
-                    sshPublicKey = secret.sshPublicKey,
+        val response = secretManagement.receiveSecretList(
+            client = pairing,
+            relayRequestId = relayRequestId,
+            requestPayload = requestPayload,
+            plaintext = opened.plaintext,
+            acceptedPsks = acceptedSecrets,
+        ) { responsePlaintext ->
+            runCatching {
+                pairedRequestProtocol.sealPairedResponse(
+                    deviceId = credentials.deviceId,
+                    requestId = relayRequestId,
+                    clientId = pairing.clientId,
+                    clientPsk = opened.clientPsk,
+                    devicePrivateKey = credentials.devicePrivateKey,
+                    devicePublicKey = credentials.devicePublicKey,
+                    request = requestPayload,
+                    plaintext = responsePlaintext,
                 )
-            },
-        )
-        val response = runCatching {
-            pairedRequestProtocol.sealPairedResponse(
-                deviceId = credentials.deviceId,
-                requestId = relayRequestId,
-                clientId = pairing.clientId,
-                clientPsk = opened.clientPsk,
-                devicePrivateKey = credentials.devicePrivateKey,
-                devicePublicKey = credentials.devicePublicKey,
-                request = requestPayload,
-                plaintext = responsePlaintext,
-            )
-        }.getOrNull() ?: return null
-        val now = currentTimeMillis()
-        dao.insertSecretListRequest(
-            request = InboxRequestEntity(
-                id = relayRequestId,
-                parentRequestId = null,
-                deviceIdentityId = pairing.deviceIdentityId,
-                clientId = pairing.clientId,
-                clientNameSnapshot = pairing.name,
-                clientSoftwareJson = encodeClientSoftware(contents.clientSoftware),
-                kind = RequestKind.SECRET_LIST.storedName,
-                state = InboxRequestState.WAITING.storedName,
-                listed = false,
-                requestJson = requestPayload.toString(),
-                responseJson = response.toString(),
-                completionJson = null,
-                error = null,
-                receivedAt = now,
-                completedAt = null,
-                requestAcknowledged = false,
-                responseAcknowledged = false,
-                completionAcknowledged = false,
-            ),
-            client = pairing.copy(
-                clientSoftwareJson = encodeClientSoftware(contents.clientSoftware),
-                lastSeenAt = now,
-            ),
-            requestPsk = acceptedSecrets.requestPsk,
-            currentClientPsk = acceptedSecrets.currentClientPsk,
-            previousClientPsk = acceptedSecrets.previousClientPsk,
-        )
-        audit.record(
-            AuditRecord(
-                type = AuditEventType.SECRET_LIST_RECEIVED,
-                outcome = AuditOutcome.RECEIVED,
-                subject = "${secretMetadata.size} secrets",
-                detail = secretMetadata.joinToString { "${it.name} (${it.type})" },
-                clientId = pairing.clientId,
-                clientName = pairing.auditClientName(),
-                relayRequestId = relayRequestId,
-            ),
-        )
+            }.getOrNull()
+        } ?: return null
         return ProcessedRelayMessage(response)
     }
 
@@ -4089,190 +3686,28 @@ internal class RequestRepository(
         acceptedSecrets: AcceptedRequestPsks,
         credentials: RelayDeviceCredentials,
     ): ProcessedRelayMessage? {
-        val contents = runCatching {
-            secretUploadProtocol.decodeRequest(opened.plaintext)
-        }.getOrNull() ?: return null
-        val now = currentTimeMillis()
-        val requestedTarget = secrets.targetForSecretUpload(contents.mode, contents.name)
-        val prepared = when (val uploadContents = contents.contents) {
-            is SecretUploadContents.Environment -> {
-                val upload = EnvironmentSecretUpload(
-                    mode = contents.mode,
-                    name = contents.name,
-                    descriptionProvided = contents.descriptionProvided,
-                    description = contents.description,
-                    variables = uploadContents.variables,
+        val response = secretManagement.receiveSecretUpload(
+            client = pairing,
+            relayRequestId = relayRequestId,
+            requestPayload = requestPayload,
+            plaintext = opened.plaintext,
+            acceptedPsks = acceptedSecrets,
+        ) { responsePlaintext ->
+            runCatching {
+                pairedRequestProtocol.sealPairedResponse(
+                    deviceId = credentials.deviceId,
+                    requestId = relayRequestId,
+                    clientId = pairing.clientId,
+                    clientPsk = opened.clientPsk,
+                    devicePrivateKey = credentials.devicePrivateKey,
+                    devicePublicKey = credentials.devicePublicKey,
+                    request = requestPayload,
+                    plaintext = responsePlaintext,
                 )
-                when (val validation = secrets.describeEnvironmentSecretUpload(upload)) {
-                    is EnvironmentSecretUploadResult.Valid -> PreparedSecretUpload(
-                        type = ENVIRONMENT_SECRET_TYPE,
-                        target = validation.summary.target,
-                        summary = SecretUploadSummarySnapshot(
-                            variableNames = uploadContents.variables.keys.sorted(),
-                            addedVariables = validation.summary.addedVariables,
-                            changedVariables = validation.summary.changedVariables,
-                            unchangedVariables = validation.summary.unchangedVariables,
-                            removedVariables = validation.summary.removedVariables,
-                        ),
-                        environmentVariables = uploadContents.variables.map { (name, value) ->
-                            material.encryptSecretUploadVariable(
-                                relayRequestId = relayRequestId,
-                                clientId = pairing.clientId,
-                                name = name,
-                                value = value,
-                                sensitive = validation.summary.variableSensitivity.getValue(name),
-                            )
-                        },
-                    )
-                    is EnvironmentSecretUploadResult.Invalid -> PreparedSecretUpload(
-                        type = ENVIRONMENT_SECRET_TYPE,
-                        target = validation.target,
-                        summary = SecretUploadSummarySnapshot(
-                            variableNames = uploadContents.variables.keys.sorted(),
-                        ),
-                        error = validation.message,
-                    )
-                }
-            }
-            is SecretUploadContents.Ssh -> {
-                val parsedKey = runCatchingNonCancellation {
-                    withContext(cryptographyDispatcher) {
-                        sshKeys.importOpenSshPrivateKey(uploadContents.privateKey)
-                    }
-                }
-                val parseError = parsedKey.exceptionOrNull()?.message
-                val privateKey = parsedKey.getOrNull()
-                if (parseError != null) {
-                    PreparedSecretUpload(
-                        type = SSH_SECRET_TYPE,
-                        summary = SecretUploadSummarySnapshot(),
-                        target = requestedTarget,
-                        error = parseError,
-                    )
-                } else {
-                    val upload = SshSecretUpload(
-                        mode = contents.mode,
-                        name = contents.name,
-                        descriptionProvided = contents.descriptionProvided,
-                        description = contents.description,
-                        privateKey = checkNotNull(privateKey),
-                    )
-                    when (val validation = secrets.describeSshSecretUpload(upload)) {
-                        is SshSecretUploadResult.Valid -> PreparedSecretUpload(
-                            type = SSH_SECRET_TYPE,
-                            target = validation.summary.target,
-                            summary = SecretUploadSummarySnapshot(
-                                publicKey = validation.summary.publicKey,
-                                fingerprint = validation.summary.fingerprint,
-                                previousPublicKey = validation.summary.previousPublicKey,
-                                previousFingerprint = validation.summary.previousFingerprint,
-                                keyChanged = validation.summary.keyChanged,
-                            ),
-                            sshKey = material.encryptSecretUploadSshKey(
-                                relayRequestId,
-                                pairing.clientId,
-                                checkNotNull(privateKey),
-                            ),
-                        )
-                        is SshSecretUploadResult.Invalid -> PreparedSecretUpload(
-                            type = SSH_SECRET_TYPE,
-                            target = validation.target,
-                            summary = SecretUploadSummarySnapshot(),
-                            error = validation.message,
-                        )
-                    }
-                }
-            }
-        }
-        val responsePlaintext = if (prepared.error == null) {
-            secretUploadProtocol.receivedResponse()
-        } else {
-            secretUploadProtocol.rejectedResponse(prepared.error)
-        }
-        val response = runCatching {
-            pairedRequestProtocol.sealPairedResponse(
-                deviceId = credentials.deviceId,
-                requestId = relayRequestId,
-                clientId = pairing.clientId,
-                clientPsk = opened.clientPsk,
-                devicePrivateKey = credentials.devicePrivateKey,
-                devicePublicKey = credentials.devicePublicKey,
-                request = requestPayload,
-                plaintext = responsePlaintext,
-            )
-        }.getOrNull() ?: return null
-        val initialDecision = prepared.error?.let {
-            SecretUploadRequestState.REJECTED.storedName
-        }
-        val initialLifecycle = secretUploadLifecycle(
-            decision = initialDecision,
-            transportFinished = false,
-        )
-        dao.insertSecretUploadRequest(
-            request = InboxRequestEntity(
-                id = relayRequestId,
-                parentRequestId = null,
-                deviceIdentityId = pairing.deviceIdentityId,
-                clientId = pairing.clientId,
-                clientNameSnapshot = pairing.name,
-                clientSoftwareJson = encodeClientSoftware(contents.clientSoftware),
-                kind = RequestKind.SECRET_UPLOAD.storedName,
-                state = initialLifecycle.state.storedName,
-                listed = prepared.error == null,
-                requestJson = requestPayload.toString(),
-                responseJson = response.toString(),
-                completionJson = null,
-                error = null,
-                receivedAt = now,
-                completedAt = null,
-                requestAcknowledged = false,
-                responseAcknowledged = false,
-                completionAcknowledged = false,
-            ),
-            secretUpload = SecretUploadRequestEntity(
-                requestId = relayRequestId,
-                decision = initialDecision,
-                mode = contents.mode.wireName,
-                uploadedName = contents.name,
-                approvedName = null,
-                descriptionProvided = contents.descriptionProvided,
-                description = contents.description,
-                secretType = prepared.type,
-                targetSecretId = prepared.target?.secretId,
-                targetSecretRevision = prepared.target?.revision,
-                summaryJson = json.encodeToString(prepared.summary),
-                intakeError = prepared.error,
-                decidedAt = if (prepared.error != null) now else null,
-            ),
-            client = pairing.copy(
-                clientSoftwareJson = encodeClientSoftware(contents.clientSoftware),
-                lastSeenAt = now,
-            ),
-            environmentVariables = prepared.environmentVariables,
-            sshKey = prepared.sshKey,
-            requestPsk = acceptedSecrets.requestPsk,
-            currentClientPsk = acceptedSecrets.currentClientPsk,
-            previousClientPsk = acceptedSecrets.previousClientPsk,
-        )
-        audit.record(
-            AuditRecord(
-                type = AuditEventType.SECRET_UPLOAD_RECEIVED,
-                outcome = if (prepared.error == null) {
-                    AuditOutcome.RECEIVED
-                } else {
-                    AuditOutcome.REJECTED
-                },
-                decisionSource = prepared.error?.let { AuditDecisionSource.VALIDATION },
-                subject = contents.name,
-                detail = prepared.error,
-                clientId = pairing.clientId,
-                clientName = pairing.auditClientName(),
-                relayRequestId = relayRequestId,
-            ),
-        )
+            }.getOrNull()
+        } ?: return null
         return ProcessedRelayMessage(response)
     }
-
     private suspend fun processPairingRemoveRequest(
         pairing: ClientEntity,
         relayRequestId: String,
@@ -4818,35 +4253,10 @@ internal class RequestRepository(
         request: InboxRequestEntity,
         completion: JsonElement,
     ): ProcessedRelayMessage? {
-        if (request.completedAt != null) return ProcessedRelayMessage()
-        val plaintext = openStoredCompletion(activeCredentials, request, completion) ?: return null
-        val decoded = runCatching { secretListProtocol.decodeCompletion(plaintext) }
-        val valid = decoded.getOrNull() == request.clientSoftwareJson?.let(::decodeClientSoftware)
-        val error = if (valid) null else decoded.exceptionOrNull()?.message
-            ?: "Secret list completion did not match the request."
-        val now = currentTimeMillis()
-        dao.updateSecretListRequest(
-            request = request.copy(
-                state = InboxRequestState.COMPLETED.storedName,
-                completionJson = completion.toString(),
-                responseAcknowledged = true,
-                completionAcknowledged = false,
-                error = error,
-                completedAt = now,
-            ),
-        )
-        audit.record(
-            AuditRecord(
-                type = AuditEventType.SECRET_LIST_COMPLETED,
-                outcome = if (valid) AuditOutcome.COMPLETED else AuditOutcome.FAILED,
-                subject = "Secret list",
-                detail = error,
-                clientId = request.clientId,
-                clientName = request.clientNameSnapshot,
-                relayRequestId = request.id,
-            ),
-        )
-        return ProcessedRelayMessage()
+        val processed = secretManagement.completeSecretList(request, completion) {
+            openStoredCompletion(activeCredentials, request, completion)
+        }
+        return if (processed) ProcessedRelayMessage() else null
     }
 
     private suspend fun processSecretUploadCompletion(
@@ -4854,51 +4264,11 @@ internal class RequestRepository(
         request: InboxRequestEntity,
         completion: JsonElement,
     ): ProcessedRelayMessage? {
-        val upload = dao.getSecretUploadRequest(request.id) ?: return null
-        if (request.completionJson != null || request.error != null) {
-            return ProcessedRelayMessage()
+        val processed = secretManagement.completeSecretUpload(request, completion) {
+            openStoredCompletion(activeCredentials, request, completion)
         }
-        val plaintext = openStoredCompletion(activeCredentials, request, completion) ?: return null
-        val decoded = runCatching { secretUploadProtocol.decodeCompletion(plaintext) }
-        val result = decoded.getOrNull()
-        val expectedResult = if (upload.intakeError == null) {
-            SecretUploadProtocol.RESULT_RECEIVED
-        } else {
-            SecretUploadProtocol.RESULT_REJECTED
-        }
-        val valid = result != null &&
-            result.clientSoftware == request.clientSoftwareJson?.let(::decodeClientSoftware) &&
-            result.result == expectedResult &&
-            result.message == upload.intakeError
-        val error = if (valid) null else decoded.exceptionOrNull()?.message
-            ?: "The client completion did not match the received upload."
-        val now = currentTimeMillis()
-        val lifecycle = secretUploadLifecycle(upload.decision, transportFinished = true)
-        dao.updateSecretUploadRequest(
-            request = request.copy(
-                state = lifecycle.state.storedName,
-                completionJson = completion.toString(),
-                responseAcknowledged = true,
-                completionAcknowledged = false,
-                error = error,
-                completedAt = request.completedAt ?: if (lifecycle.completed) now else null,
-            ),
-            secretUpload = upload,
-        )
-        audit.record(
-            AuditRecord(
-                type = AuditEventType.SECRET_UPLOAD_COMPLETED,
-                outcome = if (valid) AuditOutcome.COMPLETED else AuditOutcome.FAILED,
-                subject = upload.uploadedName,
-                detail = error,
-                clientId = request.clientId,
-                clientName = request.clientNameSnapshot,
-                relayRequestId = request.id,
-            ),
-        )
-        return ProcessedRelayMessage()
+        return if (processed) ProcessedRelayMessage() else null
     }
-
     private suspend fun processPairingRemoveCompletion(
         activeCredentials: RelayDeviceCredentials,
         request: InboxRequestEntity,
@@ -5474,15 +4844,6 @@ private fun PairingAttemptEntity.auditClientName(): String =
         .first(String::isNotBlank)
 
 private fun ClientEntity.auditClientName(): String = name
-
-private fun SecretUploadRequestEntity.target(): SecretUploadTarget? = when {
-    targetSecretId == null && targetSecretRevision == null -> null
-    targetSecretId != null && targetSecretRevision != null -> SecretUploadTarget(
-        targetSecretId,
-        targetSecretRevision,
-    )
-    else -> error("Incomplete secret upload target")
-}
 
 private fun String.toAuditDecisionSource(): AuditDecisionSource = when (this) {
     "user" -> AuditDecisionSource.USER

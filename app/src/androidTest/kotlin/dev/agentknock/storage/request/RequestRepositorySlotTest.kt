@@ -159,20 +159,30 @@ class RequestRepositorySlotTest {
             audit = audit,
             writeTransaction = RoomWriteTransaction(database),
         )
-        repository = RequestRepository(
-            database = database,
+        val requestMaterial = RequestMaterialStore(
             dao = database.requestDao(),
-            material = RequestMaterialStore(
-                dao = database.requestDao(),
-                keyManager = keyManager,
-                encryption = encryption,
-                newId = { "request-material-id" },
-                currentTimeMillis = { now },
-                cryptographyDispatcher = Dispatchers.Unconfined,
-            ),
+            keyManager = keyManager,
+            encryption = encryption,
+            newId = { "request-material-id" },
+            currentTimeMillis = { now },
+            cryptographyDispatcher = Dispatchers.Unconfined,
+        )
+        val secretManagement = SecretManagementRequests(
+            dao = database.requestDao(),
+            material = requestMaterial,
+            secrets = secrets,
+            audit = audit,
+            writeTransaction = RoomWriteTransaction(database),
+            currentTimeMillis = { now },
+            cryptographyDispatcher = Dispatchers.Unconfined,
+        )
+        repository = RequestRepository(
+            dao = database.requestDao(),
+            material = requestMaterial,
             deviceCredentials = credentialSource,
             secrets = secrets,
             clients = clients,
+            secretManagement = secretManagement,
             approvalReviewer = approvalReviewer,
             relay = relay,
             aiReviews = AiReviewCoordinator(reviewScope),

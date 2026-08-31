@@ -29,6 +29,7 @@ import dev.agentknock.storage.request.RequestConnectionManager
 import dev.agentknock.storage.request.RequestMaterialStore
 import dev.agentknock.storage.request.AiReviewCoordinator
 import dev.agentknock.storage.request.ClientRepository
+import dev.agentknock.storage.request.SecretManagementRequests
 import dev.agentknock.storage.device.DeviceIdentityRepository
 import dev.agentknock.storage.device.DeviceManagementRepository
 import dev.agentknock.storage.device.DeviceManagementResult
@@ -137,14 +138,21 @@ internal class ApplicationContainer(application: Application) {
         audit = audit,
         writeTransaction = writeTransaction,
     )
+    private val secretManagement = SecretManagementRequests(
+        dao = database.requestDao(),
+        material = requestMaterial,
+        secrets = secrets,
+        audit = audit,
+        writeTransaction = writeTransaction,
+    )
 
     val requests: RequestRepository = RequestRepository(
-        database = database,
         dao = database.requestDao(),
         material = requestMaterial,
         deviceCredentials = deviceIdentity,
         secrets = secrets,
         clients = clients,
+        secretManagement = secretManagement,
         approvalReviewer = HttpRelayApprovalReviewClient(
             RelayHttpTransport(approvalReviewHttpClient(httpClient)),
         ),
