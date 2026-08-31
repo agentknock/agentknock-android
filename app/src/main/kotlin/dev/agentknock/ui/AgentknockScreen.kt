@@ -1,5 +1,6 @@
 package dev.agentknock.ui
 
+import androidx.activity.compose.LocalActivity
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.BoxWithConstraints
 import androidx.compose.foundation.layout.Column
@@ -32,6 +33,7 @@ import androidx.compose.material3.Text
 import androidx.compose.material3.TextButton
 import androidx.compose.material3.Button
 import androidx.compose.runtime.Composable
+import androidx.compose.runtime.DisposableEffect
 import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
@@ -44,7 +46,10 @@ import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.res.stringResource
 import androidx.compose.ui.unit.dp
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
+import androidx.lifecycle.Lifecycle
+import androidx.lifecycle.LifecycleEventObserver
 import androidx.lifecycle.ViewModelProvider
+import androidx.lifecycle.compose.LocalLifecycleOwner
 import androidx.lifecycle.viewmodel.compose.viewModel
 import dev.agentknock.R
 import dev.agentknock.RequestNavigation
@@ -104,8 +109,23 @@ internal fun AgentknockScreen(
     val requestSummaries by requestsViewModel.allRequests.collectAsStateWithLifecycle()
     val subscription by subscriptionViewModel.state.collectAsStateWithLifecycle()
     val context = LocalContext.current
+    val lifecycle = LocalLifecycleOwner.current.lifecycle
+    val activity = LocalActivity.current
     val notificationsEnabled = remember(notificationRefreshGeneration) {
         RequestNotifications.actionNotificationsEnabled(context)
+    }
+
+    DisposableEffect(lifecycle, activity, secretsViewModel) {
+        val observer = LifecycleEventObserver { _, event ->
+            if (
+                event == Lifecycle.Event.ON_STOP &&
+                activity?.isChangingConfigurations != true
+            ) {
+                secretsViewModel.clearSensitiveEditor()
+            }
+        }
+        lifecycle.addObserver(observer)
+        onDispose { lifecycle.removeObserver(observer) }
     }
     val actionRequiredCounts = MainSection.entries.associateWith { section ->
         when (section) {

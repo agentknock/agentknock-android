@@ -9,7 +9,6 @@ import androidx.compose.foundation.background
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
-import androidx.compose.foundation.layout.BoxWithConstraints
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.IntrinsicSize
 import androidx.compose.foundation.layout.PaddingValues
@@ -33,9 +32,9 @@ import androidx.compose.material3.HorizontalDivider
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.Surface
 import androidx.compose.material3.Text
-import androidx.compose.material3.VerticalDivider
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.getValue
+import androidx.compose.runtime.key
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.saveable.rememberSaveable
 import androidx.compose.runtime.setValue
@@ -53,6 +52,7 @@ import androidx.compose.foundation.shape.RoundedCornerShape
 import dev.agentknock.presentation.formatTimestamp
 import dev.agentknock.storage.audit.AuditEvent
 import dev.agentknock.storage.audit.AuditOutcome
+import dev.agentknock.ui.components.AdaptiveListDetail
 import dev.agentknock.ui.components.InformationRow
 import dev.agentknock.ui.components.InformationSurface
 import dev.agentknock.ui.theme.agentknockColors
@@ -77,53 +77,43 @@ internal fun AuditBrowser(
     report: (String) -> Unit,
     modifier: Modifier,
 ) {
-    BoxWithConstraints(modifier) {
-        val twoPane = maxWidth >= 720.dp
-        if (twoPane) {
-            Row(Modifier.fillMaxSize()) {
-                AuditList(
-                    events = events,
-                    selectedEventId = selected?.id,
-                    onBack = onBack,
-                    onOpen = onOpen,
-                    modifier = Modifier.width(360.dp).fillMaxHeight(),
+    AdaptiveListDetail(
+        hasDetail = selected != null,
+        listWidth = 360.dp,
+        onBack = onBack,
+        onTopLevelChanged = {},
+        modifier = modifier,
+        list = { listModifier ->
+            AuditList(
+                events = events,
+                selectedEventId = selected?.id,
+                onBack = onBack,
+                onOpen = onOpen,
+                modifier = listModifier,
+            )
+        },
+        emptyDetail = { detailModifier ->
+            Box(detailModifier, contentAlignment = Alignment.Center) {
+                Text(
+                    "Select an event to view its details",
+                    color = MaterialTheme.colorScheme.onSurfaceVariant,
                 )
-                VerticalDivider()
-                if (selected == null) {
-                    Box(Modifier.weight(1f).fillMaxHeight(), contentAlignment = Alignment.Center) {
-                        Text(
-                            "Select an event to view its details",
-                            color = MaterialTheme.colorScheme.onSurfaceVariant,
-                        )
-                    }
-                } else {
+            }
+        },
+        detail = { showBack, detailModifier ->
+            selected?.let { event ->
+                key(event.id) {
                     AuditDetail(
-                        event = selected,
+                        event = event,
                         report = report,
                         onBack = onBack,
-                        showBack = false,
-                        modifier = Modifier.weight(1f).fillMaxHeight(),
+                        showBack = showBack,
+                        modifier = detailModifier,
                     )
                 }
             }
-        } else if (selected == null) {
-            AuditList(
-                events = events,
-                selectedEventId = null,
-                onBack = onBack,
-                onOpen = onOpen,
-                modifier = Modifier.fillMaxSize(),
-            )
-        } else {
-            AuditDetail(
-                event = selected,
-                report = report,
-                onBack = onBack,
-                showBack = true,
-                modifier = Modifier.fillMaxSize(),
-            )
-        }
-    }
+        },
+    )
 }
 
 @Composable

@@ -60,6 +60,24 @@ import dev.agentknock.ui.components.InformationSurface
 import dev.agentknock.ui.theme.agentknockColors
 import kotlinx.coroutines.launch
 
+private class SecretRevealEpoch {
+    private var epoch = 0L
+    private var active = true
+
+    fun begin(): Long? = epoch.takeIf { active }
+
+    fun isCurrent(value: Long): Boolean = active && value == epoch
+
+    fun invalidate() {
+        epoch += 1
+    }
+
+    fun close() {
+        active = false
+        invalidate()
+    }
+}
+
 @Composable
 internal fun SecretUploadRequestDetail(
     request: InboxRequestDetails,
@@ -81,15 +99,23 @@ internal fun SecretUploadRequestDetail(
     var revealedValues by remember(request.id) {
         mutableStateOf<Map<String, String>>(emptyMap())
     }
+    val revealEpoch = remember(request.id) { SecretRevealEpoch() }
     val scope = rememberCoroutineScope()
     val lifecycle = LocalLifecycleOwner.current.lifecycle
 
     DisposableEffect(lifecycle, request.id) {
         val observer = LifecycleEventObserver { _, event ->
-            if (event == Lifecycle.Event.ON_STOP) revealedValues = emptyMap()
+            if (event == Lifecycle.Event.ON_STOP) {
+                revealEpoch.invalidate()
+                revealedValues = emptyMap()
+            }
         }
         lifecycle.addObserver(observer)
-        onDispose { lifecycle.removeObserver(observer) }
+        onDispose {
+            lifecycle.removeObserver(observer)
+            revealEpoch.close()
+            revealedValues = emptyMap()
+        }
     }
     DetailPage(
         title = "Secret upload",
@@ -186,9 +212,28 @@ internal fun SecretUploadRequestDetail(
             EnvironmentVariableUploadDetails(
                 upload = upload,
                 revealedValues = revealedValues,
-                onSetRevealedValues = { revealedValues = it },
+                onUpdateRevealedValues = { update ->
+                    revealedValues = update(revealedValues)
+                },
                 authorizeProtectedAction = authorizeProtectedAction,
-                onReveal = onReveal,
+                onReveal = { variableId ->
+                    val epoch = if (
+                        lifecycle.currentState.isAtLeast(Lifecycle.State.STARTED)
+                    ) {
+                        revealEpoch.begin()
+                    } else {
+                        null
+                    }
+                    if (epoch == null) {
+                        null
+                    } else {
+                        val result = onReveal(variableId)
+                        result.takeIf {
+                            revealEpoch.isCurrent(epoch) &&
+                                lifecycle.currentState.isAtLeast(Lifecycle.State.STARTED)
+                        }
+                    }
+                },
                 onSensitivityChange = onSensitivityChange,
                 report = report,
             )
@@ -259,9 +304,9 @@ internal fun SecretUploadRequestDetail(
 private fun EnvironmentVariableUploadDetails(
     upload: SecretUploadRequestDetails,
     revealedValues: Map<String, String>,
-    onSetRevealedValues: (Map<String, String>) -> Unit,
+    onUpdateRevealedValues: ((Map<String, String>) -> Map<String, String>) -> Unit,
     authorizeProtectedAction: (String, () -> Unit, (String) -> Unit) -> Unit,
-    onReveal: suspend (String) -> SecretUploadVariableValue,
+    onReveal: suspend (String) -> SecretUploadVariableValue?,
     onSensitivityChange: suspend (String, Boolean) -> Boolean,
     report: (String) -> Unit,
 ) {
@@ -413,17 +458,19 @@ private fun EnvironmentVariableUploadDetails(
                             IconButton(
                                 onClick = {
                                     if (value != null) {
-                                        onSetRevealedValues(revealedValues - variable.id)
+                                        onUpdateRevealedValues { values ->
+                                            values - variable.id
+                                        }
                                         return@IconButton
                                     }
                                     val reveal: () -> Unit = {
                                         scope.launch {
                                             when (val result = onReveal(variable.id)) {
+                                                null -> Unit
                                                 is SecretUploadVariableValue.Available -> {
-                                                    onSetRevealedValues(
-                                                        revealedValues +
-                                                            (variable.id to result.value),
-                                                    )
+                                                    onUpdateRevealedValues { values ->
+                                                        values + (variable.id to result.value)
+                                                    }
                                                 }
                                                 SecretUploadVariableValue.NotFound ->
                                                     report(

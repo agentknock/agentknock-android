@@ -30,6 +30,7 @@ import dev.agentknock.storage.device.DeviceIdentityRepository
 import dev.agentknock.storage.request.RequestRepository
 import dev.agentknock.storage.request.RequestInbox
 import dev.agentknock.storage.secret.SecretRepository
+import dev.agentknock.storage.runCatchingNonCancellation
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.SharingStarted
@@ -321,7 +322,7 @@ internal class SecretsViewModel(
         )
         if (!editorState.compareAndSet(current, editor)) return
         viewModelScope.launch {
-            val result = runCatching {
+            val result = runCatchingNonCancellation {
                 when (source.sshInputMode) {
                     SshKeyInputMode.GENERATE -> generateSshKey(
                         source.sshAlgorithm,
@@ -360,7 +361,7 @@ internal class SecretsViewModel(
         )
         if (!editorState.compareAndSet(current, editor)) return
         viewModelScope.launch {
-            val result = runCatching {
+            val result = runCatchingNonCancellation {
                 when (source.inputMode) {
                     SshKeyInputMode.GENERATE -> generateSshKey(source.algorithm, source.comment)
                     SshKeyInputMode.IMPORT -> importSshKey(source.privateKeyText)

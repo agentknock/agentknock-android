@@ -9,7 +9,6 @@ import android.os.Build
 import android.os.Handler
 import android.os.Looper
 import android.os.PersistableBundle
-import androidx.activity.compose.LocalActivity
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
@@ -88,23 +87,15 @@ internal fun SecretsScreen(
     var variablePendingDeletion by remember { mutableStateOf<PendingVariableDeletion?>(null) }
     var revealedValues by remember { mutableStateOf<Map<String, String>>(emptyMap()) }
     val lifecycle = LocalLifecycleOwner.current.lifecycle
-    val activity = LocalActivity.current
 
-    DisposableEffect(lifecycle, activity) {
+    DisposableEffect(lifecycle) {
         val observer = LifecycleEventObserver { _, event ->
-            if (
-                event == Lifecycle.Event.ON_STOP &&
-                activity?.isChangingConfigurations != true
-            ) {
+            if (event == Lifecycle.Event.ON_STOP) {
                 revealedValues = emptyMap()
-                viewModel.clearSensitiveEditor()
             }
         }
         lifecycle.addObserver(observer)
-        onDispose {
-            lifecycle.removeObserver(observer)
-            if (activity?.isChangingConfigurations != true) viewModel.clearSensitiveEditor()
-        }
+        onDispose { lifecycle.removeObserver(observer) }
     }
 
     val target = when (val selected = content) {
