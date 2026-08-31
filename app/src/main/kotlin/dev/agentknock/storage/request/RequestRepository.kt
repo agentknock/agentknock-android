@@ -100,8 +100,6 @@ import kotlinx.coroutines.flow.Flow
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.asStateFlow
-import kotlinx.coroutines.flow.combine
-import kotlinx.coroutines.flow.map
 import kotlinx.coroutines.selects.select
 import kotlinx.coroutines.sync.Mutex
 import kotlinx.coroutines.sync.withLock
@@ -220,35 +218,6 @@ internal sealed interface SecretUploadVariableValue {
     data object UnsupportedEncryption : SecretUploadVariableValue
 }
 
-internal data class ClientSummary(
-    val clientId: String,
-    val name: String,
-    val hostname: String?,
-    val platform: String?,
-    val architecture: String?,
-    val state: RelayClientState,
-    val desiredState: RelayClientState?,
-    val pairedAt: Long?,
-    val lastRequestAt: Long? = null,
-    val temporaryAccessCount: Int = 0,
-)
-
-internal data class ClientDetails(
-    val clientId: String,
-    val name: String,
-    val hostname: String?,
-    val platform: String?,
-    val architecture: String?,
-    val osVersion: String?,
-    val machineId: String?,
-    val clientSoftware: ClientSoftware?,
-    val instructions: String,
-    val state: RelayClientState,
-    val desiredState: RelayClientState?,
-    val pairedAt: Long?,
-    val lastRequestAt: Long? = null,
-)
-
 internal sealed interface RequestSyncResult {
     data object Success : RequestSyncResult
 
@@ -348,18 +317,13 @@ internal sealed interface SshAuthenticationDecisionResult {
     data object TemporaryAccessNotStarted : SshAuthenticationDecisionResult
 }
 
-internal enum class ClientChangeResult {
-    CHANGED,
-    NOT_FOUND,
-    INVALID_STATE,
-}
-
 internal class RequestRepository(
     private val database: AgentknockDatabase,
     private val dao: RequestDao,
     private val material: RequestMaterialStore,
     private val deviceCredentials: RelayDeviceCredentialSource,
     private val secrets: SecretRepository,
+    private val clients: ClientRepository,
     private val approvalReviewer: RelayApprovalReviewClient,
     private val relay: RelayDeviceClient,
     private val aiReviews: AiReviewCoordinator,
@@ -387,57 +351,9 @@ internal class RequestRepository(
     val pushRegistrationState: StateFlow<RelayPushRegistrationState?> =
         _pushRegistrationState.asStateFlow()
 
-    fun observeClients(): Flow<List<ClientSummary>> = combine(
-        dao.observeClients(),
-        secrets.observeTemporaryAccessGrants(),
-    ) { clients, grants ->
-        val grantCounts = grants.groupingBy { it.clientId }.eachCount()
-        clients
-            .mapNotNull { client ->
-                val state = client.relayClientState.toRelayClientState()
-                val desiredState = client.desiredRelayClientState?.toRelayClientState()
-                if (state == RelayClientState.REVOKED || desiredState == RelayClientState.REVOKED) {
-                    return@mapNotNull null
-                }
-                ClientSummary(
-                    clientId = client.clientId,
-                    name = client.name,
-                    hostname = client.hostname,
-                    platform = client.platform,
-                    architecture = client.architecture,
-                    state = state,
-                    desiredState = desiredState,
-                    pairedAt = client.pairedAt,
-                    lastRequestAt = client.lastSeenAt,
-                    temporaryAccessCount = grantCounts[client.clientId] ?: 0,
-                )
-            }
-            .sortedBy { it.name.lowercase() }
-    }
+    fun observeClients(): Flow<List<ClientSummary>> = clients.observeClients()
 
-    fun observeClient(clientId: String): Flow<ClientDetails?> =
-        dao.observeClient(clientId).map { client ->
-            client?.takeIf {
-                it.relayClientState != RelayClientState.REVOKED.wireName &&
-                    it.desiredRelayClientState != RelayClientState.REVOKED.wireName
-            }?.let {
-                ClientDetails(
-                    clientId = it.clientId,
-                    name = it.name,
-                    hostname = it.hostname,
-                    platform = it.platform,
-                    architecture = it.architecture,
-                    osVersion = it.osVersion,
-                    machineId = it.machineId,
-                    clientSoftware = it.clientSoftwareJson?.let(::decodeClientSoftware),
-                    instructions = it.instructions,
-                    state = it.relayClientState.toRelayClientState(),
-                    desiredState = it.desiredRelayClientState?.toRelayClientState(),
-                    pairedAt = it.pairedAt,
-                    lastRequestAt = it.lastSeenAt,
-                )
-            }
-        }
+    fun observeClient(clientId: String): Flow<ClientDetails?> = clients.observeClient(clientId)
 
     suspend fun recoverInterruptedAiReviews(): Int = operationMutex.withLock {
         dao.recoverInterruptedAiReviews()
@@ -863,7 +779,11 @@ internal class RequestRepository(
         awaitingStates.isEmpty()
 
     private suspend fun applyClientState(event: RelayDeviceEvent.ClientState) {
-        val now = currentTimeMillis()
+        // Apply the independently retryable durable-client transaction first. If its audit insert
+        // fails, no pairing-attempt state is advanced; replaying the relay state can retry both.
+        // If the later attempt update fails, replay is also safe because applying an unchanged
+        // durable state does not emit another audit event.
+        clients.applyRelayState(event.clientId, event.state)
         val attempt = dao.getPairingAttemptByClientId(event.clientId)
         if (attempt != null) {
             val activated = event.state == RelayClientState.ACTIVE &&
@@ -888,38 +808,6 @@ internal class RequestRepository(
             ) {
                 requestSync()
             }
-        }
-
-        val client = dao.getClient(event.clientId) ?: return
-        if (event.state == RelayClientState.REVOKED) {
-            dao.deleteClient(client.clientId)
-        } else {
-            dao.updateClient(
-                client.copy(
-                    relayClientState = event.state.wireName,
-                    desiredRelayClientState = if (event.state == RelayClientState.REVOKED) {
-                        null
-                    } else {
-                        client.desiredRelayClientState?.takeUnless { it == event.state.wireName }
-                    },
-                ),
-            )
-        }
-        if (client.relayClientState != event.state.wireName) {
-            audit.record(
-                AuditRecord(
-                    type = when (event.state) {
-                        RelayClientState.ACTIVE -> AuditEventType.CLIENT_RESUMED
-                        RelayClientState.SUSPENDED -> AuditEventType.CLIENT_SUSPENDED
-                        RelayClientState.REVOKED -> AuditEventType.CLIENT_REVOKED
-                        RelayClientState.PENDING -> AuditEventType.CLIENT_PENDING
-                    },
-                    outcome = AuditOutcome.CHANGED,
-                    subject = client.name,
-                    clientId = client.clientId,
-                    clientName = client.name,
-                ),
-            )
         }
     }
 
@@ -2391,75 +2279,24 @@ internal class RequestRepository(
         }
 
     suspend fun renameClient(clientId: String, name: String): ClientChangeResult =
-        operationMutex.withLock {
-            val trimmed = name.trim()
-            require(trimmed.isNotEmpty()) { "A client name cannot be empty" }
-            val client = dao.getClient(clientId)
-                ?: return@withLock ClientChangeResult.NOT_FOUND
-            dao.updateClient(client.copy(name = trimmed))
-            audit.record(
-                AuditRecord(
-                    type = AuditEventType.CLIENT_RENAMED,
-                    outcome = AuditOutcome.CHANGED,
-                    subject = trimmed,
-                    detail = client.name.takeUnless { it == trimmed },
-                    clientId = clientId,
-                    clientName = trimmed,
-                ),
-            )
-            ClientChangeResult.CHANGED
-        }
+        operationMutex.withLock { clients.rename(clientId, name) }
 
     suspend fun saveClientInstructions(
         clientId: String,
         instructions: String,
     ): ClientChangeResult = operationMutex.withLock {
-        val client = dao.getClient(clientId)
-            ?: return@withLock ClientChangeResult.NOT_FOUND
-        val normalized = instructions.trim()
-        if (client.instructions == normalized) return@withLock ClientChangeResult.CHANGED
-        dao.updateClient(
-            client.copy(instructions = normalized),
-        )
-        audit.record(
-            AuditRecord(
-                type = AuditEventType.CLIENT_INSTRUCTIONS_CHANGED,
-                outcome = AuditOutcome.CHANGED,
-                subject = client.name,
-                clientId = clientId,
-                clientName = client.name,
-            ),
-        )
-        ClientChangeResult.CHANGED
+        clients.saveInstructions(clientId, instructions)
     }
 
     suspend fun setClientState(
         clientId: String,
         state: RelayClientState,
-    ): ClientChangeResult = operationMutex.withLock {
-        if (state == RelayClientState.PENDING) return@withLock ClientChangeResult.INVALID_STATE
-        val client = dao.getClient(clientId)
-            ?: return@withLock ClientChangeResult.NOT_FOUND
-        val current = client.relayClientState.toRelayClientState()
-        val allowed = when (current) {
-            RelayClientState.ACTIVE -> state == RelayClientState.SUSPENDED ||
-                state == RelayClientState.REVOKED
-            RelayClientState.SUSPENDED -> state == RelayClientState.ACTIVE ||
-                state == RelayClientState.REVOKED
-            RelayClientState.REVOKED -> state == RelayClientState.REVOKED
-            RelayClientState.PENDING -> false
+    ): ClientChangeResult {
+        val result = operationMutex.withLock {
+            clients.setDesiredRelayState(clientId, state)
         }
-        if (!allowed) return@withLock ClientChangeResult.INVALID_STATE
-        val updated = client.copy(
-            desiredRelayClientState = state.wireName,
-        )
-        if (state == RelayClientState.REVOKED) {
-            dao.revokeClient(updated)
-        } else {
-            dao.updateClient(updated)
-        }
-        requestSync()
-        ClientChangeResult.CHANGED
+        if (result == ClientChangeResult.CHANGED) requestSync()
+        return result
     }
 
     private suspend fun processNewRequest(

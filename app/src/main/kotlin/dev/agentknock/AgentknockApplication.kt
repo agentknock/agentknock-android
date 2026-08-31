@@ -28,6 +28,7 @@ import dev.agentknock.storage.request.RequestInbox
 import dev.agentknock.storage.request.RequestConnectionManager
 import dev.agentknock.storage.request.RequestMaterialStore
 import dev.agentknock.storage.request.AiReviewCoordinator
+import dev.agentknock.storage.request.ClientRepository
 import dev.agentknock.storage.device.DeviceIdentityRepository
 import dev.agentknock.storage.device.DeviceManagementRepository
 import dev.agentknock.storage.device.DeviceManagementResult
@@ -130,6 +131,12 @@ internal class ApplicationContainer(application: Application) {
     )
 
     val requestInbox = RequestInbox(database.requestDao())
+    private val clients = ClientRepository(
+        dao = database.requestDao(),
+        temporaryAccessGrants = secrets.observeTemporaryAccessGrants(),
+        audit = audit,
+        writeTransaction = writeTransaction,
+    )
 
     val requests: RequestRepository = RequestRepository(
         database = database,
@@ -137,6 +144,7 @@ internal class ApplicationContainer(application: Application) {
         material = requestMaterial,
         deviceCredentials = deviceIdentity,
         secrets = secrets,
+        clients = clients,
         approvalReviewer = HttpRelayApprovalReviewClient(
             RelayHttpTransport(approvalReviewHttpClient(httpClient)),
         ),

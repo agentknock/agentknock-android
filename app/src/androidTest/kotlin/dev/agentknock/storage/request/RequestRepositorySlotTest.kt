@@ -153,6 +153,12 @@ class RequestRepositorySlotTest {
         credentialSource = StaticCredentialSource(credentials)
         synchronizationRequests = 0
         inbox = RequestInbox(database.requestDao())
+        val clients = ClientRepository(
+            dao = database.requestDao(),
+            temporaryAccessGrants = secrets.observeTemporaryAccessGrants(),
+            audit = audit,
+            writeTransaction = RoomWriteTransaction(database),
+        )
         repository = RequestRepository(
             database = database,
             dao = database.requestDao(),
@@ -166,6 +172,7 @@ class RequestRepositorySlotTest {
             ),
             deviceCredentials = credentialSource,
             secrets = secrets,
+            clients = clients,
             approvalReviewer = approvalReviewer,
             relay = relay,
             aiReviews = AiReviewCoordinator(reviewScope),
