@@ -39,6 +39,11 @@ import kotlinx.serialization.encodeToString
 import kotlinx.serialization.json.Json
 import kotlinx.serialization.json.JsonElement
 
+private const val SECRET_LIST_COMPLETION_VERIFICATION_ERROR =
+    "Secret list completion could not be verified."
+private const val SECRET_UPLOAD_COMPLETION_VERIFICATION_ERROR =
+    "Secret upload completion could not be verified."
+
 @Serializable
 internal data class SecretUploadSummarySnapshot(
     val variableNames: List<String> = emptyList(),
@@ -553,8 +558,7 @@ internal class SecretManagementRequests(
         val plaintext = openCompletion() ?: return false
         val decoded = runCatching { secretListProtocol.decodeCompletion(plaintext) }
         val valid = decoded.getOrNull() == request.clientSoftwareJson?.let(::decodeClientSoftware)
-        val error = if (valid) null else decoded.exceptionOrNull()?.message
-            ?: "Secret list completion did not match the request."
+        val error = if (valid) null else SECRET_LIST_COMPLETION_VERIFICATION_ERROR
         val now = currentTimeMillis()
         writeTransaction.execute {
             dao.updateSecretListRequest(
@@ -604,8 +608,7 @@ internal class SecretManagementRequests(
             result.clientSoftware == request.clientSoftwareJson?.let(::decodeClientSoftware) &&
             result.result == expectedResult &&
             result.message == upload.intakeError
-        val error = if (valid) null else decoded.exceptionOrNull()?.message
-            ?: "The client completion did not match the received upload."
+        val error = if (valid) null else SECRET_UPLOAD_COMPLETION_VERIFICATION_ERROR
         val now = currentTimeMillis()
         val lifecycle = secretUploadLifecycle(upload.decision, transportFinished = true)
         writeTransaction.execute {

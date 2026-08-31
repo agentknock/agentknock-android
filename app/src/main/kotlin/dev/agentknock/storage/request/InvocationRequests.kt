@@ -32,6 +32,8 @@ import kotlinx.serialization.json.JsonElement
 internal const val SECRET_USE_DENIAL_MESSAGE = "Denied on device."
 internal const val SECRET_USE_POLICY_DENIAL_MESSAGE =
     "Approval settings denied access to a requested secret."
+private const val SECRET_USE_COMPLETION_VERIFICATION_ERROR =
+    "Secret use completion could not be verified."
 
 private data class InvocationTemporaryGrant(
     val policies: List<SecretApprovalPolicy>,
@@ -408,10 +410,9 @@ internal class InvocationRequests(
             is InvocationCompletion.Aborted -> true
             null -> false
         }
-        val error = if (valid) null else decoded.exceptionOrNull()?.message
-            ?: "Secret use completion did not match the device decision."
+        val error = if (valid) null else SECRET_USE_COMPLETION_VERIFICATION_ERROR
         val auditDetail = when {
-            !valid -> "Secret use completion could not be verified."
+            !valid -> SECRET_USE_COMPLETION_VERIFICATION_ERROR
             completionResult is InvocationCompletion.Denied ->
                 secretUseRequest.completionMessage ?: SECRET_USE_DENIAL_MESSAGE
             completionResult is InvocationCompletion.Aborted ->
@@ -430,26 +431,29 @@ internal class InvocationRequests(
                     completedAt = now,
                 ),
                 secretUseRequest = secretUseRequest.copy(
-                    completionResult = when (completionResult) {
-                        is InvocationCompletion.Approved -> {
+                    completionResult = when {
+                        !valid -> null
+                        completionResult is InvocationCompletion.Approved -> {
                             ApprovalCompletionResult.APPROVED.storedName
                         }
-                        is InvocationCompletion.Denied -> {
+                        completionResult is InvocationCompletion.Denied -> {
                             ApprovalCompletionResult.DENIED.storedName
                         }
-                        is InvocationCompletion.Aborted -> {
+                        completionResult is InvocationCompletion.Aborted -> {
                             ApprovalCompletionResult.ABORTED.storedName
                         }
-                        null -> null
-                    },
-                    completionReason = when (completionResult) {
-                        is InvocationCompletion.Denied -> completionResult.reason
-                        is InvocationCompletion.Aborted -> completionResult.reason
                         else -> null
                     },
-                    completionMessage = when (completionResult) {
-                        is InvocationCompletion.Denied -> completionResult.message
-                        is InvocationCompletion.Aborted -> completionResult.message
+                    completionReason = when {
+                        !valid -> null
+                        completionResult is InvocationCompletion.Denied -> completionResult.reason
+                        completionResult is InvocationCompletion.Aborted -> completionResult.reason
+                        else -> null
+                    },
+                    completionMessage = when {
+                        !valid -> null
+                        completionResult is InvocationCompletion.Denied -> completionResult.message
+                        completionResult is InvocationCompletion.Aborted -> completionResult.message
                         else -> null
                     },
                 ),

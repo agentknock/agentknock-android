@@ -477,6 +477,45 @@ class InvocationRequestsTest {
     }
 
     @Test
+    fun invalidCompletionDoesNotRetainDecodedClientFields() = runTest {
+        val requestId = "invocation-invalid-completion"
+        val regular = requests(audit)
+        assertEquals(
+            ConditionalRequestUpdate.APPLIED,
+            regular.receive(
+                request = request(requestId),
+                secretUseRequest = secretUse(requestId),
+                client = client(),
+                acceptedPsks = acceptedPsks(requestId),
+                authorization = null,
+                automaticDecisionAudit = null,
+            ),
+        )
+        val request = checkNotNull(database.requestDao().getRequestById(requestId))
+        val malicious = "raw-invalid-client-message"
+        val wrongSoftwareCompletion =
+            """{"app_info":{"name":"attacker","version":"1"},"lib_info":{"name":"attacker","version":"1"},"result":"ABORTED","reason":"CANCELLED","message":"$malicious"}"""
+                .encodeToByteArray()
+
+        assertTrue(
+            regular.complete(
+                request,
+                Json.parseToJsonElement("""{"ciphertext":"invalid"}"""),
+            ) { wrongSoftwareCompletion },
+        )
+
+        val storedRequest = checkNotNull(database.requestDao().getRequestById(requestId))
+        assertEquals("Secret use completion could not be verified.", storedRequest.error)
+        val storedInvocation = checkNotNull(database.requestDao().getSecretUseRequest(requestId))
+        assertNull(storedInvocation.completionResult)
+        assertNull(storedInvocation.completionReason)
+        assertNull(storedInvocation.completionMessage)
+        val completionAudit = audit.observeEvents().first().first()
+        assertEquals("Secret use completion could not be verified.", completionAudit.detail)
+        assertFalse(checkNotNull(completionAudit.detail).contains(malicious))
+    }
+
+    @Test
     fun expiryStateAuditAndRequestKeyRollBackAndReplayTogether() = runTest {
         val requestId = "invocation-expiry"
         val regular = requests(audit)

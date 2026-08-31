@@ -2177,7 +2177,7 @@ internal class RequestRepository(
                     outcome = reviewed.auditOutcome(),
                     decisionSource = AuditDecisionSource.AI_REVIEW,
                     subject = contents.secrets.joinToString(),
-                    detail = reviewed.auditExplanation(),
+                    detail = reviewed.auditFailureDetail(),
                     clientId = pairing.clientId,
                     clientName = pairing.auditClientName(),
                     relayRequestId = relayRequestId,
@@ -2207,7 +2207,7 @@ internal class RequestRepository(
                     },
                     subject = contents.secrets.joinToString(),
                     detail = if (aiReview != null && (aiApprovalUsed || aiDenial != null)) {
-                        aiReview.auditExplanation()
+                        aiReview.auditFailureDetail()
                     } else {
                         denial?.second
                     },
@@ -2635,7 +2635,7 @@ internal class RequestRepository(
                     outcome = aiReview.auditOutcome(),
                     decisionSource = AuditDecisionSource.AI_REVIEW,
                     subject = contents.secret,
-                    detail = aiReview.auditExplanation(),
+                    detail = aiReview.auditFailureDetail(),
                     clientId = pairing.clientId,
                     clientName = pairing.auditClientName(),
                     relayRequestId = relayRequestId,
@@ -2671,7 +2671,7 @@ internal class RequestRepository(
                     detail = if (
                         aiReview != null && aiReview.decision != AiReviewDecision.ASK_USER
                     ) {
-                        aiReview.auditExplanation()
+                        aiReview.auditFailureDetail()
                     } else {
                         denial?.second
                     },
@@ -3062,7 +3062,7 @@ internal class RequestRepository(
                         decisionSource = AuditDecisionSource.AI_REVIEW,
                         subject = contents.secret,
                         context = messageDetails.username,
-                        detail = aiReview.auditExplanation(),
+                        detail = aiReview.auditFailureDetail(),
                         clientId = pairing.clientId,
                         clientName = pairing.auditClientName(),
                         relayRequestId = relayRequestId,
@@ -3096,9 +3096,13 @@ internal class RequestRepository(
                         },
                         subject = contents.secret,
                         context = messageDetails.username,
-                        detail = aiReview?.takeIf {
-                            it.decision != AiReviewDecision.ASK_USER
-                        }?.auditExplanation() ?: denial?.second,
+                        detail = if (
+                            aiReview != null && aiReview.decision != AiReviewDecision.ASK_USER
+                        ) {
+                            aiReview.auditFailureDetail()
+                        } else {
+                            denial?.second
+                        },
                         clientId = pairing.clientId,
                         clientName = pairing.auditClientName(),
                         relayRequestId = relayRequestId,
@@ -3970,6 +3974,7 @@ internal class RequestRepository(
                     completionJson = completion.toString(),
                     responseAcknowledged = true,
                     completionAcknowledged = false,
+                    error = CLIENT_REMOVAL_COMPLETION_VERIFICATION_ERROR,
                     completedAt = now,
                 ),
             )
@@ -3978,8 +3983,7 @@ internal class RequestRepository(
                     type = AuditEventType.CLIENT_REMOVAL_CONFIRMATION_FAILED,
                     outcome = AuditOutcome.FAILED,
                     subject = request.clientNameSnapshot,
-                    detail = verification.exceptionOrNull()?.message
-                        ?: "Client removal completion could not be verified.",
+                    detail = CLIENT_REMOVAL_COMPLETION_VERIFICATION_ERROR,
                     clientId = request.clientId,
                     clientName = request.clientNameSnapshot,
                     relayRequestId = request.id,
@@ -4066,8 +4070,7 @@ internal class RequestRepository(
             null -> false
         }
         val now = currentTimeMillis()
-        val error = if (valid) null else decoded.exceptionOrNull()?.message
-            ?: "Git signing completion did not match the device decision."
+        val error = if (valid) null else GIT_SIGN_COMPLETION_VERIFICATION_ERROR
         dao.updateGitSignRequest(
             request = request.copy(
                 state = InboxRequestState.COMPLETED.storedName,
@@ -4078,20 +4081,26 @@ internal class RequestRepository(
                 completedAt = now,
             ),
             gitSignRequest = gitSign.copy(
-                completionResult = when (completionResult) {
-                    is GitSignCompletion.Approved -> ApprovalCompletionResult.APPROVED.storedName
-                    is GitSignCompletion.Denied -> ApprovalCompletionResult.DENIED.storedName
-                    is GitSignCompletion.Aborted -> ApprovalCompletionResult.ABORTED.storedName
-                    null -> null
-                },
-                completionReason = when (completionResult) {
-                    is GitSignCompletion.Denied -> completionResult.reason
-                    is GitSignCompletion.Aborted -> completionResult.reason
+                completionResult = when {
+                    !valid -> null
+                    completionResult is GitSignCompletion.Approved ->
+                        ApprovalCompletionResult.APPROVED.storedName
+                    completionResult is GitSignCompletion.Denied ->
+                        ApprovalCompletionResult.DENIED.storedName
+                    completionResult is GitSignCompletion.Aborted ->
+                        ApprovalCompletionResult.ABORTED.storedName
                     else -> null
                 },
-                completionMessage = when (completionResult) {
-                    is GitSignCompletion.Denied -> completionResult.message
-                    is GitSignCompletion.Aborted -> completionResult.message
+                completionReason = when {
+                    !valid -> null
+                    completionResult is GitSignCompletion.Denied -> completionResult.reason
+                    completionResult is GitSignCompletion.Aborted -> completionResult.reason
+                    else -> null
+                },
+                completionMessage = when {
+                    !valid -> null
+                    completionResult is GitSignCompletion.Denied -> completionResult.message
+                    completionResult is GitSignCompletion.Aborted -> completionResult.message
                     else -> null
                 },
             ),
@@ -4106,10 +4115,11 @@ internal class RequestRepository(
                     else -> AuditOutcome.ABORTED
                 },
                 subject = gitSign.secretName,
-                detail = if (!valid) error else {
+                detail = if (!valid) GIT_SIGN_COMPLETION_VERIFICATION_ERROR else {
                     when (completionResult) {
-                        is GitSignCompletion.Denied -> completionResult.message
-                        is GitSignCompletion.Aborted -> completionResult.message
+                        is GitSignCompletion.Denied ->
+                            gitSign.completionMessage ?: GIT_SIGN_DENIAL_MESSAGE
+                        is GitSignCompletion.Aborted -> GIT_SIGN_COMPLETION_ABORTED_DETAIL
                         else -> null
                     }
                 },
@@ -4153,8 +4163,7 @@ internal class RequestRepository(
             null -> false
         }
         val now = currentTimeMillis()
-        val error = if (valid) null else decoded.exceptionOrNull()?.message
-            ?: "SSH authentication completion did not match the device decision."
+        val error = if (valid) null else SSH_AUTHENTICATION_COMPLETION_VERIFICATION_ERROR
         dao.updateSshAuthenticationRequest(
             request = request.copy(
                 state = InboxRequestState.COMPLETED.storedName,
@@ -4165,23 +4174,30 @@ internal class RequestRepository(
                 completedAt = now,
             ),
             authentication = authentication.copy(
-                completionResult = when (completionResult) {
-                    is SshAuthenticationCompletion.Approved ->
+                completionResult = when {
+                    !valid -> null
+                    completionResult is SshAuthenticationCompletion.Approved ->
                         ApprovalCompletionResult.APPROVED.storedName
-                    is SshAuthenticationCompletion.Denied ->
+                    completionResult is SshAuthenticationCompletion.Denied ->
                         ApprovalCompletionResult.DENIED.storedName
-                    is SshAuthenticationCompletion.Aborted ->
+                    completionResult is SshAuthenticationCompletion.Aborted ->
                         ApprovalCompletionResult.ABORTED.storedName
-                    null -> null
-                },
-                completionReason = when (completionResult) {
-                    is SshAuthenticationCompletion.Denied -> completionResult.reason
-                    is SshAuthenticationCompletion.Aborted -> completionResult.reason
                     else -> null
                 },
-                completionMessage = when (completionResult) {
-                    is SshAuthenticationCompletion.Denied -> completionResult.message
-                    is SshAuthenticationCompletion.Aborted -> completionResult.message
+                completionReason = when {
+                    !valid -> null
+                    completionResult is SshAuthenticationCompletion.Denied ->
+                        completionResult.reason
+                    completionResult is SshAuthenticationCompletion.Aborted ->
+                        completionResult.reason
+                    else -> null
+                },
+                completionMessage = when {
+                    !valid -> null
+                    completionResult is SshAuthenticationCompletion.Denied ->
+                        completionResult.message
+                    completionResult is SshAuthenticationCompletion.Aborted ->
+                        completionResult.message
                     else -> null
                 },
             ),
@@ -4198,10 +4214,12 @@ internal class RequestRepository(
                 },
                 subject = authentication.secretName,
                 context = authentication.username,
-                detail = if (!valid) error else {
+                detail = if (!valid) SSH_AUTHENTICATION_COMPLETION_VERIFICATION_ERROR else {
                     when (completionResult) {
-                        is SshAuthenticationCompletion.Denied -> completionResult.message
-                        is SshAuthenticationCompletion.Aborted -> completionResult.message
+                        is SshAuthenticationCompletion.Denied ->
+                            authentication.completionMessage ?: SSH_AUTHENTICATION_DENIAL_MESSAGE
+                        is SshAuthenticationCompletion.Aborted ->
+                            SSH_AUTHENTICATION_COMPLETION_ABORTED_DETAIL
                         else -> null
                     }
                 },
@@ -4320,8 +4338,18 @@ internal class RequestRepository(
 
     private companion object {
         const val IDEMPOTENCY_RETENTION_MILLIS = 25 * 60 * 60 * 1_000L
+        const val CLIENT_REMOVAL_COMPLETION_VERIFICATION_ERROR =
+            "Client removal completion could not be verified."
         const val GIT_SIGN_DENIAL_MESSAGE = "Git signature denied on device."
+        const val GIT_SIGN_COMPLETION_ABORTED_DETAIL =
+            "Git signing was aborted by the client."
+        const val GIT_SIGN_COMPLETION_VERIFICATION_ERROR =
+            "Git signing completion could not be verified."
         const val SSH_AUTHENTICATION_DENIAL_MESSAGE = "SSH authentication denied on device."
+        const val SSH_AUTHENTICATION_COMPLETION_ABORTED_DETAIL =
+            "SSH authentication was aborted by the client."
+        const val SSH_AUTHENTICATION_COMPLETION_VERIFICATION_ERROR =
+            "SSH authentication completion could not be verified."
         const val MAX_AI_REVIEW_GIT_CONTENT_BYTES = 128 * 1024
         val STRING_LIST_SERIALIZER = ListSerializer(String.serializer())
     }
@@ -4333,23 +4361,13 @@ internal class RequestRepository(
 
 }
 
-private fun AiReview.auditExplanation(): String = explanation
-    ?.trim()
-    ?.let { text ->
-        val labels = when (decision) {
-            AiReviewDecision.APPROVE -> listOf("Approve:", "Approved:")
-            AiReviewDecision.DENY -> listOf("Deny:", "Denied:")
-            AiReviewDecision.ASK_USER -> listOf("Ask:", "Ask user:")
-            null -> emptyList()
-        }
-        labels.firstOrNull { text.startsWith(it, ignoreCase = true) }
-            ?.let { text.drop(it.length).trimStart() }
-            ?: text
-    }
-    ?.replace("**", "")
-    ?.replace("`", "")
-    ?.takeIf(String::isNotBlank)
-    ?: "AI review did not provide an explanation."
+private fun AiReview.auditFailureDetail(): String? = when (failure) {
+    AiReviewFailure.SUBSCRIPTION_REQUIRED -> "AI review requires a subscription."
+    AiReviewFailure.RELAY_REJECTED -> "The relay rejected AI review."
+    AiReviewFailure.UNAVAILABLE -> "AI review was unavailable."
+    AiReviewFailure.INVALID_RESPONSE -> "AI review returned an invalid response."
+    null -> null
+}
 
 private fun AiReview.auditOutcome(): AuditOutcome = when {
     failure != null -> AuditOutcome.FAILED

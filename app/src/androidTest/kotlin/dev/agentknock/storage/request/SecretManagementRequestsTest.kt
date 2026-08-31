@@ -26,6 +26,7 @@ import kotlinx.serialization.json.Json
 import kotlinx.serialization.json.JsonElement
 import org.junit.After
 import org.junit.Assert.assertEquals
+import org.junit.Assert.assertFalse
 import org.junit.Assert.assertNotNull
 import org.junit.Assert.assertNull
 import org.junit.Assert.assertTrue
@@ -134,6 +135,38 @@ class SecretManagementRequestsTest {
             listOf(AuditEventType.SECRET_LIST_RECEIVED),
             audit.observeEvents().first().map { it.type },
         )
+    }
+
+    @Test
+    fun invalidListCompletionUsesSafeFailureCategory() = runTest {
+        val requestId = "list-invalid-completion"
+        requests(audit).receiveSecretList(
+            client = client(),
+            relayRequestId = requestId,
+            requestPayload = requestPayload(requestId),
+            plaintext = secretListPlaintext(),
+            acceptedPsks = acceptedPsks(requestId),
+            sealResponse = { RESPONSE },
+        )
+        val request = checkNotNull(database.requestDao().getRequestById(requestId))
+        val malicious = "raw-secret-list-parser-input"
+
+        assertTrue(
+            requests(audit).completeSecretList(
+                request = request,
+                completion = Json.parseToJsonElement("""{"ciphertext":"completion"}"""),
+                openCompletion = { "{not-json-$malicious".encodeToByteArray() },
+            ),
+        )
+
+        assertEquals(
+            "Secret list completion could not be verified.",
+            database.requestDao().getRequestById(requestId)?.error,
+        )
+        val completionAudit = audit.observeEvents().first()
+            .single { it.type == AuditEventType.SECRET_LIST_COMPLETED }
+        assertEquals("Secret list completion could not be verified.", completionAudit.detail)
+        assertFalse(checkNotNull(completionAudit.detail).contains(malicious))
     }
 
     @Test
@@ -272,6 +305,31 @@ class SecretManagementRequestsTest {
             InboxRequestState.COMPLETED.storedName,
             database.requestDao().getRequestById(requestId)?.state,
         )
+    }
+
+    @Test
+    fun invalidUploadCompletionUsesSafeFailureCategory() = runTest {
+        val requestId = "upload-invalid-completion"
+        receiveEnvironmentUpload(requestId)
+        val request = checkNotNull(database.requestDao().getRequestById(requestId))
+        val malicious = "raw-secret-upload-parser-input"
+
+        assertTrue(
+            requests(audit).completeSecretUpload(
+                request = request,
+                completion = Json.parseToJsonElement("""{"ciphertext":"completion"}"""),
+                openCompletion = { "{not-json-$malicious".encodeToByteArray() },
+            ),
+        )
+
+        assertEquals(
+            "Secret upload completion could not be verified.",
+            database.requestDao().getRequestById(requestId)?.error,
+        )
+        val completionAudit = audit.observeEvents().first()
+            .single { it.type == AuditEventType.SECRET_UPLOAD_COMPLETED }
+        assertEquals("Secret upload completion could not be verified.", completionAudit.detail)
+        assertFalse(checkNotNull(completionAudit.detail).contains(malicious))
     }
 
     private fun requests(auditSink: AuditSink) = SecretManagementRequests(
