@@ -133,12 +133,16 @@ internal data class AuditEvent(
     val relayRequestId: String?,
 )
 
-internal fun interface AuditSink {
+internal interface AuditSink {
     suspend fun record(record: AuditRecord)
+
+    suspend fun append(records: List<AuditRecord>, occurredAt: Long)
 }
 
 internal object NoOpAuditSink : AuditSink {
     override suspend fun record(record: AuditRecord) = Unit
+
+    override suspend fun append(records: List<AuditRecord>, occurredAt: Long) = Unit
 }
 
 internal class AuditRepository(
@@ -154,24 +158,30 @@ internal class AuditRepository(
     fun observeCount(): Flow<Int> = dao.observeCount()
 
     override suspend fun record(record: AuditRecord) {
-        val now = currentTimeMillis()
+        append(listOf(record), currentTimeMillis())
+    }
+
+    override suspend fun append(records: List<AuditRecord>, occurredAt: Long) {
+        require(records.isNotEmpty())
         dao.insertAndPrune(
-            event = AuditEventEntity(
-                occurredAt = now,
-                eventType = record.type.code,
-                subject = record.subject,
-                context = record.context,
-                detail = record.detail,
-                outcome = record.outcome.code,
-                decisionSource = record.decisionSource?.code,
-                expiresAt = record.expiresAt,
-                clientId = record.clientId,
-                clientName = record.clientName,
-                relayRequestId = record.relayRequestId,
-            ),
-            cutoff = now - RETENTION_MILLIS,
+            events = records.map { record -> record.toEntity(occurredAt) },
+            cutoff = occurredAt - RETENTION_MILLIS,
         )
     }
+
+    private fun AuditRecord.toEntity(occurredAt: Long) = AuditEventEntity(
+        occurredAt = occurredAt,
+        eventType = type.code,
+        subject = subject,
+        context = context,
+        detail = detail,
+        outcome = outcome.code,
+        decisionSource = decisionSource?.code,
+        expiresAt = expiresAt,
+        clientId = clientId,
+        clientName = clientName,
+        relayRequestId = relayRequestId,
+    )
 
     private fun AuditEventEntity.toModel(): AuditEvent = AuditEvent(
         id = id,

@@ -288,6 +288,23 @@ class DeviceIdentityRepositoryTest {
     }
 
     @Test
+    fun `relay authorization does not depend on the device private key`() = runTest {
+        val fixture = Fixture(UnconfinedTestDispatcher(testScheduler))
+        fixture.repository.stageAndClaim("amber-river-maple")
+        fixture.dao.credentials.value = fixture.dao.credentials.value.filterNot {
+            it.kind == DeviceCredentialKind.DEVICE_PRIVATE_KEY.storedName
+        }
+
+        val authorization = fixture.repository.activeDeviceAuthorization()
+
+        assertTrue(authorization is RelayDeviceAuthorizationResult.Available)
+        assertEquals(
+            RelayDeviceCredentialsResult.CredentialsCorrupted,
+            fixture.repository.activeDeviceCredentials(),
+        )
+    }
+
+    @Test
     fun `a restored backup keeps device metadata and reports unavailable credentials`() = runTest {
         val fixture = Fixture(UnconfinedTestDispatcher(testScheduler))
         fixture.repository.stageAndClaim("amber-river-maple")
@@ -433,6 +450,13 @@ private class FakeDeviceIdentityDao : DeviceIdentityDao {
 
     override suspend fun getCredentials(identityId: String): List<DeviceCredentialEntity> =
         credentials.value.filter { it.identityId == identityId }
+
+    override suspend fun getCredential(
+        identityId: String,
+        kind: String,
+    ): DeviceCredentialEntity? = credentials.value.singleOrNull {
+        it.identityId == identityId && it.kind == kind
+    }
 
     override suspend fun deleteIdentity(role: String): Int {
         val removed = identities.value.filter { it.role == role }

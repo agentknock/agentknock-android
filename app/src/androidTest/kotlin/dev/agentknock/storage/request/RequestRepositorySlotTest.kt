@@ -1,6 +1,8 @@
 package dev.agentknock.storage.request
 
 import androidx.room3.Room
+import androidx.room3.executeSQL
+import androidx.room3.useWriterConnection
 import androidx.test.ext.junit.runners.AndroidJUnit4
 import androidx.test.platform.app.InstrumentationRegistry
 import dev.agentknock.protocol.PairingProtocol
@@ -14,6 +16,7 @@ import dev.agentknock.relay.RelayExchangeState
 import dev.agentknock.relay.RelayMessageKind
 import dev.agentknock.relay.RelayMessageState
 import dev.agentknock.storage.AgentknockDatabase
+import dev.agentknock.storage.audit.AuditRepository
 import dev.agentknock.storage.crypto.AesGcmEncryption
 import dev.agentknock.storage.crypto.EncryptionKeyBacking
 import dev.agentknock.storage.crypto.EncryptionKeyStore
@@ -36,6 +39,7 @@ import javax.crypto.spec.SecretKeySpec
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.channels.Channel
 import kotlinx.coroutines.channels.ReceiveChannel
+import kotlinx.coroutines.flow.first
 import kotlinx.coroutines.test.runTest
 import kotlinx.serialization.json.Json
 import kotlinx.serialization.json.JsonElement
@@ -112,13 +116,16 @@ class RequestRepositorySlotTest {
             cryptographyDispatcher = Dispatchers.Unconfined,
         )
         protocolRandom = SwitchableSecureRandom()
+        val audit = AuditRepository(database.auditDao(), currentTimeMillis = { now })
         repository = RequestRepository(
+            database = database,
             dao = database.requestDao(),
             deviceCredentials = StaticCredentialSource(credentials),
             secrets = secrets,
             relay = relay,
             keyManager = keyManager,
             encryption = encryption,
+            audit = audit,
             pairingProtocol = PairingProtocol(random = protocolRandom),
             currentTimeMillis = { now },
             cryptographyDispatcher = Dispatchers.Unconfined,
@@ -571,6 +578,69 @@ class RequestRepositorySlotTest {
     }
 
     @Test
+    fun secretUploadApprovalCommitsSecretDecisionAuditAndStagingDeletionTogether() = runTest {
+        receiveEnvironmentSecretUpload()
+
+        val result = repository.approveSecretUpload(UPLOAD_REQUEST_ID, "uploaded-secret")
+
+        assertTrue(result is SecretUploadDecisionResult.Approved)
+        assertEquals(
+            "approved",
+            database.requestDao().getSecretUploadRequest(UPLOAD_REQUEST_ID)?.decision,
+        )
+        assertTrue(
+            database.requestDao()
+                .getSecretUploadEnvironmentVariables(UPLOAD_REQUEST_ID)
+                .isEmpty(),
+        )
+        assertEquals(
+            1,
+            database.secretDao().getSecretsByName(listOf("uploaded-secret")).size,
+        )
+        val decisionAudit = database.auditDao().observeEvents().first().single {
+            it.eventType == "secret_upload_decided" && it.relayRequestId == UPLOAD_REQUEST_ID
+        }
+        assertEquals("approved", decisionAudit.outcome)
+        assertEquals(now, decisionAudit.occurredAt)
+    }
+
+    @Test
+    fun auditFailureRollsBackSecretUploadApprovalCompletely() = runTest {
+        receiveEnvironmentSecretUpload()
+        val requestBefore = database.requestDao().getRequestById(UPLOAD_REQUEST_ID)
+        val uploadBefore = database.requestDao().getSecretUploadRequest(UPLOAD_REQUEST_ID)
+        val auditBefore = database.auditDao().observeEvents().first()
+        database.useWriterConnection { connection ->
+            connection.executeSQL(
+                """
+                CREATE TRIGGER fail_secret_upload_decision_audit
+                BEFORE INSERT ON audit_events
+                WHEN NEW.event_type = 'secret_upload_decided'
+                BEGIN
+                    SELECT RAISE(ABORT, 'forced audit failure');
+                END
+                """.trimIndent(),
+            )
+        }
+
+        val failure = runCatching {
+            repository.approveSecretUpload(UPLOAD_REQUEST_ID, "uploaded-secret")
+        }
+
+        assertTrue(failure.isFailure)
+        assertEquals(requestBefore, database.requestDao().getRequestById(UPLOAD_REQUEST_ID))
+        assertEquals(uploadBefore, database.requestDao().getSecretUploadRequest(UPLOAD_REQUEST_ID))
+        assertEquals(
+            1,
+            database.requestDao()
+                .getSecretUploadEnvironmentVariables(UPLOAD_REQUEST_ID)
+                .size,
+        )
+        assertTrue(database.secretDao().getSecretsByName(listOf("uploaded-secret")).isEmpty())
+        assertEquals(auditBefore, database.auditDao().observeEvents().first())
+    }
+
+    @Test
     fun sameClientAndRequestIdWithDifferentPayloadIsNotTreatedAsReplay() = runTest {
         establishActivePairing()
         val collision = connect(
@@ -832,6 +902,32 @@ class RequestRepositorySlotTest {
         return material.clientPsk
     }
 
+    private suspend fun receiveEnvironmentSecretUpload() {
+        val clientPsk = establishActivePairing()
+        val upload = pairedRequest(
+            requestId = UPLOAD_REQUEST_ID,
+            clientPsk = clientPsk,
+            plaintext = environmentUploadPlaintext(),
+        )
+        connect(
+            requestEvent(UPLOAD_REQUEST_ID, upload),
+            RelayDeviceEvent.CaughtUp,
+            relayState(UPLOAD_REQUEST_ID),
+        )
+        assertEquals(RequestSyncResult.Success, repository.sync())
+        assertEquals(
+            "action_required",
+            database.requestDao().getRequestById(UPLOAD_REQUEST_ID)?.state,
+        )
+        assertNull(database.requestDao().getSecretUploadRequest(UPLOAD_REQUEST_ID)?.decision)
+        assertEquals(
+            1,
+            database.requestDao()
+                .getSecretUploadEnvironmentVariables(UPLOAD_REQUEST_ID)
+                .size,
+        )
+    }
+
     private suspend fun receivePairingUntilSas(): PairingMaterial {
         val clientSecret = ByteArray(32) { it.toByte() }
         val material = pairingMaterial(clientSecret)
@@ -993,6 +1089,10 @@ class RequestRepositorySlotTest {
     private fun unsupportedPlaintext(): ByteArray =
         """{${clientSoftwareFields()},"method":"FutureMethod"}""".encodeToByteArray()
 
+    private fun environmentUploadPlaintext(): ByteArray =
+        """{${clientSoftwareFields()},"method":"SecretUpload","mode":"CREATE","secret":{"name":"uploaded-secret","type":"environment","variables":{"TOKEN":{"value":"secret-value"}}}}"""
+            .encodeToByteArray()
+
     private fun clientSoftwareFields(): String =
         """"app_info":{"name":"agentknock-cli","version":"test"},"lib_info":{"name":"agentknock","version":"test"}"""
 
@@ -1131,6 +1231,7 @@ class RequestRepositorySlotTest {
         const val COLLISION_CLIENT_ID = "01K2EP16NWNAGJYF8J1Q2V6P41"
         const val UNSUPPORTED_REQUEST_ID = "01K2EP16NWNAGJYF8J1Q2V6P42"
         const val REMOVE_REQUEST_ID = "01K2EP16NWNAGJYF8J1Q2V6P43"
+        const val UPLOAD_REQUEST_ID = "01K2EP16NWNAGJYF8J1Q2V6P44"
         const val ULID_ALPHABET = "0123456789ABCDEFGHJKMNPQRSTVWXYZ"
         val EMPTY = ByteArray(0)
         val VERSION_INFO = "agentknock-v1".encodeToByteArray() + ByteArray(3)

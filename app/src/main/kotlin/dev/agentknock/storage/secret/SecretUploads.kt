@@ -3,6 +3,40 @@ package dev.agentknock.storage.secret
 import dev.agentknock.protocol.SecretUploadMode
 import dev.agentknock.storage.crypto.DecryptionResult
 
+internal sealed interface EnvironmentSecretUploadPreparation {
+    data class Ready(val upload: PreparedEnvironmentSecretUpload) :
+        EnvironmentSecretUploadPreparation
+
+    data class Invalid(val message: String) : EnvironmentSecretUploadPreparation
+}
+
+internal data class PreparedEnvironmentSecretUpload(
+    val mode: SecretUploadMode,
+    val approvedName: String,
+    val target: SecretUploadTarget?,
+    val expectedName: String,
+    val secret: SecretEntity,
+    val variables: List<EnvironmentVariableEntity>,
+    val replaceVariables: Boolean,
+    val preserveCurrentDescription: Boolean,
+)
+
+internal sealed interface SshSecretUploadPreparation {
+    data class Ready(val upload: PreparedSshSecretUpload) : SshSecretUploadPreparation
+
+    data class Invalid(val message: String) : SshSecretUploadPreparation
+}
+
+internal data class PreparedSshSecretUpload(
+    val mode: SecretUploadMode,
+    val approvedName: String,
+    val target: SecretUploadTarget?,
+    val expectedName: String,
+    val secret: SecretEntity,
+    val key: SshKeyEntity,
+    val preserveCurrentDescription: Boolean,
+)
+
 /** Plans uploads against a pinned target and applies them with an optimistic revision check. */
 internal class SecretUploads(
     private val dao: SecretDao,
@@ -93,13 +127,30 @@ internal class SecretUploads(
         upload: EnvironmentSecretUpload,
         approvedName: String,
         target: SecretUploadTarget?,
-    ): ApplyEnvironmentSecretUploadResult {
-        validateUploadInput(upload)?.let { return ApplyEnvironmentSecretUploadResult.Invalid(it) }
-        validateSecretName(approvedName)
+    ): ApplyEnvironmentSecretUploadResult = when (
+        val preparation = prepareEnvironmentSecretUpload(upload, approvedName, target)
+    ) {
+        is EnvironmentSecretUploadPreparation.Invalid ->
+            ApplyEnvironmentSecretUploadResult.Invalid(preparation.message)
+        is EnvironmentSecretUploadPreparation.Ready ->
+            applyPreparedEnvironmentSecretUpload(preparation.upload)
+    }
+
+    suspend fun prepareEnvironmentSecretUpload(
+        upload: EnvironmentSecretUpload,
+        approvedName: String,
+        target: SecretUploadTarget?,
+    ): EnvironmentSecretUploadPreparation {
+        validateUploadInput(upload)?.let {
+            return EnvironmentSecretUploadPreparation.Invalid(it)
+        }
+        runCatching { validateSecretName(approvedName) }.exceptionOrNull()?.message?.let {
+            return EnvironmentSecretUploadPreparation.Invalid(it)
+        }
         val snapshot = dao.getSecretSnapshot()
         val existing = when (upload.mode) {
             SecretUploadMode.CREATE -> {
-                if (target != null) return ApplyEnvironmentSecretUploadResult.Invalid(
+                if (target != null) return EnvironmentSecretUploadPreparation.Invalid(
                     "The upload target changed before it was approved.",
                 )
                 null
@@ -107,13 +158,13 @@ internal class SecretUploads(
             SecretUploadMode.REPLACE,
             SecretUploadMode.UPDATE,
             -> {
-                val expected = target ?: return ApplyEnvironmentSecretUploadResult.Invalid(
+                val expected = target ?: return EnvironmentSecretUploadPreparation.Invalid(
                     "The target secret no longer exists.",
                 )
                 snapshot.secrets.singleOrNull { it.id == expected.secretId }?.takeIf {
                     it.name == upload.name && it.revision == expected.revision &&
                         it.secretType == SecretType.ENVIRONMENT
-                } ?: return ApplyEnvironmentSecretUploadResult.Invalid(
+                } ?: return EnvironmentSecretUploadPreparation.Invalid(
                     "The target secret changed before the upload was approved.",
                 )
             }
@@ -155,41 +206,42 @@ internal class SecretUploads(
                 valueUpdatedAt = now,
             )
         }
-        return applyPreparedEnvironmentUpload(
-            upload = upload,
-            approvedName = approvedName,
-            target = target,
-            secret = secret,
-            variables = variables,
+        return EnvironmentSecretUploadPreparation.Ready(
+            PreparedEnvironmentSecretUpload(
+                mode = upload.mode,
+                approvedName = approvedName,
+                target = target,
+                expectedName = upload.name,
+                secret = secret,
+                variables = variables,
+                replaceVariables = upload.mode != SecretUploadMode.UPDATE,
+                preserveCurrentDescription =
+                    upload.mode == SecretUploadMode.UPDATE && !upload.descriptionProvided,
+            ),
         )
     }
 
-    private suspend fun applyPreparedEnvironmentUpload(
-        upload: EnvironmentSecretUpload,
-        approvedName: String,
-        target: SecretUploadTarget?,
-        secret: SecretEntity,
-        variables: List<EnvironmentVariableEntity>,
+    suspend fun applyPreparedEnvironmentSecretUpload(
+        upload: PreparedEnvironmentSecretUpload,
     ): ApplyEnvironmentSecretUploadResult {
         val applied = dao.applyEnvironmentUploadIfCurrent(
-            target = target,
-            expectedName = upload.name,
-            secret = secret,
-            variables = variables,
-            replaceVariables = upload.mode != SecretUploadMode.UPDATE,
-            preserveCurrentDescription =
-                upload.mode == SecretUploadMode.UPDATE && !upload.descriptionProvided,
+            target = upload.target,
+            expectedName = upload.expectedName,
+            secret = upload.secret,
+            variables = upload.variables,
+            replaceVariables = upload.replaceVariables,
+            preserveCurrentDescription = upload.preserveCurrentDescription,
         )
         if (!applied) {
             return ApplyEnvironmentSecretUploadResult.Invalid(
                 if (upload.mode == SecretUploadMode.CREATE) {
-                    "A secret named $approvedName already exists."
+                    "A secret named ${upload.approvedName} already exists."
                 } else {
                     "The target secret changed before the upload was approved."
                 },
             )
         }
-        return ApplyEnvironmentSecretUploadResult.Applied(secret.id)
+        return ApplyEnvironmentSecretUploadResult.Applied(upload.secret.id)
     }
 
     suspend fun describeSshSecretUpload(upload: SshSecretUpload): SshSecretUploadResult {
@@ -248,17 +300,32 @@ internal class SecretUploads(
         upload: SshSecretUpload,
         approvedName: String,
         target: SecretUploadTarget?,
-    ): ApplySshSecretUploadResult {
+    ): ApplySshSecretUploadResult = when (
+        val preparation = prepareSshSecretUpload(upload, approvedName, target)
+    ) {
+        is SshSecretUploadPreparation.Invalid ->
+            ApplySshSecretUploadResult.Invalid(preparation.message)
+        is SshSecretUploadPreparation.Ready ->
+            applyPreparedSshSecretUpload(preparation.upload)
+    }
+
+    suspend fun prepareSshSecretUpload(
+        upload: SshSecretUpload,
+        approvedName: String,
+        target: SecretUploadTarget?,
+    ): SshSecretUploadPreparation {
         val validation = runCatching {
             validateSecretName(upload.name)
             material.validateSshPrivateKey(upload.privateKey)
         }.exceptionOrNull()?.message
-        if (validation != null) return ApplySshSecretUploadResult.Invalid(validation)
-        validateSecretName(approvedName)
+        if (validation != null) return SshSecretUploadPreparation.Invalid(validation)
+        runCatching { validateSecretName(approvedName) }.exceptionOrNull()?.message?.let {
+            return SshSecretUploadPreparation.Invalid(it)
+        }
         val snapshot = dao.getSecretSnapshot()
         val existing = when (upload.mode) {
             SecretUploadMode.CREATE -> {
-                if (target != null) return ApplySshSecretUploadResult.Invalid(
+                if (target != null) return SshSecretUploadPreparation.Invalid(
                     "The upload target changed before it was approved.",
                 )
                 null
@@ -266,13 +333,13 @@ internal class SecretUploads(
             SecretUploadMode.REPLACE,
             SecretUploadMode.UPDATE,
             -> {
-                val expected = target ?: return ApplySshSecretUploadResult.Invalid(
+                val expected = target ?: return SshSecretUploadPreparation.Invalid(
                     "The target secret no longer exists.",
                 )
                 snapshot.secrets.singleOrNull { it.id == expected.secretId }?.takeIf {
                     it.name == upload.name && it.revision == expected.revision &&
                         it.secretType == SecretType.SSH
-                } ?: return ApplySshSecretUploadResult.Invalid(
+                } ?: return SshSecretUploadPreparation.Invalid(
                     "The target secret changed before the upload was approved.",
                 )
             }
@@ -296,7 +363,7 @@ internal class SecretUploads(
         )
         val currentKey = existing?.let { snapshot.sshKeysBySecret[it.id] }
         if (existing != null && currentKey == null) {
-            return ApplySshSecretUploadResult.Invalid("The target SSH key is incomplete.")
+            return SshSecretUploadPreparation.Invalid("The target SSH key is incomplete.")
         }
         val key = upload.privateKey.let {
             val proposedPublic = material.publicKey(it)
@@ -310,24 +377,40 @@ internal class SecretUploads(
                 if (keyChanged) now else checkNotNull(currentKey).materialUpdatedAt,
             )
         }
+        return SshSecretUploadPreparation.Ready(
+            PreparedSshSecretUpload(
+                mode = upload.mode,
+                approvedName = approvedName,
+                target = target,
+                expectedName = upload.name,
+                secret = secret,
+                key = key,
+                preserveCurrentDescription =
+                    upload.mode == SecretUploadMode.UPDATE && !upload.descriptionProvided,
+            ),
+        )
+    }
+
+    suspend fun applyPreparedSshSecretUpload(
+        upload: PreparedSshSecretUpload,
+    ): ApplySshSecretUploadResult {
         val applied = dao.applySshUploadIfCurrent(
-            target = target,
-            expectedName = upload.name,
-            secret = secret,
-            key = key,
-            preserveCurrentDescription =
-                upload.mode == SecretUploadMode.UPDATE && !upload.descriptionProvided,
+            target = upload.target,
+            expectedName = upload.expectedName,
+            secret = upload.secret,
+            key = upload.key,
+            preserveCurrentDescription = upload.preserveCurrentDescription,
         )
         if (!applied) {
             return ApplySshSecretUploadResult.Invalid(
                 if (upload.mode == SecretUploadMode.CREATE) {
-                    "A secret named $approvedName already exists."
+                    "A secret named ${upload.approvedName} already exists."
                 } else {
                     "The target secret changed before the upload was approved."
                 },
             )
         }
-        return ApplySshSecretUploadResult.Applied(secretId)
+        return ApplySshSecretUploadResult.Applied(upload.secret.id)
     }
 
     private fun validateSecretName(name: String) {

@@ -651,6 +651,18 @@ internal class SecretRepository(
     ): ApplyEnvironmentSecretUploadResult =
         uploads.applyEnvironmentSecretUpload(upload, approvedName, target)
 
+    suspend fun prepareEnvironmentSecretUpload(
+        upload: EnvironmentSecretUpload,
+        approvedName: String,
+        target: SecretUploadTarget? = null,
+    ): EnvironmentSecretUploadPreparation =
+        uploads.prepareEnvironmentSecretUpload(upload, approvedName, target)
+
+    suspend fun applyPreparedEnvironmentSecretUpload(
+        upload: PreparedEnvironmentSecretUpload,
+    ): ApplyEnvironmentSecretUploadResult =
+        uploads.applyPreparedEnvironmentSecretUpload(upload)
+
     suspend fun describeSshSecretUpload(upload: SshSecretUpload): SshSecretUploadResult =
         uploads.describeSshSecretUpload(upload)
 
@@ -659,6 +671,16 @@ internal class SecretRepository(
         approvedName: String,
         target: SecretUploadTarget? = null,
     ): ApplySshSecretUploadResult = uploads.applySshSecretUpload(upload, approvedName, target)
+
+    suspend fun prepareSshSecretUpload(
+        upload: SshSecretUpload,
+        approvedName: String,
+        target: SecretUploadTarget? = null,
+    ): SshSecretUploadPreparation = uploads.prepareSshSecretUpload(upload, approvedName, target)
+
+    suspend fun applyPreparedSshSecretUpload(
+        upload: PreparedSshSecretUpload,
+    ): ApplySshSecretUploadResult = uploads.applyPreparedSshSecretUpload(upload)
 
     suspend fun listSecretsForClient(): List<SecretMetadata> =
         resolver.listSecretsForClient()

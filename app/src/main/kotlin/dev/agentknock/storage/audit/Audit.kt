@@ -50,15 +50,15 @@ internal interface AuditDao {
     fun observeCount(): Flow<Int>
 
     @Insert
-    suspend fun insertEvent(event: AuditEventEntity): Long
+    suspend fun insertEvents(events: List<AuditEventEntity>)
 
     @Query("DELETE FROM audit_events WHERE occurred_at < :cutoff")
     suspend fun deleteBefore(cutoff: Long): Int
 
     @Transaction
-    suspend fun insertAndPrune(event: AuditEventEntity, cutoff: Long): Long {
-        val id = insertEvent(event)
+    suspend fun insertAndPrune(events: List<AuditEventEntity>, cutoff: Long) {
+        require(events.isNotEmpty())
+        insertEvents(events)
         deleteBefore(cutoff)
-        return id
     }
 }

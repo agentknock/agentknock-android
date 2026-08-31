@@ -48,6 +48,25 @@ internal data class RelayDeviceCredentials(
     val instructions: String = "",
 )
 
+internal data class RelayDeviceAuthorization(
+    val deviceIdentityId: String,
+    val deviceId: String,
+    val deviceToken: String,
+)
+
+internal sealed interface RelayDeviceAuthorizationResult {
+    data class Available(val authorization: RelayDeviceAuthorization) :
+        RelayDeviceAuthorizationResult
+
+    data object Missing : RelayDeviceAuthorizationResult
+
+    data object Unavailable : RelayDeviceAuthorizationResult
+
+    data object Corrupted : RelayDeviceAuthorizationResult
+
+    data object UnsupportedEncryption : RelayDeviceAuthorizationResult
+}
+
 internal sealed interface RelayDeviceCredentialsResult {
     data class Available(val credentials: RelayDeviceCredentials) : RelayDeviceCredentialsResult
 
@@ -90,6 +109,10 @@ internal interface RelayDeviceCredentialSource {
     suspend fun deviceCredentials(deviceIdentityId: String): RelayDeviceCredentialsResult
 }
 
+internal fun interface RelayDeviceAuthorizationSource {
+    suspend fun activeDeviceAuthorization(): RelayDeviceAuthorizationResult
+}
+
 internal class DeviceIdentityRepository(
     private val dao: DeviceIdentityDao,
     private val keyManager: VaultKeyManager,
@@ -99,7 +122,7 @@ internal class DeviceIdentityRepository(
     private val newId: () -> String = { UUID.randomUUID().toString() },
     private val currentTimeMillis: () -> Long = System::currentTimeMillis,
     private val cryptographyDispatcher: CoroutineDispatcher = Dispatchers.IO,
-) : RelayDeviceCredentialSource {
+) : RelayDeviceCredentialSource, RelayDeviceAuthorizationSource {
     fun observeConfiguration(): Flow<DeviceConfiguration> = combine(
         dao.observeIdentities(),
         dao.observeCredentials(),
@@ -349,6 +372,33 @@ internal class DeviceIdentityRepository(
         return deviceCredentials(identity)
     }
 
+    override suspend fun activeDeviceAuthorization(): RelayDeviceAuthorizationResult {
+        val identity = dao.getIdentity(DeviceIdentityRole.ACTIVE.storedName)
+            ?: return RelayDeviceAuthorizationResult.Missing
+        val deviceToken = when (
+            val result = decryptCredential(identity, DeviceCredentialKind.DEVICE_TOKEN)
+        ) {
+            is SecretResult.Available -> result.value
+            SecretResult.Unavailable -> return RelayDeviceAuthorizationResult.Unavailable
+            SecretResult.Corrupted, SecretResult.Missing -> {
+                return RelayDeviceAuthorizationResult.Corrupted
+            }
+            SecretResult.Unsupported -> {
+                return RelayDeviceAuthorizationResult.UnsupportedEncryption
+            }
+        }
+        if (deviceToken.size != DEVICE_TOKEN_BYTES) {
+            return RelayDeviceAuthorizationResult.Corrupted
+        }
+        return RelayDeviceAuthorizationResult.Available(
+            RelayDeviceAuthorization(
+                deviceIdentityId = identity.id,
+                deviceId = identity.deviceId,
+                deviceToken = DeviceProtocol.encodeDeviceToken(deviceToken),
+            ),
+        )
+    }
+
     override suspend fun deviceCredentials(
         deviceIdentityId: String,
     ): RelayDeviceCredentialsResult {
@@ -489,9 +539,27 @@ internal class DeviceIdentityRepository(
         identity: DeviceIdentityEntity,
         credentials: List<DeviceCredentialEntity>,
         kind: DeviceCredentialKind,
+    ): SecretResult = decryptCredential(
+        identity = identity,
+        credential = credentials.singleOrNull { it.kind == kind.storedName },
+        kind = kind,
+    )
+
+    private suspend fun decryptCredential(
+        identity: DeviceIdentityEntity,
+        kind: DeviceCredentialKind,
+    ): SecretResult = decryptCredential(
+        identity = identity,
+        credential = dao.getCredential(identity.id, kind.storedName),
+        kind = kind,
+    )
+
+    private suspend fun decryptCredential(
+        identity: DeviceIdentityEntity,
+        credential: DeviceCredentialEntity?,
+        kind: DeviceCredentialKind,
     ): SecretResult {
-        val credential = credentials.singleOrNull { it.kind == kind.storedName }
-            ?: return SecretResult.Missing
+        credential ?: return SecretResult.Missing
         val result = withContext(cryptographyDispatcher) {
             encryption.decrypt(
                 encrypted = credential.encryptedValue,

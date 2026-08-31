@@ -92,6 +92,26 @@ class AuditRepositoryTest {
         }
     }
 
+    @Test
+    fun `appends multiple records at one explicit timestamp`() = runTest {
+        val dao = FakeAuditDao()
+        val repository = AuditRepository(dao, currentTimeMillis = { error("unused") })
+
+        repository.append(
+            records = listOf(
+                AuditRecord(AuditEventType.SECRET_UPDATED, AuditOutcome.CHANGED),
+                AuditRecord(AuditEventType.SECRET_UPLOAD_DECIDED, AuditOutcome.APPROVED),
+            ),
+            occurredAt = 123_456L,
+        )
+
+        assertEquals(2, dao.events.value.size)
+        assertEquals(listOf(123_456L, 123_456L), dao.events.value.map { it.occurredAt })
+        assertEquals(
+            listOf("secret_updated", "secret_upload_decided"),
+            dao.events.value.map { it.eventType },
+        )
+    }
 }
 
 private class FakeAuditDao : AuditDao {
@@ -104,10 +124,9 @@ private class FakeAuditDao : AuditDao {
 
     override fun observeCount(): Flow<Int> = events.map { it.size }
 
-    override suspend fun insertEvent(event: AuditEventEntity): Long {
-        val id = (events.value.maxOfOrNull(AuditEventEntity::id) ?: 0) + 1
-        events.value += event.copy(id = id)
-        return id
+    override suspend fun insertEvents(events: List<AuditEventEntity>) {
+        var id = (this.events.value.maxOfOrNull(AuditEventEntity::id) ?: 0) + 1
+        this.events.value += events.map { event -> event.copy(id = id++) }
     }
 
     override suspend fun deleteBefore(cutoff: Long): Int {

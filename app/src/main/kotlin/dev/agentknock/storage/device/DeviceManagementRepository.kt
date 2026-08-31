@@ -21,14 +21,14 @@ internal sealed interface DeviceManagementResult {
 
 internal class DeviceManagementRepository(
     private val deviceIdentityDao: DeviceIdentityDao,
-    private val credentials: RelayDeviceCredentialSource,
+    private val deviceAuthorization: RelayDeviceAuthorizationSource,
     private val relay: RelayDeviceManagementClient,
     private val audit: AuditSink,
 ) {
     suspend fun setPairingEnabled(enabled: Boolean): DeviceManagementResult {
-        val active = when (val lookup = credentialLookup()) {
-            is CredentialLookup.Available -> lookup.credentials
-            is CredentialLookup.Failed -> return lookup.result
+        val active = when (val lookup = authorizationLookup()) {
+            is AuthorizationLookup.Available -> lookup.authorization
+            is AuthorizationLookup.Failed -> return lookup.result
         }
         return when (
             val result = relay.setPairingEnabled(
@@ -70,9 +70,9 @@ internal class DeviceManagementRepository(
     }
 
     suspend fun deleteRemoteDevice(): DeviceManagementResult {
-        val active = when (val lookup = credentialLookup()) {
-            is CredentialLookup.Available -> lookup.credentials
-            is CredentialLookup.Failed -> return lookup.result
+        val active = when (val lookup = authorizationLookup()) {
+            is AuthorizationLookup.Available -> lookup.authorization
+            is AuthorizationLookup.Failed -> return lookup.result
         }
         return when (
             val result = relay.deleteDevice(active.deviceId, active.deviceToken)
@@ -90,27 +90,27 @@ internal class DeviceManagementRepository(
         }
     }
 
-    private suspend fun credentialLookup(): CredentialLookup =
-        when (val result = credentials.activeDeviceCredentials()) {
-            is RelayDeviceCredentialsResult.Available -> CredentialLookup.Available(
-                result.credentials,
+    private suspend fun authorizationLookup(): AuthorizationLookup =
+        when (val result = deviceAuthorization.activeDeviceAuthorization()) {
+            is RelayDeviceAuthorizationResult.Available -> AuthorizationLookup.Available(
+                result.authorization,
             )
-            RelayDeviceCredentialsResult.Missing -> CredentialLookup.Failed(
+            RelayDeviceAuthorizationResult.Missing -> AuthorizationLookup.Failed(
                 DeviceManagementResult.NoDevice,
             )
-            RelayDeviceCredentialsResult.CredentialsUnavailable -> CredentialLookup.Failed(
+            RelayDeviceAuthorizationResult.Unavailable -> AuthorizationLookup.Failed(
                 DeviceManagementResult.CredentialsUnavailable,
             )
-            RelayDeviceCredentialsResult.CredentialsCorrupted -> CredentialLookup.Failed(
+            RelayDeviceAuthorizationResult.Corrupted -> AuthorizationLookup.Failed(
                 DeviceManagementResult.CredentialsCorrupted,
             )
-            RelayDeviceCredentialsResult.UnsupportedEncryption -> CredentialLookup.Failed(
+            RelayDeviceAuthorizationResult.UnsupportedEncryption -> AuthorizationLookup.Failed(
                 DeviceManagementResult.UnsupportedEncryption,
             )
         }
 
-    private sealed interface CredentialLookup {
-        data class Available(val credentials: RelayDeviceCredentials) : CredentialLookup
-        data class Failed(val result: DeviceManagementResult) : CredentialLookup
+    private sealed interface AuthorizationLookup {
+        data class Available(val authorization: RelayDeviceAuthorization) : AuthorizationLookup
+        data class Failed(val result: DeviceManagementResult) : AuthorizationLookup
     }
 }

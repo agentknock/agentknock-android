@@ -110,6 +110,9 @@ internal interface DeviceIdentityDao {
     @Query("SELECT * FROM device_credentials WHERE identity_id = :identityId ORDER BY kind")
     suspend fun getCredentials(identityId: String): List<DeviceCredentialEntity>
 
+    @Query("SELECT * FROM device_credentials WHERE identity_id = :identityId AND kind = :kind")
+    suspend fun getCredential(identityId: String, kind: String): DeviceCredentialEntity?
+
     @Query("DELETE FROM device_identities WHERE role = :role")
     suspend fun deleteIdentity(role: String): Int
 

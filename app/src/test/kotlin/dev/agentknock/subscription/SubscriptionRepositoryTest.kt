@@ -2,9 +2,9 @@ package dev.agentknock.subscription
 
 import dev.agentknock.relay.RelaySubscriptionClient
 import dev.agentknock.relay.RelaySubscriptionResult
-import dev.agentknock.storage.device.RelayDeviceCredentialSource
-import dev.agentknock.storage.device.RelayDeviceCredentials
-import dev.agentknock.storage.device.RelayDeviceCredentialsResult
+import dev.agentknock.storage.device.RelayDeviceAuthorization
+import dev.agentknock.storage.device.RelayDeviceAuthorizationResult
+import dev.agentknock.storage.device.RelayDeviceAuthorizationSource
 import kotlinx.coroutines.test.runTest
 import org.junit.Assert.assertEquals
 import org.junit.Test
@@ -13,7 +13,7 @@ class SubscriptionRepositoryTest {
     @Test
     fun `gets status with active device credentials`() = runTest {
         val relay = FakeRelay(statusResult = RelaySubscriptionResult.Status(active = true))
-        val repository = SubscriptionRepository(AvailableCredentials, relay)
+        val repository = SubscriptionRepository(availableAuthorization, relay)
 
         assertEquals(SubscriptionResult.Status(active = true), repository.status())
         assertEquals(DEVICE_ID to DEVICE_TOKEN, relay.statusCredentials)
@@ -22,7 +22,7 @@ class SubscriptionRepositoryTest {
     @Test
     fun `redeems with active device credentials`() = runTest {
         val relay = FakeRelay(redeemResult = RelaySubscriptionResult.Status(active = true))
-        val repository = SubscriptionRepository(AvailableCredentials, relay)
+        val repository = SubscriptionRepository(availableAuthorization, relay)
 
         assertEquals(
             SubscriptionResult.Status(active = true),
@@ -34,33 +34,23 @@ class SubscriptionRepositoryTest {
     @Test
     fun `does not contact relay without an active device`() = runTest {
         val relay = FakeRelay()
-        val credentials = object : RelayDeviceCredentialSource {
-            override suspend fun activeDeviceCredentials() = RelayDeviceCredentialsResult.Missing
-
-            override suspend fun deviceCredentials(deviceIdentityId: String) =
-                RelayDeviceCredentialsResult.Missing
+        val authorization = RelayDeviceAuthorizationSource {
+            RelayDeviceAuthorizationResult.Missing
         }
-        val repository = SubscriptionRepository(credentials, relay)
+        val repository = SubscriptionRepository(authorization, relay)
 
         assertEquals(SubscriptionResult.NoDevice, repository.status())
         assertEquals(null, relay.statusCredentials)
     }
 
-    private object AvailableCredentials : RelayDeviceCredentialSource {
-        override suspend fun activeDeviceCredentials() = RelayDeviceCredentialsResult.Available(
-            RelayDeviceCredentials(
+    private val availableAuthorization = RelayDeviceAuthorizationSource {
+        RelayDeviceAuthorizationResult.Available(
+            RelayDeviceAuthorization(
                 deviceIdentityId = "identity",
-                address = "normal-judge-donor",
-                addressId = "00000000000000000000000000000000",
                 deviceId = DEVICE_ID,
-                devicePublicKey = ByteArray(32),
-                devicePrivateKey = ByteArray(32),
                 deviceToken = DEVICE_TOKEN,
             ),
         )
-
-        override suspend fun deviceCredentials(deviceIdentityId: String) =
-            activeDeviceCredentials()
     }
 
     private class FakeRelay(

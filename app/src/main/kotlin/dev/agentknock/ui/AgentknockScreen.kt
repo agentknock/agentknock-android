@@ -73,9 +73,10 @@ internal fun AgentknockScreen(
         onError: (String) -> Unit,
     ) -> Unit,
     authentication: AuthenticationSession,
-    requestNavigation: StateFlow<RequestNavigation>,
-    subscriptionNavigation: StateFlow<SubscriptionNavigation>,
-    consumeSubscriptionNavigation: (Long) -> Unit,
+    requestNavigation: StateFlow<RequestNavigation?>,
+    consumeRequestNavigation: (RequestNavigation) -> Unit,
+    subscriptionNavigation: StateFlow<SubscriptionNavigation?>,
+    consumeSubscriptionNavigation: (SubscriptionNavigation) -> Unit,
     notificationStateGeneration: StateFlow<Long>,
     requestNotificationPermission: () -> Unit,
     deviceSetupViewModel: DeviceSetupViewModel = viewModel(),
@@ -93,8 +94,6 @@ internal fun AgentknockScreen(
     var openPlanInitially by remember { mutableStateOf(false) }
     var showNavigation by rememberSaveable { mutableStateOf(true) }
     var offerNotifications by rememberSaveable { mutableStateOf(false) }
-    var handledNavigationGeneration by rememberSaveable { mutableStateOf(0L) }
-    var handledSubscriptionGeneration by rememberSaveable { mutableStateOf(0L) }
     val requestNavigationTarget by requestNavigation.collectAsStateWithLifecycle()
     val subscriptionNavigationTarget by subscriptionNavigation.collectAsStateWithLifecycle()
     val notificationRefreshGeneration by notificationStateGeneration.collectAsStateWithLifecycle()
@@ -130,32 +129,28 @@ internal fun AgentknockScreen(
     }
 
     LaunchedEffect(requestNavigationTarget, requestSummaries) {
-        if (
-            requestNavigationTarget.generation > handledNavigationGeneration &&
-            requestNavigationTarget.generation > 0
-        ) {
-            val requestId = requestNavigationTarget.requestId
-            val targetSection = if (requestId == null) {
-                MainSection.REQUESTS
-            } else {
-                when (requestSummaries.firstOrNull { it.id == requestId }?.kind ?: return@LaunchedEffect) {
-                    InboxRequestKind.SECRET_USE -> MainSection.REQUESTS
-                    InboxRequestKind.GIT_SIGN -> MainSection.REQUESTS
-                    InboxRequestKind.SSH_AUTHENTICATE -> MainSection.REQUESTS
-                    InboxRequestKind.SECRET_UPLOAD -> MainSection.SECRETS
-                    InboxRequestKind.PAIRING -> MainSection.CLIENTS
-                }
+        val target = requestNavigationTarget ?: return@LaunchedEffect
+        val requestId = target.requestId
+        val targetSection = if (requestId == null) {
+            MainSection.REQUESTS
+        } else {
+            when (requestSummaries.firstOrNull { it.id == requestId }?.kind ?: return@LaunchedEffect) {
+                InboxRequestKind.SECRET_USE -> MainSection.REQUESTS
+                InboxRequestKind.GIT_SIGN -> MainSection.REQUESTS
+                InboxRequestKind.SSH_AUTHENTICATE -> MainSection.REQUESTS
+                InboxRequestKind.SECRET_UPLOAD -> MainSection.SECRETS
+                InboxRequestKind.PAIRING -> MainSection.CLIENTS
             }
-            section = targetSection
-            showSettings = false
-            showAddressEditor = false
-            when (targetSection) {
-                MainSection.REQUESTS -> requestsViewModel.selectRequest(requestId)
-                MainSection.SECRETS -> secretsViewModel.selectUpload(requestId)
-                MainSection.CLIENTS -> clientsViewModel.selectPairing(requestId)
-            }
-            handledNavigationGeneration = requestNavigationTarget.generation
         }
+        section = targetSection
+        showSettings = false
+        showAddressEditor = false
+        when (targetSection) {
+            MainSection.REQUESTS -> requestsViewModel.selectRequest(requestId)
+            MainSection.SECRETS -> secretsViewModel.selectUpload(requestId)
+            MainSection.CLIENTS -> clientsViewModel.selectPairing(requestId)
+        }
+        consumeRequestNavigation(target)
     }
 
     LaunchedEffect(
@@ -164,24 +159,21 @@ internal fun AgentknockScreen(
         authenticationMode,
         sessionAuthenticated,
     ) {
+        val target = subscriptionNavigationTarget ?: return@LaunchedEffect
         if (
-            subscriptionNavigationTarget.generation > handledSubscriptionGeneration &&
-            subscriptionNavigationTarget.generation > 0 &&
-            current?.active?.credentialsAvailable == true &&
-            (authenticationMode != DeviceAuthenticationMode.APP_LOCK || sessionAuthenticated)
+            current?.active?.credentialsAvailable != true ||
+            (authenticationMode == DeviceAuthenticationMode.APP_LOCK && !sessionAuthenticated)
         ) {
-            showSettings = true
-            showAddressEditor = false
-            openPlanInitially = true
-            val redemptionToken = subscriptionNavigationTarget.redemptionToken
-            when {
-                subscriptionNavigationTarget.invalidLink -> subscriptionViewModel.reportInvalidLink()
-                redemptionToken != null -> subscriptionViewModel.redeem(redemptionToken)
-                else -> return@LaunchedEffect
-            }
-            handledSubscriptionGeneration = subscriptionNavigationTarget.generation
-            consumeSubscriptionNavigation(subscriptionNavigationTarget.generation)
+            return@LaunchedEffect
         }
+        showSettings = true
+        showAddressEditor = false
+        openPlanInitially = true
+        when (target) {
+            is SubscriptionNavigation.Redemption -> subscriptionViewModel.redeem(target.token)
+            SubscriptionNavigation.InvalidLink -> subscriptionViewModel.reportInvalidLink()
+        }
+        consumeSubscriptionNavigation(target)
     }
 
     when {

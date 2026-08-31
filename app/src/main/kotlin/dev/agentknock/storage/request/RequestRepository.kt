@@ -1,5 +1,6 @@
 package dev.agentknock.storage.request
 
+import androidx.room3.withWriteTransaction
 import dev.agentknock.protocol.InvocationCompletion
 import dev.agentknock.protocol.ClientSoftware
 import dev.agentknock.protocol.InvocationDenialReason
@@ -61,6 +62,7 @@ import dev.agentknock.storage.crypto.EncryptionBinding
 import dev.agentknock.storage.crypto.EncryptionLocation
 import dev.agentknock.storage.crypto.VaultKeyManager
 import dev.agentknock.storage.crypto.VaultKeyPurpose
+import dev.agentknock.storage.AgentknockDatabase
 import dev.agentknock.protocol.InvocationResponseSecret
 import dev.agentknock.storage.secret.RequestedSecretsResult
 import dev.agentknock.storage.secret.SecretMetadata
@@ -68,13 +70,17 @@ import dev.agentknock.storage.secret.SecretValues
 import dev.agentknock.storage.secret.RequestedSecretDescription
 import dev.agentknock.storage.secret.ApplyEnvironmentSecretUploadResult
 import dev.agentknock.storage.secret.ApplySshSecretUploadResult
+import dev.agentknock.storage.secret.EnvironmentSecretUploadPreparation
 import dev.agentknock.storage.secret.EnvironmentSecretUpload
 import dev.agentknock.storage.secret.EnvironmentSecretUploadResult
 import dev.agentknock.storage.secret.SshKeyCodec
 import dev.agentknock.storage.secret.SshPrivateKey
 import dev.agentknock.storage.secret.SshSecretUpload
+import dev.agentknock.storage.secret.SshSecretUploadPreparation
 import dev.agentknock.storage.secret.SshSecretUploadResult
 import dev.agentknock.storage.secret.SecretUploadTarget
+import dev.agentknock.storage.secret.PreparedEnvironmentSecretUpload
+import dev.agentknock.storage.secret.PreparedSshSecretUpload
 import dev.agentknock.storage.secret.GitSignatureResult
 import dev.agentknock.storage.secret.SshAuthenticationSignatureResult
 import dev.agentknock.storage.secret.SshKeyAlgorithm
@@ -156,6 +162,13 @@ private data class PreparedSecretUpload(
     val sshKey: SecretUploadSshKeyEntity? = null,
     val error: String? = null,
 )
+
+private sealed interface PreparedSecretUploadApproval {
+    data class Environment(val upload: PreparedEnvironmentSecretUpload) :
+        PreparedSecretUploadApproval
+
+    data class Ssh(val upload: PreparedSshSecretUpload) : PreparedSecretUploadApproval
+}
 
 internal enum class InboxRequestState(val storedName: String) {
     REVIEWING("reviewing"),
@@ -656,6 +669,7 @@ internal enum class ClientChangeResult {
 }
 
 internal class RequestRepository(
+    private val database: AgentknockDatabase,
     private val dao: RequestDao,
     private val deviceCredentials: RelayDeviceCredentialSource,
     private val secrets: SecretRepository,
@@ -2974,7 +2988,8 @@ internal class RequestRepository(
         ) {
             return@withLock SecretUploadDecisionResult.NotPending
         }
-        val secretId = when (uploadRequest.secretType) {
+        val finalName = approvedName.trim()
+        val preparedUpload = when (uploadRequest.secretType) {
             ENVIRONMENT_SECRET_TYPE -> {
                 val values = sortedMapOf<String, String>()
                 val variableRows = dao.getSecretUploadEnvironmentVariables(requestId)
@@ -3009,16 +3024,17 @@ internal class RequestRepository(
                     variableSensitivity = variableRows.associate { it.name to it.sensitive },
                 )
                 when (
-                    val result = secrets.applyEnvironmentSecretUpload(
+                    val result = secrets.prepareEnvironmentSecretUpload(
                         upload,
-                        approvedName.trim(),
+                        finalName,
                         uploadRequest.target(),
                     )
                 ) {
-                    is ApplyEnvironmentSecretUploadResult.Invalid -> {
+                    is EnvironmentSecretUploadPreparation.Invalid -> {
                         return@withLock SecretUploadDecisionResult.Invalid(result.message)
                     }
-                    is ApplyEnvironmentSecretUploadResult.Applied -> result.secretId
+                    is EnvironmentSecretUploadPreparation.Ready ->
+                        PreparedSecretUploadApproval.Environment(result.upload)
                 }
             }
             SSH_SECRET_TYPE -> {
@@ -3059,16 +3075,17 @@ internal class RequestRepository(
                     privateKey = privateKey,
                 )
                 when (
-                    val result = secrets.applySshSecretUpload(
+                    val result = secrets.prepareSshSecretUpload(
                         upload,
-                        approvedName.trim(),
+                        finalName,
                         uploadRequest.target(),
                     )
                 ) {
-                    is ApplySshSecretUploadResult.Invalid -> {
+                    is SshSecretUploadPreparation.Invalid -> {
                         return@withLock SecretUploadDecisionResult.Invalid(result.message)
                     }
-                    is ApplySshSecretUploadResult.Applied -> result.secretId
+                    is SshSecretUploadPreparation.Ready ->
+                        PreparedSecretUploadApproval.Ssh(result.upload)
                 }
             }
             else -> return@withLock SecretUploadDecisionResult.Invalid(
@@ -3081,33 +3098,62 @@ internal class RequestRepository(
             SecretUploadRequestState.APPROVED.storedName,
             transportFinished,
         )
-        dao.updateSecretUploadRequest(
-            request = request.copy(
-                state = lifecycle.state.storedName,
-                listed = false,
-                updatedAt = now,
-                completedAt = if (lifecycle.completed) request.completedAt ?: now else null,
-            ),
-            secretUpload = uploadRequest.copy(
-                decision = SecretUploadRequestState.APPROVED.storedName,
-                approvedName = approvedName.trim(),
-                decidedAt = now,
-            ),
-            discardUploadedValues = true,
+        val updatedRequest = request.copy(
+            state = lifecycle.state.storedName,
+            listed = false,
+            updatedAt = now,
+            completedAt = if (lifecycle.completed) request.completedAt ?: now else null,
         )
-        audit.record(
+        val decidedUpload = uploadRequest.copy(
+            decision = SecretUploadRequestState.APPROVED.storedName,
+            approvedName = finalName,
+            decidedAt = now,
+        )
+        val auditRecords = listOf(
             AuditRecord(
                 type = AuditEventType.SECRET_UPLOAD_DECIDED,
                 outcome = AuditOutcome.APPROVED,
                 decisionSource = AuditDecisionSource.USER,
-                subject = approvedName.trim(),
-                detail = uploadRequest.uploadedName.takeUnless { it == approvedName.trim() },
+                subject = finalName,
+                detail = uploadRequest.uploadedName.takeUnless { it == finalName },
                 clientId = request.clientId,
                 clientName = request.clientNameSnapshot,
                 relayRequestId = request.id,
             ),
         )
-        SecretUploadDecisionResult.Approved(secretId)
+        database.withWriteTransaction {
+            val secretId = when (preparedUpload) {
+                is PreparedSecretUploadApproval.Environment -> when (
+                    val applied = secrets.applyPreparedEnvironmentSecretUpload(
+                        preparedUpload.upload,
+                    )
+                ) {
+                    is ApplyEnvironmentSecretUploadResult.Applied -> applied.secretId
+                    is ApplyEnvironmentSecretUploadResult.Invalid -> {
+                        return@withWriteTransaction SecretUploadDecisionResult.Invalid(
+                            applied.message,
+                        )
+                    }
+                }
+                is PreparedSecretUploadApproval.Ssh -> when (
+                    val applied = secrets.applyPreparedSshSecretUpload(preparedUpload.upload)
+                ) {
+                    is ApplySshSecretUploadResult.Applied -> applied.secretId
+                    is ApplySshSecretUploadResult.Invalid -> {
+                        return@withWriteTransaction SecretUploadDecisionResult.Invalid(
+                            applied.message,
+                        )
+                    }
+                }
+            }
+            dao.updateSecretUploadRequest(
+                request = updatedRequest,
+                secretUpload = decidedUpload,
+                discardUploadedValues = true,
+            )
+            audit.append(auditRecords, now)
+            SecretUploadDecisionResult.Approved(secretId)
+        }
     }
 
     suspend fun readSecretUploadVariable(

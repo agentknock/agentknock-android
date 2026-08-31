@@ -2,8 +2,8 @@ package dev.agentknock.subscription
 
 import dev.agentknock.relay.RelaySubscriptionClient
 import dev.agentknock.relay.RelaySubscriptionResult
-import dev.agentknock.storage.device.RelayDeviceCredentialSource
-import dev.agentknock.storage.device.RelayDeviceCredentialsResult
+import dev.agentknock.storage.device.RelayDeviceAuthorizationResult
+import dev.agentknock.storage.device.RelayDeviceAuthorizationSource
 
 internal sealed interface SubscriptionResult {
     data class Status(val active: Boolean) : SubscriptionResult
@@ -28,31 +28,31 @@ internal sealed interface SubscriptionResult {
 }
 
 internal class SubscriptionRepository(
-    private val deviceCredentials: RelayDeviceCredentialSource,
+    private val deviceAuthorization: RelayDeviceAuthorizationSource,
     private val relay: RelaySubscriptionClient,
 ) {
-    suspend fun status(): SubscriptionResult = withCredentials { deviceId, deviceToken ->
+    suspend fun status(): SubscriptionResult = withAuthorization { deviceId, deviceToken ->
         relay.status(deviceId, deviceToken)
     }
 
     suspend fun redeem(redemptionToken: String): SubscriptionResult =
-        withCredentials { deviceId, deviceToken ->
+        withAuthorization { deviceId, deviceToken ->
             relay.redeem(deviceId, deviceToken, redemptionToken)
         }
 
-    private suspend fun withCredentials(
+    private suspend fun withAuthorization(
         operation: suspend (deviceId: String, deviceToken: String) -> RelaySubscriptionResult,
-    ): SubscriptionResult = when (val credentials = deviceCredentials.activeDeviceCredentials()) {
-        is RelayDeviceCredentialsResult.Available -> operation(
-            credentials.credentials.deviceId,
-            credentials.credentials.deviceToken,
+    ): SubscriptionResult = when (val result = deviceAuthorization.activeDeviceAuthorization()) {
+        is RelayDeviceAuthorizationResult.Available -> operation(
+            result.authorization.deviceId,
+            result.authorization.deviceToken,
         ).toSubscriptionResult()
-        RelayDeviceCredentialsResult.Missing -> SubscriptionResult.NoDevice
-        RelayDeviceCredentialsResult.CredentialsUnavailable ->
+        RelayDeviceAuthorizationResult.Missing -> SubscriptionResult.NoDevice
+        RelayDeviceAuthorizationResult.Unavailable ->
             SubscriptionResult.DeviceCredentialsUnavailable
-        RelayDeviceCredentialsResult.CredentialsCorrupted ->
+        RelayDeviceAuthorizationResult.Corrupted ->
             SubscriptionResult.DeviceCredentialsCorrupted
-        RelayDeviceCredentialsResult.UnsupportedEncryption ->
+        RelayDeviceAuthorizationResult.UnsupportedEncryption ->
             SubscriptionResult.UnsupportedEncryption
     }
 }

@@ -2,8 +2,8 @@ package dev.agentknock.push
 
 import dev.agentknock.relay.RelayPushRegistrationClient
 import dev.agentknock.relay.RelayPushRegistrationResult
-import dev.agentknock.storage.device.RelayDeviceCredentialSource
-import dev.agentknock.storage.device.RelayDeviceCredentialsResult
+import dev.agentknock.storage.device.RelayDeviceAuthorizationResult
+import dev.agentknock.storage.device.RelayDeviceAuthorizationSource
 
 internal sealed interface PushRegistrationResult {
     data object Registered : PushRegistrationResult
@@ -28,27 +28,27 @@ internal sealed interface PushRegistrationResult {
 }
 
 internal class PushRegistrationRepository(
-    private val deviceCredentials: RelayDeviceCredentialSource,
+    private val deviceAuthorization: RelayDeviceAuthorizationSource,
     private val relay: RelayPushRegistrationClient,
 ) {
     suspend fun register(firebaseInstallationId: String): PushRegistrationResult {
-        val credentials = when (val result = deviceCredentials.activeDeviceCredentials()) {
-            is RelayDeviceCredentialsResult.Available -> result.credentials
-            RelayDeviceCredentialsResult.Missing -> return PushRegistrationResult.NoDevice
-            RelayDeviceCredentialsResult.CredentialsUnavailable -> {
+        val authorization = when (val result = deviceAuthorization.activeDeviceAuthorization()) {
+            is RelayDeviceAuthorizationResult.Available -> result.authorization
+            RelayDeviceAuthorizationResult.Missing -> return PushRegistrationResult.NoDevice
+            RelayDeviceAuthorizationResult.Unavailable -> {
                 return PushRegistrationResult.DeviceCredentialsUnavailable
             }
-            RelayDeviceCredentialsResult.CredentialsCorrupted -> {
+            RelayDeviceAuthorizationResult.Corrupted -> {
                 return PushRegistrationResult.DeviceCredentialsCorrupted
             }
-            RelayDeviceCredentialsResult.UnsupportedEncryption -> {
+            RelayDeviceAuthorizationResult.UnsupportedEncryption -> {
                 return PushRegistrationResult.UnsupportedDeviceCredentialEncryption
             }
         }
         return when (
             val result = relay.register(
-                deviceId = credentials.deviceId,
-                deviceToken = credentials.deviceToken,
+                deviceId = authorization.deviceId,
+                deviceToken = authorization.deviceToken,
                 firebaseInstallationId = firebaseInstallationId,
             )
         ) {

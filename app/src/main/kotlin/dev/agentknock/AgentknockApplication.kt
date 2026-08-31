@@ -105,23 +105,24 @@ internal class ApplicationContainer(application: Application) {
     )
 
     val pushRegistration = PushRegistrationRepository(
-        deviceCredentials = deviceIdentity,
+        deviceAuthorization = deviceIdentity,
         relay = HttpRelayPushRegistrationClient(relayHttp),
     )
 
     val subscription = SubscriptionRepository(
-        deviceCredentials = deviceIdentity,
+        deviceAuthorization = deviceIdentity,
         relay = HttpRelaySubscriptionClient(relayHttp),
     )
 
     val deviceManagement = DeviceManagementRepository(
         deviceIdentityDao = database.deviceIdentityDao(),
-        credentials = deviceIdentity,
+        deviceAuthorization = deviceIdentity,
         relay = HttpRelayDeviceManagementClient(relayHttp),
         audit = audit,
     )
 
     val requests = RequestRepository(
+        database = database,
         dao = database.requestDao(),
         deviceCredentials = deviceIdentity,
         secrets = secrets,
