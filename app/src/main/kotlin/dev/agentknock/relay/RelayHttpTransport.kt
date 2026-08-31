@@ -112,6 +112,7 @@ internal class RelayHttpTransport(
 internal data class RelayError(
     val code: String?,
     val message: String?,
+    val retryAfterMillis: Long?,
 )
 
 internal fun decodeRelayError(
@@ -122,8 +123,29 @@ internal fun decodeRelayError(
     return RelayError(
         code = body.stringMember("error"),
         message = body.stringMember("message"),
+        retryAfterMillis = body.nonNegativeLongMember("retry_after_ms"),
     )
 }
 
 private fun JsonObject?.stringMember(name: String): String? =
     (this?.get(name) as? JsonPrimitive)?.takeIf(JsonPrimitive::isString)?.content
+
+private fun JsonObject?.nonNegativeLongMember(name: String): Long? =
+    (this?.get(name) as? JsonPrimitive)
+        ?.takeUnless(JsonPrimitive::isString)
+        ?.content
+        ?.parseNonNegativeDecimalClamped()
+
+internal fun String.parseNonNegativeDecimalClamped(
+    maximum: Long = Long.MAX_VALUE,
+): Long? {
+    require(maximum >= 0)
+    if (isEmpty() || any { it !in '0'..'9' }) return null
+    val significant = trimStart('0').ifEmpty { "0" }
+    val maximumText = maximum.toString()
+    return when {
+        significant.length > maximumText.length -> maximum
+        significant.length == maximumText.length && significant > maximumText -> maximum
+        else -> significant.toLong()
+    }
+}

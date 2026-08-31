@@ -159,7 +159,16 @@ internal sealed interface RequestSyncResult {
 
     data class RelayRejected(val status: Int, val message: String?) : RequestSyncResult
 
-    data class RelayUnavailable(val message: String?) : RequestSyncResult
+    data class RelayUnavailable(
+        val message: String?,
+        val retryAfterMillis: Long? = null,
+    ) : RequestSyncResult {
+        init {
+            require(retryAfterMillis == null || retryAfterMillis >= 0)
+        }
+    }
+
+    data class InternalFailure(val type: String) : RequestSyncResult
 }
 
 private sealed interface SynchronizationInput {
@@ -382,7 +391,10 @@ internal class RequestRepository(
                 return RequestSyncResult.RelayRejected(result.status, result.message)
             }
             is RelayDeviceConnectionResult.Unavailable -> {
-                return RequestSyncResult.RelayUnavailable(result.message)
+                return RequestSyncResult.RelayUnavailable(
+                    message = result.message,
+                    retryAfterMillis = result.retryAfterMillis,
+                )
             }
         }
 
@@ -575,7 +587,10 @@ internal class RequestRepository(
                         null
                     }
                     is RelayDeviceEvent.Error -> if (event.retryable) {
-                        RequestSyncResult.RelayUnavailable(event.message)
+                        RequestSyncResult.RelayUnavailable(
+                            message = event.message,
+                            retryAfterMillis = event.retryAfterMillis,
+                        )
                     } else {
                         RequestSyncResult.RelayRejected(0, event.message)
                     }

@@ -27,6 +27,7 @@ import dev.agentknock.storage.request.RequestRepository
 import dev.agentknock.storage.request.RequestInbox
 import dev.agentknock.storage.request.RequestConnectionManager
 import dev.agentknock.storage.request.RequestMaterialStore
+import dev.agentknock.storage.request.persistentRelayRetryDeadline
 import dev.agentknock.storage.request.AiReviewCoordinator
 import dev.agentknock.storage.request.ClientRepository
 import dev.agentknock.storage.request.SecretManagementRequests
@@ -214,6 +215,7 @@ internal class ApplicationContainer(application: Application) {
         scheduleBackgroundSynchronization = {
             PushSynchronizationWorker.enqueue(application)
         },
+        relayRetryDeadline = persistentRelayRetryDeadline(application),
     )
 
     init {

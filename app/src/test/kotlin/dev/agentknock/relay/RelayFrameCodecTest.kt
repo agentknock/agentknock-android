@@ -2,7 +2,6 @@ package dev.agentknock.relay
 
 import kotlinx.serialization.json.Json
 import org.junit.Assert.assertEquals
-import org.junit.Assert.assertTrue
 import org.junit.Test
 
 class RelayFrameCodecTest {
@@ -93,10 +92,36 @@ class RelayFrameCodecTest {
             ),
         )
         assertEquals(RelayDeviceEvent.CaughtUp, codec.decode("""{"type":"caught_up"}"""))
-        val error = codec.decode(
-            """{"type":"error","error":"BUSY","message":"retry","retryable":true,"retry_after_ms":250}""",
+        assertEquals(
+            RelayDeviceEvent.Error(
+                code = "BUSY",
+                message = "retry",
+                retryable = true,
+                clientId = null,
+                requestId = null,
+                kind = null,
+                retryAfterMillis = 250,
+            ),
+            codec.decode(
+                """{"type":"error","error":"BUSY","message":"retry","retryable":true,"retry_after_ms":250}""",
+            ),
         )
-        assertTrue(error is RelayDeviceEvent.Error && error.retryable)
+    }
+
+    @Test(expected = IllegalStateException::class)
+    fun `rejects a negative retry delay`() {
+        codec.decode(
+            """{"type":"error","error":"BUSY","message":"retry","retryable":true,"retry_after_ms":-1}""",
+        )
+    }
+
+    @Test
+    fun `clamps an overflowing retry delay`() {
+        val event = codec.decode(
+            """{"type":"error","error":"BUSY","message":"retry","retryable":true,"retry_after_ms":999999999999999999999999999999}""",
+        )
+
+        assertEquals(Long.MAX_VALUE, (event as RelayDeviceEvent.Error).retryAfterMillis)
     }
 
     private companion object {

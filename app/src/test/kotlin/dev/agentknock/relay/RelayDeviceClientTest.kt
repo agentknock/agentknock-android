@@ -16,6 +16,7 @@ import org.junit.Assert.assertFalse
 import org.junit.Assert.assertTrue
 import org.junit.Test
 import java.net.ServerSocket
+import java.time.Instant
 
 class RelayDeviceClientTest {
     @Test
@@ -128,7 +129,9 @@ class RelayDeviceClientTest {
                 MockResponse.Builder()
                     .code(429)
                     .addHeader("Retry-After", "17")
-                    .body("""{"error":"RATE_LIMITED","message":"try again later"}""")
+                    .body(
+                        """{"error":"RATE_LIMITED","message":"try again later","retry_after_ms":12345}""",
+                    )
                     .build(),
             )
             val client = WebSocketRelayDeviceClient(
@@ -139,7 +142,214 @@ class RelayDeviceClientTest {
             assertEquals(
                 RelayDeviceConnectionResult.Unavailable(
                     message = "try again later",
+                    retryAfterMillis = 17_000,
                 ),
+                withContext(Dispatchers.IO) {
+                    withTimeout(5_000) { client.connect(DEVICE_ID, DEVICE_TOKEN) }
+                },
+            )
+        }
+    }
+
+    @Test
+    fun `preserves a JSON websocket upgrade retry delay`() = runTest {
+        MockWebServer().use { server ->
+            server.start()
+            server.enqueue(
+                MockResponse.Builder()
+                    .code(429)
+                    .body(
+                        """{"error":"RATE_LIMITED","message":"wait","retryable":true,"retry_after_ms":60000}""",
+                    )
+                    .build(),
+            )
+            val client = WebSocketRelayDeviceClient(
+                client = OkHttpClient(),
+                relayUrl = server.url("/").toString(),
+            )
+
+            assertEquals(
+                RelayDeviceConnectionResult.Unavailable(
+                    message = "wait",
+                    retryAfterMillis = 60_000,
+                ),
+                withContext(Dispatchers.IO) {
+                    withTimeout(5_000) { client.connect(DEVICE_ID, DEVICE_TOKEN) }
+                },
+            )
+        }
+    }
+
+    @Test
+    fun `supports an HTTP-date websocket upgrade retry delay`() = runTest {
+        MockWebServer().use { server ->
+            server.start()
+            server.enqueue(
+                MockResponse.Builder()
+                    .code(503)
+                    .addHeader("Retry-After", "Wed, 21 Oct 2015 07:28:00 GMT")
+                    .body("""{"error":"OVERLOADED","message":"wait"}""")
+                    .build(),
+            )
+            val client = WebSocketRelayDeviceClient(
+                client = OkHttpClient(),
+                relayUrl = server.url("/").toString(),
+                currentTimeMillis = {
+                    Instant.parse("2015-10-21T07:27:00Z").toEpochMilli()
+                },
+            )
+
+            assertEquals(
+                RelayDeviceConnectionResult.Unavailable("wait", 60_000),
+                withContext(Dispatchers.IO) {
+                    withTimeout(5_000) { client.connect(DEVICE_ID, DEVICE_TOKEN) }
+                },
+            )
+        }
+    }
+
+    @Test
+    fun `supports obsolete HTTP-date websocket upgrade retry delays`() = runTest {
+        MockWebServer().use { server ->
+            server.start()
+            listOf(
+                "Sunday, 06-Nov-94 08:49:37 GMT",
+                "Sun Nov  6 08:49:37 1994",
+            ).forEach { retryAfter ->
+                server.enqueue(
+                    MockResponse.Builder()
+                        .code(503)
+                        .addHeader("Retry-After", retryAfter)
+                        .body("""{"error":"OVERLOADED","message":"wait"}""")
+                        .build(),
+                )
+            }
+            val client = WebSocketRelayDeviceClient(
+                client = OkHttpClient(),
+                relayUrl = server.url("/").toString(),
+                currentTimeMillis = {
+                    Instant.parse("1994-11-06T08:48:37Z").toEpochMilli()
+                },
+            )
+
+            repeat(2) {
+                assertEquals(
+                    RelayDeviceConnectionResult.Unavailable("wait", 60_000),
+                    withContext(Dispatchers.IO) {
+                        withTimeout(5_000) { client.connect(DEVICE_ID, DEVICE_TOKEN) }
+                    },
+                )
+            }
+        }
+    }
+
+    @Test
+    fun `RFC850 retry date uses the full fifty-year boundary`() = runTest {
+        MockWebServer().use { server ->
+            server.start()
+            server.enqueue(
+                MockResponse.Builder()
+                    .code(503)
+                    .addHeader("Retry-After", "Friday, 31-Dec-76 23:59:59 GMT")
+                    .body("""{"error":"OVERLOADED","message":"wait"}""")
+                    .build(),
+            )
+            val client = WebSocketRelayDeviceClient(
+                client = OkHttpClient(),
+                relayUrl = server.url("/").toString(),
+                currentTimeMillis = {
+                    Instant.parse("2026-01-01T00:00:00Z").toEpochMilli()
+                },
+            )
+
+            assertEquals(
+                RelayDeviceConnectionResult.Unavailable("wait", 0),
+                withContext(Dispatchers.IO) {
+                    withTimeout(5_000) { client.connect(DEVICE_ID, DEVICE_TOKEN) }
+                },
+            )
+        }
+    }
+
+    @Test
+    fun `RFC850 retry date resolves its century relative to a future current date`() = runTest {
+        MockWebServer().use { server ->
+            server.start()
+            server.enqueue(
+                MockResponse.Builder()
+                    .code(503)
+                    .addHeader("Retry-After", "Friday, 01-Jan-20 00:00:00 GMT")
+                    .body("""{"error":"OVERLOADED","message":"wait"}""")
+                    .build(),
+            )
+            val now = Instant.parse("2076-01-01T00:00:00Z")
+            val retryAt = Instant.parse("2120-01-01T00:00:00Z")
+            val client = WebSocketRelayDeviceClient(
+                client = OkHttpClient(),
+                relayUrl = server.url("/").toString(),
+                currentTimeMillis = now::toEpochMilli,
+            )
+
+            assertEquals(
+                RelayDeviceConnectionResult.Unavailable(
+                    "wait",
+                    retryAt.toEpochMilli() - now.toEpochMilli(),
+                ),
+                withContext(Dispatchers.IO) {
+                    withTimeout(5_000) { client.connect(DEVICE_ID, DEVICE_TOKEN) }
+                },
+            )
+        }
+    }
+
+    @Test
+    fun `clamps an overflowing decimal websocket upgrade retry delay`() = runTest {
+        MockWebServer().use { server ->
+            server.start()
+            server.enqueue(
+                MockResponse.Builder()
+                    .code(429)
+                    .addHeader("Retry-After", "999999999999999999999999999999")
+                    .body("""{"error":"RATE_LIMITED","message":"wait"}""")
+                    .build(),
+            )
+            val client = WebSocketRelayDeviceClient(
+                client = OkHttpClient(),
+                relayUrl = server.url("/").toString(),
+            )
+
+            assertEquals(
+                RelayDeviceConnectionResult.Unavailable(
+                    "wait",
+                    (Long.MAX_VALUE / 1_000L) * 1_000L,
+                ),
+                withContext(Dispatchers.IO) {
+                    withTimeout(5_000) { client.connect(DEVICE_ID, DEVICE_TOKEN) }
+                },
+            )
+        }
+    }
+
+    @Test
+    fun `does not honor negative websocket upgrade retry delays`() = runTest {
+        MockWebServer().use { server ->
+            server.start()
+            server.enqueue(
+                MockResponse.Builder()
+                    .code(429)
+                    .addHeader("Retry-After", "-1")
+                    .body(
+                        """{"error":"RATE_LIMITED","message":"wait","retry_after_ms":-1}""",
+                    )
+                    .build(),
+            )
+            val client = WebSocketRelayDeviceClient(
+                client = OkHttpClient(),
+                relayUrl = server.url("/").toString(),
+            )
+
+            assertEquals(
+                RelayDeviceConnectionResult.Unavailable(message = "wait"),
                 withContext(Dispatchers.IO) {
                     withTimeout(5_000) { client.connect(DEVICE_ID, DEVICE_TOKEN) }
                 },

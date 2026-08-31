@@ -4,6 +4,7 @@ import kotlinx.coroutines.CompletableDeferred
 import kotlinx.coroutines.ExperimentalCoroutinesApi
 import kotlinx.coroutines.awaitCancellation
 import kotlinx.coroutines.async
+import kotlinx.coroutines.cancelAndJoin
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.test.advanceTimeBy
 import kotlinx.coroutines.test.runCurrent
@@ -237,7 +238,7 @@ class RequestConnectionManagerTest {
     }
 
     @Test
-    fun `requests arriving during a finite synchronization coalesce into one follow-up pass`() =
+    fun `requests arriving during a finite synchronization each run a sequential follow-up`() =
         runTest {
             val firstStarted = CompletableDeferred<Unit>()
             val finishFirst = CompletableDeferred<Unit>()
@@ -266,7 +267,7 @@ class RequestConnectionManagerTest {
             assertEquals(expected, second.await())
             assertEquals(expected, third.await())
 
-            assertEquals(2, synchronizations)
+            assertEquals(3, synchronizations)
             assertEquals(RequestSyncResult.Success, manager.lastSyncResult.value)
             assertFalse(manager.syncing.value)
         }
@@ -430,9 +431,43 @@ class RequestConnectionManagerTest {
 
         manager.pauseAndJoin()
 
-        assertEquals(OneShotSynchronizationResult.Covered, caller.await())
+        caller.join()
+        assertTrue(caller.isCancelled)
         assertTrue(cancellationObserved)
         assertFalse(manager.syncing.value)
+    }
+
+    @Test
+    fun `cancelling the finite synchronization caller cancels its relay operation`() = runTest {
+        val started = CompletableDeferred<Unit>()
+        var cancellationObserved = false
+        var attempts = 0
+        val manager = manager(
+            synchronizeOnce = {
+                attempts += 1
+                if (attempts == 1) {
+                    started.complete(Unit)
+                    try {
+                        awaitCancellation()
+                    } finally {
+                        cancellationObserved = true
+                    }
+                }
+                RequestSyncResult.Success
+            },
+        )
+        val caller = launch { manager.synchronizeOnce() }
+        started.await()
+
+        caller.cancelAndJoin()
+
+        assertTrue(cancellationObserved)
+        assertFalse(manager.syncing.value)
+        assertEquals(
+            OneShotSynchronizationResult.Completed(RequestSyncResult.Success),
+            manager.synchronizeOnce(),
+        )
+        assertEquals(2, attempts)
     }
 
     @Test
@@ -541,6 +576,253 @@ class RequestConnectionManagerTest {
     }
 
     @Test
+    fun `new synchronization work cannot bypass the server retry delay`() = runTest {
+        var attempts = 0
+        val manager = manager(
+            listen = {
+                attempts += 1
+                if (attempts == 1) {
+                    RequestSyncResult.RelayUnavailable(
+                        message = "rate limited",
+                        retryAfterMillis = 1_000,
+                    )
+                } else {
+                    awaitCancellation()
+                }
+            },
+            reconnectDelayMillis = 100,
+        )
+        manager.appForegrounded()
+        runCurrent()
+        assertEquals(1, attempts)
+
+        manager.requestSynchronization()
+        advanceTimeBy(999)
+        runCurrent()
+        assertEquals(1, attempts)
+
+        advanceTimeBy(1)
+        runCurrent()
+        assertEquals(2, attempts)
+    }
+
+    @Test
+    fun `server retry delay applies to a later finite synchronization`() = runTest {
+        var attempts = 0
+        val manager = manager(
+            synchronizeOnce = {
+                attempts += 1
+                if (attempts == 1) {
+                    RequestSyncResult.RelayUnavailable(
+                        message = "rate limited",
+                        retryAfterMillis = 1_000,
+                    )
+                } else {
+                    RequestSyncResult.Success
+                }
+            },
+        )
+
+        assertEquals(
+            OneShotSynchronizationResult.Completed(
+                RequestSyncResult.RelayUnavailable("rate limited", 1_000),
+            ),
+            manager.synchronizeOnce(),
+        )
+        assertEquals(
+            OneShotSynchronizationResult.Deferred(1_000),
+            manager.synchronizeOnce(),
+        )
+        assertEquals(1, attempts)
+
+        advanceTimeBy(999)
+        assertEquals(
+            OneShotSynchronizationResult.Deferred(1),
+            manager.synchronizeOnce(),
+        )
+        assertEquals(1, attempts)
+        advanceTimeBy(1)
+
+        assertEquals(
+            OneShotSynchronizationResult.Completed(RequestSyncResult.Success),
+            manager.synchronizeOnce(),
+        )
+        assertEquals(2, attempts)
+    }
+
+    @Test
+    fun `zero retry directive remains immediate and is not persisted`() = runTest {
+        var attempts = 0
+        var deadlineWrites = 0
+        val manager = manager(
+            synchronizeOnce = {
+                attempts += 1
+                if (attempts == 1) {
+                    RequestSyncResult.RelayUnavailable(
+                        message = "try again",
+                        retryAfterMillis = 0,
+                    )
+                } else {
+                    RequestSyncResult.Success
+                }
+            },
+            relayRetryDeadline = RelayRetryDeadline(
+                readState = { RelayRetryDeadlineState() },
+                writeState = { deadlineWrites += 1 },
+                bootCount = 7,
+                currentTimeMillis = { 1_000 },
+                elapsedRealtimeMillis = { 1_000 },
+            ),
+        )
+
+        assertEquals(
+            OneShotSynchronizationResult.Completed(
+                RequestSyncResult.RelayUnavailable("try again", 0),
+            ),
+            manager.synchronizeOnce(),
+        )
+        assertEquals(
+            OneShotSynchronizationResult.Completed(RequestSyncResult.Success),
+            manager.synchronizeOnce(),
+        )
+        assertEquals(2, attempts)
+        assertEquals(0, deadlineWrites)
+    }
+
+    @Test
+    fun `server retry delay defers a concurrent follow-up without a sleeping session`() = runTest {
+        val started = CompletableDeferred<Unit>()
+        val finish = CompletableDeferred<Unit>()
+        var attempts = 0
+        val manager = manager(
+            synchronizeOnce = {
+                attempts += 1
+                started.complete(Unit)
+                finish.await()
+                RequestSyncResult.RelayUnavailable("rate limited", 60_000)
+            },
+        )
+
+        val first = async { manager.synchronizeOnce() }
+        started.await()
+        val concurrent = async { manager.synchronizeOnce() }
+        runCurrent()
+        finish.complete(Unit)
+
+        assertEquals(
+            OneShotSynchronizationResult.Completed(
+                RequestSyncResult.RelayUnavailable("rate limited", 60_000),
+            ),
+            first.await(),
+        )
+        assertEquals(OneShotSynchronizationResult.Deferred(60_000), concurrent.await())
+        assertEquals(1, attempts)
+        assertFalse(manager.syncing.value)
+    }
+
+    @Test
+    fun `concurrent caller follows an internal failure with a fresh pass`() = runTest {
+        val firstStarted = CompletableDeferred<Unit>()
+        val finishFirst = CompletableDeferred<Unit>()
+        var attempts = 0
+        val manager = manager(
+            synchronizeOnce = {
+                attempts += 1
+                if (attempts == 1) {
+                    firstStarted.complete(Unit)
+                    finishFirst.await()
+                    error("broken local state")
+                }
+                RequestSyncResult.Success
+            },
+        )
+
+        val first = async { manager.synchronizeOnce() }
+        firstStarted.await()
+        val second = async { manager.synchronizeOnce() }
+        runCurrent()
+        finishFirst.complete(Unit)
+
+        assertEquals(
+            OneShotSynchronizationResult.Completed(
+                RequestSyncResult.InternalFailure("IllegalStateException"),
+            ),
+            first.await(),
+        )
+        assertEquals(
+            OneShotSynchronizationResult.Completed(RequestSyncResult.Success),
+            second.await(),
+        )
+        assertEquals(2, attempts)
+    }
+
+    @Test
+    fun `server retry deadline survives manager recreation`() = runTest {
+        var storedDeadline = RelayRetryDeadlineState()
+        fun retryDeadline() = RelayRetryDeadline(
+            readState = { storedDeadline },
+            writeState = { storedDeadline = it },
+            bootCount = 7,
+            currentTimeMillis = { testScheduler.currentTime },
+            elapsedRealtimeMillis = { testScheduler.currentTime },
+        )
+        val first = manager(
+            synchronizeOnce = {
+                RequestSyncResult.RelayUnavailable("rate limited", 1_000)
+            },
+            relayRetryDeadline = retryDeadline(),
+        )
+        assertEquals(
+            OneShotSynchronizationResult.Completed(
+                RequestSyncResult.RelayUnavailable("rate limited", 1_000),
+            ),
+            first.synchronizeOnce(),
+        )
+
+        var attemptsAfterRestart = 0
+        val recreated = manager(
+            synchronizeOnce = {
+                attemptsAfterRestart += 1
+                RequestSyncResult.Success
+            },
+            relayRetryDeadline = retryDeadline(),
+        )
+        assertEquals(
+            OneShotSynchronizationResult.Deferred(1_000),
+            recreated.synchronizeOnce(),
+        )
+        assertEquals(0, attemptsAfterRestart)
+    }
+
+    @Test
+    fun `unexpected local failure is terminal instead of a network retry`() = runTest {
+        var attempts = 0
+        val failure = IllegalStateException("broken local state")
+        var reportedFailure: Exception? = null
+        val manager = manager(
+            listen = {
+                attempts += 1
+                throw failure
+            },
+            reconnectDelayMillis = 100,
+            reportInternalFailure = { reportedFailure = it },
+        )
+
+        manager.appForegrounded()
+        runCurrent()
+
+        val result = manager.lastSyncResult.value
+        assertEquals(
+            RequestSyncResult.InternalFailure("IllegalStateException"),
+            result,
+        )
+        assertTrue(reportedFailure === failure)
+        advanceTimeBy(100_000)
+        runCurrent()
+        assertEquals(1, attempts)
+    }
+
+    @Test
     fun `relay failures back off exponentially and cap the local delay`() = runTest {
         var attempts = 0
         val manager = manager(
@@ -579,13 +861,29 @@ class RequestConnectionManagerTest {
         backgroundGracePeriodMillis: Long = 5_000,
         reconnectDelayMillis: Long = 3_000,
         maximumReconnectDelayMillis: Long = 60_000,
+        relayRetryDeadline: RelayRetryDeadline? = null,
+        reportInternalFailure: (Exception) -> Unit = {},
     ) = RequestConnectionManager(
         scope = backgroundScope,
         synchronizeOnce = synchronizeOnce,
         listen = listen,
         scheduleBackgroundSynchronization = scheduleBackgroundSynchronization,
+        relayRetryDeadline = relayRetryDeadline ?: inMemoryRetryDeadline(),
         backgroundGracePeriodMillis = backgroundGracePeriodMillis,
         reconnectDelayMillis = reconnectDelayMillis,
         maximumReconnectDelayMillis = maximumReconnectDelayMillis,
+        elapsedRealtimeMillis = { testScheduler.currentTime },
+        reportInternalFailure = reportInternalFailure,
     )
+
+    private fun kotlinx.coroutines.test.TestScope.inMemoryRetryDeadline(): RelayRetryDeadline {
+        var state = RelayRetryDeadlineState()
+        return RelayRetryDeadline(
+            readState = { state },
+            writeState = { state = it },
+            bootCount = 7,
+            currentTimeMillis = { testScheduler.currentTime },
+            elapsedRealtimeMillis = { testScheduler.currentTime },
+        )
+    }
 }

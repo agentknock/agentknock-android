@@ -321,6 +321,26 @@ class RequestRepositorySlotTest {
     }
 
     @Test
+    fun retryableRelayErrorPreservesServerRetryDelay() = runTest {
+        connect(
+            RelayDeviceEvent.Error(
+                code = "RATE_LIMITED",
+                message = "retry later",
+                retryable = true,
+                clientId = null,
+                requestId = null,
+                kind = null,
+                retryAfterMillis = 60_000,
+            ),
+        )
+
+        assertEquals(
+            RequestSyncResult.RelayUnavailable("retry later", 60_000),
+            repository.sync(),
+        )
+    }
+
+    @Test
     fun authenticatedUnknownCompletionInfersResponseReceipt() = runTest {
         val clientPsk = establishActivePairing()
         val exchange = pairedExchange(

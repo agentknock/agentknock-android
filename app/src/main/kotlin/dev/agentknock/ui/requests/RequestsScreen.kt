@@ -264,4 +264,5 @@ private fun RequestSyncResult?.problemMessage(): String? = when (this) {
     is RequestSyncResult.RelayRejected -> "The relay rejected the connection"
     is RequestSyncResult.RelayUnavailable ->
         "Couldn't connect to the relay. Check your connection and try again."
+    is RequestSyncResult.InternalFailure -> "Agentknock couldn't process relay messages"
 }

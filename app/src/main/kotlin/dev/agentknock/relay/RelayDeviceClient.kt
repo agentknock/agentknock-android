@@ -22,6 +22,11 @@ import okhttp3.Response
 import okhttp3.WebSocket
 import okhttp3.WebSocketListener
 import okio.ByteString
+import java.time.Instant
+import java.time.ZoneOffset
+import java.time.ZonedDateTime
+import java.time.format.DateTimeFormatter
+import java.util.Locale
 import java.util.concurrent.atomic.AtomicBoolean
 
 internal enum class RelayMessageKind(val wireName: String) {
@@ -133,7 +138,12 @@ internal sealed interface RelayDeviceEvent {
         val clientId: String?,
         val requestId: String?,
         val kind: RelayMessageKind?,
-    ) : RelayDeviceEvent
+        val retryAfterMillis: Long? = null,
+    ) : RelayDeviceEvent {
+        init {
+            require(retryAfterMillis == null || retryAfterMillis >= 0)
+        }
+    }
 
     data object CaughtUp : RelayDeviceEvent
 
@@ -151,7 +161,14 @@ internal sealed interface RelayDeviceConnectionResult {
         val message: String?,
     ) : RelayDeviceConnectionResult
 
-    data class Unavailable(val message: String?) : RelayDeviceConnectionResult
+    data class Unavailable(
+        val message: String?,
+        val retryAfterMillis: Long? = null,
+    ) : RelayDeviceConnectionResult {
+        init {
+            require(retryAfterMillis == null || retryAfterMillis >= 0)
+        }
+    }
 }
 
 internal interface RelayDeviceConnection {
@@ -174,6 +191,7 @@ internal class WebSocketRelayDeviceClient(
     private val relayUrl: String = DEFAULT_RELAY_URL,
     private val codec: RelayFrameCodec = RelayFrameCodec(),
     private val eventBufferCapacity: Int = MAXIMUM_PENDING_EVENTS,
+    private val currentTimeMillis: () -> Long = System::currentTimeMillis,
 ) : RelayDeviceClient {
     private val client = client.newBuilder()
         // The application connection manager owns retry timing.
@@ -273,6 +291,10 @@ internal class WebSocketRelayDeviceClient(
             return RelayDeviceConnectionResult.Unavailable(
                 message = error?.message
                     ?: "Relay is temporarily unavailable (HTTP ${response.code}).",
+                retryAfterMillis = maximumRetryDelay(
+                    error?.retryAfterMillis,
+                    response.header("Retry-After")?.toRetryAfterMillis(currentTimeMillis()),
+                ),
             )
         }
         return RelayDeviceConnectionResult.Rejected(
@@ -458,6 +480,7 @@ internal class RelayFrameCodec(
                 clientId = frame.optionalString("client_id"),
                 requestId = frame.optionalString("request_id"),
                 kind = frame.optionalString("kind")?.toMessageKind(),
+                retryAfterMillis = frame.optionalNonNegativeLong("retry_after_ms"),
             )
             "caught_up" -> RelayDeviceEvent.CaughtUp
             else -> error("Unknown relay frame type")
@@ -496,6 +519,75 @@ private fun JsonObject.optionalString(name: String): String? = when (val value =
         ?: error("Relay $name must be a string")
     else -> error("Relay $name must be a string")
 }
+
+private fun JsonObject.optionalNonNegativeLong(name: String): Long? = when (
+    val value = this[name]
+) {
+    null, JsonNull -> null
+    is JsonPrimitive -> value.takeUnless(JsonPrimitive::isString)
+        ?.content
+        ?.parseNonNegativeDecimalClamped()
+        ?: error("Relay $name must be a non-negative integer")
+    else -> error("Relay $name must be a non-negative integer")
+}
+
+private fun String.toRetryAfterMillis(nowMillis: Long): Long? {
+    val encoded = trim()
+    encoded.parseNonNegativeDecimalClamped(Long.MAX_VALUE / 1_000L)?.let { seconds ->
+        return seconds * 1_000L
+    }
+    val retryAtMillis = encoded.httpDateMillis(nowMillis) ?: return null
+    return when {
+        retryAtMillis <= nowMillis -> 0
+        retryAtMillis - nowMillis < 0 -> Long.MAX_VALUE
+        else -> retryAtMillis - nowMillis
+    }
+}
+
+private fun String.httpDateMillis(nowMillis: Long): Long? {
+    runCatching {
+        ZonedDateTime.parse(this, DateTimeFormatter.RFC_1123_DATE_TIME)
+            .toInstant()
+            .toEpochMilli()
+    }.getOrNull()?.let { return it }
+
+    if (',' in this && '-' in this) {
+        runCatching {
+            ZonedDateTime.parse(substringAfter(',').trim(), RFC_850_DATE_TIME)
+        }.getOrNull()?.let { parsed ->
+            val fiftyYearsFromNow = Instant.ofEpochMilli(nowMillis)
+                .atZone(ZoneOffset.UTC)
+                .plusYears(50)
+            val candidate = parsed.withYear(
+                (fiftyYearsFromNow.year / 100) * 100 + parsed.year % 100,
+            )
+            return candidate
+                .let { if (it.isAfter(fiftyYearsFromNow)) it.minusYears(100) else it }
+                .toInstant()
+                .toEpochMilli()
+        }
+    }
+
+    return runCatching {
+        val withoutWeekday = substringAfter(' ').trim().replace(WHITESPACE, " ")
+        ZonedDateTime.parse("$withoutWeekday GMT", ASCTIME_DATE_TIME)
+            .toInstant()
+            .toEpochMilli()
+    }.getOrNull()
+}
+
+private fun maximumRetryDelay(first: Long?, second: Long?): Long? =
+    listOfNotNull(first, second).maxOrNull()
+
+private val RFC_850_DATE_TIME = DateTimeFormatter.ofPattern(
+    "dd-MMM-yy HH:mm:ss zzz",
+    Locale.US,
+)
+private val ASCTIME_DATE_TIME = DateTimeFormatter.ofPattern(
+    "MMM d HH:mm:ss yyyy zzz",
+    Locale.US,
+)
+private val WHITESPACE = Regex(" +")
 
 private const val MAXIMUM_FRAME_BYTES = 256 * 1024
 private const val MAXIMUM_PENDING_EVENTS = 64

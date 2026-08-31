@@ -27,6 +27,7 @@ import androidx.work.OneTimeWorkRequestBuilder
 import androidx.work.OutOfQuotaPolicy
 import androidx.work.WorkManager
 import androidx.work.WorkerParameters
+import androidx.work.await
 import androidx.work.workDataOf
 import com.google.firebase.messaging.FirebaseMessagingService
 import com.google.firebase.messaging.RemoteMessage
@@ -36,6 +37,7 @@ import dev.agentknock.R
 import dev.agentknock.storage.request.RequestSyncResult
 import dev.agentknock.storage.request.RequestNotification
 import dev.agentknock.storage.request.RequestNotificationDetail
+import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.SupervisorJob
@@ -137,6 +139,8 @@ class PushSynchronizationWorker(
         if (container.factoryResetInProgress) return Result.success()
         return when (val synchronization = container.requestConnection.synchronizeOnce()) {
             dev.agentknock.storage.request.OneShotSynchronizationResult.Covered -> Result.success()
+            is dev.agentknock.storage.request.OneShotSynchronizationResult.Deferred ->
+                enqueueDeadlineRetry(applicationContext, synchronization.retryAfterMillis)
             is dev.agentknock.storage.request.OneShotSynchronizationResult.Completed -> when (
                 synchronization.result
             ) {
@@ -149,7 +153,22 @@ class PushSynchronizationWorker(
                     container.requestNotifications.reconcile()
                     Result.success()
                 }
-                is RequestSyncResult.RelayUnavailable -> Result.retry()
+                is RequestSyncResult.RelayUnavailable -> {
+                    synchronization.result.retryAfterMillis
+                        ?.takeIf { it > 0 }
+                        ?.let { enqueueDeadlineRetry(applicationContext, it) }
+                        ?: Result.retry()
+                }
+                is RequestSyncResult.InternalFailure -> {
+                    Log.e(
+                        TAG,
+                        "Request synchronization stopped after an internal " +
+                            synchronization.result.type,
+                    )
+                    // This worker must not fail an APPEND_OR_REPLACE chain: a later push can
+                    // represent valid new work after a transient local problem is fixed.
+                    Result.success()
+                }
                 is RequestSyncResult.RelayRejected -> {
                     // The domain failure is already exposed by RequestConnectionManager. Mark the
                     // scheduling attempt complete so APPEND_OR_REPLACE successors are not failed
@@ -162,21 +181,87 @@ class PushSynchronizationWorker(
 
     companion object {
         private const val WORK_NAME = "push-synchronization"
+        private const val DEADLINE_WORK_NAME = "push-synchronization-deadline"
+        private const val TAG = "AgentknockPush"
 
         fun enqueue(context: Context) {
-            val request = OneTimeWorkRequestBuilder<PushSynchronizationWorker>()
-                .setConstraints(networkConstraints())
-                .setBackoffCriteria(BackoffPolicy.EXPONENTIAL, 10, TimeUnit.SECONDS)
-                .setExpedited(OutOfQuotaPolicy.RUN_AS_NON_EXPEDITED_WORK_REQUEST)
-                .build()
             WorkManager.getInstance(context).enqueueUniqueWork(
                 WORK_NAME,
                 ExistingWorkPolicy.APPEND_OR_REPLACE,
-                request,
+                workRequest(),
             )
         }
+
+        internal suspend fun enqueueAndAwait(context: Context) {
+            WorkManager.getInstance(context).enqueueUniqueWork(
+                WORK_NAME,
+                ExistingWorkPolicy.APPEND_OR_REPLACE,
+                workRequest(),
+            ).await()
+        }
+
+        private fun workRequest() = OneTimeWorkRequestBuilder<PushSynchronizationWorker>()
+            .setConstraints(networkConstraints())
+            .setBackoffCriteria(BackoffPolicy.EXPONENTIAL, 10, TimeUnit.SECONDS)
+            .setExpedited(OutOfQuotaPolicy.RUN_AS_NON_EXPEDITED_WORK_REQUEST)
+            .build()
+
+        private suspend fun enqueueDeadlineRetry(context: Context, delayMillis: Long): Result {
+            val request = OneTimeWorkRequestBuilder<RelayRetryWorker>()
+                .setInitialDelay(
+                    deadlineRetryWorkDelayMillis(delayMillis),
+                    TimeUnit.MILLISECONDS,
+                )
+                .setConstraints(networkConstraints())
+                .setBackoffCriteria(BackoffPolicy.EXPONENTIAL, 10, TimeUnit.SECONDS)
+                .build()
+            return try {
+                WorkManager.getInstance(context).enqueueUniqueWork(
+                    DEADLINE_WORK_NAME,
+                    ExistingWorkPolicy.REPLACE,
+                    request,
+                ).await()
+                Result.success()
+            } catch (cancelled: CancellationException) {
+                throw cancelled
+            } catch (failure: Exception) {
+                Log.w(TAG, "Could not schedule the relay retry", failure)
+                Result.retry()
+            }
+        }
+
     }
 }
+
+class RelayRetryWorker(
+    applicationContext: Context,
+    parameters: WorkerParameters,
+) : CoroutineWorker(applicationContext, parameters) {
+    override suspend fun doWork(): Result {
+        val container = (applicationContext as AgentknockApplication).container
+        if (container.factoryResetInProgress) return Result.success()
+        return try {
+            PushSynchronizationWorker.enqueueAndAwait(applicationContext)
+            Result.success()
+        } catch (cancelled: CancellationException) {
+            throw cancelled
+        } catch (failure: Exception) {
+            Log.w(TAG, "Could not enqueue relay synchronization", failure)
+            Result.retry()
+        }
+    }
+
+    private companion object {
+        const val TAG = "AgentknockPush"
+    }
+}
+
+internal fun deadlineRetryWorkDelayMillis(remainingMillis: Long): Long {
+    require(remainingMillis > 0)
+    return minOf(remainingMillis, MAXIMUM_DEADLINE_WORK_DELAY_MILLIS)
+}
+
+private val MAXIMUM_DEADLINE_WORK_DELAY_MILLIS = TimeUnit.HOURS.toMillis(24)
 
 internal object RequestNotifications {
     const val OPEN_REQUESTS_ACTION = "dev.agentknock.action.OPEN_REQUESTS"
