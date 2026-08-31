@@ -6,7 +6,6 @@ import android.Manifest
 import android.app.KeyguardManager
 import android.content.Intent
 import android.content.pm.PackageManager
-import android.net.Uri
 import android.os.Build
 import android.provider.Settings
 import androidx.activity.compose.BackHandler
@@ -83,6 +82,7 @@ import androidx.compose.ui.text.input.KeyboardType
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
 import androidx.core.content.ContextCompat
+import androidx.core.net.toUri
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import dev.agentknock.BuildConfig
 import dev.agentknock.push.RequestNotifications
@@ -615,7 +615,7 @@ private fun About(
 ) {
     val context = LocalContext.current
     fun open(label: String, url: String) {
-        runCatching { context.startActivity(Intent(Intent.ACTION_VIEW, Uri.parse(url))) }
+        runCatching { context.startActivity(Intent(Intent.ACTION_VIEW, url.toUri())) }
             .onFailure { report("Could not open $label") }
     }
     Column(modifier) {

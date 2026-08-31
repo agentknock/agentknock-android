@@ -155,8 +155,6 @@ internal class AuditRepository(
 
     fun observeEvent(id: Long): Flow<AuditEvent?> = dao.observeEvent(id).map { it?.toModel() }
 
-    fun observeCount(): Flow<Int> = dao.observeCount()
-
     override suspend fun record(record: AuditRecord) {
         append(listOf(record), currentTimeMillis())
     }

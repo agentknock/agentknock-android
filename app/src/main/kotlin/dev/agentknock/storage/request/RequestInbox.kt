@@ -11,9 +11,6 @@ import dev.agentknock.protocol.SshAuthenticationMethod
 import dev.agentknock.protocol.SshSignatureAlgorithm
 import dev.agentknock.relay.ApprovalReviewEnvironmentDestination
 import dev.agentknock.relay.ApprovalReviewEnvironmentSecretFacts
-import dev.agentknock.relay.ApprovalReviewEnvironmentVariableFacts
-import dev.agentknock.relay.ApprovalReviewSecretFacts
-import dev.agentknock.relay.ApprovalReviewSshSecretFacts
 import dev.agentknock.relay.ApprovalReviewStandardInputDestination
 import dev.agentknock.storage.approval.ApprovalEvaluation
 import dev.agentknock.storage.secret.ENVIRONMENT_SECRET_TYPE
@@ -27,7 +24,6 @@ import kotlinx.serialization.builtins.serializer
 import kotlinx.serialization.decodeFromString
 import kotlinx.serialization.json.Json
 import kotlinx.serialization.json.JsonNull
-import kotlinx.serialization.json.jsonObject
 import kotlinx.serialization.json.jsonPrimitive
 
 internal enum class InboxRequestState(val storedName: String) {
@@ -684,12 +680,17 @@ internal class RequestInbox(
         }
     }
 
-    suspend fun pendingNotifications(): List<RequestNotification> =
-        dao.getActionRequiredRequests().mapNotNull { request ->
-            when (request.kind) {
+    fun observePendingNotifications(): Flow<List<RequestNotification>> =
+        dao.observeActionRequiredRequests().map { requests ->
+            requests.mapNotNull { notificationFor(it) }
+        }
+
+    private suspend fun notificationFor(
+        request: InboxRequestEntity,
+    ): RequestNotification? = when (request.kind) {
                 RequestKind.SECRET_USE.storedName -> {
-                    val secretUse = dao.getSecretUseRequest(request.id) ?: return@mapNotNull null
-                    if (secretUse.decision != null) return@mapNotNull null
+                    val secretUse = dao.getSecretUseRequest(request.id) ?: return null
+                    if (secretUse.decision != null) return null
                     val secrets = decodeStringList(secretUse.secretsJson)
                     val command = renderShellCommand(
                         secretUse.command,
@@ -716,11 +717,11 @@ internal class RequestInbox(
                     )
                 }
                 RequestKind.GIT_SIGN.storedName -> {
-                    val gitSign = dao.getGitSignRequest(request.id) ?: return@mapNotNull null
-                    if (gitSign.decision != null) return@mapNotNull null
-                    val parentId = request.parentRequestId ?: return@mapNotNull null
-                    val invocation = dao.getSecretUseRequest(parentId) ?: return@mapNotNull null
-                    val parentRequest = dao.getRequestById(parentId) ?: return@mapNotNull null
+                    val gitSign = dao.getGitSignRequest(request.id) ?: return null
+                    if (gitSign.decision != null) return null
+                    val parentId = request.parentRequestId ?: return null
+                    val invocation = dao.getSecretUseRequest(parentId) ?: return null
+                    val parentRequest = dao.getRequestById(parentId) ?: return null
                     val command = renderShellCommand(
                         invocation.command,
                         decodeStringList(invocation.argumentsJson),
@@ -749,11 +750,11 @@ internal class RequestInbox(
                 }
                 RequestKind.SSH_AUTHENTICATE.storedName -> {
                     val authentication = dao.getSshAuthenticationRequest(request.id)
-                        ?: return@mapNotNull null
-                    if (authentication.decision != null) return@mapNotNull null
-                    val parentId = request.parentRequestId ?: return@mapNotNull null
-                    val invocation = dao.getSecretUseRequest(parentId) ?: return@mapNotNull null
-                    val parentRequest = dao.getRequestById(parentId) ?: return@mapNotNull null
+                        ?: return null
+                    if (authentication.decision != null) return null
+                    val parentId = request.parentRequestId ?: return null
+                    val invocation = dao.getSecretUseRequest(parentId) ?: return null
+                    val parentRequest = dao.getRequestById(parentId) ?: return null
                     val command = renderShellCommand(
                         invocation.command,
                         decodeStringList(invocation.argumentsJson),
@@ -780,7 +781,7 @@ internal class RequestInbox(
                     )
                 }
                 RequestKind.PAIRING.storedName -> {
-                    val pairing = dao.getPairingAttempt(request.id) ?: return@mapNotNull null
+                    val pairing = dao.getPairingAttempt(request.id) ?: return null
                     RequestNotification(
                         requestId = request.id,
                         title = "Pairing requested",
@@ -807,8 +808,8 @@ internal class RequestInbox(
                     )
                 }
                 RequestKind.SECRET_UPLOAD.storedName -> {
-                    val upload = dao.getSecretUploadRequest(request.id) ?: return@mapNotNull null
-                    if (upload.decision != null) return@mapNotNull null
+                    val upload = dao.getSecretUploadRequest(request.id) ?: return null
+                    if (upload.decision != null) return null
                     val uploadSummary = decodeUploadSummary(upload.summaryJson)
                     RequestNotification(
                         requestId = request.id,
@@ -853,7 +854,6 @@ internal class RequestInbox(
                 }
                 else -> null
             }
-        }
 
     private fun SecretUploadRequestEntity.listSummary(): String {
         val summary = decodeUploadSummary(summaryJson)
@@ -911,7 +911,7 @@ internal class RequestInbox(
     private fun decodeEnvironmentReviewFacts(
         value: String?,
     ): Map<String, Map<String, String?>> = value?.let { encoded ->
-        decodeApprovalReviewSecretFacts(encoded)
+        json.decodeStoredApprovalReviewSecretFacts(encoded)
             ?.mapNotNull { (secretName, facts) ->
                 (facts as? ApprovalReviewEnvironmentSecretFacts)
                     ?.let { environment ->
@@ -932,37 +932,6 @@ internal class RequestInbox(
             }
             ?.toMap()
     }.orEmpty()
-
-    private fun decodeApprovalReviewSecretFacts(
-        encoded: String,
-    ): Map<String, ApprovalReviewSecretFacts>? {
-        val current = runCatching {
-            json.decodeFromString<Map<String, ApprovalReviewSecretFacts>>(encoded)
-        }.getOrNull()
-        if (current != null) return current
-        return runCatching {
-            json.parseToJsonElement(encoded).jsonObject.mapValues { (_, facts) ->
-                val objectValue = facts.jsonObject
-                when (objectValue.getValue("type").jsonPrimitive.content) {
-                    ENVIRONMENT_SECRET_TYPE -> {
-                        val variables = objectValue.getValue("environment_variables").jsonObject
-                        ApprovalReviewEnvironmentSecretFacts(
-                            variables.mapValues { (name, variable) ->
-                                ApprovalReviewEnvironmentVariableFacts(
-                                    destination = ApprovalReviewEnvironmentDestination(name),
-                                    value = variable,
-                                )
-                            },
-                        )
-                    }
-                    SSH_SECRET_TYPE -> ApprovalReviewSshSecretFacts(
-                        provides = objectValue.getValue("provides").jsonPrimitive.content,
-                    )
-                    else -> error("Unsupported stored review secret type")
-                }
-            }
-        }.getOrNull()
-    }
 
     private fun decodeClientSoftware(value: String): ClientSoftware? =
         runCatching { json.decodeFromString<ClientSoftware>(value) }.getOrNull()

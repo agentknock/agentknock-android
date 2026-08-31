@@ -30,11 +30,6 @@ import dev.agentknock.review.approvalReviewGitSignRequest
 import dev.agentknock.review.approvalReviewSshAuthenticationRequest
 import dev.agentknock.review.approvalReviewSecretFacts
 import dev.agentknock.relay.ApprovalReviewRequest
-import dev.agentknock.relay.ApprovalReviewEnvironmentSecretFacts
-import dev.agentknock.relay.ApprovalReviewEnvironmentDestination
-import dev.agentknock.relay.ApprovalReviewEnvironmentVariableFacts
-import dev.agentknock.relay.ApprovalReviewSecretFacts
-import dev.agentknock.relay.ApprovalReviewSshSecretFacts
 import dev.agentknock.relay.RelayClientState
 import dev.agentknock.relay.RelayApprovalReviewClient
 import dev.agentknock.relay.RelayApprovalReviewDecision
@@ -90,7 +85,6 @@ import dev.agentknock.storage.audit.AuditDecisionSource
 import dev.agentknock.storage.audit.AuditOutcome
 import dev.agentknock.storage.audit.AuditRecord
 import dev.agentknock.storage.audit.AuditSink
-import dev.agentknock.storage.audit.NoOpAuditSink
 import dev.agentknock.storage.device.RelayDeviceCredentials
 import dev.agentknock.storage.device.RelayDeviceCredentialsResult
 import dev.agentknock.storage.device.RelayDeviceCredentialSource
@@ -102,10 +96,8 @@ import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.NonCancellable
 import kotlinx.coroutines.channels.Channel
 import kotlinx.coroutines.flow.Flow
-import kotlinx.coroutines.flow.MutableSharedFlow
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.StateFlow
-import kotlinx.coroutines.flow.asSharedFlow
 import kotlinx.coroutines.flow.asStateFlow
 import kotlinx.coroutines.flow.combine
 import kotlinx.coroutines.flow.map
@@ -115,8 +107,6 @@ import kotlinx.coroutines.sync.withLock
 import kotlinx.coroutines.withContext
 import kotlinx.serialization.json.Json
 import kotlinx.serialization.json.JsonElement
-import kotlinx.serialization.json.jsonObject
-import kotlinx.serialization.json.jsonPrimitive
 import kotlinx.serialization.builtins.ListSerializer
 import kotlinx.serialization.builtins.serializer
 import kotlinx.serialization.decodeFromString
@@ -369,13 +359,13 @@ internal class RequestRepository(
     private val material: RequestMaterialStore,
     private val deviceCredentials: RelayDeviceCredentialSource,
     private val secrets: SecretRepository,
-    private val approvalReviewer: RelayApprovalReviewClient? = null,
+    private val approvalReviewer: RelayApprovalReviewClient,
     private val relay: RelayDeviceClient,
     private val aiReviews: AiReviewCoordinator,
     private val scheduleSynchronization: () -> Unit,
-    private val audit: AuditSink = NoOpAuditSink,
+    private val audit: AuditSink,
+    private val requestPushRegistration: () -> Unit,
     private val sshKeys: SshKeyCodec = SshKeyCodec(),
-    private val requestPushRegistration: () -> Unit = {},
     private val pairingProtocol: PairingProtocol = PairingProtocol(),
     private val pairedRequestProtocol: PairedRequestProtocol = PairedRequestProtocol(),
     private val invocationProtocol: InvocationProtocol = InvocationProtocol(),
@@ -391,13 +381,10 @@ internal class RequestRepository(
 ) {
     private val operationMutex = Mutex()
     private val pendingChanges = Channel<Unit>(Channel.CONFLATED)
-    private val _inboxChanges = MutableSharedFlow<Unit>(extraBufferCapacity = 1)
     private val _pushRegistrationState = MutableStateFlow<RelayPushRegistrationState?>(null)
 
     val pushRegistrationState: StateFlow<RelayPushRegistrationState?> =
         _pushRegistrationState.asStateFlow()
-
-    val inboxChanges: Flow<Unit> = _inboxChanges.asSharedFlow()
 
     fun observeClients(): Flow<List<ClientSummary>> = combine(
         dao.observeClients(),
@@ -451,8 +438,6 @@ internal class RequestRepository(
             }
         }
 
-    suspend fun clearCompletedHistory(): Int = dao.clearCompletedHistory()
-
     suspend fun recoverInterruptedAiReviews(): Int = operationMutex.withLock {
         dao.recoverInterruptedAiReviews()
     }
@@ -460,12 +445,10 @@ internal class RequestRepository(
     suspend fun sync(): RequestSyncResult = runConnection(keepConnected = false)
 
     suspend fun listen(
-        onCaughtUp: () -> Unit,
-        onInboxChanged: suspend () -> Unit = {},
+        onCaughtUp: suspend () -> Unit,
     ): RequestSyncResult = runConnection(
         keepConnected = true,
         onCaughtUp = onCaughtUp,
-        onInboxChanged = onInboxChanged,
     )
 
     suspend fun approvePendingRequest(requestId: String) {
@@ -535,14 +518,12 @@ internal class RequestRepository(
             }
         } finally {
             requestSync()
-            _inboxChanges.tryEmit(Unit)
         }
     }
 
     private suspend fun runConnection(
         keepConnected: Boolean,
-        onCaughtUp: () -> Unit = {},
-        onInboxChanged: suspend () -> Unit = {},
+        onCaughtUp: suspend () -> Unit = {},
     ): RequestSyncResult {
         val credentials = when (val result = deviceCredentials.activeDeviceCredentials()) {
             is RelayDeviceCredentialsResult.Available -> result.credentials
@@ -579,7 +560,6 @@ internal class RequestRepository(
                 connection = connection,
                 keepConnected = keepConnected,
                 onCaughtUp = onCaughtUp,
-                onInboxChanged = onInboxChanged,
             )
         } finally {
             connection.close()
@@ -590,8 +570,7 @@ internal class RequestRepository(
         credentials: RelayDeviceCredentials,
         connection: RelayDeviceConnection,
         keepConnected: Boolean,
-        onCaughtUp: () -> Unit,
-        onInboxChanged: suspend () -> Unit,
+        onCaughtUp: suspend () -> Unit,
     ): RequestSyncResult {
         val awaitingClientStates = mutableMapOf<String, RelayClientState>()
         val awaitingResponses = mutableSetOf<String>()
@@ -778,7 +757,6 @@ internal class RequestRepository(
                 }
             }
             if (failure != null) return failure
-            onInboxChanged()
             operationMutex.withLock {
                 dao.deleteSettledHiddenRequests(
                     currentTimeMillis() - IDEMPOTENCY_RETENTION_MILLIS,
@@ -4057,8 +4035,6 @@ internal class RequestRepository(
         policies: List<SecretApprovalPolicy>,
         credentials: RelayDeviceCredentials,
     ): AiReview {
-        val reviewer = approvalReviewer
-            ?: return AiReview(failure = AiReviewFailure.UNAVAILABLE)
         val request = approvalReviewRequest(
             client = pairing,
             contents = contents,
@@ -4068,7 +4044,7 @@ internal class RequestRepository(
             policies = policies,
             deviceInstructions = credentials.instructions,
         )
-        return performAiReview(reviewer, credentials, request)
+        return performAiReview(approvalReviewer, credentials, request)
     }
 
     private suspend fun requestGitSignAiReview(
@@ -4080,8 +4056,6 @@ internal class RequestRepository(
         policies: List<SecretApprovalPolicy>,
         credentials: RelayDeviceCredentials,
     ): AiReview {
-        val reviewer = approvalReviewer
-            ?: return AiReview(failure = AiReviewFailure.UNAVAILABLE)
         val elapsedSeconds = parentElapsedSeconds ?: return AiReview(
             decision = AiReviewDecision.ASK_USER,
             explanation = "The relative timing of the parent invocation is unavailable.",
@@ -4099,7 +4073,7 @@ internal class RequestRepository(
             explanation = "The exact Git signing content is not valid UTF-8.",
         )
         val invocationSecrets = invocation.providedSecretsJson?.let { stored ->
-            decodeApprovalReviewSecretFacts(stored)
+            json.decodeStoredApprovalReviewSecretFacts(stored)
         } ?: return AiReview(
             decision = AiReviewDecision.ASK_USER,
             explanation = "The parent invocation context is unavailable.",
@@ -4115,7 +4089,7 @@ internal class RequestRepository(
             policies = policies,
             deviceInstructions = credentials.instructions,
         )
-        return performAiReview(reviewer, credentials, request)
+        return performAiReview(approvalReviewer, credentials, request)
     }
 
     private suspend fun requestSshAuthenticationAiReview(
@@ -4128,14 +4102,12 @@ internal class RequestRepository(
         policies: List<SecretApprovalPolicy>,
         credentials: RelayDeviceCredentials,
     ): AiReview {
-        val reviewer = approvalReviewer
-            ?: return AiReview(failure = AiReviewFailure.UNAVAILABLE)
         val elapsedSeconds = parentElapsedSeconds ?: return AiReview(
             decision = AiReviewDecision.ASK_USER,
             explanation = "The relative timing of the parent invocation is unavailable.",
         )
         val invocationSecrets = invocation.providedSecretsJson?.let {
-            decodeApprovalReviewSecretFacts(it)
+            json.decodeStoredApprovalReviewSecretFacts(it)
         } ?: return AiReview(
             decision = AiReviewDecision.ASK_USER,
             explanation = "The parent invocation context is unavailable.",
@@ -4151,7 +4123,7 @@ internal class RequestRepository(
             policies = policies,
             deviceInstructions = credentials.instructions,
         )
-        return performAiReview(reviewer, credentials, request)
+        return performAiReview(approvalReviewer, credentials, request)
     }
 
     private suspend fun performAiReview(
@@ -5556,37 +5528,6 @@ internal class RequestRepository(
 
     private fun decodeApprovalEvaluation(value: String): ApprovalEvaluation? =
         runCatching { json.decodeFromString<ApprovalEvaluation>(value) }.getOrNull()
-
-    private fun decodeApprovalReviewSecretFacts(
-        encoded: String,
-    ): Map<String, ApprovalReviewSecretFacts>? {
-        val current = runCatching {
-            json.decodeFromString<Map<String, ApprovalReviewSecretFacts>>(encoded)
-        }.getOrNull()
-        if (current != null) return current
-        return runCatching {
-            json.parseToJsonElement(encoded).jsonObject.mapValues { (_, facts) ->
-                val objectValue = facts.jsonObject
-                when (objectValue.getValue("type").jsonPrimitive.content) {
-                    ENVIRONMENT_SECRET_TYPE -> {
-                        val variables = objectValue.getValue("environment_variables").jsonObject
-                        ApprovalReviewEnvironmentSecretFacts(
-                            variables.mapValues { (name, variable) ->
-                                ApprovalReviewEnvironmentVariableFacts(
-                                    destination = ApprovalReviewEnvironmentDestination(name),
-                                    value = variable,
-                                )
-                            },
-                        )
-                    }
-                    SSH_SECRET_TYPE -> ApprovalReviewSshSecretFacts(
-                        provides = objectValue.getValue("provides").jsonPrimitive.content,
-                    )
-                    else -> error("Unsupported stored review secret type")
-                }
-            }
-        }.getOrNull()
-    }
 
     private fun encodeClientSoftware(value: ClientSoftware): String = json.encodeToString(value)
 

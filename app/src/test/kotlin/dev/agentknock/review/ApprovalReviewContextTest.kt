@@ -88,7 +88,6 @@ class ApprovalReviewContextTest {
                 ),
             ),
             evaluation = ApprovalEvaluation(
-                action = ApprovalAction.ASK_AI,
                 secrets = listOf(
                     secretEvaluation("aws-id", "aws-read-only", ApprovalAction.ASK_AI),
                     secretEvaluation("ssh-id", "git-signing", ApprovalAction.APPROVE),
@@ -226,7 +225,6 @@ class ApprovalReviewContextTest {
             ),
             parentElapsedSeconds = 12,
             evaluation = ApprovalEvaluation(
-                action = ApprovalAction.ASK_AI,
                 secrets = listOf(
                     secretEvaluation("ssh-id", "git-signing", ApprovalAction.ASK_AI),
                 ),
@@ -339,7 +337,6 @@ class ApprovalReviewContextTest {
             ),
             parentElapsedSeconds = 37,
             evaluation = ApprovalEvaluation(
-                action = ApprovalAction.ASK_AI,
                 secrets = listOf(
                     secretEvaluation("ssh-id", "production-ssh", ApprovalAction.ASK_AI),
                 ),

@@ -4,6 +4,7 @@ import dev.agentknock.relay.RelayClaimClient
 import dev.agentknock.relay.RelayClaimOutcome
 import dev.agentknock.relay.RelayClaimResult
 import dev.agentknock.relay.RelayEndpointResult
+import dev.agentknock.storage.audit.NoOpAuditSink
 import dev.agentknock.storage.crypto.AesGcmEncryption
 import dev.agentknock.storage.crypto.FakeEncryptionKeyStore
 import dev.agentknock.storage.crypto.FakeVaultKeyDao
@@ -177,6 +178,7 @@ class DeviceIdentityRepositoryTest {
             keyManager = restoredKeyManager,
             encryption = AesGcmEncryption(restoredKeyStore),
             relay = fixture.relay,
+            audit = NoOpAuditSink,
             newId = { "restored-candidate" },
             currentTimeMillis = { 10_001L },
             cryptographyDispatcher = UnconfinedTestDispatcher(testScheduler),
@@ -331,6 +333,7 @@ class DeviceIdentityRepositoryTest {
             keyManager = replacementManager,
             encryption = AesGcmEncryption(replacementKeys),
             relay = fixture.relay,
+            audit = NoOpAuditSink,
             cryptographyDispatcher = UnconfinedTestDispatcher(testScheduler),
         )
 
@@ -361,6 +364,7 @@ class DeviceIdentityRepositoryTest {
             keyManager = replacementManager,
             encryption = AesGcmEncryption(replacementKeys),
             relay = fixture.relay,
+            audit = NoOpAuditSink,
             currentTimeMillis = { 1_000L },
             cryptographyDispatcher = UnconfinedTestDispatcher(testScheduler),
         )
@@ -411,6 +415,7 @@ class DeviceIdentityRepositoryTest {
             keyManager = keyManager,
             encryption = AesGcmEncryption(keyStore),
             relay = relay,
+            audit = NoOpAuditSink,
             newId = { "id-${++id}" },
             currentTimeMillis = { ++time },
             cryptographyDispatcher = dispatcher,

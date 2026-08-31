@@ -40,9 +40,6 @@ internal class RequestConnectionManager(
     private val sessionLock = Mutex()
     private var activeSession: ActiveSession? = null
 
-    @Volatile
-    private var paused = false
-
     private val _syncing = MutableStateFlow(false)
     private val _lastSyncResult = MutableStateFlow<RequestSyncResult?>(null)
 
@@ -152,7 +149,7 @@ internal class RequestConnectionManager(
      * scheduler owns process lifetime and eventually calls [synchronizeOnce].
      */
     fun requestSynchronization() {
-        if (paused) return
+        if (demand.value.paused) return
         if (demand.value.foregroundVisible) {
             demand.update { current ->
                 if (current.paused || !current.foregroundVisible) {
@@ -178,12 +175,12 @@ internal class RequestConnectionManager(
      * foreground socket.
      */
     suspend fun synchronizeOnce(): OneShotSynchronizationResult {
-        if (paused || demand.value.hasLiveForegroundOwner()) {
+        if (demand.value.paused || demand.value.hasLiveForegroundOwner()) {
             return OneShotSynchronizationResult.Covered
         }
 
         val completion = sessionLock.withLock {
-            if (paused || demand.value.hasLiveForegroundOwner()) return@withLock null
+            if (demand.value.paused || demand.value.hasLiveForegroundOwner()) return@withLock null
             when (val active = activeSession) {
                 is ActiveSession.Foreground -> null
                 is ActiveSession.OneShot -> {
@@ -198,7 +195,6 @@ internal class RequestConnectionManager(
 
     /** Stops new sessions, cancels the current owner, and does not return until it has exited. */
     suspend fun pauseAndJoin() {
-        paused = true
         demand.update { current ->
             current.copy(
                 paused = true,
@@ -219,8 +215,7 @@ internal class RequestConnectionManager(
 
     /** Allows lifecycle or scheduled work to establish sessions again after [pauseAndJoin]. */
     fun resume() {
-        if (!paused) return
-        paused = false
+        if (!demand.value.paused) return
         var scheduleReconciliation = false
         demand.update { current ->
             scheduleReconciliation = !current.foregroundVisible
@@ -257,7 +252,7 @@ internal class RequestConnectionManager(
                     if (activeSession !== session) {
                         false
                     } else if (
-                        paused ||
+                        demand.value.paused ||
                         demand.value.foregroundVisible ||
                         !session.repeatRequested
                     ) {
@@ -303,7 +298,7 @@ internal class RequestConnectionManager(
         val session = reserveForegroundSession() ?: return
         try {
             var reconnectDelay = reconnectDelayMillis
-            while (currentCoroutineContext().isActive && !paused) {
+            while (currentCoroutineContext().isActive && !demand.value.paused) {
                 var caughtUp = false
                 _syncing.value = true
                 val result = runOperation {
@@ -358,9 +353,9 @@ internal class RequestConnectionManager(
 
     private suspend fun reserveForegroundSession(): ActiveSession.Foreground? {
         val foregroundJob = checkNotNull(currentCoroutineContext()[Job])
-        while (currentCoroutineContext().isActive && !paused) {
+        while (currentCoroutineContext().isActive && !demand.value.paused) {
             val reservation = sessionLock.withLock {
-                if (paused || !demand.value.foregroundVisible) {
+                if (demand.value.paused || !demand.value.foregroundVisible) {
                     ForegroundReservation.Stop
                 } else {
                     when (val active = activeSession) {

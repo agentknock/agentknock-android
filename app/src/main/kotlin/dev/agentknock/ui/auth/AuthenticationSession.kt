@@ -3,6 +3,7 @@ package dev.agentknock.ui.auth
 import android.content.Context
 import android.os.Handler
 import android.os.Looper
+import androidx.core.content.edit
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.asStateFlow
@@ -66,7 +67,7 @@ internal class AuthenticationSession(context: Context) {
     ) {
         if (newMode == _mode.value) return
         val applyChange = {
-            preferences.edit().putString(MODE_KEY, newMode.storedName).apply()
+            preferences.edit { putString(MODE_KEY, newMode.storedName) }
             _mode.value = newMode
             _authenticated.value = newMode != DeviceAuthenticationMode.DEVICE_LOCK
         }

@@ -152,7 +152,7 @@ class PairingProtocolTest {
     }
 
     @Test
-    fun `answers and verifies the finish pairing exchange`() {
+    fun `answers the finish pairing exchange`() {
         val clientPsk = ByteArray(32) { (it + 1).toByte() }
         val sender = pskHpke.SetupPSKS(
             pskHpke.deserializePublicKey(devicePublicKey),
@@ -180,24 +180,6 @@ class PairingProtocolTest {
         assertEquals(
             "{\"result\":\"ACCEPTED\"}",
             openResponse(sender, prepared.response).decodeToString(),
-        )
-
-        val completionPlaintext =
-            """{${testClientSoftwareFields()},"result":"ACCEPTED"}"""
-                .encodeToByteArray()
-        val completion = json.parseToJsonElement(
-            """{"ciphertext":"${BASE64.encodeToString(sender.seal(EMPTY, completionPlaintext))}"}""",
-        )
-
-        protocol.verifyFinishCompletion(
-            deviceId = DEVICE_ID,
-            requestId = FINISH_REQUEST_ID,
-            clientId = CLIENT_ID,
-            clientPsk = clientPsk,
-            devicePrivateKey = devicePrivateKey,
-            devicePublicKey = devicePublicKey,
-            request = request,
-            completion = completion,
         )
     }
 

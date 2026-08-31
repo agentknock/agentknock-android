@@ -122,8 +122,6 @@ private class FakeAuditDao : AuditDao {
     override fun observeEvent(id: Long): Flow<AuditEventEntity?> =
         events.map { current -> current.find { it.id == id } }
 
-    override fun observeCount(): Flow<Int> = events.map { it.size }
-
     override suspend fun insertEvents(events: List<AuditEventEntity>) {
         var id = (this.events.value.maxOfOrNull(AuditEventEntity::id) ?: 0) + 1
         this.events.value += events.map { event -> event.copy(id = id++) }

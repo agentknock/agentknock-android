@@ -8,7 +8,6 @@ import dev.agentknock.storage.audit.AuditDecisionSource
 import dev.agentknock.storage.audit.AuditOutcome
 import dev.agentknock.storage.audit.AuditRecord
 import dev.agentknock.storage.audit.AuditSink
-import dev.agentknock.storage.audit.NoOpAuditSink
 import dev.agentknock.protocol.SecretUploadMode
 import dev.agentknock.protocol.SshSignatureAlgorithm
 import java.util.UUID
@@ -25,7 +24,7 @@ internal class SecretRepository(
     private val dao: SecretDao,
     private val keyManager: VaultKeyManager,
     private val encryption: AesGcmEncryption,
-    private val audit: AuditSink = NoOpAuditSink,
+    private val audit: AuditSink,
     private val sshKeys: SshKeyCodec = SshKeyCodec(),
     private val newId: () -> String = { UUID.randomUUID().toString() },
     private val currentTimeMillis: () -> Long = System::currentTimeMillis,
@@ -153,13 +152,6 @@ internal class SecretRepository(
                 operation = row.operation.toTemporaryAccessOperation(),
                 expiresAt = row.expiresAt,
             )
-        }
-    }
-
-    suspend fun identitiesForNames(names: List<String>): List<SecretIdentity> {
-        val byName = dao.getSecretsByName(names.distinct()).associateBy(SecretEntity::name)
-        return names.distinct().mapNotNull { name ->
-            byName[name]?.let { secret -> SecretIdentity(secret.id, secret.name) }
         }
     }
 
@@ -336,10 +328,6 @@ internal class SecretRepository(
             )
         }
         return deleted
-    }
-
-    suspend fun clearRestoredTemporaryAccess() {
-        dao.deleteAllTemporaryAccessGrants()
     }
 
     suspend fun generateSshKey(

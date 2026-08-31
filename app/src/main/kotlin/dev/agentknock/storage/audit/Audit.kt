@@ -50,9 +50,6 @@ internal interface AuditDao {
     @Query("SELECT * FROM audit_events WHERE id = :id")
     fun observeEvent(id: Long): Flow<AuditEventEntity?>
 
-    @Query("SELECT count(*) FROM audit_events")
-    fun observeCount(): Flow<Int>
-
     @Insert
     suspend fun insertEvents(events: List<AuditEventEntity>)
 

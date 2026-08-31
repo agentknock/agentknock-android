@@ -9,6 +9,7 @@ import androidx.activity.result.contract.ActivityResultContracts
 import androidx.activity.compose.setContent
 import androidx.activity.enableEdgeToEdge
 import androidx.fragment.app.FragmentActivity
+import androidx.lifecycle.lifecycleScope
 import dev.agentknock.push.RequestNotifications
 import dev.agentknock.subscription.SubscriptionRedemptionLink
 import dev.agentknock.ui.AgentknockScreen
@@ -18,6 +19,7 @@ import dev.agentknock.ui.theme.AgentknockTheme
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.asStateFlow
+import kotlinx.coroutines.launch
 
 internal data class RequestNavigation(val requestId: String?)
 
@@ -95,7 +97,12 @@ class MainActivity : FragmentActivity() {
     private val notificationStateGeneration = MutableStateFlow(0L)
     private val notificationPermissionRequestLauncher = registerForActivityResult(
         ActivityResultContracts.RequestPermission(),
-    ) { notificationStateGeneration.value += 1 }
+    ) {
+        notificationStateGeneration.value += 1
+        lifecycleScope.launch {
+            (application as AgentknockApplication).container.requestNotifications.reconcile()
+        }
+    }
 
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
@@ -129,6 +136,9 @@ class MainActivity : FragmentActivity() {
     override fun onResume() {
         super.onResume()
         notificationStateGeneration.value += 1
+        lifecycleScope.launch {
+            (application as AgentknockApplication).container.requestNotifications.reconcile()
+        }
     }
 
     override fun onSaveInstanceState(outState: Bundle) {

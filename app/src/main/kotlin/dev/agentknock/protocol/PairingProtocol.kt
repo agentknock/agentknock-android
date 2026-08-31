@@ -208,31 +208,6 @@ internal class PairingProtocol(
         )
     }
 
-    fun verifyFinishCompletion(
-        deviceId: String,
-        requestId: String,
-        clientId: String,
-        clientPsk: ByteArray,
-        devicePrivateKey: ByteArray,
-        devicePublicKey: ByteArray,
-        request: JsonElement,
-        completion: JsonElement,
-    ) {
-        val plaintext = pairedRequests.openPairedCompletion(
-            deviceId = deviceId,
-            requestId = requestId,
-            clientId = clientId,
-            clientPsk = clientPsk,
-            devicePrivateKey = devicePrivateKey,
-            devicePublicKey = devicePublicKey,
-            request = request,
-            completion = completion,
-        )
-        val result = json.decodeFromString(FinishCompletion.serializer(), plaintext.decodeToString())
-        json.decodeClientSoftware(plaintext)
-        require(result.result == RESULT_ACCEPTED) { "Client did not accept pairing" }
-    }
-
     fun finishCompletionAccepted(plaintext: ByteArray): Boolean {
         json.decodeClientSoftware(plaintext)
         return json.decodeFromString(

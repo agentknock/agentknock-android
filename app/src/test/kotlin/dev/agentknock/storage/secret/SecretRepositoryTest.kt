@@ -1,6 +1,7 @@
 package dev.agentknock.storage.secret
 
 import dev.agentknock.protocol.SecretUploadMode
+import dev.agentknock.storage.audit.NoOpAuditSink
 import dev.agentknock.storage.crypto.AesGcmEncryption
 import dev.agentknock.storage.crypto.FakeEncryptionKeyStore
 import dev.agentknock.storage.crypto.FakeVaultKeyDao
@@ -330,6 +331,7 @@ class SecretRepositoryTest {
             dao = original.dao,
             keyManager = replacementManager,
             encryption = AesGcmEncryption(replacementKeyStore),
+            audit = NoOpAuditSink,
             newId = { error("no new records expected") },
             currentTimeMillis = { 600L },
         )
@@ -1122,6 +1124,7 @@ class SecretRepositoryTest {
             dao = dao,
             keyManager = keyManager,
             encryption = AesGcmEncryption(keyStore),
+            audit = NoOpAuditSink,
             newId = { "id-${++id}" },
             currentTimeMillis = { nextTime() },
         )

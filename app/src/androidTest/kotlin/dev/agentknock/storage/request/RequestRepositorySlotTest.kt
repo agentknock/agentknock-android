@@ -132,16 +132,17 @@ class RequestRepositorySlotTest {
             ),
         )
         relay = QueuedRelayDeviceClient()
+        val audit = AuditRepository(database.auditDao(), currentTimeMillis = { now })
         secrets = SecretRepository(
             dao = database.secretDao(),
             keyManager = keyManager,
             encryption = encryption,
+            audit = audit,
             newId = { "secret-id" },
             currentTimeMillis = { now },
             cryptographyDispatcher = Dispatchers.Unconfined,
         )
         protocolRandom = SwitchableSecureRandom()
-        val audit = AuditRepository(database.auditDao(), currentTimeMillis = { now })
         reviewScope = CoroutineScope(SupervisorJob() + Dispatchers.Unconfined)
         approvalReviewer = ControllableApprovalReviewer()
         credentialSource = StaticCredentialSource(credentials)
@@ -165,6 +166,7 @@ class RequestRepositorySlotTest {
             aiReviews = AiReviewCoordinator(reviewScope),
             scheduleSynchronization = { synchronizationRequests += 1 },
             audit = audit,
+            requestPushRegistration = {},
             pairingProtocol = PairingProtocol(random = protocolRandom),
             pairedRequestProtocol = PairedRequestProtocol(random = protocolRandom),
             currentTimeMillis = { now },
@@ -1226,7 +1228,6 @@ class RequestRepositorySlotTest {
         assertEquals("USER_DENIED", deniedSigning.completionReason)
         // Pairing belongs to Clients rather than request history. The active invocation and its
         // signing child remain because neither workflow has completed.
-        assertEquals(0, repository.clearCompletedHistory())
         assertNotNull(database.requestDao().getRequestById(parent.id))
         assertNotNull(database.requestDao().getRequestById(child.id))
 

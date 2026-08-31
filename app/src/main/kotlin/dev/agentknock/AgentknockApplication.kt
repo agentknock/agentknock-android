@@ -39,7 +39,6 @@ import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.SupervisorJob
 import kotlinx.coroutines.async
 import kotlinx.coroutines.launch
-import kotlinx.coroutines.flow.collect
 import okhttp3.OkHttpClient
 import java.io.File
 import java.util.concurrent.TimeUnit
@@ -50,9 +49,9 @@ class AgentknockApplication : Application() {
 
     override fun onCreate() {
         super.onCreate()
+        RequestNotifications.createChannel(this)
         val createdContainer = ApplicationContainer(this)
         container = createdContainer
-        RequestNotifications.createChannel(this)
         ProcessLifecycleOwner.get().lifecycle.addObserver(createdContainer.requestConnection)
         createdContainer.start()
     }
@@ -149,7 +148,7 @@ internal class ApplicationContainer(application: Application) {
 
     val requestNotifications = RequestNotificationCoordinator(
         scope = applicationScope,
-        currentRequests = requestInbox::pendingNotifications,
+        requests = requestInbox.observePendingNotifications(),
         displayRequests = { RequestNotifications.showRequests(application, it) },
         displayWake = { RequestNotifications.showWake(application) },
     )
@@ -185,17 +184,10 @@ internal class ApplicationContainer(application: Application) {
         },
         listen = { onCaughtUp ->
             localStorage.await()
-            requests.listen(
-                onCaughtUp = {
-                    onCaughtUp()
-                    applicationScope.launch {
-                        requestNotifications.refresh()
-                    }
-                },
-                onInboxChanged = {
-                    requestNotifications.refresh()
-                },
-            )
+            requests.listen {
+                onCaughtUp()
+                requestNotifications.reconcile()
+            }
         },
         scheduleBackgroundSynchronization = {
             PushSynchronizationWorker.enqueue(application)
@@ -210,11 +202,6 @@ internal class ApplicationContainer(application: Application) {
         check(!started) { "The application container was already started" }
         started = true
         localStorage.start()
-        applicationScope.launch {
-            requests.inboxChanges.collect {
-                requestNotifications.refresh()
-            }
-        }
     }
 
     suspend fun beginFactoryReset(): Boolean {

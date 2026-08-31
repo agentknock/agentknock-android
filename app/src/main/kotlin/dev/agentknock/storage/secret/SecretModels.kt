@@ -303,11 +303,6 @@ internal data class SshKeyReviewMetadata(
     val materialUpdatedAt: Long,
 )
 
-internal data class SecretIdentity(
-    val id: String,
-    val name: String,
-)
-
 internal data class EnvironmentVariableSelection(
     val only: Set<String>? = null,
     val omit: Set<String> = emptySet(),

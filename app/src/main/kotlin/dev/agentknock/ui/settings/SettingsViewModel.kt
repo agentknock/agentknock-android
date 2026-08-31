@@ -67,7 +67,6 @@ internal class SettingsViewModel(
         SharingStarted.Eagerly,
         emptyList(),
     )
-    val auditSelection: StateFlow<Long?> = selectedAuditId.asStateFlow()
     val selectedAuditEvent: StateFlow<AuditEvent?> = selectedAuditId.flatMapLatest { id ->
         id?.let(audit::observeEvent) ?: flowOf(null)
     }.stateIn(viewModelScope, SharingStarted.Eagerly, null)

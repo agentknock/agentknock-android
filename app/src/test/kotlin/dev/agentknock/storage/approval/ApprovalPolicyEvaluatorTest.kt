@@ -20,28 +20,6 @@ class ApprovalPolicyEvaluatorTest {
     }
 
     @Test
-    fun `least permissive effective mode decides an atomic request`() {
-        val evaluation = ApprovalPolicyEvaluator.evaluate(
-            listOf(
-                secret("automatic", ApprovalAction.APPROVE),
-                secret("reviewed", ApprovalAction.ASK_AI),
-                secret("manual", ApprovalAction.ASK_ME),
-                secret("blocked", ApprovalAction.DENY),
-            ),
-        )
-
-        assertEquals(ApprovalAction.DENY, evaluation.action)
-    }
-
-    @Test
-    fun `empty protected request fails to manual review`() {
-        assertEquals(
-            ApprovalAction.ASK_ME,
-            ApprovalPolicyEvaluator.evaluate(emptyList()).action,
-        )
-    }
-
-    @Test
     fun `manual scope does not suppress AI review for another secret`() {
         val evaluation = ApprovalPolicyEvaluator.evaluate(
             listOf(
@@ -50,7 +28,6 @@ class ApprovalPolicyEvaluatorTest {
             ),
         )
 
-        assertEquals(ApprovalAction.ASK_ME, evaluation.action)
         assertEquals(true, evaluation.requiresAiReview())
         assertEquals(false, evaluation.isFullyApproved(AiReviewDecision.APPROVE))
     }

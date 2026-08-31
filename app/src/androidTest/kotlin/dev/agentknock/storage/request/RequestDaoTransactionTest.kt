@@ -215,7 +215,6 @@ class RequestDaoTransactionTest {
     fun completedHistoryCanBePrunedWithoutDeletingTheDurableClient() = runTest {
         insertActivePairing()
 
-        assertEquals(0, dao.clearCompletedHistory())
         assertFalse(checkNotNull(dao.getRequestById(ROOT_REQUEST_ID)).listed)
         assertNotNull(dao.getClient(CLIENT_ID))
 
@@ -282,7 +281,7 @@ class RequestDaoTransactionTest {
 
         assertEquals(
             listOf("request-b", "request-a", "request-z"),
-            dao.getActionRequiredRequests().map(InboxRequestEntity::id),
+            dao.observeActionRequiredRequests().first().map(InboxRequestEntity::id),
         )
     }
 

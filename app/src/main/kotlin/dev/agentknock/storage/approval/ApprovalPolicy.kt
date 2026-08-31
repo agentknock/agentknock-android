@@ -3,11 +3,11 @@ package dev.agentknock.storage.approval
 import kotlinx.serialization.Serializable
 
 @Serializable
-internal enum class ApprovalAction(val precedence: Int) {
-    DENY(0),
-    ASK_ME(1),
-    ASK_AI(2),
-    APPROVE(3),
+internal enum class ApprovalAction {
+    DENY,
+    ASK_ME,
+    ASK_AI,
+    APPROVE,
 }
 
 internal data class RequestedSecretApproval(
@@ -55,7 +55,6 @@ internal data class AiReview(
 
 @Serializable
 internal data class ApprovalEvaluation(
-    val action: ApprovalAction,
     val secrets: List<SecretApprovalEvaluation>,
     val aiReview: AiReview? = null,
 )
@@ -72,11 +71,7 @@ internal object ApprovalPolicyEvaluator {
                 revision = secret.revision,
             )
         }
-        return ApprovalEvaluation(
-            action = secretEvaluations.minByOrNull { it.action.precedence }?.action
-                ?: ApprovalAction.ASK_ME,
-            secrets = secretEvaluations,
-        )
+        return ApprovalEvaluation(secrets = secretEvaluations)
     }
 }
 

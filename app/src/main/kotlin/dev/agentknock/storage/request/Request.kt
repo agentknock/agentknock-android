@@ -1027,16 +1027,6 @@ internal interface RequestDao {
 
     @Query(
         """
-        UPDATE inbox_requests SET listed = 0
-        WHERE listed = 1
-          AND completed_at IS NOT NULL
-          AND kind IN ('secret_use', 'git_sign', 'ssh_authenticate')
-        """,
-    )
-    suspend fun clearCompletedHistory(): Int
-
-    @Query(
-        """
         DELETE FROM inbox_requests
         WHERE listed = 0
           AND completed_at IS NOT NULL
@@ -1070,14 +1060,27 @@ internal interface RequestDao {
     suspend fun deleteSettledHiddenRequests(receivedBefore: Long): Int
 
     @Query(
-        "SELECT inbox_requests.* FROM inbox_requests " +
-            "JOIN device_identities ON device_identities.id = inbox_requests.device_identity_id " +
-            "WHERE inbox_requests.listed = 1 " +
-            "AND inbox_requests.state = 'action_required' " +
-            "AND device_identities.role = 'active' " +
-            "ORDER BY inbox_requests.received_at DESC, inbox_requests.id DESC",
+        """
+        SELECT inbox_requests.* FROM inbox_requests
+        JOIN device_identities
+          ON device_identities.id = inbox_requests.device_identity_id
+        LEFT JOIN pairing_attempts
+          ON pairing_attempts.request_id = inbox_requests.id
+        LEFT JOIN secret_use_requests
+          ON secret_use_requests.request_id = inbox_requests.id
+        LEFT JOIN git_sign_requests
+          ON git_sign_requests.request_id = inbox_requests.id
+        LEFT JOIN ssh_authentication_requests
+          ON ssh_authentication_requests.request_id = inbox_requests.id
+        LEFT JOIN secret_upload_requests
+          ON secret_upload_requests.request_id = inbox_requests.id
+        WHERE inbox_requests.listed = 1
+          AND inbox_requests.state = 'action_required'
+          AND device_identities.role = 'active'
+        ORDER BY inbox_requests.received_at DESC, inbox_requests.id DESC
+        """,
     )
-    suspend fun getActionRequiredRequests(): List<InboxRequestEntity>
+    fun observeActionRequiredRequests(): Flow<List<InboxRequestEntity>>
 
     @Transaction
     suspend fun insertPairingRequest(

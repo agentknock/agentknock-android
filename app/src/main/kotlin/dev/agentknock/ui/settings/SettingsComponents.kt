@@ -67,8 +67,8 @@ internal fun SettingsSectionLabel(
 @Composable
 internal fun SettingsRow(
     title: String,
-    summary: String? = null,
     modifier: Modifier = Modifier,
+    summary: String? = null,
     icon: ImageVector? = null,
     destructive: Boolean = false,
     external: Boolean = false,

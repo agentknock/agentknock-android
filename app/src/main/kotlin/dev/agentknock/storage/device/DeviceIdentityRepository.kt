@@ -15,7 +15,6 @@ import dev.agentknock.storage.audit.AuditEventType
 import dev.agentknock.storage.audit.AuditOutcome
 import dev.agentknock.storage.audit.AuditRecord
 import dev.agentknock.storage.audit.AuditSink
-import dev.agentknock.storage.audit.NoOpAuditSink
 import java.util.UUID
 import kotlinx.coroutines.CoroutineDispatcher
 import kotlinx.coroutines.Dispatchers
@@ -119,7 +118,7 @@ internal class DeviceIdentityRepository(
     private val keyManager: VaultKeyManager,
     private val encryption: AesGcmEncryption,
     private val relay: RelayClaimClient,
-    private val audit: AuditSink = NoOpAuditSink,
+    private val audit: AuditSink,
     private val newId: () -> String = { UUID.randomUUID().toString() },
     private val currentTimeMillis: () -> Long = System::currentTimeMillis,
     private val cryptographyDispatcher: CoroutineDispatcher = Dispatchers.IO,

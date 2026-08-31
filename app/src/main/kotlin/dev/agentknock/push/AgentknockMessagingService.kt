@@ -146,7 +146,7 @@ class PushSynchronizationWorker(
                 RequestSyncResult.DeviceCredentialsCorrupted,
                 RequestSyncResult.UnsupportedDeviceCredentialEncryption,
                 -> {
-                    container.requestNotifications.refresh()
+                    container.requestNotifications.reconcile()
                     Result.success()
                 }
                 is RequestSyncResult.RelayUnavailable -> Result.retry()
@@ -260,9 +260,9 @@ internal object RequestNotifications {
     }
 
     fun showRequests(context: Context, requests: List<RequestNotification>) {
-        if (!canNotify(context)) return
         val manager = context.getSystemService(NotificationManager::class.java)
         manager.cancel(WAKE_NOTIFICATION_ID)
+        if (!canNotify(context)) return
         val activeTags = requests.mapTo(mutableSetOf(), RequestNotification::requestId)
         manager.activeNotifications
             .filter {
