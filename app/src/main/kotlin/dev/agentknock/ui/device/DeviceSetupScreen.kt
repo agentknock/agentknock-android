@@ -56,9 +56,9 @@ import androidx.compose.ui.unit.dp
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import dev.agentknock.R
 import dev.agentknock.protocol.DeviceProtocol
-import dev.agentknock.storage.vault.ClaimPairingAddressResult
-import dev.agentknock.storage.vault.DeviceConfiguration
-import dev.agentknock.storage.vault.DeviceIdentity
+import dev.agentknock.storage.device.ClaimPairingAddressResult
+import dev.agentknock.storage.device.DeviceConfiguration
+import dev.agentknock.storage.device.DeviceIdentity
 import dev.agentknock.ui.theme.agentknockColors
 import dev.agentknock.ui.components.NavigationBackButton
 import kotlinx.coroutines.launch
@@ -456,7 +456,6 @@ private fun reportClaimResult(
         ClaimPairingAddressResult.AddressUnavailable -> getString(R.string.pairing_address_unavailable)
         ClaimPairingAddressResult.SameAddress -> getString(R.string.pairing_address_unchanged)
         ClaimPairingAddressResult.NoCandidate -> getString(R.string.pairing_address_claim_missing)
-        ClaimPairingAddressResult.CredentialsUnavailable -> getString(R.string.device_keys_unavailable)
         ClaimPairingAddressResult.CredentialsCorrupted -> getString(R.string.device_keys_corrupted)
         ClaimPairingAddressResult.UnsupportedEncryption -> getString(R.string.device_keys_unsupported)
         is ClaimPairingAddressResult.RelayRejected -> getString(R.string.device_setup_relay_rejected)

@@ -1,7 +1,8 @@
-package dev.agentknock.storage.vault
+package dev.agentknock.storage.device
 
 import androidx.room3.ColumnInfo
 import androidx.room3.Dao
+import androidx.room3.Embedded
 import androidx.room3.Entity
 import androidx.room3.ForeignKey
 import androidx.room3.Index
@@ -10,14 +11,12 @@ import androidx.room3.PrimaryKey
 import androidx.room3.Query
 import androidx.room3.Transaction
 import dev.agentknock.storage.crypto.VaultKeyEntity
+import dev.agentknock.storage.crypto.EncryptedValue
 import kotlinx.coroutines.flow.Flow
 
 @Entity(
     tableName = "device_identities",
-    indices = [
-        Index(value = ["role"]),
-        Index(value = ["address_id"]),
-    ],
+    indices = [Index(value = ["role"])],
 )
 internal data class DeviceIdentityEntity(
     @PrimaryKey
@@ -27,12 +26,8 @@ internal data class DeviceIdentityEntity(
     val role: String,
     @ColumnInfo(name = "address")
     val address: String,
-    @ColumnInfo(name = "address_id")
-    val addressId: String,
     @ColumnInfo(name = "device_id")
     val deviceId: String,
-    @ColumnInfo(name = "device_public_key")
-    val devicePublicKey: ByteArray,
     @ColumnInfo(name = "created_at")
     val createdAt: Long,
     @ColumnInfo(name = "claimed_at")
@@ -46,7 +41,8 @@ internal data class DeviceIdentityEntity(
 )
 
 @Entity(
-    tableName = "vault_secrets",
+    tableName = "device_credentials",
+    primaryKeys = ["identity_id", "kind"],
     foreignKeys = [
         ForeignKey(
             entity = DeviceIdentityEntity::class,
@@ -64,42 +60,39 @@ internal data class DeviceIdentityEntity(
         ),
     ],
     indices = [
-        Index(value = ["identity_id", "kind"], unique = true),
         Index(value = ["encryption_key_id"]),
     ],
 )
-internal data class VaultSecretEntity(
-    @PrimaryKey
-    @ColumnInfo(name = "id")
-    val id: String,
+internal data class DeviceCredentialEntity(
     @ColumnInfo(name = "identity_id")
     val identityId: String,
     @ColumnInfo(name = "kind")
     val kind: String,
-    @ColumnInfo(name = "encryption_format")
-    val encryptionFormat: Int,
-    @ColumnInfo(name = "encryption_key_id")
-    val encryptionKeyId: String,
-    @ColumnInfo(name = "nonce")
-    val nonce: ByteArray,
-    @ColumnInfo(name = "ciphertext")
-    val ciphertext: ByteArray,
-    @ColumnInfo(name = "created_at")
-    val createdAt: Long,
-    @ColumnInfo(name = "updated_at")
-    val updatedAt: Long,
+    @Embedded
+    val encryptedValue: EncryptedValue,
 )
+
+internal enum class DeviceIdentityRole(val storedName: String) {
+    ACTIVE("active"),
+    CANDIDATE("candidate"),
+    RETIRED("retired"),
+}
+
+internal enum class DeviceCredentialKind(val storedName: String) {
+    DEVICE_TOKEN("device_token"),
+    DEVICE_PRIVATE_KEY("device_private_key"),
+}
 
 internal const val DEVICE_IDENTITY_REPLACED_REQUEST_ERROR =
     "This request could not continue because its previous device identity is no longer available."
 
 @Dao
-internal interface VaultDao {
+internal interface DeviceIdentityDao {
     @Query("SELECT * FROM device_identities ORDER BY role")
     fun observeIdentities(): Flow<List<DeviceIdentityEntity>>
 
-    @Query("SELECT * FROM vault_secrets ORDER BY identity_id, kind")
-    fun observeSecrets(): Flow<List<VaultSecretEntity>>
+    @Query("SELECT * FROM device_credentials ORDER BY identity_id, kind")
+    fun observeCredentials(): Flow<List<DeviceCredentialEntity>>
 
     @Query("SELECT * FROM device_identities WHERE role = :role ORDER BY id")
     suspend fun getIdentityRows(role: String): List<DeviceIdentityEntity>
@@ -114,8 +107,8 @@ internal interface VaultDao {
     @Query("SELECT * FROM device_identities WHERE id = :id")
     suspend fun getIdentityById(id: String): DeviceIdentityEntity?
 
-    @Query("SELECT * FROM vault_secrets WHERE identity_id = :identityId ORDER BY kind")
-    suspend fun getSecrets(identityId: String): List<VaultSecretEntity>
+    @Query("SELECT * FROM device_credentials WHERE identity_id = :identityId ORDER BY kind")
+    suspend fun getCredentials(identityId: String): List<DeviceCredentialEntity>
 
     @Query("DELETE FROM device_identities WHERE role = :role")
     suspend fun deleteIdentity(role: String): Int
@@ -127,7 +120,7 @@ internal interface VaultDao {
     suspend fun insertIdentity(identity: DeviceIdentityEntity)
 
     @Insert
-    suspend fun insertSecrets(secrets: List<VaultSecretEntity>)
+    suspend fun insertCredentials(credentials: List<DeviceCredentialEntity>)
 
     @Query(
         """
@@ -254,7 +247,6 @@ internal interface VaultDao {
         """
         UPDATE device_identities
         SET address = :address,
-            address_id = :addressId,
             claimed_at = :claimedAt
         WHERE id = :activeId AND role = :activeRole
         """,
@@ -262,13 +254,25 @@ internal interface VaultDao {
     suspend fun updateActiveAddress(
         activeId: String,
         address: String,
-        addressId: String,
         claimedAt: Long,
         activeRole: String,
     ): Int
 
+    @Query(
+        "UPDATE device_identities SET address = :address " +
+            "WHERE id = :candidateId AND role = :candidateRole",
+    )
+    suspend fun updateCandidateAddress(
+        candidateId: String,
+        address: String,
+        candidateRole: String,
+    ): Int
+
     @Query("UPDATE device_identities SET instructions = :instructions WHERE role = :activeRole")
-    suspend fun updateActiveInstructions(activeRole: String, instructions: String): Int
+    suspend fun updateActiveInstructions(
+        activeRole: String,
+        instructions: String,
+    ): Int
 
     @Query(
         """
@@ -301,12 +305,12 @@ internal interface VaultDao {
     @Transaction
     suspend fun replaceCandidate(
         identity: DeviceIdentityEntity,
-        secrets: List<VaultSecretEntity>,
+        credentials: List<DeviceCredentialEntity>,
         candidateRole: String,
     ) {
         deleteIdentity(candidateRole)
         insertIdentity(identity)
-        insertSecrets(secrets)
+        insertCredentials(credentials)
     }
 
     @Transaction
@@ -326,7 +330,6 @@ internal interface VaultDao {
                 updateActiveAddress(
                     activeId = active.id,
                     address = candidate.address,
-                    addressId = candidate.addressId,
                     claimedAt = claimedAt,
                     activeRole = activeRole,
                 ) == 1,

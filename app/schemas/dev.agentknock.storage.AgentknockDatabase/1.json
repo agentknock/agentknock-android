@@ -2,11 +2,11 @@
   "formatVersion": 1,
   "database": {
     "version": 1,
-    "identityHash": "bcb91cd0eb04f2ab80a24bd169aa8421",
+    "identityHash": "08390e6f4c5251e9a5163613ade02430",
     "entities": [
       {
         "tableName": "vault_keys",
-        "createSql": "CREATE TABLE IF NOT EXISTS `${TABLE_NAME}` (`id` TEXT NOT NULL, `purpose` TEXT NOT NULL, `active` INTEGER NOT NULL, `created_at` INTEGER NOT NULL, `backing` TEXT NOT NULL, `recovery_root_id` TEXT, `wrapping_format` INTEGER, `wrapping_nonce` BLOB, `wrapped_key` BLOB, PRIMARY KEY(`id`))",
+        "createSql": "CREATE TABLE IF NOT EXISTS `${TABLE_NAME}` (`id` TEXT NOT NULL, `purpose` TEXT NOT NULL, `active` INTEGER NOT NULL, `created_at` INTEGER NOT NULL, `backing` TEXT NOT NULL, `wrapping_format` INTEGER, `recovery_root_id` TEXT, `wrapping_nonce` BLOB, `wrapped_key` BLOB, PRIMARY KEY(`id`))",
         "fields": [
           {
             "fieldPath": "id",
@@ -39,22 +39,22 @@
             "notNull": true
           },
           {
-            "fieldPath": "recoveryRootId",
-            "columnName": "recovery_root_id",
-            "affinity": "TEXT"
-          },
-          {
-            "fieldPath": "wrappingFormat",
+            "fieldPath": "wrapping.formatVersion",
             "columnName": "wrapping_format",
             "affinity": "INTEGER"
           },
           {
-            "fieldPath": "wrappingNonce",
+            "fieldPath": "wrapping.recoveryRootId",
+            "columnName": "recovery_root_id",
+            "affinity": "TEXT"
+          },
+          {
+            "fieldPath": "wrapping.nonce",
             "columnName": "wrapping_nonce",
             "affinity": "BLOB"
           },
           {
-            "fieldPath": "wrappedKey",
+            "fieldPath": "wrapping.ciphertext",
             "columnName": "wrapped_key",
             "affinity": "BLOB"
           }
@@ -297,7 +297,7 @@
       },
       {
         "tableName": "environment_variables",
-        "createSql": "CREATE TABLE IF NOT EXISTS `${TABLE_NAME}` (`id` TEXT NOT NULL, `secret_id` TEXT NOT NULL, `name` TEXT NOT NULL, `sensitive` INTEGER NOT NULL, `notes` TEXT NOT NULL, `encryption_format` INTEGER NOT NULL, `encryption_key_id` TEXT NOT NULL, `nonce` BLOB NOT NULL, `ciphertext` BLOB NOT NULL, `created_at` INTEGER NOT NULL, `updated_at` INTEGER NOT NULL, `value_updated_at` INTEGER NOT NULL, PRIMARY KEY(`id`), FOREIGN KEY(`secret_id`) REFERENCES `secrets`(`id`) ON UPDATE NO ACTION ON DELETE CASCADE , FOREIGN KEY(`encryption_key_id`) REFERENCES `vault_keys`(`id`) ON UPDATE NO ACTION ON DELETE RESTRICT )",
+        "createSql": "CREATE TABLE IF NOT EXISTS `${TABLE_NAME}` (`id` TEXT NOT NULL, `secret_id` TEXT NOT NULL, `name` TEXT NOT NULL, `sensitive` INTEGER NOT NULL, `notes` TEXT NOT NULL, `created_at` INTEGER NOT NULL, `updated_at` INTEGER NOT NULL, `value_updated_at` INTEGER NOT NULL, `encryption_format` INTEGER NOT NULL, `encryption_key_id` TEXT NOT NULL, `nonce` BLOB NOT NULL, `ciphertext` BLOB NOT NULL, PRIMARY KEY(`id`), FOREIGN KEY(`secret_id`) REFERENCES `secrets`(`id`) ON UPDATE NO ACTION ON DELETE CASCADE , FOREIGN KEY(`encryption_key_id`) REFERENCES `vault_keys`(`id`) ON UPDATE NO ACTION ON DELETE RESTRICT )",
         "fields": [
           {
             "fieldPath": "id",
@@ -330,30 +330,6 @@
             "notNull": true
           },
           {
-            "fieldPath": "encryptionFormat",
-            "columnName": "encryption_format",
-            "affinity": "INTEGER",
-            "notNull": true
-          },
-          {
-            "fieldPath": "encryptionKeyId",
-            "columnName": "encryption_key_id",
-            "affinity": "TEXT",
-            "notNull": true
-          },
-          {
-            "fieldPath": "nonce",
-            "columnName": "nonce",
-            "affinity": "BLOB",
-            "notNull": true
-          },
-          {
-            "fieldPath": "ciphertext",
-            "columnName": "ciphertext",
-            "affinity": "BLOB",
-            "notNull": true
-          },
-          {
             "fieldPath": "createdAt",
             "columnName": "created_at",
             "affinity": "INTEGER",
@@ -369,6 +345,30 @@
             "fieldPath": "valueUpdatedAt",
             "columnName": "value_updated_at",
             "affinity": "INTEGER",
+            "notNull": true
+          },
+          {
+            "fieldPath": "encryptedValue.formatVersion",
+            "columnName": "encryption_format",
+            "affinity": "INTEGER",
+            "notNull": true
+          },
+          {
+            "fieldPath": "encryptedValue.keyId",
+            "columnName": "encryption_key_id",
+            "affinity": "TEXT",
+            "notNull": true
+          },
+          {
+            "fieldPath": "encryptedValue.nonce",
+            "columnName": "nonce",
+            "affinity": "BLOB",
+            "notNull": true
+          },
+          {
+            "fieldPath": "encryptedValue.ciphertext",
+            "columnName": "ciphertext",
+            "affinity": "BLOB",
             "notNull": true
           }
         ],
@@ -426,7 +426,7 @@
       },
       {
         "tableName": "ssh_keys",
-        "createSql": "CREATE TABLE IF NOT EXISTS `${TABLE_NAME}` (`secret_id` TEXT NOT NULL, `algorithm` TEXT NOT NULL, `public_key` BLOB NOT NULL, `comment` TEXT NOT NULL, `private_key_format` TEXT NOT NULL, `encryption_format` INTEGER NOT NULL, `encryption_key_id` TEXT NOT NULL, `nonce` BLOB NOT NULL, `ciphertext` BLOB NOT NULL, `material_updated_at` INTEGER NOT NULL, PRIMARY KEY(`secret_id`), FOREIGN KEY(`secret_id`) REFERENCES `secrets`(`id`) ON UPDATE NO ACTION ON DELETE CASCADE , FOREIGN KEY(`encryption_key_id`) REFERENCES `vault_keys`(`id`) ON UPDATE NO ACTION ON DELETE RESTRICT )",
+        "createSql": "CREATE TABLE IF NOT EXISTS `${TABLE_NAME}` (`secret_id` TEXT NOT NULL, `algorithm` TEXT NOT NULL, `public_key` BLOB NOT NULL, `comment` TEXT NOT NULL, `private_key_format` TEXT NOT NULL, `material_updated_at` INTEGER NOT NULL, `encryption_format` INTEGER NOT NULL, `encryption_key_id` TEXT NOT NULL, `nonce` BLOB NOT NULL, `ciphertext` BLOB NOT NULL, PRIMARY KEY(`secret_id`), FOREIGN KEY(`secret_id`) REFERENCES `secrets`(`id`) ON UPDATE NO ACTION ON DELETE CASCADE , FOREIGN KEY(`encryption_key_id`) REFERENCES `vault_keys`(`id`) ON UPDATE NO ACTION ON DELETE RESTRICT )",
         "fields": [
           {
             "fieldPath": "secretId",
@@ -459,33 +459,33 @@
             "notNull": true
           },
           {
-            "fieldPath": "encryptionFormat",
+            "fieldPath": "materialUpdatedAt",
+            "columnName": "material_updated_at",
+            "affinity": "INTEGER",
+            "notNull": true
+          },
+          {
+            "fieldPath": "encryptedPrivateKey.formatVersion",
             "columnName": "encryption_format",
             "affinity": "INTEGER",
             "notNull": true
           },
           {
-            "fieldPath": "encryptionKeyId",
+            "fieldPath": "encryptedPrivateKey.keyId",
             "columnName": "encryption_key_id",
             "affinity": "TEXT",
             "notNull": true
           },
           {
-            "fieldPath": "nonce",
+            "fieldPath": "encryptedPrivateKey.nonce",
             "columnName": "nonce",
             "affinity": "BLOB",
             "notNull": true
           },
           {
-            "fieldPath": "ciphertext",
+            "fieldPath": "encryptedPrivateKey.ciphertext",
             "columnName": "ciphertext",
             "affinity": "BLOB",
-            "notNull": true
-          },
-          {
-            "fieldPath": "materialUpdatedAt",
-            "columnName": "material_updated_at",
-            "affinity": "INTEGER",
             "notNull": true
           }
         ],
@@ -533,7 +533,7 @@
       },
       {
         "tableName": "device_identities",
-        "createSql": "CREATE TABLE IF NOT EXISTS `${TABLE_NAME}` (`id` TEXT NOT NULL, `role` TEXT NOT NULL, `address` TEXT NOT NULL, `address_id` TEXT NOT NULL, `device_id` TEXT NOT NULL, `device_public_key` BLOB NOT NULL, `created_at` INTEGER NOT NULL, `claimed_at` INTEGER, `claim_attempted_at` INTEGER, `pairing_enabled` INTEGER NOT NULL, `instructions` TEXT NOT NULL, PRIMARY KEY(`id`))",
+        "createSql": "CREATE TABLE IF NOT EXISTS `${TABLE_NAME}` (`id` TEXT NOT NULL, `role` TEXT NOT NULL, `address` TEXT NOT NULL, `device_id` TEXT NOT NULL, `created_at` INTEGER NOT NULL, `claimed_at` INTEGER, `claim_attempted_at` INTEGER, `pairing_enabled` INTEGER NOT NULL, `instructions` TEXT NOT NULL, PRIMARY KEY(`id`))",
         "fields": [
           {
             "fieldPath": "id",
@@ -554,21 +554,9 @@
             "notNull": true
           },
           {
-            "fieldPath": "addressId",
-            "columnName": "address_id",
-            "affinity": "TEXT",
-            "notNull": true
-          },
-          {
             "fieldPath": "deviceId",
             "columnName": "device_id",
             "affinity": "TEXT",
-            "notNull": true
-          },
-          {
-            "fieldPath": "devicePublicKey",
-            "columnName": "device_public_key",
-            "affinity": "BLOB",
             "notNull": true
           },
           {
@@ -615,28 +603,13 @@
             ],
             "orders": [],
             "createSql": "CREATE INDEX IF NOT EXISTS `index_device_identities_role` ON `${TABLE_NAME}` (`role`)"
-          },
-          {
-            "name": "index_device_identities_address_id",
-            "unique": false,
-            "columnNames": [
-              "address_id"
-            ],
-            "orders": [],
-            "createSql": "CREATE INDEX IF NOT EXISTS `index_device_identities_address_id` ON `${TABLE_NAME}` (`address_id`)"
           }
         ]
       },
       {
-        "tableName": "vault_secrets",
-        "createSql": "CREATE TABLE IF NOT EXISTS `${TABLE_NAME}` (`id` TEXT NOT NULL, `identity_id` TEXT NOT NULL, `kind` TEXT NOT NULL, `encryption_format` INTEGER NOT NULL, `encryption_key_id` TEXT NOT NULL, `nonce` BLOB NOT NULL, `ciphertext` BLOB NOT NULL, `created_at` INTEGER NOT NULL, `updated_at` INTEGER NOT NULL, PRIMARY KEY(`id`), FOREIGN KEY(`identity_id`) REFERENCES `device_identities`(`id`) ON UPDATE NO ACTION ON DELETE CASCADE , FOREIGN KEY(`encryption_key_id`) REFERENCES `vault_keys`(`id`) ON UPDATE NO ACTION ON DELETE RESTRICT )",
+        "tableName": "device_credentials",
+        "createSql": "CREATE TABLE IF NOT EXISTS `${TABLE_NAME}` (`identity_id` TEXT NOT NULL, `kind` TEXT NOT NULL, `encryption_format` INTEGER NOT NULL, `encryption_key_id` TEXT NOT NULL, `nonce` BLOB NOT NULL, `ciphertext` BLOB NOT NULL, PRIMARY KEY(`identity_id`, `kind`), FOREIGN KEY(`identity_id`) REFERENCES `device_identities`(`id`) ON UPDATE NO ACTION ON DELETE CASCADE , FOREIGN KEY(`encryption_key_id`) REFERENCES `vault_keys`(`id`) ON UPDATE NO ACTION ON DELETE RESTRICT )",
         "fields": [
-          {
-            "fieldPath": "id",
-            "columnName": "id",
-            "affinity": "TEXT",
-            "notNull": true
-          },
           {
             "fieldPath": "identityId",
             "columnName": "identity_id",
@@ -650,67 +623,46 @@
             "notNull": true
           },
           {
-            "fieldPath": "encryptionFormat",
+            "fieldPath": "encryptedValue.formatVersion",
             "columnName": "encryption_format",
             "affinity": "INTEGER",
             "notNull": true
           },
           {
-            "fieldPath": "encryptionKeyId",
+            "fieldPath": "encryptedValue.keyId",
             "columnName": "encryption_key_id",
             "affinity": "TEXT",
             "notNull": true
           },
           {
-            "fieldPath": "nonce",
+            "fieldPath": "encryptedValue.nonce",
             "columnName": "nonce",
             "affinity": "BLOB",
             "notNull": true
           },
           {
-            "fieldPath": "ciphertext",
+            "fieldPath": "encryptedValue.ciphertext",
             "columnName": "ciphertext",
             "affinity": "BLOB",
-            "notNull": true
-          },
-          {
-            "fieldPath": "createdAt",
-            "columnName": "created_at",
-            "affinity": "INTEGER",
-            "notNull": true
-          },
-          {
-            "fieldPath": "updatedAt",
-            "columnName": "updated_at",
-            "affinity": "INTEGER",
             "notNull": true
           }
         ],
         "primaryKey": {
           "autoGenerate": false,
           "columnNames": [
-            "id"
+            "identity_id",
+            "kind"
           ]
         },
         "indices": [
           {
-            "name": "index_vault_secrets_identity_id_kind",
-            "unique": true,
-            "columnNames": [
-              "identity_id",
-              "kind"
-            ],
-            "orders": [],
-            "createSql": "CREATE UNIQUE INDEX IF NOT EXISTS `index_vault_secrets_identity_id_kind` ON `${TABLE_NAME}` (`identity_id`, `kind`)"
-          },
-          {
-            "name": "index_vault_secrets_encryption_key_id",
+            "name": "index_device_credentials_encryption_key_id",
             "unique": false,
             "columnNames": [
               "encryption_key_id"
             ],
             "orders": [],
-            "createSql": "CREATE INDEX IF NOT EXISTS `index_vault_secrets_encryption_key_id` ON `${TABLE_NAME}` (`encryption_key_id`)"
+            "createSql": "CREATE INDEX IF NOT EXISTS `index_device_credentials_encryption_key_id` ON `${TABLE_NAME}` (`encryption_key_id`)"
           }
         ],
         "foreignKeys": [
@@ -912,7 +864,7 @@
       },
       {
         "tableName": "pairing_attempts",
-        "createSql": "CREATE TABLE IF NOT EXISTS `${TABLE_NAME}` (`request_id` TEXT NOT NULL, `pairing_address` TEXT NOT NULL, `client_id` TEXT NOT NULL, `friendly_name` TEXT, `device_random` BLOB NOT NULL, `desired_relay_client_state` TEXT, `relay_client_state` TEXT, `state` TEXT NOT NULL, `sas_option_0` INTEGER, `sas_option_1` INTEGER, `sas_option_2` INTEGER, `correct_sas_index` INTEGER, `platform` TEXT, `architecture` TEXT, `hostname` TEXT, `machine_id` TEXT, `os_version` TEXT, `pending_psk_encryption_format` INTEGER, `pending_psk_encryption_key_id` TEXT, `pending_psk_nonce` BLOB, `pending_psk_ciphertext` BLOB, `decided_at` INTEGER, PRIMARY KEY(`request_id`), FOREIGN KEY(`request_id`) REFERENCES `inbox_requests`(`id`) ON UPDATE NO ACTION ON DELETE CASCADE , FOREIGN KEY(`pending_psk_encryption_key_id`) REFERENCES `vault_keys`(`id`) ON UPDATE NO ACTION ON DELETE RESTRICT )",
+        "createSql": "CREATE TABLE IF NOT EXISTS `${TABLE_NAME}` (`request_id` TEXT NOT NULL, `pairing_address` TEXT NOT NULL, `client_id` TEXT NOT NULL, `friendly_name` TEXT, `device_random` BLOB NOT NULL, `desired_relay_client_state` TEXT, `relay_client_state` TEXT, `state` TEXT NOT NULL, `sas_option_0` INTEGER, `sas_option_1` INTEGER, `sas_option_2` INTEGER, `correct_sas_index` INTEGER, `platform` TEXT, `architecture` TEXT, `hostname` TEXT, `machine_id` TEXT, `os_version` TEXT, `decided_at` INTEGER, `pending_psk_encryption_format` INTEGER, `pending_psk_encryption_key_id` TEXT, `pending_psk_nonce` BLOB, `pending_psk_ciphertext` BLOB, PRIMARY KEY(`request_id`), FOREIGN KEY(`request_id`) REFERENCES `inbox_requests`(`id`) ON UPDATE NO ACTION ON DELETE CASCADE , FOREIGN KEY(`pending_psk_encryption_key_id`) REFERENCES `vault_keys`(`id`) ON UPDATE NO ACTION ON DELETE RESTRICT )",
         "fields": [
           {
             "fieldPath": "requestId",
@@ -1005,29 +957,29 @@
             "affinity": "TEXT"
           },
           {
-            "fieldPath": "pendingPskEncryptionFormat",
+            "fieldPath": "decidedAt",
+            "columnName": "decided_at",
+            "affinity": "INTEGER"
+          },
+          {
+            "fieldPath": "pendingPsk.formatVersion",
             "columnName": "pending_psk_encryption_format",
             "affinity": "INTEGER"
           },
           {
-            "fieldPath": "pendingPskEncryptionKeyId",
+            "fieldPath": "pendingPsk.keyId",
             "columnName": "pending_psk_encryption_key_id",
             "affinity": "TEXT"
           },
           {
-            "fieldPath": "pendingPskNonce",
+            "fieldPath": "pendingPsk.nonce",
             "columnName": "pending_psk_nonce",
             "affinity": "BLOB"
           },
           {
-            "fieldPath": "pendingPskCiphertext",
+            "fieldPath": "pendingPsk.ciphertext",
             "columnName": "pending_psk_ciphertext",
             "affinity": "BLOB"
-          },
-          {
-            "fieldPath": "decidedAt",
-            "columnName": "decided_at",
-            "affinity": "INTEGER"
           }
         ],
         "primaryKey": {
@@ -1201,7 +1153,7 @@
       },
       {
         "tableName": "client_psks",
-        "createSql": "CREATE TABLE IF NOT EXISTS `${TABLE_NAME}` (`client_id` TEXT NOT NULL, `slot` TEXT NOT NULL, `encryption_format` INTEGER NOT NULL, `encryption_key_id` TEXT NOT NULL, `nonce` BLOB NOT NULL, `ciphertext` BLOB NOT NULL, `stored_at` INTEGER NOT NULL, PRIMARY KEY(`client_id`, `slot`), FOREIGN KEY(`client_id`) REFERENCES `clients`(`client_id`) ON UPDATE NO ACTION ON DELETE CASCADE , FOREIGN KEY(`encryption_key_id`) REFERENCES `vault_keys`(`id`) ON UPDATE NO ACTION ON DELETE RESTRICT )",
+        "createSql": "CREATE TABLE IF NOT EXISTS `${TABLE_NAME}` (`client_id` TEXT NOT NULL, `slot` TEXT NOT NULL, `stored_at` INTEGER NOT NULL, `encryption_format` INTEGER NOT NULL, `encryption_key_id` TEXT NOT NULL, `nonce` BLOB NOT NULL, `ciphertext` BLOB NOT NULL, PRIMARY KEY(`client_id`, `slot`), FOREIGN KEY(`client_id`) REFERENCES `clients`(`client_id`) ON UPDATE NO ACTION ON DELETE CASCADE , FOREIGN KEY(`encryption_key_id`) REFERENCES `vault_keys`(`id`) ON UPDATE NO ACTION ON DELETE RESTRICT )",
         "fields": [
           {
             "fieldPath": "clientId",
@@ -1216,33 +1168,33 @@
             "notNull": true
           },
           {
-            "fieldPath": "encryptionFormat",
+            "fieldPath": "storedAt",
+            "columnName": "stored_at",
+            "affinity": "INTEGER",
+            "notNull": true
+          },
+          {
+            "fieldPath": "encryptedPsk.formatVersion",
             "columnName": "encryption_format",
             "affinity": "INTEGER",
             "notNull": true
           },
           {
-            "fieldPath": "encryptionKeyId",
+            "fieldPath": "encryptedPsk.keyId",
             "columnName": "encryption_key_id",
             "affinity": "TEXT",
             "notNull": true
           },
           {
-            "fieldPath": "nonce",
+            "fieldPath": "encryptedPsk.nonce",
             "columnName": "nonce",
             "affinity": "BLOB",
             "notNull": true
           },
           {
-            "fieldPath": "ciphertext",
+            "fieldPath": "encryptedPsk.ciphertext",
             "columnName": "ciphertext",
             "affinity": "BLOB",
-            "notNull": true
-          },
-          {
-            "fieldPath": "storedAt",
-            "columnName": "stored_at",
-            "affinity": "INTEGER",
             "notNull": true
           }
         ],
@@ -1300,25 +1252,25 @@
             "notNull": true
           },
           {
-            "fieldPath": "encryptionFormat",
+            "fieldPath": "encryptedPsk.formatVersion",
             "columnName": "encryption_format",
             "affinity": "INTEGER",
             "notNull": true
           },
           {
-            "fieldPath": "encryptionKeyId",
+            "fieldPath": "encryptedPsk.keyId",
             "columnName": "encryption_key_id",
             "affinity": "TEXT",
             "notNull": true
           },
           {
-            "fieldPath": "nonce",
+            "fieldPath": "encryptedPsk.nonce",
             "columnName": "nonce",
             "affinity": "BLOB",
             "notNull": true
           },
           {
-            "fieldPath": "ciphertext",
+            "fieldPath": "encryptedPsk.ciphertext",
             "columnName": "ciphertext",
             "affinity": "BLOB",
             "notNull": true
@@ -1850,25 +1802,25 @@
             "notNull": true
           },
           {
-            "fieldPath": "encryptionFormat",
+            "fieldPath": "encryptedValue.formatVersion",
             "columnName": "encryption_format",
             "affinity": "INTEGER",
             "notNull": true
           },
           {
-            "fieldPath": "encryptionKeyId",
+            "fieldPath": "encryptedValue.keyId",
             "columnName": "encryption_key_id",
             "affinity": "TEXT",
             "notNull": true
           },
           {
-            "fieldPath": "nonce",
+            "fieldPath": "encryptedValue.nonce",
             "columnName": "nonce",
             "affinity": "BLOB",
             "notNull": true
           },
           {
-            "fieldPath": "ciphertext",
+            "fieldPath": "encryptedValue.ciphertext",
             "columnName": "ciphertext",
             "affinity": "BLOB",
             "notNull": true
@@ -1961,25 +1913,25 @@
             "notNull": true
           },
           {
-            "fieldPath": "encryptionFormat",
+            "fieldPath": "encryptedPrivateKey.formatVersion",
             "columnName": "encryption_format",
             "affinity": "INTEGER",
             "notNull": true
           },
           {
-            "fieldPath": "encryptionKeyId",
+            "fieldPath": "encryptedPrivateKey.keyId",
             "columnName": "encryption_key_id",
             "affinity": "TEXT",
             "notNull": true
           },
           {
-            "fieldPath": "nonce",
+            "fieldPath": "encryptedPrivateKey.nonce",
             "columnName": "nonce",
             "affinity": "BLOB",
             "notNull": true
           },
           {
-            "fieldPath": "ciphertext",
+            "fieldPath": "encryptedPrivateKey.ciphertext",
             "columnName": "ciphertext",
             "affinity": "BLOB",
             "notNull": true
@@ -2106,7 +2058,7 @@
     ],
     "setupQueries": [
       "CREATE TABLE IF NOT EXISTS room_master_table (id INTEGER PRIMARY KEY,identity_hash TEXT)",
-      "INSERT OR REPLACE INTO room_master_table (id,identity_hash) VALUES(42, 'bcb91cd0eb04f2ab80a24bd169aa8421')"
+      "INSERT OR REPLACE INTO room_master_table (id,identity_hash) VALUES(42, '08390e6f4c5251e9a5163613ade02430')"
     ]
   }
 }

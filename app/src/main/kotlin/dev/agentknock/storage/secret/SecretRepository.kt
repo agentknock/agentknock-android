@@ -864,10 +864,7 @@ internal class SecretRepository(
                 name = name,
                 sensitive = sensitive,
                 notes = notes,
-                encryptionFormat = encrypted.formatVersion,
-                encryptionKeyId = encrypted.keyId,
-                nonce = encrypted.nonce,
-                ciphertext = encrypted.ciphertext,
+                encryptedValue = encrypted,
                 createdAt = now,
                 updatedAt = now,
                 valueUpdatedAt = now,
@@ -921,12 +918,7 @@ internal class SecretRepository(
                 DecryptionResult.UnsupportedFormat ->
                     return SaveEnvironmentVariableResult.UNSUPPORTED_FORMAT
             }
-            else -> EncryptedValue(
-                formatVersion = existing.encryptionFormat,
-                keyId = existing.encryptionKeyId,
-                nonce = existing.nonce,
-                ciphertext = existing.ciphertext,
-            )
+            else -> existing.encryptedValue
         }
 
         val now = currentTimeMillis()
@@ -934,10 +926,7 @@ internal class SecretRepository(
                 name = name,
                 sensitive = sensitive,
                 notes = notes,
-                encryptionFormat = encrypted.formatVersion,
-                encryptionKeyId = encrypted.keyId,
-                nonce = encrypted.nonce,
-                ciphertext = encrypted.ciphertext,
+                encryptedValue = encrypted,
                 updatedAt = now,
                 valueUpdatedAt = if (replacementValue == null) existing.valueUpdatedAt else now,
             )
@@ -1096,10 +1085,7 @@ internal class SecretRepository(
                 name = name,
                 sensitive = sensitive,
                 notes = current?.notes.orEmpty(),
-                encryptionFormat = encrypted.formatVersion,
-                encryptionKeyId = encrypted.keyId,
-                nonce = encrypted.nonce,
-                ciphertext = encrypted.ciphertext,
+                encryptedValue = encrypted,
                 createdAt = current?.createdAt ?: now,
                 updatedAt = now,
                 valueUpdatedAt = now,
@@ -1583,12 +1569,7 @@ internal class SecretRepository(
     private suspend fun decrypt(variable: EnvironmentVariableEntity): DecryptionResult =
         withContext(cryptographyDispatcher) {
             encryption.decrypt(
-                encrypted = EncryptedValue(
-                    formatVersion = variable.encryptionFormat,
-                    keyId = variable.encryptionKeyId,
-                    nonce = variable.nonce,
-                    ciphertext = variable.ciphertext,
-                ),
+                encrypted = variable.encryptedValue,
                 location = location(
                     id = variable.id,
                     secretId = variable.secretId,
@@ -1623,10 +1604,7 @@ internal class SecretRepository(
             publicKey = privateKey.publicKey.copyOf(),
             comment = privateKey.comment,
             privateKeyFormat = privateKeyFormat,
-            encryptionFormat = encrypted.formatVersion,
-            encryptionKeyId = encrypted.keyId,
-            nonce = encrypted.nonce,
-            ciphertext = encrypted.ciphertext,
+            encryptedPrivateKey = encrypted,
             materialUpdatedAt = materialUpdatedAt,
         )
     }
@@ -1639,12 +1617,7 @@ internal class SecretRepository(
         }
         return withContext(cryptographyDispatcher) {
             encryption.decrypt(
-                encrypted = EncryptedValue(
-                    formatVersion = key.encryptionFormat,
-                    keyId = key.encryptionKeyId,
-                    nonce = key.nonce,
-                    ciphertext = key.ciphertext,
-                ),
+                encrypted = key.encryptedPrivateKey,
                 location = sshKeyLocation(
                     key.secretId,
                     key.algorithm,

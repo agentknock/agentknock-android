@@ -1,8 +1,8 @@
 package dev.agentknock.storage
 
 import dev.agentknock.storage.crypto.VaultKeyManager
-import dev.agentknock.storage.vault.DeviceManagementRepository
-import dev.agentknock.storage.vault.DeviceManagementResult
+import dev.agentknock.storage.device.DeviceManagementRepository
+import dev.agentknock.storage.device.DeviceManagementResult
 
 internal sealed interface FactoryResetResult {
     data object Reset : FactoryResetResult

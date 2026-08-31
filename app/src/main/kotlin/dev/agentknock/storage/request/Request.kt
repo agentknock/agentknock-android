@@ -2,6 +2,7 @@ package dev.agentknock.storage.request
 
 import androidx.room3.ColumnInfo
 import androidx.room3.Dao
+import androidx.room3.Embedded
 import androidx.room3.Entity
 import androidx.room3.ForeignKey
 import androidx.room3.Index
@@ -12,10 +13,11 @@ import androidx.room3.Transaction
 import androidx.room3.Update
 import androidx.room3.Upsert
 import dev.agentknock.storage.crypto.VaultKeyEntity
+import dev.agentknock.storage.crypto.EncryptedValue
 import dev.agentknock.storage.secret.SecretClientApprovalOverrideEntity
 import dev.agentknock.storage.secret.SecretEntity
 import dev.agentknock.storage.secret.TemporaryAccessGrantEntity
-import dev.agentknock.storage.vault.DeviceIdentityEntity
+import dev.agentknock.storage.device.DeviceIdentityEntity
 import kotlinx.coroutines.flow.Flow
 
 @Entity(
@@ -143,29 +145,17 @@ internal data class PairingAttemptEntity(
     val machineId: String?,
     @ColumnInfo(name = "os_version")
     val osVersion: String?,
-    @ColumnInfo(name = "pending_psk_encryption_format")
-    val pendingPskEncryptionFormat: Int?,
-    @ColumnInfo(name = "pending_psk_encryption_key_id")
-    val pendingPskEncryptionKeyId: String?,
-    @ColumnInfo(name = "pending_psk_nonce")
-    val pendingPskNonce: ByteArray?,
-    @ColumnInfo(name = "pending_psk_ciphertext")
-    val pendingPskCiphertext: ByteArray?,
+    @Embedded(prefix = "pending_psk_")
+    val pendingPsk: EncryptedValue?,
     @ColumnInfo(name = "decided_at")
     val decidedAt: Long?,
 )
 
 private fun PairingAttemptEntity.hasCompletePendingPsk(): Boolean =
-    pendingPskEncryptionFormat != null &&
-        pendingPskEncryptionKeyId != null &&
-        pendingPskNonce != null &&
-        pendingPskCiphertext != null
+    pendingPsk != null
 
 private fun PairingAttemptEntity.hasNoPendingPsk(): Boolean =
-    pendingPskEncryptionFormat == null &&
-        pendingPskEncryptionKeyId == null &&
-        pendingPskNonce == null &&
-        pendingPskCiphertext == null
+    pendingPsk == null
 
 @Entity(
     tableName = "clients",
@@ -242,14 +232,8 @@ internal data class ClientPskEntity(
     val clientId: String,
     @ColumnInfo(name = "slot")
     val slot: String,
-    @ColumnInfo(name = "encryption_format")
-    val encryptionFormat: Int,
-    @ColumnInfo(name = "encryption_key_id")
-    val encryptionKeyId: String,
-    @ColumnInfo(name = "nonce")
-    val nonce: ByteArray,
-    @ColumnInfo(name = "ciphertext")
-    val ciphertext: ByteArray,
+    @Embedded
+    val encryptedPsk: EncryptedValue,
     @ColumnInfo(name = "stored_at")
     val storedAt: Long,
 )
@@ -278,14 +262,8 @@ internal data class RequestPskEntity(
     @PrimaryKey
     @ColumnInfo(name = "request_id")
     val requestId: String,
-    @ColumnInfo(name = "encryption_format")
-    val encryptionFormat: Int,
-    @ColumnInfo(name = "encryption_key_id")
-    val encryptionKeyId: String,
-    @ColumnInfo(name = "nonce")
-    val nonce: ByteArray,
-    @ColumnInfo(name = "ciphertext")
-    val ciphertext: ByteArray,
+    @Embedded
+    val encryptedPsk: EncryptedValue,
 )
 
 @Entity(
@@ -515,14 +493,8 @@ internal data class SecretUploadEnvironmentVariableEntity(
     val name: String,
     @ColumnInfo(name = "sensitive")
     val sensitive: Boolean,
-    @ColumnInfo(name = "encryption_format")
-    val encryptionFormat: Int,
-    @ColumnInfo(name = "encryption_key_id")
-    val encryptionKeyId: String,
-    @ColumnInfo(name = "nonce")
-    val nonce: ByteArray,
-    @ColumnInfo(name = "ciphertext")
-    val ciphertext: ByteArray,
+    @Embedded
+    val encryptedValue: EncryptedValue,
 )
 
 @Entity(
@@ -557,14 +529,8 @@ internal data class SecretUploadSshKeyEntity(
     val comment: String,
     @ColumnInfo(name = "private_key_format")
     val privateKeyFormat: String,
-    @ColumnInfo(name = "encryption_format")
-    val encryptionFormat: Int,
-    @ColumnInfo(name = "encryption_key_id")
-    val encryptionKeyId: String,
-    @ColumnInfo(name = "nonce")
-    val nonce: ByteArray,
-    @ColumnInfo(name = "ciphertext")
-    val ciphertext: ByteArray,
+    @Embedded
+    val encryptedPrivateKey: EncryptedValue,
 )
 
 internal data class AuthorizationPolicyCommitment(

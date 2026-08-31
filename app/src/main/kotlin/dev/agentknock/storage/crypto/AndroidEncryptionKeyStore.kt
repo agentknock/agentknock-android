@@ -4,10 +4,12 @@ import android.content.pm.PackageManager
 import android.os.Build
 import android.security.keystore.KeyGenParameterSpec
 import android.security.keystore.KeyInfo
+import android.security.keystore.KeyPermanentlyInvalidatedException
 import android.security.keystore.KeyProperties
 import android.security.keystore.KeyProtection
 import android.security.keystore.StrongBoxUnavailableException
 import java.security.KeyStore
+import java.security.UnrecoverableKeyException
 import javax.crypto.KeyGenerator
 import javax.crypto.SecretKey
 import javax.crypto.SecretKeyFactory
@@ -26,13 +28,13 @@ internal data class GeneratedEncryptionKey(
 )
 
 internal interface EncryptionKeyStore : EncryptionKeySource {
-    fun contains(keyId: String): Boolean
-
     fun generate(keyId: String): GeneratedEncryptionKey
 
     fun importKey(keyId: String, keyMaterial: ByteArray): GeneratedEncryptionKey
 
     fun delete(keyId: String)
+
+    fun managedKeyIds(): List<String>
 }
 
 internal class AndroidEncryptionKeyStore(
@@ -43,10 +45,13 @@ internal class AndroidEncryptionKeyStore(
     }
 
     @Synchronized
-    override fun contains(keyId: String): Boolean = keyStore.containsAlias(alias(keyId))
-
-    @Synchronized
-    override fun get(keyId: String): SecretKey? = keyStore.getKey(alias(keyId), null) as? SecretKey
+    override fun get(keyId: String): SecretKey? = try {
+        keyStore.getKey(alias(keyId), null) as? SecretKey
+    } catch (_: UnrecoverableKeyException) {
+        null
+    } catch (_: KeyPermanentlyInvalidatedException) {
+        null
+    }
 
     @Synchronized
     override fun delete(keyId: String) {
@@ -54,25 +59,38 @@ internal class AndroidEncryptionKeyStore(
     }
 
     @Synchronized
+    override fun managedKeyIds(): List<String> = keyStore.aliases().asSequence().toList()
+        .filter { it.startsWith(ALIAS_PREFIX) }
+        .map { it.removePrefix(ALIAS_PREFIX) }
+
+    @Synchronized
     override fun generate(keyId: String): GeneratedEncryptionKey {
         val alias = alias(keyId)
         check(!keyStore.containsAlias(alias)) { "Encryption key already exists: $keyId" }
 
-        val strongBoxRequested = Build.VERSION.SDK_INT >= Build.VERSION_CODES.P &&
-            packageManager.hasSystemFeature(PackageManager.FEATURE_STRONGBOX_KEYSTORE)
-        val (key, strongBoxUsed) = if (strongBoxRequested) {
-            try {
-                generate(alias, useStrongBox = true) to true
-            } catch (_: StrongBoxUnavailableException) {
+        return try {
+            val strongBoxRequested = Build.VERSION.SDK_INT >= Build.VERSION_CODES.P &&
+                packageManager.hasSystemFeature(PackageManager.FEATURE_STRONGBOX_KEYSTORE)
+            val (key, strongBoxUsed) = if (strongBoxRequested) {
+                try {
+                    generate(alias, useStrongBox = true) to true
+                } catch (_: StrongBoxUnavailableException) {
+                    keyStore.deleteEntry(alias)
+                    generate(alias, useStrongBox = false) to false
+                }
+            } else {
                 generate(alias, useStrongBox = false) to false
             }
-        } else {
-            generate(alias, useStrongBox = false) to false
-        }
 
-        val backing = runCatching { determineBacking(key, strongBoxUsed) }
-            .getOrDefault(EncryptionKeyBacking.UNKNOWN)
-        return GeneratedEncryptionKey(backing = backing)
+            val backing = runCatching { determineBacking(key, strongBoxUsed) }
+                .getOrDefault(EncryptionKeyBacking.UNKNOWN)
+            GeneratedEncryptionKey(backing = backing)
+        } catch (failure: Throwable) {
+            runCatching { keyStore.deleteEntry(alias) }
+                .exceptionOrNull()
+                ?.let(failure::addSuppressed)
+            throw failure
+        }
     }
 
     @Synchronized
@@ -81,26 +99,33 @@ internal class AndroidEncryptionKeyStore(
         val alias = alias(keyId)
         check(!keyStore.containsAlias(alias)) { "Encryption key already exists: $keyId" }
 
-        val strongBoxRequested = Build.VERSION.SDK_INT >= Build.VERSION_CODES.S &&
-            packageManager.hasSystemFeature(PackageManager.FEATURE_STRONGBOX_KEYSTORE)
-        val strongBoxUsed = if (strongBoxRequested) {
-            try {
-                importMaterial(alias, keyMaterial, useStrongBox = true)
-                true
-            } catch (_: StrongBoxUnavailableException) {
-                keyStore.deleteEntry(alias)
+        return try {
+            val strongBoxRequested = Build.VERSION.SDK_INT >= Build.VERSION_CODES.S &&
+                packageManager.hasSystemFeature(PackageManager.FEATURE_STRONGBOX_KEYSTORE)
+            val strongBoxUsed = if (strongBoxRequested) {
+                try {
+                    importMaterial(alias, keyMaterial, useStrongBox = true)
+                    true
+                } catch (_: StrongBoxUnavailableException) {
+                    keyStore.deleteEntry(alias)
+                    importMaterial(alias, keyMaterial, useStrongBox = false)
+                    false
+                }
+            } else {
                 importMaterial(alias, keyMaterial, useStrongBox = false)
                 false
             }
-        } else {
-            importMaterial(alias, keyMaterial, useStrongBox = false)
-            false
-        }
 
-        val key = checkNotNull(get(keyId)) { "Imported encryption key is unavailable: $keyId" }
-        val backing = runCatching { determineBacking(key, strongBoxUsed) }
-            .getOrDefault(EncryptionKeyBacking.UNKNOWN)
-        return GeneratedEncryptionKey(backing = backing)
+            val key = checkNotNull(get(keyId)) { "Imported encryption key is unavailable: $keyId" }
+            val backing = runCatching { determineBacking(key, strongBoxUsed) }
+                .getOrDefault(EncryptionKeyBacking.UNKNOWN)
+            GeneratedEncryptionKey(backing = backing)
+        } catch (failure: Throwable) {
+            runCatching { keyStore.deleteEntry(alias) }
+                .exceptionOrNull()
+                ?.let(failure::addSuppressed)
+            throw failure
+        }
     }
 
     private fun generate(alias: String, useStrongBox: Boolean): SecretKey {

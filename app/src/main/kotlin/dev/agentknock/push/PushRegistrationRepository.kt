@@ -2,8 +2,8 @@ package dev.agentknock.push
 
 import dev.agentknock.relay.RelayPushRegistrationClient
 import dev.agentknock.relay.RelayPushRegistrationResult
-import dev.agentknock.storage.vault.RelayDeviceCredentialSource
-import dev.agentknock.storage.vault.RelayDeviceCredentialsResult
+import dev.agentknock.storage.device.RelayDeviceCredentialSource
+import dev.agentknock.storage.device.RelayDeviceCredentialsResult
 
 internal sealed interface PushRegistrationResult {
     data object Registered : PushRegistrationResult

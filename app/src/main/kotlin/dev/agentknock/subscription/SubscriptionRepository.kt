@@ -2,8 +2,8 @@ package dev.agentknock.subscription
 
 import dev.agentknock.relay.RelaySubscriptionClient
 import dev.agentknock.relay.RelaySubscriptionResult
-import dev.agentknock.storage.vault.RelayDeviceCredentialSource
-import dev.agentknock.storage.vault.RelayDeviceCredentialsResult
+import dev.agentknock.storage.device.RelayDeviceCredentialSource
+import dev.agentknock.storage.device.RelayDeviceCredentialsResult
 
 internal sealed interface SubscriptionResult {
     data class Status(val active: Boolean) : SubscriptionResult

@@ -26,9 +26,9 @@ import dev.agentknock.storage.request.SecretUploadEnvironmentVariableEntity
 import dev.agentknock.storage.request.SecretUploadSshKeyEntity
 import dev.agentknock.storage.request.RequestDao
 import dev.agentknock.storage.request.RequestPskEntity
-import dev.agentknock.storage.vault.VaultDao
-import dev.agentknock.storage.vault.DeviceIdentityEntity
-import dev.agentknock.storage.vault.VaultSecretEntity
+import dev.agentknock.storage.device.DeviceIdentityDao
+import dev.agentknock.storage.device.DeviceIdentityEntity
+import dev.agentknock.storage.device.DeviceCredentialEntity
 
 @Database(
     entities = [
@@ -39,7 +39,7 @@ import dev.agentknock.storage.vault.VaultSecretEntity
         EnvironmentVariableEntity::class,
         SshKeyEntity::class,
         DeviceIdentityEntity::class,
-        VaultSecretEntity::class,
+        DeviceCredentialEntity::class,
         InboxRequestEntity::class,
         PairingAttemptEntity::class,
         ClientEntity::class,
@@ -61,7 +61,7 @@ internal abstract class AgentknockDatabase : RoomDatabase() {
 
     abstract fun secretDao(): SecretDao
 
-    abstract fun vaultDao(): VaultDao
+    abstract fun deviceIdentityDao(): DeviceIdentityDao
 
     abstract fun requestDao(): RequestDao
 

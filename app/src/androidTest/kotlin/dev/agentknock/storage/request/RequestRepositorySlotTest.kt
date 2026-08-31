@@ -23,10 +23,10 @@ import dev.agentknock.storage.crypto.VaultKeyPurpose
 import dev.agentknock.storage.secret.CreateSecretResult
 import dev.agentknock.storage.secret.SecretRepository
 import dev.agentknock.storage.secret.SshKeyAlgorithm
-import dev.agentknock.storage.vault.RelayDeviceCredentialSource
-import dev.agentknock.storage.vault.RelayDeviceCredentials
-import dev.agentknock.storage.vault.RelayDeviceCredentialsResult
-import dev.agentknock.storage.vault.DeviceIdentityEntity
+import dev.agentknock.storage.device.RelayDeviceCredentialSource
+import dev.agentknock.storage.device.RelayDeviceCredentials
+import dev.agentknock.storage.device.RelayDeviceCredentialsResult
+import dev.agentknock.storage.device.DeviceIdentityEntity
 import java.math.BigInteger
 import java.security.SecureRandom
 import java.util.ArrayDeque
@@ -92,14 +92,12 @@ class RequestRepositorySlotTest {
             devicePrivateKey = devicePrivateKey,
             deviceToken = "token",
         )
-        database.vaultDao().insertIdentity(
+        database.deviceIdentityDao().insertIdentity(
             DeviceIdentityEntity(
                 id = DEVICE_IDENTITY_ID,
                 role = "active",
                 address = ADDRESS,
-                addressId = ADDRESS_ID,
                 deviceId = DEVICE_ID,
-                devicePublicKey = devicePublicKey,
                 createdAt = now,
                 claimedAt = now,
             ),
@@ -174,10 +172,7 @@ class RequestRepositorySlotTest {
         val pairingAfterFailure = checkNotNull(database.requestDao().getPairingAttempt(root.id))
         assertEquals("receiving", pairingAfterFailure.state)
         assertNotNull(requestAfterFailure.error)
-        assertNull(pairingAfterFailure.pendingPskEncryptionFormat)
-        assertNull(pairingAfterFailure.pendingPskEncryptionKeyId)
-        assertNull(pairingAfterFailure.pendingPskNonce)
-        assertNull(pairingAfterFailure.pendingPskCiphertext)
+        assertNull(pairingAfterFailure.pendingPsk)
 
         now += 1
         synchronize(
@@ -193,10 +188,7 @@ class RequestRepositorySlotTest {
         val acceptedPairing = checkNotNull(database.requestDao().getPairingAttempt(root.id))
         assertEquals(acceptedCompletion.toString(), acceptedRequest.completionJson)
         assertEquals("sas_verification_pending", acceptedPairing.state)
-        assertNotNull(acceptedPairing.pendingPskEncryptionFormat)
-        val pendingKeyId = checkNotNull(acceptedPairing.pendingPskEncryptionKeyId)
-        assertNotNull(acceptedPairing.pendingPskNonce)
-        assertNotNull(acceptedPairing.pendingPskCiphertext)
+        val pendingKeyId = checkNotNull(acceptedPairing.pendingPsk).keyId
         assertEquals(
             VaultKeyPurpose.DEVICE_STATE.storedName,
             database.vaultKeyDao().getKey(pendingKeyId)?.purpose,
@@ -333,7 +325,7 @@ class RequestRepositorySlotTest {
         assertEquals(PairingDecisionResult.REJECTED, repository.rejectPairing(CLIENT_ID))
         val rejected = checkNotNull(database.requestDao().getPairingAttempt(CLIENT_ID))
         assertEquals("rejected", rejected.state)
-        assertNull(rejected.pendingPskCiphertext)
+        assertNull(rejected.pendingPsk)
     }
 
     @Test
@@ -833,10 +825,7 @@ class RequestRepositorySlotTest {
         assertEquals(RequestSyncResult.Success, repository.sync())
         val completedAttempt = checkNotNull(database.requestDao().getPairingAttempt(CLIENT_ID))
         assertEquals("completed", completedAttempt.state)
-        assertNull(completedAttempt.pendingPskEncryptionFormat)
-        assertNull(completedAttempt.pendingPskEncryptionKeyId)
-        assertNull(completedAttempt.pendingPskNonce)
-        assertNull(completedAttempt.pendingPskCiphertext)
+        assertNull(completedAttempt.pendingPsk)
         val client = checkNotNull(database.requestDao().getClient(CLIENT_ID))
         assertEquals("active", client.relayClientState)
         assertNotNull(database.requestDao().getClientPsk(CLIENT_ID, "current"))
@@ -1222,8 +1211,6 @@ private class SwitchableSecureRandom : SecureRandom() {
 private class MemoryEncryptionKeyStore : EncryptionKeyStore {
     private val keys = mutableMapOf<String, SecretKey>()
 
-    override fun contains(keyId: String): Boolean = keyId in keys
-
     override fun get(keyId: String): SecretKey? = keys[keyId]
 
     override fun generate(keyId: String): GeneratedEncryptionKey {
@@ -1242,4 +1229,6 @@ private class MemoryEncryptionKeyStore : EncryptionKeyStore {
     override fun delete(keyId: String) {
         keys.remove(keyId)
     }
+
+    override fun managedKeyIds(): List<String> = keys.keys.toList()
 }

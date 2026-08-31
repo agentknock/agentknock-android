@@ -1,4 +1,4 @@
-package dev.agentknock.storage.vault
+package dev.agentknock.storage.device
 
 import androidx.room3.Room
 import androidx.test.ext.junit.runners.AndroidJUnit4
@@ -6,6 +6,7 @@ import androidx.test.platform.app.InstrumentationRegistry
 import dev.agentknock.storage.AgentknockDatabase
 import dev.agentknock.storage.crypto.VaultKeyEntity
 import dev.agentknock.storage.crypto.VaultKeyPurpose
+import dev.agentknock.storage.crypto.EncryptedValue
 import dev.agentknock.storage.request.ClientEntity
 import dev.agentknock.storage.request.ClientPskEntity
 import dev.agentknock.storage.request.InboxRequestEntity
@@ -25,7 +26,7 @@ import org.junit.Test
 import org.junit.runner.RunWith
 
 @RunWith(AndroidJUnit4::class)
-class VaultIdentityRetentionTest {
+class DeviceIdentityRetentionTest {
     private lateinit var database: AgentknockDatabase
 
     @Before
@@ -54,16 +55,16 @@ class VaultIdentityRetentionTest {
         )
         val original = identity("identity-1", "device-1", "active", 1)
         val replacement = identity("identity-2", "device-2", "candidate", 2)
-        database.vaultDao().insertIdentity(original)
-        database.vaultDao().insertSecrets(credentials(original.id, 1))
-        database.vaultDao().insertIdentity(replacement)
-        database.vaultDao().insertSecrets(credentials(replacement.id, 2))
+        database.deviceIdentityDao().insertIdentity(original)
+        database.deviceIdentityDao().insertCredentials(credentials(original.id, 1))
+        database.deviceIdentityDao().insertIdentity(replacement)
+        database.deviceIdentityDao().insertCredentials(credentials(replacement.id, 2))
         database.requestDao().insertClient(client(original.id))
         database.requestDao().insertRequest(request(original.id))
 
         assertEquals(
             true,
-            database.vaultDao().promoteCandidate(
+            database.deviceIdentityDao().promoteCandidate(
                 candidateId = replacement.id,
                 claimedAt = 3,
                 activeRole = "active",
@@ -72,11 +73,11 @@ class VaultIdentityRetentionTest {
             ),
         )
 
-        val identities = database.vaultDao().observeIdentities().first()
+        val identities = database.deviceIdentityDao().observeIdentities().first()
         assertEquals("retired", identities.single { it.id == original.id }.role)
         assertEquals("active", identities.single { it.id == replacement.id }.role)
-        assertEquals(2, database.vaultDao().getSecrets(original.id).size)
-        assertEquals(2, database.vaultDao().getSecrets(replacement.id).size)
+        assertEquals(2, database.deviceIdentityDao().getCredentials(original.id).size)
+        assertEquals(2, database.deviceIdentityDao().getCredentials(replacement.id).size)
         assertNull(database.requestDao().getClient(CLIENT_ID))
         assertEquals(original.id, database.requestDao().getClientById(CLIENT_ID)?.deviceIdentityId)
         assertEquals(
@@ -85,11 +86,11 @@ class VaultIdentityRetentionTest {
         )
 
         val secondReplacement = identity("identity-3", "device-3", "candidate", 4)
-        database.vaultDao().insertIdentity(secondReplacement)
-        database.vaultDao().insertSecrets(credentials(secondReplacement.id, 3))
+        database.deviceIdentityDao().insertIdentity(secondReplacement)
+        database.deviceIdentityDao().insertCredentials(credentials(secondReplacement.id, 3))
         assertEquals(
             true,
-            database.vaultDao().promoteCandidate(
+            database.deviceIdentityDao().promoteCandidate(
                 candidateId = secondReplacement.id,
                 claimedAt = 5,
                 activeRole = "active",
@@ -98,10 +99,13 @@ class VaultIdentityRetentionTest {
             ),
         )
 
-        val twiceReplaced = database.vaultDao().observeIdentities().first()
+        val twiceReplaced = database.deviceIdentityDao().observeIdentities().first()
         assertEquals(2, twiceReplaced.count { it.role == "retired" })
-        assertNotNull(database.vaultDao().getIdentityById(original.id))
-        assertEquals(6, twiceReplaced.sumOf { database.vaultDao().getSecrets(it.id).size })
+        assertNotNull(database.deviceIdentityDao().getIdentityById(original.id))
+        assertEquals(
+            6,
+            twiceReplaced.sumOf { database.deviceIdentityDao().getCredentials(it.id).size },
+        )
         assertNull(database.requestDao().getClient(CLIENT_ID))
         assertEquals(original.id, database.requestDao().getClientById(CLIENT_ID)?.deviceIdentityId)
         assertEquals(
@@ -123,10 +127,10 @@ class VaultIdentityRetentionTest {
         )
         val original = identity("identity-1", "device-1", "active", 1)
         val replacement = identity("identity-2", "device-2", "candidate", 2)
-        database.vaultDao().insertIdentity(original)
-        database.vaultDao().insertSecrets(credentials(original.id, 1))
-        database.vaultDao().insertIdentity(replacement)
-        database.vaultDao().insertSecrets(credentials(replacement.id, 2))
+        database.deviceIdentityDao().insertIdentity(original)
+        database.deviceIdentityDao().insertCredentials(credentials(original.id, 1))
+        database.deviceIdentityDao().insertIdentity(replacement)
+        database.deviceIdentityDao().insertCredentials(credentials(replacement.id, 2))
         val requestDao = database.requestDao()
         requestDao.insertClient(
             client(original.id).copy(
@@ -166,10 +170,7 @@ class VaultIdentityRetentionTest {
                 hostname = null,
                 machineId = null,
                 osVersion = null,
-                pendingPskEncryptionFormat = 1,
-                pendingPskEncryptionKeyId = "device-state-key",
-                pendingPskNonce = ByteArray(12),
-                pendingPskCiphertext = byteArrayOf(1),
+                pendingPsk = encryptedValue(byteArrayOf(1)),
                 decidedAt = null,
             ),
         )
@@ -227,7 +228,7 @@ class VaultIdentityRetentionTest {
         val completedBefore = checkNotNull(requestDao.getRequestById(REQUEST_ID))
 
         assertTrue(
-            database.vaultDao().promoteCandidate(
+            database.deviceIdentityDao().promoteCandidate(
                 candidateId = replacement.id,
                 claimedAt = 30,
                 activeRole = "active",
@@ -246,8 +247,7 @@ class VaultIdentityRetentionTest {
         assertEquals("rejected", abandonedPairing.state)
         assertEquals(30L, abandonedPairing.decidedAt)
         assertNull(abandonedPairing.desiredRelayClientState)
-        assertNull(abandonedPairing.pendingPskEncryptionKeyId)
-        assertNull(abandonedPairing.pendingPskCiphertext)
+        assertNull(abandonedPairing.pendingPsk)
         assertTrue(
             checkNotNull(checkNotNull(requestDao.getRequestById(pairingId)).error)
                 .contains("pairing completion was malformed"),
@@ -291,10 +291,9 @@ class VaultIdentityRetentionTest {
         val original = identity("identity-1", "device-1", "active", 1)
         val candidate = identity("identity-2", "device-1", "candidate", 2).copy(
             address = "new-pairing-address",
-            addressId = "new-address-id",
         )
-        database.vaultDao().insertIdentity(original)
-        database.vaultDao().insertIdentity(candidate)
+        database.deviceIdentityDao().insertIdentity(original)
+        database.deviceIdentityDao().insertIdentity(candidate)
         database.requestDao().insertClient(
             client(original.id).copy(desiredRelayClientState = "suspended"),
         )
@@ -309,7 +308,7 @@ class VaultIdentityRetentionTest {
         database.requestDao().insertRequest(pending)
 
         assertTrue(
-            database.vaultDao().promoteCandidate(
+            database.deviceIdentityDao().promoteCandidate(
                 candidateId = candidate.id,
                 claimedAt = 3,
                 activeRole = "active",
@@ -318,10 +317,10 @@ class VaultIdentityRetentionTest {
             ),
         )
 
-        val active = checkNotNull(database.vaultDao().getIdentityById(original.id))
+        val active = checkNotNull(database.deviceIdentityDao().getIdentityById(original.id))
         assertEquals("active", active.role)
         assertEquals(candidate.address, active.address)
-        assertNull(database.vaultDao().getIdentityById(candidate.id))
+        assertNull(database.deviceIdentityDao().getIdentityById(candidate.id))
         assertEquals("action_required", database.requestDao().getRequestById(pending.id)?.state)
         assertNull(database.requestDao().getRequestById(pending.id)?.completedAt)
         assertEquals(
@@ -335,29 +334,24 @@ class VaultIdentityRetentionTest {
             id = id,
             role = role,
             address = "same-address-for-history",
-            addressId = "same-address-id",
             deviceId = deviceId,
-            devicePublicKey = ByteArray(32) { createdAt.toByte() },
             createdAt = createdAt,
             claimedAt = createdAt.takeIf { role == "active" },
         )
 
     private fun credentials(identityId: String, marker: Int) = listOf(
-        vaultSecret("$identityId-token", identityId, "device_token", marker),
-        vaultSecret("$identityId-private", identityId, "device_private_key", marker + 1),
+        deviceCredential(identityId, "device_token", marker),
+        deviceCredential(identityId, "device_private_key", marker + 1),
     )
 
-    private fun vaultSecret(id: String, identityId: String, kind: String, marker: Int) =
-        VaultSecretEntity(
-            id = id,
+    private fun deviceCredential(identityId: String, kind: String, marker: Int) =
+        DeviceCredentialEntity(
             identityId = identityId,
             kind = kind,
-            encryptionFormat = 1,
-            encryptionKeyId = "device-state-key",
-            nonce = ByteArray(12) { marker.toByte() },
-            ciphertext = ByteArray(48) { marker.toByte() },
-            createdAt = marker.toLong(),
-            updatedAt = marker.toLong(),
+            encryptedValue = encryptedValue(
+                ciphertext = ByteArray(48) { marker.toByte() },
+                nonce = ByteArray(12) { marker.toByte() },
+            ),
         )
 
     private fun client(deviceIdentityId: String) = ClientEntity(
@@ -381,19 +375,13 @@ class VaultIdentityRetentionTest {
     private fun clientPsk() = ClientPskEntity(
         clientId = CLIENT_ID,
         slot = "current",
-        encryptionFormat = 1,
-        encryptionKeyId = "device-state-key",
-        nonce = ByteArray(12),
-        ciphertext = byteArrayOf(1),
+        encryptedPsk = encryptedValue(byteArrayOf(1)),
         storedAt = 10,
     )
 
     private fun requestPsk(requestId: String) = RequestPskEntity(
         requestId = requestId,
-        encryptionFormat = 1,
-        encryptionKeyId = "device-state-key",
-        nonce = ByteArray(12),
-        ciphertext = byteArrayOf(2),
+        encryptedPsk = encryptedValue(byteArrayOf(2)),
     )
 
     private fun upload(requestId: String, decision: String?) = SecretUploadRequestEntity(
@@ -415,10 +403,17 @@ class VaultIdentityRetentionTest {
         requestId = requestId,
         name = "TOKEN",
         sensitive = true,
-        encryptionFormat = 1,
-        encryptionKeyId = "device-state-key",
-        nonce = ByteArray(12),
-        ciphertext = byteArrayOf(3),
+        encryptedValue = encryptedValue(byteArrayOf(3)),
+    )
+
+    private fun encryptedValue(
+        ciphertext: ByteArray,
+        nonce: ByteArray = ByteArray(12),
+    ) = EncryptedValue(
+        formatVersion = 1,
+        keyId = "device-state-key",
+        nonce = nonce,
+        ciphertext = ciphertext,
     )
 
     private fun request(deviceIdentityId: String) = InboxRequestEntity(

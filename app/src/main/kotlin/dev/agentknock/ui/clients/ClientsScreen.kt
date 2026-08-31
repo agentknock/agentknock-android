@@ -85,8 +85,8 @@ import dev.agentknock.storage.request.InboxRequestDetails
 import dev.agentknock.storage.request.InboxRequestState
 import dev.agentknock.storage.request.InboxRequestSummary
 import dev.agentknock.storage.request.PairingState
-import dev.agentknock.storage.vault.DeviceIdentity
-import dev.agentknock.storage.vault.DeviceManagementResult
+import dev.agentknock.storage.device.DeviceIdentity
+import dev.agentknock.storage.device.DeviceManagementResult
 import dev.agentknock.storage.secret.TemporaryAccessGrant
 import dev.agentknock.storage.secret.TemporaryAccessOperation
 import dev.agentknock.ui.components.InformationRow

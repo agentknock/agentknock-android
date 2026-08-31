@@ -2,6 +2,7 @@ package dev.agentknock.storage.crypto
 
 import androidx.room3.ColumnInfo
 import androidx.room3.Dao
+import androidx.room3.Embedded
 import androidx.room3.Entity
 import androidx.room3.Index
 import androidx.room3.Insert
@@ -9,6 +10,7 @@ import androidx.room3.PrimaryKey
 import androidx.room3.Query
 import androidx.room3.Transaction
 import java.util.UUID
+import kotlinx.coroutines.NonCancellable
 import kotlinx.coroutines.CoroutineDispatcher
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.sync.Mutex
@@ -36,14 +38,8 @@ internal data class VaultKeyEntity(
     val createdAt: Long,
     @ColumnInfo(name = "backing")
     val backing: String,
-    @ColumnInfo(name = "recovery_root_id")
-    val recoveryRootId: String? = null,
-    @ColumnInfo(name = "wrapping_format")
-    val wrappingFormat: Int? = null,
-    @ColumnInfo(name = "wrapping_nonce")
-    val wrappingNonce: ByteArray? = null,
-    @ColumnInfo(name = "wrapped_key")
-    val wrappedKey: ByteArray? = null,
+    @Embedded
+    val wrapping: WrappedVaultKey? = null,
 )
 
 @Dao
@@ -53,9 +49,6 @@ internal interface VaultKeyDao {
 
     @Query("SELECT count(*) FROM vault_keys WHERE purpose = :purpose")
     suspend fun countKeys(purpose: String): Int
-
-    @Query("SELECT id FROM vault_keys")
-    suspend fun getKeyIds(): List<String>
 
     @Query("SELECT * FROM vault_keys WHERE id = :id")
     suspend fun getKey(id: String): VaultKeyEntity?
@@ -92,7 +85,6 @@ internal sealed interface VaultProtection {
 
 internal data class VaultKeyInitialization(
     val activeKeys: Map<VaultKeyPurpose, ActiveVaultKey>,
-    val unavailableKeyIds: Map<VaultKeyPurpose, String>,
 )
 
 internal class VaultKeyManager(
@@ -109,7 +101,6 @@ internal class VaultKeyManager(
         initialization?.let { return@withLock it }
 
         val activeKeys = mutableMapOf<VaultKeyPurpose, ActiveVaultKey>()
-        val unavailableKeyIds = mutableMapOf<VaultKeyPurpose, String>()
         VaultKeyPurpose.entries.forEach { purpose ->
             val activeRows = dao.getActiveKeys(purpose.storedName)
             check(activeRows.size <= 1) {
@@ -123,10 +114,9 @@ internal class VaultKeyManager(
 
                 active == null -> error("Vault-key metadata exists without an active ${purpose.storedName} key")
 
-                keyExists(active.id) -> ActiveVaultKey(active.id)
+                keyAvailableInStore(active.id) -> ActiveVaultKey(active.id)
 
                 else -> {
-                    unavailableKeyIds[purpose] = active.id
                     createAndActivateKey(purpose)
                 }
             }
@@ -134,18 +124,17 @@ internal class VaultKeyManager(
 
         VaultKeyInitialization(
             activeKeys = activeKeys.toMap(),
-            unavailableKeyIds = unavailableKeyIds.toMap(),
         ).also { initialization = it }
     }
 
     suspend fun activeKey(purpose: VaultKeyPurpose): ActiveVaultKey =
         checkNotNull(initialize().activeKeys[purpose])
 
-    suspend fun keyAvailable(keyId: String): Boolean = keyExists(keyId)
+    suspend fun keyAvailable(keyId: String): Boolean = keyAvailableInStore(keyId)
 
     suspend fun activeProtection(): VaultProtection {
         val active = initialize().activeKeys
-        val unavailable = active.filterValues { !keyExists(it.id) }.keys
+        val unavailable = active.filterValues { !keyAvailableInStore(it.id) }.keys
         if (unavailable.isNotEmpty()) return VaultProtection.KeyUnavailable(unavailable)
 
         val backings = mutableMapOf<VaultKeyPurpose, EncryptionKeyBacking>()
@@ -160,31 +149,74 @@ internal class VaultKeyManager(
 
     suspend fun reset(clearData: suspend () -> Unit) {
         initializationMutex.withLock {
-            val keyIds = dao.getKeyIds()
-            clearData()
-            withContext(keyStoreDispatcher) {
-                keyIds.forEach(keyStore::delete)
+            try {
+                clearData()
+            } finally {
+                initialization = null
             }
-            initialization = null
+            withContext(NonCancellable + keyStoreDispatcher) {
+                deleteAllManagedKeys()
+            }
         }
         initialize()
     }
 
-    private suspend fun createAndActivateKey(purpose: VaultKeyPurpose): ActiveVaultKey {
+    private suspend fun createAndActivateKey(
+        purpose: VaultKeyPurpose,
+    ): ActiveVaultKey = withContext(NonCancellable) {
         val keyId = newKeyId()
-        val generated = withContext(keyStoreDispatcher) { keyStore.generate(keyId) }
-        dao.activate(
-            VaultKeyEntity(
-                id = keyId,
-                purpose = purpose.storedName,
-                active = true,
-                createdAt = currentTimeMillis(),
-                backing = generated.backing.name,
-            ),
-        )
-        return ActiveVaultKey(keyId)
+        val generated = try {
+            withContext(keyStoreDispatcher) { keyStore.generate(keyId) }
+        } catch (failure: Throwable) {
+            val unowned = runCatching { dao.getKey(keyId) == null }
+                .onFailure(failure::addSuppressed)
+                .getOrDefault(false)
+            if (unowned) {
+                withContext(keyStoreDispatcher) {
+                    runCatching { keyStore.delete(keyId) }
+                        .exceptionOrNull()
+                        ?.let(failure::addSuppressed)
+                }
+            }
+            throw failure
+        }
+        try {
+            dao.activate(
+                VaultKeyEntity(
+                    id = keyId,
+                    purpose = purpose.storedName,
+                    active = true,
+                    createdAt = currentTimeMillis(),
+                    backing = generated.backing.name,
+                ),
+            )
+        } catch (failure: Throwable) {
+            withContext(keyStoreDispatcher) {
+                runCatching { keyStore.delete(keyId) }
+                    .exceptionOrNull()
+                    ?.let(failure::addSuppressed)
+            }
+            throw failure
+        }
+        ActiveVaultKey(keyId)
     }
 
-    private suspend fun keyExists(keyId: String): Boolean =
-        withContext(keyStoreDispatcher) { keyStore.contains(keyId) }
+    private suspend fun keyAvailableInStore(keyId: String): Boolean =
+        withContext(keyStoreDispatcher) { keyStore.get(keyId) != null }
+
+    private fun deleteAllManagedKeys() {
+        var failure: Throwable? = null
+        keyStore.managedKeyIds().forEach { keyId ->
+            try {
+                keyStore.delete(keyId)
+            } catch (deleteFailure: Throwable) {
+                if (failure == null) {
+                    failure = deleteFailure
+                } else {
+                    failure.addSuppressed(deleteFailure)
+                }
+            }
+        }
+        failure?.let { throw it }
+    }
 }

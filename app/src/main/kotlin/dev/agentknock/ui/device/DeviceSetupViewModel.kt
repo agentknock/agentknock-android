@@ -6,8 +6,8 @@ import androidx.lifecycle.viewModelScope
 import dev.agentknock.AgentknockApplication
 import dev.agentknock.R
 import dev.agentknock.protocol.PairingAddressGenerator
-import dev.agentknock.storage.vault.ClaimPairingAddressResult
-import dev.agentknock.storage.vault.DeviceConfiguration
+import dev.agentknock.storage.device.ClaimPairingAddressResult
+import dev.agentknock.storage.device.DeviceConfiguration
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.SharingStarted
 import kotlinx.coroutines.flow.StateFlow
@@ -18,7 +18,7 @@ import kotlinx.coroutines.sync.withLock
 
 internal class DeviceSetupViewModel(application: Application) : AndroidViewModel(application) {
     private val container = (application as AgentknockApplication).container
-    private val repository = container.vault
+    private val repository = container.deviceIdentity
     private val addressGenerator = PairingAddressGenerator(
         application.resources.openRawResource(R.raw.pairing_address_words)
             .bufferedReader()

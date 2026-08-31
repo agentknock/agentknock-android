@@ -57,7 +57,6 @@ import dev.agentknock.relay.RelayMessageState
 import dev.agentknock.relay.RelayPushRegistrationState
 import dev.agentknock.storage.crypto.AesGcmEncryption
 import dev.agentknock.storage.crypto.DecryptionResult
-import dev.agentknock.storage.crypto.EncryptedValue
 import dev.agentknock.storage.crypto.EncryptionBinding
 import dev.agentknock.storage.crypto.EncryptionLocation
 import dev.agentknock.storage.crypto.VaultKeyManager
@@ -101,9 +100,9 @@ import dev.agentknock.storage.audit.AuditOutcome
 import dev.agentknock.storage.audit.AuditRecord
 import dev.agentknock.storage.audit.AuditSink
 import dev.agentknock.storage.audit.NoOpAuditSink
-import dev.agentknock.storage.vault.RelayDeviceCredentials
-import dev.agentknock.storage.vault.RelayDeviceCredentialsResult
-import dev.agentknock.storage.vault.RelayDeviceCredentialSource
+import dev.agentknock.storage.device.RelayDeviceCredentials
+import dev.agentknock.storage.device.RelayDeviceCredentialsResult
+import dev.agentknock.storage.device.RelayDeviceCredentialSource
 import java.util.UUID
 import java.util.Base64
 import java.security.MessageDigest
@@ -1920,18 +1919,7 @@ internal class RequestRepository(
                 } else {
                     RelayClientState.REVOKED.wireName
                 },
-                pendingPskEncryptionFormat = if (verified) {
-                    pairing.pendingPskEncryptionFormat
-                } else {
-                    null
-                },
-                pendingPskEncryptionKeyId = if (verified) {
-                    pairing.pendingPskEncryptionKeyId
-                } else {
-                    null
-                },
-                pendingPskNonce = if (verified) pairing.pendingPskNonce else null,
-                pendingPskCiphertext = if (verified) pairing.pendingPskCiphertext else null,
+                pendingPsk = pairing.pendingPsk.takeIf { verified },
                 decidedAt = now,
             )
             if (verified) {
@@ -1984,10 +1972,7 @@ internal class RequestRepository(
             attempt = pairing.copy(
                 state = PairingState.REJECTED.storedName,
                 desiredRelayClientState = RelayClientState.REVOKED.wireName,
-                pendingPskEncryptionFormat = null,
-                pendingPskEncryptionKeyId = null,
-                pendingPskNonce = null,
-                pendingPskCiphertext = null,
+                pendingPsk = null,
                 decidedAt = pairing.decidedAt ?: now,
             ),
         )
@@ -5481,10 +5466,7 @@ internal class RequestRepository(
                 hostname = null,
                 machineId = null,
                 osVersion = null,
-                pendingPskEncryptionFormat = null,
-                pendingPskEncryptionKeyId = null,
-                pendingPskNonce = null,
-                pendingPskCiphertext = null,
+                pendingPsk = null,
                 decidedAt = null,
             ),
         )
@@ -5697,10 +5679,7 @@ internal class RequestRepository(
                 state = PairingState.COMPLETED.storedName,
                 relayClientState = relayClientState.wireName,
                 desiredRelayClientState = null,
-                pendingPskEncryptionFormat = null,
-                pendingPskEncryptionKeyId = null,
-                pendingPskNonce = null,
-                pendingPskCiphertext = null,
+                pendingPsk = null,
             ),
             client = client,
             clientPsk = clientPsk,
@@ -6344,10 +6323,7 @@ internal class RequestRepository(
             requestId = relayRequestId,
             name = name,
             sensitive = sensitive,
-            encryptionFormat = encrypted.formatVersion,
-            encryptionKeyId = encrypted.keyId,
-            nonce = encrypted.nonce,
-            ciphertext = encrypted.ciphertext,
+            encryptedValue = encrypted,
         )
     }
 
@@ -6372,12 +6348,7 @@ internal class RequestRepository(
         variable: SecretUploadEnvironmentVariableEntity,
     ): DecryptionResult = withContext(cryptographyDispatcher) {
         encryption.decrypt(
-            encrypted = EncryptedValue(
-                formatVersion = variable.encryptionFormat,
-                keyId = variable.encryptionKeyId,
-                nonce = variable.nonce,
-                ciphertext = variable.ciphertext,
-            ),
+            encrypted = variable.encryptedValue,
             location = secretUploadVariableLocation(
                 variable.id,
                 request.id,
@@ -6413,10 +6384,7 @@ internal class RequestRepository(
             publicKey = privateKey.publicKey.copyOf(),
             comment = privateKey.comment,
             privateKeyFormat = privateKeyFormat,
-            encryptionFormat = encrypted.formatVersion,
-            encryptionKeyId = encrypted.keyId,
-            nonce = encrypted.nonce,
-            ciphertext = encrypted.ciphertext,
+            encryptedPrivateKey = encrypted,
         )
     }
 
@@ -6431,12 +6399,7 @@ internal class RequestRepository(
         }
         return withContext(cryptographyDispatcher) {
             encryption.decrypt(
-                encrypted = EncryptedValue(
-                    formatVersion = key.encryptionFormat,
-                    keyId = key.encryptionKeyId,
-                    nonce = key.nonce,
-                    ciphertext = key.ciphertext,
-                ),
+                encrypted = key.encryptedPrivateKey,
                 location = secretUploadSshKeyLocation(
                     request.id,
                     request.clientId,
@@ -6519,10 +6482,7 @@ internal class RequestRepository(
         }
         return RequestPskEntity(
             requestId = relayRequestId,
-            encryptionFormat = encrypted.formatVersion,
-            encryptionKeyId = encrypted.keyId,
-            nonce = encrypted.nonce,
-            ciphertext = encrypted.ciphertext,
+            encryptedPsk = encrypted,
         )
     }
 
@@ -6532,12 +6492,7 @@ internal class RequestRepository(
         val secret = dao.getRequestPsk(request.id) ?: return null
         val result = withContext(cryptographyDispatcher) {
             encryption.decrypt(
-                encrypted = EncryptedValue(
-                    formatVersion = secret.encryptionFormat,
-                    keyId = secret.encryptionKeyId,
-                    nonce = secret.nonce,
-                    ciphertext = secret.ciphertext,
-                ),
+                encrypted = secret.encryptedPsk,
                 location = requestPskLocation(
                     request.id,
                     request.clientId,
@@ -6582,10 +6537,7 @@ internal class RequestRepository(
         return ClientPskEntity(
             clientId = client.clientId,
             slot = slot.storedName,
-            encryptionFormat = encrypted.formatVersion,
-            encryptionKeyId = encrypted.keyId,
-            nonce = encrypted.nonce,
-            ciphertext = encrypted.ciphertext,
+            encryptedPsk = encrypted,
             storedAt = now,
         )
     }
@@ -6597,12 +6549,7 @@ internal class RequestRepository(
         val secret = dao.getClientPsk(client.clientId, slot.storedName) ?: return null
         val result = withContext(cryptographyDispatcher) {
             encryption.decrypt(
-                encrypted = EncryptedValue(
-                    formatVersion = secret.encryptionFormat,
-                    keyId = secret.encryptionKeyId,
-                    nonce = secret.nonce,
-                    ciphertext = secret.ciphertext,
-                ),
+                encrypted = secret.encryptedPsk,
                 location = clientPskLocation(client, slot),
             )
         }
@@ -6647,12 +6594,7 @@ internal class RequestRepository(
                 plaintext = clientPsk,
             )
         }
-        return attempt.copy(
-            pendingPskEncryptionFormat = encrypted.formatVersion,
-            pendingPskEncryptionKeyId = encrypted.keyId,
-            pendingPskNonce = encrypted.nonce,
-            pendingPskCiphertext = encrypted.ciphertext,
-        )
+        return attempt.copy(pendingPsk = encrypted)
     }
 
     private suspend fun decryptPendingPsk(
@@ -6661,22 +6603,10 @@ internal class RequestRepository(
     ): ByteArray? {
         require(attempt.requestId == request.id)
         require(attempt.clientId == request.clientId)
-        val values = listOf(
-            attempt.pendingPskEncryptionFormat,
-            attempt.pendingPskEncryptionKeyId,
-            attempt.pendingPskNonce,
-            attempt.pendingPskCiphertext,
-        )
-        if (values.all { it == null }) return null
-        if (values.any { it == null }) return null
+        val pendingPsk = attempt.pendingPsk ?: return null
         val result = withContext(cryptographyDispatcher) {
             encryption.decrypt(
-                encrypted = EncryptedValue(
-                    formatVersion = checkNotNull(attempt.pendingPskEncryptionFormat),
-                    keyId = checkNotNull(attempt.pendingPskEncryptionKeyId),
-                    nonce = checkNotNull(attempt.pendingPskNonce),
-                    ciphertext = checkNotNull(attempt.pendingPskCiphertext),
-                ),
+                encrypted = pendingPsk,
                 location = pendingPskLocation(attempt, request),
             )
         }

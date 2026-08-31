@@ -1,8 +1,11 @@
 package dev.agentknock.storage.crypto
 
+import android.security.keystore.KeyPermanentlyInvalidatedException
+import androidx.room3.ColumnInfo
 import java.io.ByteArrayOutputStream
 import java.io.DataOutputStream
 import java.security.GeneralSecurityException
+import java.security.UnrecoverableKeyException
 import javax.crypto.AEADBadTagException
 import javax.crypto.Cipher
 import javax.crypto.SecretKey
@@ -21,9 +24,13 @@ internal data class EncryptionBinding(
 )
 
 internal data class EncryptedValue(
+    @ColumnInfo(name = "encryption_format")
     val formatVersion: Int,
+    @ColumnInfo(name = "encryption_key_id")
     val keyId: String,
+    @ColumnInfo(name = "nonce")
     val nonce: ByteArray,
+    @ColumnInfo(name = "ciphertext")
     val ciphertext: ByteArray,
 )
 
@@ -49,16 +56,21 @@ internal class AesGcmEncryption(
         location: EncryptionLocation,
         plaintext: ByteArray,
     ): EncryptedValue {
+        require(keyId.isNotBlank()) { "Encryption-key ID must not be blank" }
         val key = checkNotNull(keys.get(keyId)) { "Encryption key is unavailable: $keyId" }
         val cipher = Cipher.getInstance(TRANSFORMATION)
         cipher.init(Cipher.ENCRYPT_MODE, key)
         check(cipher.iv.size == NONCE_BYTES) { "AES-GCM provider returned a non-standard nonce" }
         cipher.updateAAD(associatedData(FORMAT_VERSION, keyId, location))
+        val ciphertext = cipher.doFinal(plaintext)
+        check(ciphertext.size == plaintext.size + AUTHENTICATION_TAG_BYTES) {
+            "AES-GCM provider returned a non-standard authentication tag"
+        }
         return EncryptedValue(
             formatVersion = FORMAT_VERSION,
             keyId = keyId,
             nonce = cipher.iv,
-            ciphertext = cipher.doFinal(plaintext),
+            ciphertext = ciphertext,
         )
     }
 
@@ -66,10 +78,23 @@ internal class AesGcmEncryption(
         encrypted: EncryptedValue,
         location: EncryptionLocation,
     ): DecryptionResult {
-        if (encrypted.formatVersion != FORMAT_VERSION || encrypted.nonce.size != NONCE_BYTES) {
+        if (
+            encrypted.formatVersion != FORMAT_VERSION ||
+            encrypted.keyId.isBlank() ||
+            encrypted.nonce.size != NONCE_BYTES
+        ) {
             return DecryptionResult.UnsupportedFormat
         }
-        val key = keys.get(encrypted.keyId) ?: return DecryptionResult.KeyUnavailable
+        if (encrypted.ciphertext.size < AUTHENTICATION_TAG_BYTES) {
+            return DecryptionResult.AuthenticationFailed
+        }
+        val key = try {
+            keys.get(encrypted.keyId)
+        } catch (_: UnrecoverableKeyException) {
+            null
+        } catch (_: KeyPermanentlyInvalidatedException) {
+            null
+        } ?: return DecryptionResult.KeyUnavailable
         return try {
             val cipher = Cipher.getInstance(TRANSFORMATION)
             cipher.init(
@@ -81,6 +106,8 @@ internal class AesGcmEncryption(
             DecryptionResult.Plaintext(cipher.doFinal(encrypted.ciphertext))
         } catch (_: AEADBadTagException) {
             DecryptionResult.AuthenticationFailed
+        } catch (_: KeyPermanentlyInvalidatedException) {
+            DecryptionResult.KeyUnavailable
         } catch (exception: GeneralSecurityException) {
             throw IllegalStateException("Could not decrypt an encrypted value", exception)
         }
@@ -122,6 +149,7 @@ internal class AesGcmEncryption(
         private const val FORMAT_VERSION = 1
         private const val NONCE_BYTES = 12
         private const val AUTHENTICATION_TAG_BITS = 128
+        private const val AUTHENTICATION_TAG_BYTES = AUTHENTICATION_TAG_BITS / Byte.SIZE_BITS
         private const val DOMAIN = "dev.agentknock.encrypted-value"
     }
 }

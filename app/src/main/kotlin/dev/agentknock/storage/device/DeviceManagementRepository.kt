@@ -1,4 +1,4 @@
-package dev.agentknock.storage.vault
+package dev.agentknock.storage.device
 
 import dev.agentknock.relay.RelayDeviceManagementClient
 import dev.agentknock.relay.RelayDeviceManagementResult
@@ -20,7 +20,7 @@ internal sealed interface DeviceManagementResult {
 }
 
 internal class DeviceManagementRepository(
-    private val vaultDao: VaultDao,
+    private val deviceIdentityDao: DeviceIdentityDao,
     private val credentials: RelayDeviceCredentialSource,
     private val relay: RelayDeviceManagementClient,
     private val audit: AuditSink,
@@ -39,10 +39,10 @@ internal class DeviceManagementRepository(
         ) {
             RelayDeviceManagementResult.Changed -> {
                 check(
-                    vaultDao.updatePairingEnabled(
+                    deviceIdentityDao.updatePairingEnabled(
                         identityId = active.deviceIdentityId,
                         enabled = enabled,
-                        activeRole = "active",
+                        activeRole = DeviceIdentityRole.ACTIVE.storedName,
                     ) == 1,
                 )
                 audit.record(

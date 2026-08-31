@@ -1,10 +1,12 @@
 package dev.agentknock.storage.crypto
 
+import java.security.UnrecoverableKeyException
 import javax.crypto.KeyGenerator
 import javax.crypto.SecretKey
 import org.junit.Assert.assertArrayEquals
 import org.junit.Assert.assertEquals
 import org.junit.Assert.assertFalse
+import org.junit.Assert.assertThrows
 import org.junit.Assert.assertTrue
 import org.junit.Test
 
@@ -25,6 +27,7 @@ class AesGcmEncryptionTest {
 
         assertEquals(1, encrypted.formatVersion)
         assertEquals(12, encrypted.nonce.size)
+        assertEquals(plaintext.size + 16, encrypted.ciphertext.size)
         assertFalse(plaintext.contentEquals(encrypted.ciphertext))
         val result = encryption.decrypt(encrypted, location)
         assertTrue(result is DecryptionResult.Plaintext)
@@ -99,6 +102,86 @@ class AesGcmEncryptionTest {
             DecryptionResult.KeyUnavailable,
             restoredEncryption.decrypt(encrypted, location),
         )
+    }
+
+    @Test
+    fun `rejects unsupported encryption metadata before key lookup`() {
+        var lookedUp = false
+        val guarded = AesGcmEncryption(
+            object : EncryptionKeySource {
+                override fun get(keyId: String): SecretKey? {
+                    lookedUp = true
+                    return key
+                }
+            },
+        )
+        val valid = encryption.encrypt(KEY_ID, location, byteArrayOf(1))
+
+        assertEquals(
+            DecryptionResult.UnsupportedFormat,
+            guarded.decrypt(valid.copy(keyId = ""), location),
+        )
+        assertEquals(
+            DecryptionResult.UnsupportedFormat,
+            guarded.decrypt(valid.copy(nonce = ByteArray(11)), location),
+        )
+        assertEquals(
+            DecryptionResult.UnsupportedFormat,
+            guarded.decrypt(valid.copy(formatVersion = 0), location),
+        )
+        assertEquals(
+            DecryptionResult.UnsupportedFormat,
+            guarded.decrypt(valid.copy(formatVersion = 2), location),
+        )
+        assertFalse(lookedUp)
+    }
+
+    @Test
+    fun `rejects truncated ciphertext before key lookup`() {
+        var lookedUp = false
+        val guarded = AesGcmEncryption(
+            object : EncryptionKeySource {
+                override fun get(keyId: String): SecretKey? {
+                    lookedUp = true
+                    return key
+                }
+            },
+        )
+        val encrypted = encryption.encrypt(KEY_ID, location, byteArrayOf(1))
+
+        assertEquals(
+            DecryptionResult.AuthenticationFailed,
+            guarded.decrypt(encrypted.copy(ciphertext = ByteArray(15)), location),
+        )
+        assertFalse(lookedUp)
+    }
+
+    @Test
+    fun `maps an unrecoverable key lookup to unavailable`() {
+        val unavailable = AesGcmEncryption(
+            object : EncryptionKeySource {
+                override fun get(keyId: String): SecretKey? {
+                    throw UnrecoverableKeyException("restored key is gone")
+                }
+            },
+        )
+        val encrypted = encryption.encrypt(KEY_ID, location, byteArrayOf(1))
+
+        assertEquals(DecryptionResult.KeyUnavailable, unavailable.decrypt(encrypted, location))
+    }
+
+    @Test
+    fun `does not hide unexpected key source failures`() {
+        val broken = AesGcmEncryption(
+            object : EncryptionKeySource {
+                override fun get(keyId: String): SecretKey? = error("provider bug")
+            },
+        )
+        val encrypted = encryption.encrypt(KEY_ID, location, byteArrayOf(1))
+
+        assertThrows(IllegalStateException::class.java) {
+            broken.decrypt(encrypted, location)
+        }
     }
 
     private class MapKeySource(

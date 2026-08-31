@@ -7,7 +7,7 @@ import dev.agentknock.AgentknockApplication
 import dev.agentknock.storage.FactoryResetResult
 import dev.agentknock.storage.crypto.VaultProtection
 import dev.agentknock.storage.audit.AuditEvent
-import dev.agentknock.storage.vault.DeviceConfiguration
+import dev.agentknock.storage.device.DeviceConfiguration
 import kotlinx.coroutines.ExperimentalCoroutinesApi
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.SharingStarted
@@ -30,7 +30,8 @@ internal class SettingsViewModel(application: Application) : AndroidViewModel(ap
     private val selectedAuditId = MutableStateFlow<Long?>(null)
     private val _vaultProtection = MutableStateFlow<VaultProtection?>(null)
 
-    val configuration: StateFlow<DeviceConfiguration?> = container.vault.observeConfiguration()
+    val configuration: StateFlow<DeviceConfiguration?> = container.deviceIdentity
+        .observeConfiguration()
         .stateIn(viewModelScope, SharingStarted.Eagerly, null)
     val dataCounts: StateFlow<DataCounts> = combine(
         container.secrets.observeSecrets(),

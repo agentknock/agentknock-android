@@ -56,6 +56,11 @@ internal object DeviceProtocol {
         )
     }
 
+    fun deriveDevicePublicKey(privateKey: ByteArray): ByteArray {
+        require(privateKey.size == DEVICE_KEY_BYTES) { "An X25519 private key must be 32 bytes" }
+        return X25519PrivateKeyParameters(privateKey, 0).generatePublicKey().encoded
+    }
+
     fun generateDeviceToken(random: SecureRandom = SecureRandom()): ByteArray =
         ByteArray(32).also(random::nextBytes)
 
@@ -89,6 +94,7 @@ internal object DeviceProtocol {
     }
 
     private const val ULID_BYTES = 16
+    private const val DEVICE_KEY_BYTES = 32
     private const val ULID_CHARACTERS = 26
     private const val MAX_ULID_TIMESTAMP = 0xffff_ffff_ffffL
     private const val ULID_ALPHABET = "0123456789ABCDEFGHJKMNPQRSTVWXYZ"

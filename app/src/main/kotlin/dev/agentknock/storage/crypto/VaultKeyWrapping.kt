@@ -1,5 +1,6 @@
 package dev.agentknock.storage.crypto
 
+import androidx.room3.ColumnInfo
 import java.io.ByteArrayOutputStream
 import java.io.DataOutputStream
 import java.security.GeneralSecurityException
@@ -9,9 +10,13 @@ import javax.crypto.spec.GCMParameterSpec
 import javax.crypto.spec.SecretKeySpec
 
 internal data class WrappedVaultKey(
+    @ColumnInfo(name = "wrapping_format")
     val formatVersion: Int,
+    @ColumnInfo(name = "recovery_root_id")
     val recoveryRootId: String,
+    @ColumnInfo(name = "wrapping_nonce")
     val nonce: ByteArray,
+    @ColumnInfo(name = "wrapped_key")
     val ciphertext: ByteArray,
 )
 
@@ -59,6 +64,7 @@ internal object VaultKeyWrapping {
         purpose: VaultKeyPurpose,
     ): VaultKeyUnwrapResult {
         if (
+            vaultKeyId.isBlank() ||
             wrapped.formatVersion != FORMAT_VERSION ||
             wrapped.recoveryRootId.isBlank() ||
             wrapped.nonce.size != NONCE_BYTES ||

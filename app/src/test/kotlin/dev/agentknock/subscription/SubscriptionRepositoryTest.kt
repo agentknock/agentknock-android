@@ -2,9 +2,9 @@ package dev.agentknock.subscription
 
 import dev.agentknock.relay.RelaySubscriptionClient
 import dev.agentknock.relay.RelaySubscriptionResult
-import dev.agentknock.storage.vault.RelayDeviceCredentialSource
-import dev.agentknock.storage.vault.RelayDeviceCredentials
-import dev.agentknock.storage.vault.RelayDeviceCredentialsResult
+import dev.agentknock.storage.device.RelayDeviceCredentialSource
+import dev.agentknock.storage.device.RelayDeviceCredentials
+import dev.agentknock.storage.device.RelayDeviceCredentialsResult
 import kotlinx.coroutines.test.runTest
 import org.junit.Assert.assertEquals
 import org.junit.Test

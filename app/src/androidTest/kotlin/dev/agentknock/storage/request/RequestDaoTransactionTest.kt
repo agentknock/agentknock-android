@@ -1,15 +1,22 @@
 package dev.agentknock.storage.request
 
 import androidx.room3.Room
+import androidx.room3.executeSQL
+import androidx.room3.useWriterConnection
 import androidx.test.ext.junit.runners.AndroidJUnit4
 import androidx.test.platform.app.InstrumentationRegistry
 import dev.agentknock.storage.AgentknockDatabase
+import dev.agentknock.storage.crypto.AesGcmEncryption
+import dev.agentknock.storage.crypto.DecryptionResult
+import dev.agentknock.storage.crypto.EncryptionKeySource
+import dev.agentknock.storage.crypto.EncryptionLocation
 import dev.agentknock.storage.crypto.VaultKeyEntity
 import dev.agentknock.storage.crypto.VaultKeyPurpose
+import dev.agentknock.storage.crypto.EncryptedValue
 import dev.agentknock.storage.secret.SecretClientApprovalOverrideEntity
 import dev.agentknock.storage.secret.SecretEntity
 import dev.agentknock.storage.secret.TemporaryAccessGrantEntity
-import dev.agentknock.storage.vault.DeviceIdentityEntity
+import dev.agentknock.storage.device.DeviceIdentityEntity
 import kotlinx.coroutines.flow.first
 import kotlinx.coroutines.runBlocking
 import kotlinx.coroutines.test.runTest
@@ -46,14 +53,12 @@ class RequestDaoTransactionTest {
                     backing = "SOFTWARE",
                 ),
             )
-            database.vaultDao().insertIdentity(
+            database.deviceIdentityDao().insertIdentity(
                 DeviceIdentityEntity(
                     id = DEVICE_IDENTITY_ID,
                     role = "active",
                     address = "write-leader-hungry",
-                    addressId = "address-id",
                     deviceId = DEVICE_ID,
-                    devicePublicKey = ByteArray(32),
                     createdAt = 1,
                     claimedAt = 1,
                 ),
@@ -87,7 +92,7 @@ class RequestDaoTransactionTest {
         assertEquals("waiting_for_finish", dao.getPairingAttempt(ROOT_REQUEST_ID)?.state)
         assertArrayEquals(
             byteArrayOf(1),
-            dao.getPairingAttempt(ROOT_REQUEST_ID)?.pendingPskCiphertext,
+            dao.getPairingAttempt(ROOT_REQUEST_ID)?.pendingPsk?.ciphertext,
         )
         assertNull(dao.getClient(CLIENT_ID))
         assertNull(dao.getClientPsk(CLIENT_ID, CURRENT_SLOT))
@@ -106,13 +111,13 @@ class RequestDaoTransactionTest {
         assertEquals("completed", dao.getRequestById(ROOT_REQUEST_ID)?.state)
         val storedAttempt = checkNotNull(dao.getPairingAttempt(ROOT_REQUEST_ID))
         assertEquals("completed", storedAttempt.state)
-        assertNull(storedAttempt.pendingPskCiphertext)
+        assertNull(storedAttempt.pendingPsk)
         assertEquals(RESPONSE_JSON, storedFinish.responseJson)
         assertNotNull(dao.getRequestPsk(storedFinish.id))
         assertNotNull(dao.getClient(CLIENT_ID))
         assertArrayEquals(
             byteArrayOf(2),
-            dao.getClientPsk(CLIENT_ID, CURRENT_SLOT)?.ciphertext,
+            dao.getClientPsk(CLIENT_ID, CURRENT_SLOT)?.encryptedPsk?.ciphertext,
         )
         assertNull(dao.getClientPsk(CLIENT_ID, PREVIOUS_SLOT))
     }
@@ -128,10 +133,7 @@ class RequestDaoTransactionTest {
             attempt = attempt.copy(
                 desiredRelayClientState = "revoked",
                 state = "rejected",
-                pendingPskEncryptionFormat = null,
-                pendingPskEncryptionKeyId = null,
-                pendingPskNonce = null,
-                pendingPskCiphertext = null,
+                pendingPsk = null,
                 decidedAt = 2,
             ),
         )
@@ -139,9 +141,75 @@ class RequestDaoTransactionTest {
         assertEquals("completed", dao.getRequestById(ROOT_REQUEST_ID)?.state)
         val rejected = checkNotNull(dao.getPairingAttempt(ROOT_REQUEST_ID))
         assertEquals("rejected", rejected.state)
-        assertNull(rejected.pendingPskEncryptionKeyId)
-        assertNull(rejected.pendingPskCiphertext)
+        assertNull(rejected.pendingPsk)
         assertNull(dao.getClient(CLIENT_ID))
+    }
+
+    @Test
+    fun nullableEncryptedValueRoundTripsOnlyAsACompleteQuartet() = runTest {
+        val request = rootRequest()
+        dao.insertPairingRequest(request, pendingAttempt())
+        assertNull(checkNotNull(dao.getPairingAttempt(ROOT_REQUEST_ID)).pendingPsk)
+
+        val complete = pendingAttempt(withPendingPsk = true)
+        dao.updatePairingRequest(request, complete)
+
+        val stored = checkNotNull(dao.getPairingAttempt(ROOT_REQUEST_ID)).pendingPsk
+        checkNotNull(stored)
+        assertEquals(1, stored.formatVersion)
+        assertEquals(KEY_ID, stored.keyId)
+        assertArrayEquals(ByteArray(12), stored.nonce)
+        assertArrayEquals(byteArrayOf(1), stored.ciphertext)
+    }
+
+    @Test
+    fun partialNullableEncryptedValueFailsLoudlyWhenRead() = runTest {
+        dao.insertPairingRequest(rootRequest(), pendingAttempt())
+        val columns = mapOf(
+            "pending_psk_encryption_format" to "1",
+            "pending_psk_encryption_key_id" to "'$KEY_ID'",
+            "pending_psk_nonce" to "X'00'",
+            "pending_psk_ciphertext" to "X'00'",
+        )
+
+        columns.keys.forEach { missingColumn ->
+            database.useWriterConnection { connection ->
+                connection.executeSQL(
+                    "UPDATE pairing_attempts SET " +
+                        columns.entries.joinToString { (column, value) ->
+                            "$column = ${if (column == missingColumn) "NULL" else value}"
+                        } +
+                        " WHERE request_id = '$ROOT_REQUEST_ID'",
+                )
+            }
+
+            val read = runCatching { dao.getPairingAttempt(ROOT_REQUEST_ID) }
+            if (missingColumn == "pending_psk_encryption_format") {
+                val partial = checkNotNull(read.getOrThrow()?.pendingPsk)
+                assertEquals(0, partial.formatVersion)
+                assertEquals(
+                    DecryptionResult.UnsupportedFormat,
+                    AesGcmEncryption(
+                        object : EncryptionKeySource {
+                            override fun get(keyId: String) =
+                                error("Invalid metadata looked up a key")
+                        },
+                    ).decrypt(
+                        partial,
+                        EncryptionLocation(
+                            "test",
+                            ROOT_REQUEST_ID,
+                            "pending_psk",
+                        ),
+                    ),
+                )
+            } else {
+                assertTrue(
+                    "A pending PSK with a missing $missingColumn column was accepted",
+                    read.isFailure,
+                )
+            }
+        }
     }
 
     @Test
@@ -408,7 +476,11 @@ class RequestDaoTransactionTest {
         val failed = runCatching {
             dao.insertPairingRemoval(
                 request = removal,
-                requestPsk = requestPsk(REMOVE_REQUEST_ID).copy(encryptionKeyId = "missing-key"),
+                requestPsk = requestPsk(REMOVE_REQUEST_ID).let { requestPsk ->
+                    requestPsk.copy(
+                        encryptedPsk = requestPsk.encryptedPsk.copy(keyId = "missing-key"),
+                    )
+                },
                 client = revokedClient,
             )
         }
@@ -479,10 +551,7 @@ class RequestDaoTransactionTest {
                     requestId = requestId,
                     name = "TOKEN",
                     sensitive = true,
-                    encryptionFormat = 1,
-                    encryptionKeyId = KEY_ID,
-                    nonce = ByteArray(12),
-                    ciphertext = byteArrayOf(4),
+                    encryptedValue = encryptedValue(byteArrayOf(4)),
                 ),
             ),
             sshKey = null,
@@ -565,7 +634,7 @@ class RequestDaoTransactionTest {
     @Test
     fun authorizationCommitmentRejectsChangedDeviceInstructions() = runTest {
         insertActivePairing()
-        database.vaultDao().updateActiveInstructions(
+        database.deviceIdentityDao().updateActiveInstructions(
             activeRole = "active",
             instructions = "Allow repository inspection.",
         )
@@ -580,7 +649,7 @@ class RequestDaoTransactionTest {
 
         assertTrue(dao.authorizationMatches(commitment, CLIENT_ID, "invocation", 1))
 
-        database.vaultDao().updateActiveInstructions(
+        database.deviceIdentityDao().updateActiveInstructions(
             activeRole = "active",
             instructions = "Ask before every use.",
         )
@@ -874,20 +943,14 @@ class RequestDaoTransactionTest {
         hostname = "test",
         machineId = null,
         osVersion = null,
-        pendingPskEncryptionFormat = if (withPendingPsk) 1 else null,
-        pendingPskEncryptionKeyId = if (withPendingPsk) KEY_ID else null,
-        pendingPskNonce = if (withPendingPsk) ByteArray(12) else null,
-        pendingPskCiphertext = if (withPendingPsk) byteArrayOf(1) else null,
+        pendingPsk = if (withPendingPsk) encryptedValue(byteArrayOf(1)) else null,
         decidedAt = 1,
     )
 
     private fun completedAttempt(attempt: PairingAttemptEntity) = attempt.copy(
         state = "completed",
         desiredRelayClientState = null,
-        pendingPskEncryptionFormat = null,
-        pendingPskEncryptionKeyId = null,
-        pendingPskNonce = null,
-        pendingPskCiphertext = null,
+        pendingPsk = null,
         decidedAt = 2,
     )
 
@@ -961,20 +1024,21 @@ class RequestDaoTransactionTest {
 
     private fun requestPsk(requestId: String) = RequestPskEntity(
         requestId = requestId,
-        encryptionFormat = 1,
-        encryptionKeyId = KEY_ID,
-        nonce = ByteArray(12),
-        ciphertext = byteArrayOf(3),
+        encryptedPsk = encryptedValue(byteArrayOf(3)),
     )
 
     private fun clientPsk(slot: String, ciphertext: ByteArray) = ClientPskEntity(
         clientId = CLIENT_ID,
         slot = slot,
-        encryptionFormat = 1,
-        encryptionKeyId = KEY_ID,
+        encryptedPsk = encryptedValue(ciphertext),
+        storedAt = 2,
+    )
+
+    private fun encryptedValue(ciphertext: ByteArray) = EncryptedValue(
+        formatVersion = 1,
+        keyId = KEY_ID,
         nonce = ByteArray(12),
         ciphertext = ciphertext,
-        storedAt = 2,
     )
 
     private companion object {

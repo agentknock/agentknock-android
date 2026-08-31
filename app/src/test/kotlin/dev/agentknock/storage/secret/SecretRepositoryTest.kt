@@ -32,7 +32,7 @@ class SecretRepositoryTest {
         check(created is CreateSecretResult.Created)
 
         val stored = fixture.dao.sshKeys.value.single()
-        assertFalse(stored.ciphertext.contentEquals(key.privateKey))
+        assertFalse(stored.encryptedPrivateKey.ciphertext.contentEquals(key.privateKey))
         assertEquals(key.publicKey.toList(), stored.publicKey.toList())
 
         val details = checkNotNull(fixture.repository.observeSecret(created.id).first())
@@ -67,7 +67,7 @@ class SecretRepositoryTest {
         val stored = fixture.dao.sshKeys.value.single()
         assertEquals("rsa", stored.algorithm)
         assertEquals(RSA_PRIVATE_KEY_FORMAT, stored.privateKeyFormat)
-        assertFalse(stored.ciphertext.contentEquals(key.privateKey))
+        assertFalse(stored.encryptedPrivateKey.ciphertext.contentEquals(key.privateKey))
         val details = checkNotNull(fixture.repository.observeSecret(created.id).first())
         assertEquals("rsa", details.sshKey?.algorithm)
         assertTrue(details.sshKey?.publicKey?.startsWith("ssh-rsa ") == true)
@@ -82,9 +82,11 @@ class SecretRepositoryTest {
         val original = fixture.dao.sshKeys.value.single()
         val replacement = original.copy(
             publicKey = byteArrayOf(9, 8, 7),
-            encryptionKeyId = "replacement-key",
-            nonce = byteArrayOf(6, 5, 4),
-            ciphertext = byteArrayOf(3, 2, 1),
+            encryptedPrivateKey = original.encryptedPrivateKey.copy(
+                keyId = "replacement-key",
+                nonce = byteArrayOf(6, 5, 4),
+                ciphertext = byteArrayOf(3, 2, 1),
+            ),
             materialUpdatedAt = original.materialUpdatedAt + 100,
         )
         fixture.dao.beforeSshCommentUpdate = {
@@ -98,7 +100,10 @@ class SecretRepositoryTest {
 
         val stored = fixture.dao.sshKeys.value.single()
         assertEquals(replacement.publicKey.toList(), stored.publicKey.toList())
-        assertEquals(replacement.ciphertext.toList(), stored.ciphertext.toList())
+        assertEquals(
+            replacement.encryptedPrivateKey.ciphertext.toList(),
+            stored.encryptedPrivateKey.ciphertext.toList(),
+        )
         assertEquals(replacement.materialUpdatedAt, stored.materialUpdatedAt)
         assertEquals("new@example", stored.comment)
     }
@@ -173,12 +178,16 @@ class SecretRepositoryTest {
         assertEquals(
             setOf(VaultKeyPurpose.SECRET_VALUES.storedName),
             rows.map { variable ->
-                fixture.encryptionMetadata.getKey(variable.encryptionKeyId)?.purpose
+                fixture.encryptionMetadata.getKey(variable.encryptedValue.keyId)?.purpose
             }.toSet(),
         )
         assertTrue(rows.all { it.secretId == secretId })
-        assertFalse(rows[0].ciphertext.contentEquals("AKIAEXAMPLE".encodeToByteArray()))
-        assertFalse(rows[1].ciphertext.contentEquals("eu-west-1".encodeToByteArray()))
+        assertFalse(
+            rows[0].encryptedValue.ciphertext.contentEquals("AKIAEXAMPLE".encodeToByteArray()),
+        )
+        assertFalse(
+            rows[1].encryptedValue.ciphertext.contentEquals("eu-west-1".encodeToByteArray()),
+        )
 
         val secret = fixture.repository.observeSecret(secretId).first()
         checkNotNull(secret)
@@ -193,9 +202,11 @@ class SecretRepositoryTest {
         val variableId = fixture.createVariable(secretId, "TOKEN", "first", true)
         val original = fixture.dao.variables.value.single()
         val replacement = original.copy(
-            encryptionKeyId = "replacement-key",
-            nonce = byteArrayOf(9, 8, 7),
-            ciphertext = byteArrayOf(6, 5, 4),
+            encryptedValue = original.encryptedValue.copy(
+                keyId = "replacement-key",
+                nonce = byteArrayOf(9, 8, 7),
+                ciphertext = byteArrayOf(6, 5, 4),
+            ),
             valueUpdatedAt = original.valueUpdatedAt + 100,
         )
         val revisedSecret = fixture.dao.secrets.value.single().copy(
@@ -219,9 +230,12 @@ class SecretRepositoryTest {
         )
 
         val stored = fixture.dao.variables.value.single()
-        assertEquals(replacement.encryptionKeyId, stored.encryptionKeyId)
-        assertEquals(replacement.nonce.toList(), stored.nonce.toList())
-        assertEquals(replacement.ciphertext.toList(), stored.ciphertext.toList())
+        assertEquals(replacement.encryptedValue.keyId, stored.encryptedValue.keyId)
+        assertEquals(replacement.encryptedValue.nonce.toList(), stored.encryptedValue.nonce.toList())
+        assertEquals(
+            replacement.encryptedValue.ciphertext.toList(),
+            stored.encryptedValue.ciphertext.toList(),
+        )
         assertEquals(replacement.valueUpdatedAt, stored.valueUpdatedAt)
         assertEquals("Rotated out of band", stored.notes)
         assertEquals(9L, fixture.dao.secrets.value.single().revision)
@@ -268,7 +282,7 @@ class SecretRepositoryTest {
         val after = fixture.dao.variables.value.single()
         assertEquals(before.valueUpdatedAt, after.valueUpdatedAt)
         assertNotEquals(before.updatedAt, after.updatedAt)
-        assertFalse(before.ciphertext.contentEquals(after.ciphertext))
+        assertFalse(before.encryptedValue.ciphertext.contentEquals(after.encryptedValue.ciphertext))
         val value = fixture.repository.readEnvironmentVariableValue(variableId)
         assertTrue(value is EnvironmentVariableValue.Available)
         assertEquals("eu-west-1", (value as EnvironmentVariableValue.Available).value)
@@ -287,8 +301,8 @@ class SecretRepositoryTest {
         )
 
         val after = fixture.dao.variables.value.single()
-        assertTrue(before.nonce.contentEquals(after.nonce))
-        assertTrue(before.ciphertext.contentEquals(after.ciphertext))
+        assertTrue(before.encryptedValue.nonce.contentEquals(after.encryptedValue.nonce))
+        assertTrue(before.encryptedValue.ciphertext.contentEquals(after.encryptedValue.ciphertext))
         assertEquals(before.updatedAt, after.updatedAt)
         assertEquals(before.valueUpdatedAt, after.valueUpdatedAt)
     }
@@ -339,7 +353,7 @@ class SecretRepositoryTest {
 
         val replacementRow = original.dao.variables.value.single()
         assertEquals(originalRow.id, replacementRow.id)
-        assertEquals("replacement-secret-key", replacementRow.encryptionKeyId)
+        assertEquals("replacement-secret-key", replacementRow.encryptedValue.keyId)
         val replacementValue = restoredRepository.readEnvironmentVariableValue(variableId)
         assertTrue(replacementValue is EnvironmentVariableValue.Available)
         assertEquals("new-token", (replacementValue as EnvironmentVariableValue.Available).value)
@@ -1100,7 +1114,7 @@ private class FakeSecretDao : SecretDao {
                     algorithm = key.algorithm,
                     publicKey = key.publicKey,
                     comment = key.comment,
-                    encryptionKeyId = key.encryptionKeyId,
+                    encryptionKeyId = key.encryptedPrivateKey.keyId,
                     materialUpdatedAt = key.materialUpdatedAt,
                 )
             }
@@ -1118,7 +1132,7 @@ private class FakeSecretDao : SecretDao {
                     name = variable.name,
                     sensitive = variable.sensitive,
                     notes = variable.notes,
-                    encryptionKeyId = variable.encryptionKeyId,
+                    encryptionKeyId = variable.encryptedValue.keyId,
                     createdAt = variable.createdAt,
                     updatedAt = variable.updatedAt,
                     valueUpdatedAt = variable.valueUpdatedAt,

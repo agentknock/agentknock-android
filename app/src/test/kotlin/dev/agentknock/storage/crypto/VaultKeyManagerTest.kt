@@ -5,6 +5,8 @@ import javax.crypto.SecretKey
 import javax.crypto.spec.SecretKeySpec
 import kotlinx.coroutines.test.runTest
 import org.junit.Assert.assertEquals
+import org.junit.Assert.assertFalse
+import org.junit.Assert.assertNotSame
 import org.junit.Assert.assertSame
 import org.junit.Assert.assertTrue
 import org.junit.Test
@@ -25,7 +27,6 @@ class VaultKeyManagerTest {
             ),
             result.activeKeys,
         )
-        assertTrue(result.unavailableKeyIds.isEmpty())
         assertEquals(
             mapOf(
                 VaultKeyPurpose.SECRET_VALUES.storedName to "secret-key",
@@ -33,7 +34,7 @@ class VaultKeyManagerTest {
             ),
             dao.activeKeyIds(),
         )
-        assertTrue(dao.keys.all { it.recoveryRootId == null })
+        assertTrue(dao.keys.all { it.wrapping == null })
     }
 
     @Test
@@ -50,7 +51,6 @@ class VaultKeyManagerTest {
 
         val result = manager.initialize()
 
-        assertTrue(result.unavailableKeyIds.isEmpty())
         assertEquals("secret-key", result.activeKeys[VaultKeyPurpose.SECRET_VALUES]?.id)
         assertEquals("device-key", result.activeKeys[VaultKeyPurpose.DEVICE_STATE]?.id)
         assertEquals(listOf("secret-key", "device-key"), keyStore.generatedKeyIds)
@@ -67,10 +67,6 @@ class VaultKeyManagerTest {
 
         val result = manager.initialize()
 
-        assertEquals(
-            mapOf(VaultKeyPurpose.SECRET_VALUES to "unavailable-secret-key"),
-            result.unavailableKeyIds,
-        )
         assertEquals(
             "replacement-secret-key",
             result.activeKeys[VaultKeyPurpose.SECRET_VALUES]?.id,
@@ -102,6 +98,100 @@ class VaultKeyManagerTest {
         assertEquals(listOf("secret-key", "device-key"), keyStore.generatedKeyIds)
     }
 
+    @Test
+    fun `deletes a generated key when metadata activation fails`() = runTest {
+        val dao = FakeVaultKeyDao().apply { failInsert = true }
+        val keyStore = FakeEncryptionKeyStore()
+        val manager = manager(dao, keyStore, "secret-key")
+
+        val failure = runCatching { manager.initialize() }.exceptionOrNull()
+
+        assertTrue(failure is IllegalStateException)
+        assertFalse(managerKeyAvailable(keyStore, "secret-key"))
+        assertEquals(listOf("secret-key"), keyStore.deletedKeyIds)
+    }
+
+    @Test
+    fun `deletes a partially generated key when generation fails`() = runTest {
+        val dao = FakeVaultKeyDao()
+        val keyStore = FakeEncryptionKeyStore().apply {
+            generateFailuresAfterInsert += "secret-key"
+        }
+        val manager = manager(dao, keyStore, "secret-key")
+
+        val failure = runCatching { manager.initialize() }.exceptionOrNull()
+
+        assertEquals("Generation failed for secret-key", failure?.message)
+        assertFalse(managerKeyAvailable(keyStore, "secret-key"))
+        assertEquals(listOf("secret-key"), keyStore.deletedKeyIds)
+        assertTrue(dao.keys.isEmpty())
+    }
+
+    @Test
+    fun `keeps metadata failure primary when generated key cleanup also fails`() = runTest {
+        val dao = FakeVaultKeyDao().apply { failInsert = true }
+        val keyStore = FakeEncryptionKeyStore().apply { deleteFailures += "secret-key" }
+        val manager = manager(dao, keyStore, "secret-key")
+
+        val failure = runCatching { manager.initialize() }.exceptionOrNull()
+        val metadataFailure = checkNotNull(dao.lastInsertFailure)
+
+        assertEquals("Metadata activation failed", failure?.message)
+        assertEquals(1, metadataFailure.suppressed.size)
+        assertEquals("Could not delete secret-key", metadataFailure.suppressed.single().message)
+    }
+
+    @Test
+    fun `factory reset deletes orphaned managed aliases`() = runTest {
+        val dao = FakeVaultKeyDao()
+        val keyStore = FakeEncryptionKeyStore()
+        val manager = manager(
+            dao,
+            keyStore,
+            "secret-key",
+            "device-key",
+            "new-secret-key",
+            "new-device-key",
+        )
+        manager.initialize()
+        keyStore.generate("orphan-key")
+
+        manager.reset { dao.keys.clear() }
+
+        assertEquals(
+            setOf("secret-key", "device-key", "orphan-key"),
+            keyStore.deletedKeyIds.toSet(),
+        )
+        assertEquals(
+            setOf("new-secret-key", "new-device-key"),
+            keyStore.managedKeyIds().toSet(),
+        )
+    }
+
+    @Test
+    fun `failed reset does not retain cached initialization`() = runTest {
+        val dao = FakeVaultKeyDao()
+        val keyStore = FakeEncryptionKeyStore()
+        val manager = manager(
+            dao,
+            keyStore,
+            "secret-key",
+            "device-key",
+            "new-secret-key",
+            "new-device-key",
+        )
+        val before = manager.initialize()
+        keyStore.deleteFailures += "secret-key"
+
+        runCatching { manager.reset { dao.keys.clear() } }
+            .onSuccess { error("Reset unexpectedly succeeded") }
+        keyStore.deleteFailures.clear()
+        val after = manager.initialize()
+
+        assertNotSame(before, after)
+        assertEquals("new-secret-key", after.activeKeys[VaultKeyPurpose.SECRET_VALUES]?.id)
+    }
+
     private fun manager(
         dao: FakeVaultKeyDao,
         keyStore: FakeEncryptionKeyStore,
@@ -123,21 +213,28 @@ class VaultKeyManagerTest {
         createdAt = 1L,
         backing = EncryptionKeyBacking.SOFTWARE.name,
     )
+
+    private fun managerKeyAvailable(keyStore: FakeEncryptionKeyStore, keyId: String): Boolean =
+        keyStore.get(keyId) != null
 }
 
 internal class FakeVaultKeyDao : VaultKeyDao {
     val keys = mutableListOf<VaultKeyEntity>()
+    var failInsert = false
+    var lastInsertFailure: IllegalStateException? = null
 
     override suspend fun getActiveKeys(purpose: String): List<VaultKeyEntity> =
         keys.filter { it.purpose == purpose && it.active }.sortedByDescending { it.createdAt }
 
     override suspend fun countKeys(purpose: String): Int = keys.count { it.purpose == purpose }
 
-    override suspend fun getKeyIds(): List<String> = keys.map { it.id }
-
     override suspend fun getKey(id: String): VaultKeyEntity? = keys.find { it.id == id }
 
     override suspend fun insertKey(key: VaultKeyEntity) {
+        if (failInsert) {
+            throw IllegalStateException("Metadata activation failed")
+                .also { lastInsertFailure = it }
+        }
         check(keys.none { it.id == key.id })
         keys += key
     }
@@ -156,8 +253,9 @@ internal class FakeVaultKeyDao : VaultKeyDao {
 internal class FakeEncryptionKeyStore : EncryptionKeyStore {
     private val keys = mutableMapOf<String, SecretKey>()
     val generatedKeyIds = mutableListOf<String>()
-
-    override fun contains(keyId: String): Boolean = keyId in keys
+    val deletedKeyIds = mutableListOf<String>()
+    val deleteFailures = mutableSetOf<String>()
+    val generateFailuresAfterInsert = mutableSetOf<String>()
 
     override fun get(keyId: String): SecretKey? = keys[keyId]
 
@@ -168,6 +266,7 @@ internal class FakeEncryptionKeyStore : EncryptionKeyStore {
             generateKey()
         }
         generatedKeyIds += keyId
+        check(keyId !in generateFailuresAfterInsert) { "Generation failed for $keyId" }
         return GeneratedEncryptionKey(EncryptionKeyBacking.SOFTWARE)
     }
 
@@ -179,6 +278,10 @@ internal class FakeEncryptionKeyStore : EncryptionKeyStore {
     }
 
     override fun delete(keyId: String) {
+        check(keyId !in deleteFailures) { "Could not delete $keyId" }
+        deletedKeyIds += keyId
         keys.remove(keyId)
     }
+
+    override fun managedKeyIds(): List<String> = keys.keys.toList()
 }

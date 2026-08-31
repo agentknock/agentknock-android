@@ -86,6 +86,19 @@ class VaultKeyWrappingTest {
         )
     }
 
+    @Test
+    fun `rejects a blank vault key id before unwrapping`() {
+        assertEquals(
+            VaultKeyUnwrapResult.UnsupportedFormat,
+            VaultKeyWrapping.unwrap(
+                wrapped = wrapped(),
+                recoveryRoot = root,
+                vaultKeyId = "",
+                purpose = VaultKeyPurpose.SECRET_VALUES,
+            ),
+        )
+    }
+
     private fun wrapped() = VaultKeyWrapping.wrap(
         recoveryRootId = "root-id",
         recoveryRoot = root,

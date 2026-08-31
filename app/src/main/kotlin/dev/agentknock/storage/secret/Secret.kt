@@ -3,6 +3,7 @@ package dev.agentknock.storage.secret
 import androidx.room3.ColumnInfo
 import androidx.room3.Dao
 import androidx.room3.Delete
+import androidx.room3.Embedded
 import androidx.room3.Entity
 import androidx.room3.ForeignKey
 import androidx.room3.Index
@@ -13,6 +14,7 @@ import androidx.room3.Query
 import androidx.room3.Transaction
 import androidx.room3.Update
 import dev.agentknock.storage.crypto.VaultKeyEntity
+import dev.agentknock.storage.crypto.EncryptedValue
 import dev.agentknock.storage.request.ClientEntity
 import kotlinx.coroutines.flow.Flow
 
@@ -152,14 +154,8 @@ internal data class EnvironmentVariableEntity(
     val sensitive: Boolean,
     @ColumnInfo(name = "notes")
     val notes: String,
-    @ColumnInfo(name = "encryption_format")
-    val encryptionFormat: Int,
-    @ColumnInfo(name = "encryption_key_id")
-    val encryptionKeyId: String,
-    @ColumnInfo(name = "nonce")
-    val nonce: ByteArray,
-    @ColumnInfo(name = "ciphertext")
-    val ciphertext: ByteArray,
+    @Embedded
+    val encryptedValue: EncryptedValue,
     @ColumnInfo(name = "created_at")
     val createdAt: Long,
     @ColumnInfo(name = "updated_at")
@@ -200,14 +196,8 @@ internal data class SshKeyEntity(
     val comment: String,
     @ColumnInfo(name = "private_key_format")
     val privateKeyFormat: String,
-    @ColumnInfo(name = "encryption_format")
-    val encryptionFormat: Int,
-    @ColumnInfo(name = "encryption_key_id")
-    val encryptionKeyId: String,
-    @ColumnInfo(name = "nonce")
-    val nonce: ByteArray,
-    @ColumnInfo(name = "ciphertext")
-    val ciphertext: ByteArray,
+    @Embedded
+    val encryptedPrivateKey: EncryptedValue,
     @ColumnInfo(name = "material_updated_at")
     val materialUpdatedAt: Long,
 )

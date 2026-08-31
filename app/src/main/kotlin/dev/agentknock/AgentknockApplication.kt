@@ -23,8 +23,8 @@ import dev.agentknock.relay.RelayHttpTransport
 import dev.agentknock.relay.WebSocketRelayDeviceClient
 import dev.agentknock.storage.request.RequestRepository
 import dev.agentknock.storage.request.RequestConnectionManager
-import dev.agentknock.storage.vault.VaultRepository
-import dev.agentknock.storage.vault.DeviceManagementRepository
+import dev.agentknock.storage.device.DeviceIdentityRepository
+import dev.agentknock.storage.device.DeviceManagementRepository
 import dev.agentknock.subscription.SubscriptionRepository
 import dev.agentknock.ui.auth.AuthenticationSession
 import kotlinx.coroutines.CoroutineScope
@@ -96,8 +96,8 @@ internal class ApplicationContainer(application: Application) {
         audit = audit,
     )
 
-    val vault = VaultRepository(
-        dao = database.vaultDao(),
+    val deviceIdentity = DeviceIdentityRepository(
+        dao = database.deviceIdentityDao(),
         keyManager = vaultKeyManager,
         encryption = encryption,
         relay = HttpRelayClaimClient(relayHttp),
@@ -105,25 +105,25 @@ internal class ApplicationContainer(application: Application) {
     )
 
     val pushRegistration = PushRegistrationRepository(
-        deviceCredentials = vault,
+        deviceCredentials = deviceIdentity,
         relay = HttpRelayPushRegistrationClient(relayHttp),
     )
 
     val subscription = SubscriptionRepository(
-        deviceCredentials = vault,
+        deviceCredentials = deviceIdentity,
         relay = HttpRelaySubscriptionClient(relayHttp),
     )
 
     val deviceManagement = DeviceManagementRepository(
-        vaultDao = database.vaultDao(),
-        credentials = vault,
+        deviceIdentityDao = database.deviceIdentityDao(),
+        credentials = deviceIdentity,
         relay = HttpRelayDeviceManagementClient(relayHttp),
         audit = audit,
     )
 
     val requests = RequestRepository(
         dao = database.requestDao(),
-        deviceCredentials = vault,
+        deviceCredentials = deviceIdentity,
         secrets = secrets,
         approvalReviewer = HttpRelayApprovalReviewClient(
             RelayHttpTransport(

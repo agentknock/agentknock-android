@@ -23,7 +23,7 @@ import dev.agentknock.storage.secret.SaveSshSecretResult
 import dev.agentknock.storage.secret.SaveEnvironmentVariableResult
 import dev.agentknock.storage.secret.SaveSecretResult
 import dev.agentknock.ui.pendingSecretUploads
-import dev.agentknock.storage.vault.DeviceConfiguration
+import dev.agentknock.storage.device.DeviceConfiguration
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.SharingStarted
 import kotlinx.coroutines.flow.StateFlow
@@ -63,7 +63,8 @@ internal class SecretsViewModel(application: Application) : AndroidViewModel(app
         initialValue = emptyList(),
     )
 
-    val configuration: StateFlow<DeviceConfiguration?> = container.vault.observeConfiguration()
+    val configuration: StateFlow<DeviceConfiguration?> = container.deviceIdentity
+        .observeConfiguration()
         .stateIn(
             scope = viewModelScope,
             started = SharingStarted.Eagerly,
@@ -222,7 +223,7 @@ internal class SecretsViewModel(application: Application) : AndroidViewModel(app
         repository.saveInstructions(id, instructions)
 
     suspend fun saveGeneralInstructions(instructions: String): Boolean =
-        container.vault.saveInstructions(instructions)
+        container.deviceIdentity.saveInstructions(instructions)
 
     suspend fun setClientApprovalOverride(
         secretId: String,

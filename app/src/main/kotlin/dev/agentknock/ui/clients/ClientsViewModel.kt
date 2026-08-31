@@ -11,8 +11,8 @@ import dev.agentknock.storage.request.ClientSummary
 import dev.agentknock.storage.request.InboxRequestDetails
 import dev.agentknock.storage.request.InboxRequestSummary
 import dev.agentknock.storage.request.PairingDecisionResult
-import dev.agentknock.storage.vault.DeviceConfiguration
-import dev.agentknock.storage.vault.DeviceManagementResult
+import dev.agentknock.storage.device.DeviceConfiguration
+import dev.agentknock.storage.device.DeviceManagementResult
 import dev.agentknock.storage.secret.TemporaryAccessGrant
 import dev.agentknock.storage.secret.TemporaryAccessOperation
 import dev.agentknock.ui.pendingPairings
@@ -74,7 +74,8 @@ internal class ClientsViewModel(application: Application) : AndroidViewModel(app
             started = SharingStarted.Eagerly,
             initialValue = null,
         )
-    val configuration: StateFlow<DeviceConfiguration?> = container.vault.observeConfiguration()
+    val configuration: StateFlow<DeviceConfiguration?> = container.deviceIdentity
+        .observeConfiguration()
         .stateIn(
             scope = viewModelScope,
             started = SharingStarted.Eagerly,

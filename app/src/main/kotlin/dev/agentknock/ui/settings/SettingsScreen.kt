@@ -91,7 +91,7 @@ import dev.agentknock.push.RequestNotifications
 import dev.agentknock.storage.FactoryResetResult
 import dev.agentknock.storage.crypto.EncryptionKeyBacking
 import dev.agentknock.storage.crypto.VaultProtection
-import dev.agentknock.storage.vault.DeviceIdentity
+import dev.agentknock.storage.device.DeviceIdentity
 import dev.agentknock.ui.auth.DeviceAuthenticationMode
 import dev.agentknock.ui.theme.agentknockColors
 import dev.agentknock.ui.components.NavigationBackButton

@@ -21,7 +21,8 @@ class AndroidEncryptionKeyStoreTest {
         try {
             keyStore.importKey(keyId, keyMaterial)
 
-            assertTrue(keyStore.contains(keyId))
+            assertTrue(keyStore.get(keyId) != null)
+            assertTrue(keyId in keyStore.managedKeyIds())
             assertNull(keyStore.get(keyId)?.encoded)
 
             val encryption = AesGcmEncryption(keyStore)

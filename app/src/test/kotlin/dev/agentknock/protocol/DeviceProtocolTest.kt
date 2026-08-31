@@ -43,6 +43,21 @@ class DeviceProtocolTest {
     }
 
     @Test
+    fun `derives the x25519 public key from stored private material`() {
+        val pair = DeviceProtocol.generateDeviceKeyPair(SecureRandom(byteArrayOf(7, 8, 9)))
+
+        assertArrayEquals(
+            pair.publicKey,
+            DeviceProtocol.deriveDevicePublicKey(pair.privateKey),
+        )
+    }
+
+    @Test(expected = IllegalArgumentException::class)
+    fun `rejects a malformed stored x25519 private key`() {
+        DeviceProtocol.deriveDevicePublicKey(ByteArray(31))
+    }
+
+    @Test
     fun `generates a canonical device ulid`() {
         val deviceId = DeviceProtocol.generateDeviceId(
             timestampMillis = 1_700_000_000_000,
