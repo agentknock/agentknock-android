@@ -11,6 +11,7 @@ import dev.agentknock.storage.crypto.EncryptionBinding
 import dev.agentknock.storage.crypto.EncryptionLocation
 import dev.agentknock.storage.crypto.VaultKeyManager
 import dev.agentknock.storage.crypto.VaultKeyPurpose
+import dev.agentknock.storage.WriteTransaction
 import dev.agentknock.storage.audit.AuditEventType
 import dev.agentknock.storage.audit.AuditOutcome
 import dev.agentknock.storage.audit.AuditRecord
@@ -119,6 +120,7 @@ internal class DeviceIdentityRepository(
     private val encryption: AesGcmEncryption,
     private val relay: RelayClaimClient,
     private val audit: AuditSink,
+    private val writeTransaction: WriteTransaction,
     private val newId: () -> String = { UUID.randomUUID().toString() },
     private val currentTimeMillis: () -> Long = System::currentTimeMillis,
     private val cryptographyDispatcher: CoroutineDispatcher = Dispatchers.IO,
@@ -307,29 +309,31 @@ internal class DeviceIdentityRepository(
         ) {
             is RelayEndpointResult.Success -> when (result.value) {
                 RelayClaimOutcome.CLAIMED -> {
-                    if (
-                        dao.promoteCandidate(
-                            candidateId = candidate.id,
-                            now = currentTimeMillis(),
-                            activeRole = DeviceIdentityRole.ACTIVE.storedName,
-                            candidateRole = DeviceIdentityRole.CANDIDATE.storedName,
-                            retiredRole = DeviceIdentityRole.RETIRED.storedName,
-                        )
-                    ) {
-                        audit.record(
-                            AuditRecord(
-                                type = if (previous == null) {
-                                    AuditEventType.PAIRING_ADDRESS_CLAIMED
-                                } else {
-                                    AuditEventType.PAIRING_ADDRESS_CHANGED
-                                },
-                                outcome = AuditOutcome.CHANGED,
-                                subject = candidate.address,
-                            ),
-                        )
-                        ClaimPairingAddressResult.Claimed
-                    } else {
-                        ClaimPairingAddressResult.NoCandidate
+                    writeTransaction.execute {
+                        if (
+                            dao.promoteCandidate(
+                                candidateId = candidate.id,
+                                now = currentTimeMillis(),
+                                activeRole = DeviceIdentityRole.ACTIVE.storedName,
+                                candidateRole = DeviceIdentityRole.CANDIDATE.storedName,
+                                retiredRole = DeviceIdentityRole.RETIRED.storedName,
+                            )
+                        ) {
+                            audit.record(
+                                AuditRecord(
+                                    type = if (previous == null) {
+                                        AuditEventType.PAIRING_ADDRESS_CLAIMED
+                                    } else {
+                                        AuditEventType.PAIRING_ADDRESS_CHANGED
+                                    },
+                                    outcome = AuditOutcome.CHANGED,
+                                    subject = candidate.address,
+                                ),
+                            )
+                            ClaimPairingAddressResult.Claimed
+                        } else {
+                            ClaimPairingAddressResult.NoCandidate
+                        }
                     }
                 }
                 RelayClaimOutcome.ADDRESS_UNAVAILABLE ->
@@ -353,19 +357,21 @@ internal class DeviceIdentityRepository(
 
     suspend fun saveInstructions(instructions: String): Boolean {
         val normalized = instructions.trim()
-        val updated = dao.updateActiveInstructions(
-            activeRole = DeviceIdentityRole.ACTIVE.storedName,
-            instructions = normalized,
-        ) == 1
-        if (updated) {
-            audit.record(
-                AuditRecord(
-                    type = AuditEventType.GENERAL_AI_REVIEW_INSTRUCTIONS_CHANGED,
-                    outcome = AuditOutcome.CHANGED,
-                ),
-            )
+        return writeTransaction.execute {
+            val updated = dao.updateActiveInstructions(
+                activeRole = DeviceIdentityRole.ACTIVE.storedName,
+                instructions = normalized,
+            ) == 1
+            if (updated) {
+                audit.record(
+                    AuditRecord(
+                        type = AuditEventType.GENERAL_AI_REVIEW_INSTRUCTIONS_CHANGED,
+                        outcome = AuditOutcome.CHANGED,
+                    ),
+                )
+            }
+            updated
         }
-        return updated
     }
 
     override suspend fun activeDeviceCredentials(): RelayDeviceCredentialsResult {

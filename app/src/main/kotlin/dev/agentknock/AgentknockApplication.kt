@@ -10,6 +10,7 @@ import dev.agentknock.push.RequestNotifications
 import dev.agentknock.push.PushSynchronizationWorker
 import dev.agentknock.push.RequestNotificationCoordinator
 import dev.agentknock.storage.AgentknockDatabase
+import dev.agentknock.storage.RoomWriteTransaction
 import dev.agentknock.storage.audit.AuditRepository
 import dev.agentknock.storage.crypto.AesGcmEncryption
 import dev.agentknock.storage.crypto.AndroidEncryptionKeyStore
@@ -60,6 +61,7 @@ class AgentknockApplication : Application() {
 internal class ApplicationContainer(application: Application) {
     val authentication = AuthenticationSession(application)
     private val database = AgentknockDatabase.create(application)
+    private val writeTransaction = RoomWriteTransaction(database)
     private val encryptionKeyStore = AndroidEncryptionKeyStore(application.packageManager)
     val vaultKeyManager = VaultKeyManager(
         dao = database.vaultKeyDao(),
@@ -90,6 +92,7 @@ internal class ApplicationContainer(application: Application) {
         keyManager = vaultKeyManager,
         encryption = encryption,
         audit = audit,
+        writeTransaction = writeTransaction,
     )
 
     val deviceIdentity = DeviceIdentityRepository(
@@ -98,6 +101,7 @@ internal class ApplicationContainer(application: Application) {
         encryption = encryption,
         relay = HttpRelayClaimClient(relayHttp),
         audit = audit,
+        writeTransaction = writeTransaction,
     )
 
     val pushRegistration = PushRegistrationRepository(
@@ -115,6 +119,7 @@ internal class ApplicationContainer(application: Application) {
         deviceAuthorization = deviceIdentity,
         relay = HttpRelayDeviceManagementClient(relayHttp),
         audit = audit,
+        writeTransaction = writeTransaction,
     )
 
     private val aiReviews = AiReviewCoordinator(applicationScope)

@@ -1,6 +1,7 @@
 package dev.agentknock.storage.secret
 
 import dev.agentknock.protocol.SecretUploadMode
+import dev.agentknock.storage.ImmediateWriteTransaction
 import dev.agentknock.storage.audit.AuditRecord
 import dev.agentknock.storage.audit.AuditSink
 import dev.agentknock.storage.audit.NoOpAuditSink
@@ -335,6 +336,7 @@ class SecretRepositoryTest {
             keyManager = replacementManager,
             encryption = AesGcmEncryption(replacementKeyStore),
             audit = NoOpAuditSink,
+            writeTransaction = ImmediateWriteTransaction,
             newId = { error("no new records expected") },
             currentTimeMillis = { 600L },
         )
@@ -826,7 +828,9 @@ class SecretRepositoryTest {
                     if (cancelAudit) throw cancellation
                 }
 
-                override suspend fun append(records: List<AuditRecord>, occurredAt: Long) = Unit
+                override suspend fun append(records: List<AuditRecord>, occurredAt: Long) {
+                    if (cancelAudit) throw cancellation
+                }
             },
         )
         val secretId = fixture.createSecret("github")
@@ -849,7 +853,6 @@ class SecretRepositoryTest {
             failure
         }
 
-        assertTrue(fixture.dao.temporaryAccessGrants.value.isNotEmpty())
         assertEquals(cancellation, thrown)
     }
 
@@ -1168,6 +1171,7 @@ class SecretRepositoryTest {
             keyManager = keyManager,
             encryption = AesGcmEncryption(keyStore),
             audit = audit,
+            writeTransaction = ImmediateWriteTransaction,
             newId = { "id-${++id}" },
             currentTimeMillis = { nextTime() },
         )

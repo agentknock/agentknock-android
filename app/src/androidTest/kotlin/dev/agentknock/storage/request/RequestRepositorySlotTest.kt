@@ -22,6 +22,7 @@ import dev.agentknock.relay.RelayApprovalReviewDecision
 import dev.agentknock.relay.RelayApprovalReviewResult
 import dev.agentknock.relay.ApprovalReviewRequest
 import dev.agentknock.storage.AgentknockDatabase
+import dev.agentknock.storage.RoomWriteTransaction
 import dev.agentknock.storage.audit.AuditRepository
 import dev.agentknock.storage.approval.AiReviewDecision
 import dev.agentknock.storage.crypto.AesGcmEncryption
@@ -138,6 +139,7 @@ class RequestRepositorySlotTest {
             keyManager = keyManager,
             encryption = encryption,
             audit = audit,
+            writeTransaction = RoomWriteTransaction(database),
             newId = { "secret-id" },
             currentTimeMillis = { now },
             cryptographyDispatcher = Dispatchers.Unconfined,

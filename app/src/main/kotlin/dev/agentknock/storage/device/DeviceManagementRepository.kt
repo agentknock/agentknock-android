@@ -3,6 +3,7 @@ package dev.agentknock.storage.device
 import dev.agentknock.relay.RelayDeviceManagementClient
 import dev.agentknock.relay.RelayDeviceManagementResult
 import dev.agentknock.relay.RelayEndpointResult
+import dev.agentknock.storage.WriteTransaction
 import dev.agentknock.storage.audit.AuditEventType
 import dev.agentknock.storage.audit.AuditOutcome
 import dev.agentknock.storage.audit.AuditRecord
@@ -25,6 +26,7 @@ internal class DeviceManagementRepository(
     private val deviceAuthorization: RelayDeviceAuthorizationSource,
     private val relay: RelayDeviceManagementClient,
     private val audit: AuditSink,
+    private val writeTransaction: WriteTransaction,
 ) {
     suspend fun setPairingEnabled(enabled: Boolean): DeviceManagementResult {
         val active = when (val lookup = authorizationLookup()) {
@@ -39,24 +41,26 @@ internal class DeviceManagementRepository(
             )
         ) {
             is RelayEndpointResult.Success -> {
-                check(
-                    deviceIdentityDao.updatePairingEnabled(
-                        identityId = active.deviceIdentityId,
-                        enabled = enabled,
-                        activeRole = DeviceIdentityRole.ACTIVE.storedName,
-                    ) == 1,
-                )
-                audit.record(
-                    AuditRecord(
-                        type = if (enabled) {
-                            AuditEventType.NEW_PAIRINGS_RESUMED
-                        } else {
-                            AuditEventType.NEW_PAIRINGS_PAUSED
-                        },
-                        outcome = AuditOutcome.CHANGED,
-                    ),
-                )
-                DeviceManagementResult.Changed
+                writeTransaction.execute {
+                    check(
+                        deviceIdentityDao.updatePairingEnabled(
+                            identityId = active.deviceIdentityId,
+                            enabled = enabled,
+                            activeRole = DeviceIdentityRole.ACTIVE.storedName,
+                        ) == 1,
+                    )
+                    audit.record(
+                        AuditRecord(
+                            type = if (enabled) {
+                                AuditEventType.NEW_PAIRINGS_RESUMED
+                            } else {
+                                AuditEventType.NEW_PAIRINGS_PAUSED
+                            },
+                            outcome = AuditOutcome.CHANGED,
+                        ),
+                    )
+                    DeviceManagementResult.Changed
+                }
             }
             is RelayEndpointResult.Rejected -> DeviceManagementResult.Rejected(
                 result.status,

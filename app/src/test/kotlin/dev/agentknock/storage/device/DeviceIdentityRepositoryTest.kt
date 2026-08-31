@@ -5,6 +5,7 @@ import dev.agentknock.relay.RelayClaimOutcome
 import dev.agentknock.relay.RelayClaimResult
 import dev.agentknock.relay.RelayEndpointResult
 import dev.agentknock.storage.audit.NoOpAuditSink
+import dev.agentknock.storage.ImmediateWriteTransaction
 import dev.agentknock.storage.crypto.AesGcmEncryption
 import dev.agentknock.storage.crypto.FakeEncryptionKeyStore
 import dev.agentknock.storage.crypto.FakeVaultKeyDao
@@ -179,6 +180,7 @@ class DeviceIdentityRepositoryTest {
             encryption = AesGcmEncryption(restoredKeyStore),
             relay = fixture.relay,
             audit = NoOpAuditSink,
+            writeTransaction = ImmediateWriteTransaction,
             newId = { "restored-candidate" },
             currentTimeMillis = { 10_001L },
             cryptographyDispatcher = UnconfinedTestDispatcher(testScheduler),
@@ -334,6 +336,7 @@ class DeviceIdentityRepositoryTest {
             encryption = AesGcmEncryption(replacementKeys),
             relay = fixture.relay,
             audit = NoOpAuditSink,
+            writeTransaction = ImmediateWriteTransaction,
             cryptographyDispatcher = UnconfinedTestDispatcher(testScheduler),
         )
 
@@ -365,6 +368,7 @@ class DeviceIdentityRepositoryTest {
             encryption = AesGcmEncryption(replacementKeys),
             relay = fixture.relay,
             audit = NoOpAuditSink,
+            writeTransaction = ImmediateWriteTransaction,
             currentTimeMillis = { 1_000L },
             cryptographyDispatcher = UnconfinedTestDispatcher(testScheduler),
         )
@@ -416,6 +420,7 @@ class DeviceIdentityRepositoryTest {
             encryption = AesGcmEncryption(keyStore),
             relay = relay,
             audit = NoOpAuditSink,
+            writeTransaction = ImmediateWriteTransaction,
             newId = { "id-${++id}" },
             currentTimeMillis = { ++time },
             cryptographyDispatcher = dispatcher,
