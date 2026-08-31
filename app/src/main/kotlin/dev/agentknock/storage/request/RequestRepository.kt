@@ -45,6 +45,7 @@ import dev.agentknock.relay.RelayMessageState
 import dev.agentknock.relay.RelayPushRegistrationState
 import dev.agentknock.storage.crypto.DecryptionResult
 import dev.agentknock.storage.AgentknockDatabase
+import dev.agentknock.storage.runCatchingNonCancellation
 import dev.agentknock.protocol.InvocationResponseSecret
 import dev.agentknock.storage.secret.RequestedSecretsResult
 import dev.agentknock.storage.secret.SecretMetadata
@@ -509,7 +510,7 @@ internal class RequestRepository(
             }
         } catch (cancelled: CancellationException) {
             throw cancelled
-        } catch (_: Throwable) {
+        } catch (_: Exception) {
             operationMutex.withLock {
                 dao.recoverInterruptedAiReview(
                     requestId = requestId,
@@ -1366,7 +1367,7 @@ internal class RequestRepository(
                 authorization = authorization,
             )
             if (decisionResult == InvocationDecisionResult.Decided && temporaryGrant != null) {
-                val started = runCatching {
+                val started = runCatchingNonCancellation {
                     secrets.allowTemporaryAccess(
                         policies = temporaryGrant.policies,
                         clientId = request.clientId,
@@ -1637,7 +1638,7 @@ internal class RequestRepository(
                 authorization = authorization,
             )
             if (decisionResult == GitSignDecisionResult.Decided && temporaryGrant != null) {
-                val started = runCatching {
+                val started = runCatchingNonCancellation {
                     secrets.allowTemporaryAccess(
                         policies = temporaryGrant.policies,
                         clientId = request.clientId,
@@ -1939,7 +1940,7 @@ internal class RequestRepository(
             authorization = description.authorizationCommitment(listOf(policy)),
         )
         if (result == SshAuthenticationDecisionResult.Decided && temporaryGrant != null) {
-            val started = runCatching {
+            val started = runCatchingNonCancellation {
                 secrets.allowTemporaryAccess(
                     policies = temporaryGrant.policies,
                     clientId = request.clientId,
@@ -4297,7 +4298,7 @@ internal class RequestRepository(
                 }
             }
             is SecretUploadContents.Ssh -> {
-                val parsedKey = runCatching {
+                val parsedKey = runCatchingNonCancellation {
                     withContext(cryptographyDispatcher) {
                         sshKeys.importOpenSshPrivateKey(uploadContents.privateKey)
                     }

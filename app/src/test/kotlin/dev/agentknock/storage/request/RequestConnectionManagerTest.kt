@@ -310,7 +310,7 @@ class RequestConnectionManagerTest {
         }
 
     @Test
-    fun `foreground synchronization request replaces the live session without background work`() =
+    fun `foreground synchronization request keeps the healthy live session`() =
         runTest {
             var scheduled = 0
             var connections = 0
@@ -329,8 +329,56 @@ class RequestConnectionManagerTest {
             runCurrent()
 
             assertEquals(0, scheduled)
-            assertEquals(2, connections)
+            assertEquals(1, connections)
         }
+
+    @Test
+    fun `foreground synchronization request interrupts relay failure backoff`() = runTest {
+        var attempts = 0
+        val manager = manager(
+            listen = {
+                attempts += 1
+                if (attempts == 1) {
+                    RequestSyncResult.RelayUnavailable("offline")
+                } else {
+                    awaitCancellation()
+                }
+            },
+            reconnectDelayMillis = 60_000,
+        )
+        manager.appForegrounded()
+        runCurrent()
+        assertEquals(1, attempts)
+
+        manager.requestSynchronization()
+        runCurrent()
+
+        assertEquals(2, attempts)
+    }
+
+    @Test
+    fun `foreground synchronization request interrupts post-success reconnect delay`() = runTest {
+        var attempts = 0
+        val manager = manager(
+            listen = {
+                attempts += 1
+                if (attempts == 1) {
+                    RequestSyncResult.Success
+                } else {
+                    awaitCancellation()
+                }
+            },
+            reconnectDelayMillis = 60_000,
+        )
+        manager.appForegrounded()
+        runCurrent()
+        assertEquals(1, attempts)
+
+        manager.requestSynchronization()
+        runCurrent()
+
+        assertEquals(2, attempts)
+    }
 
     @Test
     fun `pause cancels and joins the active session and resume reconnects`() = runTest {

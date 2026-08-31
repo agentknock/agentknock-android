@@ -1,12 +1,15 @@
 package dev.agentknock.storage.secret
 
 import dev.agentknock.protocol.SecretUploadMode
+import dev.agentknock.storage.audit.AuditRecord
+import dev.agentknock.storage.audit.AuditSink
 import dev.agentknock.storage.audit.NoOpAuditSink
 import dev.agentknock.storage.crypto.AesGcmEncryption
 import dev.agentknock.storage.crypto.FakeEncryptionKeyStore
 import dev.agentknock.storage.crypto.FakeVaultKeyDao
 import dev.agentknock.storage.crypto.VaultKeyManager
 import dev.agentknock.storage.crypto.VaultKeyPurpose
+import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.flow.Flow
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.combine
@@ -814,6 +817,43 @@ class SecretRepositoryTest {
     }
 
     @Test
+    fun `temporary access audit cancellation propagates`() = runTest {
+        val cancellation = CancellationException("cancelled")
+        var cancelAudit = false
+        val fixture = Fixture(
+            audit = object : AuditSink {
+                override suspend fun record(record: AuditRecord) {
+                    if (cancelAudit) throw cancellation
+                }
+
+                override suspend fun append(records: List<AuditRecord>, occurredAt: Long) = Unit
+            },
+        )
+        val secretId = fixture.createSecret("github")
+        cancelAudit = true
+        val policies = fixture.repository.approvalPoliciesForNames(
+            listOf("github"),
+            "workstation",
+            TemporaryAccessOperation.INVOCATION,
+        )
+
+        val thrown = try {
+            fixture.repository.allowTemporaryAccess(
+                policies = policies,
+                clientId = "workstation",
+                operation = TemporaryAccessOperation.INVOCATION,
+                expiresAt = 10_000,
+            )
+            null
+        } catch (failure: CancellationException) {
+            failure
+        }
+
+        assertTrue(fixture.dao.temporaryAccessGrants.value.isNotEmpty())
+        assertEquals(cancellation, thrown)
+    }
+
+    @Test
     fun `temporary access cannot be extended and can be ended explicitly`() = runTest {
         val fixture = Fixture()
         val secretId = fixture.createSecret("github")
@@ -1107,7 +1147,10 @@ class SecretRepositoryTest {
         assertTrue(result is ApplyEnvironmentSecretUploadResult.Invalid)
     }
 
-    private class Fixture(keyId: String = "storage-key") {
+    private class Fixture(
+        keyId: String = "storage-key",
+        audit: AuditSink = NoOpAuditSink,
+    ) {
         val encryptionMetadata = FakeVaultKeyDao()
         val keyStore = FakeEncryptionKeyStore()
         val dao = FakeSecretDao()
@@ -1124,7 +1167,7 @@ class SecretRepositoryTest {
             dao = dao,
             keyManager = keyManager,
             encryption = AesGcmEncryption(keyStore),
-            audit = NoOpAuditSink,
+            audit = audit,
             newId = { "id-${++id}" },
             currentTimeMillis = { nextTime() },
         )

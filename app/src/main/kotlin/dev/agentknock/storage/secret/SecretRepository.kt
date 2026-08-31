@@ -8,6 +8,7 @@ import dev.agentknock.storage.audit.AuditDecisionSource
 import dev.agentknock.storage.audit.AuditOutcome
 import dev.agentknock.storage.audit.AuditRecord
 import dev.agentknock.storage.audit.AuditSink
+import dev.agentknock.storage.runCatchingNonCancellation
 import dev.agentknock.protocol.SecretUploadMode
 import dev.agentknock.protocol.SshSignatureAlgorithm
 import java.util.UUID
@@ -292,7 +293,7 @@ internal class SecretRepository(
         )
         if (!inserted) return false
         distinctPolicies.forEach { policy ->
-            runCatching {
+            runCatchingNonCancellation {
                 audit.record(
                     AuditRecord(
                         type = AuditEventType.TEMPORARY_ACCESS_ALLOWED,

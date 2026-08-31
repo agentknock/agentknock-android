@@ -1,6 +1,7 @@
 package dev.agentknock.storage.secret
 
 import dev.agentknock.protocol.SshSignatureAlgorithm
+import dev.agentknock.storage.runCatchingNonCancellation
 import dev.agentknock.storage.crypto.DecryptionResult
 import java.security.MessageDigest
 import kotlinx.coroutines.CoroutineDispatcher
@@ -74,7 +75,7 @@ internal class SecretResolver(
                 return GitSignatureResult.UnsupportedEncryption
             }
         }
-        val signature = runCatching {
+        val signature = runCatchingNonCancellation {
             withContext(cryptographyDispatcher) { sshKeys.signGitSignature(key, message) }
         }.getOrElse { return GitSignatureResult.SecretCorrupted }
         return GitSignatureResult.Signed(signature)
@@ -102,7 +103,7 @@ internal class SecretResolver(
                 return SshAuthenticationSignatureResult.UnsupportedEncryption
             }
         }
-        val signature = runCatching {
+        val signature = runCatchingNonCancellation {
             withContext(cryptographyDispatcher) {
                 sshKeys.signSshAuthentication(key, message, algorithm)
             }

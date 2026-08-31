@@ -15,6 +15,7 @@ import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.asStateFlow
 import kotlinx.coroutines.flow.collectLatest
 import kotlinx.coroutines.flow.distinctUntilChanged
+import kotlinx.coroutines.flow.first
 import kotlinx.coroutines.flow.flatMapLatest
 import kotlinx.coroutines.flow.flow
 import kotlinx.coroutines.flow.update
@@ -23,6 +24,7 @@ import kotlinx.coroutines.joinAll
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.sync.Mutex
 import kotlinx.coroutines.sync.withLock
+import kotlinx.coroutines.withTimeoutOrNull
 import kotlin.math.min
 
 @OptIn(ExperimentalCoroutinesApi::class)
@@ -154,10 +156,15 @@ internal class RequestConnectionManager(
             demand.update { current ->
                 if (current.paused || !current.foregroundVisible) {
                     current
-                } else {
+                } else if (current.stoppedOnTerminalResult) {
                     current.copy(
                         generation = current.generation + 1,
+                        synchronizationGeneration = current.synchronizationGeneration + 1,
                         stoppedOnTerminalResult = false,
+                    )
+                } else {
+                    current.copy(
+                        synchronizationGeneration = current.synchronizationGeneration + 1,
                     )
                 }
             }
@@ -299,6 +306,7 @@ internal class RequestConnectionManager(
         try {
             var reconnectDelay = reconnectDelayMillis
             while (currentCoroutineContext().isActive && !demand.value.paused) {
+                val synchronizationGeneration = demand.value.synchronizationGeneration
                 var caughtUp = false
                 _syncing.value = true
                 val result = runOperation {
@@ -314,27 +322,42 @@ internal class RequestConnectionManager(
 
                 when (result) {
                     is RequestSyncResult.RelayUnavailable -> {
-                        delay(reconnectDelay)
+                        waitForRetry(reconnectDelay, synchronizationGeneration)
                         reconnectDelay = nextReconnectDelay(reconnectDelay)
                     }
                     RequestSyncResult.Success -> {
-                        delay(reconnectDelayMillis)
+                        waitForRetry(reconnectDelayMillis, synchronizationGeneration)
                         reconnectDelay = reconnectDelayMillis
                     }
                     else -> {
-                        sessionLock.withLock {
-                            demand.update { current ->
+                        val retry: Boolean = sessionLock.withLock {
+                            while (true) {
+                                val current = demand.value
                                 if (
-                                    activeSession === session &&
-                                    current.generation == connectionGeneration
+                                    activeSession !== session ||
+                                    current.generation != connectionGeneration
+                                ) {
+                                    break
+                                }
+                                if (
+                                    current.synchronizationGeneration !=
+                                    synchronizationGeneration
+                                ) {
+                                    return@withLock true
+                                }
+                                if (
+                                    demand.compareAndSet(
+                                        current,
+                                        current.copy(stoppedOnTerminalResult = true),
+                                    )
                                 ) {
                                     activeSession = null
-                                    current.copy(stoppedOnTerminalResult = true)
-                                } else {
-                                    current
+                                    break
                                 }
                             }
+                            false
                         }
+                        if (retry) continue
                         return
                     }
                 }
@@ -348,6 +371,14 @@ internal class RequestConnectionManager(
                 if (activeSession === session) activeSession = null
             }
             _syncing.value = false
+        }
+    }
+
+    private suspend fun waitForRetry(delayMillis: Long, synchronizationGeneration: Long) {
+        withTimeoutOrNull(delayMillis) {
+            demand.first { current ->
+                current.synchronizationGeneration != synchronizationGeneration
+            }
         }
     }
 
@@ -417,6 +448,7 @@ internal class RequestConnectionManager(
     private data class ConnectionDemand(
         val foregroundVisible: Boolean = false,
         val generation: Long = 0,
+        val synchronizationGeneration: Long = 0,
         val paused: Boolean = false,
         val backgroundHandoffPending: Boolean = false,
         val stoppedOnTerminalResult: Boolean = false,
