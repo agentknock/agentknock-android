@@ -1,7 +1,5 @@
 package dev.agentknock.relay
 
-import kotlinx.coroutines.ExperimentalCoroutinesApi
-import kotlinx.coroutines.test.UnconfinedTestDispatcher
 import kotlinx.coroutines.test.runTest
 import kotlinx.serialization.json.Json
 import kotlinx.serialization.json.JsonNull
@@ -15,7 +13,6 @@ import okhttp3.OkHttpClient
 import org.junit.Assert.assertEquals
 import org.junit.Test
 
-@OptIn(ExperimentalCoroutinesApi::class)
 class RelayApprovalReviewClientTest {
     @Test
     fun `submits complete context using device authentication`() = runTest {
@@ -189,7 +186,6 @@ class RelayApprovalReviewClientTest {
     private fun client(server: MockWebServer) = HttpRelayApprovalReviewClient(
         client = OkHttpClient(),
         relayUrl = server.url("/").toString(),
-        dispatcher = UnconfinedTestDispatcher(),
     )
 
     private fun reviewRequest() = ApprovalReviewRequest(

@@ -1,7 +1,5 @@
 package dev.agentknock.relay
 
-import kotlinx.coroutines.ExperimentalCoroutinesApi
-import kotlinx.coroutines.test.UnconfinedTestDispatcher
 import kotlinx.coroutines.test.runTest
 import kotlinx.serialization.json.Json
 import kotlinx.serialization.json.boolean
@@ -13,7 +11,6 @@ import okhttp3.OkHttpClient
 import org.junit.Assert.assertEquals
 import org.junit.Test
 
-@OptIn(ExperimentalCoroutinesApi::class)
 class RelayDeviceManagementClientTest {
     @Test
     fun `changes pairing admission for the authenticated device`() = runTest {
@@ -80,7 +77,6 @@ class RelayDeviceManagementClientTest {
     private fun client(server: MockWebServer) = HttpRelayDeviceManagementClient(
         client = OkHttpClient(),
         relayUrl = server.url("/").toString(),
-        dispatcher = UnconfinedTestDispatcher(),
     )
 
     private companion object {

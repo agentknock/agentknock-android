@@ -168,4 +168,33 @@ class SecretUploadProtocolTest {
             ),
         )
     }
+
+    @Test
+    fun `decodes a rejected completion with its message`() {
+        assertEquals(
+            SecretUploadCompletion(
+                testClientSoftware("0.2.0", "0.1.0"),
+                "REJECTED",
+                "The upload cannot be accepted.",
+            ),
+            protocol.decodeCompletion(
+                """{${testClientSoftwareFields("0.2.0", "0.1.0")},"result":"REJECTED","message":"The upload cannot be accepted."}"""
+                    .encodeToByteArray(),
+            ),
+        )
+    }
+
+    @Test
+    fun `rejects a rejected completion without a useful message`() {
+        listOf(
+            """{${testClientSoftwareFields("0.2.0", "0.1.0")},"result":"REJECTED"}""",
+            """{${testClientSoftwareFields("0.2.0", "0.1.0")},"result":"REJECTED","message":null}""",
+            """{${testClientSoftwareFields("0.2.0", "0.1.0")},"result":"REJECTED","message":""}""",
+            """{${testClientSoftwareFields("0.2.0", "0.1.0")},"result":"REJECTED","message":"   "}""",
+        ).forEach { completion ->
+            assertTrue(runCatching {
+                protocol.decodeCompletion(completion.encodeToByteArray())
+            }.isFailure)
+        }
+    }
 }

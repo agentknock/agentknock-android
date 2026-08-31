@@ -1,16 +1,20 @@
 package dev.agentknock.relay
 
-import kotlinx.coroutines.ExperimentalCoroutinesApi
-import kotlinx.coroutines.test.UnconfinedTestDispatcher
+import java.util.concurrent.TimeUnit
+import kotlinx.coroutines.CompletableDeferred
+import kotlinx.coroutines.async
+import kotlinx.coroutines.cancelAndJoin
 import kotlinx.coroutines.test.runTest
 import mockwebserver3.MockResponse
 import mockwebserver3.MockWebServer
+import okhttp3.Call
+import okhttp3.Interceptor
 import okhttp3.OkHttpClient
 import org.junit.Assert.assertEquals
 import org.junit.Assert.assertNull
+import org.junit.Assert.assertTrue
 import org.junit.Test
 
-@OptIn(ExperimentalCoroutinesApi::class)
 class RelayHttpTransportTest {
     @Test
     fun `posts JSON with optional bearer authentication`() = runTest {
@@ -81,9 +85,53 @@ class RelayHttpTransportTest {
         }
     }
 
+    @Test
+    fun `maps connection failures to unavailable`() = runTest {
+        val server = MockWebServer()
+        server.start()
+        val transport = transport(server)
+        server.close()
+
+        val result = transport.post("v1/test", "{}")
+
+        assertTrue(result is RelayEndpointResult.Unavailable)
+    }
+
+    @Test
+    fun `cancelling the coroutine cancels the OkHttp call`() = runTest {
+        MockWebServer().use { server ->
+            server.start()
+            server.enqueue(
+                MockResponse.Builder()
+                    .headersDelay(1, TimeUnit.DAYS)
+                    .body("response")
+                    .build(),
+            )
+            val observedCall = CompletableDeferred<Call>()
+            val client = OkHttpClient.Builder()
+                .addInterceptor(
+                    Interceptor { chain ->
+                        observedCall.complete(chain.call())
+                        chain.proceed(chain.request())
+                    },
+                )
+                .build()
+            val transport = RelayHttpTransport(
+                client = client,
+                relayUrl = server.url("/").toString(),
+            )
+            val request = async { transport.post("v1/test", "{}") }
+            val call = observedCall.await()
+
+            request.cancelAndJoin()
+
+            assertTrue(request.isCancelled)
+            assertTrue(call.isCanceled())
+        }
+    }
+
     private fun transport(server: MockWebServer) = RelayHttpTransport(
         client = OkHttpClient(),
         relayUrl = server.url("/").toString(),
-        dispatcher = UnconfinedTestDispatcher(),
     )
 }

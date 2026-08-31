@@ -1,17 +1,18 @@
 package dev.agentknock.relay
 
 import java.io.IOException
-import kotlinx.coroutines.CoroutineDispatcher
-import kotlinx.coroutines.Dispatchers
-import kotlinx.coroutines.runInterruptible
+import kotlinx.coroutines.suspendCancellableCoroutine
 import kotlinx.serialization.json.Json
 import kotlinx.serialization.json.JsonObject
 import kotlinx.serialization.json.JsonPrimitive
 import kotlinx.serialization.json.jsonObject
+import okhttp3.Call
+import okhttp3.Callback
 import okhttp3.MediaType.Companion.toMediaType
 import okhttp3.OkHttpClient
 import okhttp3.Request
 import okhttp3.RequestBody.Companion.toRequestBody
+import okhttp3.Response
 
 internal const val DEFAULT_RELAY_URL = "https://relay.agentknock.dev/"
 
@@ -46,7 +47,6 @@ internal class RelayHttpTransport(
     private val client: OkHttpClient,
     relayUrl: String = DEFAULT_RELAY_URL,
     private val json: Json = Json { ignoreUnknownKeys = true },
-    private val dispatcher: CoroutineDispatcher = Dispatchers.IO,
 ) {
     private val baseUrl = relayUrl.trimEnd('/')
 
@@ -62,24 +62,45 @@ internal class RelayHttpTransport(
             }
             .post(body.toRequestBody(JSON_MEDIA_TYPE))
             .build()
-        return try {
-            runInterruptible(dispatcher) {
-                client.newCall(request).execute().use { response ->
-                    val responseBody = response.body.string()
-                    if (response.isSuccessful) {
-                        RelayEndpointResult.Success(responseBody)
-                    } else {
-                        val error = decodeRelayError(responseBody, json)
-                        RelayEndpointResult.Rejected(
-                            status = response.code,
-                            code = error.code,
-                            message = error.message,
+        return client.newCall(request).awaitResult()
+    }
+
+    private suspend fun Call.awaitResult(): RelayEndpointResult<String> =
+        suspendCancellableCoroutine { continuation ->
+            continuation.invokeOnCancellation { cancel() }
+            enqueue(
+                object : Callback {
+                    override fun onFailure(call: Call, e: IOException) {
+                        continuation.resumeWith(
+                            Result.success(RelayEndpointResult.Unavailable(e)),
                         )
                     }
-                }
-            }
-        } catch (exception: IOException) {
-            RelayEndpointResult.Unavailable(exception)
+
+                    override fun onResponse(call: Call, response: Response) {
+                        val result: Result<RelayEndpointResult<String>> = try {
+                            Result.success(response.toEndpointResult())
+                        } catch (exception: IOException) {
+                            Result.success(RelayEndpointResult.Unavailable(exception))
+                        } catch (failure: Exception) {
+                            Result.failure(failure)
+                        }
+                        continuation.resumeWith(result)
+                    }
+                },
+            )
+        }
+
+    private fun Response.toEndpointResult(): RelayEndpointResult<String> = use { response ->
+        val responseBody = response.body.string()
+        if (response.isSuccessful) {
+            RelayEndpointResult.Success(responseBody)
+        } else {
+            val error = decodeRelayError(responseBody, json)
+            RelayEndpointResult.Rejected(
+                status = response.code,
+                code = error.code,
+                message = error.message,
+            )
         }
     }
 

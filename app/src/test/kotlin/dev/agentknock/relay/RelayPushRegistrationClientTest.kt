@@ -1,7 +1,5 @@
 package dev.agentknock.relay
 
-import kotlinx.coroutines.ExperimentalCoroutinesApi
-import kotlinx.coroutines.test.UnconfinedTestDispatcher
 import kotlinx.coroutines.test.runTest
 import kotlinx.serialization.json.Json
 import kotlinx.serialization.json.jsonObject
@@ -12,7 +10,6 @@ import okhttp3.OkHttpClient
 import org.junit.Assert.assertEquals
 import org.junit.Test
 
-@OptIn(ExperimentalCoroutinesApi::class)
 class RelayPushRegistrationClientTest {
     @Test
     fun `registers the Firebase installation ID for the authenticated device`() = runTest {
@@ -27,7 +24,6 @@ class RelayPushRegistrationClientTest {
             val client = HttpRelayPushRegistrationClient(
                 client = OkHttpClient(),
                 relayUrl = server.url("/").toString(),
-                dispatcher = UnconfinedTestDispatcher(testScheduler),
             )
 
             assertEquals(
@@ -60,7 +56,6 @@ class RelayPushRegistrationClientTest {
             val client = HttpRelayPushRegistrationClient(
                 client = OkHttpClient(),
                 relayUrl = server.url("/").toString(),
-                dispatcher = UnconfinedTestDispatcher(testScheduler),
             )
 
             assertEquals(

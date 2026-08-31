@@ -80,6 +80,11 @@ internal class SecretUploadProtocol(
         require(completion.result == RESULT_RECEIVED || completion.result == RESULT_REJECTED) {
             "Unsupported secret upload completion result"
         }
+        if (completion.result == RESULT_REJECTED) {
+            require(!completion.message.isNullOrBlank()) {
+                "Rejected secret upload completion has no message"
+            }
+        }
         return SecretUploadCompletion(
             clientSoftware = clientSoftware,
             result = completion.result,

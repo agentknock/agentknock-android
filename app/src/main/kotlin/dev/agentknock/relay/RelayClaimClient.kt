@@ -37,7 +37,7 @@ internal class HttpRelayClaimClient(
         dispatcher: CoroutineDispatcher = Dispatchers.IO,
         attestationProvider: DeviceAttestationProvider = AndroidKeyAttestationProvider(),
     ) : this(
-        transport = RelayHttpTransport(client, relayUrl, json, dispatcher),
+        transport = RelayHttpTransport(client, relayUrl, json),
         json = json,
         dispatcher = dispatcher,
         attestationProvider = attestationProvider,

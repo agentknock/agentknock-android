@@ -1,7 +1,5 @@
 package dev.agentknock.relay
 
-import kotlinx.coroutines.CoroutineDispatcher
-import kotlinx.coroutines.Dispatchers
 import kotlinx.serialization.SerialName
 import kotlinx.serialization.Serializable
 import kotlinx.serialization.json.Json
@@ -25,8 +23,7 @@ internal class HttpRelayPushRegistrationClient(
         client: OkHttpClient,
         relayUrl: String = DEFAULT_RELAY_URL,
         json: Json = Json { ignoreUnknownKeys = true },
-        dispatcher: CoroutineDispatcher = Dispatchers.IO,
-    ) : this(RelayHttpTransport(client, relayUrl, json, dispatcher), json)
+    ) : this(RelayHttpTransport(client, relayUrl, json), json)
 
     override suspend fun register(
         deviceId: String,

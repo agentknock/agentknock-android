@@ -1,8 +1,6 @@
 package dev.agentknock.relay
 
 import java.io.IOException
-import kotlinx.coroutines.CoroutineDispatcher
-import kotlinx.coroutines.Dispatchers
 import kotlinx.serialization.SerialName
 import kotlinx.serialization.Serializable
 import kotlinx.serialization.encodeToString
@@ -188,8 +186,7 @@ internal class HttpRelayApprovalReviewClient(
             ignoreUnknownKeys = true
             explicitNulls = false
         },
-        dispatcher: CoroutineDispatcher = Dispatchers.IO,
-    ) : this(RelayHttpTransport(client, relayUrl, json, dispatcher), json)
+    ) : this(RelayHttpTransport(client, relayUrl, json), json)
 
     override suspend fun review(
         deviceId: String,
