@@ -17,8 +17,8 @@ class WorkflowPresentationTest {
     fun `each top-level section receives only its own records`() {
         val requests = listOf(
             summary(1, InboxRequestKind.PAIRING, pairing = PairingState.RECEIVING),
-            summary(2, InboxRequestKind.PAIRING, pairing = PairingState.ACTIVE),
-            summary(3, InboxRequestKind.PAIRING, pairing = PairingState.VERIFICATION_FAILED),
+            summary(2, InboxRequestKind.PAIRING, pairing = PairingState.COMPLETED),
+            summary(3, InboxRequestKind.PAIRING, pairing = PairingState.RECEIVING),
             summary(
                 4,
                 InboxRequestKind.SECRET_UPLOAD,
@@ -123,7 +123,6 @@ class WorkflowPresentationTest {
         secretUseDecision = null,
         secretUseResult = null,
         secretUseCompletionReason = null,
-        secretListState = null,
         secretUploadState = upload,
         title = "Test",
         clientName = "Test client",

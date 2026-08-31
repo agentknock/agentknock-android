@@ -32,5 +32,4 @@ private val pendingPairingStates = setOf(
     PairingState.SAS_VERIFICATION_PENDING,
     PairingState.RELAY_ACTIVATION_PENDING,
     PairingState.WAITING_FOR_FINISH,
-    PairingState.VERIFICATION_FAILED,
 )

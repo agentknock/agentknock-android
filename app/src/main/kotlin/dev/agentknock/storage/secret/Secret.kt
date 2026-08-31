@@ -13,7 +13,7 @@ import androidx.room3.Query
 import androidx.room3.Transaction
 import androidx.room3.Update
 import dev.agentknock.storage.crypto.VaultKeyEntity
-import dev.agentknock.storage.request.PairingEntity
+import dev.agentknock.storage.request.ClientEntity
 import kotlinx.coroutines.flow.Flow
 
 @Entity(
@@ -54,7 +54,7 @@ internal data class SecretEntity(
             onUpdate = ForeignKey.NO_ACTION,
         ),
         ForeignKey(
-            entity = PairingEntity::class,
+            entity = ClientEntity::class,
             parentColumns = ["client_id"],
             childColumns = ["client_id"],
             onDelete = ForeignKey.CASCADE,
@@ -84,7 +84,7 @@ internal data class SecretClientApprovalOverrideEntity(
             onUpdate = ForeignKey.NO_ACTION,
         ),
         ForeignKey(
-            entity = PairingEntity::class,
+            entity = ClientEntity::class,
             parentColumns = ["client_id"],
             childColumns = ["client_id"],
             onDelete = ForeignKey.CASCADE,
@@ -401,9 +401,8 @@ internal interface SecretDao {
     @Query(
         """
         SELECT EXISTS(
-            SELECT 1 FROM pairings
+            SELECT 1 FROM clients
             WHERE client_id = :clientId
-              AND state = 'active'
               AND relay_client_state = 'active'
               AND COALESCE(desired_relay_client_state, 'active') = 'active'
         )

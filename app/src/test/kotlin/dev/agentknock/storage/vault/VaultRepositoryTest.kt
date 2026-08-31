@@ -234,16 +234,20 @@ class VaultRepositoryTest {
             restored.stageAndClaim("silent-forest-cloud"),
         )
 
-        val replacement = fixture.dao.identities.value.single()
+        val replacement = fixture.dao.identities.value.single { it.role == "active" }
+        val retired = fixture.dao.identities.value.single { it.role == "retired" }
         assertEquals("active", replacement.role)
         assertEquals("silent-forest-cloud", replacement.address)
         assertNotEquals(original.id, replacement.id)
         assertNotEquals(original.deviceId, replacement.deviceId)
+        assertEquals(original.copy(role = "retired"), retired)
         assertTrue(fixture.relay.claims.last().providedAttestation)
         assertEquals(
             setOf("device_token", "device_private_key"),
             fixture.dao.secrets.value.map { it.kind }.toSet(),
         )
+        assertEquals(2, fixture.dao.secrets.value.count { it.identityId == original.id })
+        assertEquals(2, fixture.dao.secrets.value.count { it.identityId == replacement.id })
     }
 
     private class Fixture(dispatcher: CoroutineDispatcher) {
@@ -306,8 +310,8 @@ private class FakeVaultDao : VaultDao {
 
     override fun observeSecrets(): Flow<List<VaultSecretEntity>> = secrets
 
-    override suspend fun getIdentity(role: String): DeviceIdentityEntity? =
-        identities.value.singleOrNull { it.role == role }
+    override suspend fun getIdentityRows(role: String): List<DeviceIdentityEntity> =
+        identities.value.filter { it.role == role }.sortedBy { it.id }
 
     override suspend fun getIdentityById(id: String): DeviceIdentityEntity? =
         identities.value.singleOrNull { it.id == id }
@@ -328,7 +332,8 @@ private class FakeVaultDao : VaultDao {
         identities.value.any { it.id == id && it.role == role }
 
     override suspend fun insertIdentity(identity: DeviceIdentityEntity) {
-        check(identities.value.none { it.id == identity.id || it.role == identity.role })
+        check(identities.value.none { it.id == identity.id })
+        check(identity.role == "retired" || identities.value.none { it.role == identity.role })
         identities.value += identity
     }
 
@@ -353,6 +358,34 @@ private class FakeVaultDao : VaultDao {
         }
         return 1
     }
+
+    override suspend fun retireActiveIdentity(
+        activeId: String,
+        activeRole: String,
+        retiredRole: String,
+    ): Int {
+        if (identities.value.none { it.id == activeId && it.role == activeRole }) return 0
+        identities.value = identities.value.map { identity ->
+            if (identity.id == activeId && identity.role == activeRole) {
+                identity.copy(role = retiredRole)
+            } else {
+                identity
+            }
+        }
+        return 1
+    }
+
+    override suspend fun abandonRequests(identityId: String, now: Long, error: String): Int = 0
+
+    override suspend fun abandonPairingAttempts(identityId: String, now: Long): Int = 0
+
+    override suspend fun deletePendingUploadEnvironmentValues(identityId: String): Int = 0
+
+    override suspend fun deletePendingUploadSshKeys(identityId: String): Int = 0
+
+    override suspend fun rejectPendingUploads(identityId: String, now: Long): Int = 0
+
+    override suspend fun clearClientDesires(identityId: String, now: Long): Int = 0
 
     override suspend fun updateActiveAddress(
         activeId: String,

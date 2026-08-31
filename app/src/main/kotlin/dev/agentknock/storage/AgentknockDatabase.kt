@@ -18,14 +18,14 @@ import dev.agentknock.storage.request.InboxRequestEntity
 import dev.agentknock.storage.request.SecretUseRequestEntity
 import dev.agentknock.storage.request.SshAuthenticationRequestEntity
 import dev.agentknock.storage.request.GitSignRequestEntity
-import dev.agentknock.storage.request.PairingEntity
-import dev.agentknock.storage.request.PairingSecretEntity
-import dev.agentknock.storage.request.SecretListRequestEntity
+import dev.agentknock.storage.request.ClientEntity
+import dev.agentknock.storage.request.ClientPskEntity
+import dev.agentknock.storage.request.PairingAttemptEntity
 import dev.agentknock.storage.request.SecretUploadRequestEntity
 import dev.agentknock.storage.request.SecretUploadEnvironmentVariableEntity
 import dev.agentknock.storage.request.SecretUploadSshKeyEntity
 import dev.agentknock.storage.request.RequestDao
-import dev.agentknock.storage.request.RequestSecretEntity
+import dev.agentknock.storage.request.RequestPskEntity
 import dev.agentknock.storage.vault.VaultDao
 import dev.agentknock.storage.vault.DeviceIdentityEntity
 import dev.agentknock.storage.vault.VaultSecretEntity
@@ -41,13 +41,13 @@ import dev.agentknock.storage.vault.VaultSecretEntity
         DeviceIdentityEntity::class,
         VaultSecretEntity::class,
         InboxRequestEntity::class,
-        PairingEntity::class,
-        PairingSecretEntity::class,
-        RequestSecretEntity::class,
+        PairingAttemptEntity::class,
+        ClientEntity::class,
+        ClientPskEntity::class,
+        RequestPskEntity::class,
         SecretUseRequestEntity::class,
         GitSignRequestEntity::class,
         SshAuthenticationRequestEntity::class,
-        SecretListRequestEntity::class,
         SecretUploadRequestEntity::class,
         SecretUploadEnvironmentVariableEntity::class,
         SecretUploadSshKeyEntity::class,

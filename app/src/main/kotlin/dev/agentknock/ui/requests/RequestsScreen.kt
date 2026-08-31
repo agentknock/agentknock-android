@@ -712,8 +712,7 @@ internal fun PairingRequestDetail(
         InformationSurface {
             StatusLine(
                 pairing.pairingState.label(),
-                pairing.pairingState.isError() ||
-                    (pairing.pairingState == PairingState.RECEIVING && pairing.error != null),
+                pairing.error != null,
                 attention = request.state == InboxRequestState.ACTION_REQUIRED,
                 subdued = pairing.pairingState == PairingState.REJECTED,
             )
@@ -771,7 +770,7 @@ internal fun PairingRequestDetail(
                 "Finishing the secure pairing with this client.",
                 NoticeTone.ATTENTION,
             )
-            PairingState.ACTIVE -> Notice(
+            PairingState.COMPLETED -> Notice(
                 "Pairing completed",
                 "Access was granted to this client.",
                 NoticeTone.SUCCESS,
@@ -794,16 +793,10 @@ internal fun PairingRequestDetail(
                     NoticeTone.DANGER,
                 )
             }
-            PairingState.VERIFICATION_FAILED -> Notice(
-                "Pairing could not be verified",
-                pairing.error ?: "The cryptographic message was invalid.",
-                NoticeTone.DANGER,
-            )
         }
         if (
             pairing.pairingState in setOf(
                 PairingState.RECEIVING,
-                PairingState.VERIFICATION_FAILED,
                 PairingState.RELAY_ACTIVATION_PENDING,
                 PairingState.WAITING_FOR_FINISH,
             )
@@ -2653,6 +2646,7 @@ private enum class NoticeTone {
 }
 
 private fun InboxRequestSummary.statusLabel(): String = when {
+    state == InboxRequestState.REVIEWING -> "AI reviewing"
     !userDecisionAvailable && (
         secretUseState == SecretUseRequestState.APPROVAL_PENDING ||
             gitSignState == GitSignRequestState.APPROVAL_PENDING ||
@@ -2923,11 +2917,8 @@ private fun PairingState.label(): String = when (this) {
     PairingState.RELAY_ACTIVATION_PENDING -> "Activating"
     PairingState.WAITING_FOR_FINISH -> "Waiting for client"
     PairingState.REJECTED -> "Rejected"
-    PairingState.ACTIVE -> "Completed"
-    PairingState.VERIFICATION_FAILED -> "Verification failed"
+    PairingState.COMPLETED -> "Completed"
 }
-
-private fun PairingState.isError(): Boolean = this == PairingState.VERIFICATION_FAILED
 
 private fun SecretUseRequestDetails.statusLabel(): String = secretUseStatusLabel(
     state,

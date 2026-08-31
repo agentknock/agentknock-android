@@ -15,8 +15,8 @@ import kotlinx.coroutines.flow.Flow
 @Entity(
     tableName = "device_identities",
     indices = [
-        Index(value = ["role"], unique = true),
-        Index(value = ["address_id"], unique = true),
+        Index(value = ["role"]),
+        Index(value = ["address_id"]),
     ],
 )
 internal data class DeviceIdentityEntity(
@@ -90,6 +90,9 @@ internal data class VaultSecretEntity(
     val updatedAt: Long,
 )
 
+internal const val DEVICE_IDENTITY_REPLACED_REQUEST_ERROR =
+    "This request could not continue because its previous device identity is no longer available."
+
 @Dao
 internal interface VaultDao {
     @Query("SELECT * FROM device_identities ORDER BY role")
@@ -98,8 +101,15 @@ internal interface VaultDao {
     @Query("SELECT * FROM vault_secrets ORDER BY identity_id, kind")
     fun observeSecrets(): Flow<List<VaultSecretEntity>>
 
-    @Query("SELECT * FROM device_identities WHERE role = :role")
-    suspend fun getIdentity(role: String): DeviceIdentityEntity?
+    @Query("SELECT * FROM device_identities WHERE role = :role ORDER BY id")
+    suspend fun getIdentityRows(role: String): List<DeviceIdentityEntity>
+
+    @Transaction
+    suspend fun getIdentity(role: String): DeviceIdentityEntity? {
+        val identities = getIdentityRows(role)
+        check(identities.size <= 1) { "Multiple $role device identities exist" }
+        return identities.singleOrNull()
+    }
 
     @Query("SELECT * FROM device_identities WHERE id = :id")
     suspend fun getIdentityById(id: String): DeviceIdentityEntity?
@@ -132,6 +142,113 @@ internal interface VaultDao {
         activeRole: String,
         candidateRole: String,
     ): Int
+
+    @Query(
+        "UPDATE device_identities SET role = :retiredRole " +
+            "WHERE id = :activeId AND role = :activeRole",
+    )
+    suspend fun retireActiveIdentity(
+        activeId: String,
+        activeRole: String,
+        retiredRole: String,
+    ): Int
+
+    @Query(
+        """
+        UPDATE inbox_requests
+        SET state = 'completed',
+            listed = CASE
+                WHEN kind IN ('pairing', 'secret_upload') THEN 0
+                ELSE listed
+            END,
+            error = CASE
+                WHEN error IS NULL THEN :error
+                ELSE error || '\n\n' || :error
+            END,
+            updated_at = MAX(updated_at, :now),
+            completed_at = :now
+        WHERE device_identity_id = :identityId
+          AND completed_at IS NULL
+        """,
+    )
+    suspend fun abandonRequests(identityId: String, now: Long, error: String): Int
+
+    @Query(
+        """
+        UPDATE pairing_attempts
+        SET state = CASE
+                WHEN state IN ('completed', 'rejected') THEN state
+                ELSE 'rejected'
+            END,
+            desired_relay_client_state = NULL,
+            pending_psk_encryption_format = NULL,
+            pending_psk_encryption_key_id = NULL,
+            pending_psk_nonce = NULL,
+            pending_psk_ciphertext = NULL,
+            decided_at = CASE
+                WHEN state IN ('completed', 'rejected') THEN decided_at
+                ELSE COALESCE(decided_at, :now)
+            END
+        WHERE request_id IN (
+            SELECT id FROM inbox_requests WHERE device_identity_id = :identityId
+        )
+        """,
+    )
+    suspend fun abandonPairingAttempts(identityId: String, now: Long): Int
+
+    @Query(
+        """
+        DELETE FROM secret_upload_environment_variables
+        WHERE request_id IN (
+            SELECT secret_upload_requests.request_id
+            FROM secret_upload_requests
+            JOIN inbox_requests
+              ON inbox_requests.id = secret_upload_requests.request_id
+            WHERE inbox_requests.device_identity_id = :identityId
+              AND secret_upload_requests.decision IS NULL
+        )
+        """,
+    )
+    suspend fun deletePendingUploadEnvironmentValues(identityId: String): Int
+
+    @Query(
+        """
+        DELETE FROM secret_upload_ssh_keys
+        WHERE request_id IN (
+            SELECT secret_upload_requests.request_id
+            FROM secret_upload_requests
+            JOIN inbox_requests
+              ON inbox_requests.id = secret_upload_requests.request_id
+            WHERE inbox_requests.device_identity_id = :identityId
+              AND secret_upload_requests.decision IS NULL
+        )
+        """,
+    )
+    suspend fun deletePendingUploadSshKeys(identityId: String): Int
+
+    @Query(
+        """
+        UPDATE secret_upload_requests
+        SET decision = 'rejected',
+            decided_at = COALESCE(decided_at, :now)
+        WHERE decision IS NULL
+          AND request_id IN (
+            SELECT id FROM inbox_requests WHERE device_identity_id = :identityId
+          )
+        """,
+    )
+    suspend fun rejectPendingUploads(identityId: String, now: Long): Int
+
+    @Query(
+        """
+        UPDATE clients
+        SET desired_relay_client_state = NULL,
+            updated_at = MAX(updated_at, :now)
+        WHERE device_identity_id = :identityId
+          AND desired_relay_client_state IS NOT NULL
+        """,
+    )
+    suspend fun clearClientDesires(identityId: String, now: Long): Int
 
     @Query(
         """
@@ -198,6 +315,7 @@ internal interface VaultDao {
         claimedAt: Long,
         activeRole: String,
         candidateRole: String,
+        retiredRole: String,
     ): Boolean {
         if (!identityExists(candidateId, candidateRole)) return false
         val candidate = getIdentityById(candidateId) ?: return false
@@ -215,7 +333,19 @@ internal interface VaultDao {
             )
             return true
         }
-        deleteIdentity(activeRole)
+        if (active != null) {
+            abandonRequests(
+                identityId = active.id,
+                now = claimedAt,
+                error = DEVICE_IDENTITY_REPLACED_REQUEST_ERROR,
+            )
+            abandonPairingAttempts(active.id, claimedAt)
+            deletePendingUploadEnvironmentValues(active.id)
+            deletePendingUploadSshKeys(active.id)
+            rejectPendingUploads(active.id, claimedAt)
+            clearClientDesires(active.id, claimedAt)
+            check(retireActiveIdentity(active.id, activeRole, retiredRole) == 1)
+        }
         return markCandidateActive(
             candidateId = candidateId,
             claimedAt = claimedAt,

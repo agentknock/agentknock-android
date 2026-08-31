@@ -9,7 +9,7 @@ class PairingAdmissionTest {
     fun `allows any number of completed pairings`() {
         assertTrue(
             pairingAdmissionAllowed(
-                listOf(PairingState.ACTIVE, PairingState.REJECTED, PairingState.ACTIVE),
+                listOf(PairingState.COMPLETED, PairingState.REJECTED, PairingState.COMPLETED),
             ),
         )
     }
@@ -22,10 +22,9 @@ class PairingAdmissionTest {
                 PairingState.SAS_VERIFICATION_PENDING,
                 PairingState.RELAY_ACTIVATION_PENDING,
                 PairingState.WAITING_FOR_FINISH,
-                PairingState.VERIFICATION_FAILED,
             )
         ) {
-            assertFalse(pairingAdmissionAllowed(listOf(PairingState.ACTIVE, state)))
+            assertFalse(pairingAdmissionAllowed(listOf(PairingState.COMPLETED, state)))
         }
     }
 

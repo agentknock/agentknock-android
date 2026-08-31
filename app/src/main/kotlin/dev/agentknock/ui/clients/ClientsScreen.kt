@@ -147,7 +147,7 @@ internal fun ClientsScreen(
         val pairing = selectedPairing?.pairing ?: return@LaunchedEffect
         if (pairingSelection != null) {
             when (pairing.pairingState) {
-                PairingState.ACTIVE -> {
+                PairingState.COMPLETED -> {
                     viewModel.selectPairing(null)
                     viewModel.selectClient(pairing.clientId)
                 }
@@ -744,9 +744,8 @@ private fun PairingState.pairingListDescription(): String = when (this) {
     PairingState.SAS_VERIFICATION_PENDING -> "Compare the security code"
     PairingState.RELAY_ACTIVATION_PENDING -> "Applying the pairing"
     PairingState.WAITING_FOR_FINISH -> "Code verified; waiting for the client"
-    PairingState.VERIFICATION_FAILED -> "Open to review or reject"
     PairingState.REJECTED -> "Pairing rejected"
-    PairingState.ACTIVE -> "Pairing complete"
+    PairingState.COMPLETED -> "Pairing complete"
 }
 
 @Composable

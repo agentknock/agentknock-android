@@ -112,9 +112,19 @@ internal class VaultRepository(
             .map(VaultSecretEntity::encryptionKeyId)
             .distinct()
             .associateWith { keyId -> keyManager.keyAvailable(keyId) }
-        val identityModels = identities.associate { identity ->
+        val configuredIdentities = identities
+            .filter { identity ->
+                identity.role == DeviceIdentityRole.ACTIVE.storedName ||
+                    identity.role == DeviceIdentityRole.CANDIDATE.storedName
+            }
+            .groupBy(DeviceIdentityEntity::role)
+        configuredIdentities.forEach { (role, matches) ->
+            check(matches.size == 1) { "Multiple $role device identities exist" }
+        }
+        val identityModels = configuredIdentities.mapValues { (_, matches) ->
+            val identity = matches.single()
             val identitySecrets = secrets.filter { it.identityId == identity.id }
-            identity.role to identity.toModel(
+            identity.toModel(
                 credentialsAvailable = VaultSecretKind.entries.all { kind ->
                     identitySecrets.singleOrNull { it.kind == kind.storedName }
                         ?.let { availability.getValue(it.encryptionKeyId) } == true
@@ -274,6 +284,7 @@ internal class VaultRepository(
                         claimedAt = currentTimeMillis(),
                         activeRole = DeviceIdentityRole.ACTIVE.storedName,
                         candidateRole = DeviceIdentityRole.CANDIDATE.storedName,
+                        retiredRole = DeviceIdentityRole.RETIRED.storedName,
                     )
                 ) {
                     audit.record(
@@ -561,6 +572,7 @@ private data class DeviceMaterial(
 private enum class DeviceIdentityRole(val storedName: String) {
     ACTIVE("active"),
     CANDIDATE("candidate"),
+    RETIRED("retired"),
 }
 
 private enum class VaultSecretKind(val storedName: String) {

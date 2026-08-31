@@ -22,7 +22,7 @@ import dev.agentknock.relay.ApprovalReviewRequest
 import dev.agentknock.relay.ApprovalReviewSecretFacts
 import dev.agentknock.relay.ApprovalReviewSshSecretFacts
 import dev.agentknock.relay.ApprovalReviewSshAuthenticationEvidence
-import dev.agentknock.storage.request.PairingEntity
+import dev.agentknock.storage.request.ClientEntity
 import dev.agentknock.storage.request.SecretUseRequestEntity
 import dev.agentknock.storage.approval.ApprovalAction
 import dev.agentknock.storage.approval.ApprovalEvaluation
@@ -37,7 +37,7 @@ import kotlinx.serialization.json.JsonNull
 import kotlinx.serialization.json.JsonPrimitive
 
 internal fun approvalReviewRequest(
-    pairing: PairingEntity,
+    client: ClientEntity,
     contents: InvocationRequestMessage,
     description: RequestedSecretDescription,
     values: Map<String, SecretValues>,
@@ -48,14 +48,14 @@ internal fun approvalReviewRequest(
     val secrets = approvalReviewSecretFacts(description, values)
     return ApprovalReviewRequest(
         instructions = approvalReviewInstructions(
-            pairing = pairing,
+            client = client,
             deviceInstructions = deviceInstructions,
             decisionSecretNames = secrets.keys,
             evaluation = evaluation,
             policies = policies,
         ),
         facts = ApprovalReviewFacts(
-            client = pairing.approvalReviewClientName(),
+            client = client.name,
             operation = ApprovalReviewOperation.INVOCATION,
             secrets = secrets,
         ),
@@ -72,7 +72,7 @@ internal fun approvalReviewRequest(
 }
 
 internal fun approvalReviewGitSignRequest(
-    pairing: PairingEntity,
+    client: ClientEntity,
     contents: GitSignRequestMessage,
     signedContent: String,
     invocation: SecretUseRequestEntity,
@@ -88,14 +88,14 @@ internal fun approvalReviewGitSignRequest(
     require(parentElapsedSeconds >= 0) { "Parent elapsed time is negative" }
     return ApprovalReviewRequest(
         instructions = approvalReviewInstructions(
-            pairing = pairing,
+            client = client,
             deviceInstructions = deviceInstructions,
             decisionSecretNames = setOf(contents.secret),
             evaluation = evaluation,
             policies = policies,
         ),
         facts = ApprovalReviewFacts(
-            client = pairing.approvalReviewClientName(),
+            client = client.name,
             operation = ApprovalReviewOperation.GIT_SIGN,
             secret = contents.secret,
         ),
@@ -144,7 +144,7 @@ internal fun approvalReviewGitSignRequest(
 }
 
 internal fun approvalReviewSshAuthenticationRequest(
-    pairing: PairingEntity,
+    client: ClientEntity,
     secretName: String,
     details: SshAuthenticationMessageDetails,
     invocation: SecretUseRequestEntity,
@@ -160,14 +160,14 @@ internal fun approvalReviewSshAuthenticationRequest(
     require(parentElapsedSeconds >= 0) { "Parent elapsed time is negative" }
     return ApprovalReviewRequest(
         instructions = approvalReviewInstructions(
-            pairing = pairing,
+            client = client,
             deviceInstructions = deviceInstructions,
             decisionSecretNames = setOf(secretName),
             evaluation = evaluation,
             policies = policies,
         ),
         facts = ApprovalReviewFacts(
-            client = pairing.approvalReviewClientName(),
+            client = client.name,
             operation = ApprovalReviewOperation.SSH_AUTHENTICATE,
             secret = secretName,
         ),
@@ -198,7 +198,7 @@ internal fun approvalReviewSshAuthenticationRequest(
 }
 
 private fun approvalReviewInstructions(
-    pairing: PairingEntity,
+    client: ClientEntity,
     deviceInstructions: String,
     decisionSecretNames: Set<String>,
     evaluation: ApprovalEvaluation,
@@ -226,13 +226,10 @@ private fun approvalReviewInstructions(
 
     return ApprovalReviewInstructions(
         general = deviceInstructions,
-        client = pairing.instructions,
+        client = client.instructions,
         secrets = secretInstructions,
     )
 }
-
-private fun PairingEntity.approvalReviewClientName(): String =
-    friendlyName ?: hostname ?: "Unknown client"
 
 internal fun approvalReviewSecretFacts(
     description: RequestedSecretDescription,

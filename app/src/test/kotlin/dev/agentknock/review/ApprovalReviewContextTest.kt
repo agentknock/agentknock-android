@@ -19,7 +19,7 @@ import dev.agentknock.relay.ApprovalReviewOmittedDestination
 import dev.agentknock.relay.ApprovalReviewStandardInputDestination
 import dev.agentknock.relay.ApprovalReviewOperation
 import dev.agentknock.relay.ApprovalReviewSshSecretFacts
-import dev.agentknock.storage.request.PairingEntity
+import dev.agentknock.storage.request.ClientEntity
 import dev.agentknock.storage.request.SecretUseRequestEntity
 import dev.agentknock.storage.approval.ApprovalAction
 import dev.agentknock.storage.approval.ApprovalEvaluation
@@ -50,7 +50,7 @@ class ApprovalReviewContextTest {
     @Test
     fun `builds minimal invocation review with exact secret facts`() {
         val request = approvalReviewRequest(
-            pairing = pairing(),
+            client = client(),
             contents = InvocationRequestMessage(
                 clientSoftware = software(),
                 invocationToken = ByteArray(32),
@@ -192,7 +192,7 @@ class ApprovalReviewContextTest {
     @Test
     fun `builds git signing review in the same trust model`() {
         val request = approvalReviewGitSignRequest(
-            pairing = pairing(),
+            client = client(),
             contents = GitSignRequestMessage(
                 clientSoftware = software(),
                 invocationId = "invocation-id-not-for-the-reviewer",
@@ -322,7 +322,7 @@ class ApprovalReviewContextTest {
     @Test
     fun `builds SSH authentication review with remote identity and parent context`() {
         val request = approvalReviewSshAuthenticationRequest(
-            pairing = pairing(),
+            client = client(),
             secretName = "production-ssh",
             details = SshAuthenticationMessageDetails(
                 username = "deploy",
@@ -475,50 +475,33 @@ class ApprovalReviewContextTest {
         action = action,
     )
 
-    private fun pairing() = PairingEntity(
-        requestId = "pairing-request",
-        deviceIdentityId = "device-identity",
-        pairingAddress = "three-word-address",
-        deviceId = "device-id",
+    private fun client() = ClientEntity(
         clientId = "client-id",
-        friendlyName = "survo",
-        deviceRandom = ByteArray(32),
+        deviceIdentityId = "device-identity",
+        name = "survo",
+        instructions = "This client is used for development.",
         desiredRelayClientState = "active",
         relayClientState = "active",
-        state = "active",
-        sasOption0 = null,
-        sasOption1 = null,
-        sasOption2 = null,
-        correctSasIndex = null,
         clientSoftwareJson = null,
         platform = "linux",
         architecture = "x86_64",
         hostname = "reported-hostname",
         machineId = "reported-machine-id",
         osVersion = "reported-os-version",
-        error = null,
-        createdAt = 1,
+        pairedAt = 1,
+        lastSeenAt = 2,
         updatedAt = 2,
-        decidedAt = 1,
-        completedAt = 2,
-        instructions = "This client is used for development.",
     )
 
     private fun storedInvocation() = SecretUseRequestEntity(
         requestId = "invocation-request",
-        pairingRequestId = "pairing-request",
-        clientId = "client-id",
-        clientName = "survo",
-        pairingAddress = "three-word-address",
         hostname = "reported-hostname",
         platform = "linux",
         architecture = "x86_64",
         machineId = "reported-machine-id",
         osVersion = "reported-os-version",
-        state = "waiting_for_completion",
         invocationTokenHash = ByteArray(32),
         containsSensitiveMaterial = false,
-        clientSoftwareJson = "{}",
         secretsJson = "[\"git-signing\"]",
         secretDetailsJson = "[]",
         providedSecretsJson = null,
@@ -540,11 +523,7 @@ class ApprovalReviewContextTest {
         completionResult = null,
         completionReason = null,
         completionMessage = null,
-        error = null,
-        createdAt = 1,
-        updatedAt = 2,
         decidedAt = 1,
-        completedAt = null,
     )
 
     private fun software() = ClientSoftware(

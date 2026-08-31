@@ -2,7 +2,7 @@
   "formatVersion": 1,
   "database": {
     "version": 1,
-    "identityHash": "32b78ff234a5547ecfb639195012c080",
+    "identityHash": "bcb91cd0eb04f2ab80a24bd169aa8421",
     "entities": [
       {
         "tableName": "vault_keys",
@@ -158,7 +158,7 @@
       },
       {
         "tableName": "secret_client_approval_overrides",
-        "createSql": "CREATE TABLE IF NOT EXISTS `${TABLE_NAME}` (`secret_id` TEXT NOT NULL, `client_id` TEXT NOT NULL, `approval_mode` TEXT NOT NULL, PRIMARY KEY(`secret_id`, `client_id`), FOREIGN KEY(`secret_id`) REFERENCES `secrets`(`id`) ON UPDATE NO ACTION ON DELETE CASCADE , FOREIGN KEY(`client_id`) REFERENCES `pairings`(`client_id`) ON UPDATE NO ACTION ON DELETE CASCADE )",
+        "createSql": "CREATE TABLE IF NOT EXISTS `${TABLE_NAME}` (`secret_id` TEXT NOT NULL, `client_id` TEXT NOT NULL, `approval_mode` TEXT NOT NULL, PRIMARY KEY(`secret_id`, `client_id`), FOREIGN KEY(`secret_id`) REFERENCES `secrets`(`id`) ON UPDATE NO ACTION ON DELETE CASCADE , FOREIGN KEY(`client_id`) REFERENCES `clients`(`client_id`) ON UPDATE NO ACTION ON DELETE CASCADE )",
         "fields": [
           {
             "fieldPath": "secretId",
@@ -210,7 +210,7 @@
             ]
           },
           {
-            "table": "pairings",
+            "table": "clients",
             "onDelete": "CASCADE",
             "onUpdate": "NO ACTION",
             "columns": [
@@ -224,7 +224,7 @@
       },
       {
         "tableName": "temporary_access_grants",
-        "createSql": "CREATE TABLE IF NOT EXISTS `${TABLE_NAME}` (`secret_id` TEXT NOT NULL, `client_id` TEXT NOT NULL, `operation` TEXT NOT NULL, `expires_at` INTEGER NOT NULL, PRIMARY KEY(`secret_id`, `client_id`, `operation`), FOREIGN KEY(`secret_id`) REFERENCES `secrets`(`id`) ON UPDATE NO ACTION ON DELETE CASCADE , FOREIGN KEY(`client_id`) REFERENCES `pairings`(`client_id`) ON UPDATE NO ACTION ON DELETE CASCADE )",
+        "createSql": "CREATE TABLE IF NOT EXISTS `${TABLE_NAME}` (`secret_id` TEXT NOT NULL, `client_id` TEXT NOT NULL, `operation` TEXT NOT NULL, `expires_at` INTEGER NOT NULL, PRIMARY KEY(`secret_id`, `client_id`, `operation`), FOREIGN KEY(`secret_id`) REFERENCES `secrets`(`id`) ON UPDATE NO ACTION ON DELETE CASCADE , FOREIGN KEY(`client_id`) REFERENCES `clients`(`client_id`) ON UPDATE NO ACTION ON DELETE CASCADE )",
         "fields": [
           {
             "fieldPath": "secretId",
@@ -283,7 +283,7 @@
             ]
           },
           {
-            "table": "pairings",
+            "table": "clients",
             "onDelete": "CASCADE",
             "onUpdate": "NO ACTION",
             "columns": [
@@ -609,21 +609,21 @@
         "indices": [
           {
             "name": "index_device_identities_role",
-            "unique": true,
+            "unique": false,
             "columnNames": [
               "role"
             ],
             "orders": [],
-            "createSql": "CREATE UNIQUE INDEX IF NOT EXISTS `index_device_identities_role` ON `${TABLE_NAME}` (`role`)"
+            "createSql": "CREATE INDEX IF NOT EXISTS `index_device_identities_role` ON `${TABLE_NAME}` (`role`)"
           },
           {
             "name": "index_device_identities_address_id",
-            "unique": true,
+            "unique": false,
             "columnNames": [
               "address_id"
             ],
             "orders": [],
-            "createSql": "CREATE UNIQUE INDEX IF NOT EXISTS `index_device_identities_address_id` ON `${TABLE_NAME}` (`address_id`)"
+            "createSql": "CREATE INDEX IF NOT EXISTS `index_device_identities_address_id` ON `${TABLE_NAME}` (`address_id`)"
           }
         ]
       },
@@ -740,7 +740,7 @@
       },
       {
         "tableName": "inbox_requests",
-        "createSql": "CREATE TABLE IF NOT EXISTS `${TABLE_NAME}` (`id` TEXT NOT NULL, `parent_request_id` TEXT, `kind` TEXT NOT NULL, `state` TEXT NOT NULL, `listed` INTEGER NOT NULL, `request_json` TEXT NOT NULL, `response_json` TEXT, `completion_json` TEXT, `received_at` INTEGER NOT NULL, `updated_at` INTEGER NOT NULL, `completed_at` INTEGER, `request_acknowledged_at` INTEGER, `response_acknowledged_at` INTEGER, `completion_acknowledged_at` INTEGER, PRIMARY KEY(`id`), FOREIGN KEY(`parent_request_id`) REFERENCES `inbox_requests`(`id`) ON UPDATE NO ACTION ON DELETE RESTRICT )",
+        "createSql": "CREATE TABLE IF NOT EXISTS `${TABLE_NAME}` (`id` TEXT NOT NULL, `parent_request_id` TEXT, `device_identity_id` TEXT NOT NULL, `client_id` TEXT NOT NULL, `client_name_snapshot` TEXT NOT NULL, `client_software_json` TEXT, `kind` TEXT NOT NULL, `state` TEXT NOT NULL, `listed` INTEGER NOT NULL, `request_json` TEXT NOT NULL, `response_json` TEXT, `completion_json` TEXT, `error` TEXT, `received_at` INTEGER NOT NULL, `updated_at` INTEGER NOT NULL, `completed_at` INTEGER, `request_acknowledged_at` INTEGER, `response_acknowledged_at` INTEGER, `completion_acknowledged_at` INTEGER, PRIMARY KEY(`id`), FOREIGN KEY(`parent_request_id`) REFERENCES `inbox_requests`(`id`) ON UPDATE NO ACTION ON DELETE RESTRICT , FOREIGN KEY(`device_identity_id`) REFERENCES `device_identities`(`id`) ON UPDATE NO ACTION ON DELETE RESTRICT )",
         "fields": [
           {
             "fieldPath": "id",
@@ -751,6 +751,29 @@
           {
             "fieldPath": "parentRequestId",
             "columnName": "parent_request_id",
+            "affinity": "TEXT"
+          },
+          {
+            "fieldPath": "deviceIdentityId",
+            "columnName": "device_identity_id",
+            "affinity": "TEXT",
+            "notNull": true
+          },
+          {
+            "fieldPath": "clientId",
+            "columnName": "client_id",
+            "affinity": "TEXT",
+            "notNull": true
+          },
+          {
+            "fieldPath": "clientNameSnapshot",
+            "columnName": "client_name_snapshot",
+            "affinity": "TEXT",
+            "notNull": true
+          },
+          {
+            "fieldPath": "clientSoftwareJson",
+            "columnName": "client_software_json",
             "affinity": "TEXT"
           },
           {
@@ -785,6 +808,11 @@
           {
             "fieldPath": "completionJson",
             "columnName": "completion_json",
+            "affinity": "TEXT"
+          },
+          {
+            "fieldPath": "error",
+            "columnName": "error",
             "affinity": "TEXT"
           },
           {
@@ -837,6 +865,15 @@
             "createSql": "CREATE INDEX IF NOT EXISTS `index_inbox_requests_parent_request_id` ON `${TABLE_NAME}` (`parent_request_id`)"
           },
           {
+            "name": "index_inbox_requests_device_identity_id",
+            "unique": false,
+            "columnNames": [
+              "device_identity_id"
+            ],
+            "orders": [],
+            "createSql": "CREATE INDEX IF NOT EXISTS `index_inbox_requests_device_identity_id` ON `${TABLE_NAME}` (`device_identity_id`)"
+          },
+          {
             "name": "index_inbox_requests_listed_received_at_id",
             "unique": false,
             "columnNames": [
@@ -859,12 +896,23 @@
             "referencedColumns": [
               "id"
             ]
+          },
+          {
+            "table": "device_identities",
+            "onDelete": "RESTRICT",
+            "onUpdate": "NO ACTION",
+            "columns": [
+              "device_identity_id"
+            ],
+            "referencedColumns": [
+              "id"
+            ]
           }
         ]
       },
       {
-        "tableName": "pairings",
-        "createSql": "CREATE TABLE IF NOT EXISTS `${TABLE_NAME}` (`request_id` TEXT NOT NULL, `device_identity_id` TEXT, `pairing_address` TEXT NOT NULL, `device_id` TEXT NOT NULL, `client_id` TEXT NOT NULL, `friendly_name` TEXT, `device_random` BLOB NOT NULL, `desired_relay_client_state` TEXT, `relay_client_state` TEXT, `state` TEXT NOT NULL, `sas_option_0` INTEGER, `sas_option_1` INTEGER, `sas_option_2` INTEGER, `correct_sas_index` INTEGER, `cli_version` TEXT, `platform` TEXT, `architecture` TEXT, `hostname` TEXT, `machine_id` TEXT, `os_version` TEXT, `error` TEXT, `created_at` INTEGER NOT NULL, `updated_at` INTEGER NOT NULL, `decided_at` INTEGER, `completed_at` INTEGER, `instructions` TEXT NOT NULL, PRIMARY KEY(`request_id`), FOREIGN KEY(`request_id`) REFERENCES `inbox_requests`(`id`) ON UPDATE NO ACTION ON DELETE CASCADE , FOREIGN KEY(`device_identity_id`) REFERENCES `device_identities`(`id`) ON UPDATE NO ACTION ON DELETE SET NULL )",
+        "tableName": "pairing_attempts",
+        "createSql": "CREATE TABLE IF NOT EXISTS `${TABLE_NAME}` (`request_id` TEXT NOT NULL, `pairing_address` TEXT NOT NULL, `client_id` TEXT NOT NULL, `friendly_name` TEXT, `device_random` BLOB NOT NULL, `desired_relay_client_state` TEXT, `relay_client_state` TEXT, `state` TEXT NOT NULL, `sas_option_0` INTEGER, `sas_option_1` INTEGER, `sas_option_2` INTEGER, `correct_sas_index` INTEGER, `platform` TEXT, `architecture` TEXT, `hostname` TEXT, `machine_id` TEXT, `os_version` TEXT, `pending_psk_encryption_format` INTEGER, `pending_psk_encryption_key_id` TEXT, `pending_psk_nonce` BLOB, `pending_psk_ciphertext` BLOB, `decided_at` INTEGER, PRIMARY KEY(`request_id`), FOREIGN KEY(`request_id`) REFERENCES `inbox_requests`(`id`) ON UPDATE NO ACTION ON DELETE CASCADE , FOREIGN KEY(`pending_psk_encryption_key_id`) REFERENCES `vault_keys`(`id`) ON UPDATE NO ACTION ON DELETE RESTRICT )",
         "fields": [
           {
             "fieldPath": "requestId",
@@ -873,19 +921,8 @@
             "notNull": true
           },
           {
-            "fieldPath": "deviceIdentityId",
-            "columnName": "device_identity_id",
-            "affinity": "TEXT"
-          },
-          {
             "fieldPath": "pairingAddress",
             "columnName": "pairing_address",
-            "affinity": "TEXT",
-            "notNull": true
-          },
-          {
-            "fieldPath": "deviceId",
-            "columnName": "device_id",
             "affinity": "TEXT",
             "notNull": true
           },
@@ -943,8 +980,149 @@
             "affinity": "INTEGER"
           },
           {
+            "fieldPath": "platform",
+            "columnName": "platform",
+            "affinity": "TEXT"
+          },
+          {
+            "fieldPath": "architecture",
+            "columnName": "architecture",
+            "affinity": "TEXT"
+          },
+          {
+            "fieldPath": "hostname",
+            "columnName": "hostname",
+            "affinity": "TEXT"
+          },
+          {
+            "fieldPath": "machineId",
+            "columnName": "machine_id",
+            "affinity": "TEXT"
+          },
+          {
+            "fieldPath": "osVersion",
+            "columnName": "os_version",
+            "affinity": "TEXT"
+          },
+          {
+            "fieldPath": "pendingPskEncryptionFormat",
+            "columnName": "pending_psk_encryption_format",
+            "affinity": "INTEGER"
+          },
+          {
+            "fieldPath": "pendingPskEncryptionKeyId",
+            "columnName": "pending_psk_encryption_key_id",
+            "affinity": "TEXT"
+          },
+          {
+            "fieldPath": "pendingPskNonce",
+            "columnName": "pending_psk_nonce",
+            "affinity": "BLOB"
+          },
+          {
+            "fieldPath": "pendingPskCiphertext",
+            "columnName": "pending_psk_ciphertext",
+            "affinity": "BLOB"
+          },
+          {
+            "fieldPath": "decidedAt",
+            "columnName": "decided_at",
+            "affinity": "INTEGER"
+          }
+        ],
+        "primaryKey": {
+          "autoGenerate": false,
+          "columnNames": [
+            "request_id"
+          ]
+        },
+        "indices": [
+          {
+            "name": "index_pairing_attempts_client_id",
+            "unique": true,
+            "columnNames": [
+              "client_id"
+            ],
+            "orders": [],
+            "createSql": "CREATE UNIQUE INDEX IF NOT EXISTS `index_pairing_attempts_client_id` ON `${TABLE_NAME}` (`client_id`)"
+          },
+          {
+            "name": "index_pairing_attempts_pending_psk_encryption_key_id",
+            "unique": false,
+            "columnNames": [
+              "pending_psk_encryption_key_id"
+            ],
+            "orders": [],
+            "createSql": "CREATE INDEX IF NOT EXISTS `index_pairing_attempts_pending_psk_encryption_key_id` ON `${TABLE_NAME}` (`pending_psk_encryption_key_id`)"
+          }
+        ],
+        "foreignKeys": [
+          {
+            "table": "inbox_requests",
+            "onDelete": "CASCADE",
+            "onUpdate": "NO ACTION",
+            "columns": [
+              "request_id"
+            ],
+            "referencedColumns": [
+              "id"
+            ]
+          },
+          {
+            "table": "vault_keys",
+            "onDelete": "RESTRICT",
+            "onUpdate": "NO ACTION",
+            "columns": [
+              "pending_psk_encryption_key_id"
+            ],
+            "referencedColumns": [
+              "id"
+            ]
+          }
+        ]
+      },
+      {
+        "tableName": "clients",
+        "createSql": "CREATE TABLE IF NOT EXISTS `${TABLE_NAME}` (`client_id` TEXT NOT NULL, `device_identity_id` TEXT NOT NULL, `name` TEXT NOT NULL, `instructions` TEXT NOT NULL, `desired_relay_client_state` TEXT, `relay_client_state` TEXT NOT NULL, `client_software_json` TEXT, `platform` TEXT, `architecture` TEXT, `hostname` TEXT, `machine_id` TEXT, `os_version` TEXT, `paired_at` INTEGER NOT NULL, `last_seen_at` INTEGER, `updated_at` INTEGER NOT NULL, PRIMARY KEY(`client_id`), FOREIGN KEY(`device_identity_id`) REFERENCES `device_identities`(`id`) ON UPDATE NO ACTION ON DELETE RESTRICT )",
+        "fields": [
+          {
+            "fieldPath": "clientId",
+            "columnName": "client_id",
+            "affinity": "TEXT",
+            "notNull": true
+          },
+          {
+            "fieldPath": "deviceIdentityId",
+            "columnName": "device_identity_id",
+            "affinity": "TEXT",
+            "notNull": true
+          },
+          {
+            "fieldPath": "name",
+            "columnName": "name",
+            "affinity": "TEXT",
+            "notNull": true
+          },
+          {
+            "fieldPath": "instructions",
+            "columnName": "instructions",
+            "affinity": "TEXT",
+            "notNull": true
+          },
+          {
+            "fieldPath": "desiredRelayClientState",
+            "columnName": "desired_relay_client_state",
+            "affinity": "TEXT"
+          },
+          {
+            "fieldPath": "relayClientState",
+            "columnName": "relay_client_state",
+            "affinity": "TEXT",
+            "notNull": true
+          },
+          {
             "fieldPath": "clientSoftwareJson",
-            "columnName": "cli_version",
+            "columnName": "client_software_json",
             "affinity": "TEXT"
           },
           {
@@ -973,89 +1151,44 @@
             "affinity": "TEXT"
           },
           {
-            "fieldPath": "error",
-            "columnName": "error",
-            "affinity": "TEXT"
-          },
-          {
-            "fieldPath": "createdAt",
-            "columnName": "created_at",
+            "fieldPath": "pairedAt",
+            "columnName": "paired_at",
             "affinity": "INTEGER",
             "notNull": true
+          },
+          {
+            "fieldPath": "lastSeenAt",
+            "columnName": "last_seen_at",
+            "affinity": "INTEGER"
           },
           {
             "fieldPath": "updatedAt",
             "columnName": "updated_at",
             "affinity": "INTEGER",
             "notNull": true
-          },
-          {
-            "fieldPath": "decidedAt",
-            "columnName": "decided_at",
-            "affinity": "INTEGER"
-          },
-          {
-            "fieldPath": "completedAt",
-            "columnName": "completed_at",
-            "affinity": "INTEGER"
-          },
-          {
-            "fieldPath": "instructions",
-            "columnName": "instructions",
-            "affinity": "TEXT",
-            "notNull": true
           }
         ],
         "primaryKey": {
           "autoGenerate": false,
           "columnNames": [
-            "request_id"
+            "client_id"
           ]
         },
         "indices": [
           {
-            "name": "index_pairings_client_id",
-            "unique": true,
-            "columnNames": [
-              "client_id"
-            ],
-            "orders": [],
-            "createSql": "CREATE UNIQUE INDEX IF NOT EXISTS `index_pairings_client_id` ON `${TABLE_NAME}` (`client_id`)"
-          },
-          {
-            "name": "index_pairings_device_identity_id",
+            "name": "index_clients_device_identity_id",
             "unique": false,
             "columnNames": [
               "device_identity_id"
             ],
             "orders": [],
-            "createSql": "CREATE INDEX IF NOT EXISTS `index_pairings_device_identity_id` ON `${TABLE_NAME}` (`device_identity_id`)"
-          },
-          {
-            "name": "index_pairings_state",
-            "unique": false,
-            "columnNames": [
-              "state"
-            ],
-            "orders": [],
-            "createSql": "CREATE INDEX IF NOT EXISTS `index_pairings_state` ON `${TABLE_NAME}` (`state`)"
+            "createSql": "CREATE INDEX IF NOT EXISTS `index_clients_device_identity_id` ON `${TABLE_NAME}` (`device_identity_id`)"
           }
         ],
         "foreignKeys": [
           {
-            "table": "inbox_requests",
-            "onDelete": "CASCADE",
-            "onUpdate": "NO ACTION",
-            "columns": [
-              "request_id"
-            ],
-            "referencedColumns": [
-              "id"
-            ]
-          },
-          {
             "table": "device_identities",
-            "onDelete": "SET NULL",
+            "onDelete": "RESTRICT",
             "onUpdate": "NO ACTION",
             "columns": [
               "device_identity_id"
@@ -1067,24 +1200,18 @@
         ]
       },
       {
-        "tableName": "pairing_secrets",
-        "createSql": "CREATE TABLE IF NOT EXISTS `${TABLE_NAME}` (`id` TEXT NOT NULL, `pairing_request_id` TEXT NOT NULL, `kind` TEXT NOT NULL, `encryption_format` INTEGER NOT NULL, `encryption_key_id` TEXT NOT NULL, `nonce` BLOB NOT NULL, `ciphertext` BLOB NOT NULL, `created_at` INTEGER NOT NULL, `updated_at` INTEGER NOT NULL, PRIMARY KEY(`id`), FOREIGN KEY(`pairing_request_id`) REFERENCES `pairings`(`request_id`) ON UPDATE NO ACTION ON DELETE CASCADE , FOREIGN KEY(`encryption_key_id`) REFERENCES `vault_keys`(`id`) ON UPDATE NO ACTION ON DELETE RESTRICT )",
+        "tableName": "client_psks",
+        "createSql": "CREATE TABLE IF NOT EXISTS `${TABLE_NAME}` (`client_id` TEXT NOT NULL, `slot` TEXT NOT NULL, `encryption_format` INTEGER NOT NULL, `encryption_key_id` TEXT NOT NULL, `nonce` BLOB NOT NULL, `ciphertext` BLOB NOT NULL, `stored_at` INTEGER NOT NULL, PRIMARY KEY(`client_id`, `slot`), FOREIGN KEY(`client_id`) REFERENCES `clients`(`client_id`) ON UPDATE NO ACTION ON DELETE CASCADE , FOREIGN KEY(`encryption_key_id`) REFERENCES `vault_keys`(`id`) ON UPDATE NO ACTION ON DELETE RESTRICT )",
         "fields": [
           {
-            "fieldPath": "id",
-            "columnName": "id",
+            "fieldPath": "clientId",
+            "columnName": "client_id",
             "affinity": "TEXT",
             "notNull": true
           },
           {
-            "fieldPath": "pairingRequestId",
-            "columnName": "pairing_request_id",
-            "affinity": "TEXT",
-            "notNull": true
-          },
-          {
-            "fieldPath": "kind",
-            "columnName": "kind",
+            "fieldPath": "slot",
+            "columnName": "slot",
             "affinity": "TEXT",
             "notNull": true
           },
@@ -1113,14 +1240,8 @@
             "notNull": true
           },
           {
-            "fieldPath": "createdAt",
-            "columnName": "created_at",
-            "affinity": "INTEGER",
-            "notNull": true
-          },
-          {
-            "fieldPath": "updatedAt",
-            "columnName": "updated_at",
+            "fieldPath": "storedAt",
+            "columnName": "stored_at",
             "affinity": "INTEGER",
             "notNull": true
           }
@@ -1128,40 +1249,31 @@
         "primaryKey": {
           "autoGenerate": false,
           "columnNames": [
-            "id"
+            "client_id",
+            "slot"
           ]
         },
         "indices": [
           {
-            "name": "index_pairing_secrets_pairing_request_id_kind",
-            "unique": true,
-            "columnNames": [
-              "pairing_request_id",
-              "kind"
-            ],
-            "orders": [],
-            "createSql": "CREATE UNIQUE INDEX IF NOT EXISTS `index_pairing_secrets_pairing_request_id_kind` ON `${TABLE_NAME}` (`pairing_request_id`, `kind`)"
-          },
-          {
-            "name": "index_pairing_secrets_encryption_key_id",
+            "name": "index_client_psks_encryption_key_id",
             "unique": false,
             "columnNames": [
               "encryption_key_id"
             ],
             "orders": [],
-            "createSql": "CREATE INDEX IF NOT EXISTS `index_pairing_secrets_encryption_key_id` ON `${TABLE_NAME}` (`encryption_key_id`)"
+            "createSql": "CREATE INDEX IF NOT EXISTS `index_client_psks_encryption_key_id` ON `${TABLE_NAME}` (`encryption_key_id`)"
           }
         ],
         "foreignKeys": [
           {
-            "table": "pairings",
+            "table": "clients",
             "onDelete": "CASCADE",
             "onUpdate": "NO ACTION",
             "columns": [
-              "pairing_request_id"
+              "client_id"
             ],
             "referencedColumns": [
-              "request_id"
+              "client_id"
             ]
           },
           {
@@ -1178,15 +1290,9 @@
         ]
       },
       {
-        "tableName": "request_secrets",
-        "createSql": "CREATE TABLE IF NOT EXISTS `${TABLE_NAME}` (`id` TEXT NOT NULL, `request_id` TEXT NOT NULL, `encryption_format` INTEGER NOT NULL, `encryption_key_id` TEXT NOT NULL, `nonce` BLOB NOT NULL, `ciphertext` BLOB NOT NULL, `created_at` INTEGER NOT NULL, PRIMARY KEY(`id`), FOREIGN KEY(`request_id`) REFERENCES `inbox_requests`(`id`) ON UPDATE NO ACTION ON DELETE CASCADE , FOREIGN KEY(`encryption_key_id`) REFERENCES `vault_keys`(`id`) ON UPDATE NO ACTION ON DELETE RESTRICT )",
+        "tableName": "request_psks",
+        "createSql": "CREATE TABLE IF NOT EXISTS `${TABLE_NAME}` (`request_id` TEXT NOT NULL, `encryption_format` INTEGER NOT NULL, `encryption_key_id` TEXT NOT NULL, `nonce` BLOB NOT NULL, `ciphertext` BLOB NOT NULL, PRIMARY KEY(`request_id`), FOREIGN KEY(`request_id`) REFERENCES `inbox_requests`(`id`) ON UPDATE NO ACTION ON DELETE CASCADE , FOREIGN KEY(`encryption_key_id`) REFERENCES `vault_keys`(`id`) ON UPDATE NO ACTION ON DELETE RESTRICT )",
         "fields": [
-          {
-            "fieldPath": "id",
-            "columnName": "id",
-            "affinity": "TEXT",
-            "notNull": true
-          },
           {
             "fieldPath": "requestId",
             "columnName": "request_id",
@@ -1216,38 +1322,23 @@
             "columnName": "ciphertext",
             "affinity": "BLOB",
             "notNull": true
-          },
-          {
-            "fieldPath": "createdAt",
-            "columnName": "created_at",
-            "affinity": "INTEGER",
-            "notNull": true
           }
         ],
         "primaryKey": {
           "autoGenerate": false,
           "columnNames": [
-            "id"
+            "request_id"
           ]
         },
         "indices": [
           {
-            "name": "index_request_secrets_request_id",
-            "unique": true,
-            "columnNames": [
-              "request_id"
-            ],
-            "orders": [],
-            "createSql": "CREATE UNIQUE INDEX IF NOT EXISTS `index_request_secrets_request_id` ON `${TABLE_NAME}` (`request_id`)"
-          },
-          {
-            "name": "index_request_secrets_encryption_key_id",
+            "name": "index_request_psks_encryption_key_id",
             "unique": false,
             "columnNames": [
               "encryption_key_id"
             ],
             "orders": [],
-            "createSql": "CREATE INDEX IF NOT EXISTS `index_request_secrets_encryption_key_id` ON `${TABLE_NAME}` (`encryption_key_id`)"
+            "createSql": "CREATE INDEX IF NOT EXISTS `index_request_psks_encryption_key_id` ON `${TABLE_NAME}` (`encryption_key_id`)"
           }
         ],
         "foreignKeys": [
@@ -1277,34 +1368,11 @@
       },
       {
         "tableName": "secret_use_requests",
-        "createSql": "CREATE TABLE IF NOT EXISTS `${TABLE_NAME}` (`request_id` TEXT NOT NULL, `pairing_request_id` TEXT, `client_id` TEXT NOT NULL, `client_name` TEXT NOT NULL, `pairing_address` TEXT NOT NULL, `hostname` TEXT, `platform` TEXT, `architecture` TEXT, `machine_id` TEXT, `os_version` TEXT, `state` TEXT NOT NULL, `invocation_token_hash` BLOB, `contains_sensitive_material` INTEGER NOT NULL DEFAULT 1, `cli_version` TEXT NOT NULL, `secrets_json` TEXT NOT NULL, `secret_details_json` TEXT NOT NULL, `provided_secrets_json` TEXT, `missing_secrets_json` TEXT NOT NULL, `reason` TEXT, `command` TEXT NOT NULL, `arguments_json` TEXT NOT NULL, `working_directory` TEXT NOT NULL, `executable_path` TEXT NOT NULL, `executable_hash` TEXT, `executable_mode` TEXT NOT NULL, `stdin_kind` TEXT NOT NULL, `stdout_kind` TEXT NOT NULL, `stderr_kind` TEXT NOT NULL, `launcher_chain_json` TEXT NOT NULL, `decision` TEXT, `decision_source` TEXT, `rule_evaluation_json` TEXT, `completion_result` TEXT, `completion_reason` TEXT, `completion_message` TEXT, `error` TEXT, `created_at` INTEGER NOT NULL, `updated_at` INTEGER NOT NULL, `decided_at` INTEGER, `completed_at` INTEGER, PRIMARY KEY(`request_id`), FOREIGN KEY(`request_id`) REFERENCES `inbox_requests`(`id`) ON UPDATE NO ACTION ON DELETE CASCADE , FOREIGN KEY(`pairing_request_id`) REFERENCES `pairings`(`request_id`) ON UPDATE NO ACTION ON DELETE SET NULL )",
+        "createSql": "CREATE TABLE IF NOT EXISTS `${TABLE_NAME}` (`request_id` TEXT NOT NULL, `hostname` TEXT, `platform` TEXT, `architecture` TEXT, `machine_id` TEXT, `os_version` TEXT, `invocation_token_hash` BLOB, `contains_sensitive_material` INTEGER NOT NULL DEFAULT 1, `secrets_json` TEXT NOT NULL, `secret_details_json` TEXT NOT NULL, `provided_secrets_json` TEXT, `missing_secrets_json` TEXT NOT NULL, `reason` TEXT, `command` TEXT NOT NULL, `arguments_json` TEXT NOT NULL, `working_directory` TEXT NOT NULL, `executable_path` TEXT NOT NULL, `executable_hash` TEXT, `executable_mode` TEXT NOT NULL, `stdin_kind` TEXT NOT NULL, `stdout_kind` TEXT NOT NULL, `stderr_kind` TEXT NOT NULL, `launcher_chain_json` TEXT NOT NULL, `decision` TEXT, `decision_source` TEXT, `approval_evaluation_json` TEXT, `completion_result` TEXT, `completion_reason` TEXT, `completion_message` TEXT, `decided_at` INTEGER, PRIMARY KEY(`request_id`), FOREIGN KEY(`request_id`) REFERENCES `inbox_requests`(`id`) ON UPDATE NO ACTION ON DELETE CASCADE )",
         "fields": [
           {
             "fieldPath": "requestId",
             "columnName": "request_id",
-            "affinity": "TEXT",
-            "notNull": true
-          },
-          {
-            "fieldPath": "pairingRequestId",
-            "columnName": "pairing_request_id",
-            "affinity": "TEXT"
-          },
-          {
-            "fieldPath": "clientId",
-            "columnName": "client_id",
-            "affinity": "TEXT",
-            "notNull": true
-          },
-          {
-            "fieldPath": "clientName",
-            "columnName": "client_name",
-            "affinity": "TEXT",
-            "notNull": true
-          },
-          {
-            "fieldPath": "pairingAddress",
-            "columnName": "pairing_address",
             "affinity": "TEXT",
             "notNull": true
           },
@@ -1334,12 +1402,6 @@
             "affinity": "TEXT"
           },
           {
-            "fieldPath": "state",
-            "columnName": "state",
-            "affinity": "TEXT",
-            "notNull": true
-          },
-          {
             "fieldPath": "invocationTokenHash",
             "columnName": "invocation_token_hash",
             "affinity": "BLOB"
@@ -1350,12 +1412,6 @@
             "affinity": "INTEGER",
             "notNull": true,
             "defaultValue": "1"
-          },
-          {
-            "fieldPath": "clientSoftwareJson",
-            "columnName": "cli_version",
-            "affinity": "TEXT",
-            "notNull": true
           },
           {
             "fieldPath": "secretsJson",
@@ -1456,7 +1512,7 @@
           },
           {
             "fieldPath": "approvalEvaluationJson",
-            "columnName": "rule_evaluation_json",
+            "columnName": "approval_evaluation_json",
             "affinity": "TEXT"
           },
           {
@@ -1475,30 +1531,8 @@
             "affinity": "TEXT"
           },
           {
-            "fieldPath": "error",
-            "columnName": "error",
-            "affinity": "TEXT"
-          },
-          {
-            "fieldPath": "createdAt",
-            "columnName": "created_at",
-            "affinity": "INTEGER",
-            "notNull": true
-          },
-          {
-            "fieldPath": "updatedAt",
-            "columnName": "updated_at",
-            "affinity": "INTEGER",
-            "notNull": true
-          },
-          {
             "fieldPath": "decidedAt",
             "columnName": "decided_at",
-            "affinity": "INTEGER"
-          },
-          {
-            "fieldPath": "completedAt",
-            "columnName": "completed_at",
             "affinity": "INTEGER"
           }
         ],
@@ -1508,26 +1542,6 @@
             "request_id"
           ]
         },
-        "indices": [
-          {
-            "name": "index_secret_use_requests_pairing_request_id",
-            "unique": false,
-            "columnNames": [
-              "pairing_request_id"
-            ],
-            "orders": [],
-            "createSql": "CREATE INDEX IF NOT EXISTS `index_secret_use_requests_pairing_request_id` ON `${TABLE_NAME}` (`pairing_request_id`)"
-          },
-          {
-            "name": "index_secret_use_requests_state",
-            "unique": false,
-            "columnNames": [
-              "state"
-            ],
-            "orders": [],
-            "createSql": "CREATE INDEX IF NOT EXISTS `index_secret_use_requests_state` ON `${TABLE_NAME}` (`state`)"
-          }
-        ],
         "foreignKeys": [
           {
             "table": "inbox_requests",
@@ -1539,33 +1553,16 @@
             "referencedColumns": [
               "id"
             ]
-          },
-          {
-            "table": "pairings",
-            "onDelete": "SET NULL",
-            "onUpdate": "NO ACTION",
-            "columns": [
-              "pairing_request_id"
-            ],
-            "referencedColumns": [
-              "request_id"
-            ]
           }
         ]
       },
       {
         "tableName": "git_sign_requests",
-        "createSql": "CREATE TABLE IF NOT EXISTS `${TABLE_NAME}` (`request_id` TEXT NOT NULL, `state` TEXT NOT NULL, `secret_name` TEXT NOT NULL, `message` BLOB NOT NULL, `repository_json` TEXT, `rule_evaluation_json` TEXT, `decision` TEXT, `completion_result` TEXT, `completion_reason` TEXT, `completion_message` TEXT, `error` TEXT, `created_at` INTEGER NOT NULL, `updated_at` INTEGER NOT NULL, `decided_at` INTEGER, `completed_at` INTEGER, PRIMARY KEY(`request_id`), FOREIGN KEY(`request_id`) REFERENCES `inbox_requests`(`id`) ON UPDATE NO ACTION ON DELETE CASCADE )",
+        "createSql": "CREATE TABLE IF NOT EXISTS `${TABLE_NAME}` (`request_id` TEXT NOT NULL, `secret_name` TEXT NOT NULL, `message` BLOB NOT NULL, `repository_json` TEXT, `approval_evaluation_json` TEXT, `decision` TEXT, `completion_result` TEXT, `completion_reason` TEXT, `completion_message` TEXT, `decided_at` INTEGER, PRIMARY KEY(`request_id`), FOREIGN KEY(`request_id`) REFERENCES `inbox_requests`(`id`) ON UPDATE NO ACTION ON DELETE CASCADE )",
         "fields": [
           {
             "fieldPath": "requestId",
             "columnName": "request_id",
-            "affinity": "TEXT",
-            "notNull": true
-          },
-          {
-            "fieldPath": "state",
-            "columnName": "state",
             "affinity": "TEXT",
             "notNull": true
           },
@@ -1588,7 +1585,7 @@
           },
           {
             "fieldPath": "approvalEvaluationJson",
-            "columnName": "rule_evaluation_json",
+            "columnName": "approval_evaluation_json",
             "affinity": "TEXT"
           },
           {
@@ -1612,30 +1609,8 @@
             "affinity": "TEXT"
           },
           {
-            "fieldPath": "error",
-            "columnName": "error",
-            "affinity": "TEXT"
-          },
-          {
-            "fieldPath": "createdAt",
-            "columnName": "created_at",
-            "affinity": "INTEGER",
-            "notNull": true
-          },
-          {
-            "fieldPath": "updatedAt",
-            "columnName": "updated_at",
-            "affinity": "INTEGER",
-            "notNull": true
-          },
-          {
             "fieldPath": "decidedAt",
             "columnName": "decided_at",
-            "affinity": "INTEGER"
-          },
-          {
-            "fieldPath": "completedAt",
-            "columnName": "completed_at",
             "affinity": "INTEGER"
           }
         ],
@@ -1645,17 +1620,6 @@
             "request_id"
           ]
         },
-        "indices": [
-          {
-            "name": "index_git_sign_requests_state",
-            "unique": false,
-            "columnNames": [
-              "state"
-            ],
-            "orders": [],
-            "createSql": "CREATE INDEX IF NOT EXISTS `index_git_sign_requests_state` ON `${TABLE_NAME}` (`state`)"
-          }
-        ],
         "foreignKeys": [
           {
             "table": "inbox_requests",
@@ -1672,17 +1636,11 @@
       },
       {
         "tableName": "ssh_authentication_requests",
-        "createSql": "CREATE TABLE IF NOT EXISTS `${TABLE_NAME}` (`request_id` TEXT NOT NULL, `state` TEXT NOT NULL, `secret_name` TEXT NOT NULL, `message` BLOB NOT NULL, `username` TEXT NOT NULL, `method` TEXT NOT NULL, `algorithm` TEXT NOT NULL, `host_key_algorithm` TEXT, `host_key_fingerprint` TEXT, `approval_evaluation_json` TEXT, `decision` TEXT, `completion_result` TEXT, `completion_reason` TEXT, `completion_message` TEXT, `error` TEXT, `created_at` INTEGER NOT NULL, `updated_at` INTEGER NOT NULL, `decided_at` INTEGER, `completed_at` INTEGER, PRIMARY KEY(`request_id`), FOREIGN KEY(`request_id`) REFERENCES `inbox_requests`(`id`) ON UPDATE NO ACTION ON DELETE CASCADE )",
+        "createSql": "CREATE TABLE IF NOT EXISTS `${TABLE_NAME}` (`request_id` TEXT NOT NULL, `secret_name` TEXT NOT NULL, `message` BLOB NOT NULL, `username` TEXT NOT NULL, `method` TEXT NOT NULL, `algorithm` TEXT NOT NULL, `host_key_algorithm` TEXT, `host_key_fingerprint` TEXT, `approval_evaluation_json` TEXT, `decision` TEXT, `completion_result` TEXT, `completion_reason` TEXT, `completion_message` TEXT, `decided_at` INTEGER, PRIMARY KEY(`request_id`), FOREIGN KEY(`request_id`) REFERENCES `inbox_requests`(`id`) ON UPDATE NO ACTION ON DELETE CASCADE )",
         "fields": [
           {
             "fieldPath": "requestId",
             "columnName": "request_id",
-            "affinity": "TEXT",
-            "notNull": true
-          },
-          {
-            "fieldPath": "state",
-            "columnName": "state",
             "affinity": "TEXT",
             "notNull": true
           },
@@ -1752,31 +1710,9 @@
             "affinity": "TEXT"
           },
           {
-            "fieldPath": "error",
-            "columnName": "error",
-            "affinity": "TEXT"
-          },
-          {
-            "fieldPath": "createdAt",
-            "columnName": "created_at",
-            "affinity": "INTEGER",
-            "notNull": true
-          },
-          {
-            "fieldPath": "updatedAt",
-            "columnName": "updated_at",
-            "affinity": "INTEGER",
-            "notNull": true
-          },
-          {
             "fieldPath": "decidedAt",
             "columnName": "decided_at",
             "affinity": "INTEGER"
-          },
-          {
-            "fieldPath": "completedAt",
-            "columnName": "completed_at",
-            "affinity": "INTEGER"
           }
         ],
         "primaryKey": {
@@ -1785,17 +1721,6 @@
             "request_id"
           ]
         },
-        "indices": [
-          {
-            "name": "index_ssh_authentication_requests_state",
-            "unique": false,
-            "columnNames": [
-              "state"
-            ],
-            "orders": [],
-            "createSql": "CREATE INDEX IF NOT EXISTS `index_ssh_authentication_requests_state` ON `${TABLE_NAME}` (`state`)"
-          }
-        ],
         "foreignKeys": [
           {
             "table": "inbox_requests",
@@ -1806,157 +1731,13 @@
             ],
             "referencedColumns": [
               "id"
-            ]
-          }
-        ]
-      },
-      {
-        "tableName": "secret_list_requests",
-        "createSql": "CREATE TABLE IF NOT EXISTS `${TABLE_NAME}` (`request_id` TEXT NOT NULL, `pairing_request_id` TEXT, `client_id` TEXT NOT NULL, `pairing_address` TEXT NOT NULL, `hostname` TEXT, `platform` TEXT, `architecture` TEXT, `machine_id` TEXT, `os_version` TEXT, `state` TEXT NOT NULL, `cli_version` TEXT NOT NULL, `secrets_json` TEXT NOT NULL, `error` TEXT, `created_at` INTEGER NOT NULL, `updated_at` INTEGER NOT NULL, `completed_at` INTEGER, PRIMARY KEY(`request_id`), FOREIGN KEY(`request_id`) REFERENCES `inbox_requests`(`id`) ON UPDATE NO ACTION ON DELETE CASCADE , FOREIGN KEY(`pairing_request_id`) REFERENCES `pairings`(`request_id`) ON UPDATE NO ACTION ON DELETE SET NULL )",
-        "fields": [
-          {
-            "fieldPath": "requestId",
-            "columnName": "request_id",
-            "affinity": "TEXT",
-            "notNull": true
-          },
-          {
-            "fieldPath": "pairingRequestId",
-            "columnName": "pairing_request_id",
-            "affinity": "TEXT"
-          },
-          {
-            "fieldPath": "clientId",
-            "columnName": "client_id",
-            "affinity": "TEXT",
-            "notNull": true
-          },
-          {
-            "fieldPath": "pairingAddress",
-            "columnName": "pairing_address",
-            "affinity": "TEXT",
-            "notNull": true
-          },
-          {
-            "fieldPath": "hostname",
-            "columnName": "hostname",
-            "affinity": "TEXT"
-          },
-          {
-            "fieldPath": "platform",
-            "columnName": "platform",
-            "affinity": "TEXT"
-          },
-          {
-            "fieldPath": "architecture",
-            "columnName": "architecture",
-            "affinity": "TEXT"
-          },
-          {
-            "fieldPath": "machineId",
-            "columnName": "machine_id",
-            "affinity": "TEXT"
-          },
-          {
-            "fieldPath": "osVersion",
-            "columnName": "os_version",
-            "affinity": "TEXT"
-          },
-          {
-            "fieldPath": "state",
-            "columnName": "state",
-            "affinity": "TEXT",
-            "notNull": true
-          },
-          {
-            "fieldPath": "clientSoftwareJson",
-            "columnName": "cli_version",
-            "affinity": "TEXT",
-            "notNull": true
-          },
-          {
-            "fieldPath": "secretsJson",
-            "columnName": "secrets_json",
-            "affinity": "TEXT",
-            "notNull": true
-          },
-          {
-            "fieldPath": "error",
-            "columnName": "error",
-            "affinity": "TEXT"
-          },
-          {
-            "fieldPath": "createdAt",
-            "columnName": "created_at",
-            "affinity": "INTEGER",
-            "notNull": true
-          },
-          {
-            "fieldPath": "updatedAt",
-            "columnName": "updated_at",
-            "affinity": "INTEGER",
-            "notNull": true
-          },
-          {
-            "fieldPath": "completedAt",
-            "columnName": "completed_at",
-            "affinity": "INTEGER"
-          }
-        ],
-        "primaryKey": {
-          "autoGenerate": false,
-          "columnNames": [
-            "request_id"
-          ]
-        },
-        "indices": [
-          {
-            "name": "index_secret_list_requests_pairing_request_id",
-            "unique": false,
-            "columnNames": [
-              "pairing_request_id"
-            ],
-            "orders": [],
-            "createSql": "CREATE INDEX IF NOT EXISTS `index_secret_list_requests_pairing_request_id` ON `${TABLE_NAME}` (`pairing_request_id`)"
-          },
-          {
-            "name": "index_secret_list_requests_state",
-            "unique": false,
-            "columnNames": [
-              "state"
-            ],
-            "orders": [],
-            "createSql": "CREATE INDEX IF NOT EXISTS `index_secret_list_requests_state` ON `${TABLE_NAME}` (`state`)"
-          }
-        ],
-        "foreignKeys": [
-          {
-            "table": "inbox_requests",
-            "onDelete": "CASCADE",
-            "onUpdate": "NO ACTION",
-            "columns": [
-              "request_id"
-            ],
-            "referencedColumns": [
-              "id"
-            ]
-          },
-          {
-            "table": "pairings",
-            "onDelete": "SET NULL",
-            "onUpdate": "NO ACTION",
-            "columns": [
-              "pairing_request_id"
-            ],
-            "referencedColumns": [
-              "request_id"
             ]
           }
         ]
       },
       {
         "tableName": "secret_upload_requests",
-        "createSql": "CREATE TABLE IF NOT EXISTS `${TABLE_NAME}` (`request_id` TEXT NOT NULL, `pairing_request_id` TEXT, `client_id` TEXT NOT NULL, `client_name` TEXT NOT NULL, `state` TEXT NOT NULL, `cli_version` TEXT NOT NULL, `mode` TEXT NOT NULL, `uploaded_name` TEXT NOT NULL, `approved_name` TEXT, `description_provided` INTEGER NOT NULL, `description` TEXT, `secret_type` TEXT NOT NULL, `summary_json` TEXT NOT NULL, `error` TEXT, `transport_result` TEXT NOT NULL, `transport_message` TEXT, `created_at` INTEGER NOT NULL, `updated_at` INTEGER NOT NULL, `decided_at` INTEGER, `transport_completed_at` INTEGER, PRIMARY KEY(`request_id`), FOREIGN KEY(`request_id`) REFERENCES `inbox_requests`(`id`) ON UPDATE NO ACTION ON DELETE CASCADE , FOREIGN KEY(`pairing_request_id`) REFERENCES `pairings`(`request_id`) ON UPDATE NO ACTION ON DELETE SET NULL )",
+        "createSql": "CREATE TABLE IF NOT EXISTS `${TABLE_NAME}` (`request_id` TEXT NOT NULL, `decision` TEXT, `mode` TEXT NOT NULL, `uploaded_name` TEXT NOT NULL, `approved_name` TEXT, `description_provided` INTEGER NOT NULL, `description` TEXT, `secret_type` TEXT NOT NULL, `summary_json` TEXT NOT NULL, `intake_error` TEXT, `decided_at` INTEGER, PRIMARY KEY(`request_id`), FOREIGN KEY(`request_id`) REFERENCES `inbox_requests`(`id`) ON UPDATE NO ACTION ON DELETE CASCADE )",
         "fields": [
           {
             "fieldPath": "requestId",
@@ -1965,33 +1746,9 @@
             "notNull": true
           },
           {
-            "fieldPath": "pairingRequestId",
-            "columnName": "pairing_request_id",
+            "fieldPath": "decision",
+            "columnName": "decision",
             "affinity": "TEXT"
-          },
-          {
-            "fieldPath": "clientId",
-            "columnName": "client_id",
-            "affinity": "TEXT",
-            "notNull": true
-          },
-          {
-            "fieldPath": "clientName",
-            "columnName": "client_name",
-            "affinity": "TEXT",
-            "notNull": true
-          },
-          {
-            "fieldPath": "state",
-            "columnName": "state",
-            "affinity": "TEXT",
-            "notNull": true
-          },
-          {
-            "fieldPath": "clientSoftwareJson",
-            "columnName": "cli_version",
-            "affinity": "TEXT",
-            "notNull": true
           },
           {
             "fieldPath": "mode",
@@ -2034,41 +1791,13 @@
             "notNull": true
           },
           {
-            "fieldPath": "error",
-            "columnName": "error",
+            "fieldPath": "intakeError",
+            "columnName": "intake_error",
             "affinity": "TEXT"
-          },
-          {
-            "fieldPath": "transportResult",
-            "columnName": "transport_result",
-            "affinity": "TEXT",
-            "notNull": true
-          },
-          {
-            "fieldPath": "transportMessage",
-            "columnName": "transport_message",
-            "affinity": "TEXT"
-          },
-          {
-            "fieldPath": "createdAt",
-            "columnName": "created_at",
-            "affinity": "INTEGER",
-            "notNull": true
-          },
-          {
-            "fieldPath": "updatedAt",
-            "columnName": "updated_at",
-            "affinity": "INTEGER",
-            "notNull": true
           },
           {
             "fieldPath": "decidedAt",
             "columnName": "decided_at",
-            "affinity": "INTEGER"
-          },
-          {
-            "fieldPath": "transportCompletedAt",
-            "columnName": "transport_completed_at",
             "affinity": "INTEGER"
           }
         ],
@@ -2078,26 +1807,6 @@
             "request_id"
           ]
         },
-        "indices": [
-          {
-            "name": "index_secret_upload_requests_pairing_request_id",
-            "unique": false,
-            "columnNames": [
-              "pairing_request_id"
-            ],
-            "orders": [],
-            "createSql": "CREATE INDEX IF NOT EXISTS `index_secret_upload_requests_pairing_request_id` ON `${TABLE_NAME}` (`pairing_request_id`)"
-          },
-          {
-            "name": "index_secret_upload_requests_state",
-            "unique": false,
-            "columnNames": [
-              "state"
-            ],
-            "orders": [],
-            "createSql": "CREATE INDEX IF NOT EXISTS `index_secret_upload_requests_state` ON `${TABLE_NAME}` (`state`)"
-          }
-        ],
         "foreignKeys": [
           {
             "table": "inbox_requests",
@@ -2109,23 +1818,12 @@
             "referencedColumns": [
               "id"
             ]
-          },
-          {
-            "table": "pairings",
-            "onDelete": "SET NULL",
-            "onUpdate": "NO ACTION",
-            "columns": [
-              "pairing_request_id"
-            ],
-            "referencedColumns": [
-              "request_id"
-            ]
           }
         ]
       },
       {
         "tableName": "secret_upload_environment_variables",
-        "createSql": "CREATE TABLE IF NOT EXISTS `${TABLE_NAME}` (`id` TEXT NOT NULL, `request_id` TEXT NOT NULL, `name` TEXT NOT NULL, `sensitive` INTEGER NOT NULL, `encryption_format` INTEGER NOT NULL, `encryption_key_id` TEXT NOT NULL, `nonce` BLOB NOT NULL, `ciphertext` BLOB NOT NULL, `created_at` INTEGER NOT NULL, PRIMARY KEY(`id`), FOREIGN KEY(`request_id`) REFERENCES `secret_upload_requests`(`request_id`) ON UPDATE NO ACTION ON DELETE CASCADE , FOREIGN KEY(`encryption_key_id`) REFERENCES `vault_keys`(`id`) ON UPDATE NO ACTION ON DELETE RESTRICT )",
+        "createSql": "CREATE TABLE IF NOT EXISTS `${TABLE_NAME}` (`id` TEXT NOT NULL, `request_id` TEXT NOT NULL, `name` TEXT NOT NULL, `sensitive` INTEGER NOT NULL, `encryption_format` INTEGER NOT NULL, `encryption_key_id` TEXT NOT NULL, `nonce` BLOB NOT NULL, `ciphertext` BLOB NOT NULL, PRIMARY KEY(`id`), FOREIGN KEY(`request_id`) REFERENCES `secret_upload_requests`(`request_id`) ON UPDATE NO ACTION ON DELETE CASCADE , FOREIGN KEY(`encryption_key_id`) REFERENCES `vault_keys`(`id`) ON UPDATE NO ACTION ON DELETE RESTRICT )",
         "fields": [
           {
             "fieldPath": "id",
@@ -2173,12 +1871,6 @@
             "fieldPath": "ciphertext",
             "columnName": "ciphertext",
             "affinity": "BLOB",
-            "notNull": true
-          },
-          {
-            "fieldPath": "createdAt",
-            "columnName": "created_at",
-            "affinity": "INTEGER",
             "notNull": true
           }
         ],
@@ -2236,7 +1928,7 @@
       },
       {
         "tableName": "secret_upload_ssh_keys",
-        "createSql": "CREATE TABLE IF NOT EXISTS `${TABLE_NAME}` (`request_id` TEXT NOT NULL, `algorithm` TEXT NOT NULL, `public_key` BLOB NOT NULL, `comment` TEXT NOT NULL, `private_key_format` TEXT NOT NULL, `encryption_format` INTEGER NOT NULL, `encryption_key_id` TEXT NOT NULL, `nonce` BLOB NOT NULL, `ciphertext` BLOB NOT NULL, `created_at` INTEGER NOT NULL, PRIMARY KEY(`request_id`), FOREIGN KEY(`request_id`) REFERENCES `secret_upload_requests`(`request_id`) ON UPDATE NO ACTION ON DELETE CASCADE , FOREIGN KEY(`encryption_key_id`) REFERENCES `vault_keys`(`id`) ON UPDATE NO ACTION ON DELETE RESTRICT )",
+        "createSql": "CREATE TABLE IF NOT EXISTS `${TABLE_NAME}` (`request_id` TEXT NOT NULL, `algorithm` TEXT NOT NULL, `public_key` BLOB NOT NULL, `comment` TEXT NOT NULL, `private_key_format` TEXT NOT NULL, `encryption_format` INTEGER NOT NULL, `encryption_key_id` TEXT NOT NULL, `nonce` BLOB NOT NULL, `ciphertext` BLOB NOT NULL, PRIMARY KEY(`request_id`), FOREIGN KEY(`request_id`) REFERENCES `secret_upload_requests`(`request_id`) ON UPDATE NO ACTION ON DELETE CASCADE , FOREIGN KEY(`encryption_key_id`) REFERENCES `vault_keys`(`id`) ON UPDATE NO ACTION ON DELETE RESTRICT )",
         "fields": [
           {
             "fieldPath": "requestId",
@@ -2290,12 +1982,6 @@
             "fieldPath": "ciphertext",
             "columnName": "ciphertext",
             "affinity": "BLOB",
-            "notNull": true
-          },
-          {
-            "fieldPath": "createdAt",
-            "columnName": "created_at",
-            "affinity": "INTEGER",
             "notNull": true
           }
         ],
@@ -2420,7 +2106,7 @@
     ],
     "setupQueries": [
       "CREATE TABLE IF NOT EXISTS room_master_table (id INTEGER PRIMARY KEY,identity_hash TEXT)",
-      "INSERT OR REPLACE INTO room_master_table (id,identity_hash) VALUES(42, '32b78ff234a5547ecfb639195012c080')"
+      "INSERT OR REPLACE INTO room_master_table (id,identity_hash) VALUES(42, 'bcb91cd0eb04f2ab80a24bd169aa8421')"
     ]
   }
 }

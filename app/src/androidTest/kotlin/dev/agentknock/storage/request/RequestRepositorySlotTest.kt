@@ -61,6 +61,7 @@ class RequestRepositorySlotTest {
     private lateinit var repository: RequestRepository
     private lateinit var secrets: SecretRepository
     private lateinit var credentials: RelayDeviceCredentials
+    private lateinit var protocolRandom: SwitchableSecureRandom
     private var now = CLIENT_ID.timestamp()
 
     @Before
@@ -112,6 +113,7 @@ class RequestRepositorySlotTest {
             currentTimeMillis = { now },
             cryptographyDispatcher = Dispatchers.Unconfined,
         )
+        protocolRandom = SwitchableSecureRandom()
         repository = RequestRepository(
             dao = database.requestDao(),
             deviceCredentials = StaticCredentialSource(credentials),
@@ -119,7 +121,7 @@ class RequestRepositorySlotTest {
             relay = relay,
             keyManager = keyManager,
             encryption = encryption,
-            pairingProtocol = PairingProtocol(random = SecureRandom()),
+            pairingProtocol = PairingProtocol(random = protocolRandom),
             currentTimeMillis = { now },
             cryptographyDispatcher = Dispatchers.Unconfined,
         )
@@ -152,7 +154,7 @@ class RequestRepositorySlotTest {
         )
         val root = checkNotNull(database.requestDao().getRequestById(CLIENT_ID))
         assertNull(root.completionJson)
-        assertEquals("receiving", database.requestDao().getPairing(root.id)?.state)
+        assertEquals("receiving", database.requestDao().getPairingAttempt(root.id)?.state)
 
         now += 1
         synchronize(
@@ -168,11 +170,14 @@ class RequestRepositorySlotTest {
         )
         val requestAfterFailure = checkNotNull(database.requestDao().getRequestById(root.id))
         assertNull(requestAfterFailure.completionJson)
-        assertEquals("receiving", requestAfterFailure.state)
-        val pairingAfterFailure = checkNotNull(database.requestDao().getPairing(root.id))
+        assertEquals("waiting", requestAfterFailure.state)
+        val pairingAfterFailure = checkNotNull(database.requestDao().getPairingAttempt(root.id))
         assertEquals("receiving", pairingAfterFailure.state)
-        assertNotNull(pairingAfterFailure.error)
-        assertNull(database.requestDao().getPairingSecret(root.id, "current_client_psk"))
+        assertNotNull(requestAfterFailure.error)
+        assertNull(pairingAfterFailure.pendingPskEncryptionFormat)
+        assertNull(pairingAfterFailure.pendingPskEncryptionKeyId)
+        assertNull(pairingAfterFailure.pendingPskNonce)
+        assertNull(pairingAfterFailure.pendingPskCiphertext)
 
         now += 1
         synchronize(
@@ -185,15 +190,16 @@ class RequestRepositorySlotTest {
             ),
         )
         val acceptedRequest = checkNotNull(database.requestDao().getRequestById(root.id))
-        val acceptedPairing = checkNotNull(database.requestDao().getPairing(root.id))
+        val acceptedPairing = checkNotNull(database.requestDao().getPairingAttempt(root.id))
         assertEquals(acceptedCompletion.toString(), acceptedRequest.completionJson)
         assertEquals("sas_verification_pending", acceptedPairing.state)
-        val pairingSecret = checkNotNull(
-            database.requestDao().getPairingSecret(root.id, "current_client_psk"),
-        )
+        assertNotNull(acceptedPairing.pendingPskEncryptionFormat)
+        val pendingKeyId = checkNotNull(acceptedPairing.pendingPskEncryptionKeyId)
+        assertNotNull(acceptedPairing.pendingPskNonce)
+        assertNotNull(acceptedPairing.pendingPskCiphertext)
         assertEquals(
             VaultKeyPurpose.DEVICE_STATE.storedName,
-            database.vaultKeyDao().getKey(pairingSecret.encryptionKeyId)?.purpose,
+            database.vaultKeyDao().getKey(pendingKeyId)?.purpose,
         )
 
         now += 1
@@ -210,7 +216,271 @@ class RequestRepositorySlotTest {
             acceptedCompletion.toString(),
             database.requestDao().getRequestById(root.id)?.completionJson,
         )
-        assertEquals(acceptedPairing.updatedAt, database.requestDao().getPairing(root.id)?.updatedAt)
+        assertNotNull(database.requestDao().getRequestById(root.id)?.completionAcknowledgedAt)
+    }
+
+    @Test
+    fun authenticatedInitialPairingCompletionInfersResponseReceipt() = runTest {
+        val clientSecret = ByteArray(32) { it.toByte() }
+        connect(
+            RelayDeviceEvent.Message(
+                clientId = CLIENT_ID,
+                requestId = CLIENT_ID,
+                kind = RelayMessageKind.REQUEST,
+                payload = pairingRequest(clientSecret),
+                addressId = ADDRESS_ID,
+            ),
+            RelayDeviceEvent.Failed("disconnect before response receipt"),
+        )
+        assertEquals(
+            RequestSyncResult.RelayUnavailable("disconnect before response receipt"),
+            repository.sync(),
+        )
+        assertNull(database.requestDao().getRequestById(CLIENT_ID)?.responseAcknowledgedAt)
+
+        now += 1
+        connect(
+            RelayDeviceEvent.Message(
+                clientId = CLIENT_ID,
+                requestId = CLIENT_ID,
+                kind = RelayMessageKind.COMPLETION,
+                payload = pairingCompletion(clientSecret),
+                addressId = ADDRESS_ID,
+            ),
+            RelayDeviceEvent.Failed("disconnect after completion"),
+        )
+        assertEquals(
+            RequestSyncResult.RelayUnavailable("disconnect after completion"),
+            repository.sync(),
+        )
+        assertEquals(now, database.requestDao().getRequestById(CLIENT_ID)?.responseAcknowledgedAt)
+    }
+
+    @Test
+    fun authenticatedUnknownCompletionInfersResponseReceipt() = runTest {
+        val clientPsk = establishActivePairing()
+        val exchange = pairedExchange(
+            requestId = UNSUPPORTED_REQUEST_ID,
+            clientPsk = clientPsk,
+            requestPlaintext = unsupportedPlaintext(),
+            completionPlaintext = "{}".encodeToByteArray(),
+        )
+        assertResponseReceiptInferredFromCompletion(UNSUPPORTED_REQUEST_ID, exchange)
+    }
+
+    @Test
+    fun authenticatedPairingRemovalCompletionInfersResponseReceipt() = runTest {
+        val clientPsk = establishActivePairing()
+        val exchange = pairedExchange(
+            requestId = REMOVE_REQUEST_ID,
+            clientPsk = clientPsk,
+            requestPlaintext =
+                """{${clientSoftwareFields()},"method":"PairingRemove"}"""
+                    .encodeToByteArray(),
+            completionPlaintext = """{${clientSoftwareFields()}}""".encodeToByteArray(),
+        )
+        assertResponseReceiptInferredFromCompletion(REMOVE_REQUEST_ID, exchange)
+    }
+
+    @Test
+    fun authenticatedFinishCompletionInfersResponseReceipt() = runTest {
+        val material = verifyPairingSas()
+        connect(
+            RelayDeviceEvent.ClientState(CLIENT_ID, RelayClientState.ACTIVE),
+            relayState(CLIENT_ID, completion = RelayMessageState.DELIVERED),
+            RelayDeviceEvent.CaughtUp,
+        )
+        assertEquals(RequestSyncResult.Success, repository.sync())
+        val exchange = pairedExchange(
+            requestId = FINISH_REQUEST_ID,
+            clientPsk = material.clientPsk,
+            requestPlaintext =
+                """{${clientSoftwareFields()},"method":"PairingFinish"}"""
+                    .encodeToByteArray(),
+            completionPlaintext =
+                """{${clientSoftwareFields()},"result":"ACCEPTED"}"""
+                    .encodeToByteArray(),
+        )
+        assertResponseReceiptInferredFromCompletion(FINISH_REQUEST_ID, exchange)
+    }
+
+    @Test
+    fun pairingWithACompletionErrorRemainsUserRejectable() = runTest {
+        val clientSecret = ByteArray(32) { it.toByte() }
+        synchronize(
+            RelayDeviceEvent.Message(
+                clientId = CLIENT_ID,
+                requestId = CLIENT_ID,
+                kind = RelayMessageKind.REQUEST,
+                payload = pairingRequest(clientSecret),
+                addressId = ADDRESS_ID,
+            ),
+        )
+        now += 1
+        synchronize(
+            RelayDeviceEvent.Message(
+                clientId = CLIENT_ID,
+                requestId = CLIENT_ID,
+                kind = RelayMessageKind.COMPLETION,
+                payload = Json.parseToJsonElement(
+                    """{"key":"bad","secret":"bad","ciphertext":"bad"}""",
+                ),
+                addressId = ADDRESS_ID,
+            ),
+        )
+
+        assertNotNull(database.requestDao().getRequestById(CLIENT_ID)?.error)
+        assertEquals(PairingDecisionResult.REJECTED, repository.rejectPairing(CLIENT_ID))
+        val rejected = checkNotNull(database.requestDao().getPairingAttempt(CLIENT_ID))
+        assertEquals("rejected", rejected.state)
+        assertNull(rejected.pendingPskCiphertext)
+    }
+
+    @Test
+    fun rejectedPendingPairingRevokesAClientThatActivatesLateOnTheSameConnection() = runTest {
+        receivePairingUntilSas()
+        assertEquals(PairingDecisionResult.REJECTED, repository.rejectPairing(CLIENT_ID))
+
+        val connection = connect(
+            RelayDeviceEvent.ClientState(CLIENT_ID, RelayClientState.ACTIVE),
+            RelayDeviceEvent.CaughtUp,
+            RelayDeviceEvent.ClientState(CLIENT_ID, RelayClientState.REVOKED),
+        )
+        assertEquals(RequestSyncResult.Success, repository.sync())
+
+        assertTrue(
+            connection.sentFrames.contains(
+                RelayDeviceFrame.SetClientState(CLIENT_ID, RelayClientState.REVOKED),
+            ),
+        )
+        val attempt = checkNotNull(database.requestDao().getPairingAttempt(CLIENT_ID))
+        assertEquals("rejected", attempt.state)
+        assertEquals("revoked", attempt.relayClientState)
+        assertNull(attempt.desiredRelayClientState)
+        assertNull(database.requestDao().getClient(CLIENT_ID))
+    }
+
+    @Test
+    fun finishBeforeActivationPromotesPendingClientThenAppliesActiveState() = runTest {
+        val material = verifyPairingSas()
+        val finish = finishRequest(material)
+
+        val connection = connect(
+            requestEvent(FINISH_REQUEST_ID, finish),
+            RelayDeviceEvent.Acknowledgement(
+                CLIENT_ID,
+                FINISH_REQUEST_ID,
+                RelayMessageKind.RESPONSE,
+            ),
+            RelayDeviceEvent.ClientState(CLIENT_ID, RelayClientState.ACTIVE),
+            relayState(CLIENT_ID, completion = RelayMessageState.DELIVERED),
+            RelayDeviceEvent.CaughtUp,
+        )
+        assertEquals(RequestSyncResult.Success, repository.sync())
+
+        assertTrue(
+            connection.sentFrames.contains(
+                RelayDeviceFrame.SetClientState(CLIENT_ID, RelayClientState.ACTIVE),
+            ),
+        )
+        val client = checkNotNull(database.requestDao().getClient(CLIENT_ID))
+        assertEquals("active", client.relayClientState)
+        assertNull(client.desiredRelayClientState)
+        assertNotNull(database.requestDao().getClientPsk(CLIENT_ID, "current"))
+    }
+
+    @Test
+    fun suspendedBeforeFinishPromotesSuspendedClientWithoutInventingActiveState() = runTest {
+        assertSuspendedFinishOutcome(stateBeforeFinish = true)
+    }
+
+    @Test
+    fun suspendedAfterFinishProducesTheSameDurableClientState() = runTest {
+        assertSuspendedFinishOutcome(stateBeforeFinish = false)
+    }
+
+    @Test
+    fun revokedBeforeFinishRecordsReplayableResponseWithoutDurableClient() = runTest {
+        val material = verifyPairingSas()
+        val stateConnection = connect(
+            RelayDeviceEvent.ClientState(CLIENT_ID, RelayClientState.REVOKED),
+            RelayDeviceEvent.Failed("disconnect after revocation"),
+        )
+        assertEquals(
+            RequestSyncResult.RelayUnavailable("disconnect after revocation"),
+            repository.sync(),
+        )
+        assertTrue(
+            stateConnection.sentFrames.contains(
+                RelayDeviceFrame.SetClientState(CLIENT_ID, RelayClientState.ACTIVE),
+            ),
+        )
+
+        val finish = finishRequest(material)
+        val finishConnection = connect(
+            requestEvent(FINISH_REQUEST_ID, finish),
+            RelayDeviceEvent.Acknowledgement(
+                CLIENT_ID,
+                FINISH_REQUEST_ID,
+                RelayMessageKind.RESPONSE,
+            ),
+            RelayDeviceEvent.Failed("disconnect after finish"),
+        )
+        assertEquals(
+            RequestSyncResult.RelayUnavailable("disconnect after finish"),
+            repository.sync(),
+        )
+
+        val stored = checkNotNull(database.requestDao().getRequestById(FINISH_REQUEST_ID))
+        val persistedResponse = Json.parseToJsonElement(checkNotNull(stored.responseJson))
+        assertEquals("completed", stored.state)
+        assertNull(database.requestDao().getClient(CLIENT_ID))
+        assertNull(database.requestDao().getClientPsk(CLIENT_ID, "current"))
+        val attempt = checkNotNull(database.requestDao().getPairingAttempt(CLIENT_ID))
+        assertEquals("completed", attempt.state)
+        assertEquals("revoked", attempt.relayClientState)
+        assertNull(attempt.desiredRelayClientState)
+
+        val replay = connect(
+            requestEvent(FINISH_REQUEST_ID, finish),
+            RelayDeviceEvent.Acknowledgement(
+                CLIENT_ID,
+                FINISH_REQUEST_ID,
+                RelayMessageKind.RESPONSE,
+            ),
+            RelayDeviceEvent.CaughtUp,
+        )
+        assertEquals(RequestSyncResult.Success, repository.sync())
+        assertTrue(
+            replay.sentFrames.contains(
+                RelayDeviceFrame.Message(CLIENT_ID, FINISH_REQUEST_ID, persistedResponse),
+            ),
+        )
+    }
+
+    @Test
+    fun revokedAfterFinishProducesNoDurableClient() = runTest {
+        val material = verifyPairingSas()
+        val finish = finishRequest(material)
+        connect(
+            requestEvent(FINISH_REQUEST_ID, finish),
+            RelayDeviceEvent.Acknowledgement(
+                CLIENT_ID,
+                FINISH_REQUEST_ID,
+                RelayMessageKind.RESPONSE,
+            ),
+            RelayDeviceEvent.ClientState(CLIENT_ID, RelayClientState.REVOKED),
+            relayState(CLIENT_ID, completion = RelayMessageState.DELIVERED),
+            RelayDeviceEvent.CaughtUp,
+        )
+        assertEquals(RequestSyncResult.Success, repository.sync())
+
+        assertNull(database.requestDao().getClient(CLIENT_ID))
+        assertNull(database.requestDao().getClientPsk(CLIENT_ID, "current"))
+        val attempt = checkNotNull(database.requestDao().getPairingAttempt(CLIENT_ID))
+        assertEquals("completed", attempt.state)
+        assertEquals("revoked", attempt.relayClientState)
+        assertNull(attempt.desiredRelayClientState)
     }
 
     @Test
@@ -248,7 +518,6 @@ class RequestRepositorySlotTest {
         assertEquals("waiting", stored.state)
         assertNotNull(stored.requestAcknowledgedAt)
         assertNull(stored.responseAcknowledgedAt)
-        assertEquals("waiting_for_completion", storedInvocation.state)
         assertEquals("approved", storedInvocation.decision)
         assertEquals("git-signing", storedInvocation.secretsJson.removeSurrounding("[\"", "\"]"))
         assertEquals(
@@ -262,6 +531,11 @@ class RequestRepositorySlotTest {
             ),
             interrupted.sentFrames,
         )
+
+        // Replay is owned by the immutable request snapshot and its request-scoped PSK. It must
+        // still work after the durable client has been removed and its live PSKs have cascaded.
+        assertEquals(1, database.requestDao().deleteClient(CLIENT_ID))
+        assertNull(database.requestDao().getClient(CLIENT_ID))
 
         now += 1
         val replay = connect(
@@ -302,6 +576,122 @@ class RequestRepositorySlotTest {
         assertEquals(stored.receivedAt, afterReplay.receivedAt)
         assertEquals(stored.responseJson, afterReplay.responseJson)
         assertNotNull(afterReplay.responseAcknowledgedAt)
+    }
+
+    @Test
+    fun sameClientAndRequestIdWithDifferentPayloadIsNotTreatedAsReplay() = runTest {
+        establishActivePairing()
+        val collision = connect(
+            RelayDeviceEvent.Message(
+                clientId = CLIENT_ID,
+                requestId = CLIENT_ID,
+                kind = RelayMessageKind.REQUEST,
+                payload = Json.parseToJsonElement(
+                    """{"version":"agentknock-v1","commitment":"different"}""",
+                ),
+                addressId = ADDRESS_ID,
+            ),
+            RelayDeviceEvent.CaughtUp,
+        )
+
+        assertEquals(RequestSyncResult.Success, repository.sync())
+        assertTrue(collision.sentFrames.isEmpty())
+        assertEquals(
+            pairingRequest(ByteArray(32) { it.toByte() }).toString(),
+            database.requestDao().getRequestById(CLIENT_ID)?.requestJson,
+        )
+    }
+
+    @Test
+    fun durableClientRejectionIsNotAcknowledgedWhenResponseSealingFails() = runTest {
+        val clientPsk = establishActivePairing()
+        protocolRandom.fail = true
+        val request = pairedRequest(
+            requestId = UNSUPPORTED_REQUEST_ID,
+            clientPsk = clientPsk,
+            plaintext = unsupportedPlaintext(),
+        )
+        val connection = connect(
+            requestEvent(UNSUPPORTED_REQUEST_ID, request),
+            RelayDeviceEvent.CaughtUp,
+        )
+
+        assertEquals(RequestSyncResult.Success, repository.sync())
+        assertNull(database.requestDao().getRequestById(UNSUPPORTED_REQUEST_ID))
+        assertFalse(connection.sentFrames.any {
+            it is RelayDeviceFrame.Acknowledgement && it.requestId == UNSUPPORTED_REQUEST_ID
+        })
+    }
+
+    @Test
+    fun pendingPairingRejectionIsNotAcknowledgedWhenResponseSealingFails() = runTest {
+        val material = verifyPairingSas()
+        connect(
+            RelayDeviceEvent.ClientState(CLIENT_ID, RelayClientState.ACTIVE),
+            relayState(CLIENT_ID, completion = RelayMessageState.DELIVERED),
+            RelayDeviceEvent.CaughtUp,
+        )
+        assertEquals(RequestSyncResult.Success, repository.sync())
+        assertEquals(
+            "waiting_for_finish",
+            database.requestDao().getPairingAttempt(CLIENT_ID)?.state,
+        )
+
+        protocolRandom.fail = true
+        val request = pairedRequest(
+            requestId = UNSUPPORTED_REQUEST_ID,
+            clientPsk = material.clientPsk,
+            plaintext = unsupportedPlaintext(),
+        )
+        val connection = connect(
+            requestEvent(UNSUPPORTED_REQUEST_ID, request),
+            relayState(CLIENT_ID, completion = RelayMessageState.DELIVERED),
+            RelayDeviceEvent.CaughtUp,
+        )
+
+        assertEquals(RequestSyncResult.Success, repository.sync())
+        assertNull(database.requestDao().getRequestById(UNSUPPORTED_REQUEST_ID))
+        assertFalse(connection.sentFrames.any {
+            it is RelayDeviceFrame.Acknowledgement && it.requestId == UNSUPPORTED_REQUEST_ID
+        })
+    }
+
+    @Test
+    fun pairingStartRejectsClientIdAlreadyOwnedByDurableClient() = runTest {
+        database.requestDao().insertClient(
+            ClientEntity(
+                clientId = COLLISION_CLIENT_ID,
+                deviceIdentityId = DEVICE_IDENTITY_ID,
+                name = "Existing client",
+                instructions = "",
+                desiredRelayClientState = null,
+                relayClientState = "active",
+                clientSoftwareJson = null,
+                platform = null,
+                architecture = null,
+                hostname = null,
+                machineId = null,
+                osVersion = null,
+                pairedAt = now,
+                lastSeenAt = now,
+                updatedAt = now,
+            ),
+        )
+        val collision = connect(
+            RelayDeviceEvent.Message(
+                clientId = COLLISION_CLIENT_ID,
+                requestId = COLLISION_CLIENT_ID,
+                kind = RelayMessageKind.REQUEST,
+                payload = pairingRequest(ByteArray(32) { it.toByte() }),
+                addressId = ADDRESS_ID,
+            ),
+            RelayDeviceEvent.CaughtUp,
+        )
+
+        assertEquals(RequestSyncResult.Success, repository.sync())
+        assertTrue(collision.sentFrames.isEmpty())
+        assertNull(database.requestDao().getRequestById(COLLISION_CLIENT_ID))
+        assertNotNull(database.requestDao().getClient(COLLISION_CLIENT_ID))
     }
 
     @Test
@@ -348,7 +738,6 @@ class RequestRepositorySlotTest {
         assertEquals(signing.toString(), child.requestJson)
         assertNull(child.responseJson)
         assertEquals("action_required", child.state)
-        assertEquals("approval_pending", gitSign.state)
         assertEquals("git-signing", gitSign.secretName)
         assertEquals("commit to sign", gitSign.message.decodeToString())
         assertEquals(
@@ -370,9 +759,10 @@ class RequestRepositorySlotTest {
         val persistedResponse = Json.parseToJsonElement(checkNotNull(denied.responseJson))
         assertEquals("waiting", denied.state)
         assertNull(denied.responseAcknowledgedAt)
-        assertEquals("waiting_for_completion", deniedSigning.state)
         assertEquals("denied", deniedSigning.decision)
         assertEquals("USER_DENIED", deniedSigning.completionReason)
+        // Pairing belongs to Clients rather than request history. The active invocation and its
+        // signing child remain because neither workflow has completed.
         assertEquals(0, repository.clearCompletedHistory())
         assertNotNull(database.requestDao().getRequestById(parent.id))
         assertNotNull(database.requestDao().getRequestById(child.id))
@@ -414,6 +804,46 @@ class RequestRepositorySlotTest {
     }
 
     private suspend fun establishActivePairing(): ByteArray {
+        val material = verifyPairingSas()
+
+        val activation = connect(
+            RelayDeviceEvent.ClientState(CLIENT_ID, RelayClientState.ACTIVE),
+            relayState(CLIENT_ID, completion = RelayMessageState.DELIVERED),
+            RelayDeviceEvent.CaughtUp,
+        )
+        assertEquals(RequestSyncResult.Success, repository.sync())
+        assertTrue(
+            activation.sentFrames.contains(
+                RelayDeviceFrame.SetClientState(CLIENT_ID, RelayClientState.ACTIVE),
+            ),
+        )
+
+        now += 1
+        val finish = finishRequest(material)
+        connect(
+            relayState(CLIENT_ID, completion = RelayMessageState.DELIVERED),
+            requestEvent(FINISH_REQUEST_ID, finish),
+            RelayDeviceEvent.Acknowledgement(
+                CLIENT_ID,
+                FINISH_REQUEST_ID,
+                RelayMessageKind.RESPONSE,
+            ),
+            RelayDeviceEvent.CaughtUp,
+        )
+        assertEquals(RequestSyncResult.Success, repository.sync())
+        val completedAttempt = checkNotNull(database.requestDao().getPairingAttempt(CLIENT_ID))
+        assertEquals("completed", completedAttempt.state)
+        assertNull(completedAttempt.pendingPskEncryptionFormat)
+        assertNull(completedAttempt.pendingPskEncryptionKeyId)
+        assertNull(completedAttempt.pendingPskNonce)
+        assertNull(completedAttempt.pendingPskCiphertext)
+        val client = checkNotNull(database.requestDao().getClient(CLIENT_ID))
+        assertEquals("active", client.relayClientState)
+        assertNotNull(database.requestDao().getClientPsk(CLIENT_ID, "current"))
+        return material.clientPsk
+    }
+
+    private suspend fun receivePairingUntilSas(): PairingMaterial {
         val clientSecret = ByteArray(32) { it.toByte() }
         val material = pairingMaterial(clientSecret)
         synchronize(
@@ -437,46 +867,65 @@ class RequestRepositorySlotTest {
                 addressId = ADDRESS_ID,
             ),
         )
-        val root = checkNotNull(database.requestDao().getRequestById(CLIENT_ID))
-        val pairing = checkNotNull(database.requestDao().getPairing(root.id))
+        val pairing = checkNotNull(database.requestDao().getPairingAttempt(CLIENT_ID))
+        assertEquals("sas_verification_pending", pairing.state)
+        return material
+    }
+
+    private suspend fun verifyPairingSas(): PairingMaterial {
+        val material = receivePairingUntilSas()
+        val pairing = checkNotNull(database.requestDao().getPairingAttempt(CLIENT_ID))
         assertEquals(
             PairingDecisionResult.VERIFIED,
-            repository.chooseSas(root.id, checkNotNull(pairing.correctSasIndex)),
+            repository.chooseSas(CLIENT_ID, checkNotNull(pairing.correctSasIndex)),
         )
+        return material
+    }
 
-        val activation = connect(
-            RelayDeviceEvent.ClientState(CLIENT_ID, RelayClientState.ACTIVE),
-            relayState(CLIENT_ID, completion = RelayMessageState.DELIVERED),
-            RelayDeviceEvent.CaughtUp,
-        )
-        assertEquals(RequestSyncResult.Success, repository.sync())
-        assertTrue(
-            activation.sentFrames.contains(
-                RelayDeviceFrame.SetClientState(CLIENT_ID, RelayClientState.ACTIVE),
-            ),
-        )
-
-        now += 1
-        val finish = pairedRequest(
-            requestId = FINISH_REQUEST_ID,
-            clientPsk = material.clientPsk,
-            plaintext = """{${clientSoftwareFields()},"method":"PairingFinish"}"""
-                .encodeToByteArray(),
-        )
+    private suspend fun assertSuspendedFinishOutcome(stateBeforeFinish: Boolean) {
+        val material = verifyPairingSas()
+        val finish = finishRequest(material)
+        val events = if (stateBeforeFinish) {
+            listOf(
+                RelayDeviceEvent.ClientState(CLIENT_ID, RelayClientState.SUSPENDED),
+                requestEvent(FINISH_REQUEST_ID, finish),
+            )
+        } else {
+            listOf(
+                requestEvent(FINISH_REQUEST_ID, finish),
+                RelayDeviceEvent.ClientState(CLIENT_ID, RelayClientState.SUSPENDED),
+            )
+        }
         connect(
-            relayState(CLIENT_ID, completion = RelayMessageState.DELIVERED),
-            requestEvent(FINISH_REQUEST_ID, finish),
+            *events.toTypedArray(),
             RelayDeviceEvent.Acknowledgement(
                 CLIENT_ID,
                 FINISH_REQUEST_ID,
                 RelayMessageKind.RESPONSE,
             ),
-            RelayDeviceEvent.CaughtUp,
+            RelayDeviceEvent.Failed("disconnect with suspended client"),
         )
-        assertEquals(RequestSyncResult.Success, repository.sync())
-        assertEquals("active", database.requestDao().getPairing(root.id)?.state)
-        return material.clientPsk
+        assertEquals(
+            RequestSyncResult.RelayUnavailable("disconnect with suspended client"),
+            repository.sync(),
+        )
+
+        val client = checkNotNull(database.requestDao().getClient(CLIENT_ID))
+        assertEquals("suspended", client.relayClientState)
+        assertEquals("active", client.desiredRelayClientState)
+        assertNotNull(database.requestDao().getClientPsk(CLIENT_ID, "current"))
+        val attempt = checkNotNull(database.requestDao().getPairingAttempt(CLIENT_ID))
+        assertEquals("completed", attempt.state)
+        assertEquals("suspended", attempt.relayClientState)
+        assertNull(attempt.desiredRelayClientState)
     }
+
+    private fun finishRequest(material: PairingMaterial): JsonElement = pairedRequest(
+            requestId = FINISH_REQUEST_ID,
+            clientPsk = material.clientPsk,
+            plaintext = """{${clientSoftwareFields()},"method":"PairingFinish"}"""
+                .encodeToByteArray(),
+        )
 
     private suspend fun createSigningSecret() {
         val key = secrets.generateSshKey(SshKeyAlgorithm.ED25519, "characterization@test")
@@ -496,6 +945,41 @@ class RequestRepositorySlotTest {
         payload = payload,
         addressId = null,
     )
+
+    private suspend fun assertResponseReceiptInferredFromCompletion(
+        requestId: String,
+        exchange: PairedExchange,
+    ) {
+        connect(
+            requestEvent(requestId, exchange.request),
+            RelayDeviceEvent.Failed("disconnect before response receipt"),
+        )
+        assertEquals(
+            RequestSyncResult.RelayUnavailable("disconnect before response receipt"),
+            repository.sync(),
+        )
+        assertNull(database.requestDao().getRequestById(requestId)?.responseAcknowledgedAt)
+
+        now += 1
+        connect(
+            RelayDeviceEvent.Message(
+                clientId = CLIENT_ID,
+                requestId = requestId,
+                kind = RelayMessageKind.COMPLETION,
+                payload = exchange.completion,
+                addressId = null,
+            ),
+            RelayDeviceEvent.Failed("disconnect after completion"),
+        )
+        assertEquals(
+            RequestSyncResult.RelayUnavailable("disconnect after completion"),
+            repository.sync(),
+        )
+        assertEquals(
+            now,
+            database.requestDao().getRequestById(requestId)?.responseAcknowledgedAt,
+        )
+    }
 
     private fun relayState(
         requestId: String,
@@ -517,6 +1001,9 @@ class RequestRepositorySlotTest {
         """{${clientSoftwareFields()},"method":"GitSign","invocation_id":"$INVOCATION_REQUEST_ID","invocation_token":"${BASE64.encodeToString(token)}","secret":"git-signing","message":"${BASE64.encodeToString("commit to sign".encodeToByteArray())}","repository":{"remote":"git@example.test:repo.git","worktree":"/tmp/project"}}"""
             .encodeToByteArray()
 
+    private fun unsupportedPlaintext(): ByteArray =
+        """{${clientSoftwareFields()},"method":"FutureMethod"}""".encodeToByteArray()
+
     private fun clientSoftwareFields(): String =
         """"app_info":{"name":"agentknock-cli","version":"test"},"lib_info":{"name":"agentknock","version":"test"}"""
 
@@ -536,6 +1023,27 @@ class RequestRepositorySlotTest {
         return Json.parseToJsonElement(
             """{"version":"agentknock-v1","key":"${BASE64.encodeToString(encapsulation)}","ciphertext":"${BASE64.encodeToString(sender.seal(EMPTY, plaintext))}"}""",
         )
+    }
+
+    private fun pairedExchange(
+        requestId: String,
+        clientPsk: ByteArray,
+        requestPlaintext: ByteArray,
+        completionPlaintext: ByteArray,
+    ): PairedExchange {
+        val sender = PSK_HPKE.SetupPSKS(
+            PSK_HPKE.deserializePublicKey(credentials.devicePublicKey),
+            VERSION_INFO + DEVICE_ID.ulidBytes() + requestId.ulidBytes(),
+            clientPsk,
+            CLIENT_ID.ulidBytes(),
+        ) as org.bouncycastle.crypto.hpke.HPKEContextWithEncapsulation
+        val request = Json.parseToJsonElement(
+            """{"version":"agentknock-v1","key":"${BASE64.encodeToString(sender.encapsulation)}","ciphertext":"${BASE64.encodeToString(sender.seal(EMPTY, requestPlaintext))}"}""",
+        )
+        val completion = Json.parseToJsonElement(
+            """{"ciphertext":"${BASE64.encodeToString(sender.seal(EMPTY, completionPlaintext))}"}""",
+        )
+        return PairedExchange(request, completion)
     }
 
     private suspend fun synchronize(vararg events: RelayDeviceEvent) {
@@ -631,6 +1139,9 @@ class RequestRepositorySlotTest {
         const val FINISH_REQUEST_ID = "01K2EP16NWNAGJYF8J1Q2V6P3Y"
         const val INVOCATION_REQUEST_ID = "01K2EP16NWNAGJYF8J1Q2V6P3Z"
         const val GIT_SIGN_REQUEST_ID = "01K2EP16NWNAGJYF8J1Q2V6P40"
+        const val COLLISION_CLIENT_ID = "01K2EP16NWNAGJYF8J1Q2V6P41"
+        const val UNSUPPORTED_REQUEST_ID = "01K2EP16NWNAGJYF8J1Q2V6P42"
+        const val REMOVE_REQUEST_ID = "01K2EP16NWNAGJYF8J1Q2V6P43"
         const val ULID_ALPHABET = "0123456789ABCDEFGHJKMNPQRSTVWXYZ"
         val EMPTY = ByteArray(0)
         val VERSION_INFO = "agentknock-v1".encodeToByteArray() + ByteArray(3)
@@ -653,6 +1164,11 @@ class RequestRepositorySlotTest {
 private data class PairingMaterial(
     val completion: JsonElement,
     val clientPsk: ByteArray,
+)
+
+private data class PairedExchange(
+    val request: JsonElement,
+    val completion: JsonElement,
 )
 
 private class StaticCredentialSource(
@@ -679,6 +1195,7 @@ private class QueuedRelayDeviceClient : RelayDeviceClient {
 private class TestRelayDeviceConnection(events: List<RelayDeviceEvent>) : RelayDeviceConnection {
     private val channel = Channel<RelayDeviceEvent>(Channel.UNLIMITED).apply {
         events.forEach { trySend(it).getOrThrow() }
+        close()
     }
 
     override val events: ReceiveChannel<RelayDeviceEvent> = channel
@@ -691,6 +1208,15 @@ private class TestRelayDeviceConnection(events: List<RelayDeviceEvent>) : RelayD
     }
 
     override suspend fun close() = Unit
+}
+
+private class SwitchableSecureRandom : SecureRandom() {
+    var fail: Boolean = false
+
+    override fun nextBytes(bytes: ByteArray) {
+        check(!fail) { "Injected response-random failure" }
+        super.nextBytes(bytes)
+    }
 }
 
 private class MemoryEncryptionKeyStore : EncryptionKeyStore {
