@@ -3,6 +3,7 @@ package dev.agentknock.ui.secrets
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.rememberCoroutineScope
 import androidx.compose.ui.Modifier
+import dev.agentknock.storage.request.InboxRequestContent
 import dev.agentknock.storage.request.InboxRequestDetails
 import dev.agentknock.ui.requests.SecretUploadRequestDetail
 import dev.agentknock.ui.requests.message
@@ -19,7 +20,7 @@ internal fun SecretUploadSelectionDetail(
     modifier: Modifier,
 ) {
     val scope = rememberCoroutineScope()
-    if (request?.secretUpload == null) {
+    if (request?.content !is InboxRequestContent.SecretUpload) {
         Loading(modifier)
         return
     }

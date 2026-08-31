@@ -51,18 +51,14 @@ import dev.agentknock.storage.approval.AiReviewDecision
 import dev.agentknock.storage.approval.AiReviewFailure
 import dev.agentknock.storage.approval.ApprovalAction
 import dev.agentknock.storage.approval.ApprovalEvaluation
+import dev.agentknock.storage.request.ApprovalCompletionResult
+import dev.agentknock.storage.request.ApprovalDecision
+import dev.agentknock.storage.request.InvocationDecisionResult
+import dev.agentknock.storage.request.ApprovalRequestState
 import dev.agentknock.storage.request.GitSignDecisionResult
-import dev.agentknock.storage.request.GitSignCompletionResult
-import dev.agentknock.storage.request.GitSignRequestState
-import dev.agentknock.storage.request.InvocationCompletionResult
 import dev.agentknock.storage.request.PairingDecisionResult
 import dev.agentknock.storage.request.SecretUploadDecisionResult
-import dev.agentknock.storage.request.SecretUseDecision
-import dev.agentknock.storage.request.SecretUseDecisionResult
-import dev.agentknock.storage.request.SecretUseRequestState
-import dev.agentknock.storage.request.SshAuthenticationCompletionResult
 import dev.agentknock.storage.request.SshAuthenticationDecisionResult
-import dev.agentknock.storage.request.SshAuthenticationRequestState
 import dev.agentknock.storage.secret.TemporaryAccessOperation
 import dev.agentknock.ui.components.NavigationBackButton
 import dev.agentknock.ui.theme.agentknockColors
@@ -233,7 +229,7 @@ internal fun ApprovalEvaluation?.temporaryGrantSecretNames(
 @Composable
 internal fun HistoricalAiReview(
     review: AiReview?,
-    decision: SecretUseDecision?,
+    decision: ApprovalDecision?,
     humanResolution: String? = null,
 ) {
     review ?: return
@@ -251,8 +247,8 @@ internal fun HistoricalAiReview(
         )
         AiReviewDecision.ASK_USER -> {
             val resolution = humanResolution ?: when (decision) {
-                SecretUseDecision.APPROVED -> "You approved it once."
-                SecretUseDecision.DENIED -> "You denied it."
+                ApprovalDecision.APPROVED -> "You approved it once."
+                ApprovalDecision.DENIED -> "You denied it."
                 null -> null
             }
             Notice(
@@ -476,61 +472,61 @@ internal fun shouldShowDecisionHistory(
 ): Boolean = !verificationFailed && completionReason != "INVALID_REQUEST"
 
 internal fun secretUseStatusLabel(
-    state: SecretUseRequestState,
-    result: InvocationCompletionResult?,
+    state: ApprovalRequestState,
+    result: ApprovalCompletionResult?,
     completionReason: String?,
 ): String = when (state) {
-    SecretUseRequestState.APPROVAL_PENDING -> "Needs approval"
-    SecretUseRequestState.WAITING_FOR_COMPLETION -> "Waiting for client"
-    SecretUseRequestState.VERIFICATION_FAILED -> "Verification failed"
-    SecretUseRequestState.COMPLETED -> when (result) {
-        InvocationCompletionResult.APPROVED -> "Delivered"
-        InvocationCompletionResult.DENIED -> if (completionReason == "INVALID_REQUEST") {
+    ApprovalRequestState.APPROVAL_PENDING -> "Needs approval"
+    ApprovalRequestState.WAITING_FOR_COMPLETION -> "Waiting for client"
+    ApprovalRequestState.VERIFICATION_FAILED -> "Verification failed"
+    ApprovalRequestState.COMPLETED -> when (result) {
+        ApprovalCompletionResult.APPROVED -> "Delivered"
+        ApprovalCompletionResult.DENIED -> if (completionReason == "INVALID_REQUEST") {
             "Invalid request"
         } else {
             "Denied"
         }
-        InvocationCompletionResult.ABORTED -> "Aborted"
+        ApprovalCompletionResult.ABORTED -> "Aborted"
         null -> "Completed"
     }
 }
 
 internal fun gitSignStatusLabel(
-    state: GitSignRequestState,
-    result: GitSignCompletionResult?,
+    state: ApprovalRequestState,
+    result: ApprovalCompletionResult?,
     completionReason: String?,
 ): String = when (state) {
-    GitSignRequestState.APPROVAL_PENDING -> "Needs approval"
-    GitSignRequestState.WAITING_FOR_COMPLETION -> "Waiting for client"
-    GitSignRequestState.VERIFICATION_FAILED -> "Verification failed"
-    GitSignRequestState.COMPLETED -> when (result) {
-        GitSignCompletionResult.APPROVED -> "Signed"
-        GitSignCompletionResult.DENIED -> if (completionReason == "INVALID_REQUEST") {
+    ApprovalRequestState.APPROVAL_PENDING -> "Needs approval"
+    ApprovalRequestState.WAITING_FOR_COMPLETION -> "Waiting for client"
+    ApprovalRequestState.VERIFICATION_FAILED -> "Verification failed"
+    ApprovalRequestState.COMPLETED -> when (result) {
+        ApprovalCompletionResult.APPROVED -> "Signed"
+        ApprovalCompletionResult.DENIED -> if (completionReason == "INVALID_REQUEST") {
             "Invalid request"
         } else {
             "Denied"
         }
-        GitSignCompletionResult.ABORTED -> "Aborted"
+        ApprovalCompletionResult.ABORTED -> "Aborted"
         null -> "Completed"
     }
 }
 
 internal fun sshAuthenticationStatusLabel(
-    state: SshAuthenticationRequestState,
-    result: SshAuthenticationCompletionResult?,
+    state: ApprovalRequestState,
+    result: ApprovalCompletionResult?,
     completionReason: String?,
 ): String = when (state) {
-    SshAuthenticationRequestState.APPROVAL_PENDING -> "Needs approval"
-    SshAuthenticationRequestState.WAITING_FOR_COMPLETION -> "Waiting for client"
-    SshAuthenticationRequestState.VERIFICATION_FAILED -> "Verification failed"
-    SshAuthenticationRequestState.COMPLETED -> when (result) {
-        SshAuthenticationCompletionResult.APPROVED -> "Authenticated"
-        SshAuthenticationCompletionResult.DENIED -> if (completionReason == "INVALID_REQUEST") {
+    ApprovalRequestState.APPROVAL_PENDING -> "Needs approval"
+    ApprovalRequestState.WAITING_FOR_COMPLETION -> "Waiting for client"
+    ApprovalRequestState.VERIFICATION_FAILED -> "Verification failed"
+    ApprovalRequestState.COMPLETED -> when (result) {
+        ApprovalCompletionResult.APPROVED -> "Authenticated"
+        ApprovalCompletionResult.DENIED -> if (completionReason == "INVALID_REQUEST") {
             "Invalid request"
         } else {
             "Denied"
         }
-        SshAuthenticationCompletionResult.ABORTED -> "Aborted"
+        ApprovalCompletionResult.ABORTED -> "Aborted"
         null -> "Completed"
     }
 }
@@ -542,25 +538,25 @@ internal fun PairingDecisionResult.message(): String = when (this) {
     PairingDecisionResult.NOT_FOUND -> "Request is no longer available"
 }
 
-internal fun SecretUseDecisionResult.message(): String = when (this) {
-    SecretUseDecisionResult.Decided -> "Decision saved"
-    SecretUseDecisionResult.SecretsChanged ->
+internal fun InvocationDecisionResult.message(): String = when (this) {
+    InvocationDecisionResult.Decided -> "Decision saved"
+    InvocationDecisionResult.SecretsChanged ->
         "A requested secret changed; review the request again"
-    SecretUseDecisionResult.NotPending -> "This request no longer needs a decision"
-    SecretUseDecisionResult.NotFound -> "Request is no longer available"
-    is SecretUseDecisionResult.MissingSecrets -> "Missing secrets: ${names.joinToString()}"
-    is SecretUseDecisionResult.ConflictingVariable ->
+    InvocationDecisionResult.NotPending -> "This request no longer needs a decision"
+    InvocationDecisionResult.NotFound -> "Request is no longer available"
+    is InvocationDecisionResult.MissingSecrets -> "Missing secrets: ${names.joinToString()}"
+    is InvocationDecisionResult.ConflictingVariable ->
         "Conflicting environment variable: $name"
-    is SecretUseDecisionResult.Invalid -> message
-    SecretUseDecisionResult.SecretUnavailable ->
+    is InvocationDecisionResult.Invalid -> message
+    InvocationDecisionResult.SecretUnavailable ->
         "A secret value is unavailable on this device"
-    SecretUseDecisionResult.SecretCorrupted -> "A secret value could not be authenticated"
-    SecretUseDecisionResult.UnsupportedEncryption ->
+    InvocationDecisionResult.SecretCorrupted -> "A secret value could not be authenticated"
+    InvocationDecisionResult.UnsupportedEncryption ->
         "A secret value uses unsupported encryption"
-    SecretUseDecisionResult.PairingUnavailable -> "The paired client is unavailable"
-    SecretUseDecisionResult.TemporaryAccessUnavailable ->
+    InvocationDecisionResult.PairingUnavailable -> "The paired client is unavailable"
+    InvocationDecisionResult.TemporaryAccessUnavailable ->
         "Temporary access is no longer available"
-    SecretUseDecisionResult.TemporaryAccessNotStarted ->
+    InvocationDecisionResult.TemporaryAccessNotStarted ->
         "Request approved once, but temporary access could not be started"
 }
 

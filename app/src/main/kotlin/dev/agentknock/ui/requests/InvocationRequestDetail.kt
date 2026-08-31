@@ -42,11 +42,12 @@ import dev.agentknock.presentation.renderSoftware
 import dev.agentknock.storage.approval.AiReview
 import dev.agentknock.storage.approval.ApprovalAction
 import dev.agentknock.storage.approval.ApprovalEvaluation
+import dev.agentknock.storage.request.InboxRequestContent
 import dev.agentknock.storage.request.InboxRequestDetails
-import dev.agentknock.storage.request.InvocationCompletionResult
-import dev.agentknock.storage.request.SecretUseDecision
+import dev.agentknock.storage.request.ApprovalCompletionResult
+import dev.agentknock.storage.request.ApprovalDecision
 import dev.agentknock.storage.request.SecretUseRequestDetails
-import dev.agentknock.storage.request.SecretUseRequestState
+import dev.agentknock.storage.request.ApprovalRequestState
 import dev.agentknock.storage.secret.SecretMetadata
 import dev.agentknock.storage.secret.TemporaryAccessOperation
 import dev.agentknock.ui.components.InformationSurface
@@ -61,7 +62,7 @@ internal fun InvocationRequestDetail(
     onAllowTemporarily: () -> Unit,
     modifier: Modifier,
 ) {
-    val secretUse = checkNotNull(request.secretUse)
+    val secretUse = (request.content as InboxRequestContent.SecretUse).details
     var confirmTemporaryAccess by remember(request.id) { mutableStateOf(false) }
     val aiReviewInFlight = !request.userDecisionAvailable
     val temporarySecretNames = secretUse.approvalEvaluation.temporaryGrantSecretNames(
@@ -74,7 +75,7 @@ internal fun InvocationRequestDetail(
         showBack = showBack,
         scrollResetKey = secretUse.state to secretUse.completionResult,
         bottomContent = if (
-            secretUse.state == SecretUseRequestState.APPROVAL_PENDING &&
+            secretUse.state == ApprovalRequestState.APPROVAL_PENDING &&
             request.userDecisionAvailable
         ) {
             {
@@ -125,10 +126,10 @@ internal fun InvocationRequestDetail(
                     val secretCount = secretUse.secrets.size
                     val secretLabel = if (secretCount == 1) "secret" else "secrets"
                     val headline = when {
-                        secretUse.state == SecretUseRequestState.COMPLETED &&
-                            secretUse.completionResult == InvocationCompletionResult.APPROVED ->
+                        secretUse.state == ApprovalRequestState.COMPLETED &&
+                            secretUse.completionResult == ApprovalCompletionResult.APPROVED ->
                             "${secretUse.clientName} used $secretCount $secretLabel"
-                        secretUse.state == SecretUseRequestState.COMPLETED ->
+                        secretUse.state == ApprovalRequestState.COMPLETED ->
                             "${secretUse.clientName} requested $secretCount $secretLabel"
                         else ->
                             "${secretUse.clientName} requests $secretCount $secretLabel"
@@ -137,12 +138,12 @@ internal fun InvocationRequestDetail(
                     StatusLine(
                         if (aiReviewInFlight) "AI review in progress" else secretUse.statusLabel(),
                         secretUse.isError(),
-                        attention = secretUse.state == SecretUseRequestState.APPROVAL_PENDING &&
+                        attention = secretUse.state == ApprovalRequestState.APPROVAL_PENDING &&
                             request.userDecisionAvailable,
                         subdued = aiReviewInFlight ||
-                            secretUse.decision == SecretUseDecision.DENIED ||
-                            secretUse.completionResult == InvocationCompletionResult.DENIED ||
-                            secretUse.completionResult == InvocationCompletionResult.ABORTED,
+                            secretUse.decision == ApprovalDecision.DENIED ||
+                            secretUse.completionResult == ApprovalCompletionResult.DENIED ||
+                            secretUse.completionResult == ApprovalCompletionResult.ABORTED,
                     )
                     Text(
                         "Received ${formatTimestamp(request.receivedAt)}",
@@ -193,7 +194,7 @@ internal fun InvocationRequestDetail(
 
         if (
             secretUse.missingSecrets.isNotEmpty() &&
-            secretUse.completionResult != InvocationCompletionResult.DENIED
+            secretUse.completionResult != ApprovalCompletionResult.DENIED
         ) {
             Notice(
                 "Secrets are unavailable",
@@ -202,7 +203,7 @@ internal fun InvocationRequestDetail(
             )
         }
 
-        if (secretUse.state == SecretUseRequestState.APPROVAL_PENDING) {
+        if (secretUse.state == ApprovalRequestState.APPROVAL_PENDING) {
             val evaluation = secretUse.approvalEvaluation
             if (
                 evaluation?.aiReview != null ||
@@ -212,7 +213,7 @@ internal fun InvocationRequestDetail(
             }
         }
 
-        if (secretUse.state != SecretUseRequestState.APPROVAL_PENDING) {
+        if (secretUse.state != ApprovalRequestState.APPROVAL_PENDING) {
             SecretUseOutcome(secretUse)
         }
 
@@ -297,26 +298,26 @@ private fun SecretUseOutcome(secretUse: SecretUseRequestDetails) {
     val temporaryAccessScopes = secretUse.approvalEvaluation.temporaryAccessHistory()
     val aiReview = secretUse.approvalEvaluation?.aiReview
     val outcome = when (secretUse.state) {
-        SecretUseRequestState.WAITING_FOR_COMPLETION -> OutcomeNotice(
-            title = if (secretUse.decision == SecretUseDecision.APPROVED) {
+        ApprovalRequestState.WAITING_FOR_COMPLETION -> OutcomeNotice(
+            title = if (secretUse.decision == ApprovalDecision.APPROVED) {
                 "Approved"
             } else {
                 "Denied"
             },
             detail = "Waiting for the client to finish.",
-            tone = if (secretUse.decision == SecretUseDecision.APPROVED) {
+            tone = if (secretUse.decision == ApprovalDecision.APPROVED) {
                 NoticeTone.SUCCESS
             } else {
                 NoticeTone.SUBDUED
             },
         )
-        SecretUseRequestState.COMPLETED -> when (secretUse.completionResult) {
-            InvocationCompletionResult.APPROVED -> OutcomeNotice(
+        ApprovalRequestState.COMPLETED -> when (secretUse.completionResult) {
+            ApprovalCompletionResult.APPROVED -> OutcomeNotice(
                 "Delivered",
                 "The client received the secret values.",
                 NoticeTone.SUCCESS,
             )
-            InvocationCompletionResult.DENIED -> if (
+            ApprovalCompletionResult.DENIED -> if (
                 secretUse.completionReason == "INVALID_REQUEST"
             ) {
                 OutcomeNotice(
@@ -331,28 +332,28 @@ private fun SecretUseOutcome(secretUse: SecretUseRequestDetails) {
                     NoticeTone.SUBDUED,
                 )
             }
-            InvocationCompletionResult.ABORTED -> OutcomeNotice(
+            ApprovalCompletionResult.ABORTED -> OutcomeNotice(
                 "Aborted",
                 secretUse.completionMessage ?: "The client stopped this request.",
                 NoticeTone.SUBDUED,
             )
             null -> OutcomeNotice("Completed", "The request is complete.")
         }
-        SecretUseRequestState.VERIFICATION_FAILED -> OutcomeNotice(
+        ApprovalRequestState.VERIFICATION_FAILED -> OutcomeNotice(
             "Could not verify request",
             secretUse.error ?: "The cryptographic message was invalid.",
             NoticeTone.DANGER,
         )
-        SecretUseRequestState.APPROVAL_PENDING -> return
+        ApprovalRequestState.APPROVAL_PENDING -> return
     }
     Notice(outcome.title, outcome.detail, outcome.tone)
     if (
         shouldShowDecisionHistory(
-            verificationFailed = secretUse.state == SecretUseRequestState.VERIFICATION_FAILED,
+            verificationFailed = secretUse.state == ApprovalRequestState.VERIFICATION_FAILED,
             completionReason = secretUse.completionReason,
         )
     ) {
-        SecretUseDecisionHistory(
+        ApprovalDecisionHistory(
             decision = secretUse.decision,
             decisionSource = secretUse.decisionSource,
             aiReview = aiReview,
@@ -362,13 +363,13 @@ private fun SecretUseOutcome(secretUse: SecretUseRequestDetails) {
 }
 
 @Composable
-private fun SecretUseDecisionHistory(
-    decision: SecretUseDecision?,
+private fun ApprovalDecisionHistory(
+    decision: ApprovalDecision?,
     decisionSource: String?,
     aiReview: AiReview?,
     temporaryAccessScopes: String,
 ) {
-    val approved = decision == SecretUseDecision.APPROVED
+    val approved = decision == ApprovalDecision.APPROVED
     when (decisionSource) {
         "rule" -> Notice(
             if (approved) "Approved by previous access" else "Denied by previous access",
@@ -560,4 +561,4 @@ private fun SecretUseRequestDetails.statusLabel(): String = secretUseStatusLabel
 )
 
 private fun SecretUseRequestDetails.isError(): Boolean =
-    state == SecretUseRequestState.VERIFICATION_FAILED || completionReason == "INVALID_REQUEST"
+    state == ApprovalRequestState.VERIFICATION_FAILED || completionReason == "INVALID_REQUEST"

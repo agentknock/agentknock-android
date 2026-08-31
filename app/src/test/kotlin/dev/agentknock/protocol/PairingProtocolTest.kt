@@ -23,6 +23,7 @@ import org.junit.Test
 class PairingProtocolTest {
     private val json = Json
     private val protocol = PairingProtocol()
+    private val pairedProtocol = PairedRequestProtocol()
     private val devicePrivateKey = ByteArray(32) { 0x42 }
     private val devicePublicKey = X25519PrivateKeyParameters(devicePrivateKey, 0)
         .generatePublicKey().encoded
@@ -226,7 +227,7 @@ class PairingProtocolTest {
             """{"version":"agentknock-v1","key":"${BASE64.encodeToString(requestSender.encapsulation)}","ciphertext":"${BASE64.encodeToString(requestSender.seal(EMPTY, requestPlaintext))}","rotation_key":"${BASE64.encodeToString(rotationSender.encapsulation)}"}""",
         )
 
-        val opened = protocol.openPairedRequest(
+        val opened = pairedProtocol.openPairedRequest(
             deviceId = DEVICE_ID,
             requestId = SECRET_USE_REQUEST_ID,
             clientId = CLIENT_ID,
@@ -242,7 +243,7 @@ class PairingProtocolTest {
 
         val responsePlaintext =
             """{"result":"APPROVED","environment":{"TOKEN":"value"}}""".encodeToByteArray()
-        val response = protocol.sealPairedResponse(
+        val response = pairedProtocol.sealPairedResponse(
             deviceId = DEVICE_ID,
             requestId = SECRET_USE_REQUEST_ID,
             clientId = CLIENT_ID,
@@ -262,7 +263,7 @@ class PairingProtocolTest {
         )
         assertArrayEquals(
             completionPlaintext,
-            protocol.openPairedCompletion(
+            pairedProtocol.openPairedCompletion(
                 deviceId = DEVICE_ID,
                 requestId = SECRET_USE_REQUEST_ID,
                 clientId = CLIENT_ID,
@@ -281,7 +282,9 @@ class PairingProtocolTest {
             "c0c1c2c3c4c5c6c7c8c9cacbcccdcecf" +
                 "d0d1d2d3d4d5d6d7d8d9dadbdcdddedf",
         )
-        val vectorProtocol = PairingProtocol(random = FixedSecureRandom(responseRandom))
+        val vectorRandom = FixedSecureRandom(responseRandom)
+        val vectorProtocol = PairingProtocol(random = vectorRandom)
+        val vectorPairedProtocol = PairedRequestProtocol(random = vectorRandom)
         val initialRequest = json.parseToJsonElement(
             """{"version":"agentknock-v1","commitment":"jUVTSBEimLz6OdfXAA4qxemm4hHyzzc5yOj1ZdzHsq4="}""",
         )
@@ -307,7 +310,7 @@ class PairingProtocolTest {
         val request = json.parseToJsonElement(
             """{"version":"agentknock-v1","key":"aTZYJUYw9zrY2nj7Mxv5ds1C+Q4OnJ6D9AxRBypvdBc=","ciphertext":"LqawCio2joj6TnyKmBKHHXYuHKeWkOc="}""",
         )
-        val opened = vectorProtocol.openPairedRequest(
+        val opened = vectorPairedProtocol.openPairedRequest(
             deviceId = DEVICE_ID,
             requestId = SECRET_USE_REQUEST_ID,
             clientId = CLIENT_ID,
@@ -322,7 +325,7 @@ class PairingProtocolTest {
             json.parseToJsonElement(
                 """{"nonce":"wMHCw8TFxsfIycrLzM3Oz9DR0tPU1dbX2Nna29zd3t8=","ciphertext":"46147qHk5pdBCJwOz/qIuKggVHrkayAp"}""",
             ),
-            vectorProtocol.sealPairedResponse(
+            vectorPairedProtocol.sealPairedResponse(
                 deviceId = DEVICE_ID,
                 requestId = SECRET_USE_REQUEST_ID,
                 clientId = CLIENT_ID,
@@ -338,7 +341,7 @@ class PairingProtocolTest {
         )
         assertEquals(
             "completion",
-            vectorProtocol.openPairedCompletion(
+            vectorPairedProtocol.openPairedCompletion(
                 deviceId = DEVICE_ID,
                 requestId = SECRET_USE_REQUEST_ID,
                 clientId = CLIENT_ID,
@@ -368,7 +371,7 @@ class PairingProtocolTest {
         val request = json.parseToJsonElement(
             """{"version":"agentknock-v1","key":"${BASE64.encodeToString(sender.encapsulation)}","ciphertext":"${BASE64.encodeToString(sender.seal(EMPTY, "request".encodeToByteArray()))}","rotation_key":"sln27pLcugERhQsTs/bczIJ3JvmwgjWrYpIraz8/Khk="}""",
         )
-        val opened = protocol.openPairedRequest(
+        val opened = pairedProtocol.openPairedRequest(
             deviceId = DEVICE_ID,
             requestId = SECRET_USE_REQUEST_ID,
             clientId = CLIENT_ID,
@@ -400,7 +403,7 @@ class PairingProtocolTest {
         )
 
         val result = runCatching {
-            protocol.openPairedRequest(
+            pairedProtocol.openPairedRequest(
                 deviceId = DEVICE_ID,
                 requestId = SECRET_USE_REQUEST_ID,
                 clientId = CLIENT_ID,
@@ -439,7 +442,7 @@ class PairingProtocolTest {
             """{"version":"agentknock-v1","key":"${BASE64.encodeToString(sender.encapsulation)}","ciphertext":"${BASE64.encodeToString(sender.seal(EMPTY, plaintext))}","rotation_key":{"not":"a string"}}""",
         )
 
-        val opened = protocol.openPairedRequest(
+        val opened = pairedProtocol.openPairedRequest(
             deviceId = DEVICE_ID,
             requestId = SECRET_USE_REQUEST_ID,
             clientId = CLIENT_ID,
@@ -468,7 +471,7 @@ class PairingProtocolTest {
             """{"version":"agentknock-v1","key":"${BASE64.encodeToString(sender.encapsulation)}","ciphertext":"${BASE64.encodeToString(sender.seal(EMPTY, plaintext))}","rotation_key":{"not":"a string"}}""",
         )
 
-        val opened = protocol.openPairedRequest(
+        val opened = pairedProtocol.openPairedRequest(
             deviceId = DEVICE_ID,
             requestId = SECRET_USE_REQUEST_ID,
             clientId = CLIENT_ID,
@@ -503,7 +506,7 @@ class PairingProtocolTest {
 
         for (request in listOf(wrongType, wrongLength)) {
             val failure = runCatching {
-                protocol.openPairedRequest(
+                pairedProtocol.openPairedRequest(
                     deviceId = DEVICE_ID,
                     requestId = SECRET_USE_REQUEST_ID,
                     clientId = CLIENT_ID,
@@ -526,7 +529,7 @@ class PairingProtocolTest {
         )
 
         val failure = runCatching {
-            protocol.openPairedRequest(
+            pairedProtocol.openPairedRequest(
                 deviceId = DEVICE_ID,
                 requestId = SECRET_USE_REQUEST_ID,
                 clientId = CLIENT_ID,

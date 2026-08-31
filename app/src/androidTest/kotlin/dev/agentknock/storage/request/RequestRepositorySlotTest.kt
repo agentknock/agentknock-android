@@ -5,6 +5,7 @@ import androidx.room3.executeSQL
 import androidx.room3.useWriterConnection
 import androidx.test.ext.junit.runners.AndroidJUnit4
 import androidx.test.platform.app.InstrumentationRegistry
+import dev.agentknock.protocol.PairedRequestProtocol
 import dev.agentknock.protocol.PairingProtocol
 import dev.agentknock.relay.RelayClientState
 import dev.agentknock.relay.RelayDeviceClient
@@ -148,16 +149,23 @@ class RequestRepositorySlotTest {
         repository = RequestRepository(
             database = database,
             dao = database.requestDao(),
+            material = RequestMaterialStore(
+                dao = database.requestDao(),
+                keyManager = keyManager,
+                encryption = encryption,
+                newId = { "request-material-id" },
+                currentTimeMillis = { now },
+                cryptographyDispatcher = Dispatchers.Unconfined,
+            ),
             deviceCredentials = credentialSource,
             secrets = secrets,
             approvalReviewer = approvalReviewer,
             relay = relay,
-            keyManager = keyManager,
-            encryption = encryption,
             aiReviews = AiReviewCoordinator(reviewScope),
             scheduleSynchronization = { synchronizationRequests += 1 },
             audit = audit,
             pairingProtocol = PairingProtocol(random = protocolRandom),
+            pairedRequestProtocol = PairedRequestProtocol(random = protocolRandom),
             currentTimeMillis = { now },
             cryptographyDispatcher = Dispatchers.Unconfined,
         )
@@ -928,8 +936,11 @@ class RequestRepositorySlotTest {
         val secretUse = checkNotNull(
             database.requestDao().getSecretUseRequest(AI_INVOCATION_REQUEST_ID),
         )
-        assertEquals(SecretUseDecision.DENIED.storedName, secretUse.decision)
+        assertEquals(ApprovalDecision.DENIED.storedName, secretUse.decision)
         assertEquals(InboxRequestState.WAITING.storedName, stored.state)
+        awaitAsynchronousWork {
+            while (synchronizationRequests <= synchronizationsBeforeReview) delay(1)
+        }
         assertTrue(synchronizationRequests > synchronizationsBeforeReview)
     }
 
@@ -1751,6 +1762,9 @@ private class SwitchableSecureRandom : SecureRandom() {
     }
 }
 
+private val InboxRequestDetails.secretUse: SecretUseRequestDetails?
+    get() = (content as? InboxRequestContent.SecretUse)?.details
+
 private class MemoryEncryptionKeyStore : EncryptionKeyStore {
     private val keys = mutableMapOf<String, SecretKey>()
 
@@ -1759,13 +1773,6 @@ private class MemoryEncryptionKeyStore : EncryptionKeyStore {
     override fun generate(keyId: String): GeneratedEncryptionKey {
         check(keyId !in keys)
         keys[keyId] = SecretKeySpec(ByteArray(16) { it.toByte() }, "AES")
-        return GeneratedEncryptionKey(EncryptionKeyBacking.SOFTWARE)
-    }
-
-    override fun importKey(keyId: String, keyMaterial: ByteArray): GeneratedEncryptionKey {
-        check(keyId !in keys)
-        require(keyMaterial.size == 16)
-        keys[keyId] = SecretKeySpec(keyMaterial.copyOf(), "AES")
         return GeneratedEncryptionKey(EncryptionKeyBacking.SOFTWARE)
     }
 

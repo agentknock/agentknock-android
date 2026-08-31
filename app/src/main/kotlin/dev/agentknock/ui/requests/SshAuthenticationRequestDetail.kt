@@ -22,11 +22,12 @@ import dev.agentknock.presentation.renderShellCommand
 import dev.agentknock.presentation.renderSoftware
 import dev.agentknock.storage.approval.AiReviewDecision
 import dev.agentknock.storage.approval.ApprovalAction
+import dev.agentknock.storage.request.InboxRequestContent
 import dev.agentknock.storage.request.InboxRequestDetails
-import dev.agentknock.storage.request.SecretUseDecision
-import dev.agentknock.storage.request.SshAuthenticationCompletionResult
+import dev.agentknock.storage.request.ApprovalDecision
+import dev.agentknock.storage.request.ApprovalCompletionResult
 import dev.agentknock.storage.request.SshAuthenticationRequestDetails
-import dev.agentknock.storage.request.SshAuthenticationRequestState
+import dev.agentknock.storage.request.ApprovalRequestState
 import dev.agentknock.storage.secret.TemporaryAccessOperation
 import dev.agentknock.ui.components.ClientIdentity
 import dev.agentknock.ui.components.InformationRow
@@ -43,8 +44,8 @@ internal fun SshAuthenticationRequestDetail(
     onAllowTemporarily: () -> Unit,
     modifier: Modifier,
 ) {
-    val authentication = checkNotNull(request.sshAuthentication)
-    val pending = authentication.state == SshAuthenticationRequestState.APPROVAL_PENDING
+    val authentication = (request.content as InboxRequestContent.SshAuthentication).details
+    val pending = authentication.state == ApprovalRequestState.APPROVAL_PENDING
     val aiReviewInFlight = !request.userDecisionAvailable
     val temporarySecretNames = authentication.approvalEvaluation.temporaryGrantSecretNames(
         aiReviewInFlight,
@@ -84,14 +85,14 @@ internal fun SshAuthenticationRequestDetail(
                     authentication.statusLabel()
                 },
                 error = authentication.state ==
-                    SshAuthenticationRequestState.VERIFICATION_FAILED,
+                    ApprovalRequestState.VERIFICATION_FAILED,
                 attention = pending && request.userDecisionAvailable,
                 subdued = aiReviewInFlight ||
-                    authentication.decision == SecretUseDecision.DENIED ||
+                    authentication.decision == ApprovalDecision.DENIED ||
                     authentication.completionResult ==
-                    SshAuthenticationCompletionResult.DENIED ||
+                    ApprovalCompletionResult.DENIED ||
                     authentication.completionResult ==
-                    SshAuthenticationCompletionResult.ABORTED,
+                    ApprovalCompletionResult.ABORTED,
             )
             ClientIdentity(authentication.clientName)
             SecretIdentities(listOf(authentication.secretName))
@@ -200,17 +201,17 @@ private fun SshAuthenticationOutcome(authentication: SshAuthenticationRequestDet
         ?.maxOrNull()
     val aiReview = authentication.approvalEvaluation?.aiReview
     when {
-        authentication.state == SshAuthenticationRequestState.VERIFICATION_FAILED -> Notice(
+        authentication.state == ApprovalRequestState.VERIFICATION_FAILED -> Notice(
             "Authentication could not be confirmed",
             authentication.error ?: "The client confirmation was invalid.",
             NoticeTone.DANGER,
         )
-        authentication.completionResult == SshAuthenticationCompletionResult.APPROVED -> Notice(
+        authentication.completionResult == ApprovalCompletionResult.APPROVED -> Notice(
             "Authentication signed",
             "The SSH signature was delivered to the client.",
             NoticeTone.SUCCESS,
         )
-        authentication.completionResult == SshAuthenticationCompletionResult.DENIED -> Notice(
+        authentication.completionResult == ApprovalCompletionResult.DENIED -> Notice(
             if (authentication.completionReason == "INVALID_REQUEST") {
                 "Invalid request"
             } else {
@@ -219,18 +220,18 @@ private fun SshAuthenticationOutcome(authentication: SshAuthenticationRequestDet
             authentication.completionMessage ?: "No SSH signature was created.",
             NoticeTone.SUBDUED,
         )
-        authentication.completionResult == SshAuthenticationCompletionResult.ABORTED -> Notice(
+        authentication.completionResult == ApprovalCompletionResult.ABORTED -> Notice(
             "Request ended",
             authentication.completionMessage ?: "The client ended the SSH authentication request.",
             NoticeTone.NEUTRAL,
         )
-        authentication.state == SshAuthenticationRequestState.WAITING_FOR_COMPLETION &&
-            authentication.decision == SecretUseDecision.APPROVED -> Notice(
+        authentication.state == ApprovalRequestState.WAITING_FOR_COMPLETION &&
+            authentication.decision == ApprovalDecision.APPROVED -> Notice(
             "Authentication signed",
             "Waiting for the client to confirm receipt.",
             NoticeTone.SUCCESS,
         )
-        authentication.state == SshAuthenticationRequestState.WAITING_FOR_COMPLETION -> Notice(
+        authentication.state == ApprovalRequestState.WAITING_FOR_COMPLETION -> Notice(
             "Authentication denied",
             authentication.completionMessage ?: "Waiting for the client to confirm the denial.",
             NoticeTone.SUBDUED,
@@ -239,7 +240,7 @@ private fun SshAuthenticationOutcome(authentication: SshAuthenticationRequestDet
     if (
         shouldShowDecisionHistory(
             verificationFailed = authentication.state ==
-                SshAuthenticationRequestState.VERIFICATION_FAILED,
+                ApprovalRequestState.VERIFICATION_FAILED,
             completionReason = authentication.completionReason,
         )
     ) {
@@ -255,7 +256,7 @@ private fun SshAuthenticationOutcome(authentication: SshAuthenticationRequestDet
             decision = authentication.decision,
             humanResolution = when {
                 aiReview?.decision != AiReviewDecision.ASK_USER -> null
-                authentication.decision == SecretUseDecision.DENIED -> "You denied it."
+                authentication.decision == ApprovalDecision.DENIED -> "You denied it."
                 temporaryAccessUntil != null ->
                     "You authenticated it and allowed temporary access."
                 else -> "You authenticated it once."

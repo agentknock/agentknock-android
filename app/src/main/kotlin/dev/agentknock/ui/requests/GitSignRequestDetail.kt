@@ -29,11 +29,12 @@ import dev.agentknock.protocol.GitSignHead
 import dev.agentknock.protocol.GitSignRepository
 import dev.agentknock.storage.approval.AiReviewDecision
 import dev.agentknock.storage.approval.ApprovalAction
-import dev.agentknock.storage.request.GitSignCompletionResult
+import dev.agentknock.storage.request.ApprovalCompletionResult
 import dev.agentknock.storage.request.GitSignRequestDetails
-import dev.agentknock.storage.request.GitSignRequestState
+import dev.agentknock.storage.request.ApprovalRequestState
+import dev.agentknock.storage.request.InboxRequestContent
 import dev.agentknock.storage.request.InboxRequestDetails
-import dev.agentknock.storage.request.SecretUseDecision
+import dev.agentknock.storage.request.ApprovalDecision
 import dev.agentknock.storage.secret.TemporaryAccessOperation
 import dev.agentknock.ui.components.ClientIdentity
 import dev.agentknock.ui.components.InformationRow
@@ -51,8 +52,8 @@ internal fun GitSignRequestDetail(
     onAllowTemporarily: () -> Unit,
     modifier: Modifier,
 ) {
-    val signing = checkNotNull(request.gitSign)
-    val pending = signing.state == GitSignRequestState.APPROVAL_PENDING
+    val signing = (request.content as InboxRequestContent.GitSign).details
+    val pending = signing.state == ApprovalRequestState.APPROVAL_PENDING
     var confirmTemporaryAccess by remember(request.id) { mutableStateOf(false) }
     val aiReviewInFlight = !request.userDecisionAvailable
     val temporarySecretNames = signing.approvalEvaluation.temporaryGrantSecretNames(
@@ -91,12 +92,12 @@ internal fun GitSignRequestDetail(
         InformationSurface {
             StatusLine(
                 if (aiReviewInFlight) "AI review in progress" else signing.statusLabel(),
-                error = signing.state == GitSignRequestState.VERIFICATION_FAILED,
+                error = signing.state == ApprovalRequestState.VERIFICATION_FAILED,
                 attention = pending && request.userDecisionAvailable,
                 subdued = aiReviewInFlight ||
-                    signing.decision == SecretUseDecision.DENIED ||
-                    signing.completionResult == GitSignCompletionResult.DENIED ||
-                    signing.completionResult == GitSignCompletionResult.ABORTED,
+                    signing.decision == ApprovalDecision.DENIED ||
+                    signing.completionResult == ApprovalCompletionResult.DENIED ||
+                    signing.completionResult == ApprovalCompletionResult.ABORTED,
             )
             ClientIdentity(signing.clientName)
             SecretIdentities(listOf(signing.secretName))
@@ -315,17 +316,17 @@ private fun GitSignOutcome(signing: GitSignRequestDetails) {
         ?.maxOrNull()
     val aiReview = signing.approvalEvaluation?.aiReview
     when {
-        signing.state == GitSignRequestState.VERIFICATION_FAILED -> Notice(
+        signing.state == ApprovalRequestState.VERIFICATION_FAILED -> Notice(
             "Signature could not be confirmed",
             signing.error ?: "The client confirmation was invalid.",
             NoticeTone.DANGER,
         )
-        signing.completionResult == GitSignCompletionResult.APPROVED -> Notice(
+        signing.completionResult == ApprovalCompletionResult.APPROVED -> Notice(
             "Content signed",
             "The signature was delivered to the client.",
             NoticeTone.SUCCESS,
         )
-        signing.completionResult == GitSignCompletionResult.DENIED -> Notice(
+        signing.completionResult == ApprovalCompletionResult.DENIED -> Notice(
             if (signing.completionReason == "INVALID_REQUEST") {
                 "Invalid request"
             } else {
@@ -334,18 +335,18 @@ private fun GitSignOutcome(signing: GitSignRequestDetails) {
             signing.completionMessage ?: "No signature was created.",
             NoticeTone.SUBDUED,
         )
-        signing.completionResult == GitSignCompletionResult.ABORTED -> Notice(
+        signing.completionResult == ApprovalCompletionResult.ABORTED -> Notice(
             "Request ended",
             signing.completionMessage ?: "The client ended the Git signing request.",
             NoticeTone.NEUTRAL,
         )
-        signing.state == GitSignRequestState.WAITING_FOR_COMPLETION &&
-            signing.decision == SecretUseDecision.APPROVED -> Notice(
+        signing.state == ApprovalRequestState.WAITING_FOR_COMPLETION &&
+            signing.decision == ApprovalDecision.APPROVED -> Notice(
             "Signature sent",
             "Waiting for the client to confirm receipt.",
             NoticeTone.SUCCESS,
         )
-        signing.state == GitSignRequestState.WAITING_FOR_COMPLETION -> Notice(
+        signing.state == ApprovalRequestState.WAITING_FOR_COMPLETION -> Notice(
             "Signature denied",
             signing.completionMessage ?: "Waiting for the client to confirm the denial.",
             NoticeTone.SUBDUED,
@@ -353,7 +354,7 @@ private fun GitSignOutcome(signing: GitSignRequestDetails) {
     }
     if (
         shouldShowDecisionHistory(
-            verificationFailed = signing.state == GitSignRequestState.VERIFICATION_FAILED,
+            verificationFailed = signing.state == ApprovalRequestState.VERIFICATION_FAILED,
             completionReason = signing.completionReason,
         )
     ) {
@@ -369,7 +370,7 @@ private fun GitSignOutcome(signing: GitSignRequestDetails) {
             decision = signing.decision,
             humanResolution = when {
                 aiReview?.decision != AiReviewDecision.ASK_USER -> null
-                signing.decision == SecretUseDecision.DENIED -> "You denied it."
+                signing.decision == ApprovalDecision.DENIED -> "You denied it."
                 temporaryAccessUntil != null -> "You signed it and allowed temporary access."
                 else -> "You signed it once."
             },

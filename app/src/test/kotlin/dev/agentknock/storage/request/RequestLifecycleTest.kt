@@ -32,16 +32,16 @@ class RequestLifecycleTest {
         assertEquals(InboxRequestState.ACTION_REQUIRED, reviewedRequestState(false))
         assertEquals(InboxRequestState.WAITING, reviewedRequestState(true))
         assertEquals(
-            SecretUseRequestState.APPROVAL_PENDING,
-            secretUseRequestState(InboxRequestState.REVIEWING, error = null),
+            ApprovalRequestState.APPROVAL_PENDING,
+            approvalRequestState(InboxRequestState.REVIEWING, error = null),
         )
         assertEquals(
-            SecretUseRequestState.APPROVAL_PENDING,
-            secretUseRequestState(InboxRequestState.ACTION_REQUIRED, error = null),
+            ApprovalRequestState.APPROVAL_PENDING,
+            approvalRequestState(InboxRequestState.ACTION_REQUIRED, error = null),
         )
         assertEquals(
-            SecretUseRequestState.VERIFICATION_FAILED,
-            secretUseRequestState(InboxRequestState.COMPLETED, error = "invalid completion"),
+            ApprovalRequestState.VERIFICATION_FAILED,
+            approvalRequestState(InboxRequestState.COMPLETED, error = "invalid completion"),
         )
     }
 

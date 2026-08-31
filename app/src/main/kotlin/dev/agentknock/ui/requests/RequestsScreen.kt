@@ -27,12 +27,13 @@ import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.unit.dp
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
-import dev.agentknock.storage.request.GitSignRequestState
+import dev.agentknock.storage.request.ApprovalRequestState
+import dev.agentknock.storage.request.InboxRequestKind
+import dev.agentknock.storage.request.InboxRequestContent
 import dev.agentknock.storage.request.InboxRequestDetails
+import dev.agentknock.storage.request.InboxRequestStatus
 import dev.agentknock.storage.request.InboxRequestSummary
 import dev.agentknock.storage.request.RequestSyncResult
-import dev.agentknock.storage.request.SecretUseRequestState
-import dev.agentknock.storage.request.SshAuthenticationRequestState
 import kotlinx.coroutines.launch
 
 @Composable
@@ -56,34 +57,38 @@ internal fun RequestsScreen(
 
     fun approve(request: InboxRequestSummary) {
         scope.launch {
-            when {
-                request.secretUseState == SecretUseRequestState.APPROVAL_PENDING -> {
+            val approval = request.status as? InboxRequestStatus.Approval
+            if (approval?.state != ApprovalRequestState.APPROVAL_PENDING) return@launch
+            when (request.kind) {
+                InboxRequestKind.SECRET_USE -> {
                     report(viewModel.approveSecretUseRequest(request.id).message())
                 }
-                request.gitSignState == GitSignRequestState.APPROVAL_PENDING -> {
+                InboxRequestKind.GIT_SIGN -> {
                     report(viewModel.approveGitSignRequest(request.id).message())
                 }
-                request.sshAuthenticationState ==
-                    SshAuthenticationRequestState.APPROVAL_PENDING -> {
+                InboxRequestKind.SSH_AUTHENTICATE -> {
                     report(viewModel.approveSshAuthenticationRequest(request.id).message())
                 }
+                else -> Unit
             }
         }
     }
 
     fun reject(request: InboxRequestSummary) {
         scope.launch {
-            when {
-                request.secretUseState == SecretUseRequestState.APPROVAL_PENDING -> {
+            val approval = request.status as? InboxRequestStatus.Approval
+            if (approval?.state != ApprovalRequestState.APPROVAL_PENDING) return@launch
+            when (request.kind) {
+                InboxRequestKind.SECRET_USE -> {
                     report(viewModel.denySecretUseRequest(request.id).message())
                 }
-                request.gitSignState == GitSignRequestState.APPROVAL_PENDING -> {
+                InboxRequestKind.GIT_SIGN -> {
                     report(viewModel.denyGitSignRequest(request.id).message())
                 }
-                request.sshAuthenticationState ==
-                    SshAuthenticationRequestState.APPROVAL_PENDING -> {
+                InboxRequestKind.SSH_AUTHENTICATE -> {
                     report(viewModel.denySshAuthenticationRequest(request.id).message())
                 }
+                else -> Unit
             }
         }
     }
@@ -174,8 +179,8 @@ private fun RequestDetail(
         Box(modifier, contentAlignment = Alignment.Center) { CircularProgressIndicator() }
         return
     }
-    when {
-        request.secretUse != null -> InvocationRequestDetail(
+    when (request.content) {
+        is InboxRequestContent.SecretUse -> InvocationRequestDetail(
             request = request,
             onBack = onBack,
             showBack = showBack,
@@ -194,7 +199,7 @@ private fun RequestDetail(
             },
             modifier = modifier,
         )
-        request.gitSign != null -> GitSignRequestDetail(
+        is InboxRequestContent.GitSign -> GitSignRequestDetail(
             request = request,
             onBack = onBack,
             showBack = showBack,
@@ -211,7 +216,7 @@ private fun RequestDetail(
             },
             modifier = modifier,
         )
-        request.sshAuthentication != null -> SshAuthenticationRequestDetail(
+        is InboxRequestContent.SshAuthentication -> SshAuthenticationRequestDetail(
             request = request,
             onBack = onBack,
             showBack = showBack,

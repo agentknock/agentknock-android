@@ -2,7 +2,7 @@ package dev.agentknock.ui.requests
 
 import androidx.lifecycle.ViewModel
 import androidx.lifecycle.viewModelScope
-import dev.agentknock.storage.request.SecretUseDecisionResult
+import dev.agentknock.storage.request.InvocationDecisionResult
 import dev.agentknock.storage.request.InboxRequestDetails
 import dev.agentknock.storage.request.InboxRequestSummary
 import dev.agentknock.storage.request.RequestSyncResult
@@ -59,17 +59,17 @@ internal class RequestsViewModel(
         connection.refresh()
     }
 
-    suspend fun approveSecretUseRequest(requestId: String): SecretUseDecisionResult {
+    suspend fun approveSecretUseRequest(requestId: String): InvocationDecisionResult {
         awaitStorageReady()
         return repository.approveSecretUseRequest(requestId)
     }
 
-    suspend fun denySecretUseRequest(requestId: String): SecretUseDecisionResult {
+    suspend fun denySecretUseRequest(requestId: String): InvocationDecisionResult {
         awaitStorageReady()
         return repository.denySecretUseRequest(requestId)
     }
 
-    suspend fun allowSecretUseTemporarily(requestId: String): SecretUseDecisionResult {
+    suspend fun allowSecretUseTemporarily(requestId: String): InvocationDecisionResult {
         awaitStorageReady()
         return repository.allowSecretUseTemporarily(requestId)
     }

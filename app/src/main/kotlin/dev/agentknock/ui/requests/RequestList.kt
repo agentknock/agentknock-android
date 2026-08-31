@@ -59,16 +59,13 @@ import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
 import dev.agentknock.presentation.formatTimestamp
 import dev.agentknock.presentation.renderShellCommand
-import dev.agentknock.storage.request.GitSignCompletionResult
-import dev.agentknock.storage.request.GitSignRequestState
+import dev.agentknock.storage.request.ApprovalCompletionResult
+import dev.agentknock.storage.request.ApprovalDecision
+import dev.agentknock.storage.request.ApprovalRequestState
 import dev.agentknock.storage.request.InboxRequestKind
 import dev.agentknock.storage.request.InboxRequestState
+import dev.agentknock.storage.request.InboxRequestStatus
 import dev.agentknock.storage.request.InboxRequestSummary
-import dev.agentknock.storage.request.InvocationCompletionResult
-import dev.agentknock.storage.request.SecretUseDecision
-import dev.agentknock.storage.request.SecretUseRequestState
-import dev.agentknock.storage.request.SshAuthenticationCompletionResult
-import dev.agentknock.storage.request.SshAuthenticationRequestState
 import dev.agentknock.ui.components.ClientIdentity
 import dev.agentknock.ui.components.SecretIdentities
 import dev.agentknock.ui.theme.agentknockColors
@@ -192,17 +189,10 @@ private fun RequestRow(
     onApprove: () -> Unit,
     onReject: () -> Unit,
 ) {
-    val canApprove = request.userDecisionAvailable && (
-        request.secretUseState == SecretUseRequestState.APPROVAL_PENDING ||
-            request.gitSignState == GitSignRequestState.APPROVAL_PENDING ||
-            request.sshAuthenticationState ==
-            SshAuthenticationRequestState.APPROVAL_PENDING
-        )
-    val canReject = request.canReject() && (
-        request.userDecisionAvailable ||
-            request.secretUseState == null && request.gitSignState == null &&
-            request.sshAuthenticationState == null
-        )
+    val approval = request.status as? InboxRequestStatus.Approval
+    val canApprove = request.userDecisionAvailable &&
+        approval?.state == ApprovalRequestState.APPROVAL_PENDING
+    val canReject = request.userDecisionAvailable && request.canReject()
     val rejectLabel = "Deny once"
     val swipeState = rememberSwipeToDismissBoxState(
         positionalThreshold = { distance -> distance * 0.65f },
@@ -408,9 +398,8 @@ private fun RequestRowContent(
 
 @Composable
 private fun RequestStatusBadge(request: InboxRequestSummary) {
-    val error = request.secretUseState == SecretUseRequestState.VERIFICATION_FAILED ||
-        request.gitSignState == GitSignRequestState.VERIFICATION_FAILED ||
-        request.sshAuthenticationState == SshAuthenticationRequestState.VERIFICATION_FAILED
+    val error = (request.status as? InboxRequestStatus.Approval)?.state ==
+        ApprovalRequestState.VERIFICATION_FAILED
     val rejected = request.wasRejected()
     val actionRequired = request.state == InboxRequestState.ACTION_REQUIRED &&
         request.userDecisionAvailable
@@ -443,60 +432,45 @@ private fun RequestStatusBadge(request: InboxRequestSummary) {
 
 private fun InboxRequestSummary.statusLabel(): String = when {
     state == InboxRequestState.REVIEWING -> "AI reviewing"
-    !userDecisionAvailable && (
-        secretUseState == SecretUseRequestState.APPROVAL_PENDING ||
-            gitSignState == GitSignRequestState.APPROVAL_PENDING ||
-            sshAuthenticationState == SshAuthenticationRequestState.APPROVAL_PENDING
-        ) -> "AI reviewing"
-    secretUseState != null -> secretUseStatusLabel(
-        secretUseState,
-        secretUseResult,
-        secretUseCompletionReason,
-    )
-    gitSignState != null -> gitSignStatusLabel(
-        gitSignState,
-        gitSignResult,
-        gitSignCompletionReason,
-    )
-    sshAuthenticationState != null -> sshAuthenticationStatusLabel(
-        sshAuthenticationState,
-        sshAuthenticationResult,
-        sshAuthenticationCompletionReason,
-    )
+    !userDecisionAvailable && approvalStatus()?.state ==
+        ApprovalRequestState.APPROVAL_PENDING -> "AI reviewing"
+    kind == InboxRequestKind.SECRET_USE -> requiredApprovalStatus().let {
+        secretUseStatusLabel(it.state, it.completionResult, it.completionReason)
+    }
+    kind == InboxRequestKind.GIT_SIGN -> requiredApprovalStatus().let {
+        gitSignStatusLabel(it.state, it.completionResult, it.completionReason)
+    }
+    kind == InboxRequestKind.SSH_AUTHENTICATE -> requiredApprovalStatus().let {
+        sshAuthenticationStatusLabel(it.state, it.completionResult, it.completionReason)
+    }
     state == InboxRequestState.ACTION_REQUIRED -> "Needs attention"
     state == InboxRequestState.WAITING -> "Waiting"
     else -> "Completed"
 }
 
 private fun InboxRequestSummary.canReject(): Boolean =
-    secretUseState == SecretUseRequestState.APPROVAL_PENDING ||
-        gitSignState == GitSignRequestState.APPROVAL_PENDING ||
-        sshAuthenticationState == SshAuthenticationRequestState.APPROVAL_PENDING
+    approvalStatus()?.state == ApprovalRequestState.APPROVAL_PENDING
 
 private fun InboxRequestSummary.wasRejected(): Boolean =
-    secretUseDecision == SecretUseDecision.DENIED ||
-        secretUseResult == InvocationCompletionResult.DENIED ||
-        gitSignDecision == SecretUseDecision.DENIED ||
-        gitSignResult == GitSignCompletionResult.DENIED ||
-        sshAuthenticationDecision == SecretUseDecision.DENIED ||
-        sshAuthenticationResult == SshAuthenticationCompletionResult.DENIED
+    approvalStatus()?.let {
+        it.decision == ApprovalDecision.DENIED ||
+            it.completionResult == ApprovalCompletionResult.DENIED
+    } == true
 
 private fun InboxRequestSummary.wasAborted(): Boolean =
-    secretUseResult == InvocationCompletionResult.ABORTED ||
-        gitSignResult == GitSignCompletionResult.ABORTED ||
-        sshAuthenticationResult == SshAuthenticationCompletionResult.ABORTED
+    approvalStatus()?.completionResult == ApprovalCompletionResult.ABORTED
 
 private fun InboxRequestSummary.hasVerificationFailure(): Boolean =
-    secretUseState == SecretUseRequestState.VERIFICATION_FAILED ||
-        gitSignState == GitSignRequestState.VERIFICATION_FAILED ||
-        sshAuthenticationState == SshAuthenticationRequestState.VERIFICATION_FAILED
+    approvalStatus()?.state == ApprovalRequestState.VERIFICATION_FAILED
 
 private fun InboxRequestSummary.wasAccepted(): Boolean =
-    secretUseResult == InvocationCompletionResult.APPROVED ||
-        gitSignResult == GitSignCompletionResult.APPROVED ||
-        sshAuthenticationResult == SshAuthenticationCompletionResult.APPROVED
+    approvalStatus()?.completionResult == ApprovalCompletionResult.APPROVED
 
 private fun InboxRequestSummary.hasInvalidSecretReference(): Boolean =
-    secretUseCompletionReason == "INVALID_REQUEST" ||
-        gitSignCompletionReason == "INVALID_REQUEST" ||
-        sshAuthenticationCompletionReason == "INVALID_REQUEST"
+    approvalStatus()?.completionReason == "INVALID_REQUEST"
+
+private fun InboxRequestSummary.approvalStatus(): InboxRequestStatus.Approval? =
+    status as? InboxRequestStatus.Approval
+
+private fun InboxRequestSummary.requiredApprovalStatus(): InboxRequestStatus.Approval =
+    checkNotNull(approvalStatus()) { "$kind requests require approval status" }

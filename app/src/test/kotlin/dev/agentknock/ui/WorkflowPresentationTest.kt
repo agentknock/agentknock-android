@@ -2,10 +2,11 @@ package dev.agentknock.ui
 
 import dev.agentknock.storage.request.InboxRequestKind
 import dev.agentknock.storage.request.InboxRequestState
+import dev.agentknock.storage.request.InboxRequestStatus
 import dev.agentknock.storage.request.InboxRequestSummary
 import dev.agentknock.storage.request.PairingState
 import dev.agentknock.storage.request.SecretUploadRequestState
-import dev.agentknock.storage.request.SecretUseRequestState
+import dev.agentknock.storage.request.ApprovalRequestState
 import dev.agentknock.ui.requests.shouldShowDecisionHistory
 import org.junit.Assert.assertEquals
 import org.junit.Assert.assertFalse
@@ -32,7 +33,7 @@ class WorkflowPresentationTest {
             summary(
                 6,
                 InboxRequestKind.SECRET_USE,
-                secretUse = SecretUseRequestState.COMPLETED,
+                secretUse = ApprovalRequestState.COMPLETED,
             ),
             summary(7, InboxRequestKind.GIT_SIGN),
         )
@@ -61,13 +62,13 @@ class WorkflowPresentationTest {
                 3,
                 InboxRequestKind.SECRET_USE,
                 state = InboxRequestState.ACTION_REQUIRED,
-                secretUse = SecretUseRequestState.APPROVAL_PENDING,
+                secretUse = ApprovalRequestState.APPROVAL_PENDING,
             ),
             summary(
                 4,
                 InboxRequestKind.SECRET_USE,
                 state = InboxRequestState.COMPLETED,
-                secretUse = SecretUseRequestState.COMPLETED,
+                secretUse = ApprovalRequestState.COMPLETED,
             ),
             summary(
                 5,
@@ -113,17 +114,28 @@ class WorkflowPresentationTest {
         state: InboxRequestState = InboxRequestState.COMPLETED,
         pairing: PairingState? = null,
         upload: SecretUploadRequestState? = null,
-        secretUse: SecretUseRequestState? = null,
+        secretUse: ApprovalRequestState? = null,
     ) = InboxRequestSummary(
         id = id.toString(),
         kind = kind,
         state = state,
-        pairingState = pairing,
-        secretUseState = secretUse,
-        secretUseDecision = null,
-        secretUseResult = null,
-        secretUseCompletionReason = null,
-        secretUploadState = upload,
+        status = when (kind) {
+            InboxRequestKind.PAIRING -> InboxRequestStatus.Pairing(checkNotNull(pairing))
+            InboxRequestKind.SECRET_UPLOAD -> InboxRequestStatus.SecretUpload(checkNotNull(upload))
+            InboxRequestKind.SECRET_USE,
+            InboxRequestKind.GIT_SIGN,
+            InboxRequestKind.SSH_AUTHENTICATE,
+            -> InboxRequestStatus.Approval(
+                state = secretUse ?: if (state == InboxRequestState.ACTION_REQUIRED) {
+                    ApprovalRequestState.APPROVAL_PENDING
+                } else {
+                    ApprovalRequestState.COMPLETED
+                },
+                decision = null,
+                completionResult = null,
+                completionReason = null,
+            )
+        },
         title = "Test",
         clientName = "Test client",
         secretNames = emptyList(),

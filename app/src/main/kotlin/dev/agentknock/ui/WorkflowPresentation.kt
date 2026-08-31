@@ -2,6 +2,7 @@ package dev.agentknock.ui
 
 import dev.agentknock.storage.request.InboxRequestKind
 import dev.agentknock.storage.request.InboxRequestState
+import dev.agentknock.storage.request.InboxRequestStatus
 import dev.agentknock.storage.request.InboxRequestSummary
 import dev.agentknock.storage.request.PairingState
 import dev.agentknock.storage.request.SecretUploadRequestState
@@ -15,13 +16,15 @@ internal fun List<InboxRequestSummary>.requestHistory(): List<InboxRequestSummar
 
 internal fun List<InboxRequestSummary>.pendingPairings(): List<InboxRequestSummary> =
     filter { summary ->
-        summary.kind == InboxRequestKind.PAIRING && summary.pairingState in pendingPairingStates
+        summary.kind == InboxRequestKind.PAIRING &&
+            (summary.status as? InboxRequestStatus.Pairing)?.state in pendingPairingStates
     }
 
 internal fun List<InboxRequestSummary>.pendingSecretUploads(): List<InboxRequestSummary> =
     filter { summary ->
         summary.kind == InboxRequestKind.SECRET_UPLOAD &&
-            summary.secretUploadState == SecretUploadRequestState.REVIEW_PENDING
+            (summary.status as? InboxRequestStatus.SecretUpload)?.state ==
+            SecretUploadRequestState.REVIEW_PENDING
     }
 
 internal fun List<InboxRequestSummary>.actionRequiredCount(vararg kinds: InboxRequestKind): Int =

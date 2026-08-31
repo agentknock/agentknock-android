@@ -14,6 +14,7 @@ import androidx.compose.ui.unit.dp
 import dev.agentknock.presentation.formatPlatformName
 import dev.agentknock.presentation.formatTimestamp
 import dev.agentknock.presentation.renderSoftware
+import dev.agentknock.storage.request.InboxRequestContent
 import dev.agentknock.storage.request.InboxRequestDetails
 import dev.agentknock.storage.request.InboxRequestState
 import dev.agentknock.storage.request.PairingState
@@ -30,7 +31,7 @@ internal fun PairingRequestDetail(
     onReject: () -> Unit,
     modifier: Modifier,
 ) {
-    val pairing = checkNotNull(request.pairing)
+    val pairing = (request.content as InboxRequestContent.Pairing).details
     DetailPage(
         title = "Pairing",
         onBack = onBack,

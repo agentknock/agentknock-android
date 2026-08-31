@@ -80,8 +80,10 @@ import dev.agentknock.relay.RelayClientState
 import dev.agentknock.storage.request.ClientChangeResult
 import dev.agentknock.storage.request.ClientDetails
 import dev.agentknock.storage.request.ClientSummary
+import dev.agentknock.storage.request.InboxRequestContent
 import dev.agentknock.storage.request.InboxRequestDetails
 import dev.agentknock.storage.request.InboxRequestState
+import dev.agentknock.storage.request.InboxRequestStatus
 import dev.agentknock.storage.request.InboxRequestSummary
 import dev.agentknock.storage.request.PairingState
 import dev.agentknock.storage.device.DeviceIdentity
@@ -142,8 +144,10 @@ internal fun ClientsScreen(
         scope.launch { snackbar.showSnackbar(message) }
     }
 
-    LaunchedEffect(pairingSelection, selectedPairing?.pairing?.pairingState) {
-        val pairing = selectedPairing?.pairing ?: return@LaunchedEffect
+    val selectedPairingDetails =
+        (selectedPairing?.content as? InboxRequestContent.Pairing)?.details
+    LaunchedEffect(pairingSelection, selectedPairingDetails?.pairingState) {
+        val pairing = selectedPairingDetails ?: return@LaunchedEffect
         if (pairingSelection != null) {
             when (pairing.pairingState) {
                 PairingState.COMPLETED -> {
@@ -264,7 +268,8 @@ private fun PairingSelectionDetail(
     modifier: Modifier,
 ) {
     val scope = rememberCoroutineScope()
-    if (request?.pairing == null) {
+    val pairing = (request?.content as? InboxRequestContent.Pairing)?.details
+    if (request == null || pairing == null) {
         Box(modifier, contentAlignment = Alignment.Center) { CircularProgressIndicator() }
         return
     }
@@ -279,7 +284,7 @@ private fun PairingSelectionDetail(
                 scope.launch {
                     if (viewModel.isMatchingPendingSas(request.id, choice)) {
                         authorizeProtectedAction(
-                            "Accept ${request.pairing.clientName}",
+                            "Accept ${pairing.clientName}",
                             {
                                 scope.launch {
                                     report(viewModel.chooseSas(request.id, choice).message())
@@ -708,7 +713,7 @@ private fun PendingPairingRow(
     selected: Boolean,
     onClick: () -> Unit,
 ) {
-    val pairingState = checkNotNull(request.pairingState)
+    val pairingState = (request.status as InboxRequestStatus.Pairing).state
     val actionRequired = request.state == InboxRequestState.ACTION_REQUIRED
     ActionListSurface(
         actionRequired = actionRequired,

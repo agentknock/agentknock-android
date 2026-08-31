@@ -49,6 +49,7 @@ import androidx.lifecycle.compose.LocalLifecycleOwner
 import dev.agentknock.presentation.formatTimestamp
 import dev.agentknock.presentation.renderSoftware
 import dev.agentknock.protocol.SecretUploadMode
+import dev.agentknock.storage.request.InboxRequestContent
 import dev.agentknock.storage.request.InboxRequestDetails
 import dev.agentknock.storage.request.SecretUploadRequestDetails
 import dev.agentknock.storage.request.SecretUploadRequestState
@@ -72,7 +73,7 @@ internal fun SecretUploadRequestDetail(
     report: (String) -> Unit,
     modifier: Modifier,
 ) {
-    val upload = checkNotNull(request.secretUpload)
+    val upload = (request.content as InboxRequestContent.SecretUpload).details
     var approvedName by remember(upload.uploadedName, upload.approvedName) {
         mutableStateOf(upload.approvedName ?: upload.uploadedName)
     }

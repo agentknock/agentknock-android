@@ -24,6 +24,7 @@ import dev.agentknock.relay.RelayHttpTransport
 import dev.agentknock.relay.WebSocketRelayDeviceClient
 import dev.agentknock.storage.request.RequestRepository
 import dev.agentknock.storage.request.RequestConnectionManager
+import dev.agentknock.storage.request.RequestMaterialStore
 import dev.agentknock.storage.request.AiReviewCoordinator
 import dev.agentknock.storage.device.DeviceIdentityRepository
 import dev.agentknock.storage.device.DeviceManagementRepository
@@ -117,18 +118,22 @@ internal class ApplicationContainer(application: Application) {
     )
 
     private val aiReviews = AiReviewCoordinator(applicationScope)
+    private val requestMaterial = RequestMaterialStore(
+        dao = database.requestDao(),
+        keyManager = vaultKeyManager,
+        encryption = encryption,
+    )
 
     val requests: RequestRepository = RequestRepository(
         database = database,
         dao = database.requestDao(),
+        material = requestMaterial,
         deviceCredentials = deviceIdentity,
         secrets = secrets,
         approvalReviewer = HttpRelayApprovalReviewClient(
             RelayHttpTransport(approvalReviewHttpClient(httpClient)),
         ),
         relay = WebSocketRelayDeviceClient(httpClient),
-        keyManager = vaultKeyManager,
-        encryption = encryption,
         aiReviews = aiReviews,
         scheduleSynchronization = { scheduleRequestSynchronization() },
         audit = audit,

@@ -49,6 +49,7 @@ import androidx.lifecycle.LifecycleEventObserver
 import androidx.lifecycle.compose.LocalLifecycleOwner
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import dev.agentknock.R
+import dev.agentknock.storage.request.InboxRequestContent
 import dev.agentknock.storage.request.SecretUploadRequestState
 import dev.agentknock.storage.secret.CreateEnvironmentVariableResult
 import dev.agentknock.storage.secret.CreateSecretResult
@@ -135,10 +136,12 @@ internal fun SecretsScreen(
         revealedValues = emptyMap()
     }
 
-    LaunchedEffect(uploadSelection, selectedUpload?.secretUpload?.state) {
+    val selectedUploadDetails =
+        (selectedUpload?.content as? InboxRequestContent.SecretUpload)?.details
+    LaunchedEffect(uploadSelection, selectedUploadDetails?.state) {
         if (
             uploadSelection != null &&
-            selectedUpload?.secretUpload?.state?.let {
+            selectedUploadDetails?.state?.let {
                 it != SecretUploadRequestState.REVIEW_PENDING
             } == true
         ) {
