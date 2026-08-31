@@ -4,12 +4,16 @@ import androidx.room3.ColumnInfo
 import androidx.room3.Dao
 import androidx.room3.Entity
 import androidx.room3.Insert
+import androidx.room3.Index
 import androidx.room3.PrimaryKey
 import androidx.room3.Query
 import androidx.room3.Transaction
 import kotlinx.coroutines.flow.Flow
 
-@Entity(tableName = "audit_events")
+@Entity(
+    tableName = "audit_events",
+    indices = [Index(value = ["occurred_at"])],
+)
 internal data class AuditEventEntity(
     @PrimaryKey(autoGenerate = true)
     @ColumnInfo(name = "id")

@@ -60,7 +60,6 @@ class RequestDaoTransactionTest {
                     address = "write-leader-hungry",
                     deviceId = DEVICE_ID,
                     createdAt = 1,
-                    claimedAt = 1,
                 ),
             )
         }
@@ -129,7 +128,7 @@ class RequestDaoTransactionTest {
         val attempt = checkNotNull(dao.getPairingAttempt(ROOT_REQUEST_ID))
 
         dao.rejectPairing(
-            request = request.copy(state = "completed", completedAt = 2, updatedAt = 2),
+            request = request.copy(state = "completed", completedAt = 2),
             attempt = attempt.copy(
                 desiredRelayClientState = "revoked",
                 state = "rejected",
@@ -234,7 +233,6 @@ class RequestDaoTransactionTest {
                 state = "completed",
                 listed = false,
                 completedAt = 2,
-                updatedAt = 2,
             ),
             pendingAttempt().copy(
                 desiredRelayClientState = "revoked",
@@ -306,7 +304,6 @@ class RequestDaoTransactionTest {
                     kind = "secret_use",
                     state = "completed",
                     receivedAt = (index + 10).toLong(),
-                    updatedAt = (index + 10).toLong(),
                     completedAt = (index + 10).toLong(),
                 ),
             )
@@ -390,33 +387,46 @@ class RequestDaoTransactionTest {
     }
 
     @Test
-    fun acknowledgementTimestampsAndRequestUpdateTimeNeverMoveBackward() = runTest {
+    fun acknowledgementsAreIdempotent() = runTest {
         val requestId = "acknowledgement-request"
         dao.insertRequest(
             rootRequest().copy(
                 id = requestId,
                 kind = "unknown",
                 state = "completed",
-                updatedAt = 10,
                 completedAt = 10,
-                requestAcknowledgedAt = null,
-                responseAcknowledgedAt = null,
-                completionAcknowledgedAt = null,
+                requestAcknowledged = false,
+                responseAcknowledged = false,
+                completionAcknowledged = false,
             ),
         )
 
-        dao.markRequestAcknowledged(requestId, 20)
-        dao.markResponseAcknowledged(requestId, 21)
-        dao.markCompletionAcknowledged(requestId, 22)
-        dao.markRequestAcknowledged(requestId, 5)
-        dao.markResponseAcknowledged(requestId, 6)
-        dao.markCompletionAcknowledged(requestId, 7)
+        assertEquals(1, dao.markRequestAcknowledged(requestId))
+        assertEquals(1, dao.markResponseAcknowledged(requestId))
+        assertEquals(1, dao.markCompletionAcknowledged(requestId))
+        assertEquals(0, dao.markRequestAcknowledged(requestId))
+        assertEquals(0, dao.markResponseAcknowledged(requestId))
+        assertEquals(0, dao.markCompletionAcknowledged(requestId))
 
         val stored = checkNotNull(dao.getRequestById(requestId))
-        assertEquals(20L, stored.requestAcknowledgedAt)
-        assertEquals(21L, stored.responseAcknowledgedAt)
-        assertEquals(22L, stored.completionAcknowledgedAt)
-        assertEquals(22L, stored.updatedAt)
+        assertTrue(stored.requestAcknowledged)
+        assertTrue(stored.responseAcknowledged)
+        assertTrue(stored.completionAcknowledged)
+    }
+
+    @Test
+    fun requestPskIsDeletedOnlyAfterCompletionIsStored() = runTest {
+        val requestId = "completed-request"
+        dao.insertRequest(rootRequest().copy(id = requestId, completionJson = null))
+        dao.insertRequestPsk(requestPsk(requestId))
+
+        assertEquals(0, dao.deleteCompletedRequestPsk(requestId))
+        assertNotNull(dao.getRequestPsk(requestId))
+
+        val request = checkNotNull(dao.getRequestById(requestId))
+        assertEquals(1, dao.updateRequest(request.copy(completionJson = "{}")))
+        assertEquals(1, dao.deleteCompletedRequestPsk(requestId))
+        assertNull(dao.getRequestPsk(requestId))
     }
 
     @Test
@@ -471,7 +481,6 @@ class RequestDaoTransactionTest {
         val removal = pairingRemovalRequest(ROOT_REQUEST_ID)
         val revokedClient = checkNotNull(dao.getClient(CLIENT_ID)).copy(
             desiredRelayClientState = "revoked",
-            updatedAt = 2,
         )
 
         val failed = runCatching {
@@ -567,7 +576,7 @@ class RequestDaoTransactionTest {
         val request = checkNotNull(dao.getRequestById(requestId))
         val upload = checkNotNull(dao.getSecretUploadRequest(requestId))
         dao.updateSecretUploadRequest(
-            request = request.copy(state = "completed", completedAt = 2, updatedAt = 2),
+            request = request.copy(state = "completed", completedAt = 2),
             secretUpload = upload.copy(decision = "rejected", decidedAt = 2),
             discardUploadedValues = true,
         )
@@ -825,7 +834,6 @@ class RequestDaoTransactionTest {
                 state = "completed",
                 listed = false,
                 completedAt = 2,
-                updatedAt = 2,
             ),
             completedAttempt(pendingAttempt()),
         )
@@ -931,11 +939,10 @@ class RequestDaoTransactionTest {
         completionJson = "{}",
         error = null,
         receivedAt = 1,
-        updatedAt = 1,
         completedAt = null,
-        requestAcknowledgedAt = 1,
-        responseAcknowledgedAt = 1,
-        completionAcknowledgedAt = 1,
+        requestAcknowledged = true,
+        responseAcknowledged = true,
+        completionAcknowledged = true,
     )
 
     private fun pendingAttempt(withPendingPsk: Boolean = false) = PairingAttemptEntity(
@@ -982,12 +989,10 @@ class RequestDaoTransactionTest {
         osVersion = null,
         pairedAt = 2,
         lastSeenAt = 2,
-        updatedAt = 2,
     )
 
     private fun activatedRoot(root: InboxRequestEntity) = root.copy(
         state = "completed",
-        updatedAt = 2,
         completedAt = 2,
     )
 
@@ -1006,11 +1011,10 @@ class RequestDaoTransactionTest {
         completionJson = null,
         error = null,
         receivedAt = 2,
-        updatedAt = 2,
         completedAt = 2,
-        requestAcknowledgedAt = null,
-        responseAcknowledgedAt = null,
-        completionAcknowledgedAt = null,
+        requestAcknowledged = false,
+        responseAcknowledged = false,
+        completionAcknowledged = false,
     )
 
     private fun pairingRemovalRequest(rootId: String) = InboxRequestEntity(
@@ -1028,11 +1032,10 @@ class RequestDaoTransactionTest {
         completionJson = null,
         error = null,
         receivedAt = 2,
-        updatedAt = 2,
         completedAt = null,
-        requestAcknowledgedAt = null,
-        responseAcknowledgedAt = null,
-        completionAcknowledgedAt = null,
+        requestAcknowledged = false,
+        responseAcknowledged = false,
+        completionAcknowledged = false,
     )
 
     private fun requestPsk(requestId: String) = RequestPskEntity(

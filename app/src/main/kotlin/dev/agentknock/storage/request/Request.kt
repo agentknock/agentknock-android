@@ -74,16 +74,14 @@ internal data class InboxRequestEntity(
     val error: String?,
     @ColumnInfo(name = "received_at")
     val receivedAt: Long,
-    @ColumnInfo(name = "updated_at")
-    val updatedAt: Long,
     @ColumnInfo(name = "completed_at")
     val completedAt: Long?,
-    @ColumnInfo(name = "request_acknowledged_at")
-    val requestAcknowledgedAt: Long?,
-    @ColumnInfo(name = "response_acknowledged_at")
-    val responseAcknowledgedAt: Long?,
-    @ColumnInfo(name = "completion_acknowledged_at")
-    val completionAcknowledgedAt: Long?,
+    @ColumnInfo(name = "request_acknowledged")
+    val requestAcknowledged: Boolean,
+    @ColumnInfo(name = "response_acknowledged")
+    val responseAcknowledged: Boolean,
+    @ColumnInfo(name = "completion_acknowledged")
+    val completionAcknowledged: Boolean,
 )
 
 @Entity(
@@ -124,7 +122,7 @@ internal data class PairingAttemptEntity(
     @ColumnInfo(name = "desired_relay_client_state")
     val desiredRelayClientState: String?,
     @ColumnInfo(name = "relay_client_state")
-    val relayClientState: String?,
+    val relayClientState: String,
     @ColumnInfo(name = "state")
     val state: String,
     @ColumnInfo(name = "sas_option_0")
@@ -200,8 +198,6 @@ internal data class ClientEntity(
     val pairedAt: Long,
     @ColumnInfo(name = "last_seen_at")
     val lastSeenAt: Long?,
-    @ColumnInfo(name = "updated_at")
-    val updatedAt: Long,
 )
 
 @Entity(
@@ -293,8 +289,8 @@ internal data class SecretUseRequestEntity(
     @ColumnInfo(name = "os_version")
     val osVersion: String?,
     @ColumnInfo(name = "invocation_token_hash")
-    val invocationTokenHash: ByteArray?,
-    @ColumnInfo(name = "contains_sensitive_material", defaultValue = "1")
+    val invocationTokenHash: ByteArray,
+    @ColumnInfo(name = "contains_sensitive_material")
     val containsSensitiveMaterial: Boolean,
     @ColumnInfo(name = "secrets_json")
     val secretsJson: String,
@@ -661,9 +657,6 @@ internal interface RequestDao {
         requestId: String,
     ): Flow<List<SecretUploadEnvironmentVariableEntity>>
 
-    @Query("SELECT * FROM secret_upload_ssh_keys WHERE request_id = :requestId")
-    fun observeSecretUploadSshKey(requestId: String): Flow<SecretUploadSshKeyEntity?>
-
     @Query(
         "SELECT clients.* FROM clients " +
             "JOIN device_identities ON device_identities.id = clients.device_identity_id " +
@@ -677,23 +670,22 @@ internal interface RequestDao {
     @Query(
         """
         UPDATE inbox_requests
-        SET state = 'action_required', updated_at = MAX(updated_at, :recoveredAt)
+        SET state = 'action_required'
         WHERE state = 'reviewing'
         """,
     )
-    suspend fun recoverInterruptedAiReviews(recoveredAt: Long): Int
+    suspend fun recoverInterruptedAiReviews(): Int
 
     @Query(
         """
         UPDATE inbox_requests
-        SET state = 'action_required', updated_at = MAX(updated_at, :recoveredAt)
+        SET state = 'action_required'
         WHERE id = :requestId AND request_json = :requestJson AND state = 'reviewing'
         """,
     )
     suspend fun recoverInterruptedAiReview(
         requestId: String,
         requestJson: String,
-        recoveredAt: Long,
     ): Int
 
     @Query("SELECT EXISTS(SELECT 1 FROM device_identities WHERE id = :id AND role = 'active')")
@@ -717,9 +709,6 @@ internal interface RequestDao {
             "AND device_identities.role = 'active'",
     )
     suspend fun getPairingAttempt(requestId: String): PairingAttemptEntity?
-
-    @Query("SELECT * FROM pairing_attempts WHERE request_id = :requestId")
-    suspend fun getPairingAttemptRecord(requestId: String): PairingAttemptEntity?
 
     @Query(
         "SELECT pairing_attempts.* FROM pairing_attempts " +
@@ -816,9 +805,31 @@ internal interface RequestDao {
     suspend fun getRequestPsk(requestId: String): RequestPskEntity?
 
     @Query(
+        """
+        DELETE FROM request_psks
+        WHERE request_id = :requestId
+          AND EXISTS (
+            SELECT 1 FROM inbox_requests
+            WHERE id = :requestId AND completion_json IS NOT NULL
+          )
+        """,
+    )
+    suspend fun deleteCompletedRequestPsk(requestId: String): Int
+
+    @Query(
+        """
+        DELETE FROM request_psks
+        WHERE request_id IN (
+            SELECT id FROM inbox_requests WHERE completion_json IS NOT NULL
+        )
+        """,
+    )
+    suspend fun deleteCompletedRequestPsks(): Int
+
+    @Query(
         "SELECT inbox_requests.* FROM inbox_requests " +
             "JOIN device_identities ON device_identities.id = inbox_requests.device_identity_id " +
-            "WHERE response_json IS NOT NULL AND response_acknowledged_at IS NULL " +
+            "WHERE response_json IS NOT NULL AND response_acknowledged = 0 " +
             "AND device_identities.role = 'active' ORDER BY received_at, inbox_requests.id",
     )
     suspend fun getUnacknowledgedResponses(): List<InboxRequestEntity>
@@ -830,7 +841,7 @@ internal interface RequestDao {
         WHERE device_identities.role = 'active'
           AND (
             completed_at IS NULL
-            OR response_acknowledged_at IS NULL AND response_json IS NOT NULL
+            OR response_acknowledged = 0 AND response_json IS NOT NULL
           )
         ORDER BY received_at, inbox_requests.id
         """,
@@ -964,33 +975,27 @@ internal interface RequestDao {
 
     @Query(
         """
-        UPDATE inbox_requests
-        SET request_acknowledged_at = COALESCE(request_acknowledged_at, :acknowledgedAt),
-            updated_at = MAX(updated_at, :acknowledgedAt)
-        WHERE id = :requestId
+        UPDATE inbox_requests SET request_acknowledged = 1
+        WHERE id = :requestId AND request_acknowledged = 0
         """,
     )
-    suspend fun markRequestAcknowledged(requestId: String, acknowledgedAt: Long): Int
+    suspend fun markRequestAcknowledged(requestId: String): Int
 
     @Query(
         """
-        UPDATE inbox_requests
-        SET response_acknowledged_at = COALESCE(response_acknowledged_at, :acknowledgedAt),
-            updated_at = MAX(updated_at, :acknowledgedAt)
-        WHERE id = :requestId
+        UPDATE inbox_requests SET response_acknowledged = 1
+        WHERE id = :requestId AND response_acknowledged = 0
         """,
     )
-    suspend fun markResponseAcknowledged(requestId: String, acknowledgedAt: Long): Int
+    suspend fun markResponseAcknowledged(requestId: String): Int
 
     @Query(
         """
-        UPDATE inbox_requests
-        SET completion_acknowledged_at = COALESCE(completion_acknowledged_at, :acknowledgedAt),
-            updated_at = MAX(updated_at, :acknowledgedAt)
-        WHERE id = :requestId
+        UPDATE inbox_requests SET completion_acknowledged = 1
+        WHERE id = :requestId AND completion_acknowledged = 0
         """,
     )
-    suspend fun markCompletionAcknowledged(requestId: String, acknowledgedAt: Long): Int
+    suspend fun markCompletionAcknowledged(requestId: String): Int
 
     @Query(
         """
@@ -1043,9 +1048,9 @@ internal interface RequestDao {
                 AND device_identities.role = 'retired'
             )
             OR (
-              request_acknowledged_at IS NOT NULL
-              AND (response_json IS NULL OR response_acknowledged_at IS NOT NULL)
-              AND (completion_json IS NULL OR completion_acknowledged_at IS NOT NULL)
+              request_acknowledged = 1
+              AND (response_json IS NULL OR response_acknowledged = 1)
+              AND (completion_json IS NULL OR completion_acknowledged = 1)
             )
           )
           AND NOT EXISTS (
@@ -1057,7 +1062,6 @@ internal interface RequestDao {
             WHERE attempt.request_id = inbox_requests.id
               AND attempt.desired_relay_client_state IS NOT NULL
               AND (
-                attempt.relay_client_state IS NULL OR
                 attempt.relay_client_state != attempt.desired_relay_client_state
               )
           )

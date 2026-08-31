@@ -4,6 +4,7 @@ import androidx.room3.Room
 import androidx.test.ext.junit.runners.AndroidJUnit4
 import androidx.test.platform.app.InstrumentationRegistry
 import dev.agentknock.storage.AgentknockDatabase
+import dev.agentknock.storage.audit.AuditEventEntity
 import dev.agentknock.storage.crypto.VaultKeyEntity
 import dev.agentknock.storage.crypto.VaultKeyPurpose
 import dev.agentknock.storage.crypto.EncryptedValue
@@ -14,6 +15,9 @@ import dev.agentknock.storage.request.PairingAttemptEntity
 import dev.agentknock.storage.request.RequestPskEntity
 import dev.agentknock.storage.request.SecretUploadEnvironmentVariableEntity
 import dev.agentknock.storage.request.SecretUploadRequestEntity
+import dev.agentknock.storage.secret.SecretClientApprovalOverrideEntity
+import dev.agentknock.storage.secret.SecretEntity
+import dev.agentknock.storage.secret.TemporaryAccessGrantEntity
 import kotlinx.coroutines.flow.first
 import kotlinx.coroutines.test.runTest
 import org.junit.After
@@ -43,7 +47,7 @@ class DeviceIdentityRetentionTest {
     }
 
     @Test
-    fun replacingIdentityRetainsCredentialsClientsAndRequestProvenance() = runTest {
+    fun replacingIdentityPurgesObsoleteStateAndRetainsRequestAndAuditProvenance() = runTest {
         database.vaultKeyDao().insertKey(
             VaultKeyEntity(
                 id = "device-state-key",
@@ -60,13 +64,15 @@ class DeviceIdentityRetentionTest {
         database.deviceIdentityDao().insertIdentity(replacement)
         database.deviceIdentityDao().insertCredentials(credentials(replacement.id, 2))
         database.requestDao().insertClient(client(original.id))
-        database.requestDao().insertRequest(request(original.id))
+        val historicalRequest = request(original.id).copy(listed = true)
+        database.requestDao().insertRequest(historicalRequest)
+        database.auditDao().insertEvents(listOf(auditEvent()))
 
         assertEquals(
             true,
             database.deviceIdentityDao().promoteCandidate(
                 candidateId = replacement.id,
-                claimedAt = 3,
+                now = 3,
                 activeRole = "active",
                 candidateRole = "candidate",
                 retiredRole = "retired",
@@ -76,14 +82,15 @@ class DeviceIdentityRetentionTest {
         val identities = database.deviceIdentityDao().observeIdentities().first()
         assertEquals("retired", identities.single { it.id == original.id }.role)
         assertEquals("active", identities.single { it.id == replacement.id }.role)
-        assertEquals(2, database.deviceIdentityDao().getCredentials(original.id).size)
+        assertTrue(database.deviceIdentityDao().getCredentials(original.id).isEmpty())
         assertEquals(2, database.deviceIdentityDao().getCredentials(replacement.id).size)
         assertNull(database.requestDao().getClient(CLIENT_ID))
-        assertEquals(original.id, database.requestDao().getClientById(CLIENT_ID)?.deviceIdentityId)
+        assertNull(database.requestDao().getClientById(CLIENT_ID))
         assertEquals(
-            original.id,
-            database.requestDao().getRequestById(REQUEST_ID)?.deviceIdentityId,
+            historicalRequest.copy(listed = false),
+            database.requestDao().getRequestById(REQUEST_ID),
         )
+        assertAuditSnapshotRemains()
 
         val secondReplacement = identity("identity-3", "device-3", "candidate", 4)
         database.deviceIdentityDao().insertIdentity(secondReplacement)
@@ -92,7 +99,7 @@ class DeviceIdentityRetentionTest {
             true,
             database.deviceIdentityDao().promoteCandidate(
                 candidateId = secondReplacement.id,
-                claimedAt = 5,
+                now = 5,
                 activeRole = "active",
                 candidateRole = "candidate",
                 retiredRole = "retired",
@@ -102,16 +109,16 @@ class DeviceIdentityRetentionTest {
         val twiceReplaced = database.deviceIdentityDao().observeIdentities().first()
         assertEquals(2, twiceReplaced.count { it.role == "retired" })
         assertNotNull(database.deviceIdentityDao().getIdentityById(original.id))
-        assertEquals(
-            6,
-            twiceReplaced.sumOf { database.deviceIdentityDao().getCredentials(it.id).size },
-        )
+        assertTrue(database.deviceIdentityDao().getCredentials(original.id).isEmpty())
+        assertTrue(database.deviceIdentityDao().getCredentials(replacement.id).isEmpty())
+        assertEquals(2, database.deviceIdentityDao().getCredentials(secondReplacement.id).size)
         assertNull(database.requestDao().getClient(CLIENT_ID))
-        assertEquals(original.id, database.requestDao().getClientById(CLIENT_ID)?.deviceIdentityId)
+        assertNull(database.requestDao().getClientById(CLIENT_ID))
         assertEquals(
-            original.id,
-            database.requestDao().getRequestById(REQUEST_ID)?.deviceIdentityId,
+            historicalRequest.copy(listed = false),
+            database.requestDao().getRequestById(REQUEST_ID),
         )
+        assertAuditSnapshotRemains()
     }
 
     @Test
@@ -135,10 +142,28 @@ class DeviceIdentityRetentionTest {
         requestDao.insertClient(
             client(original.id).copy(
                 desiredRelayClientState = "suspended",
-                updatedAt = 20,
             ),
         )
         requestDao.insertClientPsk(clientPsk())
+        database.secretDao().insertSecret(secret())
+        database.secretDao().upsertClientApprovalOverride(
+            SecretClientApprovalOverrideEntity(
+                secretId = SECRET_ID,
+                clientId = CLIENT_ID,
+                approvalMode = "approve",
+            ),
+        )
+        database.secretDao().upsertTemporaryAccessGrants(
+            listOf(
+                TemporaryAccessGrantEntity(
+                    secretId = SECRET_ID,
+                    clientId = CLIENT_ID,
+                    operation = "secret_use",
+                    expiresAt = 1_000,
+                ),
+            ),
+        )
+        database.auditDao().insertEvents(listOf(auditEvent()))
 
         val pairingId = "pending-pairing"
         requestDao.insertPairingRequest(
@@ -150,7 +175,7 @@ class DeviceIdentityRetentionTest {
                 listed = true,
                 error = "The pairing completion was malformed.",
                 completedAt = null,
-                requestAcknowledgedAt = 15,
+                requestAcknowledged = true,
             ),
             PairingAttemptEntity(
                 requestId = pairingId,
@@ -184,8 +209,8 @@ class DeviceIdentityRetentionTest {
                 listed = false,
                 responseJson = "{}",
                 completedAt = null,
-                requestAcknowledgedAt = 16,
-                responseAcknowledgedAt = null,
+                requestAcknowledged = true,
+                responseAcknowledged = false,
             ),
         )
         requestDao.insertRequestPsk(requestPsk(invocationId))
@@ -224,13 +249,13 @@ class DeviceIdentityRetentionTest {
             currentClientPsk = null,
             previousClientPsk = null,
         )
-        requestDao.insertRequest(request(original.id))
+        requestDao.insertRequest(request(original.id).copy(listed = true))
         val completedBefore = checkNotNull(requestDao.getRequestById(REQUEST_ID))
 
         assertTrue(
             database.deviceIdentityDao().promoteCandidate(
                 candidateId = replacement.id,
-                claimedAt = 30,
+                now = 30,
                 activeRole = "active",
                 candidateRole = "candidate",
                 retiredRole = "retired",
@@ -240,14 +265,11 @@ class DeviceIdentityRetentionTest {
         listOf(pairingId, invocationId, uploadId, approvedUploadId).forEach { id ->
             val abandoned = checkNotNull(requestDao.getRequestById(id))
             assertEquals("completed", abandoned.state)
+            assertEquals(false, abandoned.listed)
             assertEquals(30L, abandoned.completedAt)
             assertTrue(checkNotNull(abandoned.error).contains("previous device identity"))
         }
-        val abandonedPairing = checkNotNull(requestDao.getPairingAttemptRecord(pairingId))
-        assertEquals("rejected", abandonedPairing.state)
-        assertEquals(30L, abandonedPairing.decidedAt)
-        assertNull(abandonedPairing.desiredRelayClientState)
-        assertNull(abandonedPairing.pendingPsk)
+        assertNull(requestDao.getPairingAttempt(pairingId))
         assertTrue(
             checkNotNull(checkNotNull(requestDao.getRequestById(pairingId)).error)
                 .contains("pairing completion was malformed"),
@@ -255,14 +277,40 @@ class DeviceIdentityRetentionTest {
         assertEquals("rejected", requestDao.getSecretUploadRequest(uploadId)?.decision)
         assertEquals("approved", requestDao.getSecretUploadRequest(approvedUploadId)?.decision)
         assertTrue(requestDao.getSecretUploadEnvironmentVariables(uploadId).isEmpty())
-        assertNull(requestDao.getClientById(CLIENT_ID)?.desiredRelayClientState)
-        assertNotNull(requestDao.getClientPsk(CLIENT_ID, "current"))
-        assertNotNull(requestDao.getRequestPsk(invocationId))
-        assertEquals(completedBefore, requestDao.getRequestById(REQUEST_ID))
+        assertNull(requestDao.getClientById(CLIENT_ID))
+        assertNull(requestDao.getClientPsk(CLIENT_ID, "current"))
+        listOf(invocationId, uploadId, approvedUploadId).forEach { id ->
+            assertNull(requestDao.getRequestPsk(id))
+        }
+        assertTrue(database.deviceIdentityDao().getCredentials(original.id).isEmpty())
+        assertEquals(2, database.deviceIdentityDao().getCredentials(replacement.id).size)
+        assertTrue(
+            database.secretDao().getClientApprovalOverrides(CLIENT_ID, listOf(SECRET_ID)).isEmpty(),
+        )
+        assertTrue(
+            database.secretDao().getActiveTemporaryAccessGrants(
+                clientId = CLIENT_ID,
+                secretIds = listOf(SECRET_ID),
+                operation = "secret_use",
+                now = 0,
+            ).isEmpty(),
+        )
+        assertEquals(
+            completedBefore.copy(listed = false),
+            requestDao.getRequestById(REQUEST_ID),
+        )
+        listOf(pairingId, invocationId, uploadId, approvedUploadId, REQUEST_ID).forEach { id ->
+            val historical = checkNotNull(requestDao.getRequestById(id))
+            assertEquals(original.id, historical.deviceIdentityId)
+            assertEquals(if (id == pairingId) "pending-client" else CLIENT_ID, historical.clientId)
+            assertEquals("Original client", historical.clientNameSnapshot)
+            assertEquals(false, historical.listed)
+        }
+        assertAuditSnapshotRemains()
 
         val abandonedInvocation = checkNotNull(requestDao.getRequestById(invocationId))
-        assertEquals(16L, abandonedInvocation.requestAcknowledgedAt)
-        assertNull(abandonedInvocation.responseAcknowledgedAt)
+        assertTrue(abandonedInvocation.requestAcknowledged)
+        assertTrue(!abandonedInvocation.responseAcknowledged)
         assertTrue(requestDao.getUnacknowledgedResponses().isEmpty())
         assertTrue(requestDao.getUnsettledRequests().isEmpty())
         assertTrue(requestDao.observeListedRequests().first().isEmpty())
@@ -310,7 +358,7 @@ class DeviceIdentityRetentionTest {
         assertTrue(
             database.deviceIdentityDao().promoteCandidate(
                 candidateId = candidate.id,
-                claimedAt = 3,
+                now = 3,
                 activeRole = "active",
                 candidateRole = "candidate",
                 retiredRole = "retired",
@@ -336,7 +384,6 @@ class DeviceIdentityRetentionTest {
             address = "same-address-for-history",
             deviceId = deviceId,
             createdAt = createdAt,
-            claimedAt = createdAt.takeIf { role == "active" },
         )
 
     private fun credentials(identityId: String, marker: Int) = listOf(
@@ -369,8 +416,38 @@ class DeviceIdentityRetentionTest {
         osVersion = null,
         pairedAt = 10,
         lastSeenAt = 11,
-        updatedAt = 11,
     )
+
+    private fun secret() = SecretEntity(
+        id = SECRET_ID,
+        name = "Original secret",
+        description = "Kept independently of the retired client",
+        type = "environment",
+        createdAt = 9,
+        updatedAt = 9,
+    )
+
+    private fun auditEvent() = AuditEventEntity(
+        occurredAt = 13,
+        eventType = "secret_use",
+        subject = "Original secret",
+        context = "git status",
+        detail = "Historical audit detail",
+        outcome = "approved",
+        decisionSource = "manual",
+        expiresAt = null,
+        clientId = CLIENT_ID,
+        clientName = "Original client",
+        relayRequestId = REQUEST_ID,
+    )
+
+    private suspend fun assertAuditSnapshotRemains() {
+        val audit = database.auditDao().observeEvents().first().single()
+        assertEquals(CLIENT_ID, audit.clientId)
+        assertEquals("Original client", audit.clientName)
+        assertEquals(REQUEST_ID, audit.relayRequestId)
+        assertEquals("Historical audit detail", audit.detail)
+    }
 
     private fun clientPsk() = ClientPskEntity(
         clientId = CLIENT_ID,
@@ -433,15 +510,15 @@ class DeviceIdentityRetentionTest {
         completionJson = null,
         error = null,
         receivedAt = 12,
-        updatedAt = 12,
         completedAt = 12,
-        requestAcknowledgedAt = 12,
-        responseAcknowledgedAt = null,
-        completionAcknowledgedAt = null,
+        requestAcknowledged = true,
+        responseAcknowledged = false,
+        completionAcknowledged = false,
     )
 
     private companion object {
         const val CLIENT_ID = "01K2EP16NWNAGJYF8J1Q2V6P3X"
         const val REQUEST_ID = "01K2EP16NWNAGJYF8J1Q2V6P3Z"
+        const val SECRET_ID = "01K2EP16NWNAGJYF8J1Q2V6P4A"
     }
 }

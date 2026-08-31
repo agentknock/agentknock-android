@@ -454,7 +454,7 @@ internal class RequestRepository(
     suspend fun clearCompletedHistory(): Int = dao.clearCompletedHistory()
 
     suspend fun recoverInterruptedAiReviews(): Int = operationMutex.withLock {
-        dao.recoverInterruptedAiReviews(currentTimeMillis())
+        dao.recoverInterruptedAiReviews()
     }
 
     suspend fun sync(): RequestSyncResult = runConnection(keepConnected = false)
@@ -492,7 +492,7 @@ internal class RequestRepository(
 
     suspend fun hasPendingRelayWork(): Boolean = operationMutex.withLock {
         dao.getUnacknowledgedResponses().isNotEmpty() ||
-            dao.getUnsettledRequests().any { it.requestAcknowledgedAt != null } ||
+            dao.getUnsettledRequests().any { it.requestAcknowledged } ||
             dao.getClients().any { client ->
                 client.desiredRelayClientState != null &&
                     client.desiredRelayClientState != client.relayClientState
@@ -521,7 +521,6 @@ internal class RequestRepository(
                     dao.recoverInterruptedAiReview(
                         requestId = requestId,
                         requestJson = requestJson,
-                        recoveredAt = currentTimeMillis(),
                     )
                 }
             }
@@ -532,7 +531,6 @@ internal class RequestRepository(
                 dao.recoverInterruptedAiReview(
                     requestId = requestId,
                     requestJson = requestJson,
-                    recoveredAt = currentTimeMillis(),
                 )
             }
         } finally {
@@ -683,11 +681,10 @@ internal class RequestRepository(
                             )
                         }
                         if (acknowledgedKind != null) {
-                            val now = currentTimeMillis()
                             if (event.kind == RelayMessageKind.REQUEST) {
-                                dao.markRequestAcknowledged(event.requestId, now)
+                                dao.markRequestAcknowledged(event.requestId)
                             } else {
-                                dao.markCompletionAcknowledged(event.requestId, now)
+                                dao.markCompletionAcknowledged(event.requestId)
                             }
                             if (
                                 !connection.send(
@@ -723,14 +720,14 @@ internal class RequestRepository(
                     }
                     is RelayDeviceEvent.Acknowledgement -> {
                         if (event.kind == RelayMessageKind.RESPONSE) {
-                            dao.markResponseAcknowledged(event.requestId, currentTimeMillis())
+                            dao.markResponseAcknowledged(event.requestId)
                             awaitingResponses -= event.requestId
                         }
                         null
                     }
                     is RelayDeviceEvent.Receipt -> {
                         if (event.kind == RelayMessageKind.RESPONSE) {
-                            dao.markResponseAcknowledged(event.requestId, currentTimeMillis())
+                            dao.markResponseAcknowledged(event.requestId)
                             awaitingResponses -= event.requestId
                         }
                         null
@@ -761,7 +758,7 @@ internal class RequestRepository(
                     is RelayDeviceEvent.Inactive -> {
                         awaitingStates -= event.requestId
                         if (event.kind == RelayMessageKind.RESPONSE || event.kind == null) {
-                            dao.markResponseAcknowledged(event.requestId, currentTimeMillis())
+                            dao.markResponseAcknowledged(event.requestId)
                             awaitingResponses -= event.requestId
                         }
                         null
@@ -858,7 +855,7 @@ internal class RequestRepository(
             }
 
             for (request in dao.getUnsettledRequests()) {
-                if (request.requestAcknowledgedAt == null) continue
+                if (!request.requestAcknowledged) continue
                 if (request.id in awaitingStates) continue
                 if (request.deviceIdentityId != credentials.deviceIdentityId) continue
                 if (
@@ -926,7 +923,6 @@ internal class RequestRepository(
                     } else {
                         client.desiredRelayClientState?.takeUnless { it == event.state.wireName }
                     },
-                    updatedAt = now,
                 ),
             )
         }
@@ -953,13 +949,13 @@ internal class RequestRepository(
         if (event.request == RelayMessageState.DELIVERED ||
             event.request == RelayMessageState.DISCARDED
         ) {
-            dao.markRequestAcknowledged(event.requestId, now)
+            dao.markRequestAcknowledged(event.requestId)
         }
         if (event.response == RelayMessageState.ACCEPTED ||
             event.response == RelayMessageState.DELIVERED ||
             event.response == RelayMessageState.DISCARDED
         ) {
-            dao.markResponseAcknowledged(event.requestId, now)
+            dao.markResponseAcknowledged(event.requestId)
         }
         if (event.response == RelayMessageState.DELIVERED) {
             val request = dao.getRequestById(event.requestId)
@@ -970,7 +966,7 @@ internal class RequestRepository(
         if (event.completion == RelayMessageState.DELIVERED ||
             event.completion == RelayMessageState.DISCARDED
         ) {
-            dao.markCompletionAcknowledged(event.requestId, now)
+            dao.markCompletionAcknowledged(event.requestId)
         }
         if (event.exchange == RelayExchangeState.EXPIRED) {
             expireRequest(event.requestId, now)
@@ -986,7 +982,7 @@ internal class RequestRepository(
                 val pairing = dao.getPairingAttempt(request.id) ?: return
                 if (pairing.state == PairingState.RECEIVING.storedName) {
                     dao.updatePairingRequest(
-                        request.copy(error = message, updatedAt = now),
+                        request.copy(error = message),
                         pairing,
                     )
                 }
@@ -997,7 +993,6 @@ internal class RequestRepository(
                     request.copy(
                         state = InboxRequestState.COMPLETED.storedName,
                         error = message,
-                        updatedAt = now,
                         completedAt = now,
                     ),
                     secretUse,
@@ -1009,7 +1004,6 @@ internal class RequestRepository(
                     request.copy(
                         state = InboxRequestState.COMPLETED.storedName,
                         error = message,
-                        updatedAt = now,
                         completedAt = now,
                     ),
                     gitSign,
@@ -1021,7 +1015,6 @@ internal class RequestRepository(
                     request.copy(
                         state = InboxRequestState.COMPLETED.storedName,
                         error = message,
-                        updatedAt = now,
                         completedAt = now,
                     ),
                     authentication,
@@ -1032,7 +1025,6 @@ internal class RequestRepository(
                     request.copy(
                         state = InboxRequestState.COMPLETED.storedName,
                         error = message,
-                        updatedAt = now,
                         completedAt = now,
                     ),
                 )
@@ -1048,7 +1040,6 @@ internal class RequestRepository(
                             InboxRequestState.COMPLETED.storedName
                         },
                         error = message,
-                        updatedAt = now,
                         completedAt = if (pending) null else now,
                     ),
                     upload,
@@ -1059,7 +1050,6 @@ internal class RequestRepository(
                     request.copy(
                         state = InboxRequestState.COMPLETED.storedName,
                         error = message,
-                        updatedAt = now,
                         completedAt = now,
                     ),
                 )
@@ -1080,7 +1070,6 @@ internal class RequestRepository(
                     request.copy(
                         state = InboxRequestState.COMPLETED.storedName,
                         error = message,
-                        updatedAt = now,
                         completedAt = now,
                     ),
                 )
@@ -1105,7 +1094,6 @@ internal class RequestRepository(
                     InboxRequestState.COMPLETED.storedName
                 },
                 listed = verified,
-                updatedAt = now,
                 completedAt = if (verified) null else now,
             )
             val updatedPairing = pairing.copy(
@@ -1166,7 +1154,6 @@ internal class RequestRepository(
             request = request.copy(
                 state = InboxRequestState.COMPLETED.storedName,
                 listed = false,
-                updatedAt = now,
                 completedAt = now,
             ),
             attempt = pairing.copy(
@@ -1267,9 +1254,8 @@ internal class RequestRepository(
                 secretUseRequest.containsSensitiveMaterial ||
                 approvalContextChanged
             ) {
-                val now = currentTimeMillis()
                 dao.updateSecretUseRequest(
-                    request = request.copy(updatedAt = now),
+                    request = request,
                     secretUseRequest = secretUseRequest.copy(
                         secretDetailsJson = json.encodeToString(latestDescription.secrets),
                         missingSecretsJson = encodeStringList(latestDescription.missingSecrets),
@@ -1504,8 +1490,7 @@ internal class RequestRepository(
         val updatedRequest = request.copy(
             state = InboxRequestState.WAITING.storedName,
             responseJson = response.toString(),
-            responseAcknowledgedAt = null,
-            updatedAt = now,
+            responseAcknowledged = false,
         )
         val updatedSecretUse = secretUseRequest.copy(
             decision = decision.storedName,
@@ -1597,9 +1582,8 @@ internal class RequestRepository(
                 storedEvaluation == null ||
                 !storedEvaluation.hasSameSecretPolicies(currentEvaluation)
             ) {
-                val changedAt = currentTimeMillis()
                 dao.updateGitSignRequest(
-                    request.copy(updatedAt = changedAt),
+                    request,
                     gitSign.copy(
                         approvalEvaluationJson = json.encodeToString(currentEvaluation),
                     ),
@@ -1774,8 +1758,7 @@ internal class RequestRepository(
         val updatedRequest = request.copy(
             state = InboxRequestState.WAITING.storedName,
             responseJson = response.toString(),
-            responseAcknowledgedAt = null,
-            updatedAt = now,
+            responseAcknowledged = false,
         )
         val updatedGitSign = gitSign.copy(
             decision = decision.storedName,
@@ -1884,9 +1867,8 @@ internal class RequestRepository(
             )
         }
         if (storedEvaluation == null || !storedEvaluation.hasSameSecretPolicies(currentEvaluation)) {
-            val changedAt = currentTimeMillis()
             dao.updateSshAuthenticationRequest(
-                request.copy(updatedAt = changedAt),
+                request,
                 authentication.copy(
                     approvalEvaluationJson = json.encodeToString(currentEvaluation),
                 ),
@@ -2078,8 +2060,7 @@ internal class RequestRepository(
         val updatedRequest = request.copy(
             state = InboxRequestState.WAITING.storedName,
             responseJson = response.toString(),
-            responseAcknowledgedAt = null,
-            updatedAt = now,
+            responseAcknowledged = false,
         )
         val reason = when {
             decision != ApprovalDecision.DENIED -> null
@@ -2280,7 +2261,6 @@ internal class RequestRepository(
         val updatedRequest = request.copy(
             state = lifecycle.state.storedName,
             listed = false,
-            updatedAt = now,
             completedAt = if (lifecycle.completed) request.completedAt ?: now else null,
         )
         val decidedUpload = uploadRequest.copy(
@@ -2409,7 +2389,6 @@ internal class RequestRepository(
                 request = request.copy(
                     state = lifecycle.state.storedName,
                     listed = false,
-                    updatedAt = now,
                     completedAt = if (lifecycle.completed) request.completedAt ?: now else null,
                 ),
                 secretUpload = upload.copy(
@@ -2438,7 +2417,7 @@ internal class RequestRepository(
             require(trimmed.isNotEmpty()) { "A client name cannot be empty" }
             val client = dao.getClient(clientId)
                 ?: return@withLock ClientChangeResult.NOT_FOUND
-            dao.updateClient(client.copy(name = trimmed, updatedAt = currentTimeMillis()))
+            dao.updateClient(client.copy(name = trimmed))
             audit.record(
                 AuditRecord(
                     type = AuditEventType.CLIENT_RENAMED,
@@ -2461,7 +2440,7 @@ internal class RequestRepository(
         val normalized = instructions.trim()
         if (client.instructions == normalized) return@withLock ClientChangeResult.CHANGED
         dao.updateClient(
-            client.copy(instructions = normalized, updatedAt = currentTimeMillis()),
+            client.copy(instructions = normalized),
         )
         audit.record(
             AuditRecord(
@@ -2494,7 +2473,6 @@ internal class RequestRepository(
         if (!allowed) return@withLock ClientChangeResult.INVALID_STATE
         val updated = client.copy(
             desiredRelayClientState = state.wireName,
-            updatedAt = currentTimeMillis(),
         )
         if (state == RelayClientState.REVOKED) {
             dao.revokeClient(updated)
@@ -2788,11 +2766,10 @@ internal class RequestRepository(
             completionJson = null,
             error = null,
             receivedAt = now,
-            updatedAt = now,
             completedAt = null,
-            requestAcknowledgedAt = null,
-            responseAcknowledgedAt = null,
-            completionAcknowledgedAt = null,
+            requestAcknowledged = false,
+            responseAcknowledged = false,
+            completionAcknowledged = false,
         )
         val initialSecretUse = secretUseRequestEntity(
             requestId = relayRequestId,
@@ -2970,7 +2947,6 @@ internal class RequestRepository(
         val finalRequest = requestToUpdate.copy(
             state = reviewedRequestState(response != null).storedName,
             responseJson = response?.toString(),
-            updatedAt = decidedAt,
         )
         val currentSecretUse = if (aiInputsChanged) {
             secretUseRequestEntity(
@@ -3026,7 +3002,6 @@ internal class RequestRepository(
                     client = pairing.copy(
                         clientSoftwareJson = encodeClientSoftware(contents.clientSoftware),
                         lastSeenAt = now,
-                        updatedAt = now,
                     ),
                     requestPsk = acceptedSecrets.requestPsk,
                     currentClientPsk = acceptedSecrets.currentClientPsk,
@@ -3043,7 +3018,6 @@ internal class RequestRepository(
                     client = pairing.copy(
                         clientSoftwareJson = encodeClientSoftware(contents.clientSoftware),
                         lastSeenAt = now,
-                        updatedAt = now,
                     ),
                     requestPsk = acceptedSecrets.requestPsk,
                     currentClientPsk = acceptedSecrets.currentClientPsk,
@@ -3132,7 +3106,6 @@ internal class RequestRepository(
                 client = pairing.copy(
                     clientSoftwareJson = encodeClientSoftware(contents.clientSoftware),
                     lastSeenAt = now,
-                    updatedAt = now,
                 ),
                 requestPsk = acceptedSecrets.requestPsk,
                 currentClientPsk = acceptedSecrets.currentClientPsk,
@@ -3228,7 +3201,7 @@ internal class RequestRepository(
         val invocationRequest = dao.getRequestById(contents.invocationId) ?: return null
         if (invocationRequest.kind != RequestKind.SECRET_USE.storedName) return null
         val invocation = dao.getSecretUseRequest(invocationRequest.id) ?: return null
-        val expectedTokenHash = invocation.invocationTokenHash ?: return null
+        val expectedTokenHash = invocation.invocationTokenHash
         if (
             invocationRequest.clientId != pairing.clientId ||
             invocationRequest.deviceIdentityId != pairing.deviceIdentityId ||
@@ -3294,11 +3267,10 @@ internal class RequestRepository(
             completionJson = null,
             error = null,
             receivedAt = now,
-            updatedAt = now,
             completedAt = null,
-            requestAcknowledgedAt = null,
-            responseAcknowledgedAt = null,
-            completionAcknowledgedAt = null,
+            requestAcknowledged = false,
+            responseAcknowledged = false,
+            completionAcknowledged = false,
         )
         val initialGitSign = GitSignRequestEntity(
             requestId = relayRequestId,
@@ -3460,7 +3432,6 @@ internal class RequestRepository(
         val finalRequest = requestToUpdate.copy(
             state = reviewedRequestState(response != null).storedName,
             responseJson = response?.toString(),
-            updatedAt = decidedAt,
         )
         val finalGitSign = initialGitSign.copy(
             decision = automaticDecision?.storedName,
@@ -3477,7 +3448,6 @@ internal class RequestRepository(
                     client = pairing.copy(
                         clientSoftwareJson = encodeClientSoftware(contents.clientSoftware),
                         lastSeenAt = now,
-                        updatedAt = now,
                     ),
                     requestPsk = acceptedSecrets.requestPsk,
                     currentClientPsk = acceptedSecrets.currentClientPsk,
@@ -3494,7 +3464,6 @@ internal class RequestRepository(
                     client = pairing.copy(
                         clientSoftwareJson = encodeClientSoftware(contents.clientSoftware),
                         lastSeenAt = now,
-                        updatedAt = now,
                     ),
                     requestPsk = acceptedSecrets.requestPsk,
                     currentClientPsk = acceptedSecrets.currentClientPsk,
@@ -3586,7 +3555,6 @@ internal class RequestRepository(
                 client = pairing.copy(
                     clientSoftwareJson = encodeClientSoftware(contents.clientSoftware),
                     lastSeenAt = now,
-                    updatedAt = now,
                 ),
                 requestPsk = acceptedSecrets.requestPsk,
                 currentClientPsk = acceptedSecrets.currentClientPsk,
@@ -3634,7 +3602,7 @@ internal class RequestRepository(
         val invocationRequest = dao.getRequestById(contents.invocationId) ?: return null
         if (invocationRequest.kind != RequestKind.SECRET_USE.storedName) return null
         val invocation = dao.getSecretUseRequest(invocationRequest.id) ?: return null
-        val expectedTokenHash = invocation.invocationTokenHash ?: return null
+        val expectedTokenHash = invocation.invocationTokenHash
         if (
             invocationRequest.clientId != pairing.clientId ||
             invocationRequest.deviceIdentityId != pairing.deviceIdentityId ||
@@ -3708,11 +3676,10 @@ internal class RequestRepository(
             completionJson = null,
             error = null,
             receivedAt = now,
-            updatedAt = now,
             completedAt = null,
-            requestAcknowledgedAt = null,
-            responseAcknowledgedAt = null,
-            completionAcknowledgedAt = null,
+            requestAcknowledged = false,
+            responseAcknowledged = false,
+            completionAcknowledged = false,
         )
         val initialAuthentication = SshAuthenticationRequestEntity(
             requestId = relayRequestId,
@@ -3882,7 +3849,6 @@ internal class RequestRepository(
             val finalRequest = requestToUpdate.copy(
                 state = reviewedRequestState(response != null).storedName,
                 responseJson = response?.toString(),
-                updatedAt = decidedAt,
             )
             val finalAuthentication = initialAuthentication.copy(
                 decision = automaticDecision?.storedName,
@@ -3899,7 +3865,6 @@ internal class RequestRepository(
                         client = pairing.copy(
                             clientSoftwareJson = encodeClientSoftware(contents.clientSoftware),
                             lastSeenAt = now,
-                            updatedAt = now,
                         ),
                         requestPsk = acceptedSecrets.requestPsk,
                         currentClientPsk = acceptedSecrets.currentClientPsk,
@@ -3916,7 +3881,6 @@ internal class RequestRepository(
                         client = pairing.copy(
                             clientSoftwareJson = encodeClientSoftware(contents.clientSoftware),
                             lastSeenAt = now,
-                            updatedAt = now,
                         ),
                         requestPsk = acceptedSecrets.requestPsk,
                         currentClientPsk = acceptedSecrets.currentClientPsk,
@@ -4013,7 +3977,6 @@ internal class RequestRepository(
                 client = pairing.copy(
                     clientSoftwareJson = encodeClientSoftware(contents.clientSoftware),
                     lastSeenAt = now,
-                    updatedAt = now,
                 ),
                 requestPsk = acceptedSecrets.requestPsk,
                 currentClientPsk = acceptedSecrets.currentClientPsk,
@@ -4281,16 +4244,14 @@ internal class RequestRepository(
                 completionJson = null,
                 error = null,
                 receivedAt = now,
-                updatedAt = now,
                 completedAt = null,
-                requestAcknowledgedAt = null,
-                responseAcknowledgedAt = null,
-                completionAcknowledgedAt = null,
+                requestAcknowledged = false,
+                responseAcknowledged = false,
+                completionAcknowledged = false,
             ),
             client = pairing.copy(
                 clientSoftwareJson = encodeClientSoftware(contents.clientSoftware),
                 lastSeenAt = now,
-                updatedAt = now,
             ),
             requestPsk = acceptedSecrets.requestPsk,
             currentClientPsk = acceptedSecrets.currentClientPsk,
@@ -4453,11 +4414,10 @@ internal class RequestRepository(
                 completionJson = null,
                 error = null,
                 receivedAt = now,
-                updatedAt = now,
                 completedAt = null,
-                requestAcknowledgedAt = null,
-                responseAcknowledgedAt = null,
-                completionAcknowledgedAt = null,
+                requestAcknowledged = false,
+                responseAcknowledged = false,
+                completionAcknowledged = false,
             ),
             secretUpload = SecretUploadRequestEntity(
                 requestId = relayRequestId,
@@ -4477,7 +4437,6 @@ internal class RequestRepository(
             client = pairing.copy(
                 clientSoftwareJson = encodeClientSoftware(contents.clientSoftware),
                 lastSeenAt = now,
-                updatedAt = now,
             ),
             environmentVariables = prepared.environmentVariables,
             sshKey = prepared.sshKey,
@@ -4544,17 +4503,15 @@ internal class RequestRepository(
                 completionJson = null,
                 error = null,
                 receivedAt = now,
-                updatedAt = now,
                 completedAt = null,
-                requestAcknowledgedAt = null,
-                responseAcknowledgedAt = null,
-                completionAcknowledgedAt = null,
+                requestAcknowledged = false,
+                responseAcknowledged = false,
+                completionAcknowledged = false,
             ),
             requestPsk = acceptedSecrets.requestPsk,
             client = pairing.copy(
                 desiredRelayClientState = RelayClientState.REVOKED.wireName,
                 lastSeenAt = now,
-                updatedAt = now,
             ),
         )
         requestSync()
@@ -4600,13 +4557,12 @@ internal class RequestRepository(
                     completionJson = null,
                     error = code.message,
                     receivedAt = now,
-                    updatedAt = now,
                     completedAt = now,
-                    requestAcknowledgedAt = null,
-                    responseAcknowledgedAt = null,
-                    completionAcknowledgedAt = null,
+                    requestAcknowledged = false,
+                    responseAcknowledged = false,
+                    completionAcknowledged = false,
                 ),
-                client = pairing.copy(lastSeenAt = now, updatedAt = now),
+                client = pairing.copy(lastSeenAt = now),
                 requestPsk = acceptedSecrets.requestPsk,
                 currentClientPsk = acceptedSecrets.currentClientPsk,
                 previousClientPsk = acceptedSecrets.previousClientPsk,
@@ -4666,11 +4622,10 @@ internal class RequestRepository(
                     completionJson = null,
                     error = code.message,
                     receivedAt = now,
-                    updatedAt = now,
                     completedAt = now,
-                    requestAcknowledgedAt = null,
-                    responseAcknowledgedAt = null,
-                    completionAcknowledgedAt = null,
+                    requestAcknowledged = false,
+                    responseAcknowledged = false,
+                    completionAcknowledged = false,
                 ),
                 client = null,
                 requestPsk = acceptedPsks.requestPsk,
@@ -4732,11 +4687,10 @@ internal class RequestRepository(
             completionJson = null,
             error = null,
             receivedAt = now,
-            updatedAt = now,
             completedAt = null,
-            requestAcknowledgedAt = null,
-            responseAcknowledgedAt = null,
-            completionAcknowledgedAt = null,
+            requestAcknowledged = false,
+            responseAcknowledged = false,
+            completionAcknowledged = false,
         )
         dao.insertPairingRequest(
             request = request,
@@ -4839,7 +4793,6 @@ internal class RequestRepository(
             dao.updatePairingRequest(
                 request = request.copy(
                     error = failure.message ?: "The pairing message could not be verified.",
-                    updatedAt = now,
                 ),
                 attempt = pairing,
             )
@@ -4871,13 +4824,12 @@ internal class RequestRepository(
                 state = InboxRequestState.ACTION_REQUIRED.storedName,
                 clientSoftwareJson = metadata?.clientSoftware?.let(::encodeClientSoftware),
                 completionJson = completion.toString(),
-                responseAcknowledgedAt = request.responseAcknowledgedAt ?: now,
+                responseAcknowledged = true,
                 error = if (metadata == null) {
                     "The client details could not be read, but the security code is valid."
                 } else {
                     null
                 },
-                updatedAt = now,
             ),
             attempt = completedAttempt,
         )
@@ -4898,7 +4850,7 @@ internal class RequestRepository(
             pairing.state != PairingState.RELAY_ACTIVATION_PENDING.storedName &&
             pairing.state != PairingState.WAITING_FOR_FINISH.storedName
         ) return null
-        val relayClientState = pairing.relayClientState?.toRelayClientState() ?: return null
+        val relayClientState = pairing.relayClientState.toRelayClientState()
         if (
             relayClientState == RelayClientState.PENDING &&
             pairing.desiredRelayClientState != RelayClientState.ACTIVE.wireName
@@ -4931,11 +4883,10 @@ internal class RequestRepository(
             completionJson = null,
             error = null,
             receivedAt = now,
-            updatedAt = now,
             completedAt = now,
-            requestAcknowledgedAt = null,
-            responseAcknowledgedAt = null,
-            completionAcknowledgedAt = null,
+            requestAcknowledged = false,
+            responseAcknowledged = false,
+            completionAcknowledged = false,
         )
         val client = if (relayClientState == RelayClientState.REVOKED) {
             null
@@ -4956,7 +4907,6 @@ internal class RequestRepository(
                 osVersion = pairing.osVersion,
                 pairedAt = now,
                 lastSeenAt = now,
-                updatedAt = now,
             )
         }
         val clientPsk = client?.let { material.encryptClientPsk(it, opened.clientPsk, now) }
@@ -4964,7 +4914,6 @@ internal class RequestRepository(
             rootRequest = rootRequest.copy(
                 state = InboxRequestState.COMPLETED.storedName,
                 listed = false,
-                updatedAt = now,
                 completedAt = now,
             ),
             attempt = pairing.copy(
@@ -5000,7 +4949,7 @@ internal class RequestRepository(
         if (request.clientId != message.clientId) return null
         val isInitialPairing = request.kind == RequestKind.PAIRING.storedName
         if (isInitialPairing != (message.addressId != null)) return null
-        return when (request.kind) {
+        val processed = when (request.kind) {
             RequestKind.PAIRING.storedName -> {
                 val pairing = dao.getPairingAttempt(request.id) ?: return null
                 val credentials = credentialsForRequest(request, activeCredentials) ?: return null
@@ -5032,6 +4981,8 @@ internal class RequestRepository(
             }
             else -> null
         }
+        if (processed != null) dao.deleteCompletedRequestPsk(request.id)
+        return processed
     }
 
     private suspend fun processUnknownCompletion(
@@ -5045,9 +4996,8 @@ internal class RequestRepository(
         dao.updateRequest(
             request.copy(
                 completionJson = completion.toString(),
-                responseAcknowledgedAt = request.responseAcknowledgedAt ?: now,
-                completionAcknowledgedAt = null,
-                updatedAt = now,
+                responseAcknowledged = true,
+                completionAcknowledged = false,
             ),
         )
         return ProcessedRelayMessage()
@@ -5069,10 +5019,9 @@ internal class RequestRepository(
             request = request.copy(
                 state = InboxRequestState.COMPLETED.storedName,
                 completionJson = completion.toString(),
-                responseAcknowledgedAt = request.responseAcknowledgedAt ?: now,
-                completionAcknowledgedAt = null,
+                responseAcknowledged = true,
+                completionAcknowledged = false,
                 error = error,
-                updatedAt = now,
                 completedAt = now,
             ),
         )
@@ -5119,10 +5068,9 @@ internal class RequestRepository(
             request = request.copy(
                 state = lifecycle.state.storedName,
                 completionJson = completion.toString(),
-                responseAcknowledgedAt = request.responseAcknowledgedAt ?: now,
-                completionAcknowledgedAt = null,
+                responseAcknowledged = true,
+                completionAcknowledged = false,
                 error = error,
-                updatedAt = now,
                 completedAt = request.completedAt ?: if (lifecycle.completed) now else null,
             ),
             secretUpload = upload,
@@ -5157,9 +5105,8 @@ internal class RequestRepository(
                 request.copy(
                     state = InboxRequestState.COMPLETED.storedName,
                     completionJson = completion.toString(),
-                    responseAcknowledgedAt = request.responseAcknowledgedAt ?: now,
-                    completionAcknowledgedAt = null,
-                    updatedAt = now,
+                    responseAcknowledged = true,
+                    completionAcknowledged = false,
                     completedAt = now,
                 ),
             )
@@ -5190,13 +5137,12 @@ internal class RequestRepository(
             request.copy(
                 state = InboxRequestState.COMPLETED.storedName,
                 completionJson = completion?.toString() ?: request.completionJson,
-                responseAcknowledgedAt = request.responseAcknowledgedAt ?: now,
-                completionAcknowledgedAt = if (completion == null) {
-                    request.completionAcknowledgedAt
+                responseAcknowledged = true,
+                completionAcknowledged = if (completion == null) {
+                    request.completionAcknowledged
                 } else {
-                    null
+                    false
                 },
-                updatedAt = now,
                 completedAt = now,
             ),
         )
@@ -5205,7 +5151,6 @@ internal class RequestRepository(
             dao.revokeClient(
                 client.copy(
                     desiredRelayClientState = RelayClientState.REVOKED.wireName,
-                    updatedAt = now,
                 ),
             )
         }
@@ -5263,10 +5208,9 @@ internal class RequestRepository(
             request = request.copy(
                 state = InboxRequestState.COMPLETED.storedName,
                 completionJson = completion.toString(),
-                responseAcknowledgedAt = request.responseAcknowledgedAt ?: now,
-                completionAcknowledgedAt = null,
+                responseAcknowledged = true,
+                completionAcknowledged = false,
                 error = error,
-                updatedAt = now,
                 completedAt = now,
             ),
             secretUseRequest = secretUseRequest.copy(
@@ -5358,10 +5302,9 @@ internal class RequestRepository(
             request = request.copy(
                 state = InboxRequestState.COMPLETED.storedName,
                 completionJson = completion.toString(),
-                responseAcknowledgedAt = request.responseAcknowledgedAt ?: now,
-                completionAcknowledgedAt = null,
+                responseAcknowledged = true,
+                completionAcknowledged = false,
                 error = error,
-                updatedAt = now,
                 completedAt = now,
             ),
             gitSignRequest = gitSign.copy(
@@ -5446,10 +5389,9 @@ internal class RequestRepository(
             request = request.copy(
                 state = InboxRequestState.COMPLETED.storedName,
                 completionJson = completion.toString(),
-                responseAcknowledgedAt = request.responseAcknowledgedAt ?: now,
-                completionAcknowledgedAt = null,
+                responseAcknowledged = true,
+                completionAcknowledged = false,
                 error = error,
-                updatedAt = now,
                 completedAt = now,
             ),
             authentication = authentication.copy(
@@ -5521,9 +5463,8 @@ internal class RequestRepository(
         dao.updateRequest(
             finishRequest.copy(
                 completionJson = completion.toString(),
-                responseAcknowledgedAt = finishRequest.responseAcknowledgedAt ?: now,
-                completionAcknowledgedAt = null,
-                updatedAt = now,
+                responseAcknowledged = true,
+                completionAcknowledged = false,
             ),
         )
         audit.record(

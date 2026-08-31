@@ -492,7 +492,6 @@ class ApprovalReviewContextTest {
         osVersion = "reported-os-version",
         pairedAt = 1,
         lastSeenAt = 2,
-        updatedAt = 2,
     )
 
     private fun storedInvocation() = SecretUseRequestEntity(

@@ -35,7 +35,7 @@ internal data class SecretEntity(
     val createdAt: Long,
     @ColumnInfo(name = "updated_at")
     val updatedAt: Long,
-    @ColumnInfo(name = "revision", defaultValue = "1")
+    @ColumnInfo(name = "revision")
     val revision: Long = 1,
     @ColumnInfo(name = "approval_mode")
     val approvalMode: String = "temporary",

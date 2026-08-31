@@ -129,7 +129,6 @@ class RequestRepositorySlotTest {
                 address = ADDRESS,
                 deviceId = DEVICE_ID,
                 createdAt = now,
-                claimedAt = now,
             ),
         )
         relay = QueuedRelayDeviceClient()
@@ -257,7 +256,7 @@ class RequestRepositorySlotTest {
             acceptedCompletion.toString(),
             database.requestDao().getRequestById(root.id)?.completionJson,
         )
-        assertNotNull(database.requestDao().getRequestById(root.id)?.completionAcknowledgedAt)
+        assertTrue(checkNotNull(database.requestDao().getRequestById(root.id)).completionAcknowledged)
     }
 
     @Test
@@ -277,7 +276,7 @@ class RequestRepositorySlotTest {
             RequestSyncResult.RelayUnavailable("disconnect before response receipt"),
             repository.sync(),
         )
-        assertNull(database.requestDao().getRequestById(CLIENT_ID)?.responseAcknowledgedAt)
+        assertFalse(checkNotNull(database.requestDao().getRequestById(CLIENT_ID)).responseAcknowledged)
 
         now += 1
         connect(
@@ -294,7 +293,7 @@ class RequestRepositorySlotTest {
             RequestSyncResult.RelayUnavailable("disconnect after completion"),
             repository.sync(),
         )
-        assertEquals(now, database.requestDao().getRequestById(CLIENT_ID)?.responseAcknowledgedAt)
+        assertTrue(checkNotNull(database.requestDao().getRequestById(CLIENT_ID)).responseAcknowledged)
     }
 
     @Test
@@ -557,8 +556,8 @@ class RequestRepositorySlotTest {
         val persistedResponse = Json.parseToJsonElement(checkNotNull(stored.responseJson))
         assertEquals(invocation.toString(), stored.requestJson)
         assertEquals("waiting", stored.state)
-        assertNotNull(stored.requestAcknowledgedAt)
-        assertNull(stored.responseAcknowledgedAt)
+        assertTrue(stored.requestAcknowledged)
+        assertFalse(stored.responseAcknowledged)
         assertEquals("approved", storedInvocation.decision)
         assertEquals("git-signing", storedInvocation.secretsJson.removeSurrounding("[\"", "\"]"))
         assertEquals(
@@ -616,7 +615,7 @@ class RequestRepositorySlotTest {
         assertEquals(stored.id, afterReplay.id)
         assertEquals(stored.receivedAt, afterReplay.receivedAt)
         assertEquals(stored.responseJson, afterReplay.responseJson)
-        assertNotNull(afterReplay.responseAcknowledgedAt)
+        assertTrue(afterReplay.responseAcknowledged)
     }
 
     @Test
@@ -641,7 +640,7 @@ class RequestRepositorySlotTest {
             database.requestDao().getRequestById(AI_INVOCATION_REQUEST_ID),
         )
         assertEquals(InboxRequestState.REVIEWING.storedName, reviewing.state)
-        assertNotNull(reviewing.requestAcknowledgedAt)
+        assertTrue(reviewing.requestAcknowledged)
         assertEquals(1, approvalReviewer.callCount)
         assertEquals(
             RelayPushRegistrationState.REGISTERED,
@@ -789,9 +788,9 @@ class RequestRepositorySlotTest {
                 ),
             ),
         )
-        assertNotNull(
-            database.requestDao().getRequestById(AI_INVOCATION_REQUEST_ID)
-                ?.responseAcknowledgedAt,
+        assertTrue(
+            checkNotNull(database.requestDao().getRequestById(AI_INVOCATION_REQUEST_ID))
+                .responseAcknowledged,
         )
     }
 
@@ -964,11 +963,10 @@ class RequestRepositorySlotTest {
                 completionJson = null,
                 error = null,
                 receivedAt = now,
-                updatedAt = now,
                 completedAt = null,
-                requestAcknowledgedAt = now,
-                responseAcknowledgedAt = null,
-                completionAcknowledgedAt = null,
+                requestAcknowledged = true,
+                responseAcknowledged = false,
+                completionAcknowledged = false,
             ),
         )
 
@@ -1140,7 +1138,6 @@ class RequestRepositorySlotTest {
                 osVersion = null,
                 pairedAt = now,
                 lastSeenAt = now,
-                updatedAt = now,
             ),
         )
         val collision = connect(
@@ -1224,7 +1221,7 @@ class RequestRepositorySlotTest {
         val deniedSigning = checkNotNull(database.requestDao().getGitSignRequest(child.id))
         val persistedResponse = Json.parseToJsonElement(checkNotNull(denied.responseJson))
         assertEquals("waiting", denied.state)
-        assertNull(denied.responseAcknowledgedAt)
+        assertFalse(denied.responseAcknowledged)
         assertEquals("denied", deniedSigning.decision)
         assertEquals("USER_DENIED", deniedSigning.completionReason)
         // Pairing belongs to Clients rather than request history. The active invocation and its
@@ -1266,7 +1263,7 @@ class RequestRepositorySlotTest {
         )
         val afterReplay = checkNotNull(database.requestDao().getRequestById(child.id))
         assertEquals(denied.responseJson, afterReplay.responseJson)
-        assertNotNull(afterReplay.responseAcknowledgedAt)
+        assertTrue(afterReplay.responseAcknowledged)
     }
 
     private suspend fun establishActivePairing(): ByteArray {
@@ -1472,7 +1469,7 @@ class RequestRepositorySlotTest {
             RequestSyncResult.RelayUnavailable("disconnect before response receipt"),
             repository.sync(),
         )
-        assertNull(database.requestDao().getRequestById(requestId)?.responseAcknowledgedAt)
+        assertFalse(checkNotNull(database.requestDao().getRequestById(requestId)).responseAcknowledged)
 
         now += 1
         connect(
@@ -1489,9 +1486,8 @@ class RequestRepositorySlotTest {
             RequestSyncResult.RelayUnavailable("disconnect after completion"),
             repository.sync(),
         )
-        assertEquals(
-            now,
-            database.requestDao().getRequestById(requestId)?.responseAcknowledgedAt,
+        assertTrue(
+            checkNotNull(database.requestDao().getRequestById(requestId)).responseAcknowledged,
         )
     }
 

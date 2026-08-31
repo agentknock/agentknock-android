@@ -21,7 +21,6 @@ import org.junit.Assert.assertEquals
 import org.junit.Assert.assertArrayEquals
 import org.junit.Assert.assertFalse
 import org.junit.Assert.assertNotEquals
-import org.junit.Assert.assertNull
 import org.junit.Assert.assertTrue
 import org.junit.Test
 
@@ -40,7 +39,7 @@ class DeviceIdentityRepositoryTest {
         assertEquals(DeviceIdentityRole.ACTIVE.storedName, active.role)
         assertEquals("yup-its-free", active.address)
         assertEquals(26, active.deviceId.length)
-        assertTrue(active.claimedAt != null)
+        assertTrue(active.claimAttemptedAt != null)
         val credentials = fixture.dao.credentials.value
         assertEquals(
             setOf("device_token", "device_private_key"),
@@ -253,7 +252,6 @@ class DeviceIdentityRepositoryTest {
         assertEquals(activeId, active.id)
         assertEquals("amber-river-maple", active.address)
         assertEquals("silent-forest-cloud", candidate.address)
-        assertNull(candidate.claimedAt)
         assertNotEquals(
             dev.agentknock.protocol.DeviceProtocol.addressId(active.address),
             dev.agentknock.protocol.DeviceProtocol.addressId(candidate.address),
@@ -388,8 +386,10 @@ class DeviceIdentityRepositoryTest {
             setOf("device_token", "device_private_key"),
             fixture.dao.credentials.value.map { it.kind }.toSet(),
         )
-        assertEquals(2, fixture.dao.credentials.value.count { it.identityId == original.id })
+        assertEquals(0, fixture.dao.credentials.value.count { it.identityId == original.id })
         assertEquals(2, fixture.dao.credentials.value.count { it.identityId == replacement.id })
+        assertEquals(listOf(original.id), fixture.dao.requestPskDeletionIdentityIds)
+        assertEquals(listOf(original.id), fixture.dao.clientDeletionIdentityIds)
     }
 
     private class Fixture(dispatcher: CoroutineDispatcher) {
@@ -451,6 +451,8 @@ private class FakeRelayClaimClient : RelayClaimClient {
 private class FakeDeviceIdentityDao : DeviceIdentityDao {
     val identities = MutableStateFlow<List<DeviceIdentityEntity>>(emptyList())
     val credentials = MutableStateFlow<List<DeviceCredentialEntity>>(emptyList())
+    val requestPskDeletionIdentityIds = mutableListOf<String>()
+    val clientDeletionIdentityIds = mutableListOf<String>()
 
     override fun observeIdentities(): Flow<List<DeviceIdentityEntity>> = identities
 
@@ -506,14 +508,13 @@ private class FakeDeviceIdentityDao : DeviceIdentityDao {
 
     override suspend fun markCandidateActive(
         candidateId: String,
-        claimedAt: Long,
         activeRole: String,
         candidateRole: String,
     ): Int {
         if (identities.value.none { it.id == candidateId && it.role == candidateRole }) return 0
         identities.value = identities.value.map { identity ->
             if (identity.id == candidateId && identity.role == candidateRole) {
-                identity.copy(role = activeRole, claimedAt = claimedAt)
+                identity.copy(role = activeRole)
             } else {
                 identity
             }
@@ -547,18 +548,31 @@ private class FakeDeviceIdentityDao : DeviceIdentityDao {
 
     override suspend fun rejectPendingUploads(identityId: String, now: Long): Int = 0
 
-    override suspend fun clearClientDesires(identityId: String, now: Long): Int = 0
+    override suspend fun deleteCredentials(identityId: String): Int {
+        val previousSize = credentials.value.size
+        credentials.value = credentials.value.filterNot { it.identityId == identityId }
+        return previousSize - credentials.value.size
+    }
+
+    override suspend fun deleteRequestPsks(identityId: String): Int {
+        requestPskDeletionIdentityIds += identityId
+        return 0
+    }
+
+    override suspend fun deleteClients(identityId: String): Int {
+        clientDeletionIdentityIds += identityId
+        return 0
+    }
 
     override suspend fun updateActiveAddress(
         activeId: String,
         address: String,
-        claimedAt: Long,
         activeRole: String,
     ): Int {
         if (identities.value.none { it.id == activeId && it.role == activeRole }) return 0
         identities.value = identities.value.map { identity ->
             if (identity.id == activeId && identity.role == activeRole) {
-                identity.copy(address = address, claimedAt = claimedAt)
+                identity.copy(address = address)
             } else {
                 identity
             }

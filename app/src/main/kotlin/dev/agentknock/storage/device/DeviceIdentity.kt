@@ -30,8 +30,6 @@ internal data class DeviceIdentityEntity(
     val deviceId: String,
     @ColumnInfo(name = "created_at")
     val createdAt: Long,
-    @ColumnInfo(name = "claimed_at")
-    val claimedAt: Long?,
     @ColumnInfo(name = "claim_attempted_at")
     val claimAttemptedAt: Long? = null,
     @ColumnInfo(name = "pairing_enabled")
@@ -128,13 +126,12 @@ internal interface DeviceIdentityDao {
     @Query(
         """
         UPDATE device_identities
-        SET role = :activeRole, claimed_at = :claimedAt
+        SET role = :activeRole
         WHERE id = :candidateId AND role = :candidateRole
         """,
     )
     suspend fun markCandidateActive(
         candidateId: String,
-        claimedAt: Long,
         activeRole: String,
         candidateRole: String,
     ): Int
@@ -152,19 +149,15 @@ internal interface DeviceIdentityDao {
     @Query(
         """
         UPDATE inbox_requests
-        SET state = 'completed',
-            listed = CASE
-                WHEN kind IN ('pairing', 'secret_upload') THEN 0
-                ELSE listed
-            END,
+        SET state = CASE WHEN completed_at IS NULL THEN 'completed' ELSE state END,
+            listed = 0,
             error = CASE
+                WHEN completed_at IS NOT NULL THEN error
                 WHEN error IS NULL THEN :error
                 ELSE error || '\n\n' || :error
             END,
-            updated_at = MAX(updated_at, :now),
-            completed_at = :now
+            completed_at = COALESCE(completed_at, :now)
         WHERE device_identity_id = :identityId
-          AND completed_at IS NULL
         """,
     )
     suspend fun abandonRequests(identityId: String, now: Long, error: String): Int
@@ -235,29 +228,32 @@ internal interface DeviceIdentityDao {
     )
     suspend fun rejectPendingUploads(identityId: String, now: Long): Int
 
+    @Query("DELETE FROM device_credentials WHERE identity_id = :identityId")
+    suspend fun deleteCredentials(identityId: String): Int
+
     @Query(
         """
-        UPDATE clients
-        SET desired_relay_client_state = NULL,
-            updated_at = MAX(updated_at, :now)
-        WHERE device_identity_id = :identityId
-          AND desired_relay_client_state IS NOT NULL
+        DELETE FROM request_psks
+        WHERE request_id IN (
+            SELECT id FROM inbox_requests WHERE device_identity_id = :identityId
+        )
         """,
     )
-    suspend fun clearClientDesires(identityId: String, now: Long): Int
+    suspend fun deleteRequestPsks(identityId: String): Int
+
+    @Query("DELETE FROM clients WHERE device_identity_id = :identityId")
+    suspend fun deleteClients(identityId: String): Int
 
     @Query(
         """
         UPDATE device_identities
-        SET address = :address,
-            claimed_at = :claimedAt
+        SET address = :address
         WHERE id = :activeId AND role = :activeRole
         """,
     )
     suspend fun updateActiveAddress(
         activeId: String,
         address: String,
-        claimedAt: Long,
         activeRole: String,
     ): Int
 
@@ -319,7 +315,7 @@ internal interface DeviceIdentityDao {
     @Transaction
     suspend fun promoteCandidate(
         candidateId: String,
-        claimedAt: Long,
+        now: Long,
         activeRole: String,
         candidateRole: String,
         retiredRole: String,
@@ -333,7 +329,6 @@ internal interface DeviceIdentityDao {
                 updateActiveAddress(
                     activeId = active.id,
                     address = candidate.address,
-                    claimedAt = claimedAt,
                     activeRole = activeRole,
                 ) == 1,
             )
@@ -342,19 +337,20 @@ internal interface DeviceIdentityDao {
         if (active != null) {
             abandonRequests(
                 identityId = active.id,
-                now = claimedAt,
+                now = now,
                 error = DEVICE_IDENTITY_REPLACED_REQUEST_ERROR,
             )
-            abandonPairingAttempts(active.id, claimedAt)
+            abandonPairingAttempts(active.id, now)
             deletePendingUploadEnvironmentValues(active.id)
             deletePendingUploadSshKeys(active.id)
-            rejectPendingUploads(active.id, claimedAt)
-            clearClientDesires(active.id, claimedAt)
+            rejectPendingUploads(active.id, now)
+            deleteRequestPsks(active.id)
+            deleteClients(active.id)
+            deleteCredentials(active.id)
             check(retireActiveIdentity(active.id, activeRole, retiredRole) == 1)
         }
         return markCandidateActive(
             candidateId = candidateId,
-            claimedAt = claimedAt,
             activeRole = activeRole,
             candidateRole = candidateRole,
         ) == 1

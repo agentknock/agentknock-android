@@ -35,7 +35,6 @@ internal data class DeviceIdentity(
     val credentialsAvailable: Boolean,
     val pairingEnabled: Boolean,
     val createdAt: Long,
-    val claimedAt: Long?,
     val instructions: String,
 )
 
@@ -212,7 +211,6 @@ internal class DeviceIdentityRepository(
             address = address,
             deviceId = device.deviceId,
             createdAt = now,
-            claimedAt = null,
             claimAttemptedAt = null,
             pairingEnabled = settings?.pairingEnabled ?: true,
             instructions = settings?.instructions.orEmpty(),
@@ -313,7 +311,7 @@ internal class DeviceIdentityRepository(
                     if (
                         dao.promoteCandidate(
                             candidateId = candidate.id,
-                            claimedAt = currentTimeMillis(),
+                            now = currentTimeMillis(),
                             activeRole = DeviceIdentityRole.ACTIVE.storedName,
                             candidateRole = DeviceIdentityRole.CANDIDATE.storedName,
                             retiredRole = DeviceIdentityRole.RETIRED.storedName,
@@ -597,7 +595,6 @@ internal class DeviceIdentityRepository(
         deviceId = deviceId,
         credentialsAvailable = credentialsAvailable,
         createdAt = createdAt,
-        claimedAt = claimedAt,
         pairingEnabled = pairingEnabled,
         instructions = instructions,
     )
