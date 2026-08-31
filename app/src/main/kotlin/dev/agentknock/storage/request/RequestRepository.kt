@@ -964,7 +964,7 @@ internal class RequestRepository(
                 return InvocationDecisionResult.NotPending
             }
             val requestedSecrets = decodeStringList(secretUseRequest.secretsJson)
-            val storedSecrets = json.decodeFromString<List<SecretMetadata>>(
+            val storedSecrets = storedJson.decodeFromString<List<SecretMetadata>>(
                 secretUseRequest.secretDetailsJson,
             )
             val environmentSelections = storedSecrets.environmentSelections()
@@ -1354,7 +1354,7 @@ internal class RequestRepository(
                 return GitSignDecisionResult.ApprovalChanged
             }
             val authorization = latestDescription.authorizationCommitment(listOf(policy))
-            val expectedPublicKey = json.decodeFromString<List<SecretMetadata>>(
+            val expectedPublicKey = storedJson.decodeFromString<List<SecretMetadata>>(
                 invocation.secretDetailsJson,
             ).singleOrNull { secret ->
                 secret.name == gitSign.secretName && secret.type == SSH_SECRET_TYPE
@@ -1638,7 +1638,7 @@ internal class RequestRepository(
             )
             return SshAuthenticationDecisionResult.ApprovalChanged
         }
-        val expectedPublicKey = json.decodeFromString<List<SecretMetadata>>(
+        val expectedPublicKey = storedJson.decodeFromString<List<SecretMetadata>>(
             invocation.secretDetailsJson,
         ).singleOrNull { secret ->
             secret.name == authentication.secretName && secret.type == SSH_SECRET_TYPE
@@ -2676,7 +2676,7 @@ internal class RequestRepository(
             return null
         }
 
-        val sshMetadata = json.decodeFromString<List<SecretMetadata>>(
+        val sshMetadata = storedJson.decodeFromString<List<SecretMetadata>>(
             invocation.secretDetailsJson,
         ).singleOrNull { secret ->
             secret.name == contents.secret &&
@@ -3076,7 +3076,7 @@ internal class RequestRepository(
         ) {
             return null
         }
-        val sshMetadata = json.decodeFromString<List<SecretMetadata>>(
+        val sshMetadata = storedJson.decodeFromString<List<SecretMetadata>>(
             invocation.secretDetailsJson,
         ).singleOrNull { secret ->
             secret.name == contents.secret &&
@@ -3555,7 +3555,7 @@ internal class RequestRepository(
             explanation = "The exact Git signing content is not valid UTF-8.",
         )
         val invocationSecrets = invocation.providedSecretsJson?.let { stored ->
-            json.decodeStoredApprovalReviewSecretFacts(stored)
+            decodeStoredApprovalReviewSecretFacts(stored)
         } ?: return AiReview(
             decision = AiReviewDecision.ASK_USER,
             explanation = "The parent invocation context is unavailable.",
@@ -3589,7 +3589,7 @@ internal class RequestRepository(
             explanation = "The relative timing of the parent invocation is unavailable.",
         )
         val invocationSecrets = invocation.providedSecretsJson?.let {
-            json.decodeStoredApprovalReviewSecretFacts(it)
+            decodeStoredApprovalReviewSecretFacts(it)
         } ?: return AiReview(
             decision = AiReviewDecision.ASK_USER,
             explanation = "The parent invocation context is unavailable.",
@@ -4721,7 +4721,7 @@ internal class RequestRepository(
         json.encodeToString(STRING_LIST_SERIALIZER, values)
 
     private fun decodeStringList(value: String): List<String> =
-        json.decodeFromString(STRING_LIST_SERIALIZER, value)
+        storedJson.decodeFromString(STRING_LIST_SERIALIZER, value)
 
     private fun invocationTokenHash(token: ByteArray): ByteArray =
         MessageDigest.getInstance("SHA-256").digest(token)
@@ -4735,12 +4735,12 @@ internal class RequestRepository(
     }
 
     private fun decodeApprovalEvaluation(value: String): ApprovalEvaluation? =
-        runCatching { json.decodeFromString<ApprovalEvaluation>(value) }.getOrNull()
+        runCatching { storedJson.decodeFromString<ApprovalEvaluation>(value) }.getOrNull()
 
     private fun encodeClientSoftware(value: ClientSoftware): String = json.encodeToString(value)
 
     private fun decodeClientSoftware(value: String): ClientSoftware? =
-        runCatching { json.decodeFromString<ClientSoftware>(value) }.getOrNull()
+        runCatching { storedJson.decodeFromString<ClientSoftware>(value) }.getOrNull()
 
     private companion object {
         const val IDEMPOTENCY_RETENTION_MILLIS = 25 * 60 * 60 * 1_000L

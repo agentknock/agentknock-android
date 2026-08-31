@@ -803,7 +803,7 @@ internal class SecretManagementRequests(
     }
 
     private fun decodeClientSoftware(value: String): ClientSoftware? =
-        runCatching { json.decodeFromString<ClientSoftware>(value) }.getOrNull()
+        runCatching { storedJson.decodeFromString<ClientSoftware>(value) }.getOrNull()
 }
 
 private fun SecretUploadRequestEntity.target(): SecretUploadTarget? = when {

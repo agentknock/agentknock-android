@@ -12,7 +12,6 @@ import kotlinx.coroutines.flow.Flow
 import kotlinx.coroutines.flow.combine
 import kotlinx.coroutines.flow.map
 import kotlinx.serialization.decodeFromString
-import kotlinx.serialization.json.Json
 
 internal data class ClientSummary(
     val clientId: String,
@@ -54,7 +53,6 @@ internal class ClientRepository(
     private val temporaryAccessGrants: Flow<List<TemporaryAccessGrant>>,
     private val audit: AuditSink,
     private val writeTransaction: WriteTransaction,
-    private val json: Json = Json,
 ) {
     fun observeClients(): Flow<List<ClientSummary>> = combine(
         dao.observeClients(),
@@ -216,5 +214,5 @@ internal class ClientRepository(
         checkNotNull(RelayClientState.entries.find { it.wireName == this })
 
     private fun decodeClientSoftware(value: String): ClientSoftware? =
-        runCatching { json.decodeFromString<ClientSoftware>(value) }.getOrNull()
+        runCatching { storedJson.decodeFromString<ClientSoftware>(value) }.getOrNull()
 }

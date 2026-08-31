@@ -5,11 +5,29 @@ import javax.crypto.SecretKey
 import kotlinx.coroutines.test.runTest
 import org.junit.Assert.assertEquals
 import org.junit.Assert.assertFalse
+import org.junit.Assert.assertNull
 import org.junit.Assert.assertSame
 import org.junit.Assert.assertTrue
 import org.junit.Test
 
 class VaultKeyManagerTest {
+    @Test
+    fun `encryption key backing identifiers preserve their schema 1 encoding`() {
+        val expected = mapOf(
+            EncryptionKeyBacking.STRONGBOX to "STRONGBOX",
+            EncryptionKeyBacking.TRUSTED_ENVIRONMENT to "TRUSTED_ENVIRONMENT",
+            EncryptionKeyBacking.SOFTWARE to "SOFTWARE",
+            EncryptionKeyBacking.UNKNOWN_SECURE to "UNKNOWN_SECURE",
+            EncryptionKeyBacking.UNKNOWN to "UNKNOWN",
+        )
+
+        expected.forEach { (backing, storedName) ->
+            assertEquals(storedName, backing.storedName)
+            assertEquals(backing, EncryptionKeyBacking.fromStoredName(storedName))
+        }
+        assertNull(EncryptionKeyBacking.fromStoredName("future_backing"))
+    }
+
     @Test
     fun `creates separate keys for secret values and device state`() = runTest {
         val dao = FakeVaultKeyDao()
@@ -157,7 +175,7 @@ class VaultKeyManagerTest {
         purpose = purpose.storedName,
         active = true,
         createdAt = 1L,
-        backing = EncryptionKeyBacking.SOFTWARE.name,
+        backing = EncryptionKeyBacking.SOFTWARE.storedName,
     )
 
     private fun managerKeyAvailable(keyStore: FakeEncryptionKeyStore, keyId: String): Boolean =

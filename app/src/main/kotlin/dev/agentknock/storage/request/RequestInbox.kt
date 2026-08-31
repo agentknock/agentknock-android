@@ -22,7 +22,6 @@ import kotlinx.coroutines.flow.map
 import kotlinx.serialization.builtins.ListSerializer
 import kotlinx.serialization.builtins.serializer
 import kotlinx.serialization.decodeFromString
-import kotlinx.serialization.json.Json
 import kotlinx.serialization.json.JsonNull
 import kotlinx.serialization.json.jsonPrimitive
 
@@ -303,7 +302,6 @@ private data class RequestDetailRows(
 internal class RequestInbox(
     private val dao: RequestDao,
     private val pairingProtocol: PairingProtocol = PairingProtocol(),
-    private val json: Json = Json,
 ) {
     fun observeRequests(): Flow<List<InboxRequestSummary>> {
         val visibleRequests = combine(
@@ -528,7 +526,9 @@ internal class RequestInbox(
                             completionReason = secretUse.completionReason,
                             completionMessage = secretUse.completionMessage,
                             secrets = decodeStringList(secretUse.secretsJson),
-                            secretDetails = json.decodeFromString(secretUse.secretDetailsJson),
+                            secretDetails = storedJson.decodeFromString(
+                                secretUse.secretDetailsJson,
+                            ),
                             environmentVariables = decodeEnvironmentReviewFacts(
                                 secretUse.providedSecretsJson,
                             ),
@@ -609,7 +609,7 @@ internal class RequestInbox(
                             message = gitSign.message,
                             repository = gitSign.repositoryJson?.let {
                                 runCatching {
-                                    json.decodeFromString<GitSignRepository>(it)
+                                    storedJson.decodeFromString<GitSignRepository>(it)
                                 }.getOrNull()
                             },
                             approvalEvaluation = gitSign.approvalEvaluationJson
@@ -900,18 +900,20 @@ internal class RequestInbox(
     }
 
     private fun decodeStringList(value: String): List<String> =
-        json.decodeFromString(STRING_LIST_SERIALIZER, value)
+        storedJson.decodeFromString(STRING_LIST_SERIALIZER, value)
 
     private fun decodeUploadSummary(value: String): SecretUploadSummarySnapshot =
-        json.decodeFromString(value)
+        storedJson.decodeFromString(value)
 
     private fun decodeApprovalEvaluation(value: String): ApprovalEvaluation? =
-        runCatching { json.decodeFromString<ApprovalEvaluation>(value) }.getOrNull()
+        runCatching {
+            storedJson.decodeFromString<ApprovalEvaluation>(value)
+        }.getOrNull()
 
     private fun decodeEnvironmentReviewFacts(
         value: String?,
     ): Map<String, Map<String, String?>> = value?.let { encoded ->
-        json.decodeStoredApprovalReviewSecretFacts(encoded)
+        decodeStoredApprovalReviewSecretFacts(encoded)
             ?.mapNotNull { (secretName, facts) ->
                 (facts as? ApprovalReviewEnvironmentSecretFacts)
                     ?.let { environment ->
@@ -934,7 +936,7 @@ internal class RequestInbox(
     }.orEmpty()
 
     private fun decodeClientSoftware(value: String): ClientSoftware? =
-        runCatching { json.decodeFromString<ClientSoftware>(value) }.getOrNull()
+        runCatching { storedJson.decodeFromString<ClientSoftware>(value) }.getOrNull()
 
     private companion object {
         val STRING_LIST_SERIALIZER = ListSerializer(String.serializer())

@@ -137,7 +137,7 @@ internal class VaultKeyManager(
         val backings = mutableMapOf<VaultKeyPurpose, EncryptionKeyBacking>()
         active.forEach { (purpose, key) ->
             val metadata = dao.getKey(key.id) ?: return VaultProtection.Unknown
-            val backing = runCatching { EncryptionKeyBacking.valueOf(metadata.backing) }.getOrNull()
+            val backing = EncryptionKeyBacking.fromStoredName(metadata.backing)
                 ?: return VaultProtection.Unknown
             backings[purpose] = backing
         }
@@ -170,7 +170,7 @@ internal class VaultKeyManager(
                     purpose = purpose.storedName,
                     active = true,
                     createdAt = currentTimeMillis(),
-                    backing = generated.backing.name,
+                    backing = generated.backing.storedName,
                 ),
             )
         } catch (failure: Throwable) {

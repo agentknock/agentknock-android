@@ -13,12 +13,18 @@ import javax.crypto.KeyGenerator
 import javax.crypto.SecretKey
 import javax.crypto.SecretKeyFactory
 
-internal enum class EncryptionKeyBacking {
-    STRONGBOX,
-    TRUSTED_ENVIRONMENT,
-    SOFTWARE,
-    UNKNOWN_SECURE,
-    UNKNOWN,
+internal enum class EncryptionKeyBacking(val storedName: String) {
+    STRONGBOX("STRONGBOX"),
+    TRUSTED_ENVIRONMENT("TRUSTED_ENVIRONMENT"),
+    SOFTWARE("SOFTWARE"),
+    UNKNOWN_SECURE("UNKNOWN_SECURE"),
+    UNKNOWN("UNKNOWN"),
+    ;
+
+    companion object {
+        fun fromStoredName(value: String): EncryptionKeyBacking? =
+            entries.find { it.storedName == value }
+    }
 }
 
 internal data class GeneratedEncryptionKey(

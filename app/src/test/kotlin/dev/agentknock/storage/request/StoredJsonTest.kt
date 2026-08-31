@@ -1,0 +1,54 @@
+package dev.agentknock.storage.request
+
+import dev.agentknock.protocol.ClientSoftware
+import dev.agentknock.protocol.GitSignRepository
+import dev.agentknock.relay.ApprovalReviewEnvironmentSecretFacts
+import dev.agentknock.storage.approval.ApprovalEvaluation
+import dev.agentknock.storage.secret.SecretMetadata
+import kotlinx.serialization.decodeFromString
+import org.junit.Assert.assertEquals
+import org.junit.Assert.assertNotNull
+import org.junit.Assert.assertTrue
+import org.junit.Test
+
+class StoredJsonTest {
+    @Test
+    fun `stored request snapshots ignore obsolete fields and apply new defaults`() {
+        val secrets = storedJson.decodeFromString<List<SecretMetadata>>(
+            """[{"name":"Deployment","description":"","type":"environment","future":true}]""",
+        )
+        val repository = storedJson.decodeFromString<GitSignRepository>(
+            """{"remote":"git@example.test:repo.git","future":{"nested":true}}""",
+        )
+        val evaluation = storedJson.decodeFromString<ApprovalEvaluation>(
+            """{"secrets":[],"future":"ignored"}""",
+        )
+        val clientSoftware = storedJson.decodeFromString<ClientSoftware>(
+            """{"app_info":{"name":"agentknock","version":"0.3.0","future":1},"lib_info":{"name":"agentknock","version":"0.3.0"},"future":true}""",
+        )
+        val upload = storedJson.decodeFromString<SecretUploadSummarySnapshot>(
+            """{"variableNames":["TOKEN"],"future":true}""",
+        )
+
+        assertEquals("Deployment", secrets.single().name)
+        assertTrue(secrets.single().environmentVariableNames.isEmpty())
+        assertEquals("git@example.test:repo.git", repository.remote)
+        assertTrue(evaluation.secrets.isEmpty())
+        assertEquals("agentknock", clientSoftware.application.name)
+        assertEquals(listOf("TOKEN"), upload.variableNames)
+        assertTrue(upload.changedVariables.isEmpty())
+    }
+
+    @Test
+    fun `stored approval facts ignore obsolete fields`() {
+        val decoded = decodeStoredApprovalReviewSecretFacts(
+            """{"Deployment":{"type":"environment","environment_variables":{},"future":true}}""",
+        )
+
+        assertNotNull(decoded)
+        assertTrue(
+            (decoded?.get("Deployment") as ApprovalReviewEnvironmentSecretFacts)
+                .environmentVariables.isEmpty(),
+        )
+    }
+}
