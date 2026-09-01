@@ -3,10 +3,21 @@ package dev.agentknock.storage.request
 import androidx.room3.Room
 import androidx.test.ext.junit.runners.AndroidJUnit4
 import androidx.test.platform.app.InstrumentationRegistry
+import dev.agentknock.relay.RelayApprovalReview
+import dev.agentknock.relay.RelayApprovalReviewClient
+import dev.agentknock.relay.RelayApprovalReviewDecision
+import dev.agentknock.relay.RelayApprovalReviewResult
+import dev.agentknock.relay.RelayEndpointResult
+import dev.agentknock.review.ApprovalReviewRequest
+import dev.agentknock.review.ApprovalReviewOperation
+import dev.agentknock.review.ApprovalReviewSecretFacts
+import dev.agentknock.review.ApprovalReviewSshSecretFacts
 import dev.agentknock.storage.AgentknockDatabase
 import dev.agentknock.storage.RoomWriteTransaction
 import dev.agentknock.storage.approval.ApprovalAction
 import dev.agentknock.storage.approval.ApprovalEvaluation
+import dev.agentknock.storage.approval.AiReview
+import dev.agentknock.storage.approval.AiReviewDecision
 import dev.agentknock.storage.approval.SecretApprovalEvaluation
 import dev.agentknock.storage.audit.AuditDecisionSource
 import dev.agentknock.storage.audit.AuditEventType
@@ -23,6 +34,9 @@ import dev.agentknock.storage.crypto.VaultKeyEntity
 import dev.agentknock.storage.crypto.VaultKeyManager
 import dev.agentknock.storage.crypto.VaultKeyPurpose
 import dev.agentknock.storage.device.DeviceIdentityEntity
+import dev.agentknock.storage.device.RelayDeviceCredentialSource
+import dev.agentknock.storage.device.RelayDeviceCredentials
+import dev.agentknock.storage.device.RelayDeviceCredentialsResult
 import dev.agentknock.storage.secret.CreateSecretResult
 import dev.agentknock.storage.secret.SaveSecretResult
 import dev.agentknock.storage.secret.SecretApprovalMode
@@ -33,6 +47,7 @@ import dev.agentknock.storage.secret.SshPrivateKey
 import dev.agentknock.storage.secret.TemporaryAccessOperation
 import java.io.ByteArrayOutputStream
 import java.io.DataOutputStream
+import java.util.Base64
 import javax.crypto.SecretKey
 import javax.crypto.spec.SecretKeySpec
 import kotlinx.coroutines.Dispatchers
@@ -110,6 +125,289 @@ class SshAuthenticationRequestsTest {
     }
 
     @Test
+    fun incomingRequestValidatesTranscriptAndPersistsAnActionableRequest() = runTest {
+        val key = createAuthenticationSecret(SecretApprovalMode.ASK_ME)
+        val description = secrets.describeRequestedSecrets(listOf(SECRET_NAME))
+        val token = ByteArray(32) { it.toByte() }
+        insertParent(
+            secretDetailsJson = Json.encodeToString(description.secrets),
+            invocationTokenHash = invocationTokenHash(token),
+        )
+        val requestId = "ssh-valid-intake"
+
+        val processed = requests(audit).processIncoming(
+            pairing = client(),
+            relayRequestId = requestId,
+            requestPayload = Json.parseToJsonElement("""{"envelope":"request"}"""),
+            plaintext = sshAuthenticationPlaintext(token, key),
+            acceptedSecrets = acceptedPsks(requestId),
+            credentials = credentials(),
+            sealResponse = { error("An actionable request must not be sealed") },
+            launchAiReview = { _, _, _, _ -> error("Ask-me mode must not launch AI review") },
+        )
+
+        assertEquals(ProcessedRelayMessage(), processed)
+        val request = checkNotNull(database.requestDao().getRequestById(requestId))
+        val authentication = checkNotNull(
+            database.requestDao().getSshAuthenticationRequest(requestId),
+        )
+        assertEquals(InboxRequestState.ACTION_REQUIRED.storedName, request.state)
+        assertEquals(PARENT_ID, request.parentRequestId)
+        assertEquals(SECRET_NAME, authentication.secretName)
+        assertEquals("deploy", authentication.username)
+        assertEquals("publickey", authentication.method)
+        assertEquals("ssh-ed25519", authentication.algorithm)
+        assertTrue(authentication.message!!.contentEquals(authenticationMessage(key)))
+        assertNotNull(authentication.approvalEvaluationJson)
+        assertNotNull(database.requestDao().getRequestPsk(requestId))
+    }
+
+    @Test
+    fun incomingRequestRejectsACompletedParentInvocation() = runTest {
+        val key = createAuthenticationSecret(SecretApprovalMode.ASK_ME)
+        val token = ByteArray(32) { it.toByte() }
+        insertParent(invocationTokenHash = invocationTokenHash(token))
+        endParentInvocation()
+        assertIncomingRejected("ssh-ended-parent", token, key)
+    }
+
+    @Test
+    fun incomingRequestRejectsMalformedParentSecretMetadataCleanly() = runTest {
+        val key = createAuthenticationSecret(SecretApprovalMode.ASK_ME)
+        val token = ByteArray(32) { it.toByte() }
+        insertParent(
+            secretDetailsJson = "not-json",
+            invocationTokenHash = invocationTokenHash(token),
+        )
+        assertIncomingRejected("ssh-malformed-parent", token, key)
+    }
+
+    @Test
+    fun incomingRequestRejectsAnInvocationTokenMismatch() = runTest {
+        val key = createAuthenticationSecret(SecretApprovalMode.ASK_ME)
+        val expectedToken = ByteArray(32) { it.toByte() }
+        val suppliedToken = expectedToken.copyOf().also {
+            it[0] = (it[0] + 1).toByte()
+        }
+        insertParent(invocationTokenHash = invocationTokenHash(expectedToken))
+        assertIncomingRejected("ssh-token-mismatch", suppliedToken, key)
+    }
+
+    @Test
+    fun automaticApprovalDoesNotPersistWhenParentEndsWhileSealing() = runTest {
+        val key = createAuthenticationSecret(SecretApprovalMode.APPROVE)
+        val description = secrets.describeRequestedSecrets(listOf(SECRET_NAME))
+        val token = ByteArray(32) { it.toByte() }
+        insertParent(
+            secretDetailsJson = Json.encodeToString(description.secrets),
+            invocationTokenHash = invocationTokenHash(token),
+        )
+        val requestId = "ssh-parent-ended-during-seal"
+        var sealed = false
+
+        val processed = requests(audit).processIncoming(
+            pairing = client(),
+            relayRequestId = requestId,
+            requestPayload = Json.parseToJsonElement("{}"),
+            plaintext = sshAuthenticationPlaintext(token, key),
+            acceptedSecrets = acceptedPsks(requestId),
+            credentials = credentials(),
+            sealResponse = {
+                sealed = true
+                endParentInvocation()
+                Json.parseToJsonElement(RESPONSE_JSON)
+            },
+            launchAiReview = { _, _, _, _ -> error("Approve mode must not launch AI review") },
+        )
+
+        assertNull(processed)
+        assertTrue(sealed)
+        assertNull(database.requestDao().getRequestById(requestId))
+        assertNull(database.requestDao().getSshAuthenticationRequest(requestId))
+        assertNull(database.requestDao().getRequestPsk(requestId))
+    }
+
+    @Test
+    fun askAiMapsRelayVerdictsAndRevalidatesAnEndedParent() = runTest {
+        val key = createAuthenticationSecret(SecretApprovalMode.ASK_AI)
+        val description = secrets.describeRequestedSecrets(listOf(SECRET_NAME))
+        val token = ByteArray(32) { it.toByte() }
+        insertParent(
+            secretDetailsJson = Json.encodeToString(description.secrets),
+            invocationTokenHash = invocationTokenHash(token),
+            providedSecretsJson = sshSecretFactsJson(),
+        )
+        val reviewer = RecordingApprovalReviewer()
+        val target = requests(
+            auditSink = audit,
+            credentialSource = StaticCredentialSource(credentials()),
+            reviewer = reviewer,
+        )
+        val outcomes = listOf(
+            RelayApprovalReviewDecision.ASK_USER to null,
+            RelayApprovalReviewDecision.DENY to ApprovalDecision.DENIED,
+            RelayApprovalReviewDecision.APPROVE to ApprovalDecision.APPROVED,
+        )
+
+        outcomes.forEachIndexed { index, (relayDecision, expectedDecision) ->
+            val requestId = "ssh-ai-verdict-$index"
+            reviewer.result = reviewed(relayDecision, "Review $index")
+            var pendingReview: PendingAiReview? = null
+            assertEquals(
+                ProcessedRelayMessage(),
+                target.processIncoming(
+                    pairing = client(),
+                    relayRequestId = requestId,
+                    requestPayload = Json.parseToJsonElement("{}"),
+                    plaintext = sshAuthenticationPlaintext(token, key),
+                    acceptedSecrets = acceptedPsks(requestId),
+                    credentials = credentials(),
+                    sealResponse = { Json.parseToJsonElement(RESPONSE_JSON) },
+                    launchAiReview = { _, _, review, complete ->
+                        pendingReview = PendingAiReview(review, complete)
+                        true
+                    },
+                ),
+            )
+            val pending = checkNotNull(pendingReview)
+            val mapped = pending.review()
+            assertEquals(relayDecision.toAiDecision(), mapped.decision)
+            pending.complete(mapped)
+            val stored = checkNotNull(
+                database.requestDao().getSshAuthenticationRequest(requestId),
+            )
+            assertEquals(expectedDecision?.storedName, stored.decision)
+        }
+
+        reviewer.result = reviewed(RelayApprovalReviewDecision.APPROVE, "Approve")
+        val staleId = "ssh-ai-ended-parent"
+        var pendingReview: PendingAiReview? = null
+        assertEquals(
+            ProcessedRelayMessage(),
+            target.processIncoming(
+                pairing = client(),
+                relayRequestId = staleId,
+                requestPayload = Json.parseToJsonElement("{}"),
+                plaintext = sshAuthenticationPlaintext(token, key),
+                acceptedSecrets = acceptedPsks(staleId),
+                credentials = credentials(),
+                sealResponse = { Json.parseToJsonElement(RESPONSE_JSON) },
+                launchAiReview = { _, _, review, complete ->
+                    pendingReview = PendingAiReview(review, complete)
+                    true
+                },
+            ),
+        )
+        val pending = checkNotNull(pendingReview)
+        val approved = pending.review()
+        endParentInvocation()
+        pending.complete(approved)
+        val stale = checkNotNull(database.requestDao().getSshAuthenticationRequest(staleId))
+        assertEquals(ApprovalDecision.DENIED.storedName, stale.decision)
+        assertEquals("The parent invocation is no longer active.", stale.completionMessage)
+        assertFalse(
+            audit.observeEvents().first().any {
+                it.relayRequestId == staleId &&
+                    it.type == AuditEventType.SSH_AUTHENTICATION_DECIDED &&
+                    it.outcome == AuditOutcome.APPROVED
+            },
+        )
+        assertEquals(4, reviewer.requests.size)
+        assertEquals(
+            ApprovalReviewOperation.SSH_AUTHENTICATE,
+            reviewer.requests.first().request.facts.operation,
+        )
+    }
+
+    @Test
+    fun aiApprovalCannotPersistWhenParentEndsWhileItsResponseIsSealed() = runTest {
+        val key = createAuthenticationSecret(SecretApprovalMode.ASK_AI)
+        val description = secrets.describeRequestedSecrets(listOf(SECRET_NAME))
+        val token = ByteArray(32) { it.toByte() }
+        insertParent(
+            secretDetailsJson = Json.encodeToString(description.secrets),
+            invocationTokenHash = invocationTokenHash(token),
+            providedSecretsJson = sshSecretFactsJson(),
+        )
+        val reviewer = RecordingApprovalReviewer().apply {
+            result = reviewed(RelayApprovalReviewDecision.APPROVE, "Approve")
+        }
+        val target = requests(
+            auditSink = audit,
+            credentialSource = StaticCredentialSource(credentials()),
+            reviewer = reviewer,
+        )
+        val requestId = "ssh-ai-parent-ended-during-seal"
+        var pendingReview: PendingAiReview? = null
+
+        assertEquals(
+            ProcessedRelayMessage(),
+            target.processIncoming(
+                pairing = client(),
+                relayRequestId = requestId,
+                requestPayload = Json.parseToJsonElement("{}"),
+                plaintext = sshAuthenticationPlaintext(token, key),
+                acceptedSecrets = acceptedPsks(requestId),
+                credentials = credentials(),
+                sealResponse = {
+                    endParentInvocation()
+                    Json.parseToJsonElement(RESPONSE_JSON)
+                },
+                launchAiReview = { _, _, review, complete ->
+                    pendingReview = PendingAiReview(review, complete)
+                    true
+                },
+            ),
+        )
+        val pending = checkNotNull(pendingReview)
+        pending.complete(pending.review())
+
+        val request = checkNotNull(database.requestDao().getRequestById(requestId))
+        val authentication = checkNotNull(
+            database.requestDao().getSshAuthenticationRequest(requestId),
+        )
+        assertEquals(InboxRequestState.ACTION_REQUIRED.storedName, request.state)
+        assertNull(request.responseJson)
+        assertNull(authentication.decision)
+        assertNotNull(authentication.message)
+        assertFalse(
+            audit.observeEvents().first().any {
+                it.relayRequestId == requestId &&
+                    it.type == AuditEventType.SSH_AUTHENTICATION_DECIDED &&
+                    it.outcome == AuditOutcome.APPROVED
+            },
+        )
+    }
+
+    @Test
+    fun manualApprovalStopsAfterParentEndsButDenialStillWorks() = runTest {
+        val key = createAuthenticationSecret(SecretApprovalMode.ASK_ME)
+        val description = secrets.describeRequestedSecrets(listOf(SECRET_NAME))
+        insertParent(Json.encodeToString(description.secrets))
+        val requestId = "ssh-manual-ended-parent"
+        receivePending(
+            requests(audit),
+            requestId,
+            evaluationJson = currentAuthenticationEvaluationJson(),
+            message = authenticationMessage(key),
+        )
+        endParentInvocation()
+        var sealed = false
+        val seal: suspend (InboxRequestEntity, ByteArray) -> JsonElement? = { _, _ ->
+            sealed = true
+            Json.parseToJsonElement(RESPONSE_JSON)
+        }
+
+        assertEquals(
+            SshAuthenticationDecisionResult.InvocationUnavailable,
+            requests(audit).approve(requestId, false, seal),
+        )
+        assertFalse(sealed)
+        assertEquals(SshAuthenticationDecisionResult.Decided, requests(audit).deny(requestId, seal))
+        assertTrue(sealed)
+    }
+
+    @Test
     fun receiveIsAtomicAndAuthorizationRaceRetainsTheTranscript() = runTest {
         insertParent()
         val requestId = "ssh-receive"
@@ -120,7 +418,6 @@ class SshAuthenticationRequestsTest {
                     authentication(requestId),
                     client(),
                     acceptedPsks(requestId),
-                    invocationSecretDetailsJson = "[]",
                     authorization = null,
                     automaticDecisionAudit = null,
                 )
@@ -157,7 +454,6 @@ class SshAuthenticationRequestsTest {
                 ),
                 client = client(),
                 acceptedPsks = acceptedPsks(requestId),
-                invocationSecretDetailsJson = "[]",
                 authorization = stale,
                 automaticDecisionAudit = decisionAudit(requestId, AuditOutcome.REJECTED),
             ),
@@ -196,7 +492,6 @@ class SshAuthenticationRequestsTest {
                 ),
                 client = client(),
                 acceptedPsks = acceptedPsks(requestId),
-                invocationSecretDetailsJson = "[]",
                 authorization = authorizationCommitment(),
                 automaticDecisionAudit = decisionAudit(requestId, AuditOutcome.REJECTED),
             ),
@@ -241,7 +536,6 @@ class SshAuthenticationRequestsTest {
                 requests(InsertThenFailAuditSink(audit)).finishAiReview(
                     finalRequest,
                     finalAuthentication,
-                    invocationSecretDetailsJson = "[]",
                     authorization = authorizationCommitment(),
                     aiReviewAudit = aiReviewAudit(requestId, AuditOutcome.DENIED),
                     automaticDecisionAudit = decisionAudit(requestId, AuditOutcome.DENIED),
@@ -262,7 +556,6 @@ class SshAuthenticationRequestsTest {
             regular.finishAiReview(
                 finalRequest,
                 finalAuthentication,
-                invocationSecretDetailsJson = "[]",
                 authorization = authorizationCommitment(clientName = "Old client name"),
                 aiReviewAudit = aiReviewAudit(requestId, AuditOutcome.DENIED),
                 automaticDecisionAudit = decisionAudit(requestId, AuditOutcome.DENIED),
@@ -301,7 +594,6 @@ class SshAuthenticationRequestsTest {
                     completionMessage = "AI review denied authentication.",
                     decidedAt = NOW,
                 ),
-                invocationSecretDetailsJson = "[]",
                 authorization = authorizationCommitment(),
                 aiReviewAudit = aiReviewAudit(appliedId, AuditOutcome.DENIED),
                 automaticDecisionAudit = decisionAudit(appliedId, AuditOutcome.DENIED),
@@ -315,10 +607,17 @@ class SshAuthenticationRequestsTest {
     }
 
     @Test
-    fun receiveAndAiFinalizationRequireTheExactParentInvocationSnapshot() = runTest {
+    fun receiveRequiresAnActiveParentButAiDenialCanFinishAfterItEnds() = runTest {
         insertParent()
         val regular = requests(audit)
-        val rejectedId = "ssh-stale-parent-receive"
+        val rejectedId = "ssh-ended-parent-receive"
+        database.requestDao().updateRequest(
+            parentRequest().copy(
+                state = InboxRequestState.COMPLETED.storedName,
+                completedAt = NOW,
+                exchangeEndedAt = NOW,
+            ),
+        )
         assertEquals(
             ConditionalRequestUpdate.UNAVAILABLE,
             regular.receive(
@@ -326,7 +625,6 @@ class SshAuthenticationRequestsTest {
                 authentication = authentication(rejectedId),
                 client = client(),
                 acceptedPsks = acceptedPsks(rejectedId),
-                invocationSecretDetailsJson = "stale parent details",
                 authorization = null,
                 automaticDecisionAudit = null,
             ),
@@ -335,7 +633,8 @@ class SshAuthenticationRequestsTest {
         assertNull(database.requestDao().getRequestPsk(rejectedId))
         assertTrue(audit.observeEvents().first().isEmpty())
 
-        val reviewingId = "ssh-stale-parent-review"
+        database.requestDao().updateRequest(parentRequest())
+        val reviewingId = "ssh-ended-parent-review"
         receivePending(
             regular,
             reviewingId,
@@ -346,12 +645,15 @@ class SshAuthenticationRequestsTest {
         val authentication = checkNotNull(
             database.requestDao().getSshAuthenticationRequest(reviewingId),
         )
-        assertEquals(
-            1,
-            database.requestDao().updateSecretUseRequestRow(parentInvocation("changed")),
+        database.requestDao().updateRequest(
+            parentRequest().copy(
+                state = InboxRequestState.COMPLETED.storedName,
+                completedAt = NOW,
+                exchangeEndedAt = NOW,
+            ),
         )
         assertEquals(
-            ConditionalRequestUpdate.UNAVAILABLE,
+            ConditionalRequestUpdate.APPLIED,
             regular.finishAiReview(
                 request = reviewing.copy(
                     state = InboxRequestState.WAITING.storedName,
@@ -364,21 +666,24 @@ class SshAuthenticationRequestsTest {
                     completionMessage = "AI review denied authentication.",
                     decidedAt = NOW,
                 ),
-                invocationSecretDetailsJson = "[]",
                 authorization = authorizationCommitment(),
                 aiReviewAudit = aiReviewAudit(reviewingId, AuditOutcome.DENIED),
                 automaticDecisionAudit = decisionAudit(reviewingId, AuditOutcome.DENIED),
             ),
         )
-        val stillReviewing = checkNotNull(
+        val denied = checkNotNull(
             database.requestDao().getSshAuthenticationRequest(reviewingId),
         )
-        assertEquals(INITIAL_EVALUATION_JSON, stillReviewing.approvalEvaluationJson)
-        assertNull(stillReviewing.decision)
-        assertTrue(stillReviewing.message.contentEquals(AUTHENTICATION_MESSAGE))
+        assertEquals(FINAL_EVALUATION_JSON, denied.approvalEvaluationJson)
+        assertEquals(ApprovalDecision.DENIED.storedName, denied.decision)
+        assertNull(denied.message)
         assertEquals(
-            listOf(AuditEventType.SSH_AUTHENTICATION_RECEIVED),
-            audit.observeEvents().first().map { it.type },
+            setOf(
+                AuditEventType.SSH_AUTHENTICATION_RECEIVED,
+                AuditEventType.SSH_AUTHENTICATION_AI_REVIEWED,
+                AuditEventType.SSH_AUTHENTICATION_DECIDED,
+            ),
+            audit.observeEvents().first().map { it.type }.toSet(),
         )
     }
 
@@ -468,7 +773,6 @@ class SshAuthenticationRequestsTest {
                 authentication,
                 client(),
                 acceptedPsks(requestId),
-                invocationSecretDetailsJson = Json.encodeToString(description.secrets),
                 authorization = null,
                 automaticDecisionAudit = null,
             ),
@@ -704,37 +1008,124 @@ class SshAuthenticationRequestsTest {
         assertEquals(auditCount, audit.observeEvents().first().size)
     }
 
-    private suspend fun insertParent(secretDetailsJson: String = "[]") {
+    private suspend fun insertParent(
+        secretDetailsJson: String = "[]",
+        invocationTokenHash: ByteArray = ByteArray(32),
+        providedSecretsJson: String? = null,
+    ) {
         database.requestDao().insertRequest(parentRequest())
-        database.requestDao().insertSecretUseRequestRow(parentInvocation(secretDetailsJson))
+        database.requestDao().insertSecretUseRequestRow(
+            parentInvocation(secretDetailsJson, invocationTokenHash, providedSecretsJson),
+        )
     }
+
+    private suspend fun createAuthenticationSecret(
+        approvalMode: SecretApprovalMode,
+    ): SshPrivateKey {
+        val key = secrets.generateSshKey(SshKeyAlgorithm.ED25519, "test@example")
+        assertTrue(
+            secrets.createSshSecret(SECRET_NAME, "Authentication key", key) is
+                CreateSecretResult.Created,
+        )
+        assertEquals(
+            SaveSecretResult.SAVED,
+            secrets.saveApprovalMode(SECRET_ID, approvalMode),
+        )
+        return key
+    }
+
+    private suspend fun assertIncomingRejected(
+        requestId: String,
+        suppliedToken: ByteArray,
+        key: SshPrivateKey,
+    ) {
+        var sealed = false
+        var launched = false
+        val processed = requests(audit).processIncoming(
+            pairing = client(),
+            relayRequestId = requestId,
+            requestPayload = Json.parseToJsonElement("{}"),
+            plaintext = sshAuthenticationPlaintext(suppliedToken, key),
+            acceptedSecrets = acceptedPsks(requestId),
+            credentials = credentials(),
+            sealResponse = {
+                sealed = true
+                Json.parseToJsonElement(RESPONSE_JSON)
+            },
+            launchAiReview = { _, _, _, _ ->
+                launched = true
+                true
+            },
+        )
+        assertNull(processed)
+        assertFalse(sealed)
+        assertFalse(launched)
+        assertNull(database.requestDao().getRequestById(requestId))
+        assertNull(database.requestDao().getSshAuthenticationRequest(requestId))
+        assertNull(database.requestDao().getRequestPsk(requestId))
+    }
+
+    private suspend fun currentAuthenticationEvaluationJson(): String {
+        val policy = secrets.approvalPoliciesForNames(
+            listOf(SECRET_NAME),
+            CLIENT_ID,
+            TemporaryAccessOperation.SSH_AUTHENTICATE,
+        ).single()
+        return Json.encodeToString(
+            dev.agentknock.storage.approval.ApprovalPolicyEvaluator.evaluate(
+                listOf(policy.toRequestedSecretApproval()),
+            ),
+        )
+    }
+
+    private suspend fun endParentInvocation() {
+        val parent = checkNotNull(database.requestDao().getRequestById(PARENT_ID))
+        database.requestDao().updateRequest(
+            parent.copy(
+                state = InboxRequestState.COMPLETED.storedName,
+                completedAt = NOW,
+                exchangeEndedAt = NOW,
+                responseOutboxFinished = true,
+            ),
+        )
+    }
+
+    private fun sshSecretFactsJson(): String =
+        storedJson.encodeToString<Map<String, ApprovalReviewSecretFacts>>(
+            mapOf(SECRET_NAME to ApprovalReviewSshSecretFacts(provides = "public_key")),
+        )
 
     private suspend fun receivePending(
         target: SshAuthenticationRequests,
         requestId: String,
         state: InboxRequestState = InboxRequestState.ACTION_REQUIRED,
         evaluationJson: String? = null,
+        message: ByteArray = AUTHENTICATION_MESSAGE,
     ) {
         assertEquals(
             ConditionalRequestUpdate.APPLIED,
             target.receive(
                 request = request(requestId).copy(state = state.storedName),
-                authentication = authentication(requestId).copy(
+                authentication = authentication(requestId, message).copy(
                     approvalEvaluationJson = evaluationJson,
                 ),
                 client = client(),
                 acceptedPsks = acceptedPsks(requestId),
-                invocationSecretDetailsJson = database.requestDao()
-                    .getSecretUseRequest(PARENT_ID)!!.secretDetailsJson,
                 authorization = null,
                 automaticDecisionAudit = null,
             ),
         )
     }
 
-    private fun requests(auditSink: AuditSink) = SshAuthenticationRequests(
+    private fun requests(
+        auditSink: AuditSink,
+        credentialSource: RelayDeviceCredentialSource = UnavailableCredentialSource,
+        reviewer: RelayApprovalReviewClient = FailingApprovalReviewer,
+    ) = SshAuthenticationRequests(
         dao = database.requestDao(),
         secrets = secrets,
+        deviceCredentials = credentialSource,
+        approvalReviewer = reviewer,
         audit = auditSink,
         writeTransaction = RoomWriteTransaction(database),
         currentTimeMillis = { NOW },
@@ -778,18 +1169,22 @@ class SshAuthenticationRequestsTest {
         responseOutboxFinished = false,
     )
 
-    private fun parentInvocation(secretDetailsJson: String) = SecretUseRequestEntity(
+    private fun parentInvocation(
+        secretDetailsJson: String = "[]",
+        invocationTokenHash: ByteArray = ByteArray(32),
+        providedSecretsJson: String? = null,
+    ) = SecretUseRequestEntity(
         requestId = PARENT_ID,
         hostname = "test",
         platform = "linux",
         architecture = "x86_64",
         machineId = null,
         osVersion = null,
-        invocationTokenHash = ByteArray(32),
+        invocationTokenHash = invocationTokenHash,
         containsSensitiveMaterial = true,
         secretsJson = Json.encodeToString(listOf(SECRET_NAME)),
         secretDetailsJson = secretDetailsJson,
-        providedSecretsJson = null,
+        providedSecretsJson = providedSecretsJson,
         missingSecretsJson = "[]",
         reason = null,
         command = "ssh",
@@ -848,6 +1243,34 @@ class SshAuthenticationRequestsTest {
         pairedAt = 2,
         lastSeenAt = 2,
     )
+
+    private fun credentials() = RelayDeviceCredentials(
+        deviceIdentityId = DEVICE_IDENTITY_ID,
+        address = "quiet-river-maple",
+        addressId = "address-id",
+        deviceId = DEVICE_ID,
+        devicePublicKey = ByteArray(32),
+        devicePrivateKey = ByteArray(32),
+        deviceToken = "device-token",
+    )
+
+    private fun sshAuthenticationPlaintext(
+        invocationToken: ByteArray,
+        key: SshPrivateKey,
+    ): ByteArray {
+        val token = Base64.getEncoder().encodeToString(invocationToken)
+        val message = Base64.getEncoder().encodeToString(authenticationMessage(key))
+        return """
+            {
+              $SOFTWARE_FIELDS,
+              "method":"SshAuthenticate",
+              "invocation_id":"$PARENT_ID",
+              "invocation_token":"$token",
+              "secret":"$SECRET_NAME",
+              "message":"$message"
+            }
+        """.trimIndent().encodeToByteArray()
+    }
 
     private fun acceptedPsks(requestId: String) = AcceptedRequestPsks(
         requestPsk = RequestPskEntity(
@@ -954,6 +1377,76 @@ class SshAuthenticationRequestsTest {
             delegate.append(records, occurredAt)
             error("Injected audit failure")
         }
+    }
+
+    private object UnavailableCredentialSource : RelayDeviceCredentialSource {
+        override suspend fun activeDeviceCredentials(): RelayDeviceCredentialsResult =
+            RelayDeviceCredentialsResult.Missing
+
+        override suspend fun deviceCredentials(
+            deviceIdentityId: String,
+        ): RelayDeviceCredentialsResult = RelayDeviceCredentialsResult.Missing
+    }
+
+    private object FailingApprovalReviewer : RelayApprovalReviewClient {
+        override suspend fun review(
+            deviceId: String,
+            deviceToken: String,
+            request: ApprovalReviewRequest,
+        ): Nothing = error("AI review is not expected in this test")
+    }
+
+    private class StaticCredentialSource(
+        private val credentials: RelayDeviceCredentials,
+    ) : RelayDeviceCredentialSource {
+        override suspend fun activeDeviceCredentials(): RelayDeviceCredentialsResult =
+            RelayDeviceCredentialsResult.Available(credentials)
+
+        override suspend fun deviceCredentials(
+            deviceIdentityId: String,
+        ): RelayDeviceCredentialsResult = if (deviceIdentityId == credentials.deviceIdentityId) {
+            RelayDeviceCredentialsResult.Available(credentials)
+        } else {
+            RelayDeviceCredentialsResult.Missing
+        }
+    }
+
+    private data class ApprovalReviewCall(
+        val deviceId: String,
+        val deviceToken: String,
+        val request: ApprovalReviewRequest,
+    )
+
+    private class RecordingApprovalReviewer : RelayApprovalReviewClient {
+        lateinit var result: RelayApprovalReviewResult
+        val requests = mutableListOf<ApprovalReviewCall>()
+
+        override suspend fun review(
+            deviceId: String,
+            deviceToken: String,
+            request: ApprovalReviewRequest,
+        ): RelayApprovalReviewResult {
+            requests += ApprovalReviewCall(deviceId, deviceToken, request)
+            return result
+        }
+    }
+
+    private data class PendingAiReview(
+        val review: suspend () -> AiReview,
+        val complete: suspend (AiReview) -> Unit,
+    )
+
+    private fun reviewed(
+        decision: RelayApprovalReviewDecision,
+        explanation: String,
+    ): RelayApprovalReviewResult = RelayEndpointResult.Success(
+        RelayApprovalReview(decision, explanation),
+    )
+
+    private fun RelayApprovalReviewDecision.toAiDecision(): AiReviewDecision = when (this) {
+        RelayApprovalReviewDecision.APPROVE -> AiReviewDecision.APPROVE
+        RelayApprovalReviewDecision.DENY -> AiReviewDecision.DENY
+        RelayApprovalReviewDecision.ASK_USER -> AiReviewDecision.ASK_USER
     }
 
     private class MemoryEncryptionKeyStore : EncryptionKeyStore {

@@ -195,6 +195,8 @@ internal class ApplicationContainer(application: Application) {
     private val sshAuthenticationRequests = SshAuthenticationRequests(
         dao = database.requestDao(),
         secrets = secrets,
+        deviceCredentials = deviceIdentity,
+        approvalReviewer = approvalReviewer,
         audit = audit,
         writeTransaction = writeTransaction,
     )
@@ -203,7 +205,6 @@ internal class ApplicationContainer(application: Application) {
         dao = database.requestDao(),
         material = requestMaterial,
         deviceCredentials = deviceIdentity,
-        secrets = secrets,
         clients = clients,
         secretManagement = secretManagement,
         invocationRequests = invocationRequests,
@@ -211,7 +212,6 @@ internal class ApplicationContainer(application: Application) {
         sshAuthenticationRequests = sshAuthenticationRequests,
         pairingRequests = pairingRequests,
         clientRemovalRequests = clientRemovalRequests,
-        approvalReviewer = approvalReviewer,
         relay = WebSocketRelayDeviceClient(httpClient),
         aiReviews = aiReviews,
         scheduleSynchronization = { scheduleRequestSynchronization() },

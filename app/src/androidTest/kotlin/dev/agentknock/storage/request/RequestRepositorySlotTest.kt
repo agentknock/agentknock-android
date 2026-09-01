@@ -157,7 +157,6 @@ class RequestRepositorySlotTest {
             writeTransaction = RoomWriteTransaction(database),
             newId = { "secret-id-${nextSecretId++}" },
             currentTimeMillis = { now },
-            cryptographyDispatcher = Dispatchers.Unconfined,
         )
         protocolRandom = SwitchableSecureRandom()
         reviewScope = CoroutineScope(SupervisorJob() + Dispatchers.Unconfined)
@@ -178,7 +177,6 @@ class RequestRepositorySlotTest {
             encryption = encryption,
             newId = { "request-material-id" },
             currentTimeMillis = { now },
-            cryptographyDispatcher = Dispatchers.Unconfined,
         )
         val secretManagement = SecretManagementRequests(
             dao = database.requestDao(),
@@ -187,7 +185,6 @@ class RequestRepositorySlotTest {
             audit = audit,
             writeTransaction = RoomWriteTransaction(database),
             currentTimeMillis = { now },
-            cryptographyDispatcher = Dispatchers.Unconfined,
         )
         val invocationRequests = InvocationRequests(
             dao = database.requestDao(),
@@ -210,6 +207,8 @@ class RequestRepositorySlotTest {
         val sshAuthenticationRequests = SshAuthenticationRequests(
             dao = database.requestDao(),
             secrets = secrets,
+            deviceCredentials = credentialSource,
+            approvalReviewer = approvalReviewer,
             audit = audit,
             writeTransaction = RoomWriteTransaction(database),
             currentTimeMillis = { now },
@@ -235,7 +234,6 @@ class RequestRepositorySlotTest {
             dao = database.requestDao(),
             material = requestMaterial,
             deviceCredentials = credentialSource,
-            secrets = secrets,
             clients = clients,
             secretManagement = secretManagement,
             invocationRequests = invocationRequests,
@@ -243,7 +241,6 @@ class RequestRepositorySlotTest {
             sshAuthenticationRequests = sshAuthenticationRequests,
             pairingRequests = pairingRequests,
             clientRemovalRequests = clientRemovalRequests,
-            approvalReviewer = approvalReviewer,
             relay = relay,
             aiReviews = AiReviewCoordinator(reviewScope),
             scheduleSynchronization = { synchronizationRequests += 1 },
@@ -252,7 +249,6 @@ class RequestRepositorySlotTest {
             updatePushRegistrationState = { pushRegistrationState = it },
             pairedRequestProtocol = PairedRequestProtocol(random = protocolRandom),
             currentTimeMillis = { now },
-            cryptographyDispatcher = Dispatchers.Unconfined,
         )
     }
 

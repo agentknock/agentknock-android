@@ -1,6 +1,5 @@
 package dev.agentknock.storage.request
 
-import dev.agentknock.protocol.ClientSoftware
 import dev.agentknock.protocol.InvocationDenialReason
 import dev.agentknock.protocol.InvocationProtocol
 import dev.agentknock.protocol.GitSignProtocol
@@ -10,13 +9,9 @@ import dev.agentknock.protocol.PairedRequestProtocol
 import dev.agentknock.protocol.PairingRemoveProtocol
 import dev.agentknock.protocol.SecretListProtocol
 import dev.agentknock.protocol.SecretUploadProtocol
-import dev.agentknock.protocol.SshAuthenticationMessageDetails
 import dev.agentknock.protocol.SshAuthenticationProtocol
-import dev.agentknock.protocol.SshAuthenticationRequestMessage
 import dev.agentknock.protocol.isFreshRelayRequestId
-import dev.agentknock.review.approvalReviewSshAuthenticationRequest
 import dev.agentknock.relay.RelayClientState
-import dev.agentknock.relay.RelayApprovalReviewClient
 import dev.agentknock.relay.RelayDeviceClient
 import dev.agentknock.relay.RelayDeviceConnection
 import dev.agentknock.relay.RelayDeviceConnectionResult
@@ -27,20 +22,7 @@ import dev.agentknock.relay.RelayExchangeState
 import dev.agentknock.relay.RelayMessageKind
 import dev.agentknock.relay.RelayMessageState
 import dev.agentknock.relay.RelayPushRegistrationState
-import dev.agentknock.storage.secret.SecretMetadata
-import dev.agentknock.storage.secret.SshKeyCodec
-import dev.agentknock.storage.secret.SshAuthenticationSignatureResult
-import dev.agentknock.storage.secret.SSH_SECRET_TYPE
-import dev.agentknock.storage.secret.SecretRepository
-import dev.agentknock.storage.secret.SecretApprovalPolicy
-import dev.agentknock.storage.secret.TemporaryAccessOperation
-import dev.agentknock.storage.approval.ApprovalAction
 import dev.agentknock.storage.approval.AiReview
-import dev.agentknock.storage.approval.AiReviewDecision
-import dev.agentknock.storage.approval.ApprovalPolicyEvaluator
-import dev.agentknock.storage.approval.ApprovalEvaluation
-import dev.agentknock.storage.approval.requiresAiReview
-import dev.agentknock.storage.approval.isFullyApproved
 import dev.agentknock.storage.audit.AuditEventType
 import dev.agentknock.storage.audit.AuditDecisionSource
 import dev.agentknock.storage.audit.AuditOutcome
@@ -51,18 +33,12 @@ import dev.agentknock.storage.device.RelayDeviceCredentials
 import dev.agentknock.storage.device.RelayDeviceCredentialsResult
 import dev.agentknock.storage.device.RelayDeviceCredentialSource
 import dev.agentknock.storage.WriteTransaction
-import java.util.UUID
-import java.security.MessageDigest
 import kotlinx.coroutines.CancellationException
-import kotlinx.coroutines.CoroutineDispatcher
-import kotlinx.coroutines.Dispatchers
-import kotlinx.coroutines.NonCancellable
 import kotlinx.coroutines.channels.Channel
 import kotlinx.coroutines.flow.Flow
 import kotlinx.coroutines.selects.select
 import kotlinx.coroutines.sync.Mutex
 import kotlinx.coroutines.sync.withLock
-import kotlinx.coroutines.withContext
 import kotlinx.serialization.json.Json
 import kotlinx.serialization.json.JsonElement
 import kotlinx.serialization.json.JsonObject
@@ -153,7 +129,6 @@ internal class RequestRepository(
     private val dao: RequestDao,
     private val material: RequestMaterialStore,
     private val deviceCredentials: RelayDeviceCredentialSource,
-    private val secrets: SecretRepository,
     private val clients: ClientRepository,
     private val secretManagement: SecretManagementRequests,
     private val invocationRequests: InvocationRequests,
@@ -161,20 +136,15 @@ internal class RequestRepository(
     private val sshAuthenticationRequests: SshAuthenticationRequests,
     private val pairingRequests: PairingRequests,
     private val clientRemovalRequests: ClientRemovalRequests,
-    private val approvalReviewer: RelayApprovalReviewClient,
     private val relay: RelayDeviceClient,
     private val aiReviews: AiReviewCoordinator,
     private val scheduleSynchronization: () -> Unit,
     private val audit: AuditSink,
     private val writeTransaction: WriteTransaction,
     private val updatePushRegistrationState: (RelayPushRegistrationState) -> Unit,
-    private val sshKeys: SshKeyCodec = SshKeyCodec(),
     private val pairedRequestProtocol: PairedRequestProtocol = PairedRequestProtocol(),
-    private val sshAuthenticationProtocol: SshAuthenticationProtocol = SshAuthenticationProtocol(),
     private val json: Json = Json,
-    private val newId: () -> String = { UUID.randomUUID().toString() },
     private val currentTimeMillis: () -> Long = System::currentTimeMillis,
-    private val cryptographyDispatcher: CoroutineDispatcher = Dispatchers.IO,
 ) {
     private val operationMutex = Mutex()
     private val pendingChanges = Channel<Unit>(Channel.CONFLATED)
@@ -1226,13 +1196,19 @@ internal class RequestRepository(
                 launchAiReview = ::launchAiReview,
             )
         } else if (method == SshAuthenticationProtocol.METHOD) {
-            processSshAuthenticationRequest(
+            sshAuthenticationRequests.processIncoming(
                 pairing = client,
                 relayRequestId = message.requestId,
                 requestPayload = requestPayload,
-                opened = opened,
+                plaintext = opened.plaintext,
                 acceptedSecrets = acceptedSecrets,
                 credentials = credentials,
+                sealResponse = { responsePlaintext ->
+                    runCatching {
+                        pairedRequestProtocol.sealPairedResponse(opened, responsePlaintext)
+                    }.getOrNull()
+                },
+                launchAiReview = ::launchAiReview,
             )
         } else if (method == SecretListProtocol.METHOD) {
             processSecretListRequest(
@@ -1280,420 +1256,6 @@ internal class RequestRepository(
         )
     }
 
-
-    private suspend fun processSshAuthenticationRequest(
-        pairing: ClientEntity,
-        relayRequestId: String,
-        requestPayload: JsonElement,
-        opened: OpenedPairedRequest,
-        acceptedSecrets: AcceptedRequestPsks,
-        credentials: RelayDeviceCredentials,
-    ): ProcessedRelayMessage? {
-        val now = currentTimeMillis()
-        val contents = runCatching {
-            sshAuthenticationProtocol.decodeRequest(opened.plaintext)
-        }.getOrNull() ?: return null
-        val invocationRequest = dao.getRequestById(contents.invocationId) ?: return null
-        if (invocationRequest.kind != RequestKind.SECRET_USE.storedName) return null
-        val invocation = dao.getSecretUseRequest(invocationRequest.id) ?: return null
-        val expectedTokenHash = invocation.invocationTokenHash
-        if (
-            invocationRequest.clientId != pairing.clientId ||
-            invocationRequest.deviceIdentityId != pairing.deviceIdentityId ||
-            invocation.decision != ApprovalDecision.APPROVED.storedName ||
-            invocationRequest.clientSoftwareJson?.let(::decodeStoredClientSoftware) !=
-                contents.clientSoftware ||
-            !MessageDigest.isEqual(
-                expectedTokenHash,
-                invocationTokenHash(contents.invocationToken),
-            )
-        ) {
-            return null
-        }
-        val sshMetadata = storedJson.decodeFromString<List<SecretMetadata>>(
-            invocation.secretDetailsJson,
-        ).singleOrNull { secret ->
-            secret.name == contents.secret &&
-                secret.type == SSH_SECRET_TYPE &&
-                secret.sshPublicKey != null
-        } ?: return null
-        val expectedPublicKey = runCatching {
-            sshKeys.importOpenSshPublicKey(checkNotNull(sshMetadata.sshPublicKey))
-        }.getOrNull() ?: return null
-        val messageDetails = runCatching {
-            sshAuthenticationProtocol.validateMessage(
-                message = contents.message,
-                expectedPublicKeyBlob = expectedPublicKey.blob(),
-                expectedKeyAlgorithm = expectedPublicKey.algorithm.publicName,
-            )
-        }.getOrNull() ?: return null
-
-        val description = secrets.describeRequestedSecrets(listOf(contents.secret))
-        val approvalPolicies = secrets.approvalPoliciesForNames(
-            listOf(contents.secret),
-            pairing.clientId,
-            TemporaryAccessOperation.SSH_AUTHENTICATE,
-        )
-        val policy = approvalPolicies.singleOrNull()
-        var denial = if (
-            description.reviewMetadata.singleOrNull()?.type != SSH_SECRET_TYPE || policy == null
-        ) {
-            InvocationDenialReason.INVALID_REQUEST to
-                "The SSH authentication request does not match its invocation."
-        } else {
-            null
-        }
-        val initialEvaluation = if (denial == null) {
-            ApprovalPolicyEvaluator.evaluate(
-                listOf(checkNotNull(policy).toRequestedSecretApproval()),
-            )
-        } else {
-            null
-        }
-        val needsAiReview = initialEvaluation?.requiresAiReview() == true
-        val initialRequest = InboxRequestEntity(
-            id = relayRequestId,
-            parentRequestId = invocationRequest.id,
-            deviceIdentityId = pairing.deviceIdentityId,
-            clientId = pairing.clientId,
-            clientNameSnapshot = pairing.name,
-            clientSoftwareJson = encodeClientSoftware(contents.clientSoftware),
-            kind = RequestKind.SSH_AUTHENTICATE.storedName,
-            state = if (needsAiReview) {
-                InboxRequestState.REVIEWING.storedName
-            } else {
-                InboxRequestState.ACTION_REQUIRED.storedName
-            },
-            listed = true,
-            requestJson = requestPayload.toString(),
-            responseJson = null,
-            error = null,
-            receivedAt = now,
-            completedAt = null,
-            exchangeEndedAt = null,
-            responseOutboxFinished = false,
-        )
-        val initialAuthentication = SshAuthenticationRequestEntity(
-            requestId = relayRequestId,
-            secretName = contents.secret,
-            message = contents.message,
-            username = messageDetails.username,
-            method = messageDetails.method.wireName,
-            algorithm = messageDetails.algorithm.wireName,
-            hostKeyAlgorithm = messageDetails.hostKeyAlgorithm,
-            hostKeyFingerprint = messageDetails.hostKeyFingerprint,
-            approvalEvaluationJson = initialEvaluation?.let { json.encodeToString(it) },
-            decision = null,
-            completionResult = null,
-            completionReason = null,
-            completionMessage = null,
-            decidedAt = null,
-        )
-        suspend fun finishReview(
-            reviewResult: AiReview?,
-            requestAlreadyInserted: Boolean,
-        ): ProcessedRelayMessage? {
-            val currentClient = if (needsAiReview) dao.getClient(pairing.clientId) else pairing
-            val clientUnavailable = currentClient == null ||
-                currentClient.deviceIdentityId != pairing.deviceIdentityId ||
-                currentClient.relayClientState == RelayClientState.REVOKED.wireName ||
-                currentClient.desiredRelayClientState == RelayClientState.REVOKED.wireName
-            val currentDescription = if (needsAiReview) {
-                secrets.describeRequestedSecrets(listOf(contents.secret))
-            } else {
-                description
-            }
-            val currentPolicies = if (needsAiReview) {
-                secrets.approvalPoliciesForNames(
-                    listOf(contents.secret),
-                    pairing.clientId,
-                    TemporaryAccessOperation.SSH_AUTHENTICATE,
-                )
-            } else {
-                approvalPolicies
-            }
-            val currentEvaluation = if (needsAiReview) {
-                currentPolicies.singleOrNull()?.let { currentPolicy ->
-                    ApprovalPolicyEvaluator.evaluate(
-                        listOf(currentPolicy.toRequestedSecretApproval()),
-                    )
-                }
-            } else {
-                initialEvaluation
-            }
-            val currentCredentials = if (needsAiReview) {
-                currentClient?.let { credentialsForClient(it) }
-            } else {
-                credentials
-            }
-            val aiInputsChanged = needsAiReview && (
-                clientUnavailable ||
-                    currentEvaluation == null ||
-                    !checkNotNull(initialEvaluation).hasSameSecretPolicies(currentEvaluation) ||
-                    currentCredentials?.instructions != credentials.instructions ||
-                    currentClient.name != pairing.name ||
-                    currentClient.instructions != pairing.instructions
-                )
-            val aiReview = if (aiInputsChanged) {
-                AiReview(
-                    decision = AiReviewDecision.ASK_USER,
-                    explanation = "The client, SSH key, instructions, or approval settings changed during AI review.",
-                )
-            } else {
-                reviewResult
-            }
-            val evaluation = (if (aiInputsChanged) currentEvaluation else initialEvaluation)
-                ?.copy(aiReview = aiReview)
-            val authorization = currentDescription.authorizationCommitment(
-                policies = currentPolicies,
-                instructions = if (needsAiReview) {
-                    currentCredentials?.let { current ->
-                        AuthorizationInstructionsCommitment(
-                            deviceIdentityId = current.deviceIdentityId,
-                            deviceInstructions = current.instructions,
-                            clientId = checkNotNull(currentClient).clientId,
-                            clientName = currentClient.name,
-                            clientInstructions = currentClient.instructions,
-                        )
-                    }
-                } else {
-                    null
-                },
-            )
-            if (clientUnavailable && denial == null) {
-                denial = InvocationDenialReason.OTHER to
-                    "The paired client is no longer available."
-            }
-            val approvalSettingsDenied =
-                denial == null &&
-                evaluation?.secrets?.any { it.action == ApprovalAction.DENY } == true
-            if (approvalSettingsDenied) {
-                denial = InvocationDenialReason.POLICY_DENIED to
-                    SSH_AUTHENTICATION_POLICY_DENIAL_MESSAGE
-            }
-            val aiDenied = denial == null && aiReview?.decision == AiReviewDecision.DENY
-            if (aiDenied) {
-                denial = InvocationDenialReason.POLICY_DENIED to
-                    "AI review denied SSH authentication."
-            }
-            val shouldApprove = !aiInputsChanged && denial == null &&
-                evaluation?.isFullyApproved(aiReview?.decision) == true
-            val temporaryAccessUsed = evaluation?.secrets
-                ?.any { it.temporaryAccessExpiresAt != null } == true
-            var signature: ByteArray? = null
-            if (shouldApprove) {
-                when (
-                    val result = secrets.signSshAuthentication(
-                        secretName = contents.secret,
-                        expectedPublicKey = checkNotNull(sshMetadata.sshPublicKey),
-                        message = contents.message,
-                        algorithm = messageDetails.algorithm,
-                    )
-                ) {
-                    is SshAuthenticationSignatureResult.Signed -> signature = result.signature
-                    SshAuthenticationSignatureResult.NotFound,
-                    SshAuthenticationSignatureResult.WrongType,
-                    SshAuthenticationSignatureResult.KeyChanged,
-                    -> denial = InvocationDenialReason.INVALID_REQUEST to
-                        "The SSH key changed after the invocation began."
-                    SshAuthenticationSignatureResult.SecretUnavailable ->
-                        denial = InvocationDenialReason.OTHER to
-                            "The SSH private key is unavailable on this device."
-                    SshAuthenticationSignatureResult.SecretCorrupted ->
-                        denial = InvocationDenialReason.OTHER to
-                            "The SSH private key could not be authenticated."
-                    SshAuthenticationSignatureResult.UnsupportedEncryption ->
-                        denial = InvocationDenialReason.OTHER to
-                            "The SSH private key uses an unsupported encryption format."
-                }
-            }
-            val responsePlaintext = when {
-                denial != null -> sshAuthenticationProtocol.deniedResponse(
-                    denial.first,
-                    denial.second,
-                )
-                signature != null -> sshAuthenticationProtocol.approvedResponse(signature)
-                else -> null
-            }
-            val response = responsePlaintext?.let { plaintext ->
-                runCatching {
-                    pairedRequestProtocol.sealPairedResponse(opened, plaintext)
-                }.getOrNull() ?: return null
-            }
-            val decidedAt = currentTimeMillis()
-            val automaticDecision = when {
-                signature != null -> ApprovalDecision.APPROVED
-                denial != null -> ApprovalDecision.DENIED
-                else -> null
-            }
-            val automaticDecisionSource = when {
-                signature != null && aiReview?.decision == AiReviewDecision.APPROVE &&
-                    temporaryAccessUsed -> DECISION_SOURCE_MIXED
-                signature != null && aiReview?.decision == AiReviewDecision.APPROVE ->
-                    DECISION_SOURCE_AI
-                signature != null && temporaryAccessUsed -> DECISION_SOURCE_TEMPORARY_ACCESS
-                signature != null -> DECISION_SOURCE_POLICY
-                aiDenied -> DECISION_SOURCE_AI
-                approvalSettingsDenied -> DECISION_SOURCE_POLICY
-                denial?.first == InvocationDenialReason.INVALID_REQUEST -> DECISION_SOURCE_VALIDATION
-                else -> null
-            }
-            val requestToUpdate = if (requestAlreadyInserted) {
-                dao.getRequestById(relayRequestId) ?: return null
-            } else {
-                initialRequest
-            }
-            val finalRequest = requestToUpdate.copy(
-                state = reviewedRequestState(response != null).storedName,
-                responseJson = response?.toString(),
-            )
-            val finalAuthentication = initialAuthentication.copy(
-                decision = automaticDecision?.storedName,
-                approvalEvaluationJson = evaluation?.let { json.encodeToString(it) },
-                completionReason = denial?.first?.wireName,
-                completionMessage = denial?.second,
-                decidedAt = automaticDecision?.let { decidedAt },
-            )
-            val automaticDecisionAudit = automaticDecision?.let {
-                AuditRecord(
-                    type = AuditEventType.SSH_AUTHENTICATION_DECIDED,
-                    outcome = when {
-                        signature != null -> AuditOutcome.APPROVED
-                        aiDenied || approvalSettingsDenied -> AuditOutcome.DENIED
-                        denial?.first == InvocationDenialReason.INVALID_REQUEST ->
-                            AuditOutcome.REJECTED
-                        else -> AuditOutcome.FAILED
-                    },
-                    decisionSource = automaticDecisionSource?.toAuditDecisionSource(),
-                    subject = contents.secret,
-                    detail = if (
-                        aiReview != null && aiReview.decision != AiReviewDecision.ASK_USER
-                    ) {
-                        aiReview.auditFailureDetail()
-                    } else {
-                        denial?.second
-                    },
-                    clientId = pairing.clientId,
-                    clientName = pairing.auditClientName(),
-                    relayRequestId = relayRequestId,
-                )
-            }
-            val persisted = if (requestAlreadyInserted) {
-                sshAuthenticationRequests.finishAiReview(
-                    request = finalRequest,
-                    authentication = finalAuthentication,
-                    invocationSecretDetailsJson = invocation.secretDetailsJson,
-                    authorization = authorization,
-                    aiReviewAudit = AuditRecord(
-                        type = AuditEventType.SSH_AUTHENTICATION_AI_REVIEWED,
-                        outcome = checkNotNull(aiReview).auditOutcome(),
-                        decisionSource = AuditDecisionSource.AI_REVIEW,
-                        subject = contents.secret,
-                        detail = aiReview.auditFailureDetail(),
-                        clientId = pairing.clientId,
-                        clientName = pairing.auditClientName(),
-                        relayRequestId = relayRequestId,
-                    ),
-                    automaticDecisionAudit = automaticDecisionAudit,
-                )
-            } else {
-                sshAuthenticationRequests.receive(
-                    request = finalRequest,
-                    authentication = finalAuthentication,
-                    client = pairing.copy(
-                        clientSoftwareJson = encodeClientSoftware(contents.clientSoftware),
-                        lastSeenAt = now,
-                    ),
-                    acceptedPsks = acceptedSecrets,
-                    invocationSecretDetailsJson = invocation.secretDetailsJson,
-                    authorization = authorization.takeIf { automaticDecision != null },
-                    automaticDecisionAudit = automaticDecisionAudit,
-                )
-            }
-            return when (persisted) {
-                ConditionalRequestUpdate.APPLIED -> ProcessedRelayMessage(response)
-                ConditionalRequestUpdate.ACTION_REQUIRED -> ProcessedRelayMessage()
-                ConditionalRequestUpdate.UNAVAILABLE -> null
-            }
-        }
-
-        if (!needsAiReview) return finishReview(null, requestAlreadyInserted = false)
-
-        withContext(NonCancellable) {
-            check(
-                sshAuthenticationRequests.receive(
-                    request = initialRequest,
-                    authentication = initialAuthentication,
-                    client = pairing.copy(
-                        clientSoftwareJson = encodeClientSoftware(contents.clientSoftware),
-                        lastSeenAt = now,
-                    ),
-                    acceptedPsks = acceptedSecrets,
-                    invocationSecretDetailsJson = invocation.secretDetailsJson,
-                    authorization = null,
-                    automaticDecisionAudit = null,
-                ) == ConditionalRequestUpdate.APPLIED,
-            )
-            check(
-                launchAiReview(
-                    requestId = relayRequestId,
-                    requestJson = initialRequest.requestJson,
-                    review = {
-                        requestSshAuthenticationAiReview(
-                            pairing = pairing,
-                            contents = contents,
-                            messageDetails = messageDetails,
-                            invocation = invocation,
-                            parentElapsedSeconds = if (now >= invocationRequest.receivedAt) {
-                                (now - invocationRequest.receivedAt) / 1_000
-                            } else {
-                                null
-                            },
-                            evaluation = checkNotNull(initialEvaluation),
-                            policies = approvalPolicies,
-                            credentials = credentials,
-                        )
-                    },
-                    complete = { finishReview(it, requestAlreadyInserted = true) },
-                ),
-            )
-        }
-        return ProcessedRelayMessage()
-    }
-
-    private suspend fun requestSshAuthenticationAiReview(
-        pairing: ClientEntity,
-        contents: SshAuthenticationRequestMessage,
-        messageDetails: SshAuthenticationMessageDetails,
-        invocation: SecretUseRequestEntity,
-        parentElapsedSeconds: Long?,
-        evaluation: ApprovalEvaluation,
-        policies: List<SecretApprovalPolicy>,
-        credentials: RelayDeviceCredentials,
-    ): AiReview {
-        val elapsedSeconds = parentElapsedSeconds ?: return AiReview(
-            decision = AiReviewDecision.ASK_USER,
-            explanation = "The relative timing of the parent invocation is unavailable.",
-        )
-        val invocationSecrets = invocation.providedSecretsJson?.let {
-            decodeStoredApprovalReviewSecretFacts(it)
-        } ?: return AiReview(
-            decision = AiReviewDecision.ASK_USER,
-            explanation = "The parent invocation context is unavailable.",
-        )
-        val request = approvalReviewSshAuthenticationRequest(
-            client = pairing,
-            secretName = contents.secret,
-            details = messageDetails,
-            invocation = invocation,
-            invocationSecrets = invocationSecrets,
-            parentElapsedSeconds = elapsedSeconds,
-            evaluation = evaluation,
-            policies = policies,
-            deviceInstructions = credentials.instructions,
-        )
-        return performAiReview(approvalReviewer, credentials, request)
-    }
 
     private suspend fun processSecretListRequest(
         pairing: ClientEntity,
@@ -2078,13 +1640,6 @@ internal class RequestRepository(
         }
     }
 
-    private suspend fun credentialsForClient(client: ClientEntity): RelayDeviceCredentials? {
-        return when (val result = deviceCredentials.deviceCredentials(client.deviceIdentityId)) {
-            is RelayDeviceCredentialsResult.Available -> result.credentials
-            else -> null
-        }
-    }
-
     private suspend fun openStoredCompletion(
         activeCredentials: RelayDeviceCredentials,
         request: InboxRequestEntity,
@@ -2130,8 +1685,6 @@ internal class RequestRepository(
 
     private fun String.toRelayClientState(): RelayClientState =
         checkNotNull(RelayClientState.entries.find { it.wireName == this })
-
-    private fun encodeClientSoftware(value: ClientSoftware): String = json.encodeToString(value)
 
     private companion object {
         const val IDEMPOTENCY_RETENTION_MILLIS = 25 * 60 * 60 * 1_000L
