@@ -47,40 +47,36 @@ internal fun agentknockViewModelFactory(
         initializer {
             RequestsViewModel(
                 savedStateHandle = createSavedStateHandle(),
-                repository = container.requests,
+                actions = container.actions,
                 inbox = container.requestInbox,
                 requestSummaries = container.requestSummaries,
                 connection = container.requestConnection,
-                awaitStorageReady = awaitStorageReady,
             )
         }
         initializer {
             SecretsViewModel(
                 savedStateHandle = createSavedStateHandle(),
-                repository = container.secrets,
-                requests = container.requests,
+                actions = container.actions,
+                secretRepository = container.secrets,
                 inbox = container.requestInbox,
                 requestSummaries = container.requestSummaries,
                 clientSummaries = container.clientSummaries,
                 secretSummaries = container.secretSummaries,
                 configuration = container.deviceConfiguration,
                 deviceSettings = container.deviceSettings,
-                awaitStorageReady = awaitStorageReady,
-                protectedActions = container.protectedActions,
             )
         }
         initializer {
             ClientsViewModel(
                 savedStateHandle = createSavedStateHandle(),
-                repository = container.requests,
+                actions = container.actions,
+                requests = container.requests,
                 inbox = container.requestInbox,
                 requestSummaries = container.requestSummaries,
                 clientSummaries = container.clientSummaries,
                 secrets = container.secrets,
                 configuration = container.deviceConfiguration,
                 deviceManagement = container.deviceSettings,
-                awaitStorageReady = awaitStorageReady,
-                protectedActions = container.protectedActions,
             )
         }
         initializer {

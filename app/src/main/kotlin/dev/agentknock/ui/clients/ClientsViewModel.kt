@@ -3,6 +3,8 @@ package dev.agentknock.ui.clients
 import androidx.lifecycle.SavedStateHandle
 import androidx.lifecycle.ViewModel
 import androidx.lifecycle.viewModelScope
+import dev.agentknock.AgentknockActions
+import dev.agentknock.ProtectedActionResult
 import dev.agentknock.relay.RelayClientState
 import dev.agentknock.storage.request.ClientChangeResult
 import dev.agentknock.storage.request.ClientDetails
@@ -13,16 +15,14 @@ import dev.agentknock.storage.request.InboxRequestSummary
 import dev.agentknock.storage.request.PairingState
 import dev.agentknock.storage.request.PairingDecisionResult
 import dev.agentknock.storage.device.DeviceConfiguration
-import dev.agentknock.storage.device.DeviceSettingsCoordinator
 import dev.agentknock.storage.device.DeviceManagementResult
+import dev.agentknock.storage.device.DeviceSettingsCoordinator
 import dev.agentknock.storage.request.RequestRepository
 import dev.agentknock.storage.request.RequestInbox
 import dev.agentknock.storage.secret.SecretRepository
 import dev.agentknock.storage.secret.TemporaryAccessGrant
 import dev.agentknock.storage.secret.TemporaryAccessOperation
 import dev.agentknock.ui.pendingPairings
-import dev.agentknock.ui.auth.DeviceAuthenticationResult
-import dev.agentknock.ui.auth.ProtectedActionAuthorizer
 import kotlinx.coroutines.ExperimentalCoroutinesApi
 import kotlinx.coroutines.channels.Channel
 import kotlinx.coroutines.flow.Flow
@@ -76,15 +76,14 @@ internal sealed interface ClientPaneState {
 @OptIn(ExperimentalCoroutinesApi::class)
 internal class ClientsViewModel(
     private val savedStateHandle: SavedStateHandle,
-    private val repository: RequestRepository,
+    private val actions: AgentknockActions,
+    private val requests: RequestRepository,
     private val inbox: RequestInbox,
     requestSummaries: StateFlow<List<InboxRequestSummary>>,
     clientSummaries: StateFlow<List<ClientSummary>>,
     private val secrets: SecretRepository,
     val configuration: StateFlow<DeviceConfiguration?>,
     private val deviceManagement: DeviceSettingsCoordinator,
-    private val awaitStorageReady: suspend () -> Unit,
-    private val protectedActions: ProtectedActionAuthorizer,
 ) : ViewModel() {
     private val selected = MutableStateFlow(
         savedStateHandle.get<String>(SELECTED_CLIENT)?.let(ClientSelection::Client)
@@ -105,7 +104,7 @@ internal class ClientsViewModel(
             when (selection) {
                 ClientSelection.None -> flowOf(ClientPaneState.Empty)
                 is ClientSelection.Client -> combine(
-                    repository.observeClient(selection.clientId),
+                    requests.observeClient(selection.clientId),
                     secrets.observeTemporaryAccessGrants(),
                 ) { details, grants ->
                     if (details == null) {
@@ -187,7 +186,7 @@ internal class ClientsViewModel(
 
     fun rename(clientId: String, name: String) {
         launchMutation {
-            when (repository.renameClient(clientId, name.trim())) {
+            when (requests.renameClient(clientId, name.trim())) {
                 ClientChangeResult.CHANGED -> "Client renamed"
                 ClientChangeResult.NOT_FOUND,
                 ClientChangeResult.INVALID_STATE,
@@ -198,7 +197,7 @@ internal class ClientsViewModel(
 
     fun saveInstructions(clientId: String, instructions: String) {
         launchMutation {
-            when (repository.saveClientInstructions(clientId, instructions)) {
+            when (requests.saveClientInstructions(clientId, instructions)) {
                 ClientChangeResult.CHANGED -> "Instructions updated"
                 ClientChangeResult.NOT_FOUND,
                 ClientChangeResult.INVALID_STATE,
@@ -209,7 +208,7 @@ internal class ClientsViewModel(
 
     fun setState(clientId: String, state: RelayClientState) {
         launchMutation {
-            when (repository.setClientState(clientId, state)) {
+            when (requests.setClientState(clientId, state)) {
                 ClientChangeResult.CHANGED -> {
                     if (state == RelayClientState.REVOKED) {
                         compareAndSetSelection(
@@ -248,32 +247,16 @@ internal class ClientsViewModel(
 
     fun chooseSas(requestId: String, selectedIndex: Int?) {
         launchMutation {
-            awaitStorageReady()
-            if (
-                selectedIndex != null &&
-                repository.isMatchingPendingSas(requestId, selectedIndex)
-            ) {
-                val pairing = (pane.value as? ClientPaneState.Pairing)
-                    ?.takeIf { it.request.id == requestId }
-                    ?.request
-                    ?.content as? InboxRequestContent.Pairing
-                when (
-                    val authentication = protectedActions.authorize(
-                        "Accept ${pairing?.details?.clientName ?: "client"}",
-                    )
-                ) {
-                    DeviceAuthenticationResult.Success -> Unit
-                    is DeviceAuthenticationResult.Error -> return@launchMutation authentication.message
-                }
+            when (val result = actions.choosePairingCode(requestId, selectedIndex)) {
+                is ProtectedActionResult.Completed -> result.value.message()
+                is ProtectedActionResult.AuthenticationFailed -> result.message
             }
-            repository.chooseSas(requestId, selectedIndex).message()
         }
     }
 
     fun rejectPairing(requestId: String) {
         launchMutation {
-            awaitStorageReady()
-            val result = repository.rejectPairing(requestId)
+            val result = actions.rejectPairing(requestId)
             compareAndSetSelection(ClientSelection.Pairing(requestId), ClientSelection.None)
             result.message()
         }

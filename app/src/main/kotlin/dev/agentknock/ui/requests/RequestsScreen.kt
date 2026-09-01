@@ -24,6 +24,7 @@ import androidx.compose.ui.unit.dp
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import dev.agentknock.storage.request.InboxRequestContent
 import dev.agentknock.storage.request.InboxRequestDetails
+import dev.agentknock.storage.request.RequestDecision
 import dev.agentknock.storage.request.RequestSyncResult
 import dev.agentknock.ui.components.AdaptiveListDetail
 import kotlinx.coroutines.flow.collectLatest
@@ -93,7 +94,7 @@ internal fun RequestsScreen(
 @Composable
 private fun RequestSelectionDetail(
     selection: RequestPaneState,
-    onDecision: (InboxRequestDetails, RequestDecisionAction) -> Unit,
+    onDecision: (String, RequestDecision) -> Unit,
     onBack: () -> Unit,
     showBack: Boolean,
     modifier: Modifier,
@@ -118,7 +119,7 @@ private fun RequestSelectionDetail(
 @Composable
 private fun RequestDetail(
     request: InboxRequestDetails,
-    onDecision: (InboxRequestDetails, RequestDecisionAction) -> Unit,
+    onDecision: (String, RequestDecision) -> Unit,
     onBack: () -> Unit,
     showBack: Boolean,
     modifier: Modifier,
@@ -128,10 +129,10 @@ private fun RequestDetail(
             request = request,
             onBack = onBack,
             showBack = showBack,
-            onApprove = { onDecision(request, RequestDecisionAction.APPROVE) },
-            onDeny = { onDecision(request, RequestDecisionAction.DENY) },
+            onApprove = { onDecision(request.id, RequestDecision.APPROVE) },
+            onDeny = { onDecision(request.id, RequestDecision.DENY) },
             onAllowTemporarily = {
-                onDecision(request, RequestDecisionAction.ALLOW_TEMPORARILY)
+                onDecision(request.id, RequestDecision.ALLOW_TEMPORARILY)
             },
             modifier = modifier,
         )
@@ -139,10 +140,10 @@ private fun RequestDetail(
             request = request,
             onBack = onBack,
             showBack = showBack,
-            onApprove = { onDecision(request, RequestDecisionAction.APPROVE) },
-            onDeny = { onDecision(request, RequestDecisionAction.DENY) },
+            onApprove = { onDecision(request.id, RequestDecision.APPROVE) },
+            onDeny = { onDecision(request.id, RequestDecision.DENY) },
             onAllowTemporarily = {
-                onDecision(request, RequestDecisionAction.ALLOW_TEMPORARILY)
+                onDecision(request.id, RequestDecision.ALLOW_TEMPORARILY)
             },
             modifier = modifier,
         )
@@ -150,10 +151,10 @@ private fun RequestDetail(
             request = request,
             onBack = onBack,
             showBack = showBack,
-            onApprove = { onDecision(request, RequestDecisionAction.APPROVE) },
-            onDeny = { onDecision(request, RequestDecisionAction.DENY) },
+            onApprove = { onDecision(request.id, RequestDecision.APPROVE) },
+            onDeny = { onDecision(request.id, RequestDecision.DENY) },
             onAllowTemporarily = {
-                onDecision(request, RequestDecisionAction.ALLOW_TEMPORARILY)
+                onDecision(request.id, RequestDecision.ALLOW_TEMPORARILY)
             },
             modifier = modifier,
         )

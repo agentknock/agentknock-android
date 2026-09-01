@@ -98,10 +98,17 @@ internal fun secretUploadLifecycle(
 
 internal sealed interface SecretUploadVariableValue {
     data class Available(val value: String) : SecretUploadVariableValue
+    data class AuthenticationRequired(val name: String) : SecretUploadVariableValue
     data object NotFound : SecretUploadVariableValue
     data object Unavailable : SecretUploadVariableValue
     data object Corrupted : SecretUploadVariableValue
     data object UnsupportedEncryption : SecretUploadVariableValue
+}
+
+internal sealed interface SecretUploadSensitivityResult {
+    data object Changed : SecretUploadSensitivityResult
+    data object NotFound : SecretUploadSensitivityResult
+    data class AuthenticationRequired(val name: String) : SecretUploadSensitivityResult
 }
 
 internal sealed interface SecretUploadDecisionResult {
@@ -413,6 +420,7 @@ internal class SecretManagementRequests(
     suspend fun readSecretUploadVariable(
         requestId: String,
         variableId: String,
+        sensitiveAccessAuthorized: Boolean,
     ): SecretUploadVariableValue {
         val request = dao.getRequestById(requestId) ?: return SecretUploadVariableValue.NotFound
         val upload = dao.getSecretUploadRequest(requestId)
@@ -426,6 +434,9 @@ internal class SecretManagementRequests(
         val variable = dao.getSecretUploadEnvironmentVariables(requestId).find {
             it.id == variableId
         } ?: return SecretUploadVariableValue.NotFound
+        if (variable.sensitive && !sensitiveAccessAuthorized) {
+            return SecretUploadVariableValue.AuthenticationRequired(variable.name)
+        }
         return when (
             val result = material.decryptSecretUploadEnvironmentVariable(request, variable)
         ) {
@@ -444,19 +455,31 @@ internal class SecretManagementRequests(
         requestId: String,
         variableId: String,
         sensitive: Boolean,
-    ): Boolean = writeTransaction.execute {
-        val request = dao.getRequestById(requestId) ?: return@execute false
-        val upload = dao.getSecretUploadRequest(requestId) ?: return@execute false
+        sensitivityReductionAuthorized: Boolean,
+    ): SecretUploadSensitivityResult = writeTransaction.execute {
+        val request = dao.getRequestById(requestId)
+            ?: return@execute SecretUploadSensitivityResult.NotFound
+        val upload = dao.getSecretUploadRequest(requestId)
+            ?: return@execute SecretUploadSensitivityResult.NotFound
         if (
             request.state != InboxRequestState.ACTION_REQUIRED.storedName ||
             upload.decision != null
         ) {
-            return@execute false
+            return@execute SecretUploadSensitivityResult.NotFound
         }
         val variable = dao.getSecretUploadEnvironmentVariables(requestId).find {
             it.id == variableId
-        } ?: return@execute false
-        dao.updateSecretUploadEnvironmentVariable(variable.copy(sensitive = sensitive)) == 1
+        } ?: return@execute SecretUploadSensitivityResult.NotFound
+        if (variable.sensitive && !sensitive && !sensitivityReductionAuthorized) {
+            return@execute SecretUploadSensitivityResult.AuthenticationRequired(variable.name)
+        }
+        if (variable.sensitive == sensitive) {
+            return@execute SecretUploadSensitivityResult.Changed
+        }
+        if (dao.updateSecretUploadEnvironmentVariable(variable.copy(sensitive = sensitive)) != 1) {
+            return@execute SecretUploadSensitivityResult.NotFound
+        }
+        SecretUploadSensitivityResult.Changed
     }
 
     suspend fun rejectSecretUpload(requestId: String): SecretUploadDecisionResult {

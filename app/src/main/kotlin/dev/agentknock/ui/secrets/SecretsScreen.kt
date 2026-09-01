@@ -123,6 +123,7 @@ internal fun SecretsScreen(
     suspend fun readValue(variable: EnvironmentVariableMetadata): String? =
         when (val value = viewModel.readEnvironmentVariableValue(variable.id)) {
             is EnvironmentVariableValue.Available -> value.value
+            is EnvironmentVariableValue.AuthenticationRequired -> null
             EnvironmentVariableValue.Unavailable -> null.also {
                 report(resources.getString(R.string.value_unavailable))
             }
@@ -138,36 +139,15 @@ internal fun SecretsScreen(
         }
 
     fun reveal(variable: EnvironmentVariableMetadata) {
-        viewModel.toggleEnvironmentVariableReveal(
-            variable = variable,
-            protectionTitle = if (variable.sensitive) {
-                resources.getString(R.string.reveal_sensitive_value, variable.name)
-            } else {
-                null
-            },
-        )
+        viewModel.toggleEnvironmentVariableReveal(variable)
     }
 
     fun copy(variable: EnvironmentVariableMetadata) {
-        viewModel.copyEnvironmentVariable(
-            variable = variable,
-            protectionTitle = if (variable.sensitive) {
-                resources.getString(R.string.copy_sensitive_value, variable.name)
-            } else {
-                null
-            },
-        )
+        viewModel.copyEnvironmentVariable(variable)
     }
 
     fun edit(variable: EnvironmentVariableMetadata) {
-        viewModel.editEnvironmentVariable(
-            variable = variable,
-            protectionTitle = if (variable.sensitive) {
-                resources.getString(R.string.edit_sensitive_value, variable.name)
-            } else {
-                null
-            },
-        )
+        viewModel.editEnvironmentVariable(variable)
     }
 
     fun copyPublicKey(secret: SecretDetails) {

@@ -360,6 +360,7 @@ class SecretRepositoryTest {
                 sensitive = true,
                 notes = "Rotated out of band",
                 replacementValue = null,
+                sensitivityReductionAuthorized = true,
             ),
         )
 
@@ -393,8 +394,97 @@ class SecretRepositoryTest {
 
         assertEquals(
             EnvironmentVariableValue.Corrupted,
-            fixture.repository.readEnvironmentVariableValue(variableId),
+            fixture.repository.readEnvironmentVariableValue(
+                variableId,
+                sensitiveAccessAuthorized = true,
+            ),
         )
+    }
+
+    @Test
+    fun `sensitive environment values require explicit protected access`() = runTest {
+        val fixture = Fixture()
+        val secretId = fixture.createSecret("github")
+        val tokenId = fixture.createVariable(secretId, "GITHUB_TOKEN", "token", true)
+        val regionId = fixture.createVariable(secretId, "AWS_REGION", "eu-west-1", false)
+
+        assertEquals(
+            EnvironmentVariableValue.AuthenticationRequired("GITHUB_TOKEN"),
+            fixture.repository.readEnvironmentVariableValue(
+                tokenId,
+                sensitiveAccessAuthorized = false,
+            ),
+        )
+        assertEquals(
+            EnvironmentVariableValue.Available("AWS_REGION", "eu-west-1", sensitive = false),
+            fixture.repository.readEnvironmentVariableValue(
+                regionId,
+                sensitiveAccessAuthorized = false,
+            ),
+        )
+    }
+
+    @Test
+    fun `creating a non-sensitive environment value requires explicit authorization`() = runTest {
+        val fixture = Fixture()
+        val secretId = fixture.createSecret("aws")
+
+        assertEquals(
+            CreateEnvironmentVariableResult.AuthenticationRequired,
+            fixture.repository.createEnvironmentVariable(
+                secretId = secretId,
+                name = "AWS_REGION",
+                value = "eu-west-1",
+                sensitive = false,
+                notes = "",
+                nonSensitiveCreationAuthorized = false,
+            ),
+        )
+        assertTrue(fixture.dao.variables.value.isEmpty())
+
+        assertTrue(
+            fixture.repository.createEnvironmentVariable(
+                secretId = secretId,
+                name = "AWS_REGION",
+                value = "eu-west-1",
+                sensitive = false,
+                notes = "",
+                nonSensitiveCreationAuthorized = true,
+            ) is CreateEnvironmentVariableResult.Created,
+        )
+    }
+
+    @Test
+    fun `reducing environment value sensitivity requires explicit authorization`() = runTest {
+        val fixture = Fixture()
+        val secretId = fixture.createSecret("github")
+        val variableId = fixture.createVariable(secretId, "GITHUB_TOKEN", "token", true)
+
+        assertEquals(
+            SaveEnvironmentVariableResult.AUTHENTICATION_REQUIRED,
+            fixture.repository.saveEnvironmentVariable(
+                id = variableId,
+                name = "GITHUB_TOKEN",
+                sensitive = false,
+                notes = "",
+                replacementValue = null,
+                sensitivityReductionAuthorized = false,
+            ),
+        )
+        assertTrue(fixture.dao.variables.value.single().sensitive)
+
+        assertEquals(
+            SaveEnvironmentVariableResult.SAVED,
+            fixture.repository.saveEnvironmentVariable(
+                id = variableId,
+                name = "GITHUB_TOKEN",
+                sensitive = false,
+                notes = "",
+                replacementValue = null,
+                sensitivityReductionAuthorized = true,
+            ),
+        )
+        assertFalse(fixture.dao.variables.value.single().sensitive)
     }
 
     @Test
@@ -411,6 +501,7 @@ class SecretRepositoryTest {
             sensitive = true,
             notes = "Used by the AWS CLI",
             replacementValue = null,
+            sensitivityReductionAuthorized = true,
         )
 
         assertEquals(SaveEnvironmentVariableResult.SAVED, result)
@@ -418,7 +509,10 @@ class SecretRepositoryTest {
         assertEquals(before.valueUpdatedAt, after.valueUpdatedAt)
         assertNotEquals(secretUpdatedAt, fixture.dao.secrets.value.single().updatedAt)
         assertFalse(before.encryptedValue.ciphertext.contentEquals(after.encryptedValue.ciphertext))
-        val value = fixture.repository.readEnvironmentVariableValue(variableId)
+        val value = fixture.repository.readEnvironmentVariableValue(
+            variableId,
+            sensitiveAccessAuthorized = true,
+        )
         assertTrue(value is EnvironmentVariableValue.Available)
         assertEquals("eu-west-1", (value as EnvironmentVariableValue.Available).value)
     }
@@ -473,7 +567,10 @@ class SecretRepositoryTest {
         assertFalse(restoredSecret.environmentVariables.single().valueAvailable)
         assertEquals(
             EnvironmentVariableValue.Unavailable,
-            restoredRepository.readEnvironmentVariableValue(variableId),
+            restoredRepository.readEnvironmentVariableValue(
+                variableId,
+                sensitiveAccessAuthorized = true,
+            ),
         )
 
         assertEquals(
@@ -484,13 +581,17 @@ class SecretRepositoryTest {
                 sensitive = true,
                 notes = "",
                 replacementValue = "new-token",
+                sensitivityReductionAuthorized = true,
             ),
         )
 
         val replacementRow = original.dao.variables.value.single()
         assertEquals(originalRow.id, replacementRow.id)
         assertEquals("replacement-secret-key", replacementRow.encryptedValue.keyId)
-        val replacementValue = restoredRepository.readEnvironmentVariableValue(variableId)
+        val replacementValue = restoredRepository.readEnvironmentVariableValue(
+            variableId,
+            sensitiveAccessAuthorized = true,
+        )
         assertTrue(replacementValue is EnvironmentVariableValue.Available)
         assertEquals("new-token", (replacementValue as EnvironmentVariableValue.Available).value)
     }
@@ -812,9 +913,10 @@ class SecretRepositoryTest {
         assertEquals(SecretApprovalMode.TEMPORARY, secret.approvalMode)
         assertTrue(secret.environmentVariables.all(EnvironmentVariableMetadata::sensitive))
         assertEquals(
-            EnvironmentVariableValue.Available("token"),
+            EnvironmentVariableValue.Available("CF_TOKEN", "token", sensitive = true),
             fixture.repository.readEnvironmentVariableValue(
                 secret.environmentVariables.single { it.name == "CF_TOKEN" }.id,
+                sensitiveAccessAuthorized = true,
             ),
         )
     }
@@ -831,6 +933,7 @@ class SecretRepositoryTest {
             value = "eu-west-1",
             sensitive = false,
             notes = "Safe to display",
+            nonSensitiveCreationAuthorized = true,
         )
         check(region is CreateEnvironmentVariableResult.Created)
         fixture.createVariable(secretId, "OLD_VARIABLE", "old", true)
@@ -1312,6 +1415,7 @@ class SecretRepositoryTest {
             sensitive = true,
             notes = "",
             replacementValue = "new-token",
+            sensitivityReductionAuthorized = true,
         )
         val inserted = fixture.repository.allowTemporaryAccess(
             policies = stalePolicy,
@@ -1367,6 +1471,7 @@ class SecretRepositoryTest {
             sensitive = true,
             notes = "",
             replacementValue = "new-token",
+            sensitivityReductionAuthorized = true,
         )
         assertNull(
             fixture.repository.approvalPoliciesForNames(
@@ -1431,8 +1536,11 @@ class SecretRepositoryTest {
         checkNotNull(secret)
         assertEquals(listOf("AWS_REGION", "AWS_TOKEN"), secret.environmentVariables.map { it.name })
         assertEquals(
-            EnvironmentVariableValue.Available("new-token"),
-            fixture.repository.readEnvironmentVariableValue(tokenId),
+            EnvironmentVariableValue.Available("AWS_TOKEN", "new-token", sensitive = true),
+            fixture.repository.readEnvironmentVariableValue(
+                tokenId,
+                sensitiveAccessAuthorized = true,
+            ),
         )
     }
 
@@ -1499,12 +1607,18 @@ class SecretRepositoryTest {
 
         assertTrue(result is ApplyEnvironmentSecretUploadResult.Invalid)
         assertEquals(
-            EnvironmentVariableValue.Available("old"),
-            fixture.repository.readEnvironmentVariableValue(originalVariable),
+            EnvironmentVariableValue.Available("TOKEN", "old", sensitive = true),
+            fixture.repository.readEnvironmentVariableValue(
+                originalVariable,
+                sensitiveAccessAuthorized = true,
+            ),
         )
         assertEquals(
-            EnvironmentVariableValue.Available("replacement"),
-            fixture.repository.readEnvironmentVariableValue(replacementVariable),
+            EnvironmentVariableValue.Available("TOKEN", "replacement", sensitive = true),
+            fixture.repository.readEnvironmentVariableValue(
+                replacementVariable,
+                sensitiveAccessAuthorized = true,
+            ),
         )
     }
 
@@ -1600,6 +1714,7 @@ class SecretRepositoryTest {
                 value = value,
                 sensitive = sensitive,
                 notes = "",
+                nonSensitiveCreationAuthorized = true,
             )
             check(result is CreateEnvironmentVariableResult.Created)
             return result.id

@@ -109,6 +109,30 @@ class PairingRequestsTest {
     }
 
     @Test
+    fun matchingPendingSasReturnsTheCurrentClientIdentityOnlyForTheCorrectChoice() = runTest {
+        insertPendingPairing(state = PairingState.SAS_VERIFICATION_PENDING)
+        val requests = requests(audit)
+
+        assertEquals(
+            MatchingPairingSas("Developer laptop"),
+            requests.matchingPendingSas(CLIENT_ID, selectedIndex = 1),
+        )
+        assertNull(requests.matchingPendingSas(CLIENT_ID, selectedIndex = 0))
+
+        val attempt = checkNotNull(database.requestDao().getPairingAttempt(CLIENT_ID))
+        assertEquals(
+            1,
+            database.requestDao().updatePairingAttempt(
+                attempt.copy(friendlyName = null, hostname = null),
+            ),
+        )
+        assertEquals(
+            MatchingPairingSas("linux"),
+            requests.matchingPendingSas(CLIENT_ID, selectedIndex = 1),
+        )
+    }
+
+    @Test
     fun validFinishPromotesClientAndOwnsAllDurablePairingTransitions() = runTest {
         insertPendingPairing(relayState = RelayClientState.ACTIVE)
         val requests = requests(audit)

@@ -48,34 +48,6 @@ internal const val SECRET_USE_POLICY_DENIAL_MESSAGE =
 private const val SECRET_USE_COMPLETION_VERIFICATION_ERROR =
     "Secret use completion could not be verified."
 
-internal sealed interface InvocationDecisionResult {
-    data object Decided : InvocationDecisionResult
-
-    data object SecretsChanged : InvocationDecisionResult
-
-    data object NotPending : InvocationDecisionResult
-
-    data object NotFound : InvocationDecisionResult
-
-    data class MissingSecrets(val names: List<String>) : InvocationDecisionResult
-
-    data class ConflictingVariable(val name: String) : InvocationDecisionResult
-
-    data class Invalid(val message: String) : InvocationDecisionResult
-
-    data object SecretUnavailable : InvocationDecisionResult
-
-    data object SecretCorrupted : InvocationDecisionResult
-
-    data object UnsupportedEncryption : InvocationDecisionResult
-
-    data object PairingUnavailable : InvocationDecisionResult
-
-    data object TemporaryAccessUnavailable : InvocationDecisionResult
-
-    data object TemporaryAccessNotStarted : InvocationDecisionResult
-}
-
 /**
  * Owns Invocation intake and durable transitions.
  *
@@ -494,19 +466,19 @@ internal class InvocationRequests(
         allowTemporaryAccess: Boolean,
         openRequest: suspend (InboxRequestEntity) -> ByteArray?,
         sealResponse: suspend (InboxRequestEntity, ByteArray) -> JsonElement?,
-    ): InvocationDecisionResult {
-        val request = dao.getRequestById(requestId) ?: return InvocationDecisionResult.NotFound
+    ): RequestDecisionResult {
+        val request = dao.getRequestById(requestId) ?: return RequestDecisionResult.NotFound
         val secretUseRequest = dao.getSecretUseRequest(requestId)
-            ?: return InvocationDecisionResult.NotFound
+            ?: return RequestDecisionResult.NotFound
         if (
             request.state != InboxRequestState.ACTION_REQUIRED.storedName ||
             secretUseRequest.decision != null
         ) {
-            return InvocationDecisionResult.NotPending
+            return RequestDecisionResult.NotPending
         }
-        val plaintext = openRequest(request) ?: return InvocationDecisionResult.PairingUnavailable
+        val plaintext = openRequest(request) ?: return RequestDecisionResult.ClientUnavailable
         val contents = runCatching { invocationProtocol.decodeRequest(plaintext) }.getOrNull()
-            ?: return InvocationDecisionResult.PairingUnavailable
+            ?: return RequestDecisionResult.ClientUnavailable
         val requestedSecrets = contents.secrets
         val storedSecrets = storedJson.decodeFromString<List<SecretMetadata>>(
             secretUseRequest.secretDetailsJson,
@@ -549,7 +521,7 @@ internal class InvocationRequests(
                     InvocationDenialReason.POLICY_DENIED,
                     SECRET_USE_POLICY_DENIAL_MESSAGE,
                 ),
-            ) ?: return InvocationDecisionResult.PairingUnavailable
+            ) ?: return RequestDecisionResult.ClientUnavailable
             return persistDecision(
                 request = request,
                 secretUseRequest = secretUseRequest,
@@ -578,44 +550,44 @@ internal class InvocationRequests(
                     approvalEvaluationJson = currentEvaluation?.let { json.encodeToString(it) },
                 ),
             )
-            return InvocationDecisionResult.SecretsChanged
+            return RequestDecisionResult.SecretChanged
         }
         val availableSecrets = when (val result = latestResolution.values) {
             is RequestedSecretsResult.Available -> result.secrets
             is RequestedSecretsResult.MissingSecrets -> {
-                return InvocationDecisionResult.MissingSecrets(result.names)
+                return RequestDecisionResult.MissingSecrets(result.names)
             }
             is RequestedSecretsResult.ConflictingVariable -> {
-                return InvocationDecisionResult.ConflictingVariable(result.name)
+                return RequestDecisionResult.ConflictingVariable(result.name)
             }
             is RequestedSecretsResult.MissingEnvironmentVariables -> {
-                return InvocationDecisionResult.Invalid(
+                return RequestDecisionResult.Invalid(
                     "Secret ${result.secretName} has no ${result.names.joinToString()} variable.",
                 )
             }
             is RequestedSecretsResult.EnvironmentOptionsForSshSecret -> {
-                return InvocationDecisionResult.Invalid(
+                return RequestDecisionResult.Invalid(
                     "Secret ${result.secretName} is not an environment-variable secret.",
                 )
             }
             RequestedSecretsResult.MultipleSshKeys -> {
-                return InvocationDecisionResult.Invalid("A request can use at most one SSH key.")
+                return RequestDecisionResult.Invalid("A request can use at most one SSH key.")
             }
             RequestedSecretsResult.UnsupportedSecretType -> {
-                return InvocationDecisionResult.Invalid("A requested secret type is unsupported.")
+                return RequestDecisionResult.Invalid("A requested secret type is unsupported.")
             }
             RequestedSecretsResult.SecretUnavailable -> {
-                return InvocationDecisionResult.SecretUnavailable
+                return RequestDecisionResult.SecretUnavailable
             }
             RequestedSecretsResult.SecretCorrupted -> {
-                return InvocationDecisionResult.SecretCorrupted
+                return RequestDecisionResult.SecretCorrupted
             }
             RequestedSecretsResult.UnsupportedEncryption -> {
-                return InvocationDecisionResult.UnsupportedEncryption
+                return RequestDecisionResult.UnsupportedEncryption
             }
         }
         val temporaryGrant = if (allowTemporaryAccess) {
-            storedEvaluation ?: return InvocationDecisionResult.TemporaryAccessUnavailable
+            storedEvaluation ?: return RequestDecisionResult.TemporaryAccessUnavailable
             val latestPolicies = secrets.approvalPoliciesForNames(
                 protectedNames,
                 request.clientId,
@@ -625,7 +597,7 @@ internal class InvocationRequests(
                 policies = latestPolicies,
                 storedEvaluation = storedEvaluation,
                 now = currentTimeMillis(),
-            ) ?: return InvocationDecisionResult.TemporaryAccessUnavailable
+            ) ?: return RequestDecisionResult.TemporaryAccessUnavailable
         } else {
             null
         }
@@ -634,7 +606,7 @@ internal class InvocationRequests(
             invocationProtocol.approvedResponse(
                 availableSecrets.mapValues { (_, secret) -> secret.toResponseSecret() },
             ),
-        ) ?: return InvocationDecisionResult.PairingUnavailable
+        ) ?: return RequestDecisionResult.ClientUnavailable
         val providedSecretsJson = json.encodeToString(
             dev.agentknock.review.approvalReviewSecretFacts(
                 latestDescription,
@@ -666,15 +638,15 @@ internal class InvocationRequests(
     suspend fun deny(
         requestId: String,
         sealResponse: suspend (InboxRequestEntity, ByteArray) -> JsonElement?,
-    ): InvocationDecisionResult {
-        val request = dao.getRequestById(requestId) ?: return InvocationDecisionResult.NotFound
+    ): RequestDecisionResult {
+        val request = dao.getRequestById(requestId) ?: return RequestDecisionResult.NotFound
         val secretUseRequest = dao.getSecretUseRequest(requestId)
-            ?: return InvocationDecisionResult.NotFound
+            ?: return RequestDecisionResult.NotFound
         if (
             request.state != InboxRequestState.ACTION_REQUIRED.storedName ||
             secretUseRequest.decision != null
         ) {
-            return InvocationDecisionResult.NotPending
+            return RequestDecisionResult.NotPending
         }
         val response = sealResponse(
             request,
@@ -682,7 +654,7 @@ internal class InvocationRequests(
                 InvocationDenialReason.USER_DENIED,
                 SECRET_USE_DENIAL_MESSAGE,
             ),
-        ) ?: return InvocationDecisionResult.PairingUnavailable
+        ) ?: return RequestDecisionResult.ClientUnavailable
         return persistDecision(
             request = request,
             secretUseRequest = secretUseRequest,
@@ -998,7 +970,7 @@ internal class InvocationRequests(
         denialReason: InvocationDenialReason? = null,
         denialMessage: String? = null,
         authorization: AuthorizationCommitment? = null,
-    ): InvocationDecisionResult {
+    ): RequestDecisionResult {
         require(decision != ApprovalDecision.APPROVED || providedSecretsJson != null) {
             "An approved invocation must record its provided secrets"
         }
@@ -1060,10 +1032,10 @@ internal class InvocationRequests(
                 )
             }
             when (result) {
-                ConditionalRequestUpdate.APPLIED -> InvocationDecisionResult.Decided
+                ConditionalRequestUpdate.APPLIED -> RequestDecisionResult.Decided
                 ConditionalRequestUpdate.ACTION_REQUIRED,
                 ConditionalRequestUpdate.UNAVAILABLE,
-                -> InvocationDecisionResult.SecretsChanged
+                -> RequestDecisionResult.SecretChanged
             }
         }
     }
@@ -1075,7 +1047,7 @@ internal class InvocationRequests(
         providedSecretsJson: String,
         authorization: AuthorizationCommitment,
         grant: TemporaryAccessPlan,
-    ): InvocationDecisionResult {
+    ): RequestDecisionResult {
         val evaluationJson = json.encodeToString(grant.evaluation)
         return writeTransaction.execute {
             val now = currentTimeMillis()
@@ -1087,7 +1059,7 @@ internal class InvocationRequests(
                     now,
                 )
             ) {
-                return@execute InvocationDecisionResult.SecretsChanged
+                return@execute RequestDecisionResult.SecretChanged
             }
             val temporaryAccessStarted = secrets.allowTemporaryAccess(
                 policies = grant.policies,
@@ -1135,9 +1107,9 @@ internal class InvocationRequests(
                 now,
             )
             if (temporaryAccessStarted) {
-                InvocationDecisionResult.Decided
+                RequestDecisionResult.Decided
             } else {
-                InvocationDecisionResult.TemporaryAccessNotStarted
+                RequestDecisionResult.TemporaryAccessNotStarted
             }
         }
     }

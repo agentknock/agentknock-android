@@ -5,6 +5,9 @@ import androidx.room3.executeSQL
 import androidx.room3.useWriterConnection
 import androidx.test.ext.junit.runners.AndroidJUnit4
 import androidx.test.platform.app.InstrumentationRegistry
+import dev.agentknock.AgentknockActions
+import dev.agentknock.ProtectedActionResult
+import dev.agentknock.SecretValueAction
 import dev.agentknock.protocol.PairedRequestProtocol
 import dev.agentknock.protocol.PairingProtocol
 import dev.agentknock.relay.RelayClientState
@@ -41,16 +44,20 @@ import dev.agentknock.storage.crypto.VaultKeyManager
 import dev.agentknock.storage.crypto.VaultKeyPurpose
 import dev.agentknock.storage.secret.CreateSecretResult
 import dev.agentknock.storage.secret.CreateEnvironmentVariableResult
+import dev.agentknock.storage.secret.EnvironmentVariableValue
 import dev.agentknock.storage.secret.SecretApprovalMode
 import dev.agentknock.storage.secret.SecretMetadata
+import dev.agentknock.storage.secret.SaveEnvironmentVariableResult
 import dev.agentknock.storage.secret.SaveSecretResult
 import dev.agentknock.storage.secret.SecretRepository
 import dev.agentknock.storage.secret.SshKeyAlgorithm
 import dev.agentknock.storage.secret.SshPrivateKey
+import dev.agentknock.storage.secret.TemporaryAccessOperation
 import dev.agentknock.storage.device.RelayDeviceCredentialSource
 import dev.agentknock.storage.device.RelayDeviceCredentials
 import dev.agentknock.storage.device.RelayDeviceCredentialsResult
 import dev.agentknock.storage.device.DeviceIdentityEntity
+import dev.agentknock.ui.auth.DeviceAuthenticationResult
 import java.io.ByteArrayOutputStream
 import java.io.DataOutputStream
 import kotlinx.coroutines.async
@@ -1619,19 +1626,70 @@ class RequestRepositorySlotTest {
     }
 
     @Test
+    fun correctSasRequiresSuccessfulAuthentication() = runTest {
+        receivePairingUntilSas()
+        val pairing = checkNotNull(database.requestDao().getPairingAttempt(CLIENT_ID))
+        val correctIndex = checkNotNull(pairing.correctSasIndex)
+        var authentication: DeviceAuthenticationResult =
+            DeviceAuthenticationResult.Error("cancelled")
+        var authenticationCalls = 0
+        val actions = actions {
+            authenticationCalls += 1
+            authentication
+        }
+
+        assertEquals(
+            ProtectedActionResult.AuthenticationFailed("cancelled"),
+            actions.choosePairingCode(CLIENT_ID, correctIndex),
+        )
+        assertEquals(1, authenticationCalls)
+        assertEquals(
+            PairingState.SAS_VERIFICATION_PENDING.storedName,
+            database.requestDao().getPairingAttempt(CLIENT_ID)?.state,
+        )
+
+        authentication = DeviceAuthenticationResult.Success
+        assertEquals(
+            ProtectedActionResult.Completed(PairingDecisionResult.VERIFIED),
+            actions.choosePairingCode(CLIENT_ID, correctIndex),
+        )
+        assertEquals(2, authenticationCalls)
+        assertEquals(
+            PairingState.WAITING_FOR_FINISH.storedName,
+            database.requestDao().getPairingAttempt(CLIENT_ID)?.state,
+        )
+    }
+
+    @Test
     fun wrongSasRejectsWithoutRecordingACodeAcceptedTimestamp() = runTest {
         receivePairingUntilSas()
         val pairing = checkNotNull(database.requestDao().getPairingAttempt(CLIENT_ID))
         val wrongIndex = (checkNotNull(pairing.correctSasIndex) + 1) % 3
 
         assertEquals(
-            PairingDecisionResult.REJECTED,
-            repository.chooseSas(CLIENT_ID, wrongIndex),
+            ProtectedActionResult.Completed(PairingDecisionResult.REJECTED),
+            actions { error("Wrong SAS must not request authentication") }
+                .choosePairingCode(CLIENT_ID, wrongIndex),
         )
 
         val rejected = checkNotNull(database.requestDao().getPairingAttempt(CLIENT_ID))
         assertEquals(PairingState.REJECTED.storedName, rejected.state)
         assertNull(rejected.decidedAt)
+    }
+
+    @Test
+    fun noneOfTheSasChoicesRejectsWithoutAuthentication() = runTest {
+        receivePairingUntilSas()
+
+        assertEquals(
+            ProtectedActionResult.Completed(PairingDecisionResult.REJECTED),
+            actions { error("None of the above must not request authentication") }
+                .choosePairingCode(CLIENT_ID, selectedIndex = null),
+        )
+        assertEquals(
+            PairingState.REJECTED.storedName,
+            database.requestDao().getPairingAttempt(CLIENT_ID)?.state,
+        )
     }
 
     @Test
@@ -2197,6 +2255,10 @@ class RequestRepositorySlotTest {
             requestAudit.any { it.detail?.contains(attackerControlledExplanation) == true },
         )
         assertEquals(1, approvalReviewer.callCount)
+        assertEquals(
+            RequestDecisionResult.Decided,
+            repository.decideRequest(AI_INVOCATION_REQUEST_ID, RequestDecision.APPROVE),
+        )
     }
 
     @Test
@@ -2244,6 +2306,10 @@ class RequestRepositorySlotTest {
             requestAudit.single { it.type == AuditEventType.SECRET_USE_AI_REVIEWED }.detail,
         )
         assertFalse(requestAudit.any { it.detail?.contains(malicious) == true })
+        assertEquals(
+            RequestDecisionResult.Decided,
+            repository.decideRequest(AI_INVOCATION_REQUEST_ID, RequestDecision.DENY),
+        )
     }
 
     @Test
@@ -2287,6 +2353,13 @@ class RequestRepositorySlotTest {
         assertTrue(
             reviewed.secretUse?.approvalEvaluation?.aiReview?.explanation
                 ?.contains("changed during AI review") == true,
+        )
+        assertEquals(
+            RequestDecisionResult.TemporaryAccessUnavailable,
+            repository.decideRequest(
+                AI_INVOCATION_REQUEST_ID,
+                RequestDecision.ALLOW_TEMPORARILY,
+            ),
         )
     }
 
@@ -2648,6 +2721,119 @@ class RequestRepositorySlotTest {
     }
 
     @Test
+    fun storedValueActionsAuthenticateFromCurrentSensitivity() = runTest {
+        val secretId = (secrets.createEnvironmentSecret("protected", "") as
+            CreateSecretResult.Created).id
+        val variableId = (secrets.createEnvironmentVariable(
+            secretId = secretId,
+            name = "TOKEN",
+            value = "secret-value",
+            sensitive = true,
+            notes = "",
+            nonSensitiveCreationAuthorized = false,
+        ) as CreateEnvironmentVariableResult.Created).id
+        var authentication: DeviceAuthenticationResult =
+            DeviceAuthenticationResult.Error("cancelled")
+        var authenticationCalls = 0
+        val actions = actions {
+            authenticationCalls += 1
+            authentication
+        }
+
+        assertEquals(
+            ProtectedActionResult.AuthenticationFailed("cancelled"),
+            actions.readEnvironmentVariable(variableId, SecretValueAction.REVEAL),
+        )
+        assertEquals(
+            EnvironmentVariableValue.AuthenticationRequired("TOKEN"),
+            secrets.readEnvironmentVariableValue(
+                variableId,
+                sensitiveAccessAuthorized = false,
+            ),
+        )
+        assertEquals(
+            ProtectedActionResult.AuthenticationFailed("cancelled"),
+            actions.saveEnvironmentVariable(
+                id = variableId,
+                name = "TOKEN",
+                sensitive = false,
+                notes = "",
+                replacementValue = null,
+            ),
+        )
+        assertTrue(
+            checkNotNull(secrets.observeSecret(secretId).first())
+                .environmentVariables.single().sensitive,
+        )
+
+        authentication = DeviceAuthenticationResult.Success
+        assertEquals(
+            ProtectedActionResult.Completed(SaveEnvironmentVariableResult.SAVED),
+            actions.saveEnvironmentVariable(
+                id = variableId,
+                name = "TOKEN",
+                sensitive = false,
+                notes = "",
+                replacementValue = null,
+            ),
+        )
+        assertFalse(
+            checkNotNull(secrets.observeSecret(secretId).first())
+                .environmentVariables.single().sensitive,
+        )
+
+        authentication = DeviceAuthenticationResult.Error("must not be requested")
+        val callsBeforeNonSensitiveRead = authenticationCalls
+        assertEquals(
+            ProtectedActionResult.Completed(
+                EnvironmentVariableValue.Available("TOKEN", "secret-value", sensitive = false),
+            ),
+            actions.readEnvironmentVariable(variableId, SecretValueAction.REVEAL),
+        )
+        assertEquals(callsBeforeNonSensitiveRead, authenticationCalls)
+    }
+
+    @Test
+    fun nonSensitiveVariableCreationRequiresSuccessfulAuthentication() = runTest {
+        val secretId = (secrets.createEnvironmentSecret("public", "") as
+            CreateSecretResult.Created).id
+        var authentication: DeviceAuthenticationResult =
+            DeviceAuthenticationResult.Error("cancelled")
+        val actions = actions { authentication }
+
+        assertEquals(
+            ProtectedActionResult.AuthenticationFailed("cancelled"),
+            actions.createEnvironmentVariable(
+                secretId = secretId,
+                name = "REGION",
+                value = "eu-north-1",
+                sensitive = false,
+                notes = "",
+            ),
+        )
+        assertTrue(
+            checkNotNull(secrets.observeSecret(secretId).first()).environmentVariables.isEmpty(),
+        )
+
+        authentication = DeviceAuthenticationResult.Success
+        val created = actions.createEnvironmentVariable(
+            secretId = secretId,
+            name = "REGION",
+            value = "eu-north-1",
+            sensitive = false,
+            notes = "",
+        )
+        assertTrue(
+            created is ProtectedActionResult.Completed &&
+                created.value is CreateEnvironmentVariableResult.Created,
+        )
+        assertFalse(
+            checkNotNull(secrets.observeSecret(secretId).first())
+                .environmentVariables.single().sensitive,
+        )
+    }
+
+    @Test
     fun secretUploadApprovalCommitsSecretDecisionAuditAndStagingDeletionTogether() = runTest {
         receiveEnvironmentSecretUpload()
 
@@ -2708,6 +2894,55 @@ class RequestRepositorySlotTest {
         )
         assertTrue(database.secretDao().getSecretsByName(listOf("uploaded-secret")).isEmpty())
         assertEquals(auditBefore, database.auditDao().observeEvents().first())
+    }
+
+    @Test
+    fun pendingUploadActionsFollowCurrentSensitivity() = runTest {
+        receiveEnvironmentSecretUpload()
+        val variable = database.requestDao()
+            .getSecretUploadEnvironmentVariables(UPLOAD_REQUEST_ID)
+            .single()
+        var authentication: DeviceAuthenticationResult =
+            DeviceAuthenticationResult.Error("cancelled")
+        var authenticationCalls = 0
+        val actions = actions {
+            authenticationCalls += 1
+            authentication
+        }
+
+        assertEquals(
+            ProtectedActionResult.AuthenticationFailed("cancelled"),
+            actions.readSecretUploadVariable(UPLOAD_REQUEST_ID, variable.id),
+        )
+        assertEquals(
+            ProtectedActionResult.AuthenticationFailed("cancelled"),
+            actions.setSecretUploadVariableSensitivity(
+                UPLOAD_REQUEST_ID,
+                variable.id,
+                sensitive = false,
+            ),
+        )
+        assertTrue(
+            database.requestDao().getSecretUploadEnvironmentVariables(UPLOAD_REQUEST_ID)
+                .single().sensitive,
+        )
+
+        authentication = DeviceAuthenticationResult.Success
+        assertEquals(
+            ProtectedActionResult.Completed(SecretUploadSensitivityResult.Changed),
+            actions.setSecretUploadVariableSensitivity(
+                UPLOAD_REQUEST_ID,
+                variable.id,
+                sensitive = false,
+            ),
+        )
+        authentication = DeviceAuthenticationResult.Error("must not be requested")
+        val callsBeforeNonSensitiveRead = authenticationCalls
+        assertEquals(
+            ProtectedActionResult.Completed(SecretUploadVariableValue.Available("secret-value")),
+            actions.readSecretUploadVariable(UPLOAD_REQUEST_ID, variable.id),
+        )
+        assertEquals(callsBeforeNonSensitiveRead, authenticationCalls)
     }
 
     @Test
@@ -3094,7 +3329,10 @@ class RequestRepositorySlotTest {
         )
 
         now += 1
-        assertEquals(GitSignDecisionResult.Decided, repository.denyGitSignRequest(child.id))
+        assertEquals(
+            RequestDecisionResult.Decided,
+            repository.decideRequest(child.id, RequestDecision.DENY),
+        )
         val denied = checkNotNull(database.requestDao().getRequestById(child.id))
         val deniedSigning = checkNotNull(database.requestDao().getGitSignRequest(child.id))
         val persistedResponse = Json.parseToJsonElement(checkNotNull(denied.responseJson))
@@ -3152,8 +3390,8 @@ class RequestRepositorySlotTest {
 
         now += 1
         assertEquals(
-            GitSignDecisionResult.Decided,
-            repository.approveGitSignRequest(GIT_SIGN_REQUEST_ID),
+            RequestDecisionResult.Decided,
+            repository.decideRequest(GIT_SIGN_REQUEST_ID, RequestDecision.APPROVE),
         )
         val decided = checkNotNull(database.requestDao().getRequestById(GIT_SIGN_REQUEST_ID))
         assertEquals(InboxRequestState.WAITING.storedName, decided.state)
@@ -3271,8 +3509,8 @@ class RequestRepositorySlotTest {
 
         now += 1
         assertEquals(
-            SshAuthenticationDecisionResult.Decided,
-            repository.denySshAuthenticationRequest(SSH_AUTHENTICATION_REQUEST_ID),
+            RequestDecisionResult.Decided,
+            repository.decideRequest(SSH_AUTHENTICATION_REQUEST_ID, RequestDecision.DENY),
         )
         val denied = checkNotNull(
             database.requestDao().getRequestById(SSH_AUTHENTICATION_REQUEST_ID),
@@ -3332,8 +3570,8 @@ class RequestRepositorySlotTest {
 
         now += 1
         assertEquals(
-            SshAuthenticationDecisionResult.Decided,
-            repository.approveSshAuthenticationRequest(SSH_AUTHENTICATION_REQUEST_ID),
+            RequestDecisionResult.Decided,
+            repository.decideRequest(SSH_AUTHENTICATION_REQUEST_ID, RequestDecision.APPROVE),
         )
         val decided = checkNotNull(
             database.requestDao().getSshAuthenticationRequest(SSH_AUTHENTICATION_REQUEST_ID),
@@ -3363,6 +3601,75 @@ class RequestRepositorySlotTest {
             completedAuthentication.completionResult,
         )
         assertNull(database.requestDao().getRequestPsk(SSH_AUTHENTICATION_REQUEST_ID))
+    }
+
+    @Test
+    fun sharedDispatcherAllowsTemporaryGitAndSshUse() = runTest {
+        val invocation = establishSigningInvocation(SecretApprovalMode.TEMPORARY)
+        val gitRequest = pairedRequest(
+            requestId = GIT_SIGN_REQUEST_ID,
+            clientPsk = invocation.clientPsk,
+            plaintext = gitSignPlaintext(invocation.token),
+        )
+        connect(
+            relayState(INVOCATION_REQUEST_ID),
+            requestEvent(GIT_SIGN_REQUEST_ID, gitRequest),
+            RelayDeviceEvent.CaughtUp,
+            relayState(GIT_SIGN_REQUEST_ID),
+        )
+        assertEquals(RequestSyncResult.Success, repository.sync())
+        assertEquals(
+            InboxRequestState.ACTION_REQUIRED.storedName,
+            database.requestDao().getRequestById(GIT_SIGN_REQUEST_ID)?.state,
+        )
+        assertEquals(
+            RequestDecisionResult.Decided,
+            repository.decideRequest(
+                GIT_SIGN_REQUEST_ID,
+                RequestDecision.ALLOW_TEMPORARILY,
+            ),
+        )
+        assertEquals(
+            setOf(TemporaryAccessOperation.GIT_SIGN),
+            secrets.observeTemporaryAccessGrants().first().map { it.operation }.toSet(),
+        )
+
+        now += 1
+        val sshRequest = pairedRequest(
+            requestId = SSH_AUTHENTICATION_REQUEST_ID,
+            clientPsk = invocation.clientPsk,
+            plaintext = sshAuthenticationPlaintext(invocation.token, invocation.key),
+        )
+        connect(
+            RelayDeviceEvent.Acknowledgement(
+                CLIENT_ID,
+                GIT_SIGN_REQUEST_ID,
+                RelayMessageKind.RESPONSE,
+            ),
+            relayState(INVOCATION_REQUEST_ID),
+            requestEvent(SSH_AUTHENTICATION_REQUEST_ID, sshRequest),
+            RelayDeviceEvent.CaughtUp,
+            relayState(SSH_AUTHENTICATION_REQUEST_ID),
+        )
+        assertEquals(RequestSyncResult.Success, repository.sync())
+        assertEquals(
+            InboxRequestState.ACTION_REQUIRED.storedName,
+            database.requestDao().getRequestById(SSH_AUTHENTICATION_REQUEST_ID)?.state,
+        )
+        assertEquals(
+            RequestDecisionResult.Decided,
+            repository.decideRequest(
+                SSH_AUTHENTICATION_REQUEST_ID,
+                RequestDecision.ALLOW_TEMPORARILY,
+            ),
+        )
+        assertEquals(
+            setOf(
+                TemporaryAccessOperation.GIT_SIGN,
+                TemporaryAccessOperation.SSH_AUTHENTICATE,
+            ),
+            secrets.observeTemporaryAccessGrants().first().map { it.operation }.toSet(),
+        )
     }
 
     @Test
@@ -3612,9 +3919,11 @@ class RequestRepositorySlotTest {
         return material.clientPsk
     }
 
-    private suspend fun establishSigningInvocation(): SigningInvocation {
+    private suspend fun establishSigningInvocation(
+        approvalMode: SecretApprovalMode? = null,
+    ): SigningInvocation {
         val clientPsk = establishActivePairing()
-        val key = createSigningSecret()
+        val key = createSigningSecret(approvalMode)
         val token = ByteArray(32) { (0x70 + it).toByte() }
         val request = pairedRequest(
             requestId = INVOCATION_REQUEST_ID,
@@ -3752,12 +4061,25 @@ class RequestRepositorySlotTest {
                 .encodeToByteArray(),
         )
 
-    private suspend fun createSigningSecret(): SshPrivateKey {
+    private fun actions(
+        authorize: suspend (String) -> DeviceAuthenticationResult,
+    ) = AgentknockActions(
+        context = InstrumentationRegistry.getInstrumentation().targetContext,
+        authorize = authorize,
+        requests = repository,
+        secrets = secrets,
+        awaitStorageReady = {},
+    )
+
+    private suspend fun createSigningSecret(
+        approvalMode: SecretApprovalMode? = null,
+    ): SshPrivateKey {
         val key = secrets.generateSshKey(SshKeyAlgorithm.ED25519, "characterization@test")
-        assertTrue(
-            secrets.createSshSecret("git-signing", "Signing key", key) is
-                CreateSecretResult.Created,
-        )
+        val created = secrets.createSshSecret("git-signing", "Signing key", key)
+            as CreateSecretResult.Created
+        approvalMode?.let { mode ->
+            assertEquals(SaveSecretResult.SAVED, secrets.saveApprovalMode(created.id, mode))
+        }
         return key
     }
 
@@ -3771,6 +4093,7 @@ class RequestRepositorySlotTest {
                 value = "secret-token",
                 sensitive = true,
                 notes = "",
+                nonSensitiveCreationAuthorized = true,
             ) is CreateEnvironmentVariableResult.Created,
         )
         assertEquals(
@@ -3799,6 +4122,7 @@ class RequestRepositorySlotTest {
                     value = "value-$name",
                     sensitive = true,
                     notes = "",
+                    nonSensitiveCreationAuthorized = true,
                 ) is CreateEnvironmentVariableResult.Created,
             )
         }
@@ -3827,12 +4151,13 @@ class RequestRepositorySlotTest {
                 value = "new-sensitive-value",
                 sensitive = true,
                 notes = "",
+                nonSensitiveCreationAuthorized = true,
             ) is CreateEnvironmentVariableResult.Created,
         )
 
         assertEquals(
-            InvocationDecisionResult.SecretsChanged,
-            repository.approveSecretUseRequest(AI_INVOCATION_REQUEST_ID),
+            RequestDecisionResult.SecretChanged,
+            repository.decideRequest(AI_INVOCATION_REQUEST_ID, RequestDecision.APPROVE),
         )
         val stored = checkNotNull(
             database.requestDao().getSecretUseRequest(AI_INVOCATION_REQUEST_ID),

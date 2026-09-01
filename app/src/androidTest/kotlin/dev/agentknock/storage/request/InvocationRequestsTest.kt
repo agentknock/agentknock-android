@@ -190,7 +190,7 @@ class InvocationRequestsTest {
         assertNull(rolledBackInvocation.decision)
         assertEquals(auditCount, audit.observeEvents().first().size)
 
-        assertEquals(InvocationDecisionResult.Decided, regular.deny(requestId, seal))
+        assertEquals(RequestDecisionResult.Decided, regular.deny(requestId, seal))
         val decidedRequest = checkNotNull(database.requestDao().getRequestById(requestId))
         val decidedInvocation = checkNotNull(database.requestDao().getSecretUseRequest(requestId))
         assertEquals(InboxRequestState.WAITING.storedName, decidedRequest.state)
@@ -202,7 +202,7 @@ class InvocationRequestsTest {
     }
 
     @Test
-    fun approvalTreatsMalformedStoredPlaintextAsPairingUnavailable() = runTest {
+    fun approvalTreatsMalformedStoredPlaintextAsClientUnavailable() = runTest {
         val requestId = "invocation-malformed-stored-plaintext"
         val regular = requests(audit)
         assertEquals(
@@ -219,7 +219,7 @@ class InvocationRequestsTest {
         var sealCalled = false
 
         assertEquals(
-            InvocationDecisionResult.PairingUnavailable,
+            RequestDecisionResult.ClientUnavailable,
             regular.approve(
                 requestId = requestId,
                 allowTemporaryAccess = false,
@@ -261,7 +261,7 @@ class InvocationRequestsTest {
         assertEquals(auditCount, audit.observeEvents().first().size)
 
         assertEquals(
-            InvocationDecisionResult.Decided,
+            RequestDecisionResult.Decided,
             regular.approve(
                 requestId = requestId,
                 allowTemporaryAccess = true,
@@ -419,7 +419,7 @@ class InvocationRequestsTest {
             secrets.saveApprovalMode(pending.secretId, SecretApprovalMode.DENY),
         )
         assertEquals(
-            InvocationDecisionResult.Decided,
+            RequestDecisionResult.Decided,
             regular.approve(
                 requestId = requestId,
                 allowTemporaryAccess = false,
@@ -633,6 +633,7 @@ class InvocationRequestsTest {
                 value = "sensitive-value",
                 sensitive = true,
                 notes = "",
+                nonSensitiveCreationAuthorized = true,
             ) is CreateEnvironmentVariableResult.Created,
         )
         val plaintext =

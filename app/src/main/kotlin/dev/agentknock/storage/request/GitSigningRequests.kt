@@ -46,21 +46,6 @@ private const val GIT_SIGN_COMPLETION_ABORTED_DETAIL =
 private const val GIT_SIGN_COMPLETION_VERIFICATION_ERROR =
     "Git signing completion could not be verified."
 
-internal sealed interface GitSignDecisionResult {
-    data object Decided : GitSignDecisionResult
-    data object NotPending : GitSignDecisionResult
-    data object NotFound : GitSignDecisionResult
-    data object InvocationUnavailable : GitSignDecisionResult
-    data object PairingUnavailable : GitSignDecisionResult
-    data object ApprovalChanged : GitSignDecisionResult
-    data object KeyChanged : GitSignDecisionResult
-    data object SecretUnavailable : GitSignDecisionResult
-    data object SecretCorrupted : GitSignDecisionResult
-    data object UnsupportedEncryption : GitSignDecisionResult
-    data object TemporaryAccessUnavailable : GitSignDecisionResult
-    data object TemporaryAccessNotStarted : GitSignDecisionResult
-}
-
 /**
  * Owns Git-signing intake and durable transitions.
  *
@@ -461,23 +446,23 @@ internal class GitSigningRequests(
         requestId: String,
         allowTemporaryAccess: Boolean,
         sealResponse: suspend (InboxRequestEntity, ByteArray) -> JsonElement?,
-    ): GitSignDecisionResult {
-        val request = dao.getRequestById(requestId) ?: return GitSignDecisionResult.NotFound
-        val gitSign = dao.getGitSignRequest(requestId) ?: return GitSignDecisionResult.NotFound
+    ): RequestDecisionResult {
+        val request = dao.getRequestById(requestId) ?: return RequestDecisionResult.NotFound
+        val gitSign = dao.getGitSignRequest(requestId) ?: return RequestDecisionResult.NotFound
         if (
             request.state != InboxRequestState.ACTION_REQUIRED.storedName ||
             gitSign.decision != null
         ) {
-            return GitSignDecisionResult.NotPending
+            return RequestDecisionResult.NotPending
         }
         val invocation = activeParentInvocation(request)
-            ?: return GitSignDecisionResult.InvocationUnavailable
+            ?: return RequestDecisionResult.ParentUnavailable
         val description = secrets.describeRequestedSecrets(listOf(gitSign.secretName))
         val policy = secrets.approvalPoliciesForNames(
             listOf(gitSign.secretName),
             request.clientId,
             TemporaryAccessOperation.GIT_SIGN,
-        ).singleOrNull() ?: return GitSignDecisionResult.ApprovalChanged
+        ).singleOrNull() ?: return RequestDecisionResult.ApprovalChanged
         val currentEvaluation = ApprovalPolicyEvaluator.evaluate(
             listOf(policy.toRequestedSecretApproval()),
         )
@@ -489,7 +474,7 @@ internal class GitSigningRequests(
                     InvocationDenialReason.POLICY_DENIED,
                     GIT_SIGN_POLICY_DENIAL_MESSAGE,
                 ),
-            ) ?: return GitSignDecisionResult.PairingUnavailable
+            ) ?: return RequestDecisionResult.ClientUnavailable
             return persistDecision(
                 request = request,
                 decision = ApprovalDecision.DENIED,
@@ -512,12 +497,12 @@ internal class GitSigningRequests(
         }
         val invocationSecrets = runCatching {
             storedJson.decodeFromString<List<SecretMetadata>>(invocation.secretDetailsJson)
-        }.getOrNull() ?: return GitSignDecisionResult.InvocationUnavailable
+        }.getOrNull() ?: return RequestDecisionResult.ParentUnavailable
         val expectedPublicKey = invocationSecrets.singleOrNull { secret ->
             secret.name == gitSign.secretName && secret.type == SSH_SECRET_TYPE
-        }?.sshPublicKey ?: return GitSignDecisionResult.InvocationUnavailable
+        }?.sshPublicKey ?: return RequestDecisionResult.ParentUnavailable
         if (!parentInvocationIsActive(request)) {
-            return GitSignDecisionResult.InvocationUnavailable
+            return RequestDecisionResult.ParentUnavailable
         }
         val signature = when (
             val result = secrets.signGitMessage(
@@ -530,11 +515,11 @@ internal class GitSigningRequests(
             GitSignatureResult.NotFound,
             GitSignatureResult.WrongType,
             GitSignatureResult.KeyChanged,
-            -> return GitSignDecisionResult.KeyChanged
-            GitSignatureResult.SecretUnavailable -> return GitSignDecisionResult.SecretUnavailable
-            GitSignatureResult.SecretCorrupted -> return GitSignDecisionResult.SecretCorrupted
+            -> return RequestDecisionResult.SecretChangedSinceInvocation
+            GitSignatureResult.SecretUnavailable -> return RequestDecisionResult.SecretUnavailable
+            GitSignatureResult.SecretCorrupted -> return RequestDecisionResult.SecretCorrupted
             GitSignatureResult.UnsupportedEncryption -> {
-                return GitSignDecisionResult.UnsupportedEncryption
+                return RequestDecisionResult.UnsupportedEncryption
             }
         }
         val grant = if (allowTemporaryAccess) {
@@ -543,14 +528,14 @@ internal class GitSigningRequests(
                 storedEvaluation = checkNotNull(storedEvaluation),
                 now = currentTimeMillis(),
             )
-                ?: return GitSignDecisionResult.TemporaryAccessUnavailable
+                ?: return RequestDecisionResult.TemporaryAccessUnavailable
         } else {
             null
         }
         val response = sealResponse(
             request,
             gitSignProtocol.approvedResponse(signature),
-        ) ?: return GitSignDecisionResult.PairingUnavailable
+        ) ?: return RequestDecisionResult.ClientUnavailable
         return if (grant == null) {
             persistDecision(
                 request = request,
@@ -567,17 +552,17 @@ internal class GitSigningRequests(
     suspend fun deny(
         requestId: String,
         sealResponse: suspend (InboxRequestEntity, ByteArray) -> JsonElement?,
-    ): GitSignDecisionResult {
-        val request = dao.getRequestById(requestId) ?: return GitSignDecisionResult.NotFound
-        val gitSign = dao.getGitSignRequest(requestId) ?: return GitSignDecisionResult.NotFound
+    ): RequestDecisionResult {
+        val request = dao.getRequestById(requestId) ?: return RequestDecisionResult.NotFound
+        val gitSign = dao.getGitSignRequest(requestId) ?: return RequestDecisionResult.NotFound
         if (
             request.state != InboxRequestState.ACTION_REQUIRED.storedName ||
             gitSign.decision != null
         ) {
-            return GitSignDecisionResult.NotPending
+            return RequestDecisionResult.NotPending
         }
         if (request.parentRequestId?.let { dao.getSecretUseRequest(it) } == null) {
-            return GitSignDecisionResult.InvocationUnavailable
+            return RequestDecisionResult.ParentUnavailable
         }
         val response = sealResponse(
             request,
@@ -585,7 +570,7 @@ internal class GitSigningRequests(
                 InvocationDenialReason.USER_DENIED,
                 GIT_SIGN_DENIAL_MESSAGE,
             ),
-        ) ?: return GitSignDecisionResult.PairingUnavailable
+        ) ?: return RequestDecisionResult.ClientUnavailable
         return persistDecision(
             request = request,
             decision = ApprovalDecision.DENIED,
@@ -948,7 +933,7 @@ internal class GitSigningRequests(
         denialReason: InvocationDenialReason? = null,
         denialMessage: String? = null,
         authorization: AuthorizationCommitment? = null,
-    ): GitSignDecisionResult {
+    ): RequestDecisionResult {
         require(decision != ApprovalDecision.APPROVED || authorization != null) {
             "An approved Git signature must bind its authorization state"
         }
@@ -961,20 +946,20 @@ internal class GitSigningRequests(
         return writeTransaction.execute {
             val now = currentTimeMillis()
             val currentRequest = dao.getRequestById(request.id)
-                ?: return@execute GitSignDecisionResult.NotFound
+                ?: return@execute RequestDecisionResult.NotFound
             val currentGitSign = dao.getGitSignRequest(request.id)
-                ?: return@execute GitSignDecisionResult.NotFound
+                ?: return@execute RequestDecisionResult.NotFound
             if (
                 currentRequest.state != InboxRequestState.ACTION_REQUIRED.storedName ||
                 currentGitSign.decision != null
             ) {
-                return@execute GitSignDecisionResult.NotPending
+                return@execute RequestDecisionResult.NotPending
             }
             if (
                 decision == ApprovalDecision.APPROVED &&
                 !parentInvocationIsActive(currentRequest)
             ) {
-                return@execute GitSignDecisionResult.InvocationUnavailable
+                return@execute RequestDecisionResult.ParentUnavailable
             }
             val updatedRequest = currentRequest.copy(
                 state = InboxRequestState.WAITING.storedName,
@@ -1015,10 +1000,10 @@ internal class GitSigningRequests(
                 )
             }
             when (result) {
-                ConditionalRequestUpdate.APPLIED -> GitSignDecisionResult.Decided
+                ConditionalRequestUpdate.APPLIED -> RequestDecisionResult.Decided
                 ConditionalRequestUpdate.ACTION_REQUIRED,
                 ConditionalRequestUpdate.UNAVAILABLE,
-                -> GitSignDecisionResult.ApprovalChanged
+                -> RequestDecisionResult.ApprovalChanged
             }
         }
     }
@@ -1029,23 +1014,23 @@ internal class GitSigningRequests(
         response: JsonElement,
         authorization: AuthorizationCommitment,
         grant: TemporaryAccessPlan,
-    ): GitSignDecisionResult = writeTransaction.execute {
+    ): RequestDecisionResult = writeTransaction.execute {
         val now = currentTimeMillis()
         val currentRequest = dao.getRequestById(request.id)
-            ?: return@execute GitSignDecisionResult.NotFound
+            ?: return@execute RequestDecisionResult.NotFound
         val currentGitSign = dao.getGitSignRequest(request.id)
-            ?: return@execute GitSignDecisionResult.NotFound
+            ?: return@execute RequestDecisionResult.NotFound
         if (
             currentRequest.state != InboxRequestState.ACTION_REQUIRED.storedName ||
             currentGitSign.decision != null
         ) {
-            return@execute GitSignDecisionResult.NotPending
+            return@execute RequestDecisionResult.NotPending
         }
         if (currentGitSign.approvalEvaluationJson != gitSign.approvalEvaluationJson) {
-            return@execute GitSignDecisionResult.ApprovalChanged
+            return@execute RequestDecisionResult.ApprovalChanged
         }
         if (!parentInvocationIsActive(currentRequest)) {
-            return@execute GitSignDecisionResult.InvocationUnavailable
+            return@execute RequestDecisionResult.ParentUnavailable
         }
         if (
             !dao.authorizationMatches(
@@ -1055,7 +1040,7 @@ internal class GitSigningRequests(
                 now,
             )
         ) {
-            return@execute GitSignDecisionResult.ApprovalChanged
+            return@execute RequestDecisionResult.ApprovalChanged
         }
         val temporaryAccessStarted = secrets.allowTemporaryAccess(
             policies = grant.policies,
@@ -1098,31 +1083,31 @@ internal class GitSigningRequests(
             now,
         )
         if (temporaryAccessStarted) {
-            GitSignDecisionResult.Decided
+            RequestDecisionResult.Decided
         } else {
-            GitSignDecisionResult.TemporaryAccessNotStarted
+            RequestDecisionResult.TemporaryAccessNotStarted
         }
     }
 
     private suspend fun refreshApprovalEvaluation(
         requestId: String,
         approvalEvaluationJson: String,
-    ): GitSignDecisionResult = writeTransaction.execute {
+    ): RequestDecisionResult = writeTransaction.execute {
         val currentRequest = dao.getRequestById(requestId)
-            ?: return@execute GitSignDecisionResult.NotFound
+            ?: return@execute RequestDecisionResult.NotFound
         val currentGitSign = dao.getGitSignRequest(requestId)
-            ?: return@execute GitSignDecisionResult.NotFound
+            ?: return@execute RequestDecisionResult.NotFound
         if (
             currentRequest.state != InboxRequestState.ACTION_REQUIRED.storedName ||
             currentGitSign.decision != null
         ) {
-            return@execute GitSignDecisionResult.NotPending
+            return@execute RequestDecisionResult.NotPending
         }
         dao.updateGitSignRequest(
             currentRequest,
             currentGitSign.copy(approvalEvaluationJson = approvalEvaluationJson),
         )
-        GitSignDecisionResult.ApprovalChanged
+        RequestDecisionResult.ApprovalChanged
     }
 
     private suspend fun requestAiReview(

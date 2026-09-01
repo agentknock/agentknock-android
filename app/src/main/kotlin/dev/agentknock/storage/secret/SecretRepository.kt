@@ -530,6 +530,7 @@ internal class SecretRepository(
         value: String,
         sensitive: Boolean,
         notes: String,
+        nonSensitiveCreationAuthorized: Boolean,
     ): CreateEnvironmentVariableResult {
         validateEnvironmentVariableName(name)
         validateEnvironmentVariableValue(value)
@@ -542,6 +543,9 @@ internal class SecretRepository(
         }
         if (dao.environmentVariableNameInUse(secretId, name, excludingId = "")) {
             return CreateEnvironmentVariableResult.NameInUse
+        }
+        if (!sensitive && !nonSensitiveCreationAuthorized) {
+            return CreateEnvironmentVariableResult.AuthenticationRequired
         }
 
         val id = newId()
@@ -577,9 +581,15 @@ internal class SecretRepository(
         }
     }
 
-    suspend fun readEnvironmentVariableValue(id: String): EnvironmentVariableValue {
+    suspend fun readEnvironmentVariableValue(
+        id: String,
+        sensitiveAccessAuthorized: Boolean,
+    ): EnvironmentVariableValue {
         val variable = dao.getEnvironmentVariable(id) ?: return EnvironmentVariableValue.NotFound
-        return material.decryptEnvironmentValue(variable).toEnvironmentVariableValue()
+        if (variable.sensitive && !sensitiveAccessAuthorized) {
+            return EnvironmentVariableValue.AuthenticationRequired(variable.name)
+        }
+        return material.decryptEnvironmentValue(variable).toEnvironmentVariableValue(variable)
     }
 
     suspend fun saveEnvironmentVariable(
@@ -588,6 +598,7 @@ internal class SecretRepository(
         sensitive: Boolean,
         notes: String,
         replacementValue: String?,
+        sensitivityReductionAuthorized: Boolean,
     ): SaveEnvironmentVariableResult {
         validateEnvironmentVariableName(name)
         replacementValue?.let(::validateEnvironmentVariableValue)
@@ -599,6 +610,9 @@ internal class SecretRepository(
         }
         if (dao.environmentVariableNameInUse(existing.secretId, name, excludingId = id)) {
             return SaveEnvironmentVariableResult.NAME_IN_USE
+        }
+        if (existing.sensitive && !sensitive && !sensitivityReductionAuthorized) {
+            return SaveEnvironmentVariableResult.AUTHENTICATION_REQUIRED
         }
 
         val authenticatedFieldsChanged = name != existing.name || sensitive != existing.sensitive
@@ -756,9 +770,15 @@ internal class SecretRepository(
         algorithm,
     )
 
-    private fun DecryptionResult.toEnvironmentVariableValue(): EnvironmentVariableValue = when (this) {
+    private fun DecryptionResult.toEnvironmentVariableValue(
+        variable: EnvironmentVariableEntity,
+    ): EnvironmentVariableValue = when (this) {
         is DecryptionResult.Plaintext -> try {
-            EnvironmentVariableValue.Available(value.decodeToString(throwOnInvalidSequence = true))
+            EnvironmentVariableValue.Available(
+                name = variable.name,
+                value = value.decodeToString(throwOnInvalidSequence = true),
+                sensitive = variable.sensitive,
+            )
         } catch (_: IllegalArgumentException) {
             EnvironmentVariableValue.Corrupted
         }

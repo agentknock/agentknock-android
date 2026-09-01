@@ -66,6 +66,7 @@ import dev.agentknock.storage.request.InboxRequestKind
 import dev.agentknock.storage.request.InboxRequestState
 import dev.agentknock.storage.request.InboxRequestStatus
 import dev.agentknock.storage.request.InboxRequestSummary
+import dev.agentknock.storage.request.RequestDecision
 import dev.agentknock.ui.components.ClientIdentity
 import dev.agentknock.ui.components.SecretIdentities
 import dev.agentknock.ui.theme.agentknockColors
@@ -81,7 +82,7 @@ internal fun RequestList(
     onOpenSettings: () -> Unit,
     notificationsEnabled: Boolean,
     onOpen: (String) -> Unit,
-    onDecision: (InboxRequestSummary, RequestDecisionAction) -> Unit,
+    onDecision: (String, RequestDecision) -> Unit,
     modifier: Modifier = Modifier,
 ) {
     val listState = rememberLazyListState()
@@ -171,7 +172,7 @@ internal fun RequestList(
                         request = request,
                         selected = request.id == selectedRequestId,
                         onClick = { onOpen(request.id) },
-                        onDecision = { action -> onDecision(request, action) },
+                        onDecision = { decision -> onDecision(request.id, decision) },
                     )
                 }
             }
@@ -184,7 +185,7 @@ private fun RequestRow(
     request: InboxRequestSummary,
     selected: Boolean,
     onClick: () -> Unit,
-    onDecision: (RequestDecisionAction) -> Unit,
+    onDecision: (RequestDecision) -> Unit,
 ) {
     val approval = request.status as? InboxRequestStatus.Approval
     val canApprove = request.userDecisionAvailable &&
@@ -200,10 +201,10 @@ private fun RequestRow(
 
         when (completedSwipe) {
             SwipeToDismissBoxValue.StartToEnd -> if (canApprove) {
-                onDecision(RequestDecisionAction.APPROVE)
+                onDecision(RequestDecision.APPROVE)
             }
             SwipeToDismissBoxValue.EndToStart -> if (canReject) {
-                onDecision(RequestDecisionAction.DENY)
+                onDecision(RequestDecision.DENY)
             }
             SwipeToDismissBoxValue.Settled -> return@LaunchedEffect
         }
@@ -221,13 +222,13 @@ private fun RequestRow(
                 customActions = buildList {
                     if (canApprove) {
                         add(CustomAccessibilityAction("Approve once") {
-                            onDecision(RequestDecisionAction.APPROVE)
+                            onDecision(RequestDecision.APPROVE)
                             true
                         })
                     }
                     if (canReject) {
                         add(CustomAccessibilityAction(rejectLabel) {
-                            onDecision(RequestDecisionAction.DENY)
+                            onDecision(RequestDecision.DENY)
                             true
                         })
                     }

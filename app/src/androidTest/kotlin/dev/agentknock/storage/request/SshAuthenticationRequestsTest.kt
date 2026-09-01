@@ -399,11 +399,11 @@ class SshAuthenticationRequestsTest {
         }
 
         assertEquals(
-            SshAuthenticationDecisionResult.InvocationUnavailable,
+            RequestDecisionResult.ParentUnavailable,
             requests(audit).approve(requestId, false, seal),
         )
         assertFalse(sealed)
-        assertEquals(SshAuthenticationDecisionResult.Decided, requests(audit).deny(requestId, seal))
+        assertEquals(RequestDecisionResult.Decided, requests(audit).deny(requestId, seal))
         assertTrue(sealed)
     }
 
@@ -709,7 +709,7 @@ class SshAuthenticationRequestsTest {
         )
         assertEquals(eventCount, audit.observeEvents().first().size)
 
-        assertEquals(SshAuthenticationDecisionResult.Decided, regular.deny(requestId, seal))
+        assertEquals(RequestDecisionResult.Decided, regular.deny(requestId, seal))
         val denied = checkNotNull(database.requestDao().getSshAuthenticationRequest(requestId))
         assertNull(denied.message)
         assertEquals(ApprovalDecision.DENIED.storedName, denied.decision)
@@ -718,15 +718,15 @@ class SshAuthenticationRequestsTest {
         receivePending(regular, competingId)
         val innerResponse = Json.parseToJsonElement("""{"ciphertext":"inner"}""")
         val outerResponse = Json.parseToJsonElement("""{"ciphertext":"outer"}""")
-        var competingResult: SshAuthenticationDecisionResult? = null
+        var competingResult: RequestDecisionResult? = null
         assertEquals(
-            SshAuthenticationDecisionResult.NotPending,
+            RequestDecisionResult.NotPending,
             regular.deny(competingId) { _, _ ->
                 competingResult = regular.deny(competingId) { _, _ -> innerResponse }
                 outerResponse
             },
         )
-        assertEquals(SshAuthenticationDecisionResult.Decided, competingResult)
+        assertEquals(RequestDecisionResult.Decided, competingResult)
         assertEquals(
             innerResponse.toString(),
             database.requestDao().getRequestById(competingId)?.responseJson,
@@ -795,7 +795,7 @@ class SshAuthenticationRequestsTest {
 
         val parentDetails = Json.encodeToString(description.secrets)
         assertEquals(
-            SshAuthenticationDecisionResult.ApprovalChanged,
+            RequestDecisionResult.ApprovalChanged,
             requests(audit).approve(
                 requestId,
                 allowTemporaryAccess = true,
@@ -820,7 +820,7 @@ class SshAuthenticationRequestsTest {
         )
 
         assertEquals(
-            SshAuthenticationDecisionResult.Decided,
+            RequestDecisionResult.Decided,
             requests(audit).approve(requestId, allowTemporaryAccess = true, sealResponse = seal),
         )
         val approved = checkNotNull(

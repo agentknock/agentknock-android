@@ -24,6 +24,8 @@ internal enum class PairingDecisionResult {
     NOT_FOUND,
 }
 
+internal data class MatchingPairingSas(val clientLabel: String?)
+
 /** The established pairing material needed to authenticate its one finish exchange. */
 internal data class PairingFinishContext(
     val clientId: String,
@@ -279,10 +281,20 @@ internal class PairingRequests(
             if (verified) PairingDecisionResult.VERIFIED else PairingDecisionResult.REJECTED
         }
 
-    suspend fun isMatchingPendingSas(requestId: String, selectedIndex: Int): Boolean {
-        val attempt = dao.getPairingAttempt(requestId) ?: return false
-        return attempt.state.toPairingState() == PairingState.SAS_VERIFICATION_PENDING &&
-            selectedIndex == attempt.correctSasIndex
+    suspend fun matchingPendingSas(
+        requestId: String,
+        selectedIndex: Int,
+    ): MatchingPairingSas? {
+        val attempt = dao.getPairingAttempt(requestId) ?: return null
+        if (
+            attempt.state.toPairingState() != PairingState.SAS_VERIFICATION_PENDING ||
+            selectedIndex != attempt.correctSasIndex
+        ) {
+            return null
+        }
+        return MatchingPairingSas(
+            attempt.friendlyName ?: attempt.hostname ?: attempt.platform,
+        )
     }
 
     suspend fun reject(requestId: String): PairingDecisionResult = writeTransaction.execute {

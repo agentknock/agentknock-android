@@ -38,6 +38,7 @@ import dev.agentknock.R
 import dev.agentknock.storage.request.RequestSyncResult
 import dev.agentknock.storage.request.RequestNotification
 import dev.agentknock.storage.request.RequestNotificationDetail
+import dev.agentknock.storage.request.RequestDecision
 import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
@@ -544,13 +545,18 @@ class RequestNotificationActionReceiver : BroadcastReceiver() {
         val application = context.applicationContext as AgentknockApplication
         CoroutineScope(SupervisorJob() + Dispatchers.IO).launch {
             try {
-                application.container.localStorage.await()
                 application.container.requestNotifications.performAction {
                     when (decision) {
                         RequestNotifications.APPROVE_DECISION ->
-                            application.container.requests.approvePendingRequest(requestId)
+                            application.container.actions.decideRequest(
+                                requestId,
+                                RequestDecision.APPROVE,
+                            )
                         RequestNotifications.DENY_DECISION ->
-                            application.container.requests.denyPendingRequest(requestId)
+                            application.container.actions.decideRequest(
+                                requestId,
+                                RequestDecision.DENY,
+                            )
                     }
                 }
             } finally {

@@ -310,6 +310,14 @@ internal class ApplicationContainer(private val application: Application) {
         },
     )
 
+    val actions = AgentknockActions(
+        context = application,
+        authorize = protectedActions::authorize,
+        requests = requests,
+        secrets = secrets,
+        awaitStorageReady = localStorage::await,
+    )
+
     init {
         scheduleRequestSynchronization = requestConnection::requestSynchronization
     }

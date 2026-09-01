@@ -33,7 +33,6 @@ internal fun SecretUploadSelectionDetail(
             viewModel.toggleSecretUploadVariableReveal(
                 request.id,
                 variable,
-                "Show uploaded value",
             )
         },
         onSensitivityChange = { variable, sensitive ->
@@ -41,11 +40,6 @@ internal fun SecretUploadSelectionDetail(
                 requestId = request.id,
                 variable = variable,
                 sensitive = sensitive,
-                protectionTitle = if (sensitive) {
-                    null
-                } else {
-                    "Mark ${variable.name} non-sensitive"
-                },
             )
         },
         modifier = modifier,

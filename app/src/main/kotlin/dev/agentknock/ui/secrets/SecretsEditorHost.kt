@@ -12,7 +12,6 @@ import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
 import androidx.compose.runtime.setValue
-import androidx.compose.ui.platform.LocalResources
 import androidx.compose.ui.res.stringResource
 import dev.agentknock.R
 import dev.agentknock.storage.secret.EnvironmentVariableMetadata
@@ -28,7 +27,6 @@ internal fun SecretsEditorHost(
     viewModel: SecretsViewModel,
     snackbar: SnackbarHostState,
 ) {
-    val resources = LocalResources.current
     val editorSession = when (editor) {
         SecretsEditor.None -> null
         is SecretsEditor.Secret -> editor.session
@@ -79,7 +77,6 @@ internal fun SecretsEditorHost(
                     { variablePendingDeletion = PendingVariableDeletion(it, activeEditor) }
                 },
                 onSave = { name, value, sensitive, notes, replaceValue ->
-                    val weakensProtection = !sensitive && editorState.variable?.sensitive != false
                     viewModel.saveVariableEditor(
                         expected = activeEditor,
                         name = name,
@@ -87,14 +84,6 @@ internal fun SecretsEditorHost(
                         sensitive = sensitive,
                         notes = notes,
                         replaceValue = replaceValue,
-                        protectionTitle = if (weakensProtection) {
-                            resources.getString(
-                                R.string.confirm_mark_variable_non_sensitive,
-                                name,
-                            )
-                        } else {
-                            null
-                        },
                     )
                 },
                 snackbar = snackbar,

@@ -4,7 +4,10 @@ import androidx.annotation.StringRes
 import androidx.lifecycle.SavedStateHandle
 import androidx.lifecycle.ViewModel
 import androidx.lifecycle.viewModelScope
+import dev.agentknock.AgentknockActions
+import dev.agentknock.ProtectedActionResult
 import dev.agentknock.R
+import dev.agentknock.SecretValueAction
 import dev.agentknock.storage.request.InboxRequestContent
 import dev.agentknock.storage.request.InboxRequestDetails
 import dev.agentknock.storage.request.InboxRequestSummary
@@ -13,6 +16,7 @@ import dev.agentknock.storage.request.SecretUploadDecisionResult
 import dev.agentknock.storage.request.SecretUploadRequestState
 import dev.agentknock.storage.request.SecretUploadVariableDetails
 import dev.agentknock.storage.request.SecretUploadVariableValue
+import dev.agentknock.storage.request.SecretUploadSensitivityResult
 import dev.agentknock.storage.secret.CreateEnvironmentVariableResult
 import dev.agentknock.storage.secret.CreateSecretResult
 import dev.agentknock.storage.secret.EnvironmentVariableMetadata
@@ -30,12 +34,9 @@ import dev.agentknock.storage.secret.SaveSecretResult
 import dev.agentknock.ui.pendingSecretUploads
 import dev.agentknock.storage.device.DeviceConfiguration
 import dev.agentknock.storage.device.DeviceSettingsCoordinator
-import dev.agentknock.storage.request.RequestRepository
 import dev.agentknock.storage.request.RequestInbox
 import dev.agentknock.storage.secret.SecretRepository
 import dev.agentknock.storage.runCatchingNonCancellation
-import dev.agentknock.ui.auth.DeviceAuthenticationResult
-import dev.agentknock.ui.auth.ProtectedActionAuthorizer
 import kotlinx.coroutines.channels.Channel
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.flow.MutableStateFlow
@@ -118,16 +119,14 @@ internal data class SecretClipboardValue(
 @OptIn(ExperimentalCoroutinesApi::class)
 internal class SecretsViewModel(
     private val savedStateHandle: SavedStateHandle,
-    private val repository: SecretRepository,
-    private val requests: RequestRepository,
+    private val actions: AgentknockActions,
+    private val secretRepository: SecretRepository,
     private val inbox: RequestInbox,
     requestSummaries: StateFlow<List<InboxRequestSummary>>,
     clientSummaries: StateFlow<List<ClientSummary>>,
     secretSummaries: StateFlow<List<SecretSummary>>,
     val configuration: StateFlow<DeviceConfiguration?>,
     private val deviceSettings: DeviceSettingsCoordinator,
-    private val awaitStorageReady: suspend () -> Unit,
-    private val protectedActions: ProtectedActionAuthorizer,
 ) : ViewModel() {
     private val selectedTarget = MutableStateFlow(
         savedStateHandle.get<String>(SELECTED_SECRET)?.let(SecretTarget::Stored)
@@ -170,7 +169,7 @@ internal class SecretsViewModel(
         .flatMapLatest { target ->
             when (target) {
                 null -> flowOf(SecretsContent.List)
-                is SecretTarget.Stored -> repository.observeSecret(target.id)
+                is SecretTarget.Stored -> secretRepository.observeSecret(target.id)
                     .transform<SecretDetails?, SecretsContent> { details ->
                         if (details == null) {
                             if (clearSelectedTarget(target)) {
@@ -458,10 +457,10 @@ internal class SecretsViewModel(
     private suspend fun generateSshKey(
         algorithm: SshKeyAlgorithm,
         comment: String,
-    ): SshPrivateKey = repository.generateSshKey(algorithm, comment)
+    ): SshPrivateKey = secretRepository.generateSshKey(algorithm, comment)
 
     private suspend fun importSshKey(value: String): SshPrivateKey =
-        repository.importSshKey(value)
+        secretRepository.importSshKey(value)
 
     private suspend fun prepareSshKey(source: SshKeyDraft): SshKeyPreparation {
         val result = runCatchingNonCancellation {
@@ -502,8 +501,8 @@ internal class SecretsViewModel(
                 when (
                     val result = when (expected.state.type) {
                         SecretType.ENVIRONMENT ->
-                            repository.createEnvironmentSecret(name, description)
-                        SecretType.SSH -> repository.createSshSecret(
+                            secretRepository.createEnvironmentSecret(name, description)
+                        SecretType.SSH -> secretRepository.createSshSecret(
                             name,
                             description,
                             checkNotNull(expected.state.sshKeyDraft.preparedKey),
@@ -519,7 +518,7 @@ internal class SecretsViewModel(
                     CreateSecretResult.NameInUse -> R.string.secret_name_in_use
                 }
             } else {
-                when (repository.saveSecret(expected.state.secret.id, name, description)) {
+                when (secretRepository.saveSecret(expected.state.secret.id, name, description)) {
                     SaveSecretResult.SAVED -> {
                         editorState.completeEditorCommit(commit)
                         null
@@ -535,7 +534,7 @@ internal class SecretsViewModel(
     fun replaceSshKey(expected: SecretsEditor.SshKey) {
         val privateKey = expected.state.sshKeyDraft.preparedKey ?: return
         launchEditorCommit(expected) { commit ->
-            when (repository.replaceSshKey(expected.state.secretId, privateKey)) {
+            when (secretRepository.replaceSshKey(expected.state.secretId, privateKey)) {
                 is SaveSshSecretResult.Saved -> {
                     editorState.completeEditorCommit(commit)
                     publish(R.string.ssh_key_replaced)
@@ -550,7 +549,7 @@ internal class SecretsViewModel(
     fun saveSshComment(id: String, comment: String) {
         viewModelScope.launch {
             publish(
-                when (repository.saveSshComment(id, comment)) {
+                when (secretRepository.saveSshComment(id, comment)) {
                     is SaveSshSecretResult.Saved -> R.string.ssh_public_comment_updated
                     else -> R.string.ssh_public_comment_update_failed
                 },
@@ -564,7 +563,7 @@ internal class SecretsViewModel(
     ) {
         viewModelScope.launch {
             publish(
-                if (repository.saveApprovalMode(id, mode) == SaveSecretResult.SAVED) {
+                if (secretRepository.saveApprovalMode(id, mode) == SaveSecretResult.SAVED) {
                     R.string.default_approval_updated
                 } else {
                     R.string.default_approval_update_failed
@@ -576,7 +575,7 @@ internal class SecretsViewModel(
     fun saveInstructions(id: String, instructions: String) {
         viewModelScope.launch {
             publish(
-                if (repository.saveInstructions(id, instructions) == SaveSecretResult.SAVED) {
+                if (secretRepository.saveInstructions(id, instructions) == SaveSecretResult.SAVED) {
                     R.string.instructions_updated
                 } else {
                     R.string.instructions_update_failed
@@ -605,7 +604,7 @@ internal class SecretsViewModel(
         viewModelScope.launch {
             publish(
                 if (
-                    repository.setClientApprovalOverride(secretId, clientId, mode) ==
+                    secretRepository.setClientApprovalOverride(secretId, clientId, mode) ==
                     SaveSecretResult.SAVED
                 ) {
                     R.string.client_approval_updated
@@ -623,7 +622,7 @@ internal class SecretsViewModel(
     ) {
         viewModelScope.launch {
             publish(
-                if (repository.endTemporaryAccess(secretId, clientId, operation)) {
+                if (secretRepository.endTemporaryAccess(secretId, clientId, operation)) {
                     R.string.temporary_access_ended
                 } else {
                     R.string.temporary_access_already_ended
@@ -634,7 +633,7 @@ internal class SecretsViewModel(
 
     fun deleteSecret(id: String) {
         viewModelScope.launch {
-            val deleted = repository.deleteSecret(id)
+            val deleted = secretRepository.deleteSecret(id)
             if (deleted) clearSelectedTarget(SecretTarget.Stored(id))
             publish(if (deleted) R.string.secret_deleted else R.string.secret_not_found)
         }
@@ -647,23 +646,12 @@ internal class SecretsViewModel(
         sensitive: Boolean,
         notes: String,
         replaceValue: Boolean,
-        protectionTitle: String?,
     ) {
         launchEditorCommit(expected) { commit ->
-            if (protectionTitle != null) {
-                when (val result = protectedActions.authorize(protectionTitle)) {
-                    DeviceAuthenticationResult.Success -> Unit
-                    is DeviceAuthenticationResult.Error -> {
-                        if (editorState.failEditorCommit(commit)) publish(result.message)
-                        return@launchEditorCommit
-                    }
-                }
-                if (editorState.value != commit.committing) return@launchEditorCommit
-            }
             val variable = expected.state.variable
             val error = if (variable == null) {
                 when (
-                    repository.createEnvironmentVariable(
+                    val action = actions.createEnvironmentVariable(
                         secretId = expected.state.secretId,
                         name = name,
                         value = value,
@@ -671,18 +659,26 @@ internal class SecretsViewModel(
                         notes = notes,
                     )
                 ) {
-                    is CreateEnvironmentVariableResult.Created -> {
-                        editorState.completeEditorCommit(commit)
-                        null
+                    is ProtectedActionResult.AuthenticationFailed -> {
+                        if (editorState.failEditorCommit(commit)) publish(action.message)
+                        return@launchEditorCommit
                     }
-                    CreateEnvironmentVariableResult.NameInUse ->
-                        R.string.variable_name_in_use
-                    CreateEnvironmentVariableResult.SecretNotFound ->
-                        R.string.secret_not_found
+                    is ProtectedActionResult.Completed -> when (action.value) {
+                        is CreateEnvironmentVariableResult.Created -> {
+                            editorState.completeEditorCommit(commit)
+                            null
+                        }
+                        CreateEnvironmentVariableResult.NameInUse ->
+                            R.string.variable_name_in_use
+                        CreateEnvironmentVariableResult.SecretNotFound ->
+                            R.string.secret_not_found
+                        CreateEnvironmentVariableResult.AuthenticationRequired ->
+                            error("The action service did not resolve authentication")
+                    }
                 }
             } else {
                 when (
-                    repository.saveEnvironmentVariable(
+                    val action = actions.saveEnvironmentVariable(
                         id = variable.id,
                         name = name,
                         sensitive = sensitive,
@@ -690,21 +686,29 @@ internal class SecretsViewModel(
                         replacementValue = value.takeIf { replaceValue },
                     )
                 ) {
-                    SaveEnvironmentVariableResult.SAVED -> {
-                        editorState.completeEditorCommit(commit)
-                        publish(R.string.environment_variable_updated, variable.id)
-                        null
+                    is ProtectedActionResult.AuthenticationFailed -> {
+                        if (editorState.failEditorCommit(commit)) publish(action.message)
+                        return@launchEditorCommit
                     }
-                    SaveEnvironmentVariableResult.NAME_IN_USE ->
-                        R.string.variable_name_in_use
-                    SaveEnvironmentVariableResult.NOT_FOUND ->
-                        R.string.variable_not_found
-                    SaveEnvironmentVariableResult.VALUE_UNAVAILABLE ->
-                        R.string.stored_value_unavailable
-                    SaveEnvironmentVariableResult.VALUE_CORRUPTED ->
-                        R.string.stored_value_corrupted
-                    SaveEnvironmentVariableResult.UNSUPPORTED_FORMAT ->
-                        R.string.stored_value_unsupported
+                    is ProtectedActionResult.Completed -> when (action.value) {
+                        SaveEnvironmentVariableResult.SAVED -> {
+                            editorState.completeEditorCommit(commit)
+                            publish(R.string.environment_variable_updated, variable.id)
+                            null
+                        }
+                        SaveEnvironmentVariableResult.NAME_IN_USE ->
+                            R.string.variable_name_in_use
+                        SaveEnvironmentVariableResult.NOT_FOUND ->
+                            R.string.variable_not_found
+                        SaveEnvironmentVariableResult.AUTHENTICATION_REQUIRED ->
+                            error("The action service did not resolve authentication")
+                        SaveEnvironmentVariableResult.VALUE_UNAVAILABLE ->
+                            R.string.stored_value_unavailable
+                        SaveEnvironmentVariableResult.VALUE_CORRUPTED ->
+                            R.string.stored_value_corrupted
+                        SaveEnvironmentVariableResult.UNSUPPORTED_FORMAT ->
+                            R.string.stored_value_unsupported
+                    }
                 }
             }
             if (error != null && editorState.failEditorCommit(commit)) publish(error)
@@ -714,7 +718,7 @@ internal class SecretsViewModel(
     fun deleteEnvironmentVariable(expected: SecretsEditor.Variable) {
         val id = expected.state.variable?.id ?: return
         launchEditorCommit(expected) { commit ->
-            val deleted = repository.deleteEnvironmentVariable(id)
+            val deleted = secretRepository.deleteEnvironmentVariable(id)
             if (deleted) {
                 editorState.completeEditorCommit(commit)
                 publish(
@@ -731,11 +735,10 @@ internal class SecretsViewModel(
     }
 
     suspend fun readEnvironmentVariableValue(id: String): EnvironmentVariableValue =
-        repository.readEnvironmentVariableValue(id)
+        actions.readNonSensitiveEnvironmentVariable(id)
 
     fun toggleEnvironmentVariableReveal(
         variable: EnvironmentVariableMetadata,
-        protectionTitle: String?,
     ) {
         if (revealedEnvironmentValues.value.containsKey(variable.id)) {
             revealedEnvironmentValues.update { it - variable.id }
@@ -743,30 +746,27 @@ internal class SecretsViewModel(
         }
         val epoch = secretReadEpoch
         viewModelScope.launch {
-            if (!authorize(protectionTitle)) return@launch
             if (!storedReadIsCurrent(variable.secretId, epoch)) return@launch
-            val value = readStoredValue(variable.id) ?: return@launch
+            val value = readStoredValue(variable.id, SecretValueAction.REVEAL) ?: return@launch
             if (storedReadIsCurrent(variable.secretId, epoch)) {
-                revealedEnvironmentValues.update { it + (variable.id to value) }
+                revealedEnvironmentValues.update { it + (variable.id to value.value) }
             }
         }
     }
 
     fun copyEnvironmentVariable(
         variable: EnvironmentVariableMetadata,
-        protectionTitle: String?,
     ) {
         val epoch = secretReadEpoch
         viewModelScope.launch {
-            if (!authorize(protectionTitle)) return@launch
             if (!storedReadIsCurrent(variable.secretId, epoch)) return@launch
-            val value = readStoredValue(variable.id) ?: return@launch
+            val value = readStoredValue(variable.id, SecretValueAction.COPY) ?: return@launch
             if (storedReadIsCurrent(variable.secretId, epoch)) {
                 clipboardState.value = SecretClipboardValue(
                     token = ++nextClipboardToken,
-                    label = variable.name,
-                    value = value,
-                    sensitive = variable.sensitive,
+                    label = value.name,
+                    value = value.value,
+                    sensitive = value.sensitive,
                 )
             }
         }
@@ -774,7 +774,6 @@ internal class SecretsViewModel(
 
     fun editEnvironmentVariable(
         variable: EnvironmentVariableMetadata,
-        protectionTitle: String?,
     ) {
         if (!variable.valueAvailable) {
             startEditingEnvironmentVariable(variable, null)
@@ -782,11 +781,10 @@ internal class SecretsViewModel(
         }
         val epoch = secretReadEpoch
         viewModelScope.launch {
-            if (!authorize(protectionTitle)) return@launch
             if (!storedReadIsCurrent(variable.secretId, epoch)) return@launch
-            val value = readStoredValue(variable.id) ?: return@launch
+            val value = readStoredValue(variable.id, SecretValueAction.EDIT) ?: return@launch
             if (storedReadIsCurrent(variable.secretId, epoch)) {
-                startEditingEnvironmentVariable(variable, value)
+                startEditingEnvironmentVariable(variable, value.value)
             }
         }
     }
@@ -798,7 +796,6 @@ internal class SecretsViewModel(
     fun toggleSecretUploadVariableReveal(
         requestId: String,
         variable: SecretUploadVariableDetails,
-        protectionTitle: String,
     ) {
         if (revealedUploadValuesState.value.containsKey(variable.id)) {
             revealedUploadValuesState.update { it - variable.id }
@@ -806,21 +803,29 @@ internal class SecretsViewModel(
         }
         val epoch = secretReadEpoch
         viewModelScope.launch {
-            if (!authorize(protectionTitle)) return@launch
             if (!uploadReadIsCurrent(requestId, epoch)) return@launch
-            val value = when (val result = readSecretUploadVariable(requestId, variable.id)) {
-                is SecretUploadVariableValue.Available -> result.value
-                SecretUploadVariableValue.NotFound -> null.also {
-                    publish("This environment variable is no longer available")
+            val value = when (
+                val action = actions.readSecretUploadVariable(requestId, variable.id)
+            ) {
+                is ProtectedActionResult.AuthenticationFailed -> null.also {
+                    publish(action.message)
                 }
-                SecretUploadVariableValue.Unavailable -> null.also {
-                    publish("The encryption key is unavailable")
-                }
-                SecretUploadVariableValue.Corrupted -> null.also {
-                    publish("The uploaded value could not be authenticated")
-                }
-                SecretUploadVariableValue.UnsupportedEncryption -> null.also {
-                    publish("The uploaded value uses unsupported encryption")
+                is ProtectedActionResult.Completed -> when (val result = action.value) {
+                    is SecretUploadVariableValue.Available -> result.value
+                    is SecretUploadVariableValue.AuthenticationRequired ->
+                        error("The action service did not resolve authentication")
+                    SecretUploadVariableValue.NotFound -> null.also {
+                        publish("This environment variable is no longer available")
+                    }
+                    SecretUploadVariableValue.Unavailable -> null.also {
+                        publish("The encryption key is unavailable")
+                    }
+                    SecretUploadVariableValue.Corrupted -> null.also {
+                        publish("The uploaded value could not be authenticated")
+                    }
+                    SecretUploadVariableValue.UnsupportedEncryption -> null.also {
+                        publish("The uploaded value uses unsupported encryption")
+                    }
                 }
             } ?: return@launch
             if (uploadReadIsCurrent(requestId, epoch)) {
@@ -834,8 +839,7 @@ internal class SecretsViewModel(
         approvedName: String,
     ) {
         viewModelScope.launch {
-            awaitStorageReady()
-            val result = requests.approveSecretUpload(requestId, approvedName)
+            val result = actions.approveSecretUpload(requestId, approvedName)
             publish(result.message())
             if (result is SecretUploadDecisionResult.Approved) {
                 clearDecidedUpload(requestId)
@@ -845,34 +849,35 @@ internal class SecretsViewModel(
 
     fun rejectSecretUpload(requestId: String) {
         viewModelScope.launch {
-            awaitStorageReady()
-            val result = requests.rejectSecretUpload(requestId)
+            val result = actions.rejectSecretUpload(requestId)
             publish(result.message())
             if (result == SecretUploadDecisionResult.Rejected) clearDecidedUpload(requestId)
         }
-    }
-
-    suspend fun readSecretUploadVariable(
-        requestId: String,
-        variableId: String,
-    ): SecretUploadVariableValue {
-        awaitStorageReady()
-        return requests.readSecretUploadVariable(requestId, variableId)
     }
 
     fun setSecretUploadVariableSensitivity(
         requestId: String,
         variable: SecretUploadVariableDetails,
         sensitive: Boolean,
-        protectionTitle: String?,
     ) {
         val epoch = secretReadEpoch
         viewModelScope.launch {
-            if (!authorize(protectionTitle)) return@launch
             if (!uploadReadIsCurrent(requestId, epoch)) return@launch
-            awaitStorageReady()
-            if (!requests.setSecretUploadVariableSensitivity(requestId, variable.id, sensitive)) {
-                publish(R.string.sensitivity_update_failed)
+            when (
+                val result = actions.setSecretUploadVariableSensitivity(
+                    requestId,
+                    variable.id,
+                    sensitive,
+                )
+            ) {
+                is ProtectedActionResult.AuthenticationFailed -> publish(result.message)
+                is ProtectedActionResult.Completed -> when (result.value) {
+                    SecretUploadSensitivityResult.Changed -> Unit
+                    SecretUploadSensitivityResult.NotFound ->
+                        publish(R.string.sensitivity_update_failed)
+                    is SecretUploadSensitivityResult.AuthenticationRequired ->
+                        error("The action service did not resolve authentication")
+                }
             }
         }
     }
@@ -890,22 +895,27 @@ internal class SecretsViewModel(
         uiEvents.send(SecretsUiMessage.Text(message))
     }
 
-    private suspend fun authorize(title: String?): Boolean {
-        if (title == null) return true
-        return when (val result = protectedActions.authorize(title)) {
-            DeviceAuthenticationResult.Success -> true
-            is DeviceAuthenticationResult.Error -> false.also { publish(result.message) }
-        }
-    }
-
-    private suspend fun readStoredValue(id: String): String? =
-        when (val value = repository.readEnvironmentVariableValue(id)) {
-            is EnvironmentVariableValue.Available -> value.value
-            EnvironmentVariableValue.Unavailable -> null.also { publish(R.string.value_unavailable) }
-            EnvironmentVariableValue.Corrupted -> null.also { publish(R.string.corrupted_value) }
-            EnvironmentVariableValue.UnsupportedFormat ->
-                null.also { publish(R.string.unsupported_value) }
-            EnvironmentVariableValue.NotFound -> null.also { publish(R.string.missing_value) }
+    private suspend fun readStoredValue(
+        id: String,
+        action: SecretValueAction,
+    ): EnvironmentVariableValue.Available? =
+        when (val result = actions.readEnvironmentVariable(id, action)) {
+            is ProtectedActionResult.AuthenticationFailed -> null.also {
+                publish(result.message)
+            }
+            is ProtectedActionResult.Completed -> when (val value = result.value) {
+                is EnvironmentVariableValue.Available -> value
+                is EnvironmentVariableValue.AuthenticationRequired ->
+                    error("The action service did not resolve authentication")
+                EnvironmentVariableValue.Unavailable ->
+                    null.also { publish(R.string.value_unavailable) }
+                EnvironmentVariableValue.Corrupted ->
+                    null.also { publish(R.string.corrupted_value) }
+                EnvironmentVariableValue.UnsupportedFormat ->
+                    null.also { publish(R.string.unsupported_value) }
+                EnvironmentVariableValue.NotFound ->
+                    null.also { publish(R.string.missing_value) }
+            }
         }
 
     private fun storedReadIsCurrent(secretId: String, epoch: Long): Boolean =

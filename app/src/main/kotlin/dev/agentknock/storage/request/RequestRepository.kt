@@ -54,6 +54,31 @@ private data class IncomingRelayMessage(
 
 internal object ProcessedRelayMessage
 
+internal enum class RequestDecision {
+    APPROVE,
+    DENY,
+    ALLOW_TEMPORARILY,
+}
+
+internal sealed interface RequestDecisionResult {
+    data object Decided : RequestDecisionResult
+    data object NotPending : RequestDecisionResult
+    data object NotFound : RequestDecisionResult
+    data object ParentUnavailable : RequestDecisionResult
+    data object ClientUnavailable : RequestDecisionResult
+    data object ApprovalChanged : RequestDecisionResult
+    data object SecretChanged : RequestDecisionResult
+    data object SecretChangedSinceInvocation : RequestDecisionResult
+    data class MissingSecrets(val names: List<String>) : RequestDecisionResult
+    data class ConflictingVariable(val name: String) : RequestDecisionResult
+    data class Invalid(val message: String) : RequestDecisionResult
+    data object SecretUnavailable : RequestDecisionResult
+    data object SecretCorrupted : RequestDecisionResult
+    data object UnsupportedEncryption : RequestDecisionResult
+    data object TemporaryAccessUnavailable : RequestDecisionResult
+    data object TemporaryAccessNotStarted : RequestDecisionResult
+}
+
 internal sealed interface RequestSyncResult {
     data object Success : RequestSyncResult
 
@@ -220,20 +245,60 @@ internal class RequestRepository(
         onCaughtUp = onCaughtUp,
     )
 
-    suspend fun approvePendingRequest(requestId: String) {
+    suspend fun decideRequest(
+        requestId: String,
+        decision: RequestDecision,
+    ): RequestDecisionResult = operationMutex.withLock {
         when (dao.getRequestById(requestId)?.kind) {
-            RequestKind.SECRET_USE.storedName -> approveSecretUseRequest(requestId)
-            RequestKind.GIT_SIGN.storedName -> approveGitSignRequest(requestId)
-            RequestKind.SSH_AUTHENTICATE.storedName ->
-                approveSshAuthenticationRequest(requestId)
+            null -> RequestDecisionResult.NotFound
+            RequestKind.SECRET_USE.storedName -> when (decision) {
+                RequestDecision.APPROVE,
+                RequestDecision.ALLOW_TEMPORARILY,
+                -> invocationRequests.approve(
+                    requestId = requestId,
+                    allowTemporaryAccess = decision == RequestDecision.ALLOW_TEMPORARILY,
+                    openRequest = ::openStoredPairedRequest,
+                    sealResponse = ::sealStoredPairedResponse,
+                )
+                RequestDecision.DENY -> invocationRequests.deny(
+                    requestId,
+                    ::sealStoredPairedResponse,
+                )
+            }
+            RequestKind.GIT_SIGN.storedName -> when (decision) {
+                RequestDecision.APPROVE,
+                RequestDecision.ALLOW_TEMPORARILY,
+                -> gitSigningRequests.approve(
+                    requestId = requestId,
+                    allowTemporaryAccess = decision == RequestDecision.ALLOW_TEMPORARILY,
+                    sealResponse = ::sealStoredPairedResponse,
+                )
+                RequestDecision.DENY -> gitSigningRequests.deny(
+                    requestId,
+                    ::sealStoredPairedResponse,
+                )
+            }
+            RequestKind.SSH_AUTHENTICATE.storedName -> when (decision) {
+                RequestDecision.APPROVE,
+                RequestDecision.ALLOW_TEMPORARILY,
+                -> sshAuthenticationRequests.approve(
+                    requestId = requestId,
+                    allowTemporaryAccess = decision == RequestDecision.ALLOW_TEMPORARILY,
+                    sealResponse = ::sealStoredPairedResponse,
+                )
+                RequestDecision.DENY -> sshAuthenticationRequests.deny(
+                    requestId,
+                    ::sealStoredPairedResponse,
+                )
+            }
+            else -> RequestDecisionResult.NotPending
         }
-    }
-
-    suspend fun denyPendingRequest(requestId: String) {
-        when (dao.getRequestById(requestId)?.kind) {
-            RequestKind.SECRET_USE.storedName -> denySecretUseRequest(requestId)
-            RequestKind.GIT_SIGN.storedName -> denyGitSignRequest(requestId)
-            RequestKind.SSH_AUTHENTICATE.storedName -> denySshAuthenticationRequest(requestId)
+    }.also { result ->
+        if (
+            result == RequestDecisionResult.Decided ||
+            result == RequestDecisionResult.TemporaryAccessNotStarted
+        ) {
+            requestSync()
         }
     }
 
@@ -919,9 +984,12 @@ internal class RequestRepository(
             }
         }
 
-    suspend fun isMatchingPendingSas(requestId: String, selectedIndex: Int): Boolean =
+    suspend fun matchingPendingSas(
+        requestId: String,
+        selectedIndex: Int,
+    ): MatchingPairingSas? =
         operationMutex.withLock {
-            pairingRequests.isMatchingPendingSas(requestId, selectedIndex)
+            pairingRequests.matchingPendingSas(requestId, selectedIndex)
         }
 
     suspend fun rejectPairing(requestId: String): PairingDecisionResult = operationMutex.withLock {
@@ -929,38 +997,6 @@ internal class RequestRepository(
     }.also { result ->
         if (result == PairingDecisionResult.REJECTED) requestSync()
     }
-
-    suspend fun approveSecretUseRequest(requestId: String): InvocationDecisionResult =
-        decideSecretUseRequest(requestId, allowTemporaryAccess = false)
-
-    suspend fun allowSecretUseTemporarily(requestId: String): InvocationDecisionResult =
-        decideSecretUseRequest(requestId, allowTemporaryAccess = true)
-
-    private suspend fun decideSecretUseRequest(
-        requestId: String,
-        allowTemporaryAccess: Boolean,
-    ): InvocationDecisionResult = operationMutex.withLock {
-        invocationRequests.approve(
-            requestId = requestId,
-            allowTemporaryAccess = allowTemporaryAccess,
-            openRequest = ::openStoredPairedRequest,
-            sealResponse = ::sealStoredPairedResponse,
-        )
-    }.also { result ->
-        if (
-            result == InvocationDecisionResult.Decided ||
-            result == InvocationDecisionResult.TemporaryAccessNotStarted
-        ) {
-            requestSync()
-        }
-    }
-
-    suspend fun denySecretUseRequest(requestId: String): InvocationDecisionResult =
-        operationMutex.withLock {
-            invocationRequests.deny(requestId, ::sealStoredPairedResponse)
-        }.also { result ->
-            if (result == InvocationDecisionResult.Decided) requestSync()
-        }
 
     private suspend fun sealStoredPairedResponse(
         request: InboxRequestEntity,
@@ -1017,73 +1053,6 @@ internal class RequestRepository(
         return opened.plaintext
     }
 
-    suspend fun approveGitSignRequest(requestId: String): GitSignDecisionResult =
-        decideGitSignRequest(requestId, allowTemporaryAccess = false)
-
-    suspend fun allowGitSignTemporarily(requestId: String): GitSignDecisionResult =
-        decideGitSignRequest(requestId, allowTemporaryAccess = true)
-
-    private suspend fun decideGitSignRequest(
-        requestId: String,
-        allowTemporaryAccess: Boolean,
-    ): GitSignDecisionResult = operationMutex.withLock {
-        gitSigningRequests.approve(
-            requestId = requestId,
-            allowTemporaryAccess = allowTemporaryAccess,
-            sealResponse = ::sealStoredPairedResponse,
-        )
-    }.also { result ->
-        if (
-            result == GitSignDecisionResult.Decided ||
-            result == GitSignDecisionResult.TemporaryAccessNotStarted
-        ) {
-            requestSync()
-        }
-    }
-
-    suspend fun denyGitSignRequest(requestId: String): GitSignDecisionResult =
-        operationMutex.withLock {
-            gitSigningRequests.deny(requestId, ::sealStoredPairedResponse)
-        }.also { result ->
-            if (result == GitSignDecisionResult.Decided) requestSync()
-        }
-
-    suspend fun approveSshAuthenticationRequest(
-        requestId: String,
-    ): SshAuthenticationDecisionResult =
-        decideSshAuthenticationRequest(requestId, allowTemporaryAccess = false)
-
-    suspend fun allowSshAuthenticationTemporarily(
-        requestId: String,
-    ): SshAuthenticationDecisionResult =
-        decideSshAuthenticationRequest(requestId, allowTemporaryAccess = true)
-
-    private suspend fun decideSshAuthenticationRequest(
-        requestId: String,
-        allowTemporaryAccess: Boolean,
-    ): SshAuthenticationDecisionResult = operationMutex.withLock {
-        sshAuthenticationRequests.approve(
-            requestId = requestId,
-            allowTemporaryAccess = allowTemporaryAccess,
-            sealResponse = ::sealStoredPairedResponse,
-        )
-    }.also { result ->
-        if (
-            result == SshAuthenticationDecisionResult.Decided ||
-            result == SshAuthenticationDecisionResult.TemporaryAccessNotStarted
-        ) {
-            requestSync()
-        }
-    }
-
-    suspend fun denySshAuthenticationRequest(
-        requestId: String,
-    ): SshAuthenticationDecisionResult = operationMutex.withLock {
-        sshAuthenticationRequests.deny(requestId, ::sealStoredPairedResponse)
-    }.also { result ->
-        if (result == SshAuthenticationDecisionResult.Decided) requestSync()
-    }
-
     private suspend fun processRequest(
         credentials: RelayDeviceCredentials,
         message: IncomingRelayMessage,
@@ -1119,16 +1088,27 @@ internal class RequestRepository(
     suspend fun readSecretUploadVariable(
         requestId: String,
         variableId: String,
+        sensitiveAccessAuthorized: Boolean,
     ): SecretUploadVariableValue = operationMutex.withLock {
-        secretManagement.readSecretUploadVariable(requestId, variableId)
+        secretManagement.readSecretUploadVariable(
+            requestId,
+            variableId,
+            sensitiveAccessAuthorized,
+        )
     }
 
     suspend fun setSecretUploadVariableSensitivity(
         requestId: String,
         variableId: String,
         sensitive: Boolean,
-    ): Boolean = operationMutex.withLock {
-        secretManagement.setSecretUploadVariableSensitivity(requestId, variableId, sensitive)
+        sensitivityReductionAuthorized: Boolean,
+    ): SecretUploadSensitivityResult = operationMutex.withLock {
+        secretManagement.setSecretUploadVariableSensitivity(
+            requestId,
+            variableId,
+            sensitive,
+            sensitivityReductionAuthorized,
+        )
     }
 
     suspend fun rejectSecretUpload(requestId: String): SecretUploadDecisionResult =

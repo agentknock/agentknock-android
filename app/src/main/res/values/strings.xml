@@ -1,5 +1,7 @@
 <?xml version="1.0" encoding="utf-8"?>
 <resources>
+    <string name="accept_client">Accept %1$s</string>
+    <string name="unnamed_client">client</string>
     <string name="app_name">Agentknock</string>
     <string name="request_notification_channel">Requests needing action</string>
     <string name="request_notification_channel_description">Pairing, secret use, Git signing, and secret upload decisions that need your attention</string>

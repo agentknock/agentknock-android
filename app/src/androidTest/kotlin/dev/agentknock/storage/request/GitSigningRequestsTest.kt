@@ -39,6 +39,7 @@ import dev.agentknock.storage.device.RelayDeviceCredentials
 import dev.agentknock.storage.device.RelayDeviceCredentialsResult
 import dev.agentknock.storage.secret.CreateSecretResult
 import dev.agentknock.storage.secret.SaveSecretResult
+import dev.agentknock.storage.secret.SaveSshSecretResult
 import dev.agentknock.storage.secret.SecretApprovalMode
 import dev.agentknock.storage.secret.SecretEntity
 import dev.agentknock.storage.secret.SecretRepository
@@ -559,7 +560,7 @@ class GitSigningRequestsTest {
         var sealed = false
 
         assertEquals(
-            GitSignDecisionResult.InvocationUnavailable,
+            RequestDecisionResult.ParentUnavailable,
             target.approve(
                 requestId,
                 allowTemporaryAccess = false,
@@ -575,6 +576,36 @@ class GitSigningRequestsTest {
             database.requestDao().getRequestById(requestId)?.state,
         )
         assertNull(database.requestDao().getRequestById(requestId)?.responseJson)
+        assertNull(database.requestDao().getGitSignRequest(requestId)?.decision)
+    }
+
+    @Test
+    fun manualApprovalRequiresRestartAfterTheInvocationSshKeyChanges() = runTest {
+        val invocationSecrets = createSigningSecret(SecretApprovalMode.ASK_ME)
+        insertParent(secretDetailsJson = Json.encodeToString(invocationSecrets))
+        val replacement = secrets.generateSshKey(SshKeyAlgorithm.ED25519, "replacement@example")
+        assertTrue(secrets.replaceSshKey(SECRET_ID, replacement) is SaveSshSecretResult.Saved)
+        val requestId = "git-key-changed"
+        val target = requests(audit)
+        receivePending(
+            target,
+            requestId,
+            evaluationJson = Json.encodeToString(currentGitSignEvaluation()),
+        )
+        var sealed = false
+
+        assertEquals(
+            RequestDecisionResult.SecretChangedSinceInvocation,
+            target.approve(
+                requestId,
+                allowTemporaryAccess = false,
+                sealResponse = { _, _ ->
+                    sealed = true
+                    Json.parseToJsonElement(RESPONSE_JSON)
+                },
+            ),
+        )
+        assertFalse(sealed)
         assertNull(database.requestDao().getGitSignRequest(requestId)?.decision)
     }
 
@@ -600,12 +631,12 @@ class GitSigningRequestsTest {
         }
 
         assertEquals(
-            GitSignDecisionResult.InvocationUnavailable,
+            RequestDecisionResult.ParentUnavailable,
             target.approve(requestId, allowTemporaryAccess = true, sealResponse = seal),
         )
         assertFalse(sealed)
         assertNull(database.requestDao().getGitSignRequest(requestId)?.decision)
-        assertEquals(GitSignDecisionResult.Decided, target.deny(requestId, seal))
+        assertEquals(RequestDecisionResult.Decided, target.deny(requestId, seal))
         assertTrue(sealed)
         assertEquals(
             ApprovalDecision.DENIED.storedName,
@@ -635,7 +666,7 @@ class GitSigningRequestsTest {
         assertNull(database.requestDao().getGitSignRequest(requestId)?.decision)
         assertEquals(auditCount, audit.observeEvents().first().size)
 
-        assertEquals(GitSignDecisionResult.Decided, regular.deny(requestId, seal))
+        assertEquals(RequestDecisionResult.Decided, regular.deny(requestId, seal))
         val decided = checkNotNull(database.requestDao().getGitSignRequest(requestId))
         assertEquals(ApprovalDecision.DENIED.storedName, decided.decision)
         assertEquals(GIT_SIGN_DENIAL_MESSAGE, decided.completionMessage)
@@ -651,15 +682,15 @@ class GitSigningRequestsTest {
         receivePending(regular, competingRequestId)
         val innerResponse = Json.parseToJsonElement("""{"ciphertext":"inner"}""")
         val outerResponse = Json.parseToJsonElement("""{"ciphertext":"outer"}""")
-        var competingResult: GitSignDecisionResult? = null
+        var competingResult: RequestDecisionResult? = null
         assertEquals(
-            GitSignDecisionResult.NotPending,
+            RequestDecisionResult.NotPending,
             regular.deny(competingRequestId) { _, _ ->
                 competingResult = regular.deny(competingRequestId) { _, _ -> innerResponse }
                 outerResponse
             },
         )
-        assertEquals(GitSignDecisionResult.Decided, competingResult)
+        assertEquals(RequestDecisionResult.Decided, competingResult)
         assertEquals(
             innerResponse.toString(),
             database.requestDao().getRequestById(competingRequestId)?.responseJson,
@@ -838,7 +869,7 @@ class GitSigningRequestsTest {
         assertEquals(eventCount, audit.observeEvents().first().size)
 
         assertEquals(
-            GitSignDecisionResult.Decided,
+            RequestDecisionResult.Decided,
             requests(audit).approve(requestId, allowTemporaryAccess = true, sealResponse = seal),
         )
         val decided = checkNotNull(database.requestDao().getGitSignRequest(requestId))

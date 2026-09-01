@@ -122,7 +122,13 @@ internal data class EnvironmentVariableMetadata(
 )
 
 internal sealed interface EnvironmentVariableValue {
-    data class Available(val value: String) : EnvironmentVariableValue
+    data class Available(
+        val name: String,
+        val value: String,
+        val sensitive: Boolean,
+    ) : EnvironmentVariableValue
+
+    data class AuthenticationRequired(val name: String) : EnvironmentVariableValue
 
     data object Unavailable : EnvironmentVariableValue
 
@@ -159,12 +165,15 @@ internal sealed interface CreateEnvironmentVariableResult {
     data object NameInUse : CreateEnvironmentVariableResult
 
     data object SecretNotFound : CreateEnvironmentVariableResult
+
+    data object AuthenticationRequired : CreateEnvironmentVariableResult
 }
 
 internal enum class SaveEnvironmentVariableResult {
     SAVED,
     NAME_IN_USE,
     NOT_FOUND,
+    AUTHENTICATION_REQUIRED,
     VALUE_UNAVAILABLE,
     VALUE_CORRUPTED,
     UNSUPPORTED_FORMAT,

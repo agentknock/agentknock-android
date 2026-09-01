@@ -306,6 +306,55 @@ class SecretManagementRequestsTest {
     }
 
     @Test
+    fun pendingUploadSensitivityControlsProtectedValueAccess() = runTest {
+        val requestId = "upload-protected-value"
+        receiveEnvironmentUpload(requestId)
+        val variable = database.requestDao()
+            .getSecretUploadEnvironmentVariables(requestId)
+            .single()
+        val target = requests(audit)
+
+        assertEquals(
+            SecretUploadVariableValue.AuthenticationRequired("TOKEN"),
+            target.readSecretUploadVariable(
+                requestId,
+                variable.id,
+                sensitiveAccessAuthorized = false,
+            ),
+        )
+        assertEquals(
+            SecretUploadSensitivityResult.AuthenticationRequired("TOKEN"),
+            target.setSecretUploadVariableSensitivity(
+                requestId,
+                variable.id,
+                sensitive = false,
+                sensitivityReductionAuthorized = false,
+            ),
+        )
+        assertTrue(
+            database.requestDao().getSecretUploadEnvironmentVariables(requestId).single().sensitive,
+        )
+
+        assertEquals(
+            SecretUploadSensitivityResult.Changed,
+            target.setSecretUploadVariableSensitivity(
+                requestId,
+                variable.id,
+                sensitive = false,
+                sensitivityReductionAuthorized = true,
+            ),
+        )
+        assertEquals(
+            SecretUploadVariableValue.Available("secret-value"),
+            target.readSecretUploadVariable(
+                requestId,
+                variable.id,
+                sensitiveAccessAuthorized = false,
+            ),
+        )
+    }
+
+    @Test
     fun uploadCompletionAndAuditRollBackAndReplayDoesNotReopenOrDuplicate() = runTest {
         val requestId = "upload-completion"
         receiveEnvironmentUpload(requestId)
