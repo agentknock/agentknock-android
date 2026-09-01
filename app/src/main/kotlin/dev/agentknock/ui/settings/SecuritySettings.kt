@@ -33,6 +33,7 @@ import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.unit.dp
 import dev.agentknock.storage.crypto.EncryptionKeyBacking
+import dev.agentknock.storage.crypto.VaultKeyPurpose
 import dev.agentknock.storage.crypto.VaultProtection
 import dev.agentknock.ui.auth.DeviceAuthenticationMode
 import dev.agentknock.ui.theme.agentknockColors
@@ -69,7 +70,12 @@ internal fun SecuritySettings(
                         SettingsGroupDivider()
                         SettingsValueRow("Encryption", "AES-128-GCM")
                         SettingsGroupDivider()
-                        SettingsValueRow("Key storage", protection.keyStorageDescription())
+                        SettingsValueRow("Current key storage", protection.keyStorageDescription())
+                        SettingsGroupDivider()
+                        SettingsValueRow(
+                            "Stored encrypted data",
+                            protection.storedDataDescription(),
+                        )
                         SettingsGroupDivider()
                         SettingsValueRow(
                             "Device screen lock",
@@ -158,26 +164,32 @@ internal fun SecuritySettings(
 
 @Composable
 private fun EncryptionStatus(protection: VaultProtection?) {
-    val hardwareBacked = protection is VaultProtection.Available &&
+    val hardwareBacked = protection is VaultProtection.ActiveKeysAvailable &&
         protection.backings.values.all(EncryptionKeyBacking::isHardwareBacked)
-    val softwareBacked = protection is VaultProtection.Available &&
+    val softwareBacked = protection is VaultProtection.ActiveKeysAvailable &&
         protection.backings.values.any { it == EncryptionKeyBacking.SOFTWARE }
     val style = when {
+        protection != null && protection.unavailableStoredData.isNotEmpty() -> StatusStyle(
+            "Stored data unavailable",
+            protection.unavailableStoredData.explanation(),
+            MaterialTheme.agentknockColors.dangerContainer,
+            MaterialTheme.agentknockColors.onDangerContainer,
+        )
         hardwareBacked -> StatusStyle(
             "Hardware-backed encryption",
-            "Stored secret values and device credentials are encrypted with keys protected by secure hardware.",
+            "Current encryption keys are protected by secure hardware, and all stored encrypted data is available.",
             MaterialTheme.agentknockColors.successContainer,
             MaterialTheme.agentknockColors.onSuccessContainer,
         )
         softwareBacked -> StatusStyle(
             "Android Keystore encryption",
-            "Stored secret values and device credentials are encrypted on this device.",
+            "Current encryption keys are held by Android Keystore, and all stored encrypted data is available.",
             MaterialTheme.colorScheme.surfaceContainerHigh,
             MaterialTheme.colorScheme.onSurface,
         )
-        protection is VaultProtection.KeyUnavailable -> StatusStyle(
-            "Encryption key unavailable",
-            "One or more keys cannot be used on this device.",
+        protection is VaultProtection.ActiveKeysUnavailable -> StatusStyle(
+            "Current encryption key unavailable",
+            "Agentknock cannot encrypt new secret or device data on this device.",
             MaterialTheme.agentknockColors.dangerContainer,
             MaterialTheme.agentknockColors.onDangerContainer,
         )
@@ -242,7 +254,7 @@ internal fun EncryptionKeyBacking.isHardwareBacked(): Boolean = when (this) {
 
 private fun VaultProtection?.keyStorageDescription(): String = when (this) {
     null -> "Checking this device…"
-    is VaultProtection.Available -> backings.values.distinct().let { kinds ->
+    is VaultProtection.ActiveKeysAvailable -> backings.values.distinct().let { kinds ->
         if (kinds.size != 1) {
             "Mixed Android Keystore protection"
         } else {
@@ -255,8 +267,22 @@ private fun VaultProtection?.keyStorageDescription(): String = when (this) {
             }
         }
     }
-    is VaultProtection.KeyUnavailable -> "Key unavailable on this device"
-    VaultProtection.Unknown -> "Android Keystore, protection not reported"
+    is VaultProtection.ActiveKeysUnavailable -> "Current key unavailable on this device"
+    is VaultProtection.ActiveKeyProtectionUnknown -> "Android Keystore, protection not reported"
+}
+
+private fun VaultProtection?.storedDataDescription(): String = when {
+    this == null -> "Checking this device…"
+    unavailableStoredData.isEmpty() -> "Available on this device"
+    else -> unavailableStoredData.explanation()
+}
+
+private fun Set<VaultKeyPurpose>.explanation(): String = when (this) {
+    setOf(VaultKeyPurpose.SECRET_VALUES) ->
+        "Some secret values cannot be decrypted on this device."
+    setOf(VaultKeyPurpose.DEVICE_STATE) ->
+        "Some client pairings, device credentials, or in-progress requests cannot be decrypted on this device."
+    else -> "Some secret values or encrypted device state cannot be decrypted on this device."
 }
 
 private fun DeviceAuthenticationMode.displayLabel(): String = when (this) {

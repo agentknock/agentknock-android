@@ -2,6 +2,14 @@ package dev.agentknock.storage.crypto
 
 import javax.crypto.KeyGenerator
 import javax.crypto.SecretKey
+import kotlinx.coroutines.CompletableDeferred
+import kotlinx.coroutines.flow.Flow
+import kotlinx.coroutines.flow.MutableStateFlow
+import kotlinx.coroutines.flow.collect
+import kotlinx.coroutines.flow.first
+import kotlinx.coroutines.flow.map
+import kotlinx.coroutines.flow.take
+import kotlinx.coroutines.launch
 import kotlinx.coroutines.test.runTest
 import org.junit.Assert.assertEquals
 import org.junit.Assert.assertFalse
@@ -101,6 +109,82 @@ class VaultKeyManagerTest {
     }
 
     @Test
+    fun `replacement write key does not mask ciphertext that still references the lost key`() = runTest {
+        val dao = FakeVaultKeyDao().apply {
+            keys += keyMetadata("lost-secret-key", VaultKeyPurpose.SECRET_VALUES)
+            keys += keyMetadata("device-key", VaultKeyPurpose.DEVICE_STATE)
+            referencedKeyIds.value = setOf("lost-secret-key")
+        }
+        val keyStore = FakeEncryptionKeyStore().apply { generate("device-key") }
+        val manager = manager(dao, keyStore, "replacement-secret-key")
+
+        val protection = manager.observeProtection().first()
+
+        assertTrue(protection is VaultProtection.ActiveKeysAvailable)
+        assertEquals(
+            setOf(VaultKeyPurpose.SECRET_VALUES),
+            protection.unavailableStoredData,
+        )
+        assertEquals(
+            "replacement-secret-key",
+            manager.activeKey(VaultKeyPurpose.SECRET_VALUES).id,
+        )
+    }
+
+    @Test
+    fun `reports when a current write key becomes unavailable`() = runTest {
+        val dao = FakeVaultKeyDao().apply {
+            keys += keyMetadata("secret-key", VaultKeyPurpose.SECRET_VALUES)
+            keys += keyMetadata("device-key", VaultKeyPurpose.DEVICE_STATE)
+        }
+        val keyStore = FakeEncryptionKeyStore().apply {
+            generate("secret-key")
+            generate("device-key")
+        }
+        val manager = manager(dao, keyStore, "unused-key")
+        manager.initialize()
+        keyStore.delete("secret-key")
+
+        val protection = manager.observeProtection().first()
+
+        assertEquals(
+            VaultProtection.ActiveKeysUnavailable(
+                purposes = setOf(VaultKeyPurpose.SECRET_VALUES),
+                unavailableStoredData = emptySet(),
+            ),
+            protection,
+        )
+    }
+
+    @Test
+    fun `protection updates when the last reference to a lost key is removed`() = runTest {
+        val dao = FakeVaultKeyDao().apply {
+            keys += keyMetadata("lost-secret-key", VaultKeyPurpose.SECRET_VALUES)
+            keys += keyMetadata("device-key", VaultKeyPurpose.DEVICE_STATE)
+            referencedKeyIds.value = setOf("lost-secret-key")
+        }
+        val keyStore = FakeEncryptionKeyStore().apply { generate("device-key") }
+        val manager = manager(dao, keyStore, "replacement-secret-key")
+        val protections = mutableListOf<VaultProtection>()
+        val firstEmission = CompletableDeferred<Unit>()
+        val collection = backgroundScope.launch {
+            manager.observeProtection().take(2).collect { protection ->
+                protections += protection
+                firstEmission.complete(Unit)
+            }
+        }
+        firstEmission.await()
+
+        dao.referencedKeyIds.value = emptySet()
+        collection.join()
+
+        assertEquals(
+            listOf(setOf(VaultKeyPurpose.SECRET_VALUES), emptySet()),
+            protections.map(VaultProtection::unavailableStoredData),
+        )
+    }
+
+    @Test
     fun `initializes only once per process`() = runTest {
         val dao = FakeVaultKeyDao()
         val keyStore = FakeEncryptionKeyStore()
@@ -184,6 +268,7 @@ class VaultKeyManagerTest {
 
 internal class FakeVaultKeyDao : VaultKeyDao {
     val keys = mutableListOf<VaultKeyEntity>()
+    val referencedKeyIds = MutableStateFlow<Set<String>>(emptySet())
     var failInsert = false
     var lastInsertFailure: IllegalStateException? = null
 
@@ -193,6 +278,10 @@ internal class FakeVaultKeyDao : VaultKeyDao {
     override suspend fun countKeys(purpose: String): Int = keys.count { it.purpose == purpose }
 
     override suspend fun getKey(id: String): VaultKeyEntity? = keys.find { it.id == id }
+
+    override fun observeReferencedKeys(): Flow<List<VaultKeyEntity>> = referencedKeyIds.map { ids ->
+        keys.filter { it.id in ids }.sortedWith(compareBy(VaultKeyEntity::purpose, VaultKeyEntity::id))
+    }
 
     override suspend fun insertKey(key: VaultKeyEntity) {
         if (failInsert) {

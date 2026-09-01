@@ -15,6 +15,7 @@ import kotlinx.coroutines.flow.SharingStarted
 import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.asStateFlow
 import kotlinx.coroutines.flow.combine
+import kotlinx.coroutines.flow.collect
 import kotlinx.coroutines.flow.stateIn
 import kotlinx.coroutines.launch
 
@@ -67,7 +68,9 @@ internal class SettingsViewModel(
     init {
         viewModelScope.launch {
             awaitStorageReady()
-            _vaultProtection.value = vaultKeys.activeProtection()
+            vaultKeys.observeProtection().collect { protection ->
+                _vaultProtection.value = protection
+            }
         }
     }
 

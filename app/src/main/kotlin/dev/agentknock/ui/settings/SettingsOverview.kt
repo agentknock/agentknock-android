@@ -98,13 +98,17 @@ internal fun SettingsOverview(
 
 private fun VaultProtection?.overviewDescription(): String = when (this) {
     null -> "Checking encryption"
-    is VaultProtection.Available -> if (backings.values.all(EncryptionKeyBacking::isHardwareBacked)) {
-        "Hardware-backed encryption"
-    } else {
-        "Android Keystore encryption"
+    else -> when {
+        unavailableStoredData.isNotEmpty() -> "Stored data unavailable"
+        this is VaultProtection.ActiveKeysAvailable ->
+            if (backings.values.all(EncryptionKeyBacking::isHardwareBacked)) {
+                "Hardware-backed encryption"
+            } else {
+                "Android Keystore encryption"
+            }
+        this is VaultProtection.ActiveKeysUnavailable -> "Current encryption key unavailable"
+        else -> "Encryption status unknown"
     }
-    is VaultProtection.KeyUnavailable -> "Encryption key unavailable"
-    VaultProtection.Unknown -> "Encryption status unknown"
 }
 
 private fun DeviceAuthenticationMode.overviewLabel(): String = when (this) {

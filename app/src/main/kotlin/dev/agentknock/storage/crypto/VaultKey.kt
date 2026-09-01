@@ -12,6 +12,8 @@ import java.util.UUID
 import kotlinx.coroutines.NonCancellable
 import kotlinx.coroutines.CoroutineDispatcher
 import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.flow.Flow
+import kotlinx.coroutines.flow.map
 import kotlinx.coroutines.sync.Mutex
 import kotlinx.coroutines.sync.withLock
 import kotlinx.coroutines.withContext
@@ -19,6 +21,11 @@ import kotlinx.coroutines.withContext
 internal enum class VaultKeyPurpose(val storedName: String) {
     SECRET_VALUES("secret_values"),
     DEVICE_STATE("device_state"),
+    ;
+
+    companion object {
+        fun fromStoredName(value: String): VaultKeyPurpose? = entries.find { it.storedName == value }
+    }
 }
 
 @Entity(
@@ -50,6 +57,32 @@ internal interface VaultKeyDao {
     @Query("SELECT * FROM vault_keys WHERE id = :id")
     suspend fun getKey(id: String): VaultKeyEntity?
 
+    @Query(
+        """
+        SELECT vault_keys.*
+        FROM vault_keys
+        JOIN (
+            SELECT encryption_key_id AS key_id FROM environment_variables
+            UNION
+            SELECT encryption_key_id AS key_id FROM ssh_keys
+            UNION
+            SELECT encryption_key_id AS key_id FROM secret_upload_environment_variables
+            UNION
+            SELECT encryption_key_id AS key_id FROM secret_upload_ssh_keys
+            UNION
+            SELECT encryption_key_id AS key_id FROM device_credentials
+            UNION
+            SELECT encryption_key_id AS key_id FROM client_psks
+            UNION
+            SELECT encryption_key_id AS key_id FROM request_psks
+            UNION
+            SELECT pending_psk_encryption_key_id AS key_id FROM pairing_attempts
+        ) AS referenced_keys ON referenced_keys.key_id = vault_keys.id
+        ORDER BY vault_keys.purpose, vault_keys.id
+        """,
+    )
+    fun observeReferencedKeys(): Flow<List<VaultKeyEntity>>
+
     @Insert
     suspend fun insertKey(key: VaultKeyEntity)
 
@@ -69,15 +102,21 @@ internal data class ActiveVaultKey(
 )
 
 internal sealed interface VaultProtection {
-    data class Available(
+    val unavailableStoredData: Set<VaultKeyPurpose>
+
+    data class ActiveKeysAvailable(
         val backings: Map<VaultKeyPurpose, EncryptionKeyBacking>,
+        override val unavailableStoredData: Set<VaultKeyPurpose>,
     ) : VaultProtection
 
-    data class KeyUnavailable(
+    data class ActiveKeysUnavailable(
         val purposes: Set<VaultKeyPurpose>,
+        override val unavailableStoredData: Set<VaultKeyPurpose>,
     ) : VaultProtection
 
-    data object Unknown : VaultProtection
+    data class ActiveKeyProtectionUnknown(
+        override val unavailableStoredData: Set<VaultKeyPurpose>,
+    ) : VaultProtection
 }
 
 internal data class VaultKeyInitialization(
@@ -129,19 +168,50 @@ internal class VaultKeyManager(
 
     suspend fun keyAvailable(keyId: String): Boolean = keyAvailableInStore(keyId)
 
-    suspend fun activeProtection(): VaultProtection {
+    fun observeProtection(): Flow<VaultProtection> = dao.observeReferencedKeys().map { referenced ->
         val active = initialize().activeKeys
-        val unavailable = active.filterValues { !keyAvailableInStore(it.id) }.keys
-        if (unavailable.isNotEmpty()) return VaultProtection.KeyUnavailable(unavailable)
+        val availability = mutableMapOf<String, Boolean>()
+        (active.values.map(ActiveVaultKey::id) + referenced.map(VaultKeyEntity::id))
+            .distinct()
+            .forEach { id -> availability[id] = keyAvailableInStore(id) }
+
+        val unavailableStoredData = mutableSetOf<VaultKeyPurpose>()
+        referenced.forEach { key ->
+            if (availability[key.id] == false) {
+                val purpose = VaultKeyPurpose.fromStoredName(key.purpose)
+                    ?: return@map VaultProtection.ActiveKeyProtectionUnknown(
+                        VaultKeyPurpose.entries.toSet(),
+                    )
+                unavailableStoredData += purpose
+            }
+        }
+
+        val unavailableActiveKeys = active
+            .filterValues { availability[it.id] == false }
+            .keys
+        if (unavailableActiveKeys.isNotEmpty()) {
+            return@map VaultProtection.ActiveKeysUnavailable(
+                purposes = unavailableActiveKeys,
+                unavailableStoredData = unavailableStoredData.toSet(),
+            )
+        }
 
         val backings = mutableMapOf<VaultKeyPurpose, EncryptionKeyBacking>()
         active.forEach { (purpose, key) ->
-            val metadata = dao.getKey(key.id) ?: return VaultProtection.Unknown
+            val metadata = dao.getKey(key.id)
+                ?: return@map VaultProtection.ActiveKeyProtectionUnknown(
+                    unavailableStoredData,
+                )
             val backing = EncryptionKeyBacking.fromStoredName(metadata.backing)
-                ?: return VaultProtection.Unknown
+                ?: return@map VaultProtection.ActiveKeyProtectionUnknown(
+                    unavailableStoredData,
+                )
             backings[purpose] = backing
         }
-        return VaultProtection.Available(backings)
+        VaultProtection.ActiveKeysAvailable(
+            backings = backings,
+            unavailableStoredData = unavailableStoredData.toSet(),
+        )
     }
 
     private suspend fun createAndActivateKey(
