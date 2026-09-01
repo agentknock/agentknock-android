@@ -4,7 +4,6 @@ import dev.agentknock.storage.request.InboxRequestKind
 import dev.agentknock.storage.request.InboxRequestState
 import dev.agentknock.storage.request.InboxRequestStatus
 import dev.agentknock.storage.request.InboxRequestSummary
-import dev.agentknock.storage.request.PairingState
 import dev.agentknock.storage.request.SecretUploadRequestState
 
 internal fun List<InboxRequestSummary>.requestHistory(): List<InboxRequestSummary> =
@@ -17,7 +16,7 @@ internal fun List<InboxRequestSummary>.requestHistory(): List<InboxRequestSummar
 internal fun List<InboxRequestSummary>.pendingPairings(): List<InboxRequestSummary> =
     filter { summary ->
         summary.kind == InboxRequestKind.PAIRING &&
-            (summary.status as? InboxRequestStatus.Pairing)?.state in pendingPairingStates
+            (summary.status as? InboxRequestStatus.Pairing)?.state?.isPendingPresentation == true
     }
 
 internal fun List<InboxRequestSummary>.pendingSecretUploads(): List<InboxRequestSummary> =
@@ -29,11 +28,3 @@ internal fun List<InboxRequestSummary>.pendingSecretUploads(): List<InboxRequest
 
 internal fun List<InboxRequestSummary>.actionRequiredCount(vararg kinds: InboxRequestKind): Int =
     count { it.kind in kinds && it.state == InboxRequestState.ACTION_REQUIRED }
-
-private val pendingPairingStates = setOf(
-    PairingState.RECEIVING,
-    PairingState.EXCHANGE_FAILED,
-    PairingState.SAS_VERIFICATION_PENDING,
-    PairingState.RELAY_ACTIVATION_PENDING,
-    PairingState.WAITING_FOR_FINISH,
-)

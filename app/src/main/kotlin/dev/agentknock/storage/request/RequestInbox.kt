@@ -33,14 +33,37 @@ internal enum class InboxRequestState(val storedName: String) {
 }
 
 internal enum class PairingState(val storedName: String) {
-    RECEIVING("receiving"),
+    EXCHANGE_PENDING("exchange_pending"),
     EXCHANGE_FAILED("exchange_failed"),
     SAS_VERIFICATION_PENDING("sas_verification_pending"),
-    RELAY_ACTIVATION_PENDING("relay_activation_pending"),
     WAITING_FOR_FINISH("waiting_for_finish"),
     REJECTED("rejected"),
-    COMPLETED("completed"),
+    COMPLETED("completed");
+
+    val blocksAdmission: Boolean
+        get() = this != REJECTED && this != COMPLETED
+
+    val isRejectable: Boolean
+        get() = blocksAdmission
+
+    val isPendingPresentation: Boolean
+        get() = blocksAdmission
+
+    val hasAcceptedSas: Boolean
+        get() = this == WAITING_FOR_FINISH || this == COMPLETED
+
+    val acceptsFinishRequest: Boolean
+        get() = this == WAITING_FOR_FINISH
+
+    companion object {
+        fun fromStoredName(value: String): PairingState =
+            checkNotNull(entries.find { it.storedName == value }) {
+                "Unknown pairing state: $value"
+            }
+    }
 }
+
+internal fun String.toPairingState(): PairingState = PairingState.fromStoredName(this)
 
 internal enum class InboxRequestKind {
     PAIRING,
@@ -794,13 +817,12 @@ internal class RequestInbox(
                             RequestNotificationDetail(
                                 null,
                                 when (pairing.state.toPairingState()) {
-                                    PairingState.RECEIVING ->
+                                    PairingState.EXCHANGE_PENDING ->
                                         "Waiting for the client to complete the secure exchange."
                                     PairingState.EXCHANGE_FAILED -> request.error
                                         ?: "The secure exchange failed. Reject this pairing to continue."
                                     PairingState.SAS_VERIFICATION_PENDING ->
                                         "Open Agentknock and compare the security code."
-                                    PairingState.RELAY_ACTIVATION_PENDING,
                                     PairingState.WAITING_FOR_FINISH,
                                     -> "The pairing is still waiting for the client and can be rejected."
                                     else -> "Open Agentknock to review this pairing."
@@ -876,9 +898,6 @@ internal class RequestInbox(
 
     private fun String.toInboxRequestState(): InboxRequestState =
         checkNotNull(InboxRequestState.entries.find { it.storedName == this })
-
-    private fun String.toPairingState(): PairingState =
-        checkNotNull(PairingState.entries.find { it.storedName == this })
 
     private fun InboxRequestEntity.toApprovalRequestState(): ApprovalRequestState =
         approvalRequestState(state.toInboxRequestState(), error)

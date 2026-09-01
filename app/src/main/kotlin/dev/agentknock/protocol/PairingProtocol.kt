@@ -32,10 +32,6 @@ internal data class SasChoices(
     val correctIndex: Int,
 )
 
-internal data class PreparedFinishResponse(
-    val response: JsonElement,
-)
-
 internal class PairingProtocol(
     private val json: Json = Json { ignoreUnknownKeys = true },
     private val random: SecureRandom = SecureRandom(),
@@ -50,17 +46,6 @@ internal class PairingProtocol(
 
     fun validateInitialRequest(request: JsonElement): Boolean =
         initialCommitment(request) != null
-
-    fun validateFreshRequestId(requestId: String, now: Long): Boolean = runCatching {
-        val bytes = requestId.ulidBytes()
-        if (bytes.all { it == 0.toByte() }) return@runCatching false
-        var timestamp = 0L
-        repeat(6) { index ->
-            timestamp = (timestamp shl 8) or (bytes[index].toLong() and 0xff)
-        }
-        timestamp >= now - REQUEST_ID_MAX_AGE_MILLIS &&
-            timestamp <= now + REQUEST_ID_FUTURE_TOLERANCE_MILLIS
-    }.getOrDefault(false)
 
     fun initialResponse(
         deviceId: String,
@@ -164,24 +149,8 @@ internal class PairingProtocol(
     }
 
     fun prepareFinishResponse(
-        deviceId: String,
-        requestId: String,
-        clientId: String,
-        clientPsk: ByteArray,
-        devicePrivateKey: ByteArray,
-        devicePublicKey: ByteArray,
-        request: JsonElement,
-    ): PreparedFinishResponse {
-        val opened = pairedRequests.openPairedRequest(
-            deviceId = deviceId,
-            requestId = requestId,
-            clientId = clientId,
-            clientPsk = clientPsk,
-            allowRotation = false,
-            devicePrivateKey = devicePrivateKey,
-            devicePublicKey = devicePublicKey,
-            request = request,
-        )
+        opened: OpenedPairedRequest,
+    ): JsonElement {
         val contents = json.decodeFromString(
             FinishRequest.serializer(),
             opened.plaintext.decodeToString(),
@@ -194,17 +163,9 @@ internal class PairingProtocol(
             FinishResult.serializer(),
             FinishResult(RESULT_ACCEPTED),
         ).encodeToByteArray()
-        return PreparedFinishResponse(
-            response = pairedRequests.sealPairedResponse(
-                deviceId = deviceId,
-                requestId = requestId,
-                clientId = clientId,
-                clientPsk = opened.clientPsk,
-                devicePrivateKey = devicePrivateKey,
-                devicePublicKey = devicePublicKey,
-                request = request,
-                plaintext = responsePlaintext,
-            ),
+        return pairedRequests.sealPairedResponse(
+            opened = opened,
+            plaintext = responsePlaintext,
         )
     }
 
@@ -274,8 +235,6 @@ internal class PairingProtocol(
         const val COMMITMENT_BYTES = 32
         const val SAS_MODULUS = 1_000_000_000_000L
         const val SAS_CHOICE_COUNT = 3
-        const val REQUEST_ID_MAX_AGE_MILLIS = 24 * 60 * 60 * 1_000L
-        const val REQUEST_ID_FUTURE_TOLERANCE_MILLIS = 5 * 60 * 1_000L
         val baseHpke = HPKE(
             HPKE.mode_base,
             HPKE.kem_X25519_SHA256,

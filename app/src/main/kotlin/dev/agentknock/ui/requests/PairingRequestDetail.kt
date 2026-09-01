@@ -17,6 +17,7 @@ import dev.agentknock.presentation.renderSoftware
 import dev.agentknock.storage.request.InboxRequestContent
 import dev.agentknock.storage.request.InboxRequestDetails
 import dev.agentknock.storage.request.InboxRequestState
+import dev.agentknock.storage.request.PairingRequestDetails
 import dev.agentknock.storage.request.PairingState
 import dev.agentknock.ui.components.InformationRow
 import dev.agentknock.ui.components.InformationSurface
@@ -42,7 +43,7 @@ internal fun PairingRequestDetail(
         InformationSurface {
             StatusLine(
                 pairing.pairingState.label(),
-                pairing.error != null,
+                pairing.pairingState.usesErrorStatus,
                 attention = request.state == InboxRequestState.ACTION_REQUIRED,
                 subdued = pairing.pairingState == PairingState.REJECTED,
             )
@@ -56,7 +57,7 @@ internal fun PairingRequestDetail(
                 InformationRow("Machine", reported)
             }
             InformationRow("Received", formatTimestamp(request.receivedAt))
-            pairing.decidedAt?.let {
+            pairing.decidedAt?.takeIf { pairing.pairingState.hasAcceptedSas }?.let {
                 InformationRow("Code accepted", formatTimestamp(it))
             }
             request.completedAt?.let {
@@ -66,6 +67,13 @@ internal fun PairingRequestDetail(
 
         when (pairing.pairingState) {
             PairingState.SAS_VERIFICATION_PENDING -> {
+                pairing.warningNotice?.let { warning ->
+                    Notice(
+                        warning.title,
+                        warning.message,
+                        NoticeTone.ATTENTION,
+                    )
+                }
                 Text(
                     "Which code is shown by the client?",
                     style = MaterialTheme.typography.titleLarge,
@@ -94,14 +102,9 @@ internal fun PairingRequestDetail(
                 }
             }
             PairingState.WAITING_FOR_FINISH -> Notice(
-                "Code verified",
+                "Code verified; waiting for the client",
                 "The client must run agentknock pairing finish to activate this pairing.",
                 NoticeTone.SUCCESS,
-            )
-            PairingState.RELAY_ACTIVATION_PENDING -> Notice(
-                "Code verified",
-                "Finishing the secure pairing with this client.",
-                NoticeTone.ATTENTION,
             )
             PairingState.COMPLETED -> Notice(
                 "Pairing completed",
@@ -113,32 +116,21 @@ internal fun PairingRequestDetail(
                 "No access was granted.",
                 NoticeTone.SUBDUED,
             )
-            PairingState.RECEIVING -> if (pairing.error == null) {
-                Notice(
-                    "Receiving pairing",
-                    "The request is still being verified.",
-                    NoticeTone.ATTENTION,
-                )
-            } else {
-                Notice(
-                    "Pairing message rejected",
-                    "${pairing.error} Waiting for a valid completion, or you can reject this pairing.",
-                    NoticeTone.DANGER,
-                )
-            }
+            PairingState.EXCHANGE_PENDING -> Notice(
+                "Waiting for secure exchange",
+                "The client is completing the secure pairing exchange.",
+                NoticeTone.ATTENTION,
+            )
             PairingState.EXCHANGE_FAILED -> Notice(
-                "Pairing message rejected",
-                pairing.error ?: "The secure exchange could not be completed.",
+                "Pairing could not continue",
+                pairing.error
+                    ?: "The secure exchange ended before the pairing could be verified.",
                 NoticeTone.DANGER,
             )
         }
         if (
-            pairing.pairingState in setOf(
-                PairingState.RECEIVING,
-                PairingState.EXCHANGE_FAILED,
-                PairingState.RELAY_ACTIVATION_PENDING,
-                PairingState.WAITING_FOR_FINISH,
-            )
+            pairing.pairingState.isRejectable &&
+            pairing.pairingState != PairingState.SAS_VERIFICATION_PENDING
         ) {
             OutlinedButton(
                 onClick = onReject,
@@ -170,11 +162,28 @@ internal fun PairingRequestDetail(
 }
 
 private fun PairingState.label(): String = when (this) {
-    PairingState.RECEIVING -> "Receiving"
-    PairingState.EXCHANGE_FAILED -> "Failed"
+    PairingState.EXCHANGE_PENDING -> "Waiting"
+    PairingState.EXCHANGE_FAILED -> "Pairing could not continue"
     PairingState.SAS_VERIFICATION_PENDING -> "Verify security code"
-    PairingState.RELAY_ACTIVATION_PENDING -> "Activating"
     PairingState.WAITING_FOR_FINISH -> "Waiting for client"
     PairingState.REJECTED -> "Rejected"
     PairingState.COMPLETED -> "Completed"
 }
+
+internal data class PairingWarningNotice(
+    val title: String,
+    val message: String,
+)
+
+internal val PairingRequestDetails.warningNotice: PairingWarningNotice?
+    get() = error?.takeIf {
+        pairingState == PairingState.SAS_VERIFICATION_PENDING
+    }?.let {
+        PairingWarningNotice(
+            title = "Some client details could not be read",
+            message = it,
+        )
+    }
+
+internal val PairingState.usesErrorStatus: Boolean
+    get() = this == PairingState.EXCHANGE_FAILED

@@ -320,7 +320,7 @@ class RequestDaoTransactionTest {
             pendingAttempt().copy(
                 requestId = pairingId,
                 clientId = "pending-pairing-client",
-                state = "receiving",
+                state = "exchange_pending",
                 decidedAt = null,
             ),
         )

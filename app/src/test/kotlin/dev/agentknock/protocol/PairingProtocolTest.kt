@@ -152,7 +152,7 @@ class PairingProtocolTest {
     }
 
     @Test
-    fun `answers the finish pairing exchange`() {
+    fun `answers an already-opened finish pairing exchange`() {
         val clientPsk = ByteArray(32) { (it + 1).toByte() }
         val sender = pskHpke.SetupPSKS(
             pskHpke.deserializePublicKey(devicePublicKey),
@@ -166,20 +166,24 @@ class PairingProtocolTest {
         val request = json.parseToJsonElement(
             """{"version":"agentknock-v1","key":"${BASE64.encodeToString(sender.encapsulation)}","ciphertext":"${BASE64.encodeToString(sender.seal(EMPTY, requestPlaintext))}"}""",
         )
-
-        val prepared = protocol.prepareFinishResponse(
+        val opened = pairedProtocol.openPairedRequest(
             deviceId = DEVICE_ID,
             requestId = FINISH_REQUEST_ID,
             clientId = CLIENT_ID,
             clientPsk = clientPsk,
+            allowRotation = false,
             devicePrivateKey = devicePrivateKey,
             devicePublicKey = devicePublicKey,
             request = request,
         )
 
+        val prepared = protocol.prepareFinishResponse(
+            opened = opened,
+        )
+
         assertEquals(
             "{\"result\":\"ACCEPTED\"}",
-            openResponse(sender, prepared.response).decodeToString(),
+            openResponse(sender, prepared).decodeToString(),
         )
     }
 
@@ -532,10 +536,10 @@ class PairingProtocolTest {
         var timestamp = 0L
         repeat(6) { timestamp = (timestamp shl 8) or (bytes[it].toLong() and 0xff) }
 
-        assertTrue(protocol.validateFreshRequestId(DEVICE_ID, timestamp))
-        assertFalse(protocol.validateFreshRequestId(DEVICE_ID.lowercase(), timestamp))
-        assertFalse(protocol.validateFreshRequestId("00000000000000000000000000", timestamp))
-        assertFalse(protocol.validateFreshRequestId(DEVICE_ID, timestamp + 24 * 60 * 60 * 1_000L + 1))
+        assertTrue(isFreshRelayRequestId(DEVICE_ID, timestamp))
+        assertFalse(isFreshRelayRequestId(DEVICE_ID.lowercase(), timestamp))
+        assertFalse(isFreshRelayRequestId("00000000000000000000000000", timestamp))
+        assertFalse(isFreshRelayRequestId(DEVICE_ID, timestamp + 24 * 60 * 60 * 1_000L + 1))
     }
 
     private fun pairingRequest(clientSecret: ByteArray): JsonElement {

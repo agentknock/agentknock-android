@@ -32,10 +32,12 @@ import dev.agentknock.storage.request.AiReviewCoordinator
 import dev.agentknock.storage.request.ClientRepository
 import dev.agentknock.storage.request.GitSigningRequests
 import dev.agentknock.storage.request.InvocationRequests
+import dev.agentknock.storage.request.PairingRequests
 import dev.agentknock.storage.request.SecretManagementRequests
 import dev.agentknock.storage.request.SshAuthenticationRequests
 import dev.agentknock.storage.device.DeviceIdentityRepository
 import dev.agentknock.storage.device.DeviceManagementRepository
+import dev.agentknock.protocol.PairingProtocol
 import dev.agentknock.subscription.SubscriptionRepository
 import dev.agentknock.ui.auth.AuthenticationSession
 import kotlinx.coroutines.CancellationException
@@ -45,6 +47,7 @@ import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.SupervisorJob
 import kotlinx.coroutines.async
 import kotlinx.coroutines.launch
+import kotlinx.serialization.json.Json
 import okhttp3.OkHttpClient
 import java.io.File
 import java.util.concurrent.TimeUnit
@@ -133,6 +136,15 @@ internal class ApplicationContainer(application: Application) {
         keyManager = vaultKeyManager,
         encryption = encryption,
     )
+    private val pairingRequests = PairingRequests(
+        dao = database.requestDao(),
+        material = requestMaterial,
+        audit = audit,
+        writeTransaction = writeTransaction,
+        pairingProtocol = PairingProtocol(),
+        json = Json,
+        currentTimeMillis = System::currentTimeMillis,
+    )
 
     val requestInbox = RequestInbox(database.requestDao())
     private val clients = ClientRepository(
@@ -177,6 +189,7 @@ internal class ApplicationContainer(application: Application) {
         invocationRequests = invocationRequests,
         gitSigningRequests = gitSigningRequests,
         sshAuthenticationRequests = sshAuthenticationRequests,
+        pairingRequests = pairingRequests,
         approvalReviewer = HttpRelayApprovalReviewClient(
             RelayHttpTransport(approvalReviewHttpClient(httpClient)),
         ),

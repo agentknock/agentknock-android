@@ -192,7 +192,7 @@ class DeviceIdentityRetentionTest {
                 deviceRandom = ByteArray(32),
                 desiredRelayClientState = "active",
                 relayClientState = "pending",
-                state = "receiving",
+                state = "exchange_pending",
                 sasOption0 = null,
                 sasOption1 = null,
                 sasOption2 = null,

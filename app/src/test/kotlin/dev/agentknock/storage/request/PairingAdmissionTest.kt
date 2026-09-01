@@ -6,25 +6,23 @@ import org.junit.Test
 
 class PairingAdmissionTest {
     @Test
-    fun `allows any number of completed pairings`() {
-        assertTrue(
-            pairingAdmissionAllowed(
-                listOf(PairingState.COMPLETED, PairingState.REJECTED, PairingState.COMPLETED),
-            ),
-        )
+    fun `terminal pairings do not block admission`() {
+        assertFalse(PairingState.COMPLETED.blocksAdmission)
+        assertFalse(PairingState.REJECTED.blocksAdmission)
     }
 
     @Test
     fun `temporarily blocks a second unfinished pairing`() {
         for (
             state in listOf(
-                PairingState.RECEIVING,
+                PairingState.EXCHANGE_PENDING,
+                PairingState.EXCHANGE_FAILED,
                 PairingState.SAS_VERIFICATION_PENDING,
-                PairingState.RELAY_ACTIVATION_PENDING,
                 PairingState.WAITING_FOR_FINISH,
             )
         ) {
-            assertFalse(pairingAdmissionAllowed(listOf(PairingState.COMPLETED, state)))
+            assertTrue(state.blocksAdmission)
+            assertTrue(state.isRejectable)
         }
     }
 

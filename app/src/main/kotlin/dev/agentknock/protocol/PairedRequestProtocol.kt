@@ -22,6 +22,12 @@ internal data class OpenedPairedRequest(
     val plaintext: ByteArray,
     val clientPsk: ByteArray,
     val keySource: PairedRequestKeySource,
+    val responseContext: PairedResponseContext,
+)
+
+internal data class PairedResponseContext(
+    val requestKey: ByteArray,
+    val exportedSecret: ByteArray,
 )
 
 internal enum class PairedRequestKeySource {
@@ -68,7 +74,35 @@ internal class PairedRequestProtocol(
             devicePublicKey = devicePublicKey,
             request = request,
         )
-        return OpenedPairedRequest(opened.plaintext, opened.clientPsk, opened.keySource)
+        return opened.toOpenedRequest()
+    }
+
+    fun sealPairedResponse(
+        opened: OpenedPairedRequest,
+        plaintext: ByteArray,
+    ): JsonElement = sealPairedResponse(opened.responseContext, plaintext)
+
+    private fun sealPairedResponse(
+        responseContext: PairedResponseContext,
+        plaintext: ByteArray,
+    ): JsonElement {
+        val responseRandom = ByteArray(RESPONSE_RANDOM_BYTES).also(random::nextBytes)
+        val salt = responseContext.requestKey + responseRandom
+        val key = derive(responseContext.exportedSecret, salt, RESPONSE_KEY_INFO, CHACHA_KEY_BYTES)
+        val nonce = derive(
+            responseContext.exportedSecret,
+            salt,
+            RESPONSE_NONCE_INFO,
+            RESPONSE_NONCE_BYTES,
+        )
+        val ciphertext = chachaSeal(key, nonce, plaintext)
+        return json.encodeToJsonElement(
+            EncryptedResponse.serializer(),
+            EncryptedResponse(
+                nonce = BASE64_ENCODER.encodeToString(responseRandom),
+                ciphertext = BASE64_ENCODER.encodeToString(ciphertext),
+            ),
+        )
     }
 
     fun sealPairedResponse(
@@ -92,27 +126,7 @@ internal class PairedRequestProtocol(
             devicePublicKey = devicePublicKey,
             request = request,
         )
-        val responseRandom = ByteArray(RESPONSE_RANDOM_BYTES).also(random::nextBytes)
-        val encapsulatedKey = decodeFixedBase64(
-            opened.request.key,
-            X25519_KEY_BYTES,
-            "request key",
-        )
-        val salt = encapsulatedKey + responseRandom
-        val exportedSecret = opened.context.export(
-            RESPONSE_EXPORT_CONTEXT,
-            EXPORTED_SECRET_BYTES,
-        )
-        val key = derive(exportedSecret, salt, RESPONSE_KEY_INFO, CHACHA_KEY_BYTES)
-        val nonce = derive(exportedSecret, salt, RESPONSE_NONCE_INFO, RESPONSE_NONCE_BYTES)
-        val ciphertext = chachaSeal(key, nonce, plaintext)
-        return json.encodeToJsonElement(
-            EncryptedResponse.serializer(),
-            EncryptedResponse(
-                nonce = BASE64_ENCODER.encodeToString(responseRandom),
-                ciphertext = BASE64_ENCODER.encodeToString(ciphertext),
-            ),
-        )
+        return sealPairedResponse(opened.toOpenedRequest(), plaintext)
     }
 
     fun openPairedCompletion(
@@ -212,7 +226,7 @@ internal class PairedRequestProtocol(
                 encapsulatedKey = encapsulatedKey,
             )
             return OpenedPairedContext(
-                request = decoded,
+                requestKey = encapsulatedKey,
                 context = context,
                 plaintext = context.open(EMPTY, ciphertext),
                 clientPsk = psk,
@@ -275,6 +289,19 @@ internal class PairedRequestProtocol(
         return output.copyOf(length)
     }
 
+    private fun OpenedPairedContext.toOpenedRequest() = OpenedPairedRequest(
+        plaintext = plaintext,
+        clientPsk = clientPsk,
+        keySource = keySource,
+        responseContext = PairedResponseContext(
+            requestKey = requestKey,
+            exportedSecret = context.export(
+                RESPONSE_EXPORT_CONTEXT,
+                EXPORTED_SECRET_BYTES,
+            ),
+        ),
+    )
+
     companion object {
         const val FINISH_PAIRING_METHOD = "PairingFinish"
         private val RESPONSE_EXPORT_CONTEXT = "agentknock-v1 response".encodeToByteArray()
@@ -313,7 +340,7 @@ internal enum class PairedRequestErrorCode(
 }
 
 private data class OpenedPairedContext(
-    val request: EncryptedRequestCore,
+    val requestKey: ByteArray,
     val context: org.bouncycastle.crypto.hpke.HPKEContext,
     val plaintext: ByteArray,
     val clientPsk: ByteArray,

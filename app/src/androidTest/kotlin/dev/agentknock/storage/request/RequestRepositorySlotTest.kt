@@ -205,6 +205,16 @@ class RequestRepositorySlotTest {
             writeTransaction = RoomWriteTransaction(database),
             currentTimeMillis = { now },
         )
+        val pairingProtocol = PairingProtocol(random = protocolRandom)
+        val pairingRequests = PairingRequests(
+            dao = database.requestDao(),
+            material = requestMaterial,
+            audit = audit,
+            writeTransaction = RoomWriteTransaction(database),
+            pairingProtocol = pairingProtocol,
+            json = Json,
+            currentTimeMillis = { now },
+        )
         repository = RequestRepository(
             dao = database.requestDao(),
             material = requestMaterial,
@@ -215,13 +225,13 @@ class RequestRepositorySlotTest {
             invocationRequests = invocationRequests,
             gitSigningRequests = gitSigningRequests,
             sshAuthenticationRequests = sshAuthenticationRequests,
+            pairingRequests = pairingRequests,
             approvalReviewer = approvalReviewer,
             relay = relay,
             aiReviews = AiReviewCoordinator(reviewScope),
             scheduleSynchronization = { synchronizationRequests += 1 },
             audit = audit,
             requestPushRegistration = {},
-            pairingProtocol = PairingProtocol(random = protocolRandom),
             pairedRequestProtocol = PairedRequestProtocol(random = protocolRandom),
             currentTimeMillis = { now },
             cryptographyDispatcher = Dispatchers.Unconfined,
@@ -256,7 +266,7 @@ class RequestRepositorySlotTest {
         )
         val root = checkNotNull(database.requestDao().getRequestById(CLIENT_ID))
         assertNull(root.completionJson)
-        assertEquals("receiving", database.requestDao().getPairingAttempt(root.id)?.state)
+        assertEquals("exchange_pending", database.requestDao().getPairingAttempt(root.id)?.state)
 
         now += 1
         synchronize(
@@ -275,7 +285,7 @@ class RequestRepositorySlotTest {
         assertEquals(InboxRequestState.ACTION_REQUIRED.storedName, requestAfterFailure.state)
         val pairingAfterFailure = checkNotNull(database.requestDao().getPairingAttempt(root.id))
         assertEquals(PairingState.EXCHANGE_FAILED.storedName, pairingAfterFailure.state)
-        assertNotNull(requestAfterFailure.error)
+        assertEquals("The pairing message could not be verified.", requestAfterFailure.error)
         assertNotNull(requestAfterFailure.exchangeEndedAt)
         assertNull(pairingAfterFailure.pendingPsk)
         assertEquals(
@@ -311,6 +321,119 @@ class RequestRepositorySlotTest {
         )
         assertNull(database.requestDao().getRequestById(root.id)?.completionJson)
         assertNotNull(checkNotNull(database.requestDao().getRequestById(root.id)).exchangeEndedAt)
+    }
+
+    @Test
+    fun failedInitialExchangeBlocksAnotherPairingUntilExplicitRejection() = runTest {
+        val clientSecret = ByteArray(32) { it.toByte() }
+        synchronize(
+            RelayDeviceEvent.Message(
+                clientId = CLIENT_ID,
+                requestId = CLIENT_ID,
+                kind = RelayMessageKind.REQUEST,
+                payload = pairingRequest(clientSecret),
+                addressId = ADDRESS_ID,
+            ),
+            RelayDeviceEvent.Message(
+                clientId = CLIENT_ID,
+                requestId = CLIENT_ID,
+                kind = RelayMessageKind.COMPLETION,
+                payload = Json.parseToJsonElement(
+                    """{"key":"bad","secret":"bad","ciphertext":"bad"}""",
+                ),
+                addressId = ADDRESS_ID,
+            ),
+        )
+        assertEquals(
+            PairingState.EXCHANGE_FAILED.storedName,
+            database.requestDao().getPairingAttempt(CLIENT_ID)?.state,
+        )
+
+        val blocked = connect(
+            RelayDeviceEvent.Message(
+                clientId = COLLISION_CLIENT_ID,
+                requestId = COLLISION_CLIENT_ID,
+                kind = RelayMessageKind.REQUEST,
+                payload = pairingRequest(ByteArray(32) { (it + 1).toByte() }),
+                addressId = ADDRESS_ID,
+            ),
+            RelayDeviceEvent.CaughtUp,
+        )
+        assertEquals(RequestSyncResult.Success, repository.sync())
+        assertNull(database.requestDao().getRequestById(COLLISION_CLIENT_ID))
+        assertFalse(blocked.sentFrames.any {
+            it is RelayDeviceFrame.Acknowledgement && it.requestId == COLLISION_CLIENT_ID
+        })
+
+        assertEquals(PairingDecisionResult.REJECTED, repository.rejectPairing(CLIENT_ID))
+        val accepted = connect(
+            RelayDeviceEvent.Message(
+                clientId = COLLISION_CLIENT_ID,
+                requestId = COLLISION_CLIENT_ID,
+                kind = RelayMessageKind.REQUEST,
+                payload = pairingRequest(ByteArray(32) { (it + 1).toByte() }),
+                addressId = ADDRESS_ID,
+            ),
+            RelayDeviceEvent.Acknowledgement(
+                clientId = COLLISION_CLIENT_ID,
+                requestId = COLLISION_CLIENT_ID,
+                kind = RelayMessageKind.RESPONSE,
+            ),
+            RelayDeviceEvent.State(
+                clientId = COLLISION_CLIENT_ID,
+                requestId = COLLISION_CLIENT_ID,
+                exchange = RelayExchangeState.OPEN,
+                request = RelayMessageState.DELIVERED,
+                response = RelayMessageState.DELIVERED,
+                completion = RelayMessageState.ABSENT,
+            ),
+            RelayDeviceEvent.CaughtUp,
+        )
+        assertEquals(RequestSyncResult.Success, repository.sync())
+        assertNotNull(database.requestDao().getRequestById(COLLISION_CLIENT_ID))
+        assertTrue(accepted.sentFrames.any {
+            it is RelayDeviceFrame.Acknowledgement && it.requestId == COLLISION_CLIENT_ID
+        })
+    }
+
+    @Test
+    fun internalInitialCompletionFailureStaysLiveAndUnacknowledged() = runTest {
+        val material = pairingMaterial(ByteArray(32) { it.toByte() })
+        synchronize(
+            RelayDeviceEvent.Message(
+                clientId = CLIENT_ID,
+                requestId = CLIENT_ID,
+                kind = RelayMessageKind.REQUEST,
+                payload = pairingRequest(ByteArray(32) { it.toByte() }),
+                addressId = ADDRESS_ID,
+            ),
+        )
+        protocolRandom.fail = true
+        val connection = connect(
+            RelayDeviceEvent.Message(
+                clientId = CLIENT_ID,
+                requestId = CLIENT_ID,
+                kind = RelayMessageKind.COMPLETION,
+                payload = material.completion,
+                addressId = ADDRESS_ID,
+            ),
+            relayState(CLIENT_ID, completion = RelayMessageState.DELIVERED),
+            RelayDeviceEvent.CaughtUp,
+        )
+
+        assertEquals(RequestSyncResult.Success, repository.sync())
+
+        val request = checkNotNull(database.requestDao().getRequestById(CLIENT_ID))
+        val attempt = checkNotNull(database.requestDao().getPairingAttempt(CLIENT_ID))
+        assertNull(request.exchangeEndedAt)
+        assertNull(request.error)
+        assertEquals(PairingState.EXCHANGE_PENDING.storedName, attempt.state)
+        assertNull(attempt.pendingPsk)
+        assertFalse(connection.sentFrames.any {
+            it is RelayDeviceFrame.Acknowledgement &&
+                it.requestId == CLIENT_ID &&
+                it.kind == RelayMessageKind.COMPLETION
+        })
     }
 
     @Test
@@ -729,6 +852,56 @@ class RequestRepositorySlotTest {
     }
 
     @Test
+    fun verifiedPairingRemainsRejectableWhileWaitingForFinish() = runTest {
+        verifyPairingSas()
+
+        assertEquals(PairingDecisionResult.REJECTED, repository.rejectPairing(CLIENT_ID))
+
+        val rejected = checkNotNull(database.requestDao().getPairingAttempt(CLIENT_ID))
+        assertEquals(PairingState.REJECTED.storedName, rejected.state)
+        assertNull(rejected.pendingPsk)
+        assertNotNull(rejected.decidedAt)
+    }
+
+    @Test
+    fun wrongSasRejectsWithoutRecordingACodeAcceptedTimestamp() = runTest {
+        receivePairingUntilSas()
+        val pairing = checkNotNull(database.requestDao().getPairingAttempt(CLIENT_ID))
+        val wrongIndex = (checkNotNull(pairing.correctSasIndex) + 1) % 3
+
+        assertEquals(
+            PairingDecisionResult.REJECTED,
+            repository.chooseSas(CLIENT_ID, wrongIndex),
+        )
+
+        val rejected = checkNotNull(database.requestDao().getPairingAttempt(CLIENT_ID))
+        assertEquals(PairingState.REJECTED.storedName, rejected.state)
+        assertNull(rejected.decidedAt)
+    }
+
+    @Test
+    fun terminalRootEventsAfterInitialCompletionPreserveSasAndPendingPsk() = runTest {
+        receivePairingUntilSas()
+        val before = checkNotNull(database.requestDao().getPairingAttempt(CLIENT_ID))
+        assertNotNull(before.pendingPsk)
+
+        connect(
+            relayState(CLIENT_ID).copy(exchange = RelayExchangeState.EXPIRED),
+            RelayDeviceEvent.Inactive(CLIENT_ID, CLIENT_ID, null),
+            RelayDeviceEvent.CaughtUp,
+        )
+        assertEquals(RequestSyncResult.Success, repository.sync())
+
+        val after = checkNotNull(database.requestDao().getPairingAttempt(CLIENT_ID))
+        assertEquals(PairingState.SAS_VERIFICATION_PENDING.storedName, after.state)
+        assertEquals(before.sasOption0, after.sasOption0)
+        assertEquals(before.sasOption1, after.sasOption1)
+        assertEquals(before.sasOption2, after.sasOption2)
+        assertEquals(before.correctSasIndex, after.correctSasIndex)
+        assertNotNull(after.pendingPsk)
+    }
+
+    @Test
     fun completionAfterPairingWasRejectedEndsTheRelayExchange() = runTest {
         val clientSecret = ByteArray(32) { it.toByte() }
         synchronize(
@@ -822,6 +995,10 @@ class RequestRepositorySlotTest {
         assertEquals("active", client.relayClientState)
         assertNull(client.desiredRelayClientState)
         assertNotNull(database.requestDao().getClientPsk(CLIENT_ID, "current"))
+        val finishRequest = checkNotNull(database.requestDao().getRequestById(FINISH_REQUEST_ID))
+        assertEquals(InboxRequestState.COMPLETED.storedName, finishRequest.state)
+        assertNull(finishRequest.exchangeEndedAt)
+        assertNotNull(database.requestDao().getRequestPsk(FINISH_REQUEST_ID))
     }
 
     @Test
@@ -875,6 +1052,11 @@ class RequestRepositorySlotTest {
         assertEquals("completed", attempt.state)
         assertEquals("revoked", attempt.relayClientState)
         assertNull(attempt.desiredRelayClientState)
+        assertFalse(
+            AuditRepository(database.auditDao()).observeEvents().first().any {
+                it.type == AuditEventType.PAIRING_COMPLETED && it.relayRequestId == CLIENT_ID
+            },
+        )
 
         val replay = connect(
             requestEvent(FINISH_REQUEST_ID, finish),
@@ -2451,6 +2633,10 @@ class RequestRepositorySlotTest {
             PairingDecisionResult.VERIFIED,
             repository.chooseSas(CLIENT_ID, checkNotNull(pairing.correctSasIndex)),
         )
+        val verified = checkNotNull(database.requestDao().getPairingAttempt(CLIENT_ID))
+        assertEquals(PairingState.WAITING_FOR_FINISH.storedName, verified.state)
+        assertEquals(RelayClientState.ACTIVE.wireName, verified.desiredRelayClientState)
+        assertNotNull(verified.decidedAt)
         return material
     }
 

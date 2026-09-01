@@ -9,13 +9,13 @@ import dev.agentknock.protocol.GitSignRequestMessage
 import dev.agentknock.protocol.OpenedPairedRequest
 import dev.agentknock.protocol.PairedRequestErrorCode
 import dev.agentknock.protocol.PairedRequestProtocol
-import dev.agentknock.protocol.PairingProtocol
 import dev.agentknock.protocol.PairingRemoveProtocol
 import dev.agentknock.protocol.SecretListProtocol
 import dev.agentknock.protocol.SecretUploadProtocol
 import dev.agentknock.protocol.SshAuthenticationMessageDetails
 import dev.agentknock.protocol.SshAuthenticationProtocol
 import dev.agentknock.protocol.SshAuthenticationRequestMessage
+import dev.agentknock.protocol.isFreshRelayRequestId
 import dev.agentknock.review.approvalReviewRequest
 import dev.agentknock.review.approvalReviewGitSignRequest
 import dev.agentknock.review.approvalReviewSshAuthenticationRequest
@@ -121,9 +121,6 @@ internal inline fun <T> decodeWireCompletionOrNull(decode: () -> T): T? = try {
 } catch (_: SerializationException) {
     null
 }
-
-internal fun pairingAdmissionAllowed(existingStates: Iterable<PairingState>): Boolean =
-    existingStates.none { it in INCOMPLETE_PAIRING_STATES }
 
 internal sealed interface RequestSyncResult {
     data object Success : RequestSyncResult
@@ -232,6 +229,7 @@ internal class RequestRepository(
     private val invocationRequests: InvocationRequests,
     private val gitSigningRequests: GitSigningRequests,
     private val sshAuthenticationRequests: SshAuthenticationRequests,
+    private val pairingRequests: PairingRequests,
     private val approvalReviewer: RelayApprovalReviewClient,
     private val relay: RelayDeviceClient,
     private val aiReviews: AiReviewCoordinator,
@@ -239,7 +237,6 @@ internal class RequestRepository(
     private val audit: AuditSink,
     private val requestPushRegistration: () -> Unit,
     private val sshKeys: SshKeyCodec = SshKeyCodec(),
-    private val pairingProtocol: PairingProtocol = PairingProtocol(),
     private val pairedRequestProtocol: PairedRequestProtocol = PairedRequestProtocol(),
     private val invocationProtocol: InvocationProtocol = InvocationProtocol(),
     private val gitSignProtocol: GitSignProtocol = GitSignProtocol(),
@@ -716,31 +713,7 @@ internal class RequestRepository(
         ) {
             requestSync()
         }
-        val attempt = dao.getPairingAttemptByClientId(event.clientId)
-        if (attempt != null) {
-            val activated = event.state == RelayClientState.ACTIVE &&
-                attempt.state == PairingState.RELAY_ACTIVATION_PENDING.storedName
-            val updatedAttempt = attempt.copy(
-                state = if (activated) {
-                    PairingState.WAITING_FOR_FINISH.storedName
-                } else {
-                    attempt.state
-                },
-                relayClientState = event.state.wireName,
-                desiredRelayClientState = if (event.state == RelayClientState.REVOKED) {
-                    null
-                } else {
-                    attempt.desiredRelayClientState?.takeUnless { it == event.state.wireName }
-                },
-            )
-            dao.updatePairingAttempt(updatedAttempt)
-            if (
-                updatedAttempt.desiredRelayClientState != null &&
-                updatedAttempt.desiredRelayClientState != updatedAttempt.relayClientState
-            ) {
-                requestSync()
-            }
-        }
+        if (pairingRequests.applyRelayClientState(event.clientId, event.state)) requestSync()
     }
 
     private suspend fun applyRelayState(event: RelayDeviceEvent.State): Boolean {
@@ -785,25 +758,7 @@ internal class RequestRepository(
         if (request.exchangeEndedAt != null) return
         when (request.kind) {
             RequestKind.PAIRING.storedName -> {
-                val pairing = dao.getPairingAttempt(request.id) ?: return
-                if (pairing.state == PairingState.RECEIVING.storedName) {
-                    dao.updatePairingRequest(
-                        request.copy(
-                            state = InboxRequestState.ACTION_REQUIRED.storedName,
-                            responseOutboxFinished = true,
-                            error = message,
-                            exchangeEndedAt = now,
-                        ),
-                        pairing.copy(state = PairingState.EXCHANGE_FAILED.storedName),
-                    )
-                } else {
-                    dao.updateEndedRequest(
-                        request.copy(
-                            responseOutboxFinished = true,
-                            exchangeEndedAt = now,
-                        ),
-                    )
-                }
+                pairingRequests.endInitialExchange(request.id, now, message)
             }
             RequestKind.SECRET_USE.storedName -> {
                 invocationRequests.expire(request, message, now)
@@ -845,15 +800,7 @@ internal class RequestRepository(
                 }
             }
             RequestKind.PAIRING_FINISH.storedName -> {
-                dao.updateEndedRequest(
-                    request.copy(
-                        state = InboxRequestState.COMPLETED.storedName,
-                        responseOutboxFinished = true,
-                        error = request.error ?: message,
-                        completedAt = request.completedAt ?: now,
-                        exchangeEndedAt = now,
-                    ),
-                )
+                pairingRequests.endFinishExchange(request.id, now, message)
             }
             RequestKind.UNKNOWN.storedName -> {
                 dao.updateEndedRequest(
@@ -871,54 +818,7 @@ internal class RequestRepository(
 
     suspend fun chooseSas(requestId: String, selectedIndex: Int?): PairingDecisionResult =
         operationMutex.withLock {
-            val request = dao.getRequestById(requestId) ?: return PairingDecisionResult.NOT_FOUND
-            val pairing = dao.getPairingAttempt(requestId)
-                ?: return PairingDecisionResult.NOT_FOUND
-            if (pairing.state != PairingState.SAS_VERIFICATION_PENDING.storedName) {
-                return PairingDecisionResult.NOT_PENDING
-            }
-            val verified = selectedIndex != null && selectedIndex == pairing.correctSasIndex
-            val now = currentTimeMillis()
-            val updatedRequest = request.copy(
-                state = if (verified) {
-                    InboxRequestState.WAITING.storedName
-                } else {
-                    InboxRequestState.COMPLETED.storedName
-                },
-                listed = verified,
-                completedAt = if (verified) null else now,
-            )
-            val updatedPairing = pairing.copy(
-                state = if (verified) {
-                    PairingState.RELAY_ACTIVATION_PENDING.storedName
-                } else {
-                    PairingState.REJECTED.storedName
-                },
-                desiredRelayClientState = if (verified) {
-                    RelayClientState.ACTIVE.wireName
-                } else {
-                    RelayClientState.REVOKED.wireName
-                },
-                pendingPsk = pairing.pendingPsk.takeIf { verified },
-                decidedAt = now,
-            )
-            if (verified) {
-                dao.updatePairingRequest(updatedRequest, updatedPairing)
-            } else {
-                dao.rejectPairing(updatedRequest, updatedPairing)
-            }
-            audit.record(
-                AuditRecord(
-                    type = AuditEventType.PAIRING_DECIDED,
-                    outcome = if (verified) AuditOutcome.APPROVED else AuditOutcome.REJECTED,
-                    decisionSource = AuditDecisionSource.USER,
-                    subject = pairing.auditClientName(),
-                    clientId = pairing.clientId,
-                    clientName = pairing.auditClientName(),
-                    relayRequestId = request.id,
-                ),
-            )
-            if (verified) PairingDecisionResult.VERIFIED else PairingDecisionResult.REJECTED
+            pairingRequests.chooseSas(requestId, selectedIndex)
         }.also { result ->
             if (
                 result == PairingDecisionResult.VERIFIED ||
@@ -930,43 +830,11 @@ internal class RequestRepository(
 
     suspend fun isMatchingPendingSas(requestId: String, selectedIndex: Int): Boolean =
         operationMutex.withLock {
-            val pairing = dao.getPairingAttempt(requestId) ?: return@withLock false
-            pairing.state == PairingState.SAS_VERIFICATION_PENDING.storedName &&
-                selectedIndex == pairing.correctSasIndex
+            pairingRequests.isMatchingPendingSas(requestId, selectedIndex)
         }
 
     suspend fun rejectPairing(requestId: String): PairingDecisionResult = operationMutex.withLock {
-        val request = dao.getRequestById(requestId) ?: return PairingDecisionResult.NOT_FOUND
-        val pairing = dao.getPairingAttempt(requestId) ?: return PairingDecisionResult.NOT_FOUND
-        if (pairing.state.toPairingState() !in USER_REJECTABLE_PAIRING_STATES) {
-            return PairingDecisionResult.NOT_PENDING
-        }
-        val now = currentTimeMillis()
-        dao.rejectPairing(
-            request = request.copy(
-                state = InboxRequestState.COMPLETED.storedName,
-                listed = false,
-                completedAt = now,
-            ),
-            attempt = pairing.copy(
-                state = PairingState.REJECTED.storedName,
-                desiredRelayClientState = RelayClientState.REVOKED.wireName,
-                pendingPsk = null,
-                decidedAt = pairing.decidedAt ?: now,
-            ),
-        )
-        audit.record(
-            AuditRecord(
-                type = AuditEventType.PAIRING_DECIDED,
-                outcome = AuditOutcome.REJECTED,
-                decisionSource = AuditDecisionSource.USER,
-                subject = pairing.auditClientName(),
-                clientId = pairing.clientId,
-                clientName = pairing.auditClientName(),
-                relayRequestId = request.id,
-            ),
-        )
-        PairingDecisionResult.REJECTED
+        pairingRequests.reject(requestId)
     }.also { result ->
         if (result == PairingDecisionResult.REJECTED) requestSync()
     }
@@ -1196,9 +1064,9 @@ internal class RequestRepository(
         requestPayload: JsonElement,
     ): ProcessedRelayMessage? {
         val now = currentTimeMillis()
-        if (!pairingProtocol.validateFreshRequestId(message.requestId, now)) return null
+        if (!isFreshRelayRequestId(message.requestId, now)) return null
         if (message.addressId != null) {
-            if (!pairingProtocol.isInitialRequest(requestPayload)) return null
+            if (!pairingRequests.isInitialRequest(requestPayload)) return null
             return startPairing(credentials, message, requestPayload)
         }
 
@@ -1209,12 +1077,7 @@ internal class RequestRepository(
         val attempt = dao.getPairingAttemptByClientId(message.clientId) ?: return null
         val rootRequest = dao.getRequestById(attempt.requestId) ?: return null
         if (rootRequest.deviceIdentityId != credentials.deviceIdentityId) return null
-        if (
-            attempt.state != PairingState.RELAY_ACTIVATION_PENDING.storedName &&
-            attempt.state != PairingState.WAITING_FOR_FINISH.storedName
-        ) {
-            return null
-        }
+        if (!attempt.state.toPairingState().acceptsFinishRequest) return null
         val clientPsk = material.decryptPendingPsk(attempt, rootRequest) ?: return null
         val opened = runCatching {
             pairedRequestProtocol.openPairedRequest(
@@ -1229,16 +1092,22 @@ internal class RequestRepository(
                 request = requestPayload,
             )
         }.getOrNull() ?: return null
-        val acceptedPsks = AcceptedRequestPsks(
-            requestPsk = material.encryptRequestPsk(
-                deviceIdentityId = rootRequest.deviceIdentityId,
-                clientId = rootRequest.clientId,
-                relayRequestId = message.requestId,
-                clientPsk = opened.clientPsk,
-            ),
-            currentClientPsk = null,
-            previousClientPsk = null,
-        )
+        val acceptedPsks = try {
+            AcceptedRequestPsks(
+                requestPsk = material.encryptRequestPsk(
+                    deviceIdentityId = rootRequest.deviceIdentityId,
+                    clientId = rootRequest.clientId,
+                    relayRequestId = message.requestId,
+                    clientPsk = opened.clientPsk,
+                ),
+                currentClientPsk = null,
+                previousClientPsk = null,
+            )
+        } catch (cancelled: CancellationException) {
+            throw cancelled
+        } catch (_: Exception) {
+            return null
+        }
         val method = runCatching { pairedRequestProtocol.method(opened.plaintext) }.getOrNull()
         if (method == PairedRequestProtocol.FINISH_PAIRING_METHOD) {
             return processFinishRequest(
@@ -3001,77 +2870,15 @@ internal class RequestRepository(
         message: IncomingRelayMessage,
         requestPayload: JsonElement,
     ): ProcessedRelayMessage? {
-        if (!pairingProtocol.validateInitialRequest(requestPayload)) return null
         if (message.addressId != credentials.addressId || message.clientId != message.requestId) {
             return null
         }
-        if (dao.getClientById(message.clientId) != null) return null
-        if (
-            !pairingAdmissionAllowed(
-                dao.getPairingAttempts().map { pairing -> pairing.state.toPairingState() },
-            )
-        ) {
-            return null
-        }
-
-        val deviceRandom = pairingProtocol.generateDeviceRandom()
-        val response = pairingProtocol.initialResponse(
-            deviceId = credentials.deviceId,
-            devicePublicKey = credentials.devicePublicKey,
-            deviceRandom = deviceRandom,
-        )
-        val now = currentTimeMillis()
-        val request = InboxRequestEntity(
-            id = message.requestId,
-            parentRequestId = null,
-            deviceIdentityId = credentials.deviceIdentityId,
+        val response = pairingRequests.start(
+            credentials = credentials,
+            requestId = message.requestId,
             clientId = message.clientId,
-            clientNameSnapshot = message.clientId,
-            clientSoftwareJson = null,
-            kind = RequestKind.PAIRING.storedName,
-            state = InboxRequestState.WAITING.storedName,
-            listed = true,
-            requestJson = requestPayload.toString(),
-            responseJson = response.toString(),
-            completionJson = null,
-            error = null,
-            receivedAt = now,
-            completedAt = null,
-            exchangeEndedAt = null,
-            responseOutboxFinished = false,
-        )
-        dao.insertPairingRequest(
-            request = request,
-            attempt = PairingAttemptEntity(
-                requestId = message.requestId,
-                pairingAddress = credentials.address,
-                clientId = message.clientId,
-                friendlyName = null,
-                deviceRandom = deviceRandom,
-                desiredRelayClientState = null,
-                relayClientState = RelayClientState.PENDING.wireName,
-                state = PairingState.RECEIVING.storedName,
-                sasOption0 = null,
-                sasOption1 = null,
-                sasOption2 = null,
-                correctSasIndex = null,
-                platform = null,
-                architecture = null,
-                hostname = null,
-                machineId = null,
-                osVersion = null,
-                pendingPsk = null,
-                decidedAt = null,
-            ),
-        )
-        audit.record(
-            AuditRecord(
-                type = AuditEventType.PAIRING_REQUESTED,
-                outcome = AuditOutcome.RECEIVED,
-                clientId = message.clientId,
-                relayRequestId = message.requestId,
-            ),
-        )
+            requestPayload = requestPayload,
+        ) ?: return null
         return ProcessedRelayMessage(response)
     }
 
@@ -3117,83 +2924,13 @@ internal class RequestRepository(
     private suspend fun processInitialCompletion(
         credentials: RelayDeviceCredentials,
         request: InboxRequestEntity,
-        pairing: PairingAttemptEntity,
         completion: JsonElement,
     ): ProcessedRelayMessage? {
-        if (request.exchangeEndedAt != null) return ProcessedRelayMessage()
-        val now = currentTimeMillis()
-        if (pairing.state != PairingState.RECEIVING.storedName) {
-            dao.updateEndedRequest(
-                request.copy(
-                    responseOutboxFinished = true,
-                    exchangeEndedAt = now,
-                ),
-            )
-            return ProcessedRelayMessage()
+        return if (pairingRequests.completeInitial(credentials, request.id, completion)) {
+            ProcessedRelayMessage()
+        } else {
+            null
         }
-        val result = try {
-            pairingProtocol.establish(
-                deviceId = credentials.deviceId,
-                clientId = pairing.clientId,
-                devicePrivateKey = credentials.devicePrivateKey,
-                devicePublicKey = credentials.devicePublicKey,
-                deviceRandom = pairing.deviceRandom,
-                initialRequest = json.parseToJsonElement(request.requestJson),
-                completion = completion,
-            )
-        } catch (cancelled: CancellationException) {
-            throw cancelled
-        } catch (failure: Exception) {
-            if (!failure.isIrrecoverableCompletionFailure()) return null
-            val message = failure.message ?: "The pairing message could not be verified."
-            dao.updatePairingRequest(
-                request = request.copy(
-                    state = InboxRequestState.ACTION_REQUIRED.storedName,
-                    responseOutboxFinished = true,
-                    error = message,
-                    exchangeEndedAt = now,
-                ),
-                attempt = pairing.copy(state = PairingState.EXCHANGE_FAILED.storedName),
-            )
-            return ProcessedRelayMessage()
-        }
-        val metadata = runCatching {
-            pairingProtocol.decodeClientMetadata(result.applicationPlaintext)
-        }.getOrNull()
-        val choices = pairingProtocol.sasChoices(result.sas)
-        val completedAttempt = material.withEncryptedPendingPsk(
-            attempt = pairing.copy(
-                state = PairingState.SAS_VERIFICATION_PENDING.storedName,
-                sasOption0 = choices.values[0],
-                sasOption1 = choices.values[1],
-                sasOption2 = choices.values[2],
-                correctSasIndex = choices.correctIndex,
-                platform = metadata?.platform,
-                architecture = metadata?.architecture,
-                hostname = metadata?.hostname,
-                friendlyName = pairing.friendlyName ?: metadata?.hostname,
-                machineId = metadata?.machineId,
-                osVersion = metadata?.osVersion,
-            ),
-            request = request,
-            clientPsk = result.clientPsk,
-        )
-        dao.recordInitialCompletion(
-            request = request.copy(
-                state = InboxRequestState.ACTION_REQUIRED.storedName,
-                clientSoftwareJson = metadata?.clientSoftware?.let(::encodeClientSoftware),
-                completionJson = completion.toString(),
-                responseOutboxFinished = true,
-                error = if (metadata == null) {
-                    "The client details could not be read, but the security code is valid."
-                } else {
-                    null
-                },
-                exchangeEndedAt = now,
-            ),
-            attempt = completedAttempt,
-        )
-        return ProcessedRelayMessage()
     }
 
     private suspend fun processFinishRequest(
@@ -3206,97 +2943,32 @@ internal class RequestRepository(
     ): ProcessedRelayMessage? {
         val rootRequest = dao.getRequestById(pairing.requestId) ?: return null
         if (rootRequest.deviceIdentityId != credentials.deviceIdentityId) return null
-        if (
-            pairing.state != PairingState.RELAY_ACTIVATION_PENDING.storedName &&
-            pairing.state != PairingState.WAITING_FOR_FINISH.storedName
-        ) return null
+        if (!pairing.state.toPairingState().acceptsFinishRequest) return null
         val relayClientState = pairing.relayClientState.toRelayClientState()
         if (
             relayClientState == RelayClientState.PENDING &&
             pairing.desiredRelayClientState != RelayClientState.ACTIVE.wireName
         ) return null
-        val prepared = runCatching {
-            pairingProtocol.prepareFinishResponse(
-                deviceId = credentials.deviceId,
-                requestId = relayRequestId,
-                clientId = pairing.clientId,
-                clientPsk = opened.clientPsk,
-                devicePrivateKey = credentials.devicePrivateKey,
-                devicePublicKey = credentials.devicePublicKey,
-                request = requestPayload,
+        val response = runCatching {
+            pairingRequests.prepareFinishResponse(
+                opened = opened,
             )
         }.getOrNull() ?: return null
-        val now = currentTimeMillis()
-        val clientName = pairing.auditClientName()
-        val finishRequest = InboxRequestEntity(
-            id = relayRequestId,
-            parentRequestId = pairing.requestId,
-            deviceIdentityId = rootRequest.deviceIdentityId,
-            clientId = rootRequest.clientId,
-            clientNameSnapshot = clientName,
-            clientSoftwareJson = rootRequest.clientSoftwareJson,
-            kind = RequestKind.PAIRING_FINISH.storedName,
-            state = InboxRequestState.COMPLETED.storedName,
-            listed = false,
-            requestJson = requestPayload.toString(),
-            responseJson = prepared.response.toString(),
-            completionJson = null,
-            error = null,
-            receivedAt = now,
-            completedAt = now,
-            exchangeEndedAt = null,
-            responseOutboxFinished = false,
-        )
-        val client = if (relayClientState == RelayClientState.REVOKED) {
-            null
-        } else {
-            ClientEntity(
-                clientId = pairing.clientId,
-                deviceIdentityId = rootRequest.deviceIdentityId,
-                name = clientName,
-                instructions = "",
-                desiredRelayClientState = pairing.desiredRelayClientState
-                    ?.takeUnless { it == relayClientState.wireName },
-                relayClientState = relayClientState.wireName,
-                clientSoftwareJson = rootRequest.clientSoftwareJson,
-                platform = pairing.platform,
-                architecture = pairing.architecture,
-                hostname = pairing.hostname,
-                machineId = pairing.machineId,
-                osVersion = pairing.osVersion,
-                pairedAt = now,
-                lastSeenAt = now,
+        val promoted = try {
+            pairingRequests.promoteFinish(
+                relayRequestId = relayRequestId,
+                requestPayload = requestPayload,
+                responsePayload = response,
+                pairingRequestId = pairing.requestId,
+                clientPsk = opened.clientPsk,
+                requestPsk = acceptedSecrets.requestPsk,
             )
+        } catch (cancelled: CancellationException) {
+            throw cancelled
+        } catch (_: Exception) {
+            return null
         }
-        val clientPsk = client?.let { material.encryptClientPsk(it, opened.clientPsk, now) }
-        dao.finishPairing(
-            rootRequest = rootRequest.copy(
-                state = InboxRequestState.COMPLETED.storedName,
-                listed = false,
-                completedAt = now,
-            ),
-            attempt = pairing.copy(
-                state = PairingState.COMPLETED.storedName,
-                relayClientState = relayClientState.wireName,
-                desiredRelayClientState = null,
-                pendingPsk = null,
-            ),
-            client = client,
-            clientPsk = clientPsk,
-            finishRequest = finishRequest,
-            requestPsk = acceptedSecrets.requestPsk,
-        )
-        audit.record(
-            AuditRecord(
-                type = AuditEventType.PAIRING_COMPLETED,
-                outcome = AuditOutcome.COMPLETED,
-                subject = pairing.auditClientName(),
-                clientId = pairing.clientId,
-                clientName = pairing.auditClientName(),
-                relayRequestId = rootRequest.id,
-            ),
-        )
-        return ProcessedRelayMessage(prepared.response)
+        return ProcessedRelayMessage(response).takeIf { promoted }
     }
 
     private suspend fun processCompletion(
@@ -3311,9 +2983,8 @@ internal class RequestRepository(
         if (request.exchangeEndedAt != null) return ProcessedRelayMessage()
         val processed = when (request.kind) {
             RequestKind.PAIRING.storedName -> {
-                val pairing = dao.getPairingAttempt(request.id) ?: return null
                 val credentials = credentialsForRequest(request, activeCredentials) ?: return null
-                processInitialCompletion(credentials, request, pairing, completion)
+                processInitialCompletion(credentials, request, completion)
             }
             RequestKind.PAIRING_FINISH.storedName -> {
                 processFinishCompletion(activeCredentials, request, completion)
@@ -3480,38 +3151,11 @@ internal class RequestRepository(
             finishRequest,
             completion,
         )
-        if (opened == CompletionOpenResult.RetryLater) return null
-        val accepted = (opened as? CompletionOpenResult.Opened)?.plaintext?.let {
-            decodeWireCompletionOrNull { pairingProtocol.finishCompletionAccepted(it) }
+        return if (pairingRequests.completeFinish(finishRequest.id, completion, opened)) {
+            ProcessedRelayMessage()
+        } else {
+            null
         }
-        val now = currentTimeMillis()
-        dao.updateEndedRequest(
-            finishRequest.copy(
-                completionJson = completion.toString().takeIf {
-                    opened is CompletionOpenResult.Opened
-                },
-                responseOutboxFinished = true,
-                error = "The pairing confirmation could not be verified."
-                    .takeIf { accepted == null },
-                exchangeEndedAt = now,
-            ),
-        )
-        audit.record(
-            AuditRecord(
-                type = AuditEventType.PAIRING_CONFIRMATION_RECEIVED,
-                outcome = if (accepted == true) AuditOutcome.COMPLETED else AuditOutcome.FAILED,
-                subject = finishRequest.clientNameSnapshot,
-                detail = when (accepted) {
-                    true -> null
-                    false -> "The client did not accept the pairing."
-                    null -> "The pairing confirmation could not be verified."
-                },
-                clientId = finishRequest.clientId,
-                clientName = finishRequest.clientNameSnapshot,
-                relayRequestId = finishRequest.id,
-            ),
-        )
-        return ProcessedRelayMessage()
     }
 
     private suspend fun credentialsForRequest(
@@ -3598,9 +3242,6 @@ internal class RequestRepository(
         }
     }
 
-    private fun String.toPairingState(): PairingState =
-        checkNotNull(PairingState.entries.find { it.storedName == this })
-
     private fun String.toRelayClientState(): RelayClientState =
         checkNotNull(RelayClientState.entries.find { it.wireName == this })
 
@@ -3651,25 +3292,4 @@ private fun AiReview.auditOutcome(): AuditOutcome = when {
     else -> AuditOutcome.FAILED
 }
 
-private fun PairingAttemptEntity.auditClientName(): String =
-    sequenceOf(friendlyName, hostname, clientId)
-        .filterNotNull()
-        .first(String::isNotBlank)
-
 private fun ClientEntity.auditClientName(): String = name
-
-private val INCOMPLETE_PAIRING_STATES = setOf(
-    PairingState.RECEIVING,
-    PairingState.EXCHANGE_FAILED,
-    PairingState.SAS_VERIFICATION_PENDING,
-    PairingState.RELAY_ACTIVATION_PENDING,
-    PairingState.WAITING_FOR_FINISH,
-)
-
-private val USER_REJECTABLE_PAIRING_STATES = setOf(
-    PairingState.RECEIVING,
-    PairingState.EXCHANGE_FAILED,
-    PairingState.SAS_VERIFICATION_PENDING,
-    PairingState.RELAY_ACTIVATION_PENDING,
-    PairingState.WAITING_FOR_FINISH,
-)

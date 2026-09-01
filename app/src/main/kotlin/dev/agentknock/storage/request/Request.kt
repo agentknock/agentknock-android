@@ -575,8 +575,8 @@ internal interface RequestDao {
             "WHERE device_identities.role = 'active' " +
             "AND inbox_requests.completed_at IS NULL " +
             "AND pairing_attempts.state IN " +
-            "('receiving', 'exchange_failed', 'sas_verification_pending', " +
-            "'relay_activation_pending', 'waiting_for_finish') " +
+            "('exchange_pending', 'exchange_failed', 'sas_verification_pending', " +
+            "'waiting_for_finish') " +
             "ORDER BY inbox_requests.received_at DESC, inbox_requests.id DESC",
     )
     fun observePendingPairingRequests(): Flow<List<InboxRequestEntity>>
