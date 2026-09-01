@@ -12,6 +12,7 @@ import dev.agentknock.ui.clients.ClientsViewModel
 import dev.agentknock.ui.device.DeviceSetupViewModel
 import dev.agentknock.ui.requests.RequestsViewModel
 import dev.agentknock.ui.secrets.SecretsViewModel
+import dev.agentknock.ui.settings.AuditViewModel
 import dev.agentknock.ui.settings.SettingsViewModel
 import dev.agentknock.ui.settings.SubscriptionViewModel
 
@@ -69,11 +70,13 @@ internal fun agentknockViewModelFactory(
             )
         }
         initializer {
+            AuditViewModel(container.audit)
+        }
+        initializer {
             SettingsViewModel(
                 deviceIdentity = container.deviceIdentity,
                 secrets = container.secrets,
                 requests = container.requests,
-                audit = container.audit,
                 vaultKeys = container.vaultKeyManager,
                 beginFactoryReset = container::beginFactoryReset,
                 cancelFactoryReset = container::cancelFactoryReset,

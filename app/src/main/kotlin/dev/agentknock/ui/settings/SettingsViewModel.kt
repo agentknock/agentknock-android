@@ -4,21 +4,16 @@ import androidx.lifecycle.ViewModel
 import androidx.lifecycle.viewModelScope
 import dev.agentknock.storage.crypto.VaultProtection
 import dev.agentknock.storage.crypto.VaultKeyManager
-import dev.agentknock.storage.audit.AuditEvent
-import dev.agentknock.storage.audit.AuditRepository
 import dev.agentknock.storage.device.DeviceConfiguration
 import dev.agentknock.storage.device.DeviceIdentityRepository
 import dev.agentknock.storage.request.RequestRepository
 import dev.agentknock.storage.secret.SecretRepository
 import kotlinx.coroutines.CancellationException
-import kotlinx.coroutines.ExperimentalCoroutinesApi
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.SharingStarted
 import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.asStateFlow
 import kotlinx.coroutines.flow.combine
-import kotlinx.coroutines.flow.flatMapLatest
-import kotlinx.coroutines.flow.flowOf
 import kotlinx.coroutines.flow.stateIn
 import kotlinx.coroutines.launch
 
@@ -34,19 +29,16 @@ internal sealed interface FactoryResetUiState {
     data object ClearFailed : FactoryResetUiState
 }
 
-@OptIn(ExperimentalCoroutinesApi::class)
 internal class SettingsViewModel(
     deviceIdentity: DeviceIdentityRepository,
     secrets: SecretRepository,
     requests: RequestRepository,
-    private val audit: AuditRepository,
     private val vaultKeys: VaultKeyManager,
     private val beginFactoryReset: suspend () -> Boolean,
     private val cancelFactoryReset: () -> Unit,
     private val clearApplicationData: () -> Boolean,
     private val awaitStorageReady: suspend () -> Unit,
 ) : ViewModel() {
-    private val selectedAuditId = MutableStateFlow<Long?>(null)
     private val _vaultProtection = MutableStateFlow<VaultProtection?>(null)
     private val _factoryReset = MutableStateFlow<FactoryResetUiState>(FactoryResetUiState.Idle)
 
@@ -62,14 +54,6 @@ internal class SettingsViewModel(
             clients = clients.size,
         )
     }.stateIn(viewModelScope, SharingStarted.Eagerly, DataCounts())
-    val auditEvents: StateFlow<List<AuditEvent>> = audit.observeEvents().stateIn(
-        viewModelScope,
-        SharingStarted.Eagerly,
-        emptyList(),
-    )
-    val selectedAuditEvent: StateFlow<AuditEvent?> = selectedAuditId.flatMapLatest { id ->
-        id?.let(audit::observeEvent) ?: flowOf(null)
-    }.stateIn(viewModelScope, SharingStarted.Eagerly, null)
     val pushRegistrationState = requests.pushRegistrationState
     val vaultProtection: StateFlow<VaultProtection?> = _vaultProtection.asStateFlow()
     val factoryReset: StateFlow<FactoryResetUiState> = _factoryReset.asStateFlow()
@@ -79,10 +63,6 @@ internal class SettingsViewModel(
             awaitStorageReady()
             _vaultProtection.value = vaultKeys.activeProtection()
         }
-    }
-
-    fun selectAuditEvent(id: Long?) {
-        selectedAuditId.value = id
     }
 
     fun startFactoryReset() {

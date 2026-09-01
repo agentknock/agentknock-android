@@ -4,6 +4,7 @@ package dev.agentknock.ui.settings
 
 import android.content.ClipData
 import android.content.ClipboardManager
+import androidx.activity.compose.BackHandler
 import androidx.compose.foundation.Canvas
 import androidx.compose.foundation.background
 import androidx.compose.foundation.clickable
@@ -25,8 +26,10 @@ import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.LazyRow
 import androidx.compose.foundation.lazy.items
 import androidx.compose.foundation.rememberScrollState
+import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.foundation.text.selection.SelectionContainer
 import androidx.compose.foundation.verticalScroll
+import androidx.compose.material3.CircularProgressIndicator
 import androidx.compose.material3.FilterChip
 import androidx.compose.material3.HorizontalDivider
 import androidx.compose.material3.MaterialTheme
@@ -48,7 +51,7 @@ import androidx.compose.ui.semantics.semantics
 import androidx.compose.ui.text.font.FontFamily
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
-import androidx.compose.foundation.shape.RoundedCornerShape
+import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import dev.agentknock.presentation.formatTimestamp
 import dev.agentknock.storage.audit.AuditEvent
 import dev.agentknock.storage.audit.AuditOutcome
@@ -69,16 +72,48 @@ private enum class AuditFilter(val label: String) {
 }
 
 @Composable
+internal fun AuditSettings(
+    viewModel: AuditViewModel,
+    onBack: () -> Unit,
+    report: (String) -> Unit,
+    modifier: Modifier,
+) {
+    val history by viewModel.history.collectAsStateWithLifecycle()
+    val selectedEventId by viewModel.selectedEventId.collectAsStateWithLifecycle()
+    val detail by viewModel.detail.collectAsStateWithLifecycle()
+    val events = (history as? AuditHistoryState.Loaded)?.events
+    val loadedDetail = (detail as? AuditDetailState.Loaded)
+        ?.takeIf { it.eventId == selectedEventId }
+    val selected = loadedDetail?.event
+    val back = {
+        if (selectedEventId == null) onBack() else viewModel.selectEvent(null)
+    }
+    BackHandler(enabled = selectedEventId != null) { viewModel.selectEvent(null) }
+    AuditBrowser(
+        events = events,
+        selectedEventId = selectedEventId,
+        selected = selected,
+        detailLoaded = loadedDetail != null,
+        onBack = back,
+        onOpen = viewModel::selectEvent,
+        report = report,
+        modifier = modifier,
+    )
+}
+
+@Composable
 internal fun AuditBrowser(
-    events: List<AuditEvent>,
+    events: List<AuditEvent>?,
+    selectedEventId: Long?,
     selected: AuditEvent?,
+    detailLoaded: Boolean,
     onBack: () -> Unit,
     onOpen: (Long) -> Unit,
     report: (String) -> Unit,
     modifier: Modifier,
 ) {
     AdaptiveListDetail(
-        hasDetail = selected != null,
+        hasDetail = selectedEventId != null,
         listWidth = 360.dp,
         onBack = onBack,
         onTopLevelChanged = {},
@@ -86,7 +121,7 @@ internal fun AuditBrowser(
         list = { listModifier ->
             AuditList(
                 events = events,
-                selectedEventId = selected?.id,
+                selectedEventId = selectedEventId,
                 onBack = onBack,
                 onOpen = onOpen,
                 modifier = listModifier,
@@ -101,16 +136,28 @@ internal fun AuditBrowser(
             }
         },
         detail = { showBack, detailModifier ->
-            selected?.let { event ->
-                key(event.id) {
+            when {
+                selected != null -> key(selected.id) {
                     AuditDetail(
-                        event = event,
+                        event = selected,
                         report = report,
                         onBack = onBack,
                         showBack = showBack,
                         modifier = detailModifier,
                     )
                 }
+                !detailLoaded -> AuditDetailPlaceholder(
+                    loading = true,
+                    onBack = onBack,
+                    showBack = showBack,
+                    modifier = detailModifier,
+                )
+                else -> AuditDetailPlaceholder(
+                    loading = false,
+                    onBack = onBack,
+                    showBack = showBack,
+                    modifier = detailModifier,
+                )
             }
         },
     )
@@ -118,15 +165,15 @@ internal fun AuditBrowser(
 
 @Composable
 private fun AuditList(
-    events: List<AuditEvent>,
+    events: List<AuditEvent>?,
     selectedEventId: Long?,
     onBack: () -> Unit,
     onOpen: (Long) -> Unit,
     modifier: Modifier,
 ) {
     var filter by rememberSaveable { mutableStateOf(AuditFilter.ALL) }
-    val visibleEvents = events.filter(filter::matches)
-    val dayGroups = visibleEvents.groupBy { it.occurredAt.auditDate() }
+    val visibleEvents = events?.filter(filter::matches)
+    val dayGroups = visibleEvents?.groupBy { it.occurredAt.auditDate() }.orEmpty()
     Column(modifier) {
         PageTopBar("Audit log", onBack)
         LazyRow(
@@ -141,7 +188,11 @@ private fun AuditList(
                 )
             }
         }
-        if (visibleEvents.isEmpty()) {
+        if (events == null) {
+            Box(Modifier.fillMaxSize(), contentAlignment = Alignment.Center) {
+                CircularProgressIndicator()
+            }
+        } else if (visibleEvents.isNullOrEmpty()) {
             Box(Modifier.fillMaxSize(), contentAlignment = Alignment.Center) {
                 Text(
                     if (events.isEmpty()) "No security activity recorded yet" else "No matching activity",
@@ -256,6 +307,28 @@ private fun AuditTimelineRow(
                 maxLines = 2,
                 overflow = TextOverflow.Ellipsis,
             )
+        }
+    }
+}
+
+@Composable
+private fun AuditDetailPlaceholder(
+    loading: Boolean,
+    onBack: () -> Unit,
+    showBack: Boolean,
+    modifier: Modifier,
+) {
+    Column(modifier) {
+        PageTopBar("Audit event", onBack, showBack)
+        Box(Modifier.fillMaxSize(), contentAlignment = Alignment.Center) {
+            if (loading) {
+                CircularProgressIndicator()
+            } else {
+                Text(
+                    "This audit event is no longer available",
+                    color = MaterialTheme.colorScheme.onSurfaceVariant,
+                )
+            }
         }
     }
 }

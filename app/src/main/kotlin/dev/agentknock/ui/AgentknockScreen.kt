@@ -61,6 +61,7 @@ import dev.agentknock.ui.secrets.SecretsScreen
 import dev.agentknock.ui.secrets.SecretsViewModel
 import dev.agentknock.ui.requests.RequestsScreen
 import dev.agentknock.ui.requests.RequestsViewModel
+import dev.agentknock.ui.settings.AuditViewModel
 import dev.agentknock.ui.settings.SettingsScreen
 import dev.agentknock.ui.settings.SettingsViewModel
 import dev.agentknock.ui.settings.SubscriptionViewModel
@@ -93,6 +94,7 @@ internal fun AgentknockScreen(
     secretsViewModel: SecretsViewModel = viewModel(factory = viewModelFactory),
     clientsViewModel: ClientsViewModel = viewModel(factory = viewModelFactory),
     subscriptionViewModel: SubscriptionViewModel = viewModel(factory = viewModelFactory),
+    auditViewModel: AuditViewModel = viewModel(factory = viewModelFactory),
     settingsViewModel: SettingsViewModel = viewModel(factory = viewModelFactory),
 ) {
     val authenticationMode by authentication.mode.collectAsStateWithLifecycle()
@@ -215,7 +217,6 @@ internal fun AgentknockScreen(
         destination == RootDestination.SETTINGS ||
             destination == RootDestination.PLAN -> SettingsScreen(
             onClose = { destination = RootDestination.MAIN },
-            authenticate = authenticate,
             authenticationMode = authenticationMode,
             onAuthenticationModeChange = { mode, onError ->
                 authentication.changeMode(mode, authenticate, onError)
@@ -229,6 +230,7 @@ internal fun AgentknockScreen(
                 }
             },
             subscriptionViewModel = subscriptionViewModel,
+            auditViewModel = auditViewModel,
             viewModel = settingsViewModel,
         )
         current.active == null || !current.active.credentialsAvailable -> DeviceSetupScreen(
