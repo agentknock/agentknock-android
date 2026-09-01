@@ -111,9 +111,7 @@ internal sealed interface RelayDeviceEvent {
         val clientId: String,
         val requestId: String,
         val exchange: RelayExchangeState,
-        val request: RelayMessageState,
         val response: RelayMessageState,
-        val completion: RelayMessageState,
     ) : RelayDeviceEvent
 
     data class Inactive(
@@ -447,19 +445,24 @@ internal class RelayFrameCodec(
                 frame.requiredString("request_id"),
                 frame.requiredMessageKind(),
             )
-            "state" -> RelayDeviceEvent.State(
-                clientId = frame.requiredString("client_id"),
-                requestId = frame.requiredString("request_id"),
-                exchange = frame.requiredEnum("exchange", RelayExchangeState.entries) {
+            "state" -> {
+                val exchange = frame.requiredEnum("exchange", RelayExchangeState.entries) {
                     it.wireName
-                },
-                request = frame.requiredEnum("request", RelayMessageState.entries) { it.wireName },
-                response = frame.requiredEnum("response", RelayMessageState.entries) { it.wireName },
-                completion = frame.requiredEnum(
+                }
+                frame.requiredEnum("request", RelayMessageState.entries) { it.wireName }
+                val response =
+                    frame.requiredEnum("response", RelayMessageState.entries) { it.wireName }
+                frame.requiredEnum(
                     "completion",
                     RelayMessageState.entries,
-                ) { it.wireName },
-            )
+                ) { it.wireName }
+                RelayDeviceEvent.State(
+                    clientId = frame.requiredString("client_id"),
+                    requestId = frame.requiredString("request_id"),
+                    exchange = exchange,
+                    response = response,
+                )
+            }
             "inactive" -> RelayDeviceEvent.Inactive(
                 frame.requiredString("client_id"),
                 frame.requiredString("request_id"),

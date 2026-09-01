@@ -1,6 +1,6 @@
 package dev.agentknock.storage.request
 
-import dev.agentknock.relay.ApprovalReviewSecretFacts
+import dev.agentknock.review.ApprovalReviewSecretFacts
 import kotlinx.serialization.decodeFromString
 
 internal fun decodeStoredApprovalReviewSecretFacts(

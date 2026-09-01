@@ -20,7 +20,7 @@ import dev.agentknock.review.approvalReviewRequest
 import dev.agentknock.review.approvalReviewGitSignRequest
 import dev.agentknock.review.approvalReviewSshAuthenticationRequest
 import dev.agentknock.review.approvalReviewSecretFacts
-import dev.agentknock.relay.ApprovalReviewRequest
+import dev.agentknock.review.ApprovalReviewRequest
 import dev.agentknock.relay.RelayClientState
 import dev.agentknock.relay.RelayApprovalReviewClient
 import dev.agentknock.relay.RelayApprovalReviewDecision
@@ -72,9 +72,6 @@ import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.NonCancellable
 import kotlinx.coroutines.channels.Channel
 import kotlinx.coroutines.flow.Flow
-import kotlinx.coroutines.flow.MutableStateFlow
-import kotlinx.coroutines.flow.StateFlow
-import kotlinx.coroutines.flow.asStateFlow
 import kotlinx.coroutines.selects.select
 import kotlinx.coroutines.sync.Mutex
 import kotlinx.coroutines.sync.withLock
@@ -231,7 +228,7 @@ internal class RequestRepository(
     private val scheduleSynchronization: () -> Unit,
     private val audit: AuditSink,
     private val writeTransaction: WriteTransaction,
-    private val requestPushRegistration: () -> Unit,
+    private val updatePushRegistrationState: (RelayPushRegistrationState) -> Unit,
     private val sshKeys: SshKeyCodec = SshKeyCodec(),
     private val pairedRequestProtocol: PairedRequestProtocol = PairedRequestProtocol(),
     private val invocationProtocol: InvocationProtocol = InvocationProtocol(),
@@ -244,11 +241,6 @@ internal class RequestRepository(
 ) {
     private val operationMutex = Mutex()
     private val pendingChanges = Channel<Unit>(Channel.CONFLATED)
-    private val _pushRegistrationState = MutableStateFlow<RelayPushRegistrationState?>(null)
-
-    val pushRegistrationState: StateFlow<RelayPushRegistrationState?> =
-        _pushRegistrationState.asStateFlow()
-
     fun observeClients(): Flow<List<ClientSummary>> = clients.observeClients()
 
     fun observeClient(clientId: String): Flow<ClientDetails?> = clients.observeClient(clientId)
@@ -537,10 +529,7 @@ internal class RequestRepository(
                         null
                     }
                     is RelayDeviceEvent.PushRegistration -> {
-                        _pushRegistrationState.value = event.state
-                        if (event.state != RelayPushRegistrationState.REGISTERED) {
-                            requestPushRegistration()
-                        }
+                        updatePushRegistrationState(event.state)
                         null
                     }
                     is RelayDeviceEvent.State -> {
@@ -1662,7 +1651,7 @@ internal class RequestRepository(
             invocationRequest.clientId != pairing.clientId ||
             invocationRequest.deviceIdentityId != pairing.deviceIdentityId ||
             invocation.decision != ApprovalDecision.APPROVED.storedName ||
-            invocationRequest.clientSoftwareJson?.let(::decodeClientSoftware) !=
+            invocationRequest.clientSoftwareJson?.let(::decodeStoredClientSoftware) !=
                 contents.clientSoftware ||
             !MessageDigest.isEqual(
                 expectedTokenHash,
@@ -2025,7 +2014,7 @@ internal class RequestRepository(
             invocationRequest.clientId != pairing.clientId ||
             invocationRequest.deviceIdentityId != pairing.deviceIdentityId ||
             invocation.decision != ApprovalDecision.APPROVED.storedName ||
-            invocationRequest.clientSoftwareJson?.let(::decodeClientSoftware) !=
+            invocationRequest.clientSoftwareJson?.let(::decodeStoredClientSoftware) !=
                 contents.clientSoftware ||
             !MessageDigest.isEqual(
                 expectedTokenHash,
@@ -3040,9 +3029,6 @@ internal class RequestRepository(
         MessageDigest.getInstance("SHA-256").digest(token)
 
     private fun encodeClientSoftware(value: ClientSoftware): String = json.encodeToString(value)
-
-    private fun decodeClientSoftware(value: String): ClientSoftware? =
-        runCatching { storedJson.decodeFromString<ClientSoftware>(value) }.getOrNull()
 
     private companion object {
         const val IDEMPOTENCY_RETENTION_MILLIS = 25 * 60 * 60 * 1_000L

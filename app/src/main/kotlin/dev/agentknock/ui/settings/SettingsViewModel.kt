@@ -8,6 +8,7 @@ import dev.agentknock.storage.device.DeviceConfiguration
 import dev.agentknock.storage.device.DeviceIdentityRepository
 import dev.agentknock.storage.request.RequestRepository
 import dev.agentknock.storage.secret.SecretRepository
+import dev.agentknock.push.PushRegistrationRepository
 import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.SharingStarted
@@ -33,6 +34,7 @@ internal class SettingsViewModel(
     deviceIdentity: DeviceIdentityRepository,
     secrets: SecretRepository,
     requests: RequestRepository,
+    pushRegistration: PushRegistrationRepository,
     private val vaultKeys: VaultKeyManager,
     private val beginFactoryReset: suspend () -> Boolean,
     private val cancelFactoryReset: () -> Unit,
@@ -54,7 +56,7 @@ internal class SettingsViewModel(
             clients = clients.size,
         )
     }.stateIn(viewModelScope, SharingStarted.Eagerly, DataCounts())
-    val pushRegistrationState = requests.pushRegistrationState
+    val pushRegistrationState = pushRegistration.registrationState
     val vaultProtection: StateFlow<VaultProtection?> = _vaultProtection.asStateFlow()
     val factoryReset: StateFlow<FactoryResetUiState> = _factoryReset.asStateFlow()
 

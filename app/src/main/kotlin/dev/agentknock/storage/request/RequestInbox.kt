@@ -9,9 +9,9 @@ import dev.agentknock.protocol.PairingProtocol
 import dev.agentknock.protocol.SecretUploadMode
 import dev.agentknock.protocol.SshAuthenticationMethod
 import dev.agentknock.protocol.SshSignatureAlgorithm
-import dev.agentknock.relay.ApprovalReviewEnvironmentDestination
-import dev.agentknock.relay.ApprovalReviewEnvironmentSecretFacts
-import dev.agentknock.relay.ApprovalReviewStandardInputDestination
+import dev.agentknock.review.ApprovalReviewEnvironmentDestination
+import dev.agentknock.review.ApprovalReviewEnvironmentSecretFacts
+import dev.agentknock.review.ApprovalReviewStandardInputDestination
 import dev.agentknock.storage.approval.ApprovalEvaluation
 import dev.agentknock.storage.secret.ENVIRONMENT_SECRET_TYPE
 import dev.agentknock.storage.secret.SSH_SECRET_TYPE
@@ -509,7 +509,7 @@ internal class RequestInbox(
         ) { request, detailRows, uploadVariables ->
             request ?: return@combine null
             val state = request.state.toInboxRequestState()
-            val clientSoftware = request.clientSoftwareJson?.let(::decodeClientSoftware)
+            val clientSoftware = request.clientSoftwareJson?.let(::decodeStoredClientSoftware)
             val content = when (request.kind) {
                 RequestKind.PAIRING.storedName -> {
                     val pairing = detailRows.pairing ?: return@combine null
@@ -927,11 +927,6 @@ internal class RequestInbox(
     private fun decodeUploadSummary(value: String): SecretUploadSummarySnapshot =
         storedJson.decodeFromString(value)
 
-    private fun decodeApprovalEvaluation(value: String): ApprovalEvaluation? =
-        runCatching {
-            storedJson.decodeFromString<ApprovalEvaluation>(value)
-        }.getOrNull()
-
     private fun decodeEnvironmentReviewFacts(
         value: String?,
     ): Map<String, Map<String, String?>> = value?.let { encoded ->
@@ -956,9 +951,6 @@ internal class RequestInbox(
             }
             ?.toMap()
     }.orEmpty()
-
-    private fun decodeClientSoftware(value: String): ClientSoftware? =
-        runCatching { storedJson.decodeFromString<ClientSoftware>(value) }.getOrNull()
 
     private companion object {
         val STRING_LIST_SERIALIZER = ListSerializer(String.serializer())

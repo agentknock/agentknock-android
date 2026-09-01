@@ -189,9 +189,14 @@ class GitSigningRequestsTest {
             InboxRequestState.WAITING.storedName,
             database.requestDao().getRequestById(requestId)?.state,
         )
+        val events = audit.observeEvents().first()
         assertEquals(
             setOf(AuditEventType.GIT_SIGN_RECEIVED, AuditEventType.GIT_SIGN_DECIDED),
-            audit.observeEvents().first().take(2).map { it.type }.toSet(),
+            events.take(2).map { it.type }.toSet(),
+        )
+        assertEquals(
+            AuditDecisionSource.VALIDATION,
+            events.first { it.type == AuditEventType.GIT_SIGN_DECIDED }.decisionSource,
         )
     }
 
@@ -222,6 +227,12 @@ class GitSigningRequestsTest {
         assertEquals(ApprovalDecision.DENIED.storedName, decided.decision)
         assertEquals(GIT_SIGN_DENIAL_MESSAGE, decided.completionMessage)
         assertEquals(auditCount + 1, audit.observeEvents().first().size)
+        assertEquals(
+            AuditDecisionSource.USER,
+            audit.observeEvents().first()
+                .first { it.type == AuditEventType.GIT_SIGN_DECIDED }
+                .decisionSource,
+        )
 
         val competingRequestId = "git-competing-denial"
         receivePending(regular, competingRequestId)
@@ -420,12 +431,17 @@ class GitSigningRequestsTest {
         val decided = checkNotNull(database.requestDao().getGitSignRequest(requestId))
         assertEquals(ApprovalDecision.APPROVED.storedName, decided.decision)
         assertEquals(1, secrets.observeTemporaryAccessGrants().first().size)
+        val events = audit.observeEvents().first()
         assertEquals(
             setOf(
                 AuditEventType.TEMPORARY_ACCESS_ALLOWED,
                 AuditEventType.GIT_SIGN_DECIDED,
             ),
-            audit.observeEvents().first().take(2).map { it.type }.toSet(),
+            events.take(2).map { it.type }.toSet(),
+        )
+        assertEquals(
+            AuditDecisionSource.TEMPORARY_ACCESS,
+            events.first { it.type == AuditEventType.GIT_SIGN_DECIDED }.decisionSource,
         )
     }
 

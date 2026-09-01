@@ -565,7 +565,7 @@ internal class SecretManagementRequests(
             val current = dao.getRequestById(request.id) ?: return@execute false
             if (current.exchangeEndedAt != null) return@execute true
             if (opened == CompletionOpenResult.RetryLater) return@execute false
-            val valid = decoded == current.clientSoftwareJson?.let(::decodeClientSoftware)
+            val valid = decoded == current.clientSoftwareJson?.let(::decodeStoredClientSoftware)
             val error = if (valid) null else SECRET_LIST_COMPLETION_VERIFICATION_ERROR
             dao.updateSecretListRequest(
                 current.copy(
@@ -616,7 +616,7 @@ internal class SecretManagementRequests(
                 SecretUploadProtocol.RESULT_REJECTED
             }
             val valid = result != null &&
-                result.clientSoftware == current.clientSoftwareJson?.let(::decodeClientSoftware) &&
+                result.clientSoftware == current.clientSoftwareJson?.let(::decodeStoredClientSoftware) &&
                 result.result == expectedResult &&
                 result.message == upload.intakeError
             val error = if (valid) null else SECRET_UPLOAD_COMPLETION_VERIFICATION_ERROR
@@ -821,8 +821,6 @@ internal class SecretManagementRequests(
         }
     }
 
-    private fun decodeClientSoftware(value: String): ClientSoftware? =
-        runCatching { storedJson.decodeFromString<ClientSoftware>(value) }.getOrNull()
 }
 
 private fun SecretUploadRequestEntity.target(): SecretUploadTarget? = when {

@@ -460,7 +460,7 @@ internal class SshAuthenticationRequests(
             }
             if (opened == CompletionOpenResult.RetryLater) return@execute false
             val softwareMatches = completionResult?.clientSoftware ==
-                currentRequest.clientSoftwareJson?.let(::decodeClientSoftware)
+                currentRequest.clientSoftwareJson?.let(::decodeStoredClientSoftware)
             val valid = softwareMatches && when (completionResult) {
                 is SshAuthenticationCompletion.Approved -> {
                     authentication.decision == ApprovalDecision.APPROVED.storedName
@@ -910,7 +910,4 @@ internal class SshAuthenticationRequests(
         relayRequestId = request.id,
     )
 
-    private fun decodeClientSoftware(value: String) = runCatching {
-        storedJson.decodeFromString<dev.agentknock.protocol.ClientSoftware>(value)
-    }.getOrNull()
 }

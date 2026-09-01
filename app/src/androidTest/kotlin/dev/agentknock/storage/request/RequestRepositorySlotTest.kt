@@ -22,7 +22,7 @@ import dev.agentknock.relay.RelayApprovalReviewClient
 import dev.agentknock.relay.RelayApprovalReviewDecision
 import dev.agentknock.relay.RelayApprovalReviewResult
 import dev.agentknock.relay.RelayEndpointResult
-import dev.agentknock.relay.ApprovalReviewRequest
+import dev.agentknock.review.ApprovalReviewRequest
 import dev.agentknock.storage.AgentknockDatabase
 import dev.agentknock.storage.RoomWriteTransaction
 import dev.agentknock.storage.audit.AuditEventType
@@ -105,6 +105,7 @@ class RequestRepositorySlotTest {
     private lateinit var reviewScope: CoroutineScope
     private lateinit var approvalReviewer: ControllableApprovalReviewer
     private var synchronizationRequests = 0
+    private var pushRegistrationState: RelayPushRegistrationState? = null
     private var now = CLIENT_ID.timestamp()
 
     @Before
@@ -162,6 +163,7 @@ class RequestRepositorySlotTest {
         approvalReviewer = ControllableApprovalReviewer()
         credentialSource = StaticCredentialSource(credentials)
         synchronizationRequests = 0
+        pushRegistrationState = null
         inbox = RequestInbox(database.requestDao())
         val clients = ClientRepository(
             dao = database.requestDao(),
@@ -242,7 +244,7 @@ class RequestRepositorySlotTest {
             scheduleSynchronization = { synchronizationRequests += 1 },
             audit = audit,
             writeTransaction = RoomWriteTransaction(database),
-            requestPushRegistration = {},
+            updatePushRegistrationState = { pushRegistrationState = it },
             pairedRequestProtocol = PairedRequestProtocol(random = protocolRandom),
             currentTimeMillis = { now },
             cryptographyDispatcher = Dispatchers.Unconfined,
@@ -390,9 +392,7 @@ class RequestRepositorySlotTest {
                 clientId = COLLISION_CLIENT_ID,
                 requestId = COLLISION_CLIENT_ID,
                 exchange = RelayExchangeState.OPEN,
-                request = RelayMessageState.DELIVERED,
                 response = RelayMessageState.DELIVERED,
-                completion = RelayMessageState.ABSENT,
             ),
             RelayDeviceEvent.CaughtUp,
         )
@@ -424,7 +424,7 @@ class RequestRepositorySlotTest {
                 payload = material.completion,
                 addressId = ADDRESS_ID,
             ),
-            relayState(CLIENT_ID, completion = RelayMessageState.DELIVERED),
+            relayState(CLIENT_ID),
             RelayDeviceEvent.CaughtUp,
         )
 
@@ -607,9 +607,7 @@ class RequestRepositorySlotTest {
                 clientId = CLIENT_ID,
                 requestId = UNSUPPORTED_REQUEST_ID,
                 exchange = RelayExchangeState.EXPIRED,
-                request = RelayMessageState.DELIVERED,
                 response = RelayMessageState.ABSENT,
-                completion = RelayMessageState.ABSENT,
             ),
             RelayDeviceEvent.CaughtUp,
         )
@@ -633,9 +631,7 @@ class RequestRepositorySlotTest {
                     clientId = CLIENT_ID,
                     requestId = UNSUPPORTED_REQUEST_ID,
                     exchange = RelayExchangeState.OPEN,
-                    request = RelayMessageState.DELIVERED,
                     response = responseState,
-                    completion = RelayMessageState.ABSENT,
                 ),
                 RelayDeviceEvent.CaughtUp,
             )
@@ -796,9 +792,7 @@ class RequestRepositorySlotTest {
                 clientId = CLIENT_ID,
                 requestId = REMOVE_REQUEST_ID,
                 exchange = RelayExchangeState.OPEN,
-                request = RelayMessageState.DELIVERED,
                 response = RelayMessageState.DELIVERED,
-                completion = RelayMessageState.ABSENT,
             ),
             RelayDeviceEvent.ClientState(CLIENT_ID, RelayClientState.REVOKED),
             RelayDeviceEvent.CaughtUp,
@@ -806,9 +800,7 @@ class RequestRepositorySlotTest {
                 clientId = CLIENT_ID,
                 requestId = REMOVE_REQUEST_ID,
                 exchange = RelayExchangeState.OPEN,
-                request = RelayMessageState.DELIVERED,
                 response = RelayMessageState.DELIVERED,
-                completion = RelayMessageState.ABSENT,
             ),
         )
 
@@ -869,7 +861,7 @@ class RequestRepositorySlotTest {
         val material = verifyPairingSas()
         connect(
             RelayDeviceEvent.ClientState(CLIENT_ID, RelayClientState.ACTIVE),
-            relayState(CLIENT_ID, completion = RelayMessageState.DELIVERED),
+            relayState(CLIENT_ID),
             RelayDeviceEvent.CaughtUp,
         )
         assertEquals(RequestSyncResult.Success, repository.sync())
@@ -1048,7 +1040,7 @@ class RequestRepositorySlotTest {
                 RelayMessageKind.RESPONSE,
             ),
             RelayDeviceEvent.ClientState(CLIENT_ID, RelayClientState.ACTIVE),
-            relayState(CLIENT_ID, completion = RelayMessageState.DELIVERED),
+            relayState(CLIENT_ID),
             RelayDeviceEvent.CaughtUp,
         )
         assertEquals(RequestSyncResult.Success, repository.sync())
@@ -1132,7 +1124,7 @@ class RequestRepositorySlotTest {
                 FINISH_REQUEST_ID,
                 RelayMessageKind.RESPONSE,
             ),
-            relayState(FINISH_REQUEST_ID, completion = RelayMessageState.DELIVERED).copy(
+            relayState(FINISH_REQUEST_ID).copy(
                 exchange = RelayExchangeState.SETTLED,
             ),
             RelayDeviceEvent.CaughtUp,
@@ -1157,7 +1149,7 @@ class RequestRepositorySlotTest {
                 RelayMessageKind.RESPONSE,
             ),
             RelayDeviceEvent.ClientState(CLIENT_ID, RelayClientState.REVOKED),
-            relayState(CLIENT_ID, completion = RelayMessageState.DELIVERED),
+            relayState(CLIENT_ID),
             RelayDeviceEvent.CaughtUp,
         )
         assertEquals(RequestSyncResult.Success, repository.sync())
@@ -1289,7 +1281,7 @@ class RequestRepositorySlotTest {
         assertEquals(1, approvalReviewer.callCount)
         assertEquals(
             RelayPushRegistrationState.REGISTERED,
-            repository.pushRegistrationState.value,
+            pushRegistrationState,
         )
         assertTrue(
             first.sentFrames.contains(
@@ -2053,7 +2045,7 @@ class RequestRepositorySlotTest {
         val material = verifyPairingSas()
         connect(
             RelayDeviceEvent.ClientState(CLIENT_ID, RelayClientState.ACTIVE),
-            relayState(CLIENT_ID, completion = RelayMessageState.DELIVERED),
+            relayState(CLIENT_ID),
             RelayDeviceEvent.CaughtUp,
         )
         assertEquals(RequestSyncResult.Success, repository.sync())
@@ -2070,7 +2062,7 @@ class RequestRepositorySlotTest {
         )
         val connection = connect(
             requestEvent(UNSUPPORTED_REQUEST_ID, request),
-            relayState(CLIENT_ID, completion = RelayMessageState.DELIVERED),
+            relayState(CLIENT_ID),
             RelayDeviceEvent.CaughtUp,
         )
 
@@ -2670,7 +2662,7 @@ class RequestRepositorySlotTest {
 
         val activation = connect(
             RelayDeviceEvent.ClientState(CLIENT_ID, RelayClientState.ACTIVE),
-            relayState(CLIENT_ID, completion = RelayMessageState.DELIVERED),
+            relayState(CLIENT_ID),
             RelayDeviceEvent.CaughtUp,
         )
         assertEquals(RequestSyncResult.Success, repository.sync())
@@ -2683,14 +2675,14 @@ class RequestRepositorySlotTest {
         now += 1
         val finish = finishRequest(material)
         connect(
-            relayState(CLIENT_ID, completion = RelayMessageState.DELIVERED),
+            relayState(CLIENT_ID),
             requestEvent(FINISH_REQUEST_ID, finish),
             RelayDeviceEvent.Acknowledgement(
                 CLIENT_ID,
                 FINISH_REQUEST_ID,
                 RelayMessageKind.RESPONSE,
             ),
-            relayState(FINISH_REQUEST_ID, completion = RelayMessageState.DELIVERED).copy(
+            relayState(FINISH_REQUEST_ID).copy(
                 exchange = RelayExchangeState.SETTLED,
             ),
             RelayDeviceEvent.CaughtUp,
@@ -3022,16 +3014,11 @@ class RequestRepositorySlotTest {
         )
     }
 
-    private fun relayState(
-        requestId: String,
-        completion: RelayMessageState = RelayMessageState.ABSENT,
-    ) = RelayDeviceEvent.State(
+    private fun relayState(requestId: String) = RelayDeviceEvent.State(
         clientId = CLIENT_ID,
         requestId = requestId,
         exchange = RelayExchangeState.OPEN,
-        request = RelayMessageState.DELIVERED,
         response = RelayMessageState.DELIVERED,
-        completion = completion,
     )
 
     private fun invocationPlaintext(token: ByteArray): ByteArray =
@@ -3169,9 +3156,7 @@ class RequestRepositorySlotTest {
             clientId = CLIENT_ID,
             requestId = CLIENT_ID,
             exchange = RelayExchangeState.OPEN,
-            request = RelayMessageState.DELIVERED,
             response = RelayMessageState.DELIVERED,
-            completion = RelayMessageState.ABSENT,
         )
         val connection = TestRelayDeviceConnection(
             events.toList() + state + RelayDeviceEvent.CaughtUp,

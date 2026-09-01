@@ -349,7 +349,7 @@ internal class GitSigningRequests(
             }
             if (opened == CompletionOpenResult.RetryLater) return@execute false
             val softwareMatches = completionResult?.clientSoftware ==
-                currentRequest.clientSoftwareJson?.let(::decodeClientSoftware)
+                currentRequest.clientSoftwareJson?.let(::decodeStoredClientSoftware)
             val valid = softwareMatches && when (completionResult) {
                 is GitSignCompletion.Approved -> {
                     gitSign.decision == ApprovalDecision.APPROVED.storedName
@@ -725,7 +725,4 @@ internal class GitSigningRequests(
         relayRequestId = request.id,
     )
 
-    private fun decodeClientSoftware(value: String) = runCatching {
-        storedJson.decodeFromString<dev.agentknock.protocol.ClientSoftware>(value)
-    }.getOrNull()
 }

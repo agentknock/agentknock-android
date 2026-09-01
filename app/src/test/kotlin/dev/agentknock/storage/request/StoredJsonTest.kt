@@ -2,7 +2,7 @@ package dev.agentknock.storage.request
 
 import dev.agentknock.protocol.ClientSoftware
 import dev.agentknock.protocol.GitSignRepository
-import dev.agentknock.relay.ApprovalReviewEnvironmentSecretFacts
+import dev.agentknock.review.ApprovalReviewEnvironmentSecretFacts
 import dev.agentknock.storage.approval.ApprovalEvaluation
 import dev.agentknock.storage.secret.SecretMetadata
 import kotlinx.serialization.decodeFromString

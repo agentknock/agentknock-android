@@ -394,7 +394,7 @@ internal class InvocationRequests(
             }
             if (opened == CompletionOpenResult.RetryLater) return@execute false
             val softwareMatches = completionResult?.clientSoftware ==
-                currentRequest.clientSoftwareJson?.let(::decodeClientSoftware)
+                currentRequest.clientSoftwareJson?.let(::decodeStoredClientSoftware)
             val valid = softwareMatches && when (completionResult) {
                 is InvocationCompletion.Approved -> {
                     secretUseRequest.decision == ApprovalDecision.APPROVED.storedName
@@ -774,10 +774,5 @@ internal class InvocationRequests(
 
     private fun decodeStringList(value: String): List<String> =
         storedJson.decodeFromString(ListSerializer(String.serializer()), value)
-
-    private fun decodeClientSoftware(value: String) =
-        runCatching {
-            storedJson.decodeFromString<dev.agentknock.protocol.ClientSoftware>(value)
-        }.getOrNull()
 
 }

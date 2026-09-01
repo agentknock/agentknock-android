@@ -81,7 +81,7 @@ internal class ClientRemovalRequests(
             if (current.exchangeEndedAt != null) return@execute true
             if (opened == CompletionOpenResult.RetryLater) return@execute false
 
-            val expectedSoftware = current.clientSoftwareJson?.let(::decodeClientSoftware)
+            val expectedSoftware = current.clientSoftwareJson?.let(::decodeStoredClientSoftware)
             val valid = decoded != null && decoded == expectedSoftware
             val error = CLIENT_REMOVAL_COMPLETION_VERIFICATION_ERROR.takeUnless { valid }
             val now = currentTimeMillis()
@@ -150,9 +150,6 @@ internal class ClientRemovalRequests(
             }
         }
     }
-
-    private fun decodeClientSoftware(value: String): ClientSoftware? =
-        runCatching { storedJson.decodeFromString<ClientSoftware>(value) }.getOrNull()
 
     private companion object {
         const val CLIENT_REMOVAL_COMPLETION_VERIFICATION_ERROR =

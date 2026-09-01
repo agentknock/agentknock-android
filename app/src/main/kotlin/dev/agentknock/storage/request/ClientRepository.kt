@@ -96,7 +96,7 @@ internal class ClientRepository(
                     architecture = it.architecture,
                     osVersion = it.osVersion,
                     machineId = it.machineId,
-                    clientSoftware = it.clientSoftwareJson?.let(::decodeClientSoftware),
+                    clientSoftware = it.clientSoftwareJson?.let(::decodeStoredClientSoftware),
                     instructions = it.instructions,
                     state = it.relayClientState.toRelayClientState(),
                     desiredState = it.desiredRelayClientState?.toRelayClientState(),
@@ -220,6 +220,4 @@ internal class ClientRepository(
     private fun String.toRelayClientState(): RelayClientState =
         checkNotNull(RelayClientState.entries.find { it.wireName == this })
 
-    private fun decodeClientSoftware(value: String): ClientSoftware? =
-        runCatching { storedJson.decodeFromString<ClientSoftware>(value) }.getOrNull()
 }

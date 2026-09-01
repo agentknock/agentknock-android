@@ -61,9 +61,7 @@ class RelayFrameCodecTest {
                 clientId = CLIENT_ID,
                 requestId = REQUEST_ID,
                 exchange = RelayExchangeState.CLOSING,
-                request = RelayMessageState.DELIVERED,
                 response = RelayMessageState.DISCARDED,
-                completion = RelayMessageState.ACCEPTED,
             ),
             codec.decode(
                 """{"type":"state","client_id":"$CLIENT_ID","request_id":"$REQUEST_ID","exchange":"closing","request":"delivered","response":"discarded","completion":"accepted"}""",

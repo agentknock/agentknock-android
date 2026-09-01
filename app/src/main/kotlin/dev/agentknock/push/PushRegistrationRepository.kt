@@ -3,8 +3,12 @@ package dev.agentknock.push
 import dev.agentknock.relay.RelayEndpointResult
 import dev.agentknock.relay.RelayPushRegistrationClient
 import dev.agentknock.relay.RelayPushRegistrationResult
+import dev.agentknock.relay.RelayPushRegistrationState
 import dev.agentknock.storage.device.RelayDeviceAuthorizationResult
 import dev.agentknock.storage.device.RelayDeviceAuthorizationSource
+import kotlinx.coroutines.flow.MutableStateFlow
+import kotlinx.coroutines.flow.StateFlow
+import kotlinx.coroutines.flow.asStateFlow
 
 internal sealed interface PushRegistrationResult {
     data object Registered : PushRegistrationResult
@@ -31,7 +35,18 @@ internal sealed interface PushRegistrationResult {
 internal class PushRegistrationRepository(
     private val deviceAuthorization: RelayDeviceAuthorizationSource,
     private val relay: RelayPushRegistrationClient,
+    private val requestRegistration: () -> Unit,
 ) {
+    private val _registrationState = MutableStateFlow<RelayPushRegistrationState?>(null)
+
+    val registrationState: StateFlow<RelayPushRegistrationState?> =
+        _registrationState.asStateFlow()
+
+    fun updateRelayState(state: RelayPushRegistrationState) {
+        _registrationState.value = state
+        if (state != RelayPushRegistrationState.REGISTERED) requestRegistration()
+    }
+
     suspend fun register(firebaseInstallationId: String): PushRegistrationResult {
         val authorization = when (val result = deviceAuthorization.activeDeviceAuthorization()) {
             is RelayDeviceAuthorizationResult.Available -> result.authorization

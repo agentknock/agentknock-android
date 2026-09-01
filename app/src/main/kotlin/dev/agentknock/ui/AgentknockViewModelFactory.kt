@@ -77,6 +77,7 @@ internal fun agentknockViewModelFactory(
                 deviceIdentity = container.deviceIdentity,
                 secrets = container.secrets,
                 requests = container.requests,
+                pushRegistration = container.pushRegistration,
                 vaultKeys = container.vaultKeyManager,
                 beginFactoryReset = container::beginFactoryReset,
                 cancelFactoryReset = container::cancelFactoryReset,

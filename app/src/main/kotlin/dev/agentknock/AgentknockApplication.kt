@@ -116,6 +116,11 @@ internal class ApplicationContainer(application: Application) {
     val pushRegistration = PushRegistrationRepository(
         deviceAuthorization = deviceIdentity,
         relay = HttpRelayPushRegistrationClient(relayHttp),
+        requestRegistration = {
+            FirebaseMessaging.getInstance().register().addOnFailureListener { failure ->
+                Log.w("Agentknock", "FCM registration failed", failure)
+            }
+        },
     )
 
     val subscription = SubscriptionRepository(
@@ -207,11 +212,7 @@ internal class ApplicationContainer(application: Application) {
         scheduleSynchronization = { scheduleRequestSynchronization() },
         audit = audit,
         writeTransaction = writeTransaction,
-        requestPushRegistration = {
-            FirebaseMessaging.getInstance().register().addOnFailureListener { failure ->
-                Log.w("Agentknock", "FCM registration failed", failure)
-            }
-        },
+        updatePushRegistrationState = pushRegistration::updateRelayState,
     )
 
     val requestNotifications = RequestNotificationCoordinator(
