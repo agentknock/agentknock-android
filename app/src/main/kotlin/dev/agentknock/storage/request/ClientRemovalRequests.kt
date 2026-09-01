@@ -47,7 +47,6 @@ internal class ClientRemovalRequests(
                 listed = false,
                 requestJson = requestPayload.toString(),
                 responseJson = response.toString(),
-                completionJson = null,
                 error = null,
                 receivedAt = now,
                 completedAt = null,
@@ -66,7 +65,6 @@ internal class ClientRemovalRequests(
     /** Returns true when the completion is terminal and can be acknowledged. */
     suspend fun complete(
         request: InboxRequestEntity,
-        completion: JsonElement,
         openCompletion: suspend () -> CompletionOpenResult,
     ): Boolean {
         val existing = dao.getRequestById(request.id) ?: return false
@@ -90,9 +88,6 @@ internal class ClientRemovalRequests(
             dao.updateEndedRequest(
                 current.copy(
                     state = InboxRequestState.COMPLETED.storedName,
-                    completionJson = completion.toString().takeIf {
-                        opened is CompletionOpenResult.Opened
-                    },
                     responseOutboxFinished = true,
                     error = error,
                     completedAt = current.completedAt ?: now,

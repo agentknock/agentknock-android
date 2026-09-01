@@ -69,7 +69,6 @@ internal class PairingRequests(
                     listed = true,
                     requestJson = requestPayload.toString(),
                     responseJson = response.toString(),
-                    completionJson = null,
                     error = null,
                     receivedAt = now,
                     completedAt = null,
@@ -192,7 +191,6 @@ internal class PairingRequests(
                 request = currentRequest.copy(
                     state = InboxRequestState.ACTION_REQUIRED.storedName,
                     clientSoftwareJson = metadata?.clientSoftware?.let(json::encodeToString),
-                    completionJson = completion.toString(),
                     responseOutboxFinished = true,
                     error = METADATA_WARNING.takeIf { metadata == null },
                     exchangeEndedAt = now,
@@ -378,7 +376,6 @@ internal class PairingRequests(
             listed = false,
             requestJson = requestPayload.toString(),
             responseJson = responsePayload.toString(),
-            completionJson = null,
             error = null,
             receivedAt = now,
             completedAt = now,
@@ -446,7 +443,6 @@ internal class PairingRequests(
     /** Returns true when the completion is terminal and can be acknowledged. */
     suspend fun completeFinish(
         requestId: String,
-        completion: JsonElement,
         opened: CompletionOpenResult,
     ): Boolean {
         if (opened == CompletionOpenResult.RetryLater) return false
@@ -466,9 +462,6 @@ internal class PairingRequests(
             }
             dao.updateEndedRequest(
                 request.copy(
-                    completionJson = completion.toString().takeIf {
-                        opened is CompletionOpenResult.Opened
-                    },
                     responseOutboxFinished = true,
                     error = detail,
                     exchangeEndedAt = now,
@@ -533,7 +526,6 @@ internal class PairingRequests(
                 request = request.copy(
                     state = InboxRequestState.ACTION_REQUIRED.storedName,
                     responseOutboxFinished = true,
-                    completionJson = null,
                     error = INITIAL_COMPLETION_VERIFICATION_ERROR,
                     exchangeEndedAt = now,
                 ),

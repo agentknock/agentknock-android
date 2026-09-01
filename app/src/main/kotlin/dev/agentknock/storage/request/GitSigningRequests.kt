@@ -212,7 +212,6 @@ internal class GitSigningRequests(
             )
             val storedGitSign = if (authorized) gitSign else gitSign.copy(
                 decision = null,
-                decisionSource = null,
                 completionResult = null,
                 completionReason = null,
                 completionMessage = null,
@@ -302,7 +301,6 @@ internal class GitSigningRequests(
                 gitSignRequest = currentGitSign.copy(
                     approvalEvaluationJson = gitSign.approvalEvaluationJson,
                     decision = gitSign.decision,
-                    decisionSource = gitSign.decisionSource,
                     completionReason = gitSign.completionReason,
                     completionMessage = gitSign.completionMessage,
                     decidedAt = gitSign.decidedAt,
@@ -336,10 +334,8 @@ internal class GitSigningRequests(
 
     suspend fun complete(
         request: InboxRequestEntity,
-        completion: JsonElement,
         openCompletion: suspend () -> CompletionOpenResult,
     ): Boolean {
-        val completionJson = completion.toString()
         terminalCompletionHandled(request.id)?.let { return it }
         val opened = openCompletion()
         val completionResult = (opened as? CompletionOpenResult.Opened)?.plaintext?.let {
@@ -375,9 +371,6 @@ internal class GitSigningRequests(
             dao.updateGitSignRequest(
                 request = currentRequest.copy(
                     state = InboxRequestState.COMPLETED.storedName,
-                    completionJson = completionJson.takeIf {
-                        opened is CompletionOpenResult.Opened
-                    },
                     responseOutboxFinished = true,
                     error = error,
                     completedAt = now,
@@ -537,7 +530,6 @@ internal class GitSigningRequests(
             )
             val updatedGitSign = currentGitSign.copy(
                 decision = decision.storedName,
-                decisionSource = decisionSource,
                 completionReason = denialReason?.wireName,
                 completionMessage = denialMessage,
                 decidedAt = now,
@@ -660,7 +652,6 @@ internal class GitSigningRequests(
                     currentGitSign.approvalEvaluationJson
                 },
                 decision = ApprovalDecision.APPROVED.storedName,
-                decisionSource = decisionSource,
                 completionReason = null,
                 completionMessage = null,
                 decidedAt = now,

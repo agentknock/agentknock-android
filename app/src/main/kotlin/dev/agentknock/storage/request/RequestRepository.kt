@@ -1305,7 +1305,6 @@ internal class RequestRepository(
             listed = true,
             requestJson = requestPayload.toString(),
             responseJson = null,
-            completionJson = null,
             error = null,
             receivedAt = now,
             completedAt = null,
@@ -1721,7 +1720,6 @@ internal class RequestRepository(
             listed = true,
             requestJson = requestPayload.toString(),
             responseJson = null,
-            completionJson = null,
             error = null,
             receivedAt = now,
             completedAt = null,
@@ -1735,7 +1733,6 @@ internal class RequestRepository(
             repositoryJson = contents.repository?.let { json.encodeToString(it) },
             approvalEvaluationJson = initialEvaluation?.let { json.encodeToString(it) },
             decision = null,
-            decisionSource = null,
             completionResult = null,
             completionReason = null,
             completionMessage = null,
@@ -1897,7 +1894,6 @@ internal class RequestRepository(
             )
             val finalGitSign = initialGitSign.copy(
                 decision = automaticDecision?.storedName,
-                decisionSource = automaticDecisionSource,
                 approvalEvaluationJson = evaluation?.let { json.encodeToString(it) },
                 completionReason = denial?.first?.wireName,
                 completionMessage = denial?.second,
@@ -2095,7 +2091,6 @@ internal class RequestRepository(
             listed = true,
             requestJson = requestPayload.toString(),
             responseJson = null,
-            completionJson = null,
             error = null,
             receivedAt = now,
             completedAt = null,
@@ -2655,7 +2650,6 @@ internal class RequestRepository(
                         listed = false,
                         requestJson = requestPayload.toString(),
                         responseJson = response.toString(),
-                        completionJson = null,
                         error = code.message,
                         receivedAt = now,
                         completedAt = now,
@@ -2714,7 +2708,6 @@ internal class RequestRepository(
                         listed = false,
                         requestJson = requestPayload.toString(),
                         responseJson = response.toString(),
-                        completionJson = null,
                         error = code.message,
                         receivedAt = now,
                         completedAt = now,
@@ -2882,19 +2875,19 @@ internal class RequestRepository(
                 processFinishCompletion(activeCredentials, request, completion)
             }
             RequestKind.SECRET_USE.storedName -> {
-                val completed = invocationRequests.complete(request, completion) {
+                val completed = invocationRequests.complete(request) {
                     openStoredCompletion(activeCredentials, request, completion)
                 }
                 if (completed) ProcessedRelayMessage() else null
             }
             RequestKind.GIT_SIGN.storedName -> {
-                val completed = gitSigningRequests.complete(request, completion) {
+                val completed = gitSigningRequests.complete(request) {
                     openStoredCompletion(activeCredentials, request, completion)
                 }
                 if (completed) ProcessedRelayMessage() else null
             }
             RequestKind.SSH_AUTHENTICATE.storedName -> {
-                val completed = sshAuthenticationRequests.complete(request, completion) {
+                val completed = sshAuthenticationRequests.complete(request) {
                     openStoredCompletion(activeCredentials, request, completion)
                 }
                 if (completed) ProcessedRelayMessage() else null
@@ -2906,7 +2899,7 @@ internal class RequestRepository(
                 processSecretUploadCompletion(activeCredentials, request, completion)
             }
             RequestKind.PAIRING_REMOVE.storedName -> {
-                val completed = clientRemovalRequests.complete(request, completion) {
+                val completed = clientRemovalRequests.complete(request) {
                     openStoredCompletion(activeCredentials, request, completion)
                 }
                 if (completed) ProcessedRelayMessage() else null
@@ -2930,9 +2923,6 @@ internal class RequestRepository(
         dao.updateEndedRequest(
             request.copy(
                 state = InboxRequestState.COMPLETED.storedName,
-                completionJson = completion.toString().takeIf {
-                    opened is CompletionOpenResult.Opened
-                },
                 responseOutboxFinished = true,
                 error = request.error ?: "The completion could not be verified."
                     .takeIf { opened == CompletionOpenResult.IrrecoverablyInvalid },
@@ -2948,7 +2938,7 @@ internal class RequestRepository(
         request: InboxRequestEntity,
         completion: JsonElement,
     ): ProcessedRelayMessage? {
-        val processed = secretManagement.completeSecretList(request, completion) {
+        val processed = secretManagement.completeSecretList(request) {
             openStoredCompletion(activeCredentials, request, completion)
         }
         return if (processed) ProcessedRelayMessage() else null
@@ -2959,7 +2949,7 @@ internal class RequestRepository(
         request: InboxRequestEntity,
         completion: JsonElement,
     ): ProcessedRelayMessage? {
-        val processed = secretManagement.completeSecretUpload(request, completion) {
+        val processed = secretManagement.completeSecretUpload(request) {
             openStoredCompletion(activeCredentials, request, completion)
         }
         return if (processed) ProcessedRelayMessage() else null
@@ -2974,7 +2964,7 @@ internal class RequestRepository(
             finishRequest,
             completion,
         )
-        return if (pairingRequests.completeFinish(finishRequest.id, completion, opened)) {
+        return if (pairingRequests.completeFinish(finishRequest.id, opened)) {
             ProcessedRelayMessage()
         } else {
             null

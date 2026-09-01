@@ -167,7 +167,6 @@ internal class SecretManagementRequests(
                     listed = false,
                     requestJson = requestPayload.toString(),
                     responseJson = response.toString(),
-                    completionJson = null,
                     error = null,
                     receivedAt = now,
                     completedAt = null,
@@ -277,7 +276,6 @@ internal class SecretManagementRequests(
                     listed = prepared.error == null,
                     requestJson = requestPayload.toString(),
                     responseJson = response.toString(),
-                    completionJson = null,
                     error = null,
                     receivedAt = now,
                     completedAt = null,
@@ -555,7 +553,6 @@ internal class SecretManagementRequests(
 
     suspend fun completeSecretList(
         request: InboxRequestEntity,
-        completion: JsonElement,
         openCompletion: suspend () -> CompletionOpenResult,
     ): Boolean {
         terminalCompletionHandled(request.id)?.let { return it }
@@ -573,9 +570,6 @@ internal class SecretManagementRequests(
             dao.updateSecretListRequest(
                 current.copy(
                     state = InboxRequestState.COMPLETED.storedName,
-                    completionJson = completion.toString().takeIf {
-                        opened is CompletionOpenResult.Opened
-                    },
                     responseOutboxFinished = true,
                     error = error,
                     completedAt = now,
@@ -603,7 +597,6 @@ internal class SecretManagementRequests(
 
     suspend fun completeSecretUpload(
         request: InboxRequestEntity,
-        completion: JsonElement,
         openCompletion: suspend () -> CompletionOpenResult,
     ): Boolean {
         terminalCompletionHandled(request.id)?.let { return it }
@@ -631,9 +624,6 @@ internal class SecretManagementRequests(
             dao.updateSecretUploadRequest(
                 request = current.copy(
                     state = lifecycle.state.storedName,
-                    completionJson = completion.toString().takeIf {
-                        opened is CompletionOpenResult.Opened
-                    },
                     responseOutboxFinished = true,
                     error = error,
                     completedAt = current.completedAt ?: if (lifecycle.completed) now else null,

@@ -156,7 +156,6 @@ class SecretManagementRequestsTest {
         assertTrue(
             requests(audit).completeSecretList(
                 request = request,
-                completion = Json.parseToJsonElement("""{"ciphertext":"completion"}"""),
                 openCompletion = {
                     CompletionOpenResult.Opened("{not-json-$malicious".encodeToByteArray())
                 },
@@ -311,32 +310,28 @@ class SecretManagementRequestsTest {
         val requestId = "upload-completion"
         receiveEnvironmentUpload(requestId)
         val request = checkNotNull(database.requestDao().getRequestById(requestId))
-        val completion = Json.parseToJsonElement("""{"ciphertext":"completion"}""")
         val eventCount = audit.observeEvents().first().size
 
         assertTrue(
             runCatching {
                 requests(InsertThenFailAuditSink(audit)).completeSecretUpload(
                     request,
-                    completion,
                 ) { CompletionOpenResult.Opened(uploadCompletionPlaintext()) }
             }.isFailure,
         )
-        assertNull(database.requestDao().getRequestById(requestId)?.completionJson)
         assertEquals(eventCount, audit.observeEvents().first().size)
 
         val regular = requests(audit)
         assertTrue(
-            regular.completeSecretUpload(request, completion) {
+            regular.completeSecretUpload(request) {
                 CompletionOpenResult.Opened(uploadCompletionPlaintext())
             },
         )
         val completedTransport = checkNotNull(database.requestDao().getRequestById(requestId))
         assertEquals(InboxRequestState.ACTION_REQUIRED.storedName, completedTransport.state)
-        assertEquals(completion.toString(), completedTransport.completionJson)
         assertNull(completedTransport.completedAt)
         assertTrue(
-            regular.completeSecretUpload(completedTransport, completion) {
+            regular.completeSecretUpload(completedTransport) {
                 error("A completed upload must not reopen its transport completion")
             },
         )
@@ -359,7 +354,6 @@ class SecretManagementRequestsTest {
         assertTrue(
             requests(audit).completeSecretUpload(
                 request = request,
-                completion = Json.parseToJsonElement("""{"ciphertext":"completion"}"""),
                 openCompletion = {
                     CompletionOpenResult.Opened("{not-json-$malicious".encodeToByteArray())
                 },
@@ -443,7 +437,6 @@ class SecretManagementRequestsTest {
         listed = false,
         requestJson = "{}",
         responseJson = null,
-        completionJson = null,
         error = null,
         receivedAt = NOW,
         completedAt = null,

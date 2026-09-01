@@ -378,7 +378,6 @@ internal class InvocationRequests(
 
     suspend fun complete(
         request: InboxRequestEntity,
-        completion: JsonElement,
         openCompletion: suspend () -> CompletionOpenResult,
     ): Boolean {
         terminalCompletionHandled(request.id)?.let { return it }
@@ -428,9 +427,6 @@ internal class InvocationRequests(
             dao.updateSecretUseRequest(
                 request = currentRequest.copy(
                     state = InboxRequestState.COMPLETED.storedName,
-                    completionJson = completion.toString().takeIf {
-                        opened is CompletionOpenResult.Opened
-                    },
                     responseOutboxFinished = true,
                     error = error,
                     completedAt = now,

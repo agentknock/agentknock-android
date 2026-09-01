@@ -406,48 +406,47 @@ class RequestDaoTransactionTest {
     }
 
     @Test
-    fun requestPskIsDeletedOnlyAfterCompletionIsStored() = runTest {
-        val requestId = "completed-request"
-        dao.insertRequest(rootRequest().copy(id = requestId, completionJson = null))
+    fun requestPskIsDeletedOnlyAfterExchangeEnds() = runTest {
+        val requestId = "ended-request"
+        dao.insertRequest(rootRequest().copy(id = requestId, exchangeEndedAt = null))
         dao.insertRequestPsk(requestPsk(requestId))
 
-        assertEquals(0, dao.deleteCompletedRequestPsk(requestId))
+        assertEquals(0, dao.deleteEndedRequestPsk(requestId))
         assertNotNull(dao.getRequestPsk(requestId))
 
         val request = checkNotNull(dao.getRequestById(requestId))
-        assertEquals(1, dao.updateRequest(request.copy(completionJson = "{}")))
-        assertEquals(1, dao.deleteCompletedRequestPsk(requestId))
+        assertEquals(1, dao.updateRequest(request.copy(exchangeEndedAt = 5)))
+        assertEquals(1, dao.deleteEndedRequestPsk(requestId))
         assertNull(dao.getRequestPsk(requestId))
     }
 
     @Test
-    fun startupRequestPskCleanupRequiresAStoredCompletion() = runTest {
-        val requestId = "completed-pairing-finish"
+    fun startupRequestPskCleanupDeletesOnlyEndedExchanges() = runTest {
+        val openRequestId = "open-pairing-finish"
         dao.insertRequest(
             rootRequest().copy(
-                id = requestId,
+                id = openRequestId,
                 kind = RequestKind.PAIRING_FINISH.storedName,
                 state = "completed",
-                completionJson = null,
                 completedAt = 5,
                 exchangeEndedAt = null,
             ),
         )
-        dao.insertRequestPsk(requestPsk(requestId))
-        val completedRequestId = "request-with-completion"
+        dao.insertRequestPsk(requestPsk(openRequestId))
+        val endedRequestId = "ended-request"
         dao.insertRequest(
             rootRequest().copy(
-                id = completedRequestId,
-                completionJson = "{}",
+                id = endedRequestId,
+                exchangeEndedAt = 5,
             ),
         )
-        dao.insertRequestPsk(requestPsk(completedRequestId))
+        dao.insertRequestPsk(requestPsk(endedRequestId))
 
-        assertEquals(1, dao.deleteCompletedRequestPsks())
-        assertNotNull(dao.getRequestPsk(requestId))
-        assertNull(dao.getRequestPsk(completedRequestId))
-        assertEquals(0, dao.deleteEndedRequestPsk(requestId))
-        assertNotNull(dao.getRequestPsk(requestId))
+        assertEquals(1, dao.deleteEndedRequestPsks())
+        assertNotNull(dao.getRequestPsk(openRequestId))
+        assertNull(dao.getRequestPsk(endedRequestId))
+        assertEquals(0, dao.deleteEndedRequestPsk(openRequestId))
+        assertNotNull(dao.getRequestPsk(openRequestId))
     }
 
     @Test
@@ -855,7 +854,6 @@ class RequestDaoTransactionTest {
         assertEquals("action_required", dao.getRequestById(gitRequestId)?.state)
         assertNull(dao.getRequestById(gitRequestId)?.responseJson)
         assertNull(dao.getGitSignRequest(gitRequestId)?.decision)
-        assertNull(dao.getGitSignRequest(gitRequestId)?.decisionSource)
         assertNull(dao.getGitSignRequest(gitRequestId)?.approvalEvaluationJson)
 
         val sshRequestId = "$INVOCATION_REQUEST_ID-ssh"
@@ -968,7 +966,6 @@ class RequestDaoTransactionTest {
         repositoryJson = null,
         approvalEvaluationJson = null,
         decision = null,
-        decisionSource = null,
         completionResult = null,
         completionReason = null,
         completionMessage = null,
@@ -1024,7 +1021,6 @@ class RequestDaoTransactionTest {
         listed = true,
         requestJson = "{}",
         responseJson = "{}",
-        completionJson = "{}",
         error = null,
         receivedAt = 1,
         completedAt = null,
@@ -1095,7 +1091,6 @@ class RequestDaoTransactionTest {
         listed = false,
         requestJson = "{}",
         responseJson = RESPONSE_JSON,
-        completionJson = null,
         error = null,
         receivedAt = 2,
         completedAt = 2,
@@ -1115,7 +1110,6 @@ class RequestDaoTransactionTest {
         listed = false,
         requestJson = "{}",
         responseJson = RESPONSE_JSON,
-        completionJson = null,
         error = null,
         receivedAt = 2,
         completedAt = null,

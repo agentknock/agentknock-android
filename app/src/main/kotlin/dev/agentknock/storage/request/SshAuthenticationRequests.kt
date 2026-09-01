@@ -444,10 +444,8 @@ internal class SshAuthenticationRequests(
 
     suspend fun complete(
         request: InboxRequestEntity,
-        completion: JsonElement,
         openCompletion: suspend () -> CompletionOpenResult,
     ): Boolean {
-        val completionJson = completion.toString()
         terminalCompletionHandled(request.id)?.let { return it }
         val opened = openCompletion()
         val completionResult = (opened as? CompletionOpenResult.Opened)?.plaintext?.let {
@@ -485,9 +483,6 @@ internal class SshAuthenticationRequests(
             dao.updateSshAuthenticationRequest(
                 request = currentRequest.copy(
                     state = InboxRequestState.COMPLETED.storedName,
-                    completionJson = completionJson.takeIf {
-                        opened is CompletionOpenResult.Opened
-                    },
                     responseOutboxFinished = true,
                     error = error,
                     completedAt = now,

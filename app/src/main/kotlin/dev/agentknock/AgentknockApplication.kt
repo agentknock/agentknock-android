@@ -237,7 +237,7 @@ internal class ApplicationContainer(application: Application) {
             clearExpired = { now -> database.secretDao().deleteExpiredTemporaryAccessGrants(now) },
         )
         database.requestDao().discardDecidedSecretUploadValues()
-        database.requestDao().deleteCompletedRequestPsks()
+        database.requestDao().deleteEndedRequestPsks()
         requestMaterial.deleteExpiredPreviousClientPsks()
         requests.recoverInterruptedAiReviews()
         if (requests.hasPendingRelayWork()) {

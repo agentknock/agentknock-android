@@ -68,8 +68,6 @@ internal data class InboxRequestEntity(
     val requestJson: String,
     @ColumnInfo(name = "response_json")
     val responseJson: String?,
-    @ColumnInfo(name = "completion_json")
-    val completionJson: String?,
     @ColumnInfo(name = "error")
     val error: String?,
     @ColumnInfo(name = "received_at")
@@ -362,8 +360,6 @@ internal data class GitSignRequestEntity(
     val approvalEvaluationJson: String?,
     @ColumnInfo(name = "decision")
     val decision: String?,
-    @ColumnInfo(name = "decision_source")
-    val decisionSource: String?,
     @ColumnInfo(name = "completion_result")
     val completionResult: String?,
     @ColumnInfo(name = "completion_reason")
@@ -813,18 +809,6 @@ internal interface RequestDao {
         WHERE request_id = :requestId
           AND EXISTS (
             SELECT 1 FROM inbox_requests
-            WHERE id = :requestId AND completion_json IS NOT NULL
-          )
-        """,
-    )
-    suspend fun deleteCompletedRequestPsk(requestId: String): Int
-
-    @Query(
-        """
-        DELETE FROM request_psks
-        WHERE request_id = :requestId
-          AND EXISTS (
-            SELECT 1 FROM inbox_requests
             WHERE id = :requestId AND exchange_ended_at IS NOT NULL
           )
         """,
@@ -835,11 +819,11 @@ internal interface RequestDao {
         """
         DELETE FROM request_psks
         WHERE request_id IN (
-            SELECT id FROM inbox_requests WHERE completion_json IS NOT NULL
+            SELECT id FROM inbox_requests WHERE exchange_ended_at IS NOT NULL
         )
         """,
     )
-    suspend fun deleteCompletedRequestPsks(): Int
+    suspend fun deleteEndedRequestPsks(): Int
 
     @Query(
         "SELECT inbox_requests.* FROM inbox_requests " +
@@ -1262,7 +1246,7 @@ internal interface RequestDao {
     ) {
         check(request.id == attempt.requestId)
         check(request.clientId == attempt.clientId)
-        check(request.completionJson != null)
+        check(request.exchangeEndedAt != null)
         check(attempt.state == "sas_verification_pending")
         check(attempt.hasCompletePendingPsk())
         check(canAdvanceRequest(request.id, request.deviceIdentityId))
@@ -1387,7 +1371,6 @@ internal interface RequestDao {
                 updateGitSignRequestRow(
                     currentGitSignRequest.copy(
                         decision = null,
-                        decisionSource = null,
                         completionResult = null,
                         completionReason = null,
                         completionMessage = null,

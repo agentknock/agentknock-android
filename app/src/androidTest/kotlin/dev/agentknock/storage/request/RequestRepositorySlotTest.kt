@@ -276,7 +276,6 @@ class RequestRepositorySlotTest {
             ),
         )
         val root = checkNotNull(database.requestDao().getRequestById(CLIENT_ID))
-        assertNull(root.completionJson)
         assertEquals("exchange_pending", database.requestDao().getPairingAttempt(root.id)?.state)
 
         now += 1
@@ -292,7 +291,6 @@ class RequestRepositorySlotTest {
             ),
         )
         val requestAfterFailure = checkNotNull(database.requestDao().getRequestById(root.id))
-        assertNull(requestAfterFailure.completionJson)
         assertEquals(InboxRequestState.ACTION_REQUIRED.storedName, requestAfterFailure.state)
         val pairingAfterFailure = checkNotNull(database.requestDao().getPairingAttempt(root.id))
         assertEquals(PairingState.EXCHANGE_FAILED.storedName, pairingAfterFailure.state)
@@ -316,7 +314,6 @@ class RequestRepositorySlotTest {
         )
         val afterReplay = checkNotNull(database.requestDao().getRequestById(root.id))
         val pairingAfterReplay = checkNotNull(database.requestDao().getPairingAttempt(root.id))
-        assertNull(afterReplay.completionJson)
         assertEquals(PairingState.EXCHANGE_FAILED.storedName, pairingAfterReplay.state)
         assertNull(pairingAfterReplay.pendingPsk)
 
@@ -330,7 +327,6 @@ class RequestRepositorySlotTest {
                 addressId = ADDRESS_ID,
             ),
         )
-        assertNull(database.requestDao().getRequestById(root.id)?.completionJson)
         assertNotNull(checkNotNull(database.requestDao().getRequestById(root.id)).exchangeEndedAt)
     }
 
@@ -712,7 +708,6 @@ class RequestRepositorySlotTest {
             database.requestDao().getRequestById(UNSUPPORTED_REQUEST_ID),
         )
         assertNotNull(ended.exchangeEndedAt)
-        assertNull(ended.completionJson)
         assertEquals(rejectionError, ended.error)
         assertNull(database.requestDao().getRequestPsk(UNSUPPORTED_REQUEST_ID))
     }
@@ -766,7 +761,6 @@ class RequestRepositorySlotTest {
             database.requestDao().getRequestById(UNSUPPORTED_REQUEST_ID),
         )
         assertNotNull(ended.exchangeEndedAt)
-        assertNull(ended.completionJson)
         assertEquals(stored.error, ended.error)
         assertNull(database.requestDao().getRequestPsk(UNSUPPORTED_REQUEST_ID))
     }
@@ -1780,7 +1774,6 @@ class RequestRepositorySlotTest {
                 listed = true,
                 requestJson = "{}",
                 responseJson = null,
-                completionJson = null,
                 error = null,
                 receivedAt = now,
                 completedAt = null,
@@ -1918,7 +1911,6 @@ class RequestRepositorySlotTest {
             listed = false,
             requestJson = payload.toString(),
             responseJson = """{"old":"response"}""",
-            completionJson = null,
             error = null,
             receivedAt = now - 1,
             completedAt = null,
@@ -1959,7 +1951,6 @@ class RequestRepositorySlotTest {
             listed = false,
             requestJson = "{}",
             responseJson = "{}",
-            completionJson = null,
             error = null,
             receivedAt = now - 1,
             completedAt = now - 1,
@@ -2576,7 +2567,6 @@ class RequestRepositorySlotTest {
         val completed = checkNotNull(database.requestDao().getRequestById(SECRET_LIST_REQUEST_ID))
         assertEquals(stored.receivedAt, completed.receivedAt)
         assertEquals(InboxRequestState.COMPLETED.storedName, completed.state)
-        assertEquals(exchange.completion.toString(), completed.completionJson)
         assertNull(database.requestDao().getRequestPsk(SECRET_LIST_REQUEST_ID))
     }
 
@@ -2602,7 +2592,6 @@ class RequestRepositorySlotTest {
             database.requestDao().getSecretUploadRequest(UPLOAD_REQUEST_ID),
         )
         assertEquals(InboxRequestState.ACTION_REQUIRED.storedName, awaitingDecision.state)
-        assertNotNull(awaitingDecision.completionJson)
         assertNull(awaitingDecision.completedAt)
         assertNull(pendingUpload.decision)
         assertEquals(
@@ -2655,7 +2644,6 @@ class RequestRepositorySlotTest {
             database.requestDao().getRequestById(UPLOAD_REQUEST_ID),
         )
         assertEquals(InboxRequestState.WAITING.storedName, awaitingCompletion.state)
-        assertNull(awaitingCompletion.completionJson)
         assertNull(awaitingCompletion.completedAt)
         assertNotNull(database.requestDao().getRequestPsk(UPLOAD_REQUEST_ID))
         assertTrue(
@@ -2672,7 +2660,6 @@ class RequestRepositorySlotTest {
 
         val completed = checkNotNull(database.requestDao().getRequestById(UPLOAD_REQUEST_ID))
         assertEquals(InboxRequestState.COMPLETED.storedName, completed.state)
-        assertEquals(exchange.completion.toString(), completed.completionJson)
         assertNotNull(completed.completedAt)
         assertNull(database.requestDao().getRequestPsk(UPLOAD_REQUEST_ID))
         assertTrue(database.secretDao().getSecretsByName(listOf("uploaded-secret")).isEmpty())
@@ -2968,7 +2955,6 @@ class RequestRepositorySlotTest {
                 listed = false,
                 requestJson = "{}",
                 responseJson = "{}",
-                completionJson = null,
                 error = null,
                 receivedAt = now,
                 completedAt = null,

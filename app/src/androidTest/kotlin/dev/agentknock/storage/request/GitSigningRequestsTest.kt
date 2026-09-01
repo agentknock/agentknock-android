@@ -141,7 +141,6 @@ class GitSigningRequestsTest {
                 ),
                 gitSign = gitSign(requestId).copy(
                     decision = ApprovalDecision.DENIED.storedName,
-                    decisionSource = DECISION_SOURCE_VALIDATION,
                     completionReason = "INVALID_REQUEST",
                     completionMessage = "Invalid request.",
                     decidedAt = NOW,
@@ -157,7 +156,6 @@ class GitSigningRequestsTest {
         assertEquals(InboxRequestState.ACTION_REQUIRED.storedName, storedRequest.state)
         assertNull(storedRequest.responseJson)
         assertNull(storedGitSign.decision)
-        assertNull(storedGitSign.decisionSource)
         assertEquals(
             listOf(AuditEventType.GIT_SIGN_RECEIVED),
             audit.observeEvents().first().map { it.type },
@@ -177,7 +175,6 @@ class GitSigningRequestsTest {
                 ),
                 gitSign = gitSign(requestId).copy(
                     decision = ApprovalDecision.DENIED.storedName,
-                    decisionSource = DECISION_SOURCE_VALIDATION,
                     completionReason = "INVALID_REQUEST",
                     completionMessage = "Invalid request.",
                     decidedAt = NOW,
@@ -191,10 +188,6 @@ class GitSigningRequestsTest {
         assertEquals(
             InboxRequestState.WAITING.storedName,
             database.requestDao().getRequestById(requestId)?.state,
-        )
-        assertEquals(
-            DECISION_SOURCE_VALIDATION,
-            database.requestDao().getGitSignRequest(requestId)?.decisionSource,
         )
         assertEquals(
             setOf(AuditEventType.GIT_SIGN_RECEIVED, AuditEventType.GIT_SIGN_DECIDED),
@@ -227,7 +220,6 @@ class GitSigningRequestsTest {
         assertEquals(GitSignDecisionResult.Decided, regular.deny(requestId, seal))
         val decided = checkNotNull(database.requestDao().getGitSignRequest(requestId))
         assertEquals(ApprovalDecision.DENIED.storedName, decided.decision)
-        assertEquals(DECISION_SOURCE_USER, decided.decisionSource)
         assertEquals(GIT_SIGN_DENIAL_MESSAGE, decided.completionMessage)
         assertEquals(auditCount + 1, audit.observeEvents().first().size)
 
@@ -270,7 +262,6 @@ class GitSigningRequestsTest {
         val finalGitSign = storedGitSign.copy(
             approvalEvaluationJson = FINAL_EVALUATION_JSON,
             decision = ApprovalDecision.DENIED.storedName,
-            decisionSource = DECISION_SOURCE_AI,
             completionReason = "POLICY_DENIED",
             completionMessage = "AI review denied signing.",
             decidedAt = NOW,
@@ -287,10 +278,6 @@ class GitSigningRequestsTest {
                 aiAudit,
                 decisionAudit,
             ),
-        )
-        assertEquals(
-            DECISION_SOURCE_AI,
-            database.requestDao().getGitSignRequest(requestId)?.decisionSource,
         )
         assertEquals(
             FINAL_EVALUATION_JSON,
@@ -356,7 +343,6 @@ class GitSigningRequestsTest {
                 gitSign = storedGitSign.copy(
                     approvalEvaluationJson = FINAL_EVALUATION_JSON,
                     decision = ApprovalDecision.DENIED.storedName,
-                    decisionSource = DECISION_SOURCE_AI,
                     completionReason = "POLICY_DENIED",
                     completionMessage = "AI review denied signing.",
                     decidedAt = NOW,
@@ -371,7 +357,6 @@ class GitSigningRequestsTest {
         assertEquals(InboxRequestState.ACTION_REQUIRED.storedName, request.state)
         assertNull(request.responseJson)
         assertNull(signing.decision)
-        assertNull(signing.decisionSource)
         assertEquals(INITIAL_EVALUATION_JSON, signing.approvalEvaluationJson)
         val aiAudit = audit.observeEvents().first().first()
         assertEquals(AuditEventType.GIT_SIGN_AI_REVIEWED, aiAudit.type)
@@ -434,7 +419,6 @@ class GitSigningRequestsTest {
         )
         val decided = checkNotNull(database.requestDao().getGitSignRequest(requestId))
         assertEquals(ApprovalDecision.APPROVED.storedName, decided.decision)
-        assertEquals(DECISION_SOURCE_TEMPORARY_ACCESS, decided.decisionSource)
         assertEquals(1, secrets.observeTemporaryAccessGrants().first().size)
         assertEquals(
             setOf(
@@ -446,20 +430,19 @@ class GitSigningRequestsTest {
     }
 
     @Test
-    fun completionIsSanitizedAtomicAndOnlyExactReplaySucceeds() = runTest {
+    fun completionIsSanitizedAtomicAndEveryTerminalReplayIsAcknowledged() = runTest {
         insertParent()
         val requestId = "git-completion"
         val regular = requests(audit)
         receivePending(regular, requestId)
         val request = checkNotNull(database.requestDao().getRequestById(requestId))
-        val completion = Json.parseToJsonElement("""{"ciphertext":"completion"}""")
         val malicious = "raw-client-controlled-message"
         val plaintext = abortedCompletionPlaintext(malicious)
         val eventCount = audit.observeEvents().first().size
 
         assertTrue(
             runCatching {
-                requests(InsertThenFailAuditSink(audit)).complete(request, completion) {
+                requests(InsertThenFailAuditSink(audit)).complete(request) {
                     CompletionOpenResult.Opened(plaintext)
                 }
             }.isFailure,
@@ -469,7 +452,7 @@ class GitSigningRequestsTest {
         assertEquals(eventCount, audit.observeEvents().first().size)
 
         assertTrue(
-            regular.complete(request, completion) { CompletionOpenResult.Opened(plaintext) },
+            regular.complete(request) { CompletionOpenResult.Opened(plaintext) },
         )
         val completed = checkNotNull(database.requestDao().getRequestById(requestId))
         val signing = checkNotNull(database.requestDao().getGitSignRequest(requestId))
@@ -482,12 +465,11 @@ class GitSigningRequestsTest {
         assertFalse(checkNotNull(completionAudit.detail).contains(malicious))
 
         val auditCount = audit.observeEvents().first().size
-        assertTrue(regular.complete(request, completion) { error("Must not reopen") })
+        assertTrue(regular.complete(request) { error("Must not reopen") })
         assertNull(database.requestDao().getRequestPsk(requestId))
         assertTrue(
             regular.complete(
                 completed,
-                Json.parseToJsonElement("""{"ciphertext":"different"}"""),
             ) { error("Must not reopen") },
         )
         assertEquals(auditCount, audit.observeEvents().first().size)
@@ -496,9 +478,9 @@ class GitSigningRequestsTest {
         receivePending(regular, racingRequestId)
         val racingRequest = checkNotNull(database.requestDao().getRequestById(racingRequestId))
         assertTrue(
-            regular.complete(racingRequest, completion) {
+            regular.complete(racingRequest) {
                 assertTrue(
-                    regular.complete(racingRequest, completion) {
+                    regular.complete(racingRequest) {
                         CompletionOpenResult.Opened(plaintext)
                     },
                 )
@@ -587,7 +569,6 @@ class GitSigningRequestsTest {
         listed = true,
         requestJson = "{}",
         responseJson = RESPONSE_JSON,
-        completionJson = null,
         error = null,
         receivedAt = NOW - 1,
         completedAt = null,
@@ -607,7 +588,6 @@ class GitSigningRequestsTest {
         listed = true,
         requestJson = "{}",
         responseJson = null,
-        completionJson = null,
         error = null,
         receivedAt = NOW,
         completedAt = null,
@@ -655,7 +635,6 @@ class GitSigningRequestsTest {
         repositoryJson = null,
         approvalEvaluationJson = null,
         decision = null,
-        decisionSource = null,
         completionResult = null,
         completionReason = null,
         completionMessage = null,

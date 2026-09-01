@@ -2,7 +2,7 @@
   "formatVersion": 1,
   "database": {
     "version": 1,
-    "identityHash": "2a3f6806e22f26535e48c3917bf1f6d6",
+    "identityHash": "9ab4193e6cc14abc70775d981e704d3f",
     "entities": [
       {
         "tableName": "vault_keys",
@@ -642,7 +642,7 @@
       },
       {
         "tableName": "inbox_requests",
-        "createSql": "CREATE TABLE IF NOT EXISTS `${TABLE_NAME}` (`id` TEXT NOT NULL, `parent_request_id` TEXT, `device_identity_id` TEXT NOT NULL, `client_id` TEXT NOT NULL, `client_name_snapshot` TEXT NOT NULL, `client_software_json` TEXT, `kind` TEXT NOT NULL, `state` TEXT NOT NULL, `listed` INTEGER NOT NULL, `request_json` TEXT NOT NULL, `response_json` TEXT, `completion_json` TEXT, `error` TEXT, `received_at` INTEGER NOT NULL, `completed_at` INTEGER, `exchange_ended_at` INTEGER, `response_outbox_finished` INTEGER NOT NULL, PRIMARY KEY(`id`), FOREIGN KEY(`parent_request_id`) REFERENCES `inbox_requests`(`id`) ON UPDATE NO ACTION ON DELETE RESTRICT , FOREIGN KEY(`device_identity_id`) REFERENCES `device_identities`(`id`) ON UPDATE NO ACTION ON DELETE RESTRICT )",
+        "createSql": "CREATE TABLE IF NOT EXISTS `${TABLE_NAME}` (`id` TEXT NOT NULL, `parent_request_id` TEXT, `device_identity_id` TEXT NOT NULL, `client_id` TEXT NOT NULL, `client_name_snapshot` TEXT NOT NULL, `client_software_json` TEXT, `kind` TEXT NOT NULL, `state` TEXT NOT NULL, `listed` INTEGER NOT NULL, `request_json` TEXT NOT NULL, `response_json` TEXT, `error` TEXT, `received_at` INTEGER NOT NULL, `completed_at` INTEGER, `exchange_ended_at` INTEGER, `response_outbox_finished` INTEGER NOT NULL, PRIMARY KEY(`id`), FOREIGN KEY(`parent_request_id`) REFERENCES `inbox_requests`(`id`) ON UPDATE NO ACTION ON DELETE RESTRICT , FOREIGN KEY(`device_identity_id`) REFERENCES `device_identities`(`id`) ON UPDATE NO ACTION ON DELETE RESTRICT )",
         "fields": [
           {
             "fieldPath": "id",
@@ -705,11 +705,6 @@
           {
             "fieldPath": "responseJson",
             "columnName": "response_json",
-            "affinity": "TEXT"
-          },
-          {
-            "fieldPath": "completionJson",
-            "columnName": "completion_json",
             "affinity": "TEXT"
           },
           {
@@ -1445,7 +1440,7 @@
       },
       {
         "tableName": "git_sign_requests",
-        "createSql": "CREATE TABLE IF NOT EXISTS `${TABLE_NAME}` (`request_id` TEXT NOT NULL, `secret_name` TEXT NOT NULL, `message` BLOB NOT NULL, `repository_json` TEXT, `approval_evaluation_json` TEXT, `decision` TEXT, `decision_source` TEXT, `completion_result` TEXT, `completion_reason` TEXT, `completion_message` TEXT, `decided_at` INTEGER, PRIMARY KEY(`request_id`), FOREIGN KEY(`request_id`) REFERENCES `inbox_requests`(`id`) ON UPDATE NO ACTION ON DELETE CASCADE )",
+        "createSql": "CREATE TABLE IF NOT EXISTS `${TABLE_NAME}` (`request_id` TEXT NOT NULL, `secret_name` TEXT NOT NULL, `message` BLOB NOT NULL, `repository_json` TEXT, `approval_evaluation_json` TEXT, `decision` TEXT, `completion_result` TEXT, `completion_reason` TEXT, `completion_message` TEXT, `decided_at` INTEGER, PRIMARY KEY(`request_id`), FOREIGN KEY(`request_id`) REFERENCES `inbox_requests`(`id`) ON UPDATE NO ACTION ON DELETE CASCADE )",
         "fields": [
           {
             "fieldPath": "requestId",
@@ -1478,11 +1473,6 @@
           {
             "fieldPath": "decision",
             "columnName": "decision",
-            "affinity": "TEXT"
-          },
-          {
-            "fieldPath": "decisionSource",
-            "columnName": "decision_source",
             "affinity": "TEXT"
           },
           {
@@ -2012,7 +2002,7 @@
     ],
     "setupQueries": [
       "CREATE TABLE IF NOT EXISTS room_master_table (id INTEGER PRIMARY KEY,identity_hash TEXT)",
-      "INSERT OR REPLACE INTO room_master_table (id,identity_hash) VALUES(42, '2a3f6806e22f26535e48c3917bf1f6d6')"
+      "INSERT OR REPLACE INTO room_master_table (id,identity_hash) VALUES(42, '9ab4193e6cc14abc70775d981e704d3f')"
     ]
   }
 }

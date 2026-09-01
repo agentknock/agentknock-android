@@ -541,14 +541,13 @@ class SshAuthenticationRequestsTest {
         val requestId = "ssh-completion"
         receivePending(regular, requestId)
         val request = checkNotNull(database.requestDao().getRequestById(requestId))
-        val completion = Json.parseToJsonElement("""{"ciphertext":"completion"}""")
         val malicious = "raw-client-controlled-message"
         val plaintext = abortedCompletionPlaintext(malicious)
         val eventCount = audit.observeEvents().first().size
 
         assertTrue(
             runCatching {
-                requests(InsertThenFailAuditSink(audit)).complete(request, completion) {
+                requests(InsertThenFailAuditSink(audit)).complete(request) {
                     CompletionOpenResult.Opened(plaintext)
                 }
             }.isFailure,
@@ -565,7 +564,7 @@ class SshAuthenticationRequestsTest {
         receivePending(regular, retryableId)
         val retryable = checkNotNull(database.requestDao().getRequestById(retryableId))
         assertFalse(
-            regular.complete(retryable, completion) { CompletionOpenResult.RetryLater },
+            regular.complete(retryable) { CompletionOpenResult.RetryLater },
         )
         assertNull(database.requestDao().getRequestById(retryableId)?.completedAt)
         assertNotNull(database.requestDao().getRequestPsk(retryableId))
@@ -575,7 +574,7 @@ class SshAuthenticationRequestsTest {
         )
 
         assertTrue(
-            regular.complete(request, completion) { CompletionOpenResult.Opened(plaintext) },
+            regular.complete(request) { CompletionOpenResult.Opened(plaintext) },
         )
         val completed = checkNotNull(database.requestDao().getRequestById(requestId))
         val authentication = checkNotNull(
@@ -591,12 +590,11 @@ class SshAuthenticationRequestsTest {
         assertFalse(checkNotNull(completionAudit.detail).contains(malicious))
 
         val auditCount = audit.observeEvents().first().size
-        assertTrue(regular.complete(request, completion) { error("Must not reopen") })
+        assertTrue(regular.complete(request) { error("Must not reopen") })
         assertNull(database.requestDao().getRequestPsk(requestId))
         assertTrue(
             regular.complete(
                 completed,
-                Json.parseToJsonElement("""{"ciphertext":"different"}"""),
             ) { error("Must not reopen") },
         )
         assertEquals(auditCount, audit.observeEvents().first().size)
@@ -605,7 +603,7 @@ class SshAuthenticationRequestsTest {
         receivePending(regular, malformedId)
         val malformed = checkNotNull(database.requestDao().getRequestById(malformedId))
         assertTrue(
-            regular.complete(malformed, completion) {
+            regular.complete(malformed) {
                 CompletionOpenResult.Opened("not a completion".encodeToByteArray())
             },
         )
@@ -637,9 +635,9 @@ class SshAuthenticationRequestsTest {
         receivePending(regular, racingId)
         val racing = checkNotNull(database.requestDao().getRequestById(racingId))
         assertTrue(
-            regular.complete(racing, completion) {
+            regular.complete(racing) {
                 assertTrue(
-                    regular.complete(racing, completion) {
+                    regular.complete(racing) {
                         CompletionOpenResult.Opened(plaintext)
                     },
                 )
@@ -655,9 +653,9 @@ class SshAuthenticationRequestsTest {
         )
         val preRaceAuditCount = audit.observeEvents().first().size
         assertTrue(
-            regular.complete(postOpenRace, completion) {
+            regular.complete(postOpenRace) {
                 assertTrue(
-                    regular.complete(postOpenRace, completion) {
+                    regular.complete(postOpenRace) {
                         CompletionOpenResult.Opened(plaintext)
                     },
                 )
@@ -754,7 +752,6 @@ class SshAuthenticationRequestsTest {
         listed = true,
         requestJson = "{}",
         responseJson = RESPONSE_JSON,
-        completionJson = null,
         error = null,
         receivedAt = NOW - 1,
         completedAt = null,
@@ -774,7 +771,6 @@ class SshAuthenticationRequestsTest {
         listed = true,
         requestJson = "{}",
         responseJson = null,
-        completionJson = null,
         error = null,
         receivedAt = NOW,
         completedAt = null,

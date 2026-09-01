@@ -119,7 +119,7 @@ class ClientRemovalRequestsTest {
         var openCount = 0
 
         assertTrue(
-            requests(audit).complete(request, COMPLETION) {
+            requests(audit).complete(request) {
                 openCount += 1
                 CompletionOpenResult.Opened(completionPlaintext())
             },
@@ -128,7 +128,6 @@ class ClientRemovalRequestsTest {
         val completed = checkNotNull(database.requestDao().getRequestById(REQUEST_ID))
         assertEquals(1, openCount)
         assertEquals(InboxRequestState.COMPLETED.storedName, completed.state)
-        assertEquals(COMPLETION.toString(), completed.completionJson)
         assertTrue(completed.responseOutboxFinished)
         assertNull(completed.error)
         assertEquals(NOW, completed.completedAt)
@@ -139,7 +138,7 @@ class ClientRemovalRequestsTest {
         assertEquals(NOW, event.occurredAt)
 
         assertTrue(
-            requests(audit).complete(completed, COMPLETION) {
+            requests(audit).complete(completed) {
                 error("A terminal removal completion must not be reopened")
             },
         )
@@ -152,14 +151,13 @@ class ClientRemovalRequestsTest {
         val request = checkNotNull(database.requestDao().getRequestById(REQUEST_ID))
 
         assertTrue(
-            requests(audit).complete(request, COMPLETION) {
+            requests(audit).complete(request) {
                 CompletionOpenResult.Opened(completionPlaintext(version = "9.9.9"))
             },
         )
 
         val completed = checkNotNull(database.requestDao().getRequestById(REQUEST_ID))
         assertEquals(COMPLETION_ERROR, completed.error)
-        assertEquals(COMPLETION.toString(), completed.completionJson)
         assertNull(database.requestDao().getRequestPsk(REQUEST_ID))
         val event = audit.observeEvents().first().single()
         assertEquals(AuditEventType.CLIENT_REMOVAL_CONFIRMATION_FAILED, event.type)
@@ -173,7 +171,7 @@ class ClientRemovalRequestsTest {
         val before = checkNotNull(database.requestDao().getRequestById(REQUEST_ID))
 
         assertFalse(
-            requests(audit).complete(before, COMPLETION) { CompletionOpenResult.RetryLater },
+            requests(audit).complete(before) { CompletionOpenResult.RetryLater },
         )
 
         assertEquals(before, database.requestDao().getRequestById(REQUEST_ID))
@@ -182,19 +180,18 @@ class ClientRemovalRequestsTest {
     }
 
     @Test
-    fun irrecoverablyInvalidCompletionEndsWithoutRetainingItsPayload() = runTest {
+    fun irrecoverablyInvalidCompletionEndsExchangeAndDeletesRequestPsk() = runTest {
         receive()
         val request = checkNotNull(database.requestDao().getRequestById(REQUEST_ID))
 
         assertTrue(
-            requests(audit).complete(request, COMPLETION) {
+            requests(audit).complete(request) {
                 CompletionOpenResult.IrrecoverablyInvalid
             },
         )
 
         val completed = checkNotNull(database.requestDao().getRequestById(REQUEST_ID))
         assertEquals(COMPLETION_ERROR, completed.error)
-        assertNull(completed.completionJson)
         assertNotNull(completed.exchangeEndedAt)
         assertNull(database.requestDao().getRequestPsk(REQUEST_ID))
         assertEquals(
@@ -210,7 +207,7 @@ class ClientRemovalRequestsTest {
         assertEquals(1, database.requestDao().updateRequest(request.copy(clientSoftwareJson = null)))
 
         assertTrue(
-            requests(audit).complete(request, COMPLETION) {
+            requests(audit).complete(request) {
                 CompletionOpenResult.IrrecoverablyInvalid
             },
         )
@@ -230,7 +227,7 @@ class ClientRemovalRequestsTest {
 
         assertTrue(
             runCatching {
-                requests(InsertThenFailAuditSink(audit)).complete(before, COMPLETION) {
+                requests(InsertThenFailAuditSink(audit)).complete(before) {
                     CompletionOpenResult.Opened(completionPlaintext())
                 }
             }.isFailure,
@@ -240,7 +237,7 @@ class ClientRemovalRequestsTest {
         assertTrue(audit.observeEvents().first().isEmpty())
 
         assertTrue(
-            requests(audit).complete(before, COMPLETION) {
+            requests(audit).complete(before) {
                 CompletionOpenResult.Opened(completionPlaintext())
             },
         )
@@ -255,7 +252,7 @@ class ClientRemovalRequestsTest {
 
         assertTrue(
             runCatching {
-                requests(InsertThenFailAuditSink(audit)).complete(before, COMPLETION) {
+                requests(InsertThenFailAuditSink(audit)).complete(before) {
                     CompletionOpenResult.IrrecoverablyInvalid
                 }
             }.isFailure,
@@ -400,6 +397,5 @@ class ClientRemovalRequestsTest {
         const val COMPLETION_ERROR = "Client removal completion could not be verified."
         val REQUEST: JsonElement = Json.parseToJsonElement("""{"ciphertext":"request"}""")
         val RESPONSE: JsonElement = Json.parseToJsonElement("""{"ciphertext":"response"}""")
-        val COMPLETION: JsonElement = Json.parseToJsonElement("""{"ciphertext":"completion"}""")
     }
 }

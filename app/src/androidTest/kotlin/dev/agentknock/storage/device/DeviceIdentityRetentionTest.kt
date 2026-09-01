@@ -517,7 +517,6 @@ class DeviceIdentityRetentionTest {
         listed = false,
         requestJson = "{}",
         responseJson = null,
-        completionJson = null,
         error = null,
         receivedAt = 12,
         completedAt = 12,
