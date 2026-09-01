@@ -229,16 +229,7 @@ class PairingProtocolTest {
 
         val responsePlaintext =
             """{"result":"APPROVED","environment":{"TOKEN":"value"}}""".encodeToByteArray()
-        val response = pairedProtocol.sealPairedResponse(
-            deviceId = DEVICE_ID,
-            requestId = SECRET_USE_REQUEST_ID,
-            clientId = CLIENT_ID,
-            clientPsk = opened.clientPsk,
-            devicePrivateKey = devicePrivateKey,
-            devicePublicKey = devicePublicKey,
-            request = request,
-            plaintext = responsePlaintext,
-        )
+        val response = pairedProtocol.sealPairedResponse(opened, responsePlaintext)
         assertArrayEquals(responsePlaintext, openResponse(requestSender, response))
 
         val completionPlaintext =

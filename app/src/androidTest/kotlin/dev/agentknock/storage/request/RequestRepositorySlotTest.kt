@@ -74,6 +74,8 @@ import kotlinx.coroutines.withTimeout
 import kotlinx.coroutines.withTimeoutOrNull
 import kotlinx.serialization.json.Json
 import kotlinx.serialization.json.JsonElement
+import kotlinx.serialization.json.JsonObject
+import kotlinx.serialization.json.JsonPrimitive
 import kotlinx.serialization.decodeFromString
 import org.bouncycastle.crypto.digests.SHA256Digest
 import org.bouncycastle.crypto.generators.HKDFBytesGenerator
@@ -239,6 +241,7 @@ class RequestRepositorySlotTest {
             aiReviews = AiReviewCoordinator(reviewScope),
             scheduleSynchronization = { synchronizationRequests += 1 },
             audit = audit,
+            writeTransaction = RoomWriteTransaction(database),
             requestPushRegistration = {},
             pairedRequestProtocol = PairedRequestProtocol(random = protocolRandom),
             currentTimeMillis = { now },
@@ -660,6 +663,10 @@ class RequestRepositorySlotTest {
             completionPlaintext = "{}".encodeToByteArray(),
         )
         assertCompletionEndsExchangeWithoutResponseStatus(UNSUPPORTED_REQUEST_ID, exchange)
+        assertEquals(
+            "The requested operation is not supported.",
+            database.requestDao().getRequestById(UNSUPPORTED_REQUEST_ID)?.error,
+        )
     }
 
     @Test
@@ -684,6 +691,10 @@ class RequestRepositorySlotTest {
             RequestSyncResult.RelayUnavailable("disconnect before completion"),
             repository.sync(),
         )
+        val rejectionError = database.requestDao()
+            .getRequestById(UNSUPPORTED_REQUEST_ID)
+            ?.error
+        assertNotNull(rejectionError)
         database.useWriterConnection { connection ->
             connection.executeSQL(
                 "UPDATE request_psks SET encryption_format = 999 " +
@@ -702,7 +713,61 @@ class RequestRepositorySlotTest {
         )
         assertNotNull(ended.exchangeEndedAt)
         assertNull(ended.completionJson)
-        assertEquals("The completion could not be verified.", ended.error)
+        assertEquals(rejectionError, ended.error)
+        assertNull(database.requestDao().getRequestPsk(UNSUPPORTED_REQUEST_ID))
+    }
+
+    @Test
+    fun lowOrderStoredRequestKeyEndsCompletionAsInvalid() = runTest {
+        val clientPsk = establishActivePairing()
+        val exchange = pairedExchange(
+            requestId = UNSUPPORTED_REQUEST_ID,
+            clientPsk = clientPsk,
+            requestPlaintext = unsupportedPlaintext(),
+            completionPlaintext = "{}".encodeToByteArray(),
+        )
+        connect(
+            requestEvent(UNSUPPORTED_REQUEST_ID, exchange.request),
+            RelayDeviceEvent.Acknowledgement(
+                CLIENT_ID,
+                UNSUPPORTED_REQUEST_ID,
+                RelayMessageKind.RESPONSE,
+            ),
+            RelayDeviceEvent.Failed("disconnect before completion"),
+        )
+        assertEquals(
+            RequestSyncResult.RelayUnavailable("disconnect before completion"),
+            repository.sync(),
+        )
+
+        val stored = checkNotNull(
+            database.requestDao().getRequestById(UNSUPPORTED_REQUEST_ID),
+        )
+        val requestObject = Json.parseToJsonElement(stored.requestJson) as JsonObject
+        val lowOrderKey = Base64.getEncoder().encodeToString(ByteArray(32))
+        assertEquals(
+            1,
+            database.requestDao().updateRequest(
+                stored.copy(
+                    requestJson = JsonObject(
+                        requestObject + ("key" to JsonPrimitive(lowOrderKey)),
+                    ).toString(),
+                ),
+            ),
+        )
+
+        connect(
+            completionEvent(UNSUPPORTED_REQUEST_ID, exchange.completion),
+            RelayDeviceEvent.CaughtUp,
+        )
+        assertEquals(RequestSyncResult.Success, repository.sync())
+
+        val ended = checkNotNull(
+            database.requestDao().getRequestById(UNSUPPORTED_REQUEST_ID),
+        )
+        assertNotNull(ended.exchangeEndedAt)
+        assertNull(ended.completionJson)
+        assertEquals(stored.error, ended.error)
         assertNull(database.requestDao().getRequestPsk(UNSUPPORTED_REQUEST_ID))
     }
 
@@ -1872,6 +1937,50 @@ class RequestRepositorySlotTest {
     }
 
     @Test
+    fun completionFromAnotherIdentityIsNotAcknowledgedOrApplied() = runTest {
+        database.deviceIdentityDao().insertIdentity(
+            DeviceIdentityEntity(
+                id = RETIRED_DEVICE_IDENTITY_ID,
+                role = "retired",
+                address = "retired-address",
+                deviceId = "01K2ENXDTW1P3XAR4J7V7C9D0J",
+                createdAt = now - 1,
+            ),
+        )
+        val stored = InboxRequestEntity(
+            id = UNSUPPORTED_REQUEST_ID,
+            parentRequestId = null,
+            deviceIdentityId = RETIRED_DEVICE_IDENTITY_ID,
+            clientId = CLIENT_ID,
+            clientNameSnapshot = "Retired identity client",
+            clientSoftwareJson = null,
+            kind = RequestKind.UNKNOWN.storedName,
+            state = InboxRequestState.COMPLETED.storedName,
+            listed = false,
+            requestJson = "{}",
+            responseJson = "{}",
+            completionJson = null,
+            error = null,
+            receivedAt = now - 1,
+            completedAt = now - 1,
+            exchangeEndedAt = now - 1,
+            responseOutboxFinished = true,
+        )
+        database.requestDao().insertRequest(stored)
+        val collision = connect(
+            completionEvent(
+                UNSUPPORTED_REQUEST_ID,
+                Json.parseToJsonElement("""{"ciphertext":"collision"}"""),
+            ),
+            RelayDeviceEvent.CaughtUp,
+        )
+
+        assertEquals(RequestSyncResult.Success, repository.sync())
+        assertTrue(collision.sentFrames.isEmpty())
+        assertEquals(stored, database.requestDao().getRequestById(UNSUPPORTED_REQUEST_ID))
+    }
+
+    @Test
     fun durableClientRejectionIsNotAcknowledgedWhenResponseSealingFails() = runTest {
         val clientPsk = establishActivePairing()
         protocolRandom.fail = true
@@ -1890,6 +1999,62 @@ class RequestRepositorySlotTest {
         assertFalse(connection.sentFrames.any {
             it is RelayDeviceFrame.Acknowledgement && it.requestId == UNSUPPORTED_REQUEST_ID
         })
+    }
+
+    @Test
+    fun rejectedRequestAndAuditRollBackTogetherAndCanBeRetried() = runTest {
+        val clientPsk = establishActivePairing()
+        val beforeEvents = AuditRepository(database.auditDao()).observeEvents().first()
+        val request = pairedRequest(
+            requestId = UNSUPPORTED_REQUEST_ID,
+            clientPsk = clientPsk,
+            plaintext = unsupportedPlaintext(),
+        )
+
+        database.useWriterConnection { connection ->
+            connection.executeSQL(
+                """
+                CREATE TRIGGER fail_request_rejected_audit
+                BEFORE INSERT ON audit_events
+                WHEN NEW.event_type = 'request_rejected'
+                BEGIN
+                    SELECT RAISE(ABORT, 'forced audit failure');
+                END
+                """.trimIndent(),
+            )
+        }
+        val failed = connect(
+            requestEvent(UNSUPPORTED_REQUEST_ID, request),
+            RelayDeviceEvent.CaughtUp,
+        )
+        assertEquals(RequestSyncResult.Success, repository.sync())
+        assertNull(database.requestDao().getRequestById(UNSUPPORTED_REQUEST_ID))
+        assertEquals(beforeEvents, AuditRepository(database.auditDao()).observeEvents().first())
+        assertFalse(failed.sentFrames.any {
+            it is RelayDeviceFrame.Acknowledgement && it.requestId == UNSUPPORTED_REQUEST_ID
+        })
+
+        database.useWriterConnection { connection ->
+            connection.executeSQL("DROP TRIGGER fail_request_rejected_audit")
+        }
+        val retried = connect(
+            requestEvent(UNSUPPORTED_REQUEST_ID, request),
+            RelayDeviceEvent.Acknowledgement(
+                CLIENT_ID,
+                UNSUPPORTED_REQUEST_ID,
+                RelayMessageKind.RESPONSE,
+            ),
+            RelayDeviceEvent.CaughtUp,
+        )
+        assertEquals(RequestSyncResult.Success, repository.sync())
+
+        assertNotNull(database.requestDao().getRequestById(UNSUPPORTED_REQUEST_ID))
+        assertTrue(retried.sentFrames.any {
+            it is RelayDeviceFrame.Acknowledgement && it.requestId == UNSUPPORTED_REQUEST_ID
+        })
+        val rejection = AuditRepository(database.auditDao()).observeEvents().first()
+            .single { it.type == AuditEventType.REQUEST_REJECTED }
+        assertEquals(UNSUPPORTED_REQUEST_ID, rejection.relayRequestId)
     }
 
     @Test

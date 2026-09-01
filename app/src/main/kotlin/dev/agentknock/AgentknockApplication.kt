@@ -206,6 +206,7 @@ internal class ApplicationContainer(application: Application) {
         aiReviews = aiReviews,
         scheduleSynchronization = { scheduleRequestSynchronization() },
         audit = audit,
+        writeTransaction = writeTransaction,
         requestPushRegistration = {
             FirebaseMessaging.getInstance().register().addOnFailureListener { failure ->
                 Log.w("Agentknock", "FCM registration failed", failure)

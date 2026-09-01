@@ -11,11 +11,9 @@ import dev.agentknock.storage.audit.AuditRecord
 import dev.agentknock.storage.audit.AuditSink
 import dev.agentknock.storage.device.RelayDeviceCredentials
 import kotlinx.coroutines.CancellationException
-import kotlinx.serialization.SerializationException
 import kotlinx.serialization.encodeToString
 import kotlinx.serialization.json.Json
 import kotlinx.serialization.json.JsonElement
-import org.bouncycastle.crypto.InvalidCipherTextException
 
 /** Owns the persisted lifecycle of the one concrete pairing protocol. */
 internal class PairingRequests(
@@ -143,7 +141,7 @@ internal class PairingRequests(
         } catch (cancelled: CancellationException) {
             throw cancelled
         } catch (failure: Exception) {
-            if (!failure.isTerminalPairingCompletionFailure()) return false
+            if (!failure.isIrrecoverableCompletionFailure()) return false
             return failInitialCompletion(requestId)
         }
 
@@ -589,12 +587,6 @@ internal class PairingRequests(
     private fun String.toRelayClientState(): RelayClientState =
         checkNotNull(RelayClientState.entries.find { it.wireName == this })
 
-    private fun Exception.isTerminalPairingCompletionFailure(): Boolean =
-        this is SerializationException ||
-            this is IllegalArgumentException ||
-            this is InvalidCipherTextException ||
-            this is IllegalStateException && message == X25519_AGREEMENT_FAILURE
-
     private companion object {
         const val INITIAL_COMPLETION_VERIFICATION_ERROR =
             "The pairing message could not be verified."
@@ -603,7 +595,6 @@ internal class PairingRequests(
         const val FINISH_REJECTED_ERROR = "The client did not accept the pairing."
         const val FINISH_VERIFICATION_ERROR =
             "The pairing confirmation could not be verified."
-        const val X25519_AGREEMENT_FAILURE = "X25519 agreement failed"
     }
 }
 

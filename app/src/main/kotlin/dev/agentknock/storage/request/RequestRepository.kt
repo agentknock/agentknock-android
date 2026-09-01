@@ -63,6 +63,7 @@ import dev.agentknock.storage.crypto.DecryptionResult
 import dev.agentknock.storage.device.RelayDeviceCredentials
 import dev.agentknock.storage.device.RelayDeviceCredentialsResult
 import dev.agentknock.storage.device.RelayDeviceCredentialSource
+import dev.agentknock.storage.WriteTransaction
 import java.util.UUID
 import java.security.MessageDigest
 import kotlinx.coroutines.CancellationException
@@ -86,7 +87,6 @@ import kotlinx.serialization.builtins.serializer
 import kotlinx.serialization.decodeFromString
 import kotlinx.serialization.encodeToString
 import kotlinx.serialization.SerializationException
-import org.bouncycastle.crypto.InvalidCipherTextException
 
 internal fun reviewedRequestState(responseAvailable: Boolean): InboxRequestState =
     if (responseAvailable) InboxRequestState.WAITING else InboxRequestState.ACTION_REQUIRED
@@ -109,12 +109,6 @@ private data class IncomingRelayMessage(
 )
 
 private data class ProcessedRelayMessage(val response: JsonElement? = null)
-
-internal sealed interface CompletionOpenResult {
-    data class Opened(val plaintext: ByteArray) : CompletionOpenResult
-    data object IrrecoverablyInvalid : CompletionOpenResult
-    data object RetryLater : CompletionOpenResult
-}
 
 internal inline fun <T> decodeWireCompletionOrNull(decode: () -> T): T? = try {
     decode()
@@ -236,6 +230,7 @@ internal class RequestRepository(
     private val aiReviews: AiReviewCoordinator,
     private val scheduleSynchronization: () -> Unit,
     private val audit: AuditSink,
+    private val writeTransaction: WriteTransaction,
     private val requestPushRegistration: () -> Unit,
     private val sshKeys: SshKeyCodec = SshKeyCodec(),
     private val pairedRequestProtocol: PairedRequestProtocol = PairedRequestProtocol(),
@@ -1105,7 +1100,6 @@ internal class RequestRepository(
             requestPayload = requestPayload,
             opened = opened,
             acceptedPsks = acceptedPsks,
-            credentials = credentials,
             code = if (method == null) {
                 PairedRequestErrorCode.INVALID_REQUEST
             } else {
@@ -1159,7 +1153,6 @@ internal class RequestRepository(
                 requestPayload = requestPayload,
                 opened = opened,
                 acceptedSecrets = acceptedSecrets,
-                credentials = credentials,
                 code = PairedRequestErrorCode.INVALID_REQUEST,
                 now = now,
             )
@@ -1171,7 +1164,6 @@ internal class RequestRepository(
                 requestPayload = requestPayload,
                 opened = opened,
                 acceptedSecrets = acceptedSecrets,
-                credentials = credentials,
                 code = PairedRequestErrorCode.INVALID_STATE,
                 now = now,
             )
@@ -1210,7 +1202,6 @@ internal class RequestRepository(
                 requestPayload = requestPayload,
                 opened = opened,
                 acceptedSecrets = acceptedSecrets,
-                credentials = credentials,
             )
         } else if (method == SecretUploadProtocol.METHOD) {
             processSecretUploadRequest(
@@ -1219,7 +1210,6 @@ internal class RequestRepository(
                 requestPayload = requestPayload,
                 opened = opened,
                 acceptedSecrets = acceptedSecrets,
-                credentials = credentials,
             )
         } else if (method == PairingRemoveProtocol.METHOD) {
             processPairingRemoveRequest(
@@ -1236,7 +1226,6 @@ internal class RequestRepository(
                 requestPayload = requestPayload,
                 opened = opened,
                 acceptedSecrets = acceptedSecrets,
-                credentials = credentials,
                 code = PairedRequestErrorCode.UNSUPPORTED_METHOD,
                 now = now,
             )
@@ -1247,7 +1236,6 @@ internal class RequestRepository(
             requestPayload = requestPayload,
             opened = opened,
             acceptedSecrets = acceptedSecrets,
-            credentials = credentials,
             code = PairedRequestErrorCode.INVALID_REQUEST,
             now = now,
         )
@@ -1473,16 +1461,7 @@ internal class RequestRepository(
             }
             val response = if (responsePlaintext != null) {
                 runCatching {
-                    pairedRequestProtocol.sealPairedResponse(
-                        deviceId = credentials.deviceId,
-                        requestId = relayRequestId,
-                        clientId = pairing.clientId,
-                        clientPsk = opened.clientPsk,
-                        devicePrivateKey = credentials.devicePrivateKey,
-                        devicePublicKey = credentials.devicePublicKey,
-                        request = requestPayload,
-                        plaintext = responsePlaintext,
-                    )
+                    pairedRequestProtocol.sealPairedResponse(opened, responsePlaintext)
                 }.getOrNull() ?: return null
             } else {
                 null
@@ -1886,16 +1865,7 @@ internal class RequestRepository(
             }
             val response = responsePlaintext?.let { plaintext ->
                 runCatching {
-                    pairedRequestProtocol.sealPairedResponse(
-                    deviceId = credentials.deviceId,
-                        requestId = relayRequestId,
-                        clientId = pairing.clientId,
-                        clientPsk = opened.clientPsk,
-                        devicePrivateKey = credentials.devicePrivateKey,
-                        devicePublicKey = credentials.devicePublicKey,
-                        request = requestPayload,
-                        plaintext = plaintext,
-                    )
+                    pairedRequestProtocol.sealPairedResponse(opened, plaintext)
                 }.getOrNull() ?: return null
             }
             val decidedAt = currentTimeMillis()
@@ -2276,16 +2246,7 @@ internal class RequestRepository(
             }
             val response = responsePlaintext?.let { plaintext ->
                 runCatching {
-                    pairedRequestProtocol.sealPairedResponse(
-                deviceId = credentials.deviceId,
-                        requestId = relayRequestId,
-                        clientId = pairing.clientId,
-                        clientPsk = opened.clientPsk,
-                        devicePrivateKey = credentials.devicePrivateKey,
-                        devicePublicKey = credentials.devicePublicKey,
-                        request = requestPayload,
-                        plaintext = plaintext,
-                    )
+                    pairedRequestProtocol.sealPairedResponse(opened, plaintext)
                 }.getOrNull() ?: return null
             }
             val decidedAt = currentTimeMillis()
@@ -2607,7 +2568,6 @@ internal class RequestRepository(
         requestPayload: JsonElement,
         opened: OpenedPairedRequest,
         acceptedSecrets: AcceptedRequestPsks,
-        credentials: RelayDeviceCredentials,
     ): ProcessedRelayMessage? {
         val response = secretManagement.receiveSecretList(
             client = pairing,
@@ -2617,16 +2577,7 @@ internal class RequestRepository(
             acceptedPsks = acceptedSecrets,
         ) { responsePlaintext ->
             runCatching {
-                pairedRequestProtocol.sealPairedResponse(
-                    deviceId = credentials.deviceId,
-                    requestId = relayRequestId,
-                    clientId = pairing.clientId,
-                    clientPsk = opened.clientPsk,
-                    devicePrivateKey = credentials.devicePrivateKey,
-                    devicePublicKey = credentials.devicePublicKey,
-                    request = requestPayload,
-                    plaintext = responsePlaintext,
-                )
+                pairedRequestProtocol.sealPairedResponse(opened, responsePlaintext)
             }.getOrNull()
         } ?: return null
         return ProcessedRelayMessage(response)
@@ -2638,7 +2589,6 @@ internal class RequestRepository(
         requestPayload: JsonElement,
         opened: OpenedPairedRequest,
         acceptedSecrets: AcceptedRequestPsks,
-        credentials: RelayDeviceCredentials,
     ): ProcessedRelayMessage? {
         val response = secretManagement.receiveSecretUpload(
             client = pairing,
@@ -2648,16 +2598,7 @@ internal class RequestRepository(
             acceptedPsks = acceptedSecrets,
         ) { responsePlaintext ->
             runCatching {
-                pairedRequestProtocol.sealPairedResponse(
-                    deviceId = credentials.deviceId,
-                    requestId = relayRequestId,
-                    clientId = pairing.clientId,
-                    clientPsk = opened.clientPsk,
-                    devicePrivateKey = credentials.devicePrivateKey,
-                    devicePublicKey = credentials.devicePublicKey,
-                    request = requestPayload,
-                    plaintext = responsePlaintext,
-                )
+                pairedRequestProtocol.sealPairedResponse(opened, responsePlaintext)
             }.getOrNull()
         } ?: return null
         return ProcessedRelayMessage(response)
@@ -2690,60 +2631,55 @@ internal class RequestRepository(
         requestPayload: JsonElement,
         opened: OpenedPairedRequest,
         acceptedSecrets: AcceptedRequestPsks,
-        credentials: RelayDeviceCredentials,
         code: PairedRequestErrorCode,
         now: Long,
     ): ProcessedRelayMessage? {
         val response = runCatching {
             pairedRequestProtocol.sealPairedResponse(
-                deviceId = credentials.deviceId,
-                requestId = relayRequestId,
-                clientId = pairing.clientId,
-                clientPsk = opened.clientPsk,
-                devicePrivateKey = credentials.devicePrivateKey,
-                devicePublicKey = credentials.devicePublicKey,
-                request = requestPayload,
+                opened = opened,
                 plaintext = pairedRequestProtocol.errorResponse(code),
             )
         }.getOrNull() ?: return null
         if (!persistRejectedRequest {
-            dao.insertHiddenPairedRequest(
-                request = InboxRequestEntity(
-                    id = relayRequestId,
-                    parentRequestId = null,
-                    deviceIdentityId = pairing.deviceIdentityId,
-                    clientId = pairing.clientId,
-                    clientNameSnapshot = pairing.name,
-                    clientSoftwareJson = pairing.clientSoftwareJson,
-                    kind = RequestKind.UNKNOWN.storedName,
-                    state = InboxRequestState.COMPLETED.storedName,
-                    listed = false,
-                    requestJson = requestPayload.toString(),
-                    responseJson = response.toString(),
-                    completionJson = null,
-                error = code.message,
-                receivedAt = now,
-                completedAt = now,
-                exchangeEndedAt = null,
-                responseOutboxFinished = false,
-                ),
-                client = pairing.copy(lastSeenAt = now),
-                requestPsk = acceptedSecrets.requestPsk,
-                currentClientPsk = acceptedSecrets.currentClientPsk,
-                previousClientPsk = acceptedSecrets.previousClientPsk,
-            )
+            writeTransaction.execute {
+                dao.insertHiddenPairedRequest(
+                    request = InboxRequestEntity(
+                        id = relayRequestId,
+                        parentRequestId = null,
+                        deviceIdentityId = pairing.deviceIdentityId,
+                        clientId = pairing.clientId,
+                        clientNameSnapshot = pairing.name,
+                        clientSoftwareJson = pairing.clientSoftwareJson,
+                        kind = RequestKind.UNKNOWN.storedName,
+                        state = InboxRequestState.COMPLETED.storedName,
+                        listed = false,
+                        requestJson = requestPayload.toString(),
+                        responseJson = response.toString(),
+                        completionJson = null,
+                        error = code.message,
+                        receivedAt = now,
+                        completedAt = now,
+                        exchangeEndedAt = null,
+                        responseOutboxFinished = false,
+                    ),
+                    client = pairing.copy(lastSeenAt = now),
+                    requestPsk = acceptedSecrets.requestPsk,
+                    currentClientPsk = acceptedSecrets.currentClientPsk,
+                    previousClientPsk = acceptedSecrets.previousClientPsk,
+                )
+                audit.append(
+                    records = listOf(
+                        rejectedRequestAudit(
+                            clientId = pairing.clientId,
+                            clientName = pairing.auditClientName(),
+                            relayRequestId = relayRequestId,
+                            code = code,
+                        ),
+                    ),
+                    occurredAt = now,
+                )
+            }
         }) return null
-        audit.record(
-            AuditRecord(
-                type = AuditEventType.REQUEST_REJECTED,
-                outcome = AuditOutcome.REJECTED,
-                decisionSource = AuditDecisionSource.VALIDATION,
-                detail = code.message,
-                clientId = pairing.clientId,
-                clientName = pairing.auditClientName(),
-                relayRequestId = relayRequestId,
-            ),
-        )
         return ProcessedRelayMessage(response)
     }
 
@@ -2754,62 +2690,72 @@ internal class RequestRepository(
         requestPayload: JsonElement,
         opened: OpenedPairedRequest,
         acceptedPsks: AcceptedRequestPsks,
-        credentials: RelayDeviceCredentials,
         code: PairedRequestErrorCode,
         now: Long,
     ): ProcessedRelayMessage? {
         val response = runCatching {
             pairedRequestProtocol.sealPairedResponse(
-                deviceId = credentials.deviceId,
-                requestId = relayRequestId,
-                clientId = attempt.clientId,
-                clientPsk = opened.clientPsk,
-                devicePrivateKey = credentials.devicePrivateKey,
-                devicePublicKey = credentials.devicePublicKey,
-                request = requestPayload,
+                opened = opened,
                 plaintext = pairedRequestProtocol.errorResponse(code),
             )
         }.getOrNull() ?: return null
         if (!persistRejectedRequest {
-            dao.insertHiddenPairedRequest(
-                request = InboxRequestEntity(
-                    id = relayRequestId,
-                    parentRequestId = rootRequest.id,
-                    deviceIdentityId = rootRequest.deviceIdentityId,
-                    clientId = rootRequest.clientId,
-                    clientNameSnapshot = attempt.auditClientName(),
-                    clientSoftwareJson = rootRequest.clientSoftwareJson,
-                    kind = RequestKind.UNKNOWN.storedName,
-                    state = InboxRequestState.COMPLETED.storedName,
-                    listed = false,
-                    requestJson = requestPayload.toString(),
-                    responseJson = response.toString(),
-                    completionJson = null,
-                    error = code.message,
-                    receivedAt = now,
-                    completedAt = now,
-                    exchangeEndedAt = null,
-                    responseOutboxFinished = false,
-                ),
-                client = null,
-                requestPsk = acceptedPsks.requestPsk,
-                currentClientPsk = null,
-                previousClientPsk = null,
-            )
+            writeTransaction.execute {
+                dao.insertHiddenPairedRequest(
+                    request = InboxRequestEntity(
+                        id = relayRequestId,
+                        parentRequestId = rootRequest.id,
+                        deviceIdentityId = rootRequest.deviceIdentityId,
+                        clientId = rootRequest.clientId,
+                        clientNameSnapshot = attempt.auditClientName(),
+                        clientSoftwareJson = rootRequest.clientSoftwareJson,
+                        kind = RequestKind.UNKNOWN.storedName,
+                        state = InboxRequestState.COMPLETED.storedName,
+                        listed = false,
+                        requestJson = requestPayload.toString(),
+                        responseJson = response.toString(),
+                        completionJson = null,
+                        error = code.message,
+                        receivedAt = now,
+                        completedAt = now,
+                        exchangeEndedAt = null,
+                        responseOutboxFinished = false,
+                    ),
+                    client = null,
+                    requestPsk = acceptedPsks.requestPsk,
+                    currentClientPsk = null,
+                    previousClientPsk = null,
+                )
+                audit.append(
+                    records = listOf(
+                        rejectedRequestAudit(
+                            clientId = rootRequest.clientId,
+                            clientName = attempt.auditClientName(),
+                            relayRequestId = relayRequestId,
+                            code = code,
+                        ),
+                    ),
+                    occurredAt = now,
+                )
+            }
         }) return null
-        audit.record(
-            AuditRecord(
-                type = AuditEventType.REQUEST_REJECTED,
-                outcome = AuditOutcome.REJECTED,
-                decisionSource = AuditDecisionSource.VALIDATION,
-                detail = code.message,
-                clientId = rootRequest.clientId,
-                clientName = attempt.auditClientName(),
-                relayRequestId = relayRequestId,
-            ),
-        )
         return ProcessedRelayMessage(response)
     }
+
+    private fun rejectedRequestAudit(
+        clientId: String,
+        clientName: String,
+        relayRequestId: String,
+        code: PairedRequestErrorCode,
+    ) = AuditRecord(
+        type = AuditEventType.REQUEST_REJECTED,
+        outcome = AuditOutcome.REJECTED,
+        decisionSource = AuditDecisionSource.VALIDATION,
+        detail = code.message,
+        clientId = clientId,
+        clientName = clientName,
+        relayRequestId = relayRequestId,
+    )
 
     private suspend fun startPairing(
         credentials: RelayDeviceCredentials,
@@ -2924,13 +2870,13 @@ internal class RequestRepository(
         val completion = message.completion ?: return null
         val request = dao.getRequestById(message.requestId) ?: return null
         if (request.clientId != message.clientId) return null
+        if (request.deviceIdentityId != activeCredentials.deviceIdentityId) return null
         val isInitialPairing = request.kind == RequestKind.PAIRING.storedName
         if (isInitialPairing != (message.addressId != null)) return null
         if (request.exchangeEndedAt != null) return ProcessedRelayMessage()
         val processed = when (request.kind) {
             RequestKind.PAIRING.storedName -> {
-                val credentials = credentialsForRequest(request, activeCredentials) ?: return null
-                processInitialCompletion(credentials, request, completion)
+                processInitialCompletion(activeCredentials, request, completion)
             }
             RequestKind.PAIRING_FINISH.storedName -> {
                 processFinishCompletion(activeCredentials, request, completion)
@@ -2988,7 +2934,7 @@ internal class RequestRepository(
                     opened is CompletionOpenResult.Opened
                 },
                 responseOutboxFinished = true,
-                error = "The completion could not be verified."
+                error = request.error ?: "The completion could not be verified."
                     .takeIf { opened == CompletionOpenResult.IrrecoverablyInvalid },
                 completedAt = request.completedAt ?: now,
                 exchangeEndedAt = now,
@@ -3037,19 +2983,6 @@ internal class RequestRepository(
 
     private suspend fun credentialsForRequest(
         request: InboxRequestEntity,
-        active: RelayDeviceCredentials,
-    ): RelayDeviceCredentials? {
-        if (request.deviceIdentityId == active.deviceIdentityId) return active
-        return when (
-            val result = deviceCredentials.deviceCredentials(request.deviceIdentityId)
-        ) {
-            is RelayDeviceCredentialsResult.Available -> result.credentials
-            else -> null
-        }
-    }
-
-    private suspend fun credentialsForRequest(
-        request: InboxRequestEntity,
     ): RelayDeviceCredentials? {
         return when (val result = deviceCredentials.deviceCredentials(request.deviceIdentityId)) {
             is RelayDeviceCredentialsResult.Available -> result.credentials
@@ -3069,19 +3002,7 @@ internal class RequestRepository(
         request: InboxRequestEntity,
         completion: JsonElement,
     ): CompletionOpenResult {
-        val credentials = if (request.deviceIdentityId == activeCredentials.deviceIdentityId) {
-            activeCredentials
-        } else {
-            when (val result = deviceCredentials.deviceCredentials(request.deviceIdentityId)) {
-                is RelayDeviceCredentialsResult.Available -> result.credentials
-                RelayDeviceCredentialsResult.CredentialsUnavailable,
-                RelayDeviceCredentialsResult.UnsupportedEncryption,
-                -> return CompletionOpenResult.RetryLater
-                RelayDeviceCredentialsResult.Missing,
-                RelayDeviceCredentialsResult.CredentialsCorrupted,
-                -> return CompletionOpenResult.IrrecoverablyInvalid
-            }
-        }
+        check(request.deviceIdentityId == activeCredentials.deviceIdentityId)
         val clientPsk = when (val result = material.decryptRequestPskResult(request)) {
             is DecryptionResult.Plaintext -> result.value
             DecryptionResult.KeyUnavailable -> return CompletionOpenResult.RetryLater
@@ -3098,12 +3019,12 @@ internal class RequestRepository(
         return try {
             CompletionOpenResult.Opened(
                 pairedRequestProtocol.openPairedCompletion(
-                    deviceId = credentials.deviceId,
+                    deviceId = activeCredentials.deviceId,
                     requestId = request.id,
                     clientId = request.clientId,
                     clientPsk = clientPsk,
-                    devicePrivateKey = credentials.devicePrivateKey,
-                    devicePublicKey = credentials.devicePublicKey,
+                    devicePrivateKey = activeCredentials.devicePrivateKey,
+                    devicePublicKey = activeCredentials.devicePublicKey,
                     request = storedRequest,
                     completion = completion,
                 ),
@@ -3138,11 +3059,6 @@ internal class RequestRepository(
         const val MAX_AI_REVIEW_GIT_CONTENT_BYTES = 128 * 1024
         val STRING_LIST_SERIALIZER = ListSerializer(String.serializer())
     }
-
-    private fun Exception.isIrrecoverableCompletionFailure(): Boolean =
-        this is SerializationException ||
-            this is IllegalArgumentException ||
-            this is InvalidCipherTextException
 
     private fun RequestedSecretDescription.hasSameSecretRevisions(
         other: RequestedSecretDescription,

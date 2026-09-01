@@ -26,7 +26,7 @@ internal data class OpenedPairedRequest(
 )
 
 internal data class PairedResponseContext(
-    val requestKey: ByteArray,
+    val encapsulatedKey: ByteArray,
     val exportedSecret: ByteArray,
 )
 
@@ -87,7 +87,7 @@ internal class PairedRequestProtocol(
         plaintext: ByteArray,
     ): JsonElement {
         val responseRandom = ByteArray(RESPONSE_RANDOM_BYTES).also(random::nextBytes)
-        val salt = responseContext.requestKey + responseRandom
+        val salt = responseContext.encapsulatedKey + responseRandom
         val key = derive(responseContext.exportedSecret, salt, RESPONSE_KEY_INFO, CHACHA_KEY_BYTES)
         val nonce = derive(
             responseContext.exportedSecret,
@@ -105,6 +105,7 @@ internal class PairedRequestProtocol(
         )
     }
 
+    /** Reconstructs response context for a delayed response after the opened request is gone. */
     fun sealPairedResponse(
         deviceId: String,
         requestId: String,
@@ -226,7 +227,7 @@ internal class PairedRequestProtocol(
                 encapsulatedKey = encapsulatedKey,
             )
             return OpenedPairedContext(
-                requestKey = encapsulatedKey,
+                encapsulatedKey = encapsulatedKey,
                 context = context,
                 plaintext = context.open(EMPTY, ciphertext),
                 clientPsk = psk,
@@ -294,7 +295,7 @@ internal class PairedRequestProtocol(
         clientPsk = clientPsk,
         keySource = keySource,
         responseContext = PairedResponseContext(
-            requestKey = requestKey,
+            encapsulatedKey = encapsulatedKey,
             exportedSecret = context.export(
                 RESPONSE_EXPORT_CONTEXT,
                 EXPORTED_SECRET_BYTES,
@@ -340,7 +341,7 @@ internal enum class PairedRequestErrorCode(
 }
 
 private data class OpenedPairedContext(
-    val requestKey: ByteArray,
+    val encapsulatedKey: ByteArray,
     val context: org.bouncycastle.crypto.hpke.HPKEContext,
     val plaintext: ByteArray,
     val clientPsk: ByteArray,
