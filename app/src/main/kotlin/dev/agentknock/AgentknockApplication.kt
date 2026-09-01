@@ -16,6 +16,7 @@ import dev.agentknock.storage.crypto.AesGcmEncryption
 import dev.agentknock.storage.crypto.AndroidEncryptionKeyStore
 import dev.agentknock.storage.crypto.VaultKeyManager
 import dev.agentknock.storage.secret.SecretRepository
+import dev.agentknock.storage.secret.SecretSummary
 import dev.agentknock.relay.HttpRelayClaimClient
 import dev.agentknock.relay.HttpRelayApprovalReviewClient
 import dev.agentknock.relay.HttpRelayPushRegistrationClient
@@ -31,7 +32,9 @@ import dev.agentknock.storage.request.persistentRelayRetryDeadline
 import dev.agentknock.storage.request.AiReviewCoordinator
 import dev.agentknock.storage.request.ClientRemovalRequests
 import dev.agentknock.storage.request.ClientRepository
+import dev.agentknock.storage.request.ClientSummary
 import dev.agentknock.storage.request.GitSigningRequests
+import dev.agentknock.storage.request.InboxRequestSummary
 import dev.agentknock.storage.request.InvocationRequests
 import dev.agentknock.storage.request.PairingRequests
 import dev.agentknock.storage.request.SecretManagementRequests
@@ -47,6 +50,9 @@ import kotlinx.coroutines.CoroutineStart
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.SupervisorJob
 import kotlinx.coroutines.async
+import kotlinx.coroutines.flow.SharingStarted
+import kotlinx.coroutines.flow.StateFlow
+import kotlinx.coroutines.flow.stateIn
 import kotlinx.coroutines.launch
 import kotlinx.serialization.json.Json
 import okhttp3.OkHttpClient
@@ -160,11 +166,27 @@ internal class ApplicationContainer(application: Application) {
     )
 
     val requestInbox = RequestInbox(database.requestDao())
+    val requestSummaries: StateFlow<List<InboxRequestSummary>> = requestInbox.observeRequests()
+        .stateIn(
+            scope = applicationScope,
+            started = SharingStarted.WhileSubscribed(READ_MODEL_STOP_TIMEOUT_MILLIS),
+            initialValue = emptyList(),
+        )
     private val clients = ClientRepository(
         dao = database.requestDao(),
         temporaryAccessGrants = secrets.observeTemporaryAccessGrants(),
         audit = audit,
         writeTransaction = writeTransaction,
+    )
+    val clientSummaries: StateFlow<List<ClientSummary>> = clients.observeClients().stateIn(
+        scope = applicationScope,
+        started = SharingStarted.WhileSubscribed(READ_MODEL_STOP_TIMEOUT_MILLIS),
+        initialValue = emptyList(),
+    )
+    val secretSummaries: StateFlow<List<SecretSummary>> = secrets.observeSecrets().stateIn(
+        scope = applicationScope,
+        started = SharingStarted.WhileSubscribed(READ_MODEL_STOP_TIMEOUT_MILLIS),
+        initialValue = emptyList(),
     )
     private val secretManagement = SecretManagementRequests(
         dao = database.requestDao(),
@@ -298,6 +320,10 @@ internal class ApplicationContainer(application: Application) {
     }
 
     private var started = false
+
+    private companion object {
+        const val READ_MODEL_STOP_TIMEOUT_MILLIS = 5_000L
+    }
 }
 
 internal fun approvalReviewHttpClient(base: OkHttpClient): OkHttpClient = base.newBuilder()

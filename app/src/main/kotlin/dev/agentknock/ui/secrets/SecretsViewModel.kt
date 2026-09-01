@@ -82,6 +82,9 @@ internal class SecretsViewModel(
     private val repository: SecretRepository,
     private val requests: RequestRepository,
     private val inbox: RequestInbox,
+    requestSummaries: StateFlow<List<InboxRequestSummary>>,
+    clientSummaries: StateFlow<List<ClientSummary>>,
+    secretSummaries: StateFlow<List<SecretSummary>>,
     private val deviceIdentity: DeviceIdentityRepository,
     private val awaitStorageReady: suspend () -> Unit,
 ) : ViewModel() {
@@ -95,17 +98,9 @@ internal class SecretsViewModel(
 
     val editor: StateFlow<SecretsEditor> = editorState.asStateFlow()
 
-    val secrets: StateFlow<List<SecretSummary>> = repository.observeSecrets().stateIn(
-        scope = viewModelScope,
-        started = SharingStarted.Eagerly,
-        initialValue = emptyList(),
-    )
+    val secrets: StateFlow<List<SecretSummary>> = secretSummaries
 
-    val clients: StateFlow<List<ClientSummary>> = requests.observeClients().stateIn(
-        scope = viewModelScope,
-        started = SharingStarted.Eagerly,
-        initialValue = emptyList(),
-    )
+    val clients: StateFlow<List<ClientSummary>> = clientSummaries
 
     val configuration: StateFlow<DeviceConfiguration?> = deviceIdentity
         .observeConfiguration()
@@ -115,11 +110,11 @@ internal class SecretsViewModel(
             initialValue = null,
         )
 
-    val pendingUploads: StateFlow<List<InboxRequestSummary>> = inbox.observeRequests()
+    val pendingUploads: StateFlow<List<InboxRequestSummary>> = requestSummaries
         .map(List<InboxRequestSummary>::pendingSecretUploads)
         .stateIn(
             scope = viewModelScope,
-            started = SharingStarted.Eagerly,
+            started = SharingStarted.WhileSubscribed(READ_MODEL_STOP_TIMEOUT_MILLIS),
             initialValue = emptyList(),
         )
 
@@ -577,6 +572,7 @@ internal class SecretsViewModel(
     private companion object {
         const val SELECTED_SECRET = "selected_secret_id"
         const val SELECTED_UPLOAD = "selected_upload_request_id"
+        const val READ_MODEL_STOP_TIMEOUT_MILLIS = 5_000L
     }
 }
 

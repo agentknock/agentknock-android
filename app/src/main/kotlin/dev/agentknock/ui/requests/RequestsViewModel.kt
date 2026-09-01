@@ -44,6 +44,7 @@ internal class RequestsViewModel(
     savedStateHandle: SavedStateHandle,
     private val repository: RequestRepository,
     private val inbox: RequestInbox,
+    requestSummaries: StateFlow<List<InboxRequestSummary>>,
     private val connection: RequestConnectionManager,
     private val awaitStorageReady: suspend () -> Unit,
 ) : ViewModel() {
@@ -52,16 +53,12 @@ internal class RequestsViewModel(
         null,
     )
 
-    val allRequests: StateFlow<List<InboxRequestSummary>> = inbox.observeRequests().stateIn(
-        scope = viewModelScope,
-        started = SharingStarted.Eagerly,
-        initialValue = emptyList(),
-    )
+    val allRequests: StateFlow<List<InboxRequestSummary>> = requestSummaries
     val requests: StateFlow<List<InboxRequestSummary>> = allRequests
         .map(List<InboxRequestSummary>::requestHistory)
         .stateIn(
             scope = viewModelScope,
-            started = SharingStarted.Eagerly,
+            started = SharingStarted.WhileSubscribed(READ_MODEL_STOP_TIMEOUT_MILLIS),
             initialValue = emptyList(),
         )
     val selection: StateFlow<RequestPaneState> = selectedRequestId
@@ -145,5 +142,6 @@ internal class RequestsViewModel(
 
     private companion object {
         const val SELECTED_REQUEST_ID = "selected_request_id"
+        const val READ_MODEL_STOP_TIMEOUT_MILLIS = 5_000L
     }
 }

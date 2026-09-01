@@ -70,6 +70,8 @@ internal class ClientsViewModel(
     private val savedStateHandle: SavedStateHandle,
     private val repository: RequestRepository,
     private val inbox: RequestInbox,
+    requestSummaries: StateFlow<List<InboxRequestSummary>>,
+    clientSummaries: StateFlow<List<ClientSummary>>,
     private val secrets: SecretRepository,
     private val deviceIdentity: DeviceIdentityRepository,
     private val deviceManagement: DeviceManagementRepository,
@@ -81,11 +83,7 @@ internal class ClientsViewModel(
             ?: ClientSelection.None,
     )
 
-    val clients: StateFlow<List<ClientSummary>> = repository.observeClients().stateIn(
-        scope = viewModelScope,
-        started = SharingStarted.Eagerly,
-        initialValue = emptyList(),
-    )
+    val clients: StateFlow<List<ClientSummary>> = clientSummaries
     val pane: StateFlow<ClientPaneState> = selected
         .flatMapLatest { selection ->
             when (selection) {
@@ -143,11 +141,11 @@ internal class ClientsViewModel(
             started = SharingStarted.Eagerly,
             initialValue = ClientPaneState.Empty,
         )
-    val pendingPairings: StateFlow<List<InboxRequestSummary>> = inbox.observeRequests()
+    val pendingPairings: StateFlow<List<InboxRequestSummary>> = requestSummaries
         .map(List<InboxRequestSummary>::pendingPairings)
         .stateIn(
             scope = viewModelScope,
-            started = SharingStarted.Eagerly,
+            started = SharingStarted.WhileSubscribed(READ_MODEL_STOP_TIMEOUT_MILLIS),
             initialValue = emptyList(),
         )
     val configuration: StateFlow<DeviceConfiguration?> = deviceIdentity
@@ -227,5 +225,6 @@ internal class ClientsViewModel(
     private companion object {
         const val SELECTED_CLIENT = "selected_client_id"
         const val SELECTED_PAIRING = "selected_pairing_request_id"
+        const val READ_MODEL_STOP_TIMEOUT_MILLIS = 5_000L
     }
 }

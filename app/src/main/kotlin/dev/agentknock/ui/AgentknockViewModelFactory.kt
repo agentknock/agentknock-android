@@ -42,6 +42,7 @@ internal fun agentknockViewModelFactory(
                 savedStateHandle = createSavedStateHandle(),
                 repository = container.requests,
                 inbox = container.requestInbox,
+                requestSummaries = container.requestSummaries,
                 connection = container.requestConnection,
                 awaitStorageReady = awaitStorageReady,
             )
@@ -52,6 +53,9 @@ internal fun agentknockViewModelFactory(
                 repository = container.secrets,
                 requests = container.requests,
                 inbox = container.requestInbox,
+                requestSummaries = container.requestSummaries,
+                clientSummaries = container.clientSummaries,
+                secretSummaries = container.secretSummaries,
                 deviceIdentity = container.deviceIdentity,
                 awaitStorageReady = awaitStorageReady,
             )
@@ -61,6 +65,8 @@ internal fun agentknockViewModelFactory(
                 savedStateHandle = createSavedStateHandle(),
                 repository = container.requests,
                 inbox = container.requestInbox,
+                requestSummaries = container.requestSummaries,
+                clientSummaries = container.clientSummaries,
                 secrets = container.secrets,
                 deviceIdentity = container.deviceIdentity,
                 deviceManagement = container.deviceManagement,
@@ -82,8 +88,8 @@ internal fun agentknockViewModelFactory(
         initializer {
             SettingsViewModel(
                 deviceIdentity = container.deviceIdentity,
-                secrets = container.secrets,
-                requests = container.requests,
+                secretSummaries = container.secretSummaries,
+                clientSummaries = container.clientSummaries,
                 pushRegistration = container.pushRegistration,
                 vaultKeys = container.vaultKeyManager,
                 beginFactoryReset = container::beginFactoryReset,

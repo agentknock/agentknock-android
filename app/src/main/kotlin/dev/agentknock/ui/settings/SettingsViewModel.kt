@@ -6,8 +6,8 @@ import dev.agentknock.storage.crypto.VaultProtection
 import dev.agentknock.storage.crypto.VaultKeyManager
 import dev.agentknock.storage.device.DeviceConfiguration
 import dev.agentknock.storage.device.DeviceIdentityRepository
-import dev.agentknock.storage.request.RequestRepository
-import dev.agentknock.storage.secret.SecretRepository
+import dev.agentknock.storage.request.ClientSummary
+import dev.agentknock.storage.secret.SecretSummary
 import dev.agentknock.push.PushRegistrationRepository
 import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.flow.MutableStateFlow
@@ -32,8 +32,8 @@ internal sealed interface FactoryResetUiState {
 
 internal class SettingsViewModel(
     deviceIdentity: DeviceIdentityRepository,
-    secrets: SecretRepository,
-    requests: RequestRepository,
+    secretSummaries: StateFlow<List<SecretSummary>>,
+    clientSummaries: StateFlow<List<ClientSummary>>,
     pushRegistration: PushRegistrationRepository,
     private val vaultKeys: VaultKeyManager,
     private val beginFactoryReset: suspend () -> Boolean,
@@ -48,14 +48,18 @@ internal class SettingsViewModel(
         .observeConfiguration()
         .stateIn(viewModelScope, SharingStarted.Eagerly, null)
     val dataCounts: StateFlow<DataCounts> = combine(
-        secrets.observeSecrets(),
-        requests.observeClients(),
+        secretSummaries,
+        clientSummaries,
     ) { secrets, clients ->
         DataCounts(
             secrets = secrets.size,
             clients = clients.size,
         )
-    }.stateIn(viewModelScope, SharingStarted.Eagerly, DataCounts())
+    }.stateIn(
+        viewModelScope,
+        SharingStarted.WhileSubscribed(READ_MODEL_STOP_TIMEOUT_MILLIS),
+        DataCounts(),
+    )
     val pushRegistrationState = pushRegistration.registrationState
     val vaultProtection: StateFlow<VaultProtection?> = _vaultProtection.asStateFlow()
     val factoryReset: StateFlow<FactoryResetUiState> = _factoryReset.asStateFlow()
@@ -109,5 +113,9 @@ internal class SettingsViewModel(
         if (runCatching(clearApplicationData).getOrDefault(false)) return
         cancelFactoryReset()
         _factoryReset.value = FactoryResetUiState.ClearFailed
+    }
+
+    private companion object {
+        const val READ_MODEL_STOP_TIMEOUT_MILLIS = 5_000L
     }
 }
