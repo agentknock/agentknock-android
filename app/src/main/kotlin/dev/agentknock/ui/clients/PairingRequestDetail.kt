@@ -1,4 +1,4 @@
-package dev.agentknock.ui.requests
+package dev.agentknock.ui.clients
 
 import androidx.compose.foundation.BorderStroke
 import androidx.compose.foundation.layout.fillMaxWidth
@@ -17,10 +17,17 @@ import dev.agentknock.presentation.renderSoftware
 import dev.agentknock.storage.request.InboxRequestContent
 import dev.agentknock.storage.request.InboxRequestDetails
 import dev.agentknock.storage.request.InboxRequestState
+import dev.agentknock.storage.request.PairingDecisionResult
 import dev.agentknock.storage.request.PairingRequestDetails
 import dev.agentknock.storage.request.PairingState
+import dev.agentknock.ui.components.DetailPage
+import dev.agentknock.ui.components.DetailValue
+import dev.agentknock.ui.components.Disclosure
 import dev.agentknock.ui.components.InformationRow
 import dev.agentknock.ui.components.InformationSurface
+import dev.agentknock.ui.components.Notice
+import dev.agentknock.ui.components.NoticeTone
+import dev.agentknock.ui.components.StatusLine
 import dev.agentknock.ui.theme.agentknockColors
 
 @Composable
@@ -187,3 +194,10 @@ internal val PairingRequestDetails.warningNotice: PairingWarningNotice?
 
 internal val PairingState.usesErrorStatus: Boolean
     get() = this == PairingState.EXCHANGE_FAILED
+
+internal fun PairingDecisionResult.message(): String = when (this) {
+    PairingDecisionResult.VERIFIED -> "Pairing code verified"
+    PairingDecisionResult.REJECTED -> "Pairing rejected"
+    PairingDecisionResult.NOT_PENDING -> "This pairing no longer needs a decision"
+    PairingDecisionResult.NOT_FOUND -> "Request is no longer available"
+}

@@ -1,4 +1,4 @@
-package dev.agentknock.ui.requests
+package dev.agentknock.ui.clients
 
 import dev.agentknock.storage.request.PairingRequestDetails
 import dev.agentknock.storage.request.PairingState

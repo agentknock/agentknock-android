@@ -1,4 +1,4 @@
-package dev.agentknock.ui.requests
+package dev.agentknock.ui.secrets
 
 import androidx.compose.foundation.BorderStroke
 import androidx.compose.foundation.layout.Arrangement
@@ -51,12 +51,19 @@ import dev.agentknock.presentation.renderSoftware
 import dev.agentknock.protocol.SecretUploadMode
 import dev.agentknock.storage.request.InboxRequestContent
 import dev.agentknock.storage.request.InboxRequestDetails
+import dev.agentknock.storage.request.SecretUploadDecisionResult
 import dev.agentknock.storage.request.SecretUploadRequestDetails
 import dev.agentknock.storage.request.SecretUploadRequestState
 import dev.agentknock.storage.request.SecretUploadVariableValue
 import dev.agentknock.ui.components.ClientIdentity
+import dev.agentknock.ui.components.DetailPage
+import dev.agentknock.ui.components.DetailValue
+import dev.agentknock.ui.components.Disclosure
 import dev.agentknock.ui.components.InformationRow
 import dev.agentknock.ui.components.InformationSurface
+import dev.agentknock.ui.components.Notice
+import dev.agentknock.ui.components.NoticeTone
+import dev.agentknock.ui.components.StatusLine
 import dev.agentknock.ui.theme.agentknockColors
 import kotlinx.coroutines.launch
 
@@ -630,4 +637,18 @@ private fun SecretUploadRequestState.label(): String = when (this) {
     SecretUploadRequestState.APPROVED -> "Approved"
     SecretUploadRequestState.REJECTED -> "Rejected"
     SecretUploadRequestState.VERIFICATION_FAILED -> "Verification failed"
+}
+
+internal fun SecretUploadDecisionResult.message(): String = when (this) {
+    is SecretUploadDecisionResult.Approved -> "Secret upload approved"
+    SecretUploadDecisionResult.Rejected -> "Secret upload rejected"
+    SecretUploadDecisionResult.NotPending -> "This upload no longer needs a decision"
+    SecretUploadDecisionResult.NotFound -> "Upload is no longer available"
+    is SecretUploadDecisionResult.Invalid -> message
+    SecretUploadDecisionResult.SecretUnavailable ->
+        "An uploaded value is unavailable on this device"
+    SecretUploadDecisionResult.SecretCorrupted ->
+        "An uploaded value could not be authenticated"
+    SecretUploadDecisionResult.UnsupportedEncryption ->
+        "An uploaded value uses unsupported encryption"
 }

@@ -37,9 +37,15 @@ import dev.agentknock.storage.request.InboxRequestDetails
 import dev.agentknock.storage.request.ApprovalDecision
 import dev.agentknock.storage.secret.TemporaryAccessOperation
 import dev.agentknock.ui.components.ClientIdentity
+import dev.agentknock.ui.components.DetailPage
+import dev.agentknock.ui.components.DetailValue
+import dev.agentknock.ui.components.Disclosure
 import dev.agentknock.ui.components.InformationRow
 import dev.agentknock.ui.components.InformationSurface
+import dev.agentknock.ui.components.Notice
+import dev.agentknock.ui.components.NoticeTone
 import dev.agentknock.ui.components.SecretIdentities
+import dev.agentknock.ui.components.StatusLine
 import dev.agentknock.ui.theme.agentknockColors
 
 @Composable

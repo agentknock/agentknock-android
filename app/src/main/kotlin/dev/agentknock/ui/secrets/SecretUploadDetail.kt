@@ -5,8 +5,6 @@ import androidx.compose.runtime.rememberCoroutineScope
 import androidx.compose.ui.Modifier
 import dev.agentknock.storage.request.InboxRequestContent
 import dev.agentknock.storage.request.InboxRequestDetails
-import dev.agentknock.ui.requests.SecretUploadRequestDetail
-import dev.agentknock.ui.requests.message
 import kotlinx.coroutines.launch
 
 @Composable

@@ -92,8 +92,6 @@ import dev.agentknock.ui.components.InformationSurface
 import dev.agentknock.ui.components.TonalIcon
 import dev.agentknock.ui.components.ActionListSurface
 import dev.agentknock.ui.components.NavigationBackButton
-import dev.agentknock.ui.requests.PairingRequestDetail
-import dev.agentknock.ui.requests.message
 import dev.agentknock.ui.theme.agentknockColors
 import kotlinx.coroutines.launch
 

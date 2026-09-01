@@ -30,9 +30,15 @@ import dev.agentknock.storage.request.SshAuthenticationRequestDetails
 import dev.agentknock.storage.request.ApprovalRequestState
 import dev.agentknock.storage.secret.TemporaryAccessOperation
 import dev.agentknock.ui.components.ClientIdentity
+import dev.agentknock.ui.components.DetailPage
+import dev.agentknock.ui.components.DetailValue
+import dev.agentknock.ui.components.Disclosure
 import dev.agentknock.ui.components.InformationRow
 import dev.agentknock.ui.components.InformationSurface
+import dev.agentknock.ui.components.Notice
+import dev.agentknock.ui.components.NoticeTone
 import dev.agentknock.ui.components.SecretIdentities
+import dev.agentknock.ui.components.StatusLine
 
 @Composable
 internal fun SshAuthenticationRequestDetail(
