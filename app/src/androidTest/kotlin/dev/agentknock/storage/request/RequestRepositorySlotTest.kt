@@ -11,6 +11,7 @@ import dev.agentknock.relay.RelayClientState
 import dev.agentknock.relay.RelayDeviceClient
 import dev.agentknock.relay.RelayDeviceConnection
 import dev.agentknock.relay.RelayDeviceConnectionResult
+import dev.agentknock.relay.RelayDeviceErrorScope
 import dev.agentknock.relay.RelayDeviceEvent
 import dev.agentknock.relay.RelayDeviceFrame
 import dev.agentknock.relay.RelayExchangeState
@@ -493,9 +494,7 @@ class RequestRepositorySlotTest {
                 code = "RATE_LIMITED",
                 message = "retry later",
                 retryable = true,
-                clientId = null,
-                requestId = null,
-                kind = null,
+                scope = RelayDeviceErrorScope.Unscoped,
                 retryAfterMillis = 60_000,
             ),
         )
@@ -504,6 +503,212 @@ class RequestRepositorySlotTest {
             RequestSyncResult.RelayUnavailable("retry later", 60_000),
             repository.sync(),
         )
+    }
+
+    @Test
+    fun scopedRetryableErrorPreservesDurableResponseAndServerRetryDelay() = runTest {
+        insertOpenUnknownRequest()
+        val connection = connect(
+            RelayDeviceEvent.Error(
+                code = "CAPACITY_EXCEEDED",
+                message = "retry response later",
+                retryable = true,
+                scope = RelayDeviceErrorScope.Exchange(
+                    clientId = CLIENT_ID,
+                    requestId = UNSUPPORTED_REQUEST_ID,
+                    kind = RelayMessageKind.RESPONSE,
+                ),
+                retryAfterMillis = 30_000,
+            ),
+        )
+
+        assertEquals(
+            RequestSyncResult.RelayUnavailable("retry response later", 30_000),
+            repository.sync(),
+        )
+        val stored = checkNotNull(database.requestDao().getRequestById(UNSUPPORTED_REQUEST_ID))
+        assertFalse(stored.responseOutboxFinished)
+        assertNull(stored.exchangeEndedAt)
+        assertTrue(
+            connection.sentFrames.contains(
+                RelayDeviceFrame.Response(
+                    CLIENT_ID,
+                    UNSUPPORTED_REQUEST_ID,
+                    Json.parseToJsonElement("{}"),
+                ),
+            ),
+        )
+    }
+
+    @Test
+    fun nonretryableResponseErrorFinishesOnlyItsOutboxAndKeepsSocketHealthy() = runTest {
+        insertOpenUnknownRequest()
+        connect(
+            RelayDeviceEvent.Error(
+                code = "REQUEST_ID_CONFLICT",
+                message = "response rejected",
+                retryable = false,
+                scope = RelayDeviceErrorScope.Exchange(
+                    clientId = CLIENT_ID,
+                    requestId = UNSUPPORTED_REQUEST_ID,
+                    kind = RelayMessageKind.RESPONSE,
+                ),
+            ),
+            RelayDeviceEvent.PushRegistration(RelayPushRegistrationState.REGISTERED),
+            relayState(UNSUPPORTED_REQUEST_ID).copy(response = RelayMessageState.ABSENT),
+            RelayDeviceEvent.CaughtUp,
+        )
+
+        assertEquals(RequestSyncResult.Success, repository.sync())
+        val stored = checkNotNull(database.requestDao().getRequestById(UNSUPPORTED_REQUEST_ID))
+        assertTrue(stored.responseOutboxFinished)
+        assertNull(stored.exchangeEndedAt)
+        assertEquals(RelayPushRegistrationState.REGISTERED, pushRegistrationState)
+    }
+
+    @Test
+    fun nonretryableExchangeErrorEndsOnlyItsMatchingExchange() = runTest {
+        insertOpenUnknownRequest()
+        insertOpenUnknownRequest(INVOCATION_REQUEST_ID)
+        connect(
+            RelayDeviceEvent.Error(
+                code = "INVALID_REQUEST_ID",
+                message = "exchange rejected",
+                retryable = false,
+                scope = RelayDeviceErrorScope.Exchange(
+                    clientId = CLIENT_ID,
+                    requestId = UNSUPPORTED_REQUEST_ID,
+                    kind = null,
+                ),
+            ),
+            relayState(INVOCATION_REQUEST_ID),
+            RelayDeviceEvent.CaughtUp,
+        )
+
+        assertEquals(RequestSyncResult.Success, repository.sync())
+        val rejected = checkNotNull(
+            database.requestDao().getRequestById(UNSUPPORTED_REQUEST_ID),
+        )
+        val healthy = checkNotNull(database.requestDao().getRequestById(INVOCATION_REQUEST_ID))
+        assertEquals(now, rejected.exchangeEndedAt)
+        assertEquals("exchange rejected", rejected.error)
+        assertNull(healthy.exchangeEndedAt)
+    }
+
+    @Test
+    fun mismatchedScopedErrorRejectsSessionWithoutMutatingDurableWork() = runTest {
+        insertOpenUnknownRequest()
+        connect(
+            RelayDeviceEvent.Error(
+                code = "REQUEST_ID_CONFLICT",
+                message = "mismatched error",
+                retryable = false,
+                scope = RelayDeviceErrorScope.Exchange(
+                    clientId = COLLISION_CLIENT_ID,
+                    requestId = UNSUPPORTED_REQUEST_ID,
+                    kind = RelayMessageKind.RESPONSE,
+                ),
+            ),
+        )
+
+        assertEquals(
+            RequestSyncResult.RelayRejected(0, "mismatched error"),
+            repository.sync(),
+        )
+        val stored = checkNotNull(database.requestDao().getRequestById(UNSUPPORTED_REQUEST_ID))
+        assertFalse(stored.responseOutboxFinished)
+        assertNull(stored.exchangeEndedAt)
+    }
+
+    @Test
+    fun requestAndCompletionScopedErrorsAreInvalidForDeviceOperations() = runTest {
+        insertOpenUnknownRequest()
+        for (kind in listOf(RelayMessageKind.REQUEST, RelayMessageKind.COMPLETION)) {
+            connect(
+                RelayDeviceEvent.Error(
+                    code = "INVALID_REQUEST_ID",
+                    message = "unsupported device error scope",
+                    retryable = false,
+                    scope = RelayDeviceErrorScope.Exchange(
+                        clientId = CLIENT_ID,
+                        requestId = UNSUPPORTED_REQUEST_ID,
+                        kind = kind,
+                    ),
+                ),
+            )
+
+            assertEquals(
+                RequestSyncResult.RelayRejected(0, "unsupported device error scope"),
+                repository.sync(),
+            )
+        }
+        val stored = checkNotNull(database.requestDao().getRequestById(UNSUPPORTED_REQUEST_ID))
+        assertFalse(stored.responseOutboxFinished)
+        assertNull(stored.exchangeEndedAt)
+    }
+
+    @Test
+    fun invalidClientStateSkipsItsMutationAndAdvancesRemainingDurableIntent() = runTest {
+        insertDesiredClient(CLIENT_ID, pairedAt = now)
+        insertDesiredClient(COLLISION_CLIENT_ID, pairedAt = now + 1)
+        val connection = connect(
+            RelayDeviceEvent.Error(
+                code = "INVALID_CLIENT_STATE",
+                message = "invalid transition",
+                retryable = false,
+                scope = RelayDeviceErrorScope.Unscoped,
+            ),
+            RelayDeviceEvent.ClientState(
+                COLLISION_CLIENT_ID,
+                RelayClientState.SUSPENDED,
+            ),
+            RelayDeviceEvent.CaughtUp,
+        )
+
+        assertEquals(RequestSyncResult.Success, repository.sync())
+        assertEquals(
+            listOf(
+                RelayDeviceFrame.SetClientState(CLIENT_ID, RelayClientState.SUSPENDED),
+                RelayDeviceFrame.SetClientState(
+                    COLLISION_CLIENT_ID,
+                    RelayClientState.SUSPENDED,
+                ),
+            ),
+            connection.sentFrames,
+        )
+        assertEquals(
+            RelayClientState.SUSPENDED.wireName,
+            database.requestDao().getClient(CLIENT_ID)?.desiredRelayClientState,
+        )
+        assertEquals(
+            null,
+            database.requestDao().getClient(COLLISION_CLIENT_ID)?.desiredRelayClientState,
+        )
+    }
+
+    @Test
+    fun clientStateMutationsAdvanceOneAtATime() = runTest {
+        insertDesiredClient(CLIENT_ID, pairedAt = now)
+        insertDesiredClient(COLLISION_CLIENT_ID, pairedAt = now + 1)
+        val connection = connect(
+            RelayDeviceEvent.ClientState(CLIENT_ID, RelayClientState.SUSPENDED),
+            RelayDeviceEvent.ClientState(COLLISION_CLIENT_ID, RelayClientState.SUSPENDED),
+            RelayDeviceEvent.CaughtUp,
+        )
+
+        assertEquals(RequestSyncResult.Success, repository.sync())
+        assertEquals(
+            listOf(
+                RelayDeviceFrame.SetClientState(CLIENT_ID, RelayClientState.SUSPENDED),
+                RelayDeviceFrame.SetClientState(
+                    COLLISION_CLIENT_ID,
+                    RelayClientState.SUSPENDED,
+                ),
+            ),
+            connection.sentFrames,
+        )
+        assertNull(database.requestDao().getClient(CLIENT_ID)?.desiredRelayClientState)
+        assertNull(database.requestDao().getClient(COLLISION_CLIENT_ID)?.desiredRelayClientState)
     }
 
     @Test
@@ -2935,10 +3140,12 @@ class RequestRepositorySlotTest {
         withTimeout(5_000) { block() }
     }
 
-    private suspend fun insertOpenUnknownRequest() {
+    private suspend fun insertOpenUnknownRequest(
+        requestId: String = UNSUPPORTED_REQUEST_ID,
+    ) {
         database.requestDao().insertRequest(
             InboxRequestEntity(
-                id = UNSUPPORTED_REQUEST_ID,
+                id = requestId,
                 parentRequestId = null,
                 deviceIdentityId = DEVICE_IDENTITY_ID,
                 clientId = CLIENT_ID,
@@ -2954,6 +3161,27 @@ class RequestRepositorySlotTest {
                 completedAt = null,
                 exchangeEndedAt = null,
                 responseOutboxFinished = false,
+            ),
+        )
+    }
+
+    private suspend fun insertDesiredClient(clientId: String, pairedAt: Long) {
+        database.requestDao().insertClient(
+            ClientEntity(
+                clientId = clientId,
+                deviceIdentityId = DEVICE_IDENTITY_ID,
+                name = "Test client $clientId",
+                instructions = "",
+                desiredRelayClientState = RelayClientState.SUSPENDED.wireName,
+                relayClientState = RelayClientState.ACTIVE.wireName,
+                clientSoftwareJson = null,
+                platform = null,
+                architecture = null,
+                hostname = null,
+                machineId = null,
+                osVersion = null,
+                pairedAt = pairedAt,
+                lastSeenAt = pairedAt,
             ),
         )
     }

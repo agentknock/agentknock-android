@@ -434,6 +434,57 @@ class RelayDeviceClientTest {
     }
 
     @Test
+    fun `an error frame does not terminate a healthy websocket`() = runTest {
+        MockWebServer().use { server ->
+            val serverSocket = CompletableDeferred<WebSocket>()
+            server.start()
+            server.enqueue(
+                MockResponse.Builder()
+                    .webSocketUpgrade(
+                        object : WebSocketListener() {
+                            override fun onOpen(webSocket: WebSocket, response: Response) {
+                                serverSocket.complete(webSocket)
+                            }
+                        },
+                    )
+                    .build(),
+            )
+            val client = WebSocketRelayDeviceClient(
+                client = OkHttpClient(),
+                relayUrl = server.url("/").toString(),
+            )
+            val result = client.connect(DEVICE_ID, DEVICE_TOKEN)
+            val connection = (result as RelayDeviceConnectionResult.Connected).connection
+            val socket = serverSocket.await()
+
+            socket.send(
+                """{"type":"error","client_id":"$CLIENT_ID","request_id":"$REQUEST_ID","kind":"response","error":"REQUEST_ID_CONFLICT","message":"conflict","retryable":false}""",
+            )
+            socket.send("""{"type":"caught_up"}""")
+
+            assertEquals(
+                RelayDeviceEvent.Error(
+                    code = "REQUEST_ID_CONFLICT",
+                    message = "conflict",
+                    retryable = false,
+                    scope = RelayDeviceErrorScope.Exchange(
+                        clientId = CLIENT_ID,
+                        requestId = REQUEST_ID,
+                        kind = RelayMessageKind.RESPONSE,
+                    ),
+                ),
+                connection.events.receive(),
+            )
+            assertEquals(RelayDeviceEvent.CaughtUp, connection.events.receive())
+            assertTrue(socket.close(1000, "test complete"))
+            assertEquals(
+                RelayDeviceEvent.Closed(1000, "test complete"),
+                connection.events.receive(),
+            )
+        }
+    }
+
+    @Test
     fun `completes a client initiated close handshake`() = runTest {
         MockWebServer().use { server ->
             val closeCode = CompletableDeferred<Int>()

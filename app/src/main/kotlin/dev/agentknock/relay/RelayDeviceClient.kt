@@ -86,6 +86,16 @@ internal sealed interface RelayDeviceFrame {
     ) : RelayDeviceFrame
 }
 
+internal sealed interface RelayDeviceErrorScope {
+    data object Unscoped : RelayDeviceErrorScope
+
+    data class Exchange(
+        val clientId: String,
+        val requestId: String,
+        val kind: RelayMessageKind?,
+    ) : RelayDeviceErrorScope
+}
+
 internal sealed interface RelayDeviceEvent {
     data class Message(
         val clientId: String,
@@ -133,9 +143,7 @@ internal sealed interface RelayDeviceEvent {
         val code: String,
         val message: String,
         val retryable: Boolean,
-        val clientId: String?,
-        val requestId: String?,
-        val kind: RelayMessageKind?,
+        val scope: RelayDeviceErrorScope,
         val retryAfterMillis: Long? = null,
     ) : RelayDeviceEvent {
         init {
@@ -480,9 +488,7 @@ internal class RelayFrameCodec(
                 message = frame.requiredString("message"),
                 retryable = frame["retryable"]?.jsonPrimitive?.booleanOrNull
                     ?: error("Missing relay retryable flag"),
-                clientId = frame.optionalString("client_id"),
-                requestId = frame.optionalString("request_id"),
-                kind = frame.optionalString("kind")?.toMessageKind(),
+                scope = frame.errorScope(),
                 retryAfterMillis = frame.optionalNonNegativeLong("retry_after_ms"),
             )
             "caught_up" -> RelayDeviceEvent.CaughtUp
@@ -495,6 +501,21 @@ internal class RelayFrameCodec(
 
     private fun String.toMessageKind(): RelayMessageKind =
         RelayMessageKind.entries.find { it.wireName == this } ?: error("Invalid relay kind")
+
+    private fun JsonObject.errorScope(): RelayDeviceErrorScope {
+        val clientId = optionalString("client_id")
+        val requestId = optionalString("request_id")
+        val kind = optionalString("kind")?.toMessageKind()
+        return when {
+            clientId == null && requestId == null && kind == null -> {
+                RelayDeviceErrorScope.Unscoped
+            }
+            clientId != null && requestId != null -> {
+                RelayDeviceErrorScope.Exchange(clientId, requestId, kind)
+            }
+            else -> error("Invalid relay error scope")
+        }
+    }
 
     private fun <T> JsonObject.requiredEnum(
         name: String,

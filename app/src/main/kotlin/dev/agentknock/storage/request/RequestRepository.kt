@@ -22,6 +22,7 @@ import dev.agentknock.relay.RelayApprovalReviewClient
 import dev.agentknock.relay.RelayDeviceClient
 import dev.agentknock.relay.RelayDeviceConnection
 import dev.agentknock.relay.RelayDeviceConnectionResult
+import dev.agentknock.relay.RelayDeviceErrorScope
 import dev.agentknock.relay.RelayDeviceEvent
 import dev.agentknock.relay.RelayDeviceFrame
 import dev.agentknock.relay.RelayExchangeState
@@ -338,12 +339,14 @@ internal class RequestRepository(
         onCaughtUp: suspend () -> Unit,
     ): RequestSyncResult {
         val awaitingClientStates = mutableMapOf<String, RelayClientState>()
-        val awaitingResponses = mutableSetOf<String>()
-        val awaitingStates = mutableSetOf<String>()
+        val rejectedClientStateMutations = mutableMapOf<String, RelayClientState>()
+        val awaitingResponses = mutableMapOf<String, String>()
+        val awaitingStates = mutableMapOf<String, String>()
         flushPendingChanges(
             credentials = credentials,
             connection = connection,
             awaitingClientStates = awaitingClientStates,
+            rejectedClientStateMutations = rejectedClientStateMutations,
             awaitingResponses = awaitingResponses,
             awaitingStates = awaitingStates,
         )?.let { return it }
@@ -358,17 +361,26 @@ internal class RequestRepository(
         ) {
             val input = if (keepConnected) {
                 select<SynchronizationInput> {
-                    connection.events.onReceive { SynchronizationInput.Event(it) }
+                    connection.events.onReceiveCatching {
+                        SynchronizationInput.Event(
+                            it.getOrNull()
+                                ?: RelayDeviceEvent.Failed("Relay event stream ended."),
+                        )
+                    }
                     pendingChanges.onReceive { SynchronizationInput.PendingChanges }
                 }
             } else {
-                SynchronizationInput.Event(connection.events.receive())
+                SynchronizationInput.Event(
+                    connection.events.receiveCatching().getOrNull()
+                        ?: RelayDeviceEvent.Failed("Relay event stream ended."),
+                )
             }
             if (input == SynchronizationInput.PendingChanges) {
                 flushPendingChanges(
                     credentials = credentials,
                     connection = connection,
                     awaitingClientStates = awaitingClientStates,
+                    rejectedClientStateMutations = rejectedClientStateMutations,
                     awaitingResponses = awaitingResponses,
                     awaitingStates = awaitingStates,
                 )?.let { return it }
@@ -388,6 +400,7 @@ internal class RequestRepository(
                         credentials = credentials,
                         connection = connection,
                         awaitingClientStates = awaitingClientStates,
+                        rejectedClientStateMutations = rejectedClientStateMutations,
                         awaitingResponses = awaitingResponses,
                         awaitingStates = awaitingStates,
                     )?.let { return it }
@@ -453,34 +466,42 @@ internal class RequestRepository(
                                     "Could not send relay response.",
                                 )
                             }
-                            awaitingResponses += event.requestId
+                            awaitingResponses[event.requestId] = event.clientId
                         }
                         if (dao.getRequestById(event.requestId)?.exchangeEndedAt != null) {
-                            awaitingResponses -= event.requestId
-                            awaitingStates -= event.requestId
+                            awaitingResponses.remove(event.requestId)
+                            awaitingStates.remove(event.requestId)
                         }
                         null
                     }
                     is RelayDeviceEvent.Acknowledgement -> {
                         if (event.kind == RelayMessageKind.RESPONSE) {
                             dao.markResponseOutboxFinished(event.requestId)
-                            awaitingResponses -= event.requestId
+                            awaitingResponses.remove(event.requestId)
                         }
                         null
                     }
                     is RelayDeviceEvent.Receipt -> {
                         if (event.kind == RelayMessageKind.RESPONSE) {
                             dao.markResponseOutboxFinished(event.requestId)
-                            awaitingResponses -= event.requestId
+                            awaitingResponses.remove(event.requestId)
                         }
                         null
                     }
                     is RelayDeviceEvent.ClientState -> {
                         applyClientState(event)
+                        rejectedClientStateMutations.remove(event.clientId)
                         // Every state event is an authoritative answer to the outstanding
                         // mutation. If it differs from the desired state, applyClientState keeps
                         // that desire and queues a new pass; a terminal REVOKED state clears it.
-                        awaitingClientStates -= event.clientId
+                        if (awaitingClientStates.remove(event.clientId) != null) {
+                            sendNextClientState(
+                                credentials = credentials,
+                                connection = connection,
+                                awaitingClientStates = awaitingClientStates,
+                                rejectedClientStateMutations = rejectedClientStateMutations,
+                            )?.let { return@withLock it }
+                        }
                         null
                     }
                     is RelayDeviceEvent.PushRegistration -> {
@@ -489,43 +510,44 @@ internal class RequestRepository(
                     }
                     is RelayDeviceEvent.State -> {
                         val ended = applyRelayState(event)
-                        awaitingStates -= event.requestId
+                        awaitingStates.remove(event.requestId)
                         if (
                             event.response != RelayMessageState.ABSENT ||
                             event.exchange == RelayExchangeState.CLOSING
                         ) {
-                            awaitingResponses -= event.requestId
+                            awaitingResponses.remove(event.requestId)
                         }
                         if (ended) {
-                            awaitingResponses -= event.requestId
-                            awaitingStates -= event.requestId
+                            awaitingResponses.remove(event.requestId)
+                            awaitingStates.remove(event.requestId)
                         }
                         null
                     }
                     is RelayDeviceEvent.Inactive -> {
-                        awaitingStates -= event.requestId
+                        awaitingStates.remove(event.requestId)
                         if (event.kind == RelayMessageKind.RESPONSE) {
                             dao.markResponseOutboxFinished(event.requestId)
-                            awaitingResponses -= event.requestId
+                            awaitingResponses.remove(event.requestId)
                         } else if (event.kind == null) {
                             endRequestExchange(
                                 event.requestId,
                                 currentTimeMillis(),
                                 "The relay no longer has this exchange.",
                             )
-                            awaitingResponses -= event.requestId
-                            awaitingStates -= event.requestId
+                            awaitingResponses.remove(event.requestId)
+                            awaitingStates.remove(event.requestId)
                         }
                         null
                     }
-                    is RelayDeviceEvent.Error -> if (event.retryable) {
-                        RequestSyncResult.RelayUnavailable(
-                            message = event.message,
-                            retryAfterMillis = event.retryAfterMillis,
-                        )
-                    } else {
-                        RequestSyncResult.RelayRejected(0, event.message)
-                    }
+                    is RelayDeviceEvent.Error -> handleRelayError(
+                        event = event,
+                        credentials = credentials,
+                        connection = connection,
+                        awaitingClientStates = awaitingClientStates,
+                        rejectedClientStateMutations = rejectedClientStateMutations,
+                        awaitingResponses = awaitingResponses,
+                        awaitingStates = awaitingStates,
+                    )
                     is RelayDeviceEvent.Closed -> RequestSyncResult.RelayUnavailable(
                         "Relay connection closed (${event.code}): ${event.reason}",
                     )
@@ -549,48 +571,20 @@ internal class RequestRepository(
         credentials: RelayDeviceCredentials,
         connection: RelayDeviceConnection,
         awaitingClientStates: MutableMap<String, RelayClientState>,
-        awaitingResponses: MutableSet<String>,
-        awaitingStates: MutableSet<String>,
+        rejectedClientStateMutations: Map<String, RelayClientState>,
+        awaitingResponses: MutableMap<String, String>,
+        awaitingStates: MutableMap<String, String>,
     ): RequestSyncResult? {
         while (pendingChanges.tryReceive().isSuccess) {
             // Changes made after this drain remain queued for the next pass.
         }
         return operationMutex.withLock {
-            for (attempt in dao.getPairingAttempts()) {
-                val rootRequest = dao.getRequestById(attempt.requestId) ?: continue
-                if (rootRequest.deviceIdentityId != credentials.deviceIdentityId) continue
-                if (
-                    attempt.state == PairingState.REJECTED.storedName &&
-                    attempt.relayClientState == RelayClientState.PENDING.wireName &&
-                    attempt.desiredRelayClientState == RelayClientState.REVOKED.wireName
-                ) {
-                    // A pending candidate cannot be revoked yet. Preserve the desired state so a
-                    // late activation acknowledgement is followed by revocation.
-                    continue
-                }
-                val desired = attempt.desiredRelayClientState?.toRelayClientState() ?: continue
-                if (attempt.relayClientState == desired.wireName) continue
-                if (awaitingClientStates[attempt.clientId] == desired) continue
-                if (!connection.send(RelayDeviceFrame.SetClientState(attempt.clientId, desired))) {
-                    return@withLock RequestSyncResult.RelayUnavailable(
-                        "Could not send relay client state.",
-                    )
-                }
-                awaitingClientStates[attempt.clientId] = desired
-            }
-
-            for (client in dao.getClients()) {
-                if (client.deviceIdentityId != credentials.deviceIdentityId) continue
-                val desired = client.desiredRelayClientState?.toRelayClientState() ?: continue
-                if (client.relayClientState == desired.wireName) continue
-                if (awaitingClientStates[client.clientId] == desired) continue
-                if (!connection.send(RelayDeviceFrame.SetClientState(client.clientId, desired))) {
-                    return@withLock RequestSyncResult.RelayUnavailable(
-                        "Could not send relay client state.",
-                    )
-                }
-                awaitingClientStates[client.clientId] = desired
-            }
+            sendNextClientState(
+                credentials = credentials,
+                connection = connection,
+                awaitingClientStates = awaitingClientStates,
+                rejectedClientStateMutations = rejectedClientStateMutations,
+            )?.let { return@withLock it }
 
             for (request in dao.getUnfinishedResponseOutboxes()) {
                 if (request.id in awaitingResponses) continue
@@ -608,7 +602,7 @@ internal class RequestRepository(
                         "Could not send relay response.",
                     )
                 }
-                awaitingResponses += request.id
+                awaitingResponses[request.id] = request.clientId
             }
 
             for (request in dao.getOpenExchanges()) {
@@ -623,17 +617,127 @@ internal class RequestRepository(
                         "Could not resume relay exchange.",
                     )
                 }
-                awaitingStates += request.id
+                awaitingStates[request.id] = request.clientId
             }
             null
         }
     }
 
+    private suspend fun sendNextClientState(
+        credentials: RelayDeviceCredentials,
+        connection: RelayDeviceConnection,
+        awaitingClientStates: MutableMap<String, RelayClientState>,
+        rejectedClientStateMutations: Map<String, RelayClientState>,
+    ): RequestSyncResult? {
+        if (awaitingClientStates.isNotEmpty()) return null
+
+        for (attempt in dao.getPairingAttempts()) {
+            val rootRequest = dao.getRequestById(attempt.requestId) ?: continue
+            if (rootRequest.deviceIdentityId != credentials.deviceIdentityId) continue
+            if (
+                attempt.state == PairingState.REJECTED.storedName &&
+                attempt.relayClientState == RelayClientState.PENDING.wireName &&
+                attempt.desiredRelayClientState == RelayClientState.REVOKED.wireName
+            ) {
+                // A pending candidate cannot be revoked yet. Preserve the desired state so a
+                // late activation acknowledgement is followed by revocation.
+                continue
+            }
+            val desired = attempt.desiredRelayClientState?.toRelayClientState() ?: continue
+            if (attempt.relayClientState == desired.wireName) continue
+            if (rejectedClientStateMutations[attempt.clientId] == desired) continue
+            if (!connection.send(RelayDeviceFrame.SetClientState(attempt.clientId, desired))) {
+                return RequestSyncResult.RelayUnavailable("Could not send relay client state.")
+            }
+            awaitingClientStates[attempt.clientId] = desired
+            return null
+        }
+
+        for (client in dao.getClients()) {
+            if (client.deviceIdentityId != credentials.deviceIdentityId) continue
+            val desired = client.desiredRelayClientState?.toRelayClientState() ?: continue
+            if (client.relayClientState == desired.wireName) continue
+            if (rejectedClientStateMutations[client.clientId] == desired) continue
+            if (!connection.send(RelayDeviceFrame.SetClientState(client.clientId, desired))) {
+                return RequestSyncResult.RelayUnavailable("Could not send relay client state.")
+            }
+            awaitingClientStates[client.clientId] = desired
+            return null
+        }
+        return null
+    }
+
+    private suspend fun handleRelayError(
+        event: RelayDeviceEvent.Error,
+        credentials: RelayDeviceCredentials,
+        connection: RelayDeviceConnection,
+        awaitingClientStates: MutableMap<String, RelayClientState>,
+        rejectedClientStateMutations: MutableMap<String, RelayClientState>,
+        awaitingResponses: MutableMap<String, String>,
+        awaitingStates: MutableMap<String, String>,
+    ): RequestSyncResult? {
+        val scope = when (val scope = event.scope) {
+            RelayDeviceErrorScope.Unscoped -> {
+                if (event.code == "INVALID_CLIENT_STATE" && !event.retryable) {
+                    val rejected = awaitingClientStates.entries.singleOrNull()
+                        ?: return event.toSynchronizationFailure()
+                    awaitingClientStates.remove(rejected.key)
+                    rejectedClientStateMutations[rejected.key] = rejected.value
+                    return sendNextClientState(
+                        credentials = credentials,
+                        connection = connection,
+                        awaitingClientStates = awaitingClientStates,
+                        rejectedClientStateMutations = rejectedClientStateMutations,
+                    )
+                }
+                return event.toSynchronizationFailure()
+            }
+            is RelayDeviceErrorScope.Exchange -> scope
+        }
+        val matchesOutstandingOperation = when (scope.kind) {
+            RelayMessageKind.RESPONSE -> awaitingResponses[scope.requestId] == scope.clientId
+            null -> awaitingStates[scope.requestId] == scope.clientId
+            RelayMessageKind.REQUEST,
+            RelayMessageKind.COMPLETION,
+            -> false
+        }
+        if (!matchesOutstandingOperation) {
+            return RequestSyncResult.RelayRejected(0, event.message)
+        }
+        if (event.retryable) return event.toSynchronizationFailure()
+
+        when (scope.kind) {
+            RelayMessageKind.RESPONSE -> {
+                dao.markResponseOutboxFinished(scope.requestId)
+                awaitingResponses.remove(scope.requestId)
+            }
+            null -> {
+                endRequestExchange(scope.requestId, currentTimeMillis(), event.message)
+                awaitingResponses.remove(scope.requestId)
+                awaitingStates.remove(scope.requestId)
+            }
+            RelayMessageKind.REQUEST,
+            RelayMessageKind.COMPLETION,
+            -> error("Unsupported scoped relay error was accepted")
+        }
+        return null
+    }
+
+    private fun RelayDeviceEvent.Error.toSynchronizationFailure(): RequestSyncResult =
+        if (retryable) {
+            RequestSyncResult.RelayUnavailable(
+                message = message,
+                retryAfterMillis = retryAfterMillis,
+            )
+        } else {
+            RequestSyncResult.RelayRejected(0, message)
+        }
+
     private fun initialSynchronizationComplete(
         caughtUp: Boolean,
         awaitingClientStates: Map<String, RelayClientState>,
-        awaitingResponses: Set<String>,
-        awaitingStates: Set<String>,
+        awaitingResponses: Map<String, String>,
+        awaitingStates: Map<String, String>,
     ): Boolean = caughtUp &&
         awaitingClientStates.isEmpty() &&
         awaitingResponses.isEmpty() &&

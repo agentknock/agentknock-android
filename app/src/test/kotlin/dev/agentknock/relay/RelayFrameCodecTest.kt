@@ -95,14 +95,38 @@ class RelayFrameCodecTest {
                 code = "BUSY",
                 message = "retry",
                 retryable = true,
-                clientId = null,
-                requestId = null,
-                kind = null,
+                scope = RelayDeviceErrorScope.Unscoped,
                 retryAfterMillis = 250,
             ),
             codec.decode(
                 """{"type":"error","error":"BUSY","message":"retry","retryable":true,"retry_after_ms":250}""",
             ),
+        )
+    }
+
+    @Test
+    fun `decodes a complete exchange error scope`() {
+        assertEquals(
+            RelayDeviceEvent.Error(
+                code = "REQUEST_ID_CONFLICT",
+                message = "conflict",
+                retryable = false,
+                scope = RelayDeviceErrorScope.Exchange(
+                    clientId = CLIENT_ID,
+                    requestId = REQUEST_ID,
+                    kind = RelayMessageKind.RESPONSE,
+                ),
+            ),
+            codec.decode(
+                """{"type":"error","client_id":"$CLIENT_ID","request_id":"$REQUEST_ID","kind":"response","error":"REQUEST_ID_CONFLICT","message":"conflict","retryable":false}""",
+            ),
+        )
+    }
+
+    @Test(expected = IllegalStateException::class)
+    fun `rejects a partial exchange error scope`() {
+        codec.decode(
+            """{"type":"error","client_id":"$CLIENT_ID","error":"BUSY","message":"retry","retryable":true}""",
         )
     }
 
