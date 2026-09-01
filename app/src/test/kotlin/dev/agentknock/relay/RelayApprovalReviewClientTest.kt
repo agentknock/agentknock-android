@@ -28,9 +28,11 @@ class RelayApprovalReviewClientTest {
             )
 
             assertEquals(
-                RelayApprovalReviewResult.Reviewed(
-                    RelayApprovalReviewDecision.APPROVE,
-                    "The policy allows it.",
+                RelayEndpointResult.Success(
+                    RelayApprovalReview(
+                        RelayApprovalReviewDecision.APPROVE,
+                        "The policy allows it.",
+                    ),
                 ),
                 client(server).review(DEVICE_ID, DEVICE_TOKEN, reviewRequest()),
             )
@@ -109,7 +111,7 @@ class RelayApprovalReviewClientTest {
             )
 
             assertEquals(
-                RelayApprovalReviewResult.Rejected(
+                RelayEndpointResult.Rejected(
                     status = 402,
                     code = "SUBSCRIPTION_REQUIRED",
                     message = "An active subscription is required.",
@@ -133,9 +135,11 @@ class RelayApprovalReviewClientTest {
             )
 
             assertEquals(
-                RelayApprovalReviewResult.Reviewed(
-                    RelayApprovalReviewDecision.ASK_USER,
-                    "The reason is ambiguous.",
+                RelayEndpointResult.Success(
+                    RelayApprovalReview(
+                        RelayApprovalReviewDecision.ASK_USER,
+                        "The reason is ambiguous.",
+                    ),
                 ),
                 client(server).review(DEVICE_ID, DEVICE_TOKEN, reviewRequest()),
             )
@@ -156,9 +160,11 @@ class RelayApprovalReviewClientTest {
             )
 
             assertEquals(
-                RelayApprovalReviewResult.Reviewed(
-                    RelayApprovalReviewDecision.DENY,
-                    "The command is destructive.",
+                RelayEndpointResult.Success(
+                    RelayApprovalReview(
+                        RelayApprovalReviewDecision.DENY,
+                        "The command is destructive.",
+                    ),
                 ),
                 client(server).review(DEVICE_ID, DEVICE_TOKEN, reviewRequest()),
             )
@@ -177,15 +183,17 @@ class RelayApprovalReviewClientTest {
             )
 
             assertEquals(
-                RelayApprovalReviewResult.InvalidResponse,
+                RelayEndpointResult.InvalidResponse,
                 client(server).review(DEVICE_ID, DEVICE_TOKEN, reviewRequest()),
             )
         }
     }
 
     private fun client(server: MockWebServer) = HttpRelayApprovalReviewClient(
-        client = OkHttpClient(),
-        relayUrl = server.url("/").toString(),
+        transport = RelayHttpTransport(
+            client = OkHttpClient(),
+            relayUrl = server.url("/").toString(),
+        ),
     )
 
     private fun reviewRequest() = ApprovalReviewRequest(

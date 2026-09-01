@@ -6,7 +6,6 @@ import kotlinx.coroutines.withContext
 import kotlinx.serialization.SerialName
 import kotlinx.serialization.Serializable
 import kotlinx.serialization.json.Json
-import okhttp3.OkHttpClient
 
 internal enum class RelayClaimOutcome {
     CLAIMED,
@@ -30,19 +29,6 @@ internal class HttpRelayClaimClient(
     private val dispatcher: CoroutineDispatcher = Dispatchers.IO,
     private val attestationProvider: DeviceAttestationProvider = AndroidKeyAttestationProvider(),
 ) : RelayClaimClient {
-    constructor(
-        client: OkHttpClient,
-        relayUrl: String = DEFAULT_RELAY_URL,
-        json: Json = Json { ignoreUnknownKeys = true },
-        dispatcher: CoroutineDispatcher = Dispatchers.IO,
-        attestationProvider: DeviceAttestationProvider = AndroidKeyAttestationProvider(),
-    ) : this(
-        transport = RelayHttpTransport(client, relayUrl, json),
-        json = json,
-        dispatcher = dispatcher,
-        attestationProvider = attestationProvider,
-    )
-
     override suspend fun claim(
         deviceId: String,
         addressId: String,

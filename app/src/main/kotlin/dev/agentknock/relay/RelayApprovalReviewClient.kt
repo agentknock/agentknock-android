@@ -1,12 +1,10 @@
 package dev.agentknock.relay
 
-import java.io.IOException
 import kotlinx.serialization.SerialName
 import kotlinx.serialization.Serializable
 import kotlinx.serialization.encodeToString
 import kotlinx.serialization.json.Json
 import kotlinx.serialization.json.JsonElement
-import okhttp3.OkHttpClient
 
 @Serializable
 internal data class ApprovalReviewRequest(
@@ -147,22 +145,12 @@ internal enum class RelayApprovalReviewDecision {
     ASK_USER,
 }
 
-internal sealed interface RelayApprovalReviewResult {
-    data class Reviewed(
-        val decision: RelayApprovalReviewDecision,
-        val explanation: String,
-    ) : RelayApprovalReviewResult
+internal data class RelayApprovalReview(
+    val decision: RelayApprovalReviewDecision,
+    val explanation: String,
+)
 
-    data class Rejected(
-        val status: Int,
-        val code: String?,
-        val message: String?,
-    ) : RelayApprovalReviewResult
-
-    data class Unavailable(val cause: IOException) : RelayApprovalReviewResult
-
-    data object InvalidResponse : RelayApprovalReviewResult
-}
+internal typealias RelayApprovalReviewResult = RelayEndpointResult<RelayApprovalReview>
 
 internal interface RelayApprovalReviewClient {
     suspend fun review(
@@ -179,28 +167,17 @@ internal class HttpRelayApprovalReviewClient(
         explicitNulls = false
     },
 ) : RelayApprovalReviewClient {
-    constructor(
-        client: OkHttpClient,
-        relayUrl: String = DEFAULT_RELAY_URL,
-        json: Json = Json {
-            ignoreUnknownKeys = true
-            explicitNulls = false
-        },
-    ) : this(RelayHttpTransport(client, relayUrl, json), json)
-
     override suspend fun review(
         deviceId: String,
         deviceToken: String,
         request: ApprovalReviewRequest,
-    ): RelayApprovalReviewResult = when (
-        val result = transport.post(
-            path = "v1/device/$deviceId/review",
-            body = json.encodeToString(request),
-            bearerToken = deviceToken,
-        )
-    ) {
-        is RelayEndpointResult.Success -> runCatching {
-            val value = json.decodeFromString<ApprovalReviewResponse>(result.value)
+    ): RelayApprovalReviewResult = transport.post(
+        path = "v1/device/$deviceId/review",
+        body = json.encodeToString(request),
+        bearerToken = deviceToken,
+    )
+        .decodeSuccess { encoded ->
+            val value = json.decodeFromString<ApprovalReviewResponse>(encoded)
             val decision = when (value.decision) {
                 "approve" -> RelayApprovalReviewDecision.APPROVE
                 "deny" -> RelayApprovalReviewDecision.DENY
@@ -210,16 +187,8 @@ internal class HttpRelayApprovalReviewClient(
             require(value.explanation.isNotBlank()) {
                 "Approval review explanation is empty"
             }
-            RelayApprovalReviewResult.Reviewed(decision, value.explanation)
-        }.getOrElse { RelayApprovalReviewResult.InvalidResponse }
-        is RelayEndpointResult.Rejected -> RelayApprovalReviewResult.Rejected(
-            status = result.status,
-            code = result.code,
-            message = result.message,
-        )
-        is RelayEndpointResult.Unavailable -> RelayApprovalReviewResult.Unavailable(result.cause)
-        RelayEndpointResult.InvalidResponse -> RelayApprovalReviewResult.InvalidResponse
-    }
+            RelayApprovalReview(decision, value.explanation)
+        }
 }
 
 @Serializable

@@ -3,7 +3,6 @@ package dev.agentknock.relay
 import kotlinx.serialization.SerialName
 import kotlinx.serialization.Serializable
 import kotlinx.serialization.json.Json
-import okhttp3.OkHttpClient
 
 internal data class RelaySubscriptionStatus(val active: Boolean)
 
@@ -26,12 +25,6 @@ internal class HttpRelaySubscriptionClient(
     private val transport: RelayHttpTransport,
     private val json: Json = Json { ignoreUnknownKeys = true },
 ) : RelaySubscriptionClient {
-    constructor(
-        client: OkHttpClient,
-        relayUrl: String = DEFAULT_RELAY_URL,
-        json: Json = Json { ignoreUnknownKeys = true },
-    ) : this(RelayHttpTransport(client, relayUrl, json), json)
-
     override suspend fun status(
         deviceId: String,
         deviceToken: String,

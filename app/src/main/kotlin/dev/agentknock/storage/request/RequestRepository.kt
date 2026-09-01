@@ -24,13 +24,13 @@ import dev.agentknock.relay.ApprovalReviewRequest
 import dev.agentknock.relay.RelayClientState
 import dev.agentknock.relay.RelayApprovalReviewClient
 import dev.agentknock.relay.RelayApprovalReviewDecision
-import dev.agentknock.relay.RelayApprovalReviewResult
 import dev.agentknock.relay.RelayDeviceClient
 import dev.agentknock.relay.RelayDeviceConnection
 import dev.agentknock.relay.RelayDeviceConnectionResult
 import dev.agentknock.relay.RelayDeviceEvent
 import dev.agentknock.relay.RelayDeviceFrame
 import dev.agentknock.relay.RelayExchangeState
+import dev.agentknock.relay.RelayEndpointResult
 import dev.agentknock.relay.RelayMessageKind
 import dev.agentknock.relay.RelayMessageState
 import dev.agentknock.relay.RelayPushRegistrationState
@@ -2728,15 +2728,15 @@ internal class RequestRepository(
             return AiReview(failure = AiReviewFailure.UNAVAILABLE)
         }
         return when (result) {
-            is RelayApprovalReviewResult.Reviewed -> AiReview(
-                decision = when (result.decision) {
+            is RelayEndpointResult.Success -> AiReview(
+                decision = when (result.value.decision) {
                     RelayApprovalReviewDecision.APPROVE -> AiReviewDecision.APPROVE
                     RelayApprovalReviewDecision.DENY -> AiReviewDecision.DENY
                     RelayApprovalReviewDecision.ASK_USER -> AiReviewDecision.ASK_USER
                 },
-                explanation = result.explanation,
+                explanation = result.value.explanation,
             )
-            is RelayApprovalReviewResult.Rejected -> AiReview(
+            is RelayEndpointResult.Rejected -> AiReview(
                 failure = if (
                     result.status == 402 || result.code == "SUBSCRIPTION_REQUIRED"
                 ) {
@@ -2747,9 +2747,9 @@ internal class RequestRepository(
                 httpStatus = result.status,
                 errorCode = result.code,
             )
-            is RelayApprovalReviewResult.Unavailable ->
+            is RelayEndpointResult.Unavailable ->
                 AiReview(failure = AiReviewFailure.UNAVAILABLE)
-            RelayApprovalReviewResult.InvalidResponse ->
+            RelayEndpointResult.InvalidResponse ->
                 AiReview(failure = AiReviewFailure.INVALID_RESPONSE)
         }
     }

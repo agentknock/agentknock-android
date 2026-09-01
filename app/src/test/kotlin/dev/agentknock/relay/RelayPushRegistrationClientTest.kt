@@ -21,10 +21,7 @@ class RelayPushRegistrationClientTest {
                     .body("""{"push_registration":"registered"}""")
                     .build(),
             )
-            val client = HttpRelayPushRegistrationClient(
-                client = OkHttpClient(),
-                relayUrl = server.url("/").toString(),
-            )
+            val client = client(server)
 
             assertEquals(
                 RelayEndpointResult.Success(Unit),
@@ -53,10 +50,7 @@ class RelayPushRegistrationClientTest {
                     .body("""{"push_registration":"pending"}""")
                     .build(),
             )
-            val client = HttpRelayPushRegistrationClient(
-                client = OkHttpClient(),
-                relayUrl = server.url("/").toString(),
-            )
+            val client = client(server)
 
             assertEquals(
                 RelayEndpointResult.InvalidResponse,
@@ -64,6 +58,13 @@ class RelayPushRegistrationClientTest {
             )
         }
     }
+
+    private fun client(server: MockWebServer) = HttpRelayPushRegistrationClient(
+        transport = RelayHttpTransport(
+            client = OkHttpClient(),
+            relayUrl = server.url("/").toString(),
+        ),
+    )
 
     private companion object {
         const val DEVICE_ID = "01K2ENXDTW1P3XAR4J7V7C9D0H"

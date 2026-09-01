@@ -70,8 +70,10 @@ class RelaySubscriptionClientTest {
     }
 
     private fun client(server: MockWebServer) = HttpRelaySubscriptionClient(
-        client = OkHttpClient(),
-        relayUrl = server.url("/").toString(),
+        transport = RelayHttpTransport(
+            client = OkHttpClient(),
+            relayUrl = server.url("/").toString(),
+        ),
     )
 
     private companion object {

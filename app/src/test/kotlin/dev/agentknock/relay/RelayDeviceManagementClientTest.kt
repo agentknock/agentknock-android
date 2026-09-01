@@ -75,8 +75,10 @@ class RelayDeviceManagementClientTest {
     }
 
     private fun client(server: MockWebServer) = HttpRelayDeviceManagementClient(
-        client = OkHttpClient(),
-        relayUrl = server.url("/").toString(),
+        transport = RelayHttpTransport(
+            client = OkHttpClient(),
+            relayUrl = server.url("/").toString(),
+        ),
     )
 
     private companion object {

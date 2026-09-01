@@ -34,8 +34,7 @@ class RelayClaimClientTest {
                     .build(),
             )
             val client = HttpRelayClaimClient(
-                client = OkHttpClient(),
-                relayUrl = server.url("/").toString(),
+                transport = transport(server),
                 dispatcher = UnconfinedTestDispatcher(testScheduler),
                 attestationProvider = attestationProvider(),
             )
@@ -99,8 +98,7 @@ class RelayClaimClientTest {
                     .build(),
             )
             val client = HttpRelayClaimClient(
-                client = OkHttpClient(),
-                relayUrl = server.url("/").toString(),
+                transport = transport(server),
                 dispatcher = UnconfinedTestDispatcher(testScheduler),
                 attestationProvider = attestationProvider(),
             )
@@ -134,8 +132,7 @@ class RelayClaimClientTest {
                     .build(),
             )
             val client = HttpRelayClaimClient(
-                client = OkHttpClient(),
-                relayUrl = server.url("/").toString(),
+                transport = transport(server),
                 dispatcher = UnconfinedTestDispatcher(testScheduler),
                 attestationProvider = attestationProvider(),
             )
@@ -169,8 +166,7 @@ class RelayClaimClientTest {
                     .build(),
             )
             val client = HttpRelayClaimClient(
-                client = OkHttpClient(),
-                relayUrl = server.url("/").toString(),
+                transport = transport(server),
                 dispatcher = UnconfinedTestDispatcher(testScheduler),
                 attestationProvider = DeviceAttestationProvider { _, _ ->
                     error("Attestation provider must not be called")
@@ -193,6 +189,11 @@ class RelayClaimClientTest {
             assertFalse("attestation" in body)
         }
     }
+
+    private fun transport(server: MockWebServer) = RelayHttpTransport(
+        client = OkHttpClient(),
+        relayUrl = server.url("/").toString(),
+    )
 
     private fun attestationProvider() = DeviceAttestationProvider { deviceId, deviceToken ->
         assertEquals(DEVICE_ID, deviceId)
