@@ -147,8 +147,6 @@ internal sealed interface CreateSecretResult {
 internal sealed interface SaveSshSecretResult {
     data class Saved(val id: String) : SaveSshSecretResult
 
-    data object NameInUse : SaveSshSecretResult
-
     data object NotFound : SaveSshSecretResult
 
     data object WrongType : SaveSshSecretResult

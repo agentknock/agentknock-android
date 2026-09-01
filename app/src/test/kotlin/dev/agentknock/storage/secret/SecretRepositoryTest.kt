@@ -11,6 +11,7 @@ import dev.agentknock.storage.crypto.FakeVaultKeyDao
 import dev.agentknock.storage.crypto.VaultKeyManager
 import dev.agentknock.storage.crypto.VaultKeyPurpose
 import kotlinx.coroutines.CancellationException
+import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.flow.Flow
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.combine
@@ -50,7 +51,10 @@ class SecretRepositoryTest {
         assertEquals(SecretType.SSH, summary.type)
         assertEquals(SshKeyAlgorithm.ED25519, summary.sshKey?.algorithm)
 
-        val requested = fixture.repository.requestedSecrets(listOf("production-ssh"))
+        val requested = fixture.resolver.resolve(
+            names = listOf("production-ssh"),
+            includeValues = true,
+        ).values
         check(requested is RequestedSecretsResult.Available)
         assertEquals(
             SecretValues.Ssh("Production host access", key.publicKeyLine),
@@ -105,7 +109,7 @@ class SecretRepositoryTest {
         assertTrue(description.reviewMetadata.isEmpty())
         assertEquals(
             RequestedSecretsResult.UnsupportedSecretType,
-            fixture.repository.requestedSecrets(listOf("corrupt")),
+            fixture.resolver.resolve(listOf("corrupt"), includeValues = true).values,
         )
     }
 
@@ -130,7 +134,7 @@ class SecretRepositoryTest {
         assertTrue(description.reviewMetadata.isEmpty())
         assertEquals(
             RequestedSecretsResult.SecretCorrupted,
-            fixture.repository.requestedSecrets(listOf("production-ssh")),
+            fixture.resolver.resolve(listOf("production-ssh"), includeValues = true).values,
         )
     }
 
@@ -231,7 +235,13 @@ class SecretRepositoryTest {
             privateKey = firstKey,
         )
         check(fixture.repository.describeSshSecretUpload(create) is SshSecretUploadResult.Valid)
-        val created = fixture.repository.applySshSecretUpload(create, "production-ssh")
+        val createPreparation = fixture.uploads.prepareSshSecretUpload(
+            create,
+            approvedName = "production-ssh",
+            target = null,
+        )
+        check(createPreparation is SshSecretUploadPreparation.Ready)
+        val created = fixture.uploads.applyPreparedSshSecretUpload(createPreparation.upload)
         check(created is ApplySshSecretUploadResult.Applied)
 
         val before = fixture.dao.sshKeys.value.single()
@@ -245,11 +255,13 @@ class SecretRepositoryTest {
         )
         val replacePlan = fixture.repository.describeSshSecretUpload(replaceUpload)
         check(replacePlan is SshSecretUploadResult.Valid)
-        val replace = fixture.repository.applySshSecretUpload(
+        val replacePreparation = fixture.uploads.prepareSshSecretUpload(
             replaceUpload,
             approvedName = "ignored-for-existing-secret",
             target = replacePlan.summary.target,
         )
+        check(replacePreparation is SshSecretUploadPreparation.Ready)
+        val replace = fixture.uploads.applyPreparedSshSecretUpload(replacePreparation.upload)
         check(replace is ApplySshSecretUploadResult.Applied)
 
         assertEquals(created.secretId, replace.secretId)
@@ -271,12 +283,18 @@ class SecretRepositoryTest {
         }
 
         assertTrue(
-            fixture.repository.requestedSecrets(listOf("environment", "ssh-0"))
+            fixture.resolver.resolve(
+                listOf("environment", "ssh-0"),
+                includeValues = true,
+            ).values
                 is RequestedSecretsResult.Available,
         )
         assertEquals(
             RequestedSecretsResult.MultipleSshKeys,
-            fixture.repository.requestedSecrets(listOf("ssh-0", "ssh-1")),
+            fixture.resolver.resolve(
+                listOf("ssh-0", "ssh-1"),
+                includeValues = true,
+            ).values,
         )
     }
 
@@ -503,7 +521,10 @@ class SecretRepositoryTest {
             },
         )
 
-        val result = fixture.repository.requestedSecrets(listOf("first", "second"))
+        val result = fixture.resolver.resolve(
+            listOf("first", "second"),
+            includeValues = true,
+        ).values
         check(result is RequestedSecretsResult.Available)
         assertEquals(
             mapOf(
@@ -547,11 +568,14 @@ class SecretRepositoryTest {
 
         assertEquals(
             RequestedSecretsResult.ConflictingVariable("TOKEN"),
-            fixture.repository.requestedSecrets(listOf("first", "second")),
+            fixture.resolver.resolve(
+                listOf("first", "second"),
+                includeValues = true,
+            ).values,
         )
         assertEquals(
             RequestedSecretsResult.MissingSecrets(listOf("missing")),
-            fixture.repository.requestedSecrets(listOf("missing")),
+            fixture.resolver.resolve(listOf("missing"), includeValues = true).values,
         )
     }
 
@@ -577,17 +601,22 @@ class SecretRepositoryTest {
         )
         assertFalse(description.containsSensitiveMaterial)
 
-        val requested = fixture.repository.requestedSecrets(listOf("github"), onlyHost)
+        val requested = fixture.resolver.resolve(
+            listOf("github"),
+            onlyHost,
+            includeValues = true,
+        ).values
         check(requested is RequestedSecretsResult.Available)
         assertEquals(
             mapOf("GH_HOST" to "github.com"),
             (requested.secrets.getValue("github") as SecretValues.Environment).environment,
         )
 
-        val omitted = fixture.repository.requestedSecrets(
+        val omitted = fixture.resolver.resolve(
             listOf("github"),
             mapOf("github" to EnvironmentVariableSelection(omit = setOf("GH_TOKEN", "ABSENT"))),
-        )
+            includeValues = true,
+        ).values
         check(omitted is RequestedSecretsResult.Available)
         assertEquals(
             mapOf("GH_HOST" to "github.com", "UNRELATED" to "hidden"),
@@ -608,21 +637,23 @@ class SecretRepositoryTest {
                 secretName = "environment",
                 names = listOf("MISSING"),
             ),
-            fixture.repository.requestedSecrets(
+            fixture.resolver.resolve(
                 listOf("environment"),
                 mapOf(
                     "environment" to EnvironmentVariableSelection(
                         only = setOf("TOKEN", "MISSING"),
                     ),
                 ),
-            ),
+                includeValues = true,
+            ).values,
         )
         assertEquals(
             RequestedSecretsResult.EnvironmentOptionsForSshSecret("git-signing"),
-            fixture.repository.requestedSecrets(
+            fixture.resolver.resolve(
                 listOf("git-signing"),
                 mapOf("git-signing" to EnvironmentVariableSelection(omit = setOf("TOKEN"))),
-            ),
+                includeValues = true,
+            ).values,
         )
     }
 
@@ -646,14 +677,19 @@ class SecretRepositoryTest {
         )
         assertEquals(
             RequestedSecretsResult.ConflictingVariable("TOKEN"),
-            fixture.repository.requestedSecrets(listOf("first", "second"), delivery),
+            fixture.resolver.resolve(
+                listOf("first", "second"),
+                delivery,
+                includeValues = true,
+            ).values,
         )
         assertEquals(
             RequestedSecretsResult.MissingEnvironmentVariables("first", listOf("ABSENT")),
-            fixture.repository.requestedSecrets(
+            fixture.resolver.resolve(
                 listOf("first"),
                 mapOf("first" to EnvironmentVariableSelection(rename = mapOf("ABSENT" to "TOKEN"))),
-            ),
+                includeValues = true,
+            ).values,
         )
     }
 
@@ -675,10 +711,11 @@ class SecretRepositoryTest {
             description.reviewMetadata.single()
                 .environmentVariableDestinations.getValue("TOKEN"),
         )
-        val requested = fixture.repository.requestedSecrets(
+        val requested = fixture.resolver.resolve(
             listOf("input", "environment"),
             delivery,
-        )
+            includeValues = true,
+        ).values
         check(requested is RequestedSecretsResult.Available)
         assertEquals(
             mapOf("TOKEN" to "stdin-value"),
@@ -686,10 +723,11 @@ class SecretRepositoryTest {
         )
         assertEquals(
             RequestedSecretsResult.MissingEnvironmentVariables("input", listOf("MISSING")),
-            fixture.repository.requestedSecrets(
+            fixture.resolver.resolve(
                 listOf("input"),
                 mapOf("input" to EnvironmentVariableSelection(stdin = "MISSING")),
-            ),
+                includeValues = true,
+            ).values,
         )
     }
 
@@ -747,7 +785,7 @@ class SecretRepositoryTest {
     fun `uploaded secrets make new environment variables sensitive by default`() = runTest {
         val fixture = Fixture()
 
-        val result = fixture.repository.applyEnvironmentSecretUpload(
+        val preparation = fixture.uploads.prepareEnvironmentSecretUpload(
             EnvironmentSecretUpload(
                 mode = SecretUploadMode.CREATE,
                 name = "cloudflare-read-only",
@@ -756,7 +794,10 @@ class SecretRepositoryTest {
                 variables = mapOf("CF_ACCOUNT_ID" to "account", "CF_TOKEN" to "token"),
             ),
             approvedName = "cloudflare-read-only",
+            target = null,
         )
+        check(preparation is EnvironmentSecretUploadPreparation.Ready)
+        val result = fixture.uploads.applyPreparedEnvironmentSecretUpload(preparation.upload)
 
         check(result is ApplyEnvironmentSecretUploadResult.Applied)
         val secret = fixture.repository.observeSecret(result.secretId).first()
@@ -793,7 +834,7 @@ class SecretRepositoryTest {
         check(region is CreateEnvironmentVariableResult.Created)
         fixture.createVariable(secretId, "OLD_VARIABLE", "old", true)
 
-        val result = fixture.repository.applyEnvironmentSecretUpload(
+        val preparation = fixture.uploads.prepareEnvironmentSecretUpload(
             EnvironmentSecretUpload(
                 mode = SecretUploadMode.REPLACE,
                 name = "aws-read-only",
@@ -810,6 +851,8 @@ class SecretRepositoryTest {
                 checkNotNull(fixture.dao.getSecret(secretId)).revision,
             ),
         )
+        check(preparation is EnvironmentSecretUploadPreparation.Ready)
+        val result = fixture.uploads.applyPreparedEnvironmentSecretUpload(preparation.upload)
 
         assertTrue(result is ApplyEnvironmentSecretUploadResult.Applied)
         val secret = fixture.repository.observeSecret(secretId).first()
@@ -1152,11 +1195,13 @@ class SecretRepositoryTest {
         check(description is EnvironmentSecretUploadResult.Valid)
         assertEquals(listOf("AWS_REGION"), description.summary.unchangedVariables)
 
-        val result = fixture.repository.applyEnvironmentSecretUpload(
+        val preparation = fixture.uploads.prepareEnvironmentSecretUpload(
             upload,
             approvedName = "ignored-for-existing-secret",
             target = description.summary.target,
         )
+        check(preparation is EnvironmentSecretUploadPreparation.Ready)
+        val result = fixture.uploads.applyPreparedEnvironmentSecretUpload(preparation.upload)
 
         assertTrue(result is ApplyEnvironmentSecretUploadResult.Applied)
         val secret = fixture.repository.observeSecret(secretId).first()
@@ -1187,11 +1232,13 @@ class SecretRepositoryTest {
             fixture.repository.saveSecret(secretId, "production", "Edited on the phone"),
         )
 
-        val result = fixture.repository.applyEnvironmentSecretUpload(
+        val preparation = fixture.uploads.prepareEnvironmentSecretUpload(
             upload,
             approvedName = "ignored",
             target = plan.summary.target,
         )
+        check(preparation is EnvironmentSecretUploadPreparation.Ready)
+        val result = fixture.uploads.applyPreparedEnvironmentSecretUpload(preparation.upload)
 
         assertTrue(result is ApplyEnvironmentSecretUploadResult.Applied)
         assertEquals(
@@ -1214,16 +1261,18 @@ class SecretRepositoryTest {
         )
         val plan = fixture.repository.describeEnvironmentSecretUpload(upload)
         check(plan is EnvironmentSecretUploadResult.Valid)
+        val preparation = fixture.uploads.prepareEnvironmentSecretUpload(
+            upload,
+            approvedName = "ignored",
+            target = plan.summary.target,
+        )
+        check(preparation is EnvironmentSecretUploadPreparation.Ready)
 
         assertEquals(SaveSecretResult.SAVED, fixture.repository.saveSecret(originalId, "archive", ""))
         val replacementId = fixture.createSecret("production")
         val replacementVariable = fixture.createVariable(replacementId, "TOKEN", "replacement", true)
 
-        val result = fixture.repository.applyEnvironmentSecretUpload(
-            upload,
-            approvedName = "ignored",
-            target = plan.summary.target,
-        )
+        val result = fixture.uploads.applyPreparedEnvironmentSecretUpload(preparation.upload)
 
         assertTrue(result is ApplyEnvironmentSecretUploadResult.Invalid)
         assertEquals(
@@ -1250,13 +1299,15 @@ class SecretRepositoryTest {
         )
         val plan = fixture.repository.describeEnvironmentSecretUpload(upload)
         check(plan is EnvironmentSecretUploadResult.Valid)
-        fixture.repository.saveInstructions(secretId, "Only for production deploys")
-
-        val result = fixture.repository.applyEnvironmentSecretUpload(
+        val preparation = fixture.uploads.prepareEnvironmentSecretUpload(
             upload,
             approvedName = "ignored",
             target = plan.summary.target,
         )
+        check(preparation is EnvironmentSecretUploadPreparation.Ready)
+        fixture.repository.saveInstructions(secretId, "Only for production deploys")
+
+        val result = fixture.uploads.applyPreparedEnvironmentSecretUpload(preparation.upload)
 
         assertTrue(result is ApplyEnvironmentSecretUploadResult.Invalid)
     }
@@ -1277,14 +1328,35 @@ class SecretRepositoryTest {
             newKeyId = { keyIds.removeFirst() },
             currentTimeMillis = { nextTime() },
         )
+        private val encryption = AesGcmEncryption(keyStore)
+        private val sshKeys = SshKeyCodec()
+        private val material = SecretMaterialStore(
+            keyManager = keyManager,
+            encryption = encryption,
+            sshKeys = sshKeys,
+            cryptographyDispatcher = Dispatchers.IO,
+        )
         val repository = SecretRepository(
             dao = dao,
             keyManager = keyManager,
-            encryption = AesGcmEncryption(keyStore),
+            encryption = encryption,
             audit = audit,
             writeTransaction = ImmediateWriteTransaction,
-            newId = { "id-${++id}" },
+            sshKeys = sshKeys,
+            newId = { nextId() },
             currentTimeMillis = { nextTime() },
+        )
+        val uploads = SecretUploads(
+            dao = dao,
+            material = material,
+            newId = { nextId() },
+            currentTimeMillis = { nextTime() },
+        )
+        val resolver = SecretResolver(
+            dao = dao,
+            material = material,
+            sshKeys = sshKeys,
+            cryptographyDispatcher = Dispatchers.IO,
         )
 
         suspend fun createSecret(name: String): String {
@@ -1309,6 +1381,8 @@ class SecretRepositoryTest {
             check(result is CreateEnvironmentVariableResult.Created)
             return result.id
         }
+
+        private fun nextId(): String = "id-${++id}"
 
         private fun nextTime(): Long = ++time
     }

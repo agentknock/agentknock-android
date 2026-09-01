@@ -696,13 +696,6 @@ internal class SecretRepository(
         name: String,
     ): SecretUploadTarget? = uploads.targetForSecretUpload(mode, name)
 
-    suspend fun applyEnvironmentSecretUpload(
-        upload: EnvironmentSecretUpload,
-        approvedName: String,
-        target: SecretUploadTarget? = null,
-    ): ApplyEnvironmentSecretUploadResult =
-        uploads.applyEnvironmentSecretUpload(upload, approvedName, target)
-
     suspend fun prepareEnvironmentSecretUpload(
         upload: EnvironmentSecretUpload,
         approvedName: String,
@@ -717,12 +710,6 @@ internal class SecretRepository(
 
     suspend fun describeSshSecretUpload(upload: SshSecretUpload): SshSecretUploadResult =
         uploads.describeSshSecretUpload(upload)
-
-    suspend fun applySshSecretUpload(
-        upload: SshSecretUpload,
-        approvedName: String,
-        target: SecretUploadTarget? = null,
-    ): ApplySshSecretUploadResult = uploads.applySshSecretUpload(upload, approvedName, target)
 
     suspend fun prepareSshSecretUpload(
         upload: SshSecretUpload,
@@ -742,12 +729,6 @@ internal class SecretRepository(
         environmentSelections: Map<String, EnvironmentVariableSelection> = emptyMap(),
     ): RequestedSecretDescription =
         resolver.resolve(names, environmentSelections, includeValues = false).description
-
-    suspend fun requestedSecrets(
-        names: List<String>,
-        environmentSelections: Map<String, EnvironmentVariableSelection> = emptyMap(),
-    ): RequestedSecretsResult =
-        resolver.resolve(names, environmentSelections, includeValues = true).values
 
     suspend fun resolveRequestedSecrets(
         names: List<String>,

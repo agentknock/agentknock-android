@@ -123,19 +123,6 @@ internal class SecretUploads(
         }
     }
 
-    suspend fun applyEnvironmentSecretUpload(
-        upload: EnvironmentSecretUpload,
-        approvedName: String,
-        target: SecretUploadTarget?,
-    ): ApplyEnvironmentSecretUploadResult = when (
-        val preparation = prepareEnvironmentSecretUpload(upload, approvedName, target)
-    ) {
-        is EnvironmentSecretUploadPreparation.Invalid ->
-            ApplyEnvironmentSecretUploadResult.Invalid(preparation.message)
-        is EnvironmentSecretUploadPreparation.Ready ->
-            applyPreparedEnvironmentSecretUpload(preparation.upload)
-    }
-
     suspend fun prepareEnvironmentSecretUpload(
         upload: EnvironmentSecretUpload,
         approvedName: String,
@@ -292,19 +279,6 @@ internal class SecretUploads(
                     !proposedPublic.publicKey.contentEquals(previousPublic.publicKey),
             ),
         )
-    }
-
-    suspend fun applySshSecretUpload(
-        upload: SshSecretUpload,
-        approvedName: String,
-        target: SecretUploadTarget?,
-    ): ApplySshSecretUploadResult = when (
-        val preparation = prepareSshSecretUpload(upload, approvedName, target)
-    ) {
-        is SshSecretUploadPreparation.Invalid ->
-            ApplySshSecretUploadResult.Invalid(preparation.message)
-        is SshSecretUploadPreparation.Ready ->
-            applyPreparedSshSecretUpload(preparation.upload)
     }
 
     suspend fun prepareSshSecretUpload(
