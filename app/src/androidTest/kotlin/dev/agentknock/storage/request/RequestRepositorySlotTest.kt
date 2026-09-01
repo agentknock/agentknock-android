@@ -1324,6 +1324,124 @@ class RequestRepositorySlotTest {
     }
 
     @Test
+    fun finishFromAnotherClientIsNotAcknowledgedOrPersisted() = runTest {
+        val material = verifyPairingSas()
+        connect(
+            RelayDeviceEvent.ClientState(CLIENT_ID, RelayClientState.ACTIVE),
+            relayState(CLIENT_ID),
+            RelayDeviceEvent.CaughtUp,
+        )
+        assertEquals(RequestSyncResult.Success, repository.sync())
+        val finish = finishRequest(material)
+        val connection = connect(
+            RelayDeviceEvent.Message(
+                clientId = COLLISION_CLIENT_ID,
+                requestId = FINISH_REQUEST_ID,
+                kind = RelayMessageKind.REQUEST,
+                payload = finish,
+                addressId = null,
+            ),
+            RelayDeviceEvent.CaughtUp,
+        )
+
+        assertEquals(RequestSyncResult.Success, repository.sync())
+
+        assertNull(database.requestDao().getRequestById(FINISH_REQUEST_ID))
+        assertEquals(
+            PairingState.WAITING_FOR_FINISH.storedName,
+            database.requestDao().getPairingAttempt(CLIENT_ID)?.state,
+        )
+        assertFalse(connection.sentFrames.any {
+            it is RelayDeviceFrame.Acknowledgement && it.requestId == FINISH_REQUEST_ID
+        })
+    }
+
+    @Test
+    fun finishAfterPairingRejectionIsNotAcknowledgedOrPersisted() = runTest {
+        val material = verifyPairingSas()
+        assertEquals(PairingDecisionResult.REJECTED, repository.rejectPairing(CLIENT_ID))
+        val connection = connect(
+            requestEvent(FINISH_REQUEST_ID, finishRequest(material)),
+            RelayDeviceEvent.CaughtUp,
+        )
+
+        assertEquals(RequestSyncResult.Success, repository.sync())
+
+        assertNull(database.requestDao().getRequestById(FINISH_REQUEST_ID))
+        assertEquals(
+            PairingState.REJECTED.storedName,
+            database.requestDao().getPairingAttempt(CLIENT_ID)?.state,
+        )
+        assertFalse(connection.sentFrames.any {
+            it is RelayDeviceFrame.Acknowledgement && it.requestId == FINISH_REQUEST_ID
+        })
+    }
+
+    @Test
+    fun failedFinishPromotionRollsBackAndCanBeRetried() = runTest {
+        val material = verifyPairingSas()
+        connect(
+            RelayDeviceEvent.ClientState(CLIENT_ID, RelayClientState.ACTIVE),
+            relayState(CLIENT_ID),
+            RelayDeviceEvent.CaughtUp,
+        )
+        assertEquals(RequestSyncResult.Success, repository.sync())
+        val finish = finishRequest(material)
+        database.useWriterConnection { connection ->
+            connection.executeSQL(
+                """
+                CREATE TRIGGER fail_pairing_completed_audit
+                BEFORE INSERT ON audit_events
+                WHEN NEW.event_type = 'pairing_completed'
+                BEGIN
+                    SELECT RAISE(ABORT, 'forced audit failure');
+                END
+                """.trimIndent(),
+            )
+        }
+
+        val failed = connect(
+            requestEvent(FINISH_REQUEST_ID, finish),
+            RelayDeviceEvent.CaughtUp,
+        )
+        assertEquals(RequestSyncResult.Success, repository.sync())
+        assertNull(database.requestDao().getRequestById(FINISH_REQUEST_ID))
+        assertNull(database.requestDao().getClient(CLIENT_ID))
+        assertEquals(
+            PairingState.WAITING_FOR_FINISH.storedName,
+            database.requestDao().getPairingAttempt(CLIENT_ID)?.state,
+        )
+        assertFalse(failed.sentFrames.any {
+            it is RelayDeviceFrame.Acknowledgement && it.requestId == FINISH_REQUEST_ID
+        })
+
+        database.useWriterConnection { connection ->
+            connection.executeSQL("DROP TRIGGER fail_pairing_completed_audit")
+        }
+        val retried = connect(
+            requestEvent(FINISH_REQUEST_ID, finish),
+            RelayDeviceEvent.Acknowledgement(
+                CLIENT_ID,
+                FINISH_REQUEST_ID,
+                RelayMessageKind.RESPONSE,
+            ),
+            RelayDeviceEvent.CaughtUp,
+        )
+        assertEquals(RequestSyncResult.Success, repository.sync())
+
+        assertNotNull(database.requestDao().getRequestById(FINISH_REQUEST_ID))
+        assertNotNull(database.requestDao().getClient(CLIENT_ID))
+        assertEquals(
+            1,
+            AuditRepository(database.auditDao()).observeEvents().first()
+                .count { it.type == AuditEventType.PAIRING_COMPLETED },
+        )
+        assertTrue(retried.sentFrames.any {
+            it is RelayDeviceFrame.Acknowledgement && it.requestId == FINISH_REQUEST_ID
+        })
+    }
+
+    @Test
     fun suspendedBeforeFinishPromotesSuspendedClientWithoutInventingActiveState() = runTest {
         assertSuspendedFinishOutcome(stateBeforeFinish = true)
     }

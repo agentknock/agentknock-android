@@ -102,13 +102,6 @@ private sealed interface SynchronizationInput {
     data object PendingChanges : SynchronizationInput
 }
 
-internal enum class PairingDecisionResult {
-    VERIFIED,
-    REJECTED,
-    NOT_PENDING,
-    NOT_FOUND,
-}
-
 internal sealed interface SshAuthenticationDecisionResult {
     data object Decided : SshAuthenticationDecisionResult
     data object NotPending : SshAuthenticationDecisionResult
@@ -1087,17 +1080,13 @@ internal class RequestRepository(
         if (client != null) {
             return processActiveClientRequest(credentials, message, requestPayload, client, now)
         }
-        val attempt = dao.getPairingAttempt(message.clientId) ?: return null
-        val rootRequest = dao.getRequestById(attempt.requestId) ?: return null
-        if (rootRequest.deviceIdentityId != credentials.deviceIdentityId) return null
-        if (!attempt.state.toPairingState().acceptsFinishRequest) return null
-        val clientPsk = material.decryptPendingPsk(attempt, rootRequest) ?: return null
+        val pairing = pairingRequests.finishContext(credentials, message.clientId) ?: return null
         val opened = runCatching {
             pairedRequestProtocol.openPairedRequest(
                 deviceId = credentials.deviceId,
                 requestId = message.requestId,
-                clientId = attempt.clientId,
-                clientPsk = clientPsk,
+                clientId = pairing.clientId,
+                clientPsk = pairing.clientPsk,
                 previousClientPsk = null,
                 allowRotation = false,
                 devicePrivateKey = credentials.devicePrivateKey,
@@ -1108,8 +1097,8 @@ internal class RequestRepository(
         val acceptedPsks = try {
             AcceptedRequestPsks(
                 requestPsk = material.encryptRequestPsk(
-                    deviceIdentityId = rootRequest.deviceIdentityId,
-                    clientId = rootRequest.clientId,
+                    deviceIdentityId = pairing.deviceIdentityId,
+                    clientId = pairing.clientId,
                     relayRequestId = message.requestId,
                     clientPsk = opened.clientPsk,
                 ),
@@ -1123,18 +1112,21 @@ internal class RequestRepository(
         }
         val method = runCatching { pairedRequestProtocol.method(opened.plaintext) }.getOrNull()
         if (method == PairedRequestProtocol.FINISH_PAIRING_METHOD) {
-            return processFinishRequest(
-                credentials = credentials,
+            return pairingRequests.receiveFinish(
+                pairing = pairing,
                 relayRequestId = message.requestId,
                 requestPayload = requestPayload,
-                pairing = attempt,
-                opened = opened,
-                acceptedSecrets = acceptedPsks,
+                plaintext = opened.plaintext,
+                requestPsk = acceptedPsks.requestPsk,
+                sealResponse = { responsePlaintext ->
+                    runCatching {
+                        pairedRequestProtocol.sealPairedResponse(opened, responsePlaintext)
+                    }.getOrNull()
+                },
             )
         }
         return rejectPendingPairingRequest(
-            attempt = attempt,
-            rootRequest = rootRequest,
+            pairing = pairing,
             relayRequestId = message.requestId,
             requestPayload = requestPayload,
             opened = opened,
@@ -1144,7 +1136,6 @@ internal class RequestRepository(
             } else {
                 PairedRequestErrorCode.INVALID_STATE
             },
-            now = now,
         )
     }
 
@@ -1420,14 +1411,12 @@ internal class RequestRepository(
     }
 
     private suspend fun rejectPendingPairingRequest(
-        attempt: PairingAttemptEntity,
-        rootRequest: InboxRequestEntity,
+        pairing: PairingFinishContext,
         relayRequestId: String,
         requestPayload: JsonElement,
         opened: OpenedPairedRequest,
         acceptedPsks: AcceptedRequestPsks,
         code: PairedRequestErrorCode,
-        now: Long,
     ): ProcessedRelayMessage? {
         val response = runCatching {
             pairedRequestProtocol.sealPairedResponse(
@@ -1435,45 +1424,15 @@ internal class RequestRepository(
                 plaintext = pairedRequestProtocol.errorResponse(code),
             )
         }.getOrNull() ?: return null
-        if (!persistRejectedRequest {
-            writeTransaction.execute {
-                dao.insertHiddenPairedRequest(
-                    request = InboxRequestEntity(
-                        id = relayRequestId,
-                        parentRequestId = rootRequest.id,
-                        deviceIdentityId = rootRequest.deviceIdentityId,
-                        clientId = rootRequest.clientId,
-                        clientNameSnapshot = attempt.auditClientName(),
-                        clientSoftwareJson = rootRequest.clientSoftwareJson,
-                        kind = RequestKind.UNKNOWN.storedName,
-                        state = InboxRequestState.COMPLETED.storedName,
-                        listed = false,
-                        requestJson = requestPayload.toString(),
-                        responseJson = response.toString(),
-                        error = code.message,
-                        receivedAt = now,
-                        completedAt = now,
-                        exchangeEndedAt = null,
-                        responseOutboxFinished = false,
-                    ),
-                    client = null,
-                    requestPsk = acceptedPsks.requestPsk,
-                    currentClientPsk = null,
-                    previousClientPsk = null,
-                )
-                audit.append(
-                    records = listOf(
-                        rejectedRequestAudit(
-                            clientId = rootRequest.clientId,
-                            clientName = attempt.auditClientName(),
-                            relayRequestId = relayRequestId,
-                            code = code,
-                        ),
-                    ),
-                    occurredAt = now,
-                )
-            }
-        }) return null
+        if (!pairingRequests.recordRejectedRequest(
+                pairing = pairing,
+                relayRequestId = relayRequestId,
+                requestPayload = requestPayload,
+                responsePayload = response,
+                requestPsk = acceptedPsks.requestPsk,
+                code = code,
+            )
+        ) return null
         return ProcessedRelayMessage(response)
     }
 
@@ -1518,44 +1477,6 @@ internal class RequestRepository(
         } else {
             null
         }
-    }
-
-    private suspend fun processFinishRequest(
-        credentials: RelayDeviceCredentials,
-        relayRequestId: String,
-        requestPayload: JsonElement,
-        pairing: PairingAttemptEntity,
-        opened: OpenedPairedRequest,
-        acceptedSecrets: AcceptedRequestPsks,
-    ): ProcessedRelayMessage? {
-        val rootRequest = dao.getRequestById(pairing.requestId) ?: return null
-        if (rootRequest.deviceIdentityId != credentials.deviceIdentityId) return null
-        if (!pairing.state.toPairingState().acceptsFinishRequest) return null
-        val relayClientState = pairing.relayClientState.toRelayClientState()
-        if (
-            relayClientState == RelayClientState.PENDING &&
-            pairing.desiredRelayClientState != RelayClientState.ACTIVE.wireName
-        ) return null
-        val response = runCatching {
-            pairingRequests.prepareFinishResponse(
-                opened = opened,
-            )
-        }.getOrNull() ?: return null
-        val promoted = try {
-            pairingRequests.promoteFinish(
-                relayRequestId = relayRequestId,
-                requestPayload = requestPayload,
-                responsePayload = response,
-                pairingRequestId = pairing.requestId,
-                clientPsk = opened.clientPsk,
-                requestPsk = acceptedSecrets.requestPsk,
-            )
-        } catch (cancelled: CancellationException) {
-            throw cancelled
-        } catch (_: Exception) {
-            return null
-        }
-        return ProcessedRelayMessage(response).takeIf { promoted }
     }
 
     private suspend fun processCompletion(

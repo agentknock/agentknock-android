@@ -36,8 +36,6 @@ internal class PairingProtocol(
     private val json: Json = Json { ignoreUnknownKeys = true },
     private val random: SecureRandom = SecureRandom(),
 ) {
-    private val pairedRequests = PairedRequestProtocol(json, random)
-
     fun isInitialRequest(request: JsonElement): Boolean = runCatching {
         json.decodeFromJsonElement(PairingRequest.serializer(), request)
     }.isSuccess
@@ -149,24 +147,20 @@ internal class PairingProtocol(
     }
 
     fun prepareFinishResponse(
-        opened: OpenedPairedRequest,
-    ): JsonElement {
+        request: ByteArray,
+    ): ByteArray {
         val contents = json.decodeFromString(
             FinishRequest.serializer(),
-            opened.plaintext.decodeToString(),
+            request.decodeToString(),
         )
-        json.decodeClientSoftware(opened.plaintext)
+        json.decodeClientSoftware(request)
         require(contents.method == PairedRequestProtocol.FINISH_PAIRING_METHOD) {
             "Unexpected pairing method"
         }
-        val responsePlaintext = json.encodeToString(
+        return json.encodeToString(
             FinishResult.serializer(),
             FinishResult(RESULT_ACCEPTED),
         ).encodeToByteArray()
-        return pairedRequests.sealPairedResponse(
-            opened = opened,
-            plaintext = responsePlaintext,
-        )
     }
 
     fun finishCompletionAccepted(plaintext: ByteArray): Boolean {

@@ -152,38 +152,18 @@ class PairingProtocolTest {
     }
 
     @Test
-    fun `answers an already-opened finish pairing exchange`() {
-        val clientPsk = ByteArray(32) { (it + 1).toByte() }
-        val sender = pskHpke.SetupPSKS(
-            pskHpke.deserializePublicKey(devicePublicKey),
-            pairedProtocolInfo(FINISH_REQUEST_ID),
-            clientPsk,
-            CLIENT_ID.ulidBytes(),
-        )
+    fun `prepares the finish pairing response plaintext`() {
         val requestPlaintext =
             """{${testClientSoftwareFields()},"method":"PairingFinish"}"""
                 .encodeToByteArray()
-        val request = json.parseToJsonElement(
-            """{"version":"agentknock-v1","key":"${BASE64.encodeToString(sender.encapsulation)}","ciphertext":"${BASE64.encodeToString(sender.seal(EMPTY, requestPlaintext))}"}""",
-        )
-        val opened = pairedProtocol.openPairedRequest(
-            deviceId = DEVICE_ID,
-            requestId = FINISH_REQUEST_ID,
-            clientId = CLIENT_ID,
-            clientPsk = clientPsk,
-            allowRotation = false,
-            devicePrivateKey = devicePrivateKey,
-            devicePublicKey = devicePublicKey,
-            request = request,
-        )
 
         val prepared = protocol.prepareFinishResponse(
-            opened = opened,
+            request = requestPlaintext,
         )
 
         assertEquals(
             "{\"result\":\"ACCEPTED\"}",
-            openResponse(sender, prepared).decodeToString(),
+            prepared.decodeToString(),
         )
     }
 
