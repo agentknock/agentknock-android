@@ -1,10 +1,13 @@
 package dev.agentknock.ui.settings
 
+import androidx.lifecycle.SavedStateHandle
+import androidx.lifecycle.viewModelScope
 import dev.agentknock.storage.audit.AuditDao
 import dev.agentknock.storage.audit.AuditEventEntity
 import dev.agentknock.storage.audit.AuditRepository
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.ExperimentalCoroutinesApi
+import kotlinx.coroutines.cancel
 import kotlinx.coroutines.cancelAndJoin
 import kotlinx.coroutines.flow.Flow
 import kotlinx.coroutines.flow.MutableSharedFlow
@@ -23,12 +26,49 @@ import org.junit.Test
 class AuditViewModelTest {
     @OptIn(ExperimentalCoroutinesApi::class)
     @Test
+    fun `restores the selected event from saved state`() = runTest {
+        val dispatcher = UnconfinedTestDispatcher(testScheduler)
+        Dispatchers.setMain(dispatcher)
+        var originalToClose: AuditViewModel? = null
+        var restoredToClose: AuditViewModel? = null
+        try {
+            val original = AuditViewModel(
+                AuditRepository(TrackingAuditDao()),
+                SavedStateHandle(),
+            ).also {
+                originalToClose = it
+                it.selectEvent(7L)
+            }
+
+            val restored = AuditViewModel(
+                AuditRepository(TrackingAuditDao()),
+                SavedStateHandle(
+                    mapOf("selected_audit_event_id" to original.selectedEventId.value),
+                ),
+            ).also { restoredToClose = it }
+
+            assertEquals(7L, original.selectedEventId.value)
+            assertEquals(7L, restored.selectedEventId.value)
+        } finally {
+            originalToClose?.viewModelScope?.cancel()
+            restoredToClose?.viewModelScope?.cancel()
+            runCurrent()
+            Dispatchers.resetMain()
+        }
+    }
+
+    @OptIn(ExperimentalCoroutinesApi::class)
+    @Test
     fun `loads only while observed and replays page state when observation resumes`() = runTest {
         val dispatcher = UnconfinedTestDispatcher(testScheduler)
         Dispatchers.setMain(dispatcher)
+        var viewModelToClose: AuditViewModel? = null
         try {
             val dao = TrackingAuditDao()
-            val viewModel = AuditViewModel(AuditRepository(dao))
+            val viewModel = AuditViewModel(
+                AuditRepository(dao),
+                SavedStateHandle(),
+            ).also { viewModelToClose = it }
 
             assertEquals(AuditHistoryState.Loading, viewModel.history.value)
             assertEquals(AuditDetailState.None, viewModel.detail.value)
@@ -96,6 +136,8 @@ class AuditViewModelTest {
             assertEquals(AuditDetailState.None, viewModel.detail.value)
             assertEquals(7L, viewModel.selectedEventId.value)
         } finally {
+            viewModelToClose?.viewModelScope?.cancel()
+            runCurrent()
             Dispatchers.resetMain()
         }
     }

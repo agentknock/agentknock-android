@@ -1,5 +1,6 @@
 package dev.agentknock.ui.clients
 
+import androidx.lifecycle.SavedStateHandle
 import androidx.lifecycle.ViewModel
 import androidx.lifecycle.viewModelScope
 import dev.agentknock.relay.RelayClientState
@@ -66,6 +67,7 @@ internal sealed interface ClientPaneState {
 
 @OptIn(ExperimentalCoroutinesApi::class)
 internal class ClientsViewModel(
+    private val savedStateHandle: SavedStateHandle,
     private val repository: RequestRepository,
     private val inbox: RequestInbox,
     private val secrets: SecretRepository,
@@ -73,7 +75,11 @@ internal class ClientsViewModel(
     private val deviceManagement: DeviceManagementRepository,
     private val awaitStorageReady: suspend () -> Unit,
 ) : ViewModel() {
-    private val selected = MutableStateFlow<ClientSelection>(ClientSelection.None)
+    private val selected = MutableStateFlow(
+        savedStateHandle.get<String>(SELECTED_CLIENT)?.let(ClientSelection::Client)
+            ?: savedStateHandle.get<String>(SELECTED_PAIRING)?.let(ClientSelection::Pairing)
+            ?: ClientSelection.None,
+    )
 
     val clients: StateFlow<List<ClientSummary>> = repository.observeClients().stateIn(
         scope = viewModelScope,
@@ -113,16 +119,16 @@ internal class ClientsViewModel(
         .onEach { pane ->
             when (pane) {
                 is ClientPaneState.Missing ->
-                    selected.compareAndSet(pane.selection, ClientSelection.None)
+                    compareAndSetSelection(pane.selection, ClientSelection.None)
                 is ClientPaneState.Pairing -> {
                     val pairing = (pane.request.content as InboxRequestContent.Pairing).details
                     when (pairing.pairingState) {
-                        PairingState.COMPLETED -> selected.compareAndSet(
+                        PairingState.COMPLETED -> compareAndSetSelection(
                             pane.selection,
                             ClientSelection.Client(pairing.clientId),
                         )
                         PairingState.REJECTED ->
-                            selected.compareAndSet(pane.selection, ClientSelection.None)
+                            compareAndSetSelection(pane.selection, ClientSelection.None)
                         else -> Unit
                     }
                 }
@@ -153,19 +159,19 @@ internal class ClientsViewModel(
         )
 
     fun selectClient(clientId: String?) {
-        selected.value = clientId?.let(ClientSelection::Client) ?: ClientSelection.None
+        setSelection(clientId?.let(ClientSelection::Client) ?: ClientSelection.None)
     }
 
     fun selectPairing(requestId: String?) {
-        selected.value = requestId?.let(ClientSelection::Pairing) ?: ClientSelection.None
+        setSelection(requestId?.let(ClientSelection::Pairing) ?: ClientSelection.None)
     }
 
     fun clearSelection(expected: ClientSelection) {
-        selected.compareAndSet(expected, ClientSelection.None)
+        compareAndSetSelection(expected, ClientSelection.None)
     }
 
     fun clearSelection() {
-        selected.value = ClientSelection.None
+        setSelection(ClientSelection.None)
     }
 
     suspend fun rename(clientId: String, name: String): ClientChangeResult =
@@ -199,5 +205,27 @@ internal class ClientsViewModel(
     suspend fun rejectPairing(requestId: String): PairingDecisionResult {
         awaitStorageReady()
         return repository.rejectPairing(requestId)
+    }
+
+    private fun setSelection(selection: ClientSelection) {
+        selected.value = selection
+        persistSelection(selection)
+    }
+
+    private fun compareAndSetSelection(
+        expected: ClientSelection,
+        selection: ClientSelection,
+    ) {
+        if (selected.compareAndSet(expected, selection)) persistSelection(selection)
+    }
+
+    private fun persistSelection(selection: ClientSelection) {
+        savedStateHandle[SELECTED_CLIENT] = (selection as? ClientSelection.Client)?.clientId
+        savedStateHandle[SELECTED_PAIRING] = (selection as? ClientSelection.Pairing)?.requestId
+    }
+
+    private companion object {
+        const val SELECTED_CLIENT = "selected_client_id"
+        const val SELECTED_PAIRING = "selected_pairing_request_id"
     }
 }

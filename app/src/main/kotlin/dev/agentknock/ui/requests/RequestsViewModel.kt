@@ -1,5 +1,6 @@
 package dev.agentknock.ui.requests
 
+import androidx.lifecycle.SavedStateHandle
 import androidx.lifecycle.ViewModel
 import androidx.lifecycle.viewModelScope
 import dev.agentknock.storage.request.InvocationDecisionResult
@@ -13,7 +14,6 @@ import dev.agentknock.storage.request.GitSignDecisionResult
 import dev.agentknock.storage.request.SshAuthenticationDecisionResult
 import dev.agentknock.ui.requestHistory
 import kotlinx.coroutines.ExperimentalCoroutinesApi
-import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.SharingStarted
 import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.flatMapLatest
@@ -41,12 +41,16 @@ internal sealed interface RequestPaneState {
 
 @OptIn(ExperimentalCoroutinesApi::class)
 internal class RequestsViewModel(
+    savedStateHandle: SavedStateHandle,
     private val repository: RequestRepository,
     private val inbox: RequestInbox,
     private val connection: RequestConnectionManager,
     private val awaitStorageReady: suspend () -> Unit,
 ) : ViewModel() {
-    private val selectedRequestId = MutableStateFlow<String?>(null)
+    private val selectedRequestId = savedStateHandle.getMutableStateFlow<String?>(
+        SELECTED_REQUEST_ID,
+        null,
+    )
 
     val allRequests: StateFlow<List<InboxRequestSummary>> = inbox.observeRequests().stateIn(
         scope = viewModelScope,
@@ -139,4 +143,7 @@ internal class RequestsViewModel(
         return repository.allowSshAuthenticationTemporarily(requestId)
     }
 
+    private companion object {
+        const val SELECTED_REQUEST_ID = "selected_request_id"
+    }
 }

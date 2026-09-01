@@ -1,11 +1,11 @@
 package dev.agentknock.ui.settings
 
+import androidx.lifecycle.SavedStateHandle
 import androidx.lifecycle.ViewModel
 import androidx.lifecycle.viewModelScope
 import dev.agentknock.storage.audit.AuditEvent
 import dev.agentknock.storage.audit.AuditRepository
 import kotlinx.coroutines.ExperimentalCoroutinesApi
-import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.SharingStarted
 import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.asStateFlow
@@ -29,8 +29,12 @@ internal sealed interface AuditDetailState {
 @OptIn(ExperimentalCoroutinesApi::class)
 internal class AuditViewModel(
     audit: AuditRepository,
+    savedStateHandle: SavedStateHandle,
 ) : ViewModel() {
-    private val _selectedEventId = MutableStateFlow<Long?>(null)
+    private val _selectedEventId = savedStateHandle.getMutableStateFlow<Long?>(
+        SELECTED_EVENT_ID,
+        null,
+    )
 
     val history: StateFlow<AuditHistoryState> = audit.observeEvents()
         .map<List<AuditEvent>, AuditHistoryState> { events -> AuditHistoryState.Loaded(events) }
@@ -66,5 +70,6 @@ internal class AuditViewModel(
         )
 
         private const val AUDIT_REPLAY_GRACE_MILLIS = 5_000L
+        private const val SELECTED_EVENT_ID = "selected_audit_event_id"
     }
 }

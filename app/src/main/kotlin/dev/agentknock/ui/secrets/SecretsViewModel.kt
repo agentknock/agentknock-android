@@ -1,5 +1,6 @@
 package dev.agentknock.ui.secrets
 
+import androidx.lifecycle.SavedStateHandle
 import androidx.lifecycle.ViewModel
 import androidx.lifecycle.viewModelScope
 import dev.agentknock.storage.request.InboxRequestContent
@@ -77,13 +78,17 @@ internal sealed interface SecretsEditor {
 
 @OptIn(ExperimentalCoroutinesApi::class)
 internal class SecretsViewModel(
+    private val savedStateHandle: SavedStateHandle,
     private val repository: SecretRepository,
     private val requests: RequestRepository,
     private val inbox: RequestInbox,
     private val deviceIdentity: DeviceIdentityRepository,
     private val awaitStorageReady: suspend () -> Unit,
 ) : ViewModel() {
-    private val selectedTarget = MutableStateFlow<SecretTarget?>(null)
+    private val selectedTarget = MutableStateFlow(
+        savedStateHandle.get<String>(SELECTED_SECRET)?.let(SecretTarget::Stored)
+            ?: savedStateHandle.get<String>(SELECTED_UPLOAD)?.let(SecretTarget::Upload),
+    )
     private val editorState = MutableStateFlow<SecretsEditor>(SecretsEditor.None)
     private var nextEditorSession = 0L
     private var secretReadEpoch = 0L
@@ -125,7 +130,7 @@ internal class SecretsViewModel(
                 is SecretTarget.Stored -> repository.observeSecret(target.id)
                     .transform<SecretDetails?, SecretsContent> { details ->
                         if (details == null) {
-                            if (selectedTarget.compareAndSet(target, null)) {
+                            if (clearSelectedTarget(target)) {
                                 emit(SecretsContent.List)
                             }
                         } else {
@@ -141,7 +146,7 @@ internal class SecretsViewModel(
                             upload == null ||
                             upload.details.state != SecretUploadRequestState.REVIEW_PENDING
                         ) {
-                            if (selectedTarget.compareAndSet(target, null)) {
+                            if (clearSelectedTarget(target)) {
                                 emit(SecretsContent.List)
                             }
                         } else {
@@ -417,6 +422,19 @@ internal class SecretsViewModel(
     private fun setSelectedTarget(target: SecretTarget?) {
         secretReadEpoch += 1
         selectedTarget.value = target
+        persistSelectedTarget(target)
+    }
+
+    private fun clearSelectedTarget(expected: SecretTarget): Boolean {
+        if (!selectedTarget.compareAndSet(expected, null)) return false
+        secretReadEpoch += 1
+        persistSelectedTarget(null)
+        return true
+    }
+
+    private fun persistSelectedTarget(target: SecretTarget?) {
+        savedStateHandle[SELECTED_SECRET] = (target as? SecretTarget.Stored)?.id
+        savedStateHandle[SELECTED_UPLOAD] = (target as? SecretTarget.Upload)?.requestId
     }
 
     suspend fun createSecret(name: String, description: String): CreateSecretResult =
@@ -488,9 +506,7 @@ internal class SecretsViewModel(
 
     suspend fun deleteSecret(id: String): Boolean {
         val deleted = repository.deleteSecret(id)
-        if (deleted && selectedTarget.compareAndSet(SecretTarget.Stored(id), null)) {
-            secretReadEpoch += 1
-        }
+        if (deleted) clearSelectedTarget(SecretTarget.Stored(id))
         return deleted
     }
 
@@ -556,6 +572,11 @@ internal class SecretsViewModel(
     ): Boolean {
         awaitStorageReady()
         return requests.setSecretUploadVariableSensitivity(requestId, variableId, sensitive)
+    }
+
+    private companion object {
+        const val SELECTED_SECRET = "selected_secret_id"
+        const val SELECTED_UPLOAD = "selected_upload_request_id"
     }
 }
 

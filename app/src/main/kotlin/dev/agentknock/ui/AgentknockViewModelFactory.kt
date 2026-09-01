@@ -3,6 +3,7 @@ package dev.agentknock.ui
 import android.app.Application
 import android.app.ActivityManager
 import androidx.lifecycle.ViewModelProvider
+import androidx.lifecycle.createSavedStateHandle
 import androidx.lifecycle.viewmodel.initializer
 import androidx.lifecycle.viewmodel.viewModelFactory
 import dev.agentknock.ApplicationContainer
@@ -38,6 +39,7 @@ internal fun agentknockViewModelFactory(
         }
         initializer {
             RequestsViewModel(
+                savedStateHandle = createSavedStateHandle(),
                 repository = container.requests,
                 inbox = container.requestInbox,
                 connection = container.requestConnection,
@@ -46,6 +48,7 @@ internal fun agentknockViewModelFactory(
         }
         initializer {
             SecretsViewModel(
+                savedStateHandle = createSavedStateHandle(),
                 repository = container.secrets,
                 requests = container.requests,
                 inbox = container.requestInbox,
@@ -55,6 +58,7 @@ internal fun agentknockViewModelFactory(
         }
         initializer {
             ClientsViewModel(
+                savedStateHandle = createSavedStateHandle(),
                 repository = container.requests,
                 inbox = container.requestInbox,
                 secrets = container.secrets,
@@ -70,7 +74,10 @@ internal fun agentknockViewModelFactory(
             )
         }
         initializer {
-            AuditViewModel(container.audit)
+            AuditViewModel(
+                audit = container.audit,
+                savedStateHandle = createSavedStateHandle(),
+            )
         }
         initializer {
             SettingsViewModel(
