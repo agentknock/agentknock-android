@@ -1,1 +1,1 @@
-Adds privacy-preserving device attestation during setup and refreshes stale unclaimed device IDs. Improves AI review context for secrets already approved by policy.
+Agentknock 0.2.0 improves operation handling, restored-data recovery, device setup, and AI review context.
