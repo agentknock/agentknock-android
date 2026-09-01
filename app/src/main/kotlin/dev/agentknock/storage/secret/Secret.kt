@@ -158,10 +158,6 @@ internal data class EnvironmentVariableEntity(
     val notes: String,
     @Embedded
     val encryptedValue: EncryptedValue,
-    @ColumnInfo(name = "created_at")
-    val createdAt: Long,
-    @ColumnInfo(name = "updated_at")
-    val updatedAt: Long,
     @ColumnInfo(name = "value_updated_at")
     val valueUpdatedAt: Long,
 )
@@ -196,12 +192,8 @@ internal data class SshKeyEntity(
     val publicKey: ByteArray,
     @ColumnInfo(name = "comment")
     val comment: String,
-    @ColumnInfo(name = "private_key_format")
-    val privateKeyFormat: String,
     @Embedded
     val encryptedPrivateKey: EncryptedValue,
-    @ColumnInfo(name = "material_updated_at")
-    val materialUpdatedAt: Long,
 )
 
 internal data class SecretSummaryRow(
@@ -227,8 +219,6 @@ internal data class SecretSummaryRow(
     val sshComment: String? = null,
     @ColumnInfo(name = "ssh_encryption_key_id")
     val sshEncryptionKeyId: String? = null,
-    @ColumnInfo(name = "ssh_material_updated_at")
-    val sshMaterialUpdatedAt: Long? = null,
 )
 
 internal data class EnvironmentVariableMetadataRow(
@@ -244,10 +234,6 @@ internal data class EnvironmentVariableMetadataRow(
     val notes: String,
     @ColumnInfo(name = "encryption_key_id")
     val encryptionKeyId: String,
-    @ColumnInfo(name = "created_at")
-    val createdAt: Long,
-    @ColumnInfo(name = "updated_at")
-    val updatedAt: Long,
     @ColumnInfo(name = "value_updated_at")
     val valueUpdatedAt: Long,
 )
@@ -263,8 +249,6 @@ internal data class SshKeyMetadataRow(
     val comment: String,
     @ColumnInfo(name = "encryption_key_id")
     val encryptionKeyId: String,
-    @ColumnInfo(name = "material_updated_at")
-    val materialUpdatedAt: Long,
 )
 
 /** A transactionally consistent view of every usable secret and its typed content. */
@@ -293,8 +277,7 @@ internal interface SecretDao {
                ssh_keys.algorithm AS ssh_algorithm,
                ssh_keys.public_key AS ssh_public_key,
                ssh_keys.comment AS ssh_comment,
-               ssh_keys.encryption_key_id AS ssh_encryption_key_id,
-               ssh_keys.material_updated_at AS ssh_material_updated_at
+               ssh_keys.encryption_key_id AS ssh_encryption_key_id
         FROM secrets
         LEFT JOIN environment_variables ON environment_variables.secret_id = secrets.id
         LEFT JOIN ssh_keys ON ssh_keys.secret_id = secrets.id
@@ -337,8 +320,6 @@ internal interface SecretDao {
                sensitive,
                notes,
                encryption_key_id,
-               created_at,
-               updated_at,
                value_updated_at
         FROM environment_variables
         WHERE secret_id = :secretId
@@ -355,8 +336,7 @@ internal interface SecretDao {
                algorithm,
                public_key,
                comment,
-               encryption_key_id,
-               material_updated_at
+               encryption_key_id
         FROM ssh_keys
         WHERE secret_id = :secretId
         """,
@@ -584,7 +564,7 @@ internal interface SecretDao {
     @Query(
         "UPDATE environment_variables SET name = :name, sensitive = :sensitive, notes = :notes, " +
             "encryption_format = :encryptionFormat, encryption_key_id = :encryptionKeyId, " +
-            "nonce = :nonce, ciphertext = :ciphertext, updated_at = :updatedAt, " +
+            "nonce = :nonce, ciphertext = :ciphertext, " +
             "value_updated_at = :valueUpdatedAt WHERE id = :variableId AND secret_id = :secretId",
     )
     suspend fun updateEnvironmentVariableMaterialRow(
@@ -597,12 +577,11 @@ internal interface SecretDao {
         encryptionKeyId: String,
         nonce: ByteArray,
         ciphertext: ByteArray,
-        updatedAt: Long,
         valueUpdatedAt: Long,
     ): Int
 
     @Query(
-        "UPDATE environment_variables SET notes = :notes, updated_at = :updatedAt " +
+        "UPDATE environment_variables SET notes = :notes " +
             "WHERE id = :variableId AND secret_id = :secretId " +
             "AND EXISTS (SELECT 1 FROM secrets WHERE id = :secretId AND type = 'environment')",
     )
@@ -610,7 +589,6 @@ internal interface SecretDao {
         variableId: String,
         secretId: String,
         notes: String,
-        updatedAt: Long,
     ): Int
 
     @Delete
@@ -621,21 +599,19 @@ internal interface SecretDao {
 
     @Query(
         "UPDATE ssh_keys SET algorithm = :algorithm, public_key = :publicKey, comment = :comment, " +
-            "private_key_format = :privateKeyFormat, encryption_format = :encryptionFormat, " +
-            "encryption_key_id = :encryptionKeyId, nonce = :nonce, ciphertext = :ciphertext, " +
-            "material_updated_at = :materialUpdatedAt WHERE secret_id = :secretId",
+            "encryption_format = :encryptionFormat, " +
+            "encryption_key_id = :encryptionKeyId, nonce = :nonce, ciphertext = :ciphertext " +
+            "WHERE secret_id = :secretId",
     )
     suspend fun updateSshKeyMaterialRow(
         secretId: String,
         algorithm: String,
         publicKey: ByteArray,
         comment: String,
-        privateKeyFormat: String,
         encryptionFormat: Int,
         encryptionKeyId: String,
         nonce: ByteArray,
         ciphertext: ByteArray,
-        materialUpdatedAt: Long,
     ): Int
 
     @Query("UPDATE ssh_keys SET comment = :comment WHERE secret_id = :secretId")
@@ -645,7 +621,7 @@ internal interface SecretDao {
         "UPDATE environment_variables SET sensitive = :sensitive, " +
             "encryption_format = :encryptionFormat, encryption_key_id = :encryptionKeyId, " +
             "nonce = :nonce, ciphertext = :ciphertext, " +
-            "updated_at = :updatedAt, value_updated_at = :updatedAt " +
+            "value_updated_at = :valueUpdatedAt " +
             "WHERE id = :variableId AND secret_id = :secretId",
     )
     suspend fun updateUploadedEnvironmentVariableRow(
@@ -656,7 +632,7 @@ internal interface SecretDao {
         encryptionKeyId: String,
         nonce: ByteArray,
         ciphertext: ByteArray,
-        updatedAt: Long,
+        valueUpdatedAt: Long,
     ): Int
 
     @Query("UPDATE secrets SET updated_at = MAX(updated_at, :updatedAt) WHERE id = :secretId")
@@ -757,6 +733,7 @@ internal interface SecretDao {
     suspend fun insertEnvironmentVariableIfCurrent(
         variable: EnvironmentVariableEntity,
         expectedSecretRevision: Long,
+        secretUpdatedAt: Long,
     ): Boolean {
         val secret = getSecret(variable.secretId) ?: return false
         if (
@@ -769,7 +746,7 @@ internal interface SecretDao {
                 variable.secretId,
                 expectedSecretRevision,
                 SecretType.ENVIRONMENT.storedName,
-                variable.updatedAt,
+                secretUpdatedAt,
             ) == 1,
         )
         deleteTemporaryAccessGrantsForSecret(variable.secretId)
@@ -780,6 +757,7 @@ internal interface SecretDao {
     suspend fun updateEnvironmentVariableIfCurrent(
         variable: EnvironmentVariableEntity,
         expectedSecretRevision: Long,
+        secretUpdatedAt: Long,
     ): Boolean {
         val secret = getSecret(variable.secretId) ?: return false
         if (
@@ -797,7 +775,6 @@ internal interface SecretDao {
                 encryptionKeyId = variable.encryptedValue.keyId,
                 nonce = variable.encryptedValue.nonce,
                 ciphertext = variable.encryptedValue.ciphertext,
-                updatedAt = variable.updatedAt,
                 valueUpdatedAt = variable.valueUpdatedAt,
             ) != 1
         ) return false
@@ -806,7 +783,7 @@ internal interface SecretDao {
                 variable.secretId,
                 expectedSecretRevision,
                 SecretType.ENVIRONMENT.storedName,
-                variable.updatedAt,
+                secretUpdatedAt,
             ) == 1,
         )
         deleteTemporaryAccessGrantsForSecret(variable.secretId)
@@ -825,7 +802,6 @@ internal interface SecretDao {
             variableId = variableId,
             secretId = secretId,
             notes = notes,
-            updatedAt = updatedAt,
         )
         if (updated == 1) touchSecret(secretId, updatedAt)
         return updated
@@ -879,12 +855,10 @@ internal interface SecretDao {
                 algorithm = key.algorithm,
                 publicKey = key.publicKey,
                 comment = key.comment,
-                privateKeyFormat = key.privateKeyFormat,
                 encryptionFormat = key.encryptedPrivateKey.formatVersion,
                 encryptionKeyId = key.encryptedPrivateKey.keyId,
                 nonce = key.encryptedPrivateKey.nonce,
                 ciphertext = key.encryptedPrivateKey.ciphertext,
-                materialUpdatedAt = key.materialUpdatedAt,
             ) != 1
         ) return false
         check(
@@ -967,7 +941,7 @@ internal interface SecretDao {
                         encryptionKeyId = variable.encryptedValue.keyId,
                         nonce = variable.encryptedValue.nonce,
                         ciphertext = variable.encryptedValue.ciphertext,
-                        updatedAt = variable.updatedAt,
+                        valueUpdatedAt = variable.valueUpdatedAt,
                     ) == 1,
                 )
             }
@@ -1017,12 +991,10 @@ internal interface SecretDao {
                 algorithm = key.algorithm,
                 publicKey = key.publicKey,
                 comment = key.comment,
-                privateKeyFormat = key.privateKeyFormat,
                 encryptionFormat = key.encryptedPrivateKey.formatVersion,
                 encryptionKeyId = key.encryptedPrivateKey.keyId,
                 nonce = key.encryptedPrivateKey.nonce,
                 ciphertext = key.encryptedPrivateKey.ciphertext,
-                materialUpdatedAt = key.materialUpdatedAt,
             ) == 1,
         )
         return true

@@ -527,8 +527,6 @@ internal data class SecretUploadSshKeyEntity(
     val publicKey: ByteArray,
     @ColumnInfo(name = "comment")
     val comment: String,
-    @ColumnInfo(name = "private_key_format")
-    val privateKeyFormat: String,
     @Embedded
     val encryptedPrivateKey: EncryptedValue,
 )

@@ -21,7 +21,7 @@ internal val SSH_SECRET_TYPE = SecretType.SSH.storedName
 internal const val ED25519_PRIVATE_KEY_FORMAT = "ed25519_seed"
 internal const val RSA_PRIVATE_KEY_FORMAT = "rsa_pkcs8"
 
-internal fun SshKeyAlgorithm.privateKeyFormat(): String = when (this) {
+internal fun SshKeyAlgorithm.canonicalPrivateKeyFormat(): String = when (this) {
     SshKeyAlgorithm.ED25519 -> ED25519_PRIVATE_KEY_FORMAT
     SshKeyAlgorithm.RSA -> RSA_PRIVATE_KEY_FORMAT
 }
@@ -110,7 +110,6 @@ internal data class SshKeyMetadata(
     val fingerprint: String,
     val comment: String,
     val privateKeyAvailable: Boolean,
-    val materialUpdatedAt: Long,
 )
 
 internal data class EnvironmentVariableMetadata(
@@ -120,8 +119,6 @@ internal data class EnvironmentVariableMetadata(
     val sensitive: Boolean,
     val notes: String,
     val valueAvailable: Boolean,
-    val createdAt: Long,
-    val updatedAt: Long,
     val valueUpdatedAt: Long,
 )
 
@@ -267,15 +264,10 @@ internal data class SecretReviewMetadata(
     val id: String,
     val revision: Long = 1,
     val name: String,
-    val description: String,
     val type: String,
-    val instructions: String,
     val environmentVariables: List<EnvironmentVariableReviewMetadata>,
     val environmentVariableDestinations: Map<String, EnvironmentVariableReviewDestination> =
         emptyMap(),
-    val sshKey: SshKeyReviewMetadata?,
-    val createdAt: Long,
-    val updatedAt: Long,
 )
 
 internal sealed interface EnvironmentVariableReviewDestination {
@@ -289,18 +281,6 @@ internal sealed interface EnvironmentVariableReviewDestination {
 internal data class EnvironmentVariableReviewMetadata(
     val name: String,
     val sensitive: Boolean,
-    val notes: String,
-    val createdAt: Long,
-    val updatedAt: Long,
-    val valueUpdatedAt: Long,
-)
-
-internal data class SshKeyReviewMetadata(
-    val algorithm: String,
-    val publicKey: String,
-    val fingerprint: String,
-    val comment: String,
-    val materialUpdatedAt: Long,
 )
 
 internal data class EnvironmentVariableSelection(

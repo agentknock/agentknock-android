@@ -51,18 +51,15 @@ internal class SecretMaterialStore(
     suspend fun encryptedSshKey(
         secretId: String,
         privateKey: SshPrivateKey,
-        materialUpdatedAt: Long,
     ): SshKeyEntity {
         validateSshPrivateKey(privateKey)
         val key = keyManager.activeKey(VaultKeyPurpose.SECRET_VALUES)
-        val privateKeyFormat = privateKey.algorithm.privateKeyFormat()
         val encrypted = withContext(cryptographyDispatcher) {
             encryption.encrypt(
                 keyId = key.id,
                 location = sshKeyLocation(
                     secretId,
-                    privateKey.algorithm.storedName,
-                    privateKeyFormat,
+                    privateKey.algorithm,
                     privateKey.publicKey,
                 ),
                 plaintext = privateKey.privateKey,
@@ -73,25 +70,19 @@ internal class SecretMaterialStore(
             algorithm = privateKey.algorithm.storedName,
             publicKey = privateKey.publicKey.copyOf(),
             comment = privateKey.comment,
-            privateKeyFormat = privateKeyFormat,
             encryptedPrivateKey = encrypted,
-            materialUpdatedAt = materialUpdatedAt,
         )
     }
 
     suspend fun decryptSshKey(key: SshKeyEntity): DecryptionResult {
         val algorithm = SshKeyAlgorithm.fromStoredName(key.algorithm)
             ?: return DecryptionResult.UnsupportedFormat
-        if (key.privateKeyFormat != algorithm.privateKeyFormat()) {
-            return DecryptionResult.UnsupportedFormat
-        }
         return withContext(cryptographyDispatcher) {
             encryption.decrypt(
                 encrypted = key.encryptedPrivateKey,
                 location = sshKeyLocation(
                     key.secretId,
-                    key.algorithm,
-                    key.privateKeyFormat,
+                    algorithm,
                     key.publicKey,
                 ),
             )
@@ -134,16 +125,15 @@ internal class SecretMaterialStore(
 
     private fun sshKeyLocation(
         secretId: String,
-        algorithm: String,
-        privateKeyFormat: String,
+        algorithm: SshKeyAlgorithm,
         publicKey: ByteArray,
     ) = EncryptionLocation(
         recordType = "ssh_key",
         recordId = secretId,
         fieldName = "private_key",
         bindings = listOf(
-            EncryptionBinding("algorithm", algorithm),
-            EncryptionBinding("private_key_format", privateKeyFormat),
+            EncryptionBinding("algorithm", algorithm.storedName),
+            EncryptionBinding("private_key_format", algorithm.canonicalPrivateKeyFormat()),
             EncryptionBinding("public_key", Base64.getEncoder().encodeToString(publicKey)),
         ),
     )

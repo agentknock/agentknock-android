@@ -10,7 +10,7 @@ import dev.agentknock.storage.crypto.VaultKeyManager
 import dev.agentknock.storage.crypto.VaultKeyPurpose
 import dev.agentknock.storage.secret.SshKeyAlgorithm
 import dev.agentknock.storage.secret.SshPrivateKey
-import dev.agentknock.storage.secret.privateKeyFormat
+import dev.agentknock.storage.secret.canonicalPrivateKeyFormat
 import java.util.Base64
 import java.util.UUID
 import kotlinx.coroutines.CoroutineDispatcher
@@ -72,15 +72,13 @@ internal class RequestMaterialStore(
         privateKey: SshPrivateKey,
     ): SecretUploadSshKeyEntity {
         val key = keyManager.activeKey(VaultKeyPurpose.SECRET_VALUES)
-        val privateKeyFormat = privateKey.algorithm.privateKeyFormat()
         val encrypted = withContext(cryptographyDispatcher) {
             encryption.encrypt(
                 keyId = key.id,
                 location = secretUploadSshKeyLocation(
                     relayRequestId,
                     clientId,
-                    privateKey.algorithm.storedName,
-                    privateKeyFormat,
+                    privateKey.algorithm,
                     privateKey.publicKey,
                 ),
                 plaintext = privateKey.privateKey,
@@ -91,7 +89,6 @@ internal class RequestMaterialStore(
             algorithm = privateKey.algorithm.storedName,
             publicKey = privateKey.publicKey.copyOf(),
             comment = privateKey.comment,
-            privateKeyFormat = privateKeyFormat,
             encryptedPrivateKey = encrypted,
         )
     }
@@ -102,17 +99,13 @@ internal class RequestMaterialStore(
     ): DecryptionResult {
         val algorithm = SshKeyAlgorithm.fromStoredName(key.algorithm)
             ?: return DecryptionResult.UnsupportedFormat
-        if (key.privateKeyFormat != algorithm.privateKeyFormat()) {
-            return DecryptionResult.UnsupportedFormat
-        }
         return withContext(cryptographyDispatcher) {
             encryption.decrypt(
                 encrypted = key.encryptedPrivateKey,
                 location = secretUploadSshKeyLocation(
                     request.id,
                     request.clientId,
-                    key.algorithm,
-                    key.privateKeyFormat,
+                    algorithm,
                     key.publicKey,
                 ),
             )
@@ -315,8 +308,7 @@ internal class RequestMaterialStore(
     private fun secretUploadSshKeyLocation(
         relayRequestId: String,
         clientId: String,
-        algorithm: String,
-        privateKeyFormat: String,
+        algorithm: SshKeyAlgorithm,
         publicKey: ByteArray,
     ) = EncryptionLocation(
         recordType = "secret_upload_ssh_key",
@@ -324,8 +316,8 @@ internal class RequestMaterialStore(
         fieldName = "private_key",
         bindings = listOf(
             EncryptionBinding("client_id", clientId),
-            EncryptionBinding("algorithm", algorithm),
-            EncryptionBinding("private_key_format", privateKeyFormat),
+            EncryptionBinding("algorithm", algorithm.storedName),
+            EncryptionBinding("private_key_format", algorithm.canonicalPrivateKeyFormat()),
             EncryptionBinding("public_key", Base64.getEncoder().encodeToString(publicKey)),
         ),
     )

@@ -49,7 +49,7 @@ class SecretDaoTransactionTest {
     @Test
     fun subtypeWritesRequireTheOwningSecretType() = runTest {
         dao.insertSecret(secret("ssh", SecretType.SSH))
-        val inserted = dao.insertEnvironmentVariableIfCurrent(variable("ssh"), 1)
+        val inserted = dao.insertEnvironmentVariableIfCurrent(variable("ssh"), 1, 2)
 
         assertFalse(inserted)
         assertNull(dao.getEnvironmentVariable(VARIABLE_ID))
@@ -69,16 +69,16 @@ class SecretDaoTransactionTest {
     @Test
     fun staleRevisionCannotOverwriteSecretMaterial() = runTest {
         dao.insertSecret(secret("environment", SecretType.ENVIRONMENT))
-        assertTrue(dao.insertEnvironmentVariableIfCurrent(variable("environment"), 1))
+        assertTrue(dao.insertEnvironmentVariableIfCurrent(variable("environment"), 1, 2))
         val stored = checkNotNull(dao.getEnvironmentVariable(VARIABLE_ID))
 
         val staleUpdate = dao.updateEnvironmentVariableIfCurrent(
             stored.copy(
                 encryptedValue = encrypted(byteArrayOf(9, 9, 9)),
-                updatedAt = 3,
                 valueUpdatedAt = 3,
             ),
             expectedSecretRevision = 1,
+            secretUpdatedAt = 3,
         )
 
         assertFalse(staleUpdate)
@@ -112,7 +112,6 @@ class SecretDaoTransactionTest {
         assertArrayEquals(key.publicKey, stored.publicKey)
         assertArrayEquals(key.encryptedPrivateKey.nonce, stored.encryptedPrivateKey.nonce)
         assertArrayEquals(key.encryptedPrivateKey.ciphertext, stored.encryptedPrivateKey.ciphertext)
-        assertEquals(key.materialUpdatedAt, stored.materialUpdatedAt)
     }
 
     private fun secret(id: String, type: SecretType) = SecretEntity(
@@ -131,8 +130,6 @@ class SecretDaoTransactionTest {
         sensitive = true,
         notes = "",
         encryptedValue = encrypted(byteArrayOf(1, 2, 3)),
-        createdAt = 2,
-        updatedAt = 2,
         valueUpdatedAt = 2,
     )
 
@@ -141,9 +138,7 @@ class SecretDaoTransactionTest {
         algorithm = SshKeyAlgorithm.ED25519.storedName,
         publicKey = ByteArray(32) { 4 },
         comment = "test@example",
-        privateKeyFormat = ED25519_PRIVATE_KEY_FORMAT,
         encryptedPrivateKey = encrypted(byteArrayOf(5, 6, 7)),
-        materialUpdatedAt = 2,
     )
 
     private fun encrypted(ciphertext: ByteArray) = EncryptedValue(

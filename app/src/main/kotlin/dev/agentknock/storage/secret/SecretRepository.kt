@@ -76,7 +76,6 @@ internal class SecretRepository(
                         } else {
                             keyManager.keyAvailable(row.sshEncryptionKeyId)
                         },
-                        materialUpdatedAt = checkNotNull(row.sshMaterialUpdatedAt),
                     )
                 },
                 createdAt = row.createdAt,
@@ -111,8 +110,6 @@ internal class SecretRepository(
                         sensitive = variable.sensitive,
                         notes = variable.notes,
                         valueAvailable = availability.getValue(variable.encryptionKeyId),
-                        createdAt = variable.createdAt,
-                        updatedAt = variable.updatedAt,
                         valueUpdatedAt = variable.valueUpdatedAt,
                     )
                 },
@@ -124,7 +121,6 @@ internal class SecretRepository(
                         fingerprint = rendered.fingerprint,
                         comment = rendered.comment,
                         privateKeyAvailable = keyManager.keyAvailable(key.encryptionKeyId),
-                        materialUpdatedAt = key.materialUpdatedAt,
                     )
                 },
                 approvalMode = secret.approvalMode.toSecretApprovalMode(),
@@ -405,7 +401,7 @@ internal class SecretRepository(
             createdAt = now,
             updatedAt = now,
         )
-        val encryptedKey = material.encryptedSshKey(id, privateKey, now)
+        val encryptedKey = material.encryptedSshKey(id, privateKey)
         return writeTransaction.execute {
             if (dao.secretNameInUse(name, excludingId = "")) {
                 return@execute CreateSecretResult.NameInUse
@@ -428,7 +424,7 @@ internal class SecretRepository(
         if (secret.type != SSH_SECRET_TYPE) return SaveSshSecretResult.WrongType
         dao.getSshKey(id) ?: return SaveSshSecretResult.NotFound
         val now = currentTimeMillis()
-        val encryptedKey = material.encryptedSshKey(id, privateKey, now)
+        val encryptedKey = material.encryptedSshKey(id, privateKey)
         return writeTransaction.execute {
             if (
                 !dao.updateSshKeyIfCurrent(
@@ -544,11 +540,10 @@ internal class SecretRepository(
                     sensitive = sensitive,
                     notes = notes,
                     encryptedValue = encrypted,
-                    createdAt = now,
-                    updatedAt = now,
                     valueUpdatedAt = now,
                 ),
                 expectedSecretRevision = owner.revision,
+                secretUpdatedAt = now,
             )
             if (!inserted) return@execute CreateEnvironmentVariableResult.SecretNotFound
             audit.record(
@@ -618,7 +613,6 @@ internal class SecretRepository(
             sensitive = sensitive,
             notes = notes,
             encryptedValue = encrypted,
-            updatedAt = now,
             valueUpdatedAt = if (replacementValue == null) existing.valueUpdatedAt else now,
         )
         return writeTransaction.execute {
@@ -633,7 +627,13 @@ internal class SecretRepository(
                     updatedAt = now,
                 )
             } else {
-                if (dao.updateEnvironmentVariableIfCurrent(updated, owner.revision)) 1 else 0
+                if (
+                    dao.updateEnvironmentVariableIfCurrent(
+                        updated,
+                        owner.revision,
+                        secretUpdatedAt = now,
+                    )
+                ) 1 else 0
             }
             if (rowsUpdated != 1) return@execute SaveEnvironmentVariableResult.NOT_FOUND
             audit.record(

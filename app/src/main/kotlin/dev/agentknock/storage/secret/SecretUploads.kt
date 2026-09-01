@@ -201,8 +201,6 @@ internal class SecretUploads(
                 sensitive = sensitive,
                 notes = current?.notes.orEmpty(),
                 encryptedValue = encrypted,
-                createdAt = current?.createdAt ?: now,
-                updatedAt = now,
                 valueUpdatedAt = now,
             )
         }
@@ -365,18 +363,7 @@ internal class SecretUploads(
         if (existing != null && currentKey == null) {
             return SshSecretUploadPreparation.Invalid("The target SSH key is incomplete.")
         }
-        val key = upload.privateKey.let {
-            val proposedPublic = material.publicKey(it)
-            val previousPublic = currentKey?.let(material::publicKey)
-            val keyChanged = previousPublic == null ||
-                proposedPublic.algorithm != previousPublic.algorithm ||
-                !proposedPublic.publicKey.contentEquals(previousPublic.publicKey)
-            material.encryptedSshKey(
-                secretId,
-                it,
-                if (keyChanged) now else checkNotNull(currentKey).materialUpdatedAt,
-            )
-        }
+        val key = material.encryptedSshKey(secretId, upload.privateKey)
         return SshSecretUploadPreparation.Ready(
             PreparedSshSecretUpload(
                 mode = upload.mode,

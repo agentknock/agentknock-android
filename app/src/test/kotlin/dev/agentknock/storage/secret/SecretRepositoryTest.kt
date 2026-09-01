@@ -63,7 +63,7 @@ class SecretRepositoryTest {
     }
 
     @Test
-    fun `stores generated RSA material with its algorithm specific format`() = runTest {
+    fun `stores generated RSA material with its canonical algorithm`() = runTest {
         val fixture = Fixture()
         val key = fixture.repository.generateSshKey(SshKeyAlgorithm.RSA, "rsa@example")
         val created = fixture.repository.createSshSecret("legacy-host", "", key)
@@ -71,11 +71,63 @@ class SecretRepositoryTest {
 
         val stored = fixture.dao.sshKeys.value.single()
         assertEquals("rsa", stored.algorithm)
-        assertEquals(RSA_PRIVATE_KEY_FORMAT, stored.privateKeyFormat)
+        assertEquals(RSA_PRIVATE_KEY_FORMAT, SshKeyAlgorithm.RSA.canonicalPrivateKeyFormat())
         assertFalse(stored.encryptedPrivateKey.ciphertext.contentEquals(key.privateKey))
         val details = checkNotNull(fixture.repository.observeSecret(created.id).first())
         assertEquals("rsa", details.sshKey?.algorithm)
         assertTrue(details.sshKey?.publicKey?.startsWith("ssh-rsa ") == true)
+    }
+
+    @Test
+    fun `rejects SSH ciphertext with the wrong algorithm or record binding`() = runTest {
+        val algorithmFixture = Fixture()
+        val ed25519 = algorithmFixture.repository.generateSshKey(
+            SshKeyAlgorithm.ED25519,
+            "ed25519@example",
+        )
+        algorithmFixture.repository.createSshSecret("algorithm-bound", "", ed25519)
+        val rsa = algorithmFixture.repository.generateSshKey(SshKeyAlgorithm.RSA, "rsa@example")
+        val stored = algorithmFixture.dao.sshKeys.value.single()
+        algorithmFixture.dao.directlyReplaceSshKey(
+            stored.copy(
+                algorithm = rsa.algorithm.storedName,
+                publicKey = rsa.publicKey,
+                comment = rsa.comment,
+            ),
+        )
+
+        assertEquals(
+            GitSignatureResult.SecretCorrupted,
+            algorithmFixture.repository.signGitMessage(
+                "algorithm-bound",
+                rsa.publicKeyLine,
+                "commit".encodeToByteArray(),
+            ),
+        )
+
+        val recordFixture = Fixture()
+        val first = recordFixture.repository.generateSshKey(SshKeyAlgorithm.ED25519, "first@example")
+        val firstSecret = recordFixture.repository.createSshSecret("first", "", first)
+        check(firstSecret is CreateSecretResult.Created)
+        val second = recordFixture.repository.generateSshKey(SshKeyAlgorithm.ED25519, "second@example")
+        val secondSecret = recordFixture.repository.createSshSecret("second", "", second)
+        check(secondSecret is CreateSecretResult.Created)
+        val rows = recordFixture.dao.sshKeys.value.associateBy(SshKeyEntity::secretId)
+        val firstRow = rows.getValue(firstSecret.id)
+        recordFixture.dao.directlyReplaceSshKey(
+            firstRow.copy(
+                encryptedPrivateKey = rows.getValue(secondSecret.id).encryptedPrivateKey,
+            ),
+        )
+
+        assertEquals(
+            GitSignatureResult.SecretCorrupted,
+            recordFixture.repository.signGitMessage(
+                "first",
+                first.publicKeyLine,
+                "commit".encodeToByteArray(),
+            ),
+        )
     }
 
     @Test
@@ -92,7 +144,6 @@ class SecretRepositoryTest {
                 nonce = byteArrayOf(6, 5, 4),
                 ciphertext = byteArrayOf(3, 2, 1),
             ),
-            materialUpdatedAt = original.materialUpdatedAt + 100,
         )
         fixture.dao.beforeSshCommentUpdate = {
             fixture.dao.directlyReplaceSshKey(replacement)
@@ -109,7 +160,6 @@ class SecretRepositoryTest {
             replacement.encryptedPrivateKey.ciphertext.toList(),
             stored.encryptedPrivateKey.ciphertext.toList(),
         )
-        assertEquals(replacement.materialUpdatedAt, stored.materialUpdatedAt)
         assertEquals("new@example", stored.comment)
     }
 
@@ -278,6 +328,7 @@ class SecretRepositoryTest {
         val secretId = fixture.createSecret("aws-read-only")
         val variableId = fixture.createVariable(secretId, "AWS_REGION", "eu-west-1", false)
         val before = fixture.dao.variables.value.single()
+        val secretUpdatedAt = fixture.dao.secrets.value.single().updatedAt
 
         val result = fixture.repository.saveEnvironmentVariable(
             id = variableId,
@@ -290,7 +341,7 @@ class SecretRepositoryTest {
         assertEquals(SaveEnvironmentVariableResult.SAVED, result)
         val after = fixture.dao.variables.value.single()
         assertEquals(before.valueUpdatedAt, after.valueUpdatedAt)
-        assertNotEquals(before.updatedAt, after.updatedAt)
+        assertNotEquals(secretUpdatedAt, fixture.dao.secrets.value.single().updatedAt)
         assertFalse(before.encryptedValue.ciphertext.contentEquals(after.encryptedValue.ciphertext))
         val value = fixture.repository.readEnvironmentVariableValue(variableId)
         assertTrue(value is EnvironmentVariableValue.Available)
@@ -312,7 +363,6 @@ class SecretRepositoryTest {
         val after = fixture.dao.variables.value.single()
         assertTrue(before.encryptedValue.nonce.contentEquals(after.encryptedValue.nonce))
         assertTrue(before.encryptedValue.ciphertext.contentEquals(after.encryptedValue.ciphertext))
-        assertEquals(before.updatedAt, after.updatedAt)
         assertEquals(before.valueUpdatedAt, after.valueUpdatedAt)
     }
 
@@ -1269,7 +1319,6 @@ private class FakeSecretDao : SecretDao {
                     publicKey = key.publicKey,
                     comment = key.comment,
                     encryptionKeyId = key.encryptedPrivateKey.keyId,
-                    materialUpdatedAt = key.materialUpdatedAt,
                 )
             }
         }
@@ -1287,8 +1336,6 @@ private class FakeSecretDao : SecretDao {
                     sensitive = variable.sensitive,
                     notes = variable.notes,
                     encryptionKeyId = variable.encryptedValue.keyId,
-                    createdAt = variable.createdAt,
-                    updatedAt = variable.updatedAt,
                     valueUpdatedAt = variable.valueUpdatedAt,
                 )
             }
@@ -1522,12 +1569,10 @@ private class FakeSecretDao : SecretDao {
         algorithm: String,
         publicKey: ByteArray,
         comment: String,
-        privateKeyFormat: String,
         encryptionFormat: Int,
         encryptionKeyId: String,
         nonce: ByteArray,
         ciphertext: ByteArray,
-        materialUpdatedAt: Long,
     ): Int {
         val current = sshKeys.value.singleOrNull { it.secretId == secretId } ?: return 0
         directlyReplaceSshKey(
@@ -1535,14 +1580,12 @@ private class FakeSecretDao : SecretDao {
                 algorithm = algorithm,
                 publicKey = publicKey,
                 comment = comment,
-                privateKeyFormat = privateKeyFormat,
                 encryptedPrivateKey = current.encryptedPrivateKey.copy(
                     formatVersion = encryptionFormat,
                     keyId = encryptionKeyId,
                     nonce = nonce,
                     ciphertext = ciphertext,
                 ),
-                materialUpdatedAt = materialUpdatedAt,
             ),
         )
         return 1
@@ -1575,7 +1618,6 @@ private class FakeSecretDao : SecretDao {
         encryptionKeyId: String,
         nonce: ByteArray,
         ciphertext: ByteArray,
-        updatedAt: Long,
         valueUpdatedAt: Long,
     ): Int {
         val current = variables.value.singleOrNull {
@@ -1592,7 +1634,6 @@ private class FakeSecretDao : SecretDao {
                     nonce = nonce,
                     ciphertext = ciphertext,
                 ),
-                updatedAt = updatedAt,
                 valueUpdatedAt = valueUpdatedAt,
             ),
         )
@@ -1607,7 +1648,7 @@ private class FakeSecretDao : SecretDao {
         encryptionKeyId: String,
         nonce: ByteArray,
         ciphertext: ByteArray,
-        updatedAt: Long,
+        valueUpdatedAt: Long,
     ): Int {
         val current = variables.value.singleOrNull {
             it.id == variableId && it.secretId == secretId
@@ -1621,8 +1662,7 @@ private class FakeSecretDao : SecretDao {
                     nonce = nonce,
                     ciphertext = ciphertext,
                 ),
-                updatedAt = updatedAt,
-                valueUpdatedAt = updatedAt,
+                valueUpdatedAt = valueUpdatedAt,
             ),
         )
         return 1
@@ -1632,7 +1672,6 @@ private class FakeSecretDao : SecretDao {
         variableId: String,
         secretId: String,
         notes: String,
-        updatedAt: Long,
     ): Int {
         beforeEnvironmentNotesUpdate?.also {
             beforeEnvironmentNotesUpdate = null
@@ -1641,7 +1680,7 @@ private class FakeSecretDao : SecretDao {
         if (variables.value.none { it.id == variableId && it.secretId == secretId }) return 0
         variables.value = variables.value.map { variable ->
             if (variable.id == variableId && variable.secretId == secretId) {
-                variable.copy(notes = notes, updatedAt = updatedAt)
+                variable.copy(notes = notes)
             } else {
                 variable
             }

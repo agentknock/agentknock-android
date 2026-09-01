@@ -155,8 +155,8 @@ internal class SecretResolver(
         private val secretByName = requestedNames.mapNotNull(snapshot.secretsByName::get)
             .associateBy(SecretEntity::name)
 
-        private fun selectedVariables(secret: SecretEntity): List<EnvironmentVariableEntity> =
-            snapshot.variablesBySecret[secret.id].orEmpty().filter { variable ->
+        private val selectedVariablesBySecretId = secretByName.values.associate { secret ->
+            secret.id to snapshot.variablesBySecret[secret.id].orEmpty().filter { variable ->
                 val selection = selections[secret.name]
                 when {
                     selection?.only != null -> variable.name in selection.only
@@ -164,6 +164,10 @@ internal class SecretResolver(
                     else -> true
                 }
             }
+        }
+
+        private fun selectedVariables(secret: SecretEntity): List<EnvironmentVariableEntity> =
+            selectedVariablesBySecretId.getValue(secret.id)
 
         fun description(): RequestedSecretDescription = RequestedSecretDescription(
             secrets = requestedNames.mapNotNull { name ->
@@ -292,17 +296,11 @@ internal class SecretResolver(
                     id = id,
                     revision = revision,
                     name = name,
-                    description = description,
                     type = SecretType.ENVIRONMENT.storedName,
-                    instructions = instructions,
                     environmentVariables = selected.sortedBy(EnvironmentVariableEntity::name).map {
                         EnvironmentVariableReviewMetadata(
                             name = it.name,
                             sensitive = it.sensitive,
-                            notes = it.notes,
-                            createdAt = it.createdAt,
-                            updatedAt = it.updatedAt,
-                            valueUpdatedAt = it.valueUpdatedAt,
                         )
                     },
                     environmentVariableDestinations = snapshot.variablesBySecret[id].orEmpty()
@@ -310,29 +308,14 @@ internal class SecretResolver(
                         .associate { variable ->
                             variable.name to destination(variable, variable.name in selectedNames)
                         },
-                    sshKey = null,
-                    createdAt = createdAt,
-                    updatedAt = updatedAt,
                 )
-                SecretType.SSH -> snapshot.sshKeysBySecret[id]?.let { key ->
-                    val public = material.publicKey(key)
+                SecretType.SSH -> snapshot.sshKeysBySecret[id]?.let {
                     SecretReviewMetadata(
                         id = id,
                         revision = revision,
                         name = name,
-                        description = description,
                         type = SecretType.SSH.storedName,
-                        instructions = instructions,
                         environmentVariables = emptyList(),
-                        sshKey = SshKeyReviewMetadata(
-                            algorithm = public.algorithm.storedName,
-                            publicKey = public.line,
-                            fingerprint = public.fingerprint,
-                            comment = public.comment,
-                            materialUpdatedAt = key.materialUpdatedAt,
-                        ),
-                        createdAt = createdAt,
-                        updatedAt = updatedAt,
                     )
                 }
                 null -> null

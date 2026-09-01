@@ -11,12 +11,14 @@ import dev.agentknock.storage.audit.AuditRecord
 import dev.agentknock.storage.audit.AuditRepository
 import dev.agentknock.storage.audit.AuditSink
 import dev.agentknock.storage.crypto.AesGcmEncryption
+import dev.agentknock.storage.crypto.DecryptionResult
 import dev.agentknock.storage.crypto.EncryptionKeyBacking
 import dev.agentknock.storage.crypto.EncryptionKeyStore
 import dev.agentknock.storage.crypto.GeneratedEncryptionKey
 import dev.agentknock.storage.crypto.VaultKeyManager
 import dev.agentknock.storage.device.DeviceIdentityEntity
 import dev.agentknock.storage.secret.SecretRepository
+import dev.agentknock.storage.secret.SshKeyAlgorithm
 import javax.crypto.SecretKey
 import javax.crypto.spec.SecretKeySpec
 import kotlinx.coroutines.Dispatchers
@@ -169,6 +171,42 @@ class SecretManagementRequestsTest {
             .single { it.type == AuditEventType.SECRET_LIST_COMPLETED }
         assertEquals("Secret list completion could not be verified.", completionAudit.detail)
         assertFalse(checkNotNull(completionAudit.detail).contains(malicious))
+    }
+
+    @Test
+    fun pendingSshUploadDerivesCanonicalFormatAndRejectsWrongBindings() = runTest {
+        val ed25519 = secrets.generateSshKey(SshKeyAlgorithm.ED25519, "ed25519@example")
+        val encrypted = material.encryptSecretUploadSshKey("ssh-upload", CLIENT_ID, ed25519)
+
+        val decrypted = material.decryptSecretUploadSshKey(request("ssh-upload"), encrypted)
+        assertTrue(decrypted is DecryptionResult.Plaintext)
+        assertTrue((decrypted as DecryptionResult.Plaintext).value.contentEquals(ed25519.privateKey))
+
+        val rsa = secrets.generateSshKey(SshKeyAlgorithm.RSA, "rsa@example")
+        assertEquals(
+            DecryptionResult.AuthenticationFailed,
+            material.decryptSecretUploadSshKey(
+                request("ssh-upload"),
+                encrypted.copy(
+                    algorithm = rsa.algorithm.storedName,
+                    publicKey = rsa.publicKey,
+                    comment = rsa.comment,
+                ),
+            ),
+        )
+
+        val other = material.encryptSecretUploadSshKey(
+            "other-upload",
+            CLIENT_ID,
+            secrets.generateSshKey(SshKeyAlgorithm.ED25519, "other@example"),
+        )
+        assertEquals(
+            DecryptionResult.AuthenticationFailed,
+            material.decryptSecretUploadSshKey(
+                request("ssh-upload"),
+                encrypted.copy(encryptedPrivateKey = other.encryptedPrivateKey),
+            ),
+        )
     }
 
     @Test
@@ -392,6 +430,26 @@ class SecretManagementRequestsTest {
 
     private fun requestPayload(requestId: String): JsonElement =
         Json.parseToJsonElement("""{"request":"$requestId"}""")
+
+    private fun request(id: String) = InboxRequestEntity(
+        id = id,
+        parentRequestId = null,
+        deviceIdentityId = DEVICE_IDENTITY_ID,
+        clientId = CLIENT_ID,
+        clientNameSnapshot = "Workstation",
+        clientSoftwareJson = null,
+        kind = "secret_upload",
+        state = "pending",
+        listed = false,
+        requestJson = "{}",
+        responseJson = null,
+        completionJson = null,
+        error = null,
+        receivedAt = NOW,
+        completedAt = null,
+        exchangeEndedAt = null,
+        responseOutboxFinished = false,
+    )
 
     private fun secretListPlaintext(): ByteArray =
         """{${clientSoftwareFields()},"method":"SecretList"}""".encodeToByteArray()

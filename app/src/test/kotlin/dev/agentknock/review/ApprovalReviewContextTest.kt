@@ -35,7 +35,6 @@ import dev.agentknock.storage.secret.SecretApprovalMode
 import dev.agentknock.storage.secret.SecretApprovalPolicy
 import dev.agentknock.storage.secret.SecretReviewMetadata
 import dev.agentknock.storage.secret.SecretValues
-import dev.agentknock.storage.secret.SshKeyReviewMetadata
 import kotlinx.serialization.encodeToString
 import kotlinx.serialization.json.Json
 import kotlinx.serialization.json.JsonNull
@@ -185,7 +184,6 @@ class ApprovalReviewContextTest {
         assertFalse(wire.contains("sensitive-access-key"))
         assertFalse(wire.contains("sensitive-secret-key"))
         assertFalse(wire.contains("private vault description"))
-        assertFalse(wire.contains("private note"))
         assertFalse(wire.contains("not-useful-to-the-reviewer"))
         assertFalse(wire.contains("inactive instruction"))
     }
@@ -384,9 +382,7 @@ class ApprovalReviewContextTest {
             SecretReviewMetadata(
                 id = "aws-id",
                 name = "aws-read-only",
-                description = "private vault description",
                 type = ENVIRONMENT_SECRET_TYPE,
-                instructions = "Allow inspection but not changes.",
                 environmentVariables = listOf(
                     variable("AWS_ACCESS_KEY_ID", sensitive = true),
                     variable("AWS_REGION", sensitive = false),
@@ -408,26 +404,12 @@ class ApprovalReviewContextTest {
                     "AWS_SESSION_TOKEN" to
                         EnvironmentVariableReviewDestination.StandardInput,
                 ),
-                sshKey = null,
-                createdAt = 1,
-                updatedAt = 2,
             ),
             SecretReviewMetadata(
                 id = "ssh-id",
                 name = "git-signing",
-                description = "private SSH description",
                 type = SSH_SECRET_TYPE,
-                instructions = "This inactive instruction must not be sent.",
                 environmentVariables = emptyList(),
-                sshKey = SshKeyReviewMetadata(
-                    algorithm = "ed25519",
-                    publicKey = "ssh-ed25519 public-key",
-                    fingerprint = "SHA256:fingerprint",
-                    comment = "private comment",
-                    materialUpdatedAt = 2,
-                ),
-                createdAt = 1,
-                updatedAt = 2,
             ),
         ),
         missingSecrets = emptyList(),
@@ -438,10 +420,6 @@ class ApprovalReviewContextTest {
         EnvironmentVariableReviewMetadata(
             name = name,
             sensitive = sensitive,
-            notes = "private note",
-            createdAt = 1,
-            updatedAt = 2,
-            valueUpdatedAt = 3,
         )
 
     private fun environmentFact(value: String?) = ApprovalReviewEnvironmentVariableFacts(
