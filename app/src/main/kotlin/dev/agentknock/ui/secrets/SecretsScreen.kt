@@ -403,7 +403,7 @@ internal fun SecretsScreen(
                                     viewModel.createSshSecret(
                                         name,
                                         description,
-                                        checkNotNull(editorState.preparedSshKey),
+                                        checkNotNull(editorState.sshKeyDraft.preparedKey),
                                     )
                                 } else {
                                     viewModel.createSecret(name, description)
@@ -455,7 +455,7 @@ internal fun SecretsScreen(
                         when (
                             viewModel.replaceSshKey(
                                 editorState.secretId,
-                                checkNotNull(editorState.preparedKey),
+                                checkNotNull(editorState.sshKeyDraft.preparedKey),
                             )
                         ) {
                             is SaveSshSecretResult.Saved -> {

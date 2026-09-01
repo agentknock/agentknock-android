@@ -199,9 +199,9 @@ internal class SecretsViewModel(
                 editor !is SecretsEditor.Secret || editor.session != session -> editor
                 state.type != SSH_SECRET_TYPE -> editor.copy(
                     state = state.copy(
-                        sshPrivateKeyText = "",
-                        preparedSshKey = null,
-                        sshError = null,
+                        sshKeyDraft = state.sshKeyDraft.copy(
+                            privateKeyText = "",
+                        ).withoutPreparation(),
                     ),
                 )
                 else -> editor.copy(state = state)
@@ -217,13 +217,11 @@ internal class SecretsViewModel(
                 secretId = secret.id,
                 secretName = secret.name,
                 currentKey = key,
-                inputMode = SshKeyInputMode.GENERATE,
-                algorithm = SshKeyAlgorithm.fromStoredName(key.algorithm)
-                    ?: SshKeyAlgorithm.ED25519,
-                privateKeyText = "",
-                comment = key.comment,
-                preparedKey = null,
-                error = null,
+                sshKeyDraft = SshKeyDraft(
+                    algorithm = SshKeyAlgorithm.fromStoredName(key.algorithm)
+                        ?: SshKeyAlgorithm.ED25519,
+                    comment = key.comment,
+                ),
             ),
         )
     }
@@ -232,8 +230,10 @@ internal class SecretsViewModel(
         editorState.update { editor ->
             when {
                 editor !is SecretsEditor.SshKey || editor.session != session -> editor
-                state.inputMode == SshKeyInputMode.GENERATE -> editor.copy(
-                    state = state.copy(privateKeyText = ""),
+                state.sshKeyDraft.inputMode == SshKeyInputMode.GENERATE -> editor.copy(
+                    state = state.copy(
+                        sshKeyDraft = state.sshKeyDraft.copy(privateKeyText = ""),
+                    ),
                 )
                 else -> editor.copy(state = state)
             }
@@ -316,35 +316,31 @@ internal class SecretsViewModel(
         val current = editorState.value as? SecretsEditor.Secret ?: return
         val source = current.state
         if (source.type != SSH_SECRET_TYPE) return
+        val sourceDraft = source.sshKeyDraft
         val editor = current.copy(
             session = newEditorSession(),
-            state = source.copy(preparedSshKey = null, sshError = null),
+            state = source.copy(
+                sshKeyDraft = sourceDraft.withoutPreparation(),
+            ),
         )
         if (!editorState.compareAndSet(current, editor)) return
         viewModelScope.launch {
-            val result = runCatchingNonCancellation {
-                when (source.sshInputMode) {
-                    SshKeyInputMode.GENERATE -> generateSshKey(
-                        source.sshAlgorithm,
-                        source.sshComment,
-                    )
-                    SshKeyInputMode.IMPORT -> importSshKey(source.sshPrivateKeyText)
-                }
-            }
+            val preparation = prepareSshKey(sourceDraft)
             editorState.update { current ->
                 if (
                     current !is SecretsEditor.Secret ||
                     current.session != editor.session ||
-                    !current.state.hasSameSshSourceAs(source)
+                    current.state.type != source.type ||
+                    !current.state.sshKeyDraft.hasSameSourceAs(sourceDraft)
                 ) {
                     current
                 } else {
                     current.copy(
                         state = current.state.copy(
-                            preparedSshKey = result.getOrNull(),
-                            sshError = result.exceptionOrNull()?.let { failure ->
-                                failure.message ?: "The private key is not valid"
-                            },
+                            sshKeyDraft = current.state.sshKeyDraft.copy(
+                                preparedKey = preparation.key,
+                                error = preparation.error,
+                            ),
                         ),
                     )
                 }
@@ -355,32 +351,30 @@ internal class SecretsViewModel(
     fun prepareReplacementSshKey() {
         val current = editorState.value as? SecretsEditor.SshKey ?: return
         val source = current.state
+        val sourceDraft = source.sshKeyDraft
         val editor = current.copy(
             session = newEditorSession(),
-            state = source.copy(preparedKey = null, error = null),
+            state = source.copy(
+                sshKeyDraft = sourceDraft.withoutPreparation(),
+            ),
         )
         if (!editorState.compareAndSet(current, editor)) return
         viewModelScope.launch {
-            val result = runCatchingNonCancellation {
-                when (source.inputMode) {
-                    SshKeyInputMode.GENERATE -> generateSshKey(source.algorithm, source.comment)
-                    SshKeyInputMode.IMPORT -> importSshKey(source.privateKeyText)
-                }
-            }
+            val preparation = prepareSshKey(sourceDraft)
             editorState.update { current ->
                 if (
                     current !is SecretsEditor.SshKey ||
                     current.session != editor.session ||
-                    !current.state.hasSameSourceAs(source)
+                    !current.state.sshKeyDraft.hasSameSourceAs(sourceDraft)
                 ) {
                     current
                 } else {
                     current.copy(
                         state = current.state.copy(
-                            preparedKey = result.getOrNull(),
-                            error = result.exceptionOrNull()?.let { failure ->
-                                failure.message ?: "The private key is not valid"
-                            },
+                            sshKeyDraft = current.state.sshKeyDraft.copy(
+                                preparedKey = preparation.key,
+                                error = preparation.error,
+                            ),
                         ),
                     )
                 }
@@ -401,15 +395,16 @@ internal class SecretsViewModel(
                     editor
                 }
                 is SecretsEditor.Secret -> if (
-                    editor.state.sshPrivateKeyText.isNotEmpty() ||
-                    editor.state.preparedSshKey != null
+                    editor.state.sshKeyDraft.privateKeyText.isNotEmpty() ||
+                    editor.state.sshKeyDraft.preparedKey != null
                 ) {
                     SecretsEditor.None
                 } else {
                     editor.copy(session = newEditorSession())
                 }
                 is SecretsEditor.SshKey -> if (
-                    editor.state.privateKeyText.isNotEmpty() || editor.state.preparedKey != null
+                    editor.state.sshKeyDraft.privateKeyText.isNotEmpty() ||
+                    editor.state.sshKeyDraft.preparedKey != null
                 ) {
                     SecretsEditor.None
                 } else {
@@ -442,6 +437,21 @@ internal class SecretsViewModel(
 
     suspend fun importSshKey(value: String): SshPrivateKey =
         repository.importSshKey(value)
+
+    private suspend fun prepareSshKey(source: SshKeyDraft): SshKeyPreparation {
+        val result = runCatchingNonCancellation {
+            when (source.inputMode) {
+                SshKeyInputMode.GENERATE -> generateSshKey(source.algorithm, source.comment)
+                SshKeyInputMode.IMPORT -> importSshKey(source.privateKeyText)
+            }
+        }
+        return SshKeyPreparation(
+            key = result.getOrNull(),
+            error = result.exceptionOrNull()?.let { failure ->
+                failure.message ?: "The private key is not valid"
+            },
+        )
+    }
 
     suspend fun replaceSshKey(id: String, privateKey: SshPrivateKey): SaveSshSecretResult =
         repository.replaceSshKey(id, privateKey)
@@ -551,14 +561,12 @@ internal class SecretsViewModel(
     }
 }
 
-private fun SecretEditorState.hasSameSshSourceAs(other: SecretEditorState): Boolean =
-    type == other.type &&
-        sshInputMode == other.sshInputMode &&
-        sshAlgorithm == other.sshAlgorithm &&
-        sshPrivateKeyText == other.sshPrivateKeyText &&
-        sshComment == other.sshComment
+private data class SshKeyPreparation(
+    val key: SshPrivateKey?,
+    val error: String?,
+)
 
-private fun SshKeyEditorState.hasSameSourceAs(other: SshKeyEditorState): Boolean =
+private fun SshKeyDraft.hasSameSourceAs(other: SshKeyDraft): Boolean =
     inputMode == other.inputMode &&
         algorithm == other.algorithm &&
         privateKeyText == other.privateKeyText &&

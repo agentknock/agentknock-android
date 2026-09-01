@@ -72,31 +72,33 @@ import dev.agentknock.ui.components.InformationSurface
 import dev.agentknock.ui.components.NavigationBackButton
 
 private val environmentVariableName = Regex("[A-Za-z_][A-Za-z0-9_]*")
+
+internal enum class SshKeyInputMode { GENERATE, IMPORT }
+
+internal data class SshKeyDraft(
+    val inputMode: SshKeyInputMode = SshKeyInputMode.GENERATE,
+    val algorithm: SshKeyAlgorithm = SshKeyAlgorithm.ED25519,
+    val privateKeyText: String = "",
+    val comment: String = "",
+    val preparedKey: SshPrivateKey? = null,
+    val error: String? = null,
+) {
+    fun withoutPreparation(): SshKeyDraft = copy(preparedKey = null, error = null)
+}
+
 internal data class SecretEditorState(
     val secret: SecretDetails?,
     val name: String,
     val description: String,
     val type: String,
-    val sshInputMode: SshKeyInputMode = SshKeyInputMode.GENERATE,
-    val sshAlgorithm: SshKeyAlgorithm = SshKeyAlgorithm.ED25519,
-    val sshPrivateKeyText: String = "",
-    val sshComment: String = "",
-    val preparedSshKey: SshPrivateKey? = null,
-    val sshError: String? = null,
+    val sshKeyDraft: SshKeyDraft = SshKeyDraft(),
 )
-
-internal enum class SshKeyInputMode { GENERATE, IMPORT }
 
 internal data class SshKeyEditorState(
     val secretId: String,
     val secretName: String,
     val currentKey: SshKeyMetadata,
-    val inputMode: SshKeyInputMode,
-    val algorithm: SshKeyAlgorithm,
-    val privateKeyText: String,
-    val comment: String,
-    val preparedKey: SshPrivateKey?,
-    val error: String?,
+    val sshKeyDraft: SshKeyDraft,
 )
 
 internal data class VariableEditorState(
@@ -128,8 +130,9 @@ internal fun SecretEditorScreen(
     var confirmDiscard by rememberSaveable(secret?.id) { mutableStateOf(false) }
     val dirty = if (secret == null) {
         name.isNotEmpty() || description.isNotEmpty() ||
-            editor.sshPrivateKeyText.isNotEmpty() || editor.sshComment.isNotEmpty() ||
-            editor.preparedSshKey != null
+            editor.sshKeyDraft.privateKeyText.isNotEmpty() ||
+            editor.sshKeyDraft.comment.isNotEmpty() ||
+            editor.sshKeyDraft.preparedKey != null
     } else {
         name != secret.name || description != secret.description
     }
@@ -137,8 +140,8 @@ internal fun SecretEditorScreen(
         if (dirty) confirmDiscard = true else onDismiss()
     }
 
-    LaunchedEffect(editor.preparedSshKey) {
-        if (editor.preparedSshKey != null) {
+    LaunchedEffect(editor.sshKeyDraft.preparedKey) {
+        if (editor.sshKeyDraft.preparedKey != null) {
             focusManager.clearFocus()
             // Let the preview and save action participate in layout before moving them
             // into view. Generating a key is a transition to review, not an invitation to
@@ -185,8 +188,7 @@ internal fun SecretEditorScreen(
                                 onEditorChange(
                                     editor.copy(
                                         type = ENVIRONMENT_SECRET_TYPE,
-                                        preparedSshKey = null,
-                                        sshError = null,
+                                        sshKeyDraft = editor.sshKeyDraft.withoutPreparation(),
                                     ),
                                 )
                             },
@@ -195,7 +197,12 @@ internal fun SecretEditorScreen(
                         FilterChip(
                             selected = editor.type == SSH_SECRET_TYPE,
                             onClick = {
-                                onEditorChange(editor.copy(type = SSH_SECRET_TYPE, sshError = null))
+                                onEditorChange(
+                                    editor.copy(
+                                        type = SSH_SECRET_TYPE,
+                                        sshKeyDraft = editor.sshKeyDraft.copy(error = null),
+                                    ),
+                                )
                             },
                             label = { Text("SSH key", maxLines = 1) },
                         )
@@ -240,52 +247,17 @@ internal fun SecretEditorScreen(
             )
             if (secret == null && editor.type == SSH_SECRET_TYPE) {
                 SshKeyInput(
-                    mode = editor.sshInputMode,
-                    algorithm = editor.sshAlgorithm,
-                    privateKeyText = editor.sshPrivateKeyText,
-                    comment = editor.sshComment,
-                    preparedKey = editor.preparedSshKey,
-                    error = editor.sshError,
-                    onModeChange = { mode ->
-                        onEditorChange(
-                            editor.copy(
-                                sshInputMode = mode,
-                                preparedSshKey = null,
-                                sshError = null,
-                            ),
-                        )
-                    },
-                    onAlgorithmChange = { algorithm ->
-                        onEditorChange(
-                            editor.copy(
-                                sshAlgorithm = algorithm,
-                                preparedSshKey = null,
-                                sshError = null,
-                            ),
-                        )
-                    },
-                    onPrivateKeyChange = { value ->
-                        onEditorChange(
-                            editor.copy(
-                                sshPrivateKeyText = value,
-                                preparedSshKey = null,
-                                sshError = null,
-                            ),
-                        )
-                    },
-                    onCommentChange = { value ->
-                        onEditorChange(
-                            editor.copy(
-                                sshComment = value,
-                                preparedSshKey = null,
-                                sshError = null,
-                            ),
-                        )
+                    draft = editor.sshKeyDraft,
+                    onDraftChange = { draft ->
+                        onEditorChange(editor.copy(sshKeyDraft = draft))
                     },
                     onPrepare = onPrepareSshKey,
                 )
             }
-            if (secret != null || editor.type != SSH_SECRET_TYPE || editor.preparedSshKey != null) {
+            if (
+                secret != null || editor.type != SSH_SECRET_TYPE ||
+                editor.sshKeyDraft.preparedKey != null
+            ) {
                 Button(
                     onClick = {
                         validationError = when {
@@ -321,51 +293,60 @@ internal fun SecretEditorScreen(
 
 @Composable
 private fun SshKeyInput(
-    mode: SshKeyInputMode,
-    algorithm: SshKeyAlgorithm,
-    privateKeyText: String,
-    comment: String,
-    preparedKey: SshPrivateKey?,
-    error: String?,
-    onModeChange: (SshKeyInputMode) -> Unit,
-    onAlgorithmChange: (SshKeyAlgorithm) -> Unit,
-    onPrivateKeyChange: (String) -> Unit,
-    onCommentChange: (String) -> Unit,
+    draft: SshKeyDraft,
+    onDraftChange: (SshKeyDraft) -> Unit,
     onPrepare: () -> Unit,
 ) {
     Column(verticalArrangement = Arrangement.spacedBy(12.dp)) {
         Text("Key material", style = MaterialTheme.typography.titleMedium)
         Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
             FilterChip(
-                selected = mode == SshKeyInputMode.GENERATE,
-                onClick = { onModeChange(SshKeyInputMode.GENERATE) },
+                selected = draft.inputMode == SshKeyInputMode.GENERATE,
+                onClick = {
+                    onDraftChange(
+                        draft.copy(inputMode = SshKeyInputMode.GENERATE).withoutPreparation(),
+                    )
+                },
                 label = { Text("Generate") },
             )
             FilterChip(
-                selected = mode == SshKeyInputMode.IMPORT,
-                onClick = { onModeChange(SshKeyInputMode.IMPORT) },
+                selected = draft.inputMode == SshKeyInputMode.IMPORT,
+                onClick = {
+                    onDraftChange(
+                        draft.copy(inputMode = SshKeyInputMode.IMPORT).withoutPreparation(),
+                    )
+                },
                 label = { Text("Import") },
             )
         }
-        if (mode == SshKeyInputMode.GENERATE) {
+        if (draft.inputMode == SshKeyInputMode.GENERATE) {
             Text("Algorithm", style = MaterialTheme.typography.labelLarge)
             FlowRow(
                 horizontalArrangement = Arrangement.spacedBy(8.dp),
                 verticalArrangement = Arrangement.spacedBy(4.dp),
             ) {
                 FilterChip(
-                    selected = algorithm == SshKeyAlgorithm.ED25519,
-                    onClick = { onAlgorithmChange(SshKeyAlgorithm.ED25519) },
+                    selected = draft.algorithm == SshKeyAlgorithm.ED25519,
+                    onClick = {
+                        onDraftChange(
+                            draft.copy(algorithm = SshKeyAlgorithm.ED25519)
+                                .withoutPreparation(),
+                        )
+                    },
                     label = { Text("Ed25519") },
                 )
                 FilterChip(
-                    selected = algorithm == SshKeyAlgorithm.RSA,
-                    onClick = { onAlgorithmChange(SshKeyAlgorithm.RSA) },
+                    selected = draft.algorithm == SshKeyAlgorithm.RSA,
+                    onClick = {
+                        onDraftChange(
+                            draft.copy(algorithm = SshKeyAlgorithm.RSA).withoutPreparation(),
+                        )
+                    },
                     label = { Text("RSA") },
                 )
             }
             Text(
-                when (algorithm) {
+                when (draft.algorithm) {
                     SshKeyAlgorithm.ED25519 ->
                         "Generate a new Ed25519 key on this device. Recommended for new keys."
                     SshKeyAlgorithm.RSA ->
@@ -374,8 +355,10 @@ private fun SshKeyInput(
                 color = MaterialTheme.colorScheme.onSurfaceVariant,
             )
             OutlinedTextField(
-                value = comment,
-                onValueChange = onCommentChange,
+                value = draft.comment,
+                onValueChange = { comment ->
+                    onDraftChange(draft.copy(comment = comment).withoutPreparation())
+                },
                 label = { Text("Public key comment (optional)") },
                 singleLine = true,
                 modifier = Modifier.fillMaxWidth(),
@@ -387,8 +370,12 @@ private fun SshKeyInput(
                 color = MaterialTheme.colorScheme.onSurfaceVariant,
             )
             OutlinedTextField(
-                value = privateKeyText,
-                onValueChange = onPrivateKeyChange,
+                value = draft.privateKeyText,
+                onValueChange = { privateKeyText ->
+                    onDraftChange(
+                        draft.copy(privateKeyText = privateKeyText).withoutPreparation(),
+                    )
+                },
                 label = { Text("OpenSSH private key") },
                 minLines = 6,
                 maxLines = 12,
@@ -396,18 +383,25 @@ private fun SshKeyInput(
                 modifier = Modifier.fillMaxWidth(),
             )
         }
-        if (preparedKey == null) {
+        if (draft.preparedKey == null) {
             FilledTonalButton(
                 onClick = onPrepare,
-                enabled = mode == SshKeyInputMode.GENERATE || privateKeyText.isNotBlank(),
+                enabled = draft.inputMode == SshKeyInputMode.GENERATE ||
+                    draft.privateKeyText.isNotBlank(),
                 modifier = Modifier.fillMaxWidth(),
             ) {
-                Text(if (mode == SshKeyInputMode.GENERATE) "Generate and review" else "Review key")
+                Text(
+                    if (draft.inputMode == SshKeyInputMode.GENERATE) {
+                        "Generate and review"
+                    } else {
+                        "Review key"
+                    },
+                )
             }
         } else {
-            SshKeyPreview(preparedKey)
+            SshKeyPreview(draft.preparedKey)
         }
-        error?.let {
+        draft.error?.let {
             Text(
                 it,
                 color = MaterialTheme.colorScheme.error,
@@ -453,11 +447,12 @@ internal fun SshKeyEditorScreen(
     var confirmDiscard by rememberSaveable(editor.secretId) { mutableStateOf(false) }
     val scrollState = rememberScrollState()
     val focusManager = LocalFocusManager.current
-    val dirty = editor.privateKeyText.isNotEmpty() || editor.preparedKey != null ||
-        editor.comment != editor.currentKey.comment ||
-        editor.algorithm.storedName != editor.currentKey.algorithm
-    LaunchedEffect(editor.preparedKey) {
-        if (editor.preparedKey != null) {
+    val draft = editor.sshKeyDraft
+    val dirty = draft.privateKeyText.isNotEmpty() || draft.preparedKey != null ||
+        draft.comment != editor.currentKey.comment ||
+        draft.algorithm.storedName != editor.currentKey.algorithm
+    LaunchedEffect(draft.preparedKey) {
+        if (draft.preparedKey != null) {
             withFrameNanos { }
             withFrameNanos { }
             scrollState.animateScrollTo(scrollState.maxValue)
@@ -493,31 +488,9 @@ internal fun SshKeyEditorScreen(
                 )
             }
             SshKeyInput(
-                mode = editor.inputMode,
-                algorithm = editor.algorithm,
-                privateKeyText = editor.privateKeyText,
-                comment = editor.comment,
-                preparedKey = editor.preparedKey,
-                error = editor.error,
-                onModeChange = { mode ->
-                    onEditorChange(
-                        editor.copy(inputMode = mode, preparedKey = null, error = null),
-                    )
-                },
-                onAlgorithmChange = { algorithm ->
-                    onEditorChange(
-                        editor.copy(algorithm = algorithm, preparedKey = null, error = null),
-                    )
-                },
-                onPrivateKeyChange = { value ->
-                    onEditorChange(
-                        editor.copy(privateKeyText = value, preparedKey = null, error = null),
-                    )
-                },
-                onCommentChange = { value ->
-                    onEditorChange(
-                        editor.copy(comment = value, preparedKey = null, error = null),
-                    )
+                draft = draft,
+                onDraftChange = { sshKeyDraft ->
+                    onEditorChange(editor.copy(sshKeyDraft = sshKeyDraft))
                 },
                 onPrepare = {
                     focusManager.clearFocus()
@@ -526,7 +499,7 @@ internal fun SshKeyEditorScreen(
             )
             Button(
                 onClick = onReplace,
-                enabled = editor.preparedKey != null,
+                enabled = draft.preparedKey != null,
                 modifier = Modifier.fillMaxWidth(),
             ) { Text("Replace key") }
         }
