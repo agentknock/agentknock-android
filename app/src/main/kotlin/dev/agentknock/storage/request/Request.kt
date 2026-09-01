@@ -395,7 +395,7 @@ internal data class SshAuthenticationRequestEntity(
     @ColumnInfo(name = "secret_name")
     val secretName: String,
     @ColumnInfo(name = "message")
-    val message: ByteArray,
+    val message: ByteArray?,
     @ColumnInfo(name = "username")
     val username: String,
     @ColumnInfo(name = "method")
@@ -854,6 +854,20 @@ internal interface RequestDao {
     @Query(
         """
         DELETE FROM request_psks
+        WHERE request_id = :requestId
+          AND EXISTS (
+            SELECT 1 FROM inbox_requests
+            WHERE id = :requestId
+              AND kind = 'ssh_authenticate'
+              AND completed_at IS NOT NULL
+          )
+        """,
+    )
+    suspend fun deleteTerminalSshAuthenticationRequestPsk(requestId: String): Int
+
+    @Query(
+        """
+        DELETE FROM request_psks
         WHERE request_id IN (
             SELECT id FROM inbox_requests WHERE completion_json IS NOT NULL
         )
@@ -1194,31 +1208,6 @@ internal interface RequestDao {
     }
 
     @Transaction
-    suspend fun insertSshAuthenticationRequestIfAuthorized(
-        request: InboxRequestEntity,
-        authentication: SshAuthenticationRequestEntity,
-        client: ClientEntity,
-        requestPsk: RequestPskEntity,
-        currentClientPsk: ClientPskEntity?,
-        previousClientPsk: ClientPskEntity?,
-        authorization: AuthorizationCommitment,
-        clientId: String,
-        operation: String,
-        now: Long,
-    ): Boolean {
-        if (!authorizationMatches(authorization, clientId, operation, now)) return false
-        insertSshAuthenticationRequest(
-            request,
-            authentication,
-            client,
-            requestPsk,
-            currentClientPsk,
-            previousClientPsk,
-        )
-        return true
-    }
-
-    @Transaction
     suspend fun insertSecretListRequest(
         request: InboxRequestEntity,
         client: ClientEntity,
@@ -1489,15 +1478,26 @@ internal interface RequestDao {
         authorization: AuthorizationCommitment,
         clientId: String,
         operation: String,
+        expectedState: String,
         now: Long,
     ): ConditionalRequestUpdate {
         if (!canAdvanceRequest(request.id, request.deviceIdentityId)) {
             return ConditionalRequestUpdate.UNAVAILABLE
         }
+        val currentRequest = getRequestById(request.id)
+            ?: return ConditionalRequestUpdate.UNAVAILABLE
+        val currentAuthentication = getSshAuthenticationRequest(request.id)
+            ?: return ConditionalRequestUpdate.UNAVAILABLE
+        if (
+            currentRequest.state != expectedState ||
+            currentAuthentication.decision != null
+        ) {
+            return ConditionalRequestUpdate.UNAVAILABLE
+        }
         if (!authorizationMatches(authorization, clientId, operation, now)) {
             check(
                 updateRequest(
-                    request.copy(
+                    currentRequest.copy(
                         state = "action_required",
                         responseJson = null,
                         completedAt = null,
@@ -1506,7 +1506,7 @@ internal interface RequestDao {
             )
             check(
                 updateSshAuthenticationRequestRow(
-                    authentication.copy(
+                    currentAuthentication.copy(
                         decision = null,
                         completionResult = null,
                         completionReason = null,

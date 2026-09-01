@@ -196,6 +196,13 @@ class RequestRepositorySlotTest {
             writeTransaction = RoomWriteTransaction(database),
             currentTimeMillis = { now },
         )
+        val sshAuthenticationRequests = SshAuthenticationRequests(
+            dao = database.requestDao(),
+            secrets = secrets,
+            audit = audit,
+            writeTransaction = RoomWriteTransaction(database),
+            currentTimeMillis = { now },
+        )
         repository = RequestRepository(
             dao = database.requestDao(),
             material = requestMaterial,
@@ -205,6 +212,7 @@ class RequestRepositorySlotTest {
             secretManagement = secretManagement,
             invocationRequests = invocationRequests,
             gitSigningRequests = gitSigningRequests,
+            sshAuthenticationRequests = sshAuthenticationRequests,
             approvalReviewer = approvalReviewer,
             relay = relay,
             aiReviews = AiReviewCoordinator(reviewScope),
@@ -1721,6 +1729,7 @@ class RequestRepositorySlotTest {
         )
         assertEquals(InboxRequestState.COMPLETED.storedName, completed.state)
         assertEquals(ApprovalDecision.DENIED.storedName, completedAuthentication.decision)
+        assertNull(completedAuthentication.message)
         assertEquals(
             ApprovalCompletionResult.DENIED.storedName,
             completedAuthentication.completionResult,
@@ -1754,6 +1763,7 @@ class RequestRepositorySlotTest {
             database.requestDao().getSshAuthenticationRequest(SSH_AUTHENTICATION_REQUEST_ID),
         )
         assertEquals(ApprovalDecision.APPROVED.storedName, decided.decision)
+        assertNull(decided.message)
 
         now += 1
         connect(
@@ -1833,6 +1843,7 @@ class RequestRepositorySlotTest {
         assertNull(authentication.completionResult)
         assertNull(authentication.completionReason)
         assertNull(authentication.completionMessage)
+        assertNull(authentication.message)
         val completionAudit = AuditRepository(database.auditDao()).observeEvents().first()
             .single { it.type == AuditEventType.SSH_AUTHENTICATION_COMPLETED }
         assertEquals(

@@ -2,7 +2,7 @@
   "formatVersion": 1,
   "database": {
     "version": 1,
-    "identityHash": "b7db1b0ec76a5b66ab5febf4239f8021",
+    "identityHash": "a02d06af05b5f0564eec6943aa689867",
     "entities": [
       {
         "tableName": "vault_keys",
@@ -1559,7 +1559,7 @@
       },
       {
         "tableName": "ssh_authentication_requests",
-        "createSql": "CREATE TABLE IF NOT EXISTS `${TABLE_NAME}` (`request_id` TEXT NOT NULL, `secret_name` TEXT NOT NULL, `message` BLOB NOT NULL, `username` TEXT NOT NULL, `method` TEXT NOT NULL, `algorithm` TEXT NOT NULL, `host_key_algorithm` TEXT, `host_key_fingerprint` TEXT, `approval_evaluation_json` TEXT, `decision` TEXT, `completion_result` TEXT, `completion_reason` TEXT, `completion_message` TEXT, `decided_at` INTEGER, PRIMARY KEY(`request_id`), FOREIGN KEY(`request_id`) REFERENCES `inbox_requests`(`id`) ON UPDATE NO ACTION ON DELETE CASCADE )",
+        "createSql": "CREATE TABLE IF NOT EXISTS `${TABLE_NAME}` (`request_id` TEXT NOT NULL, `secret_name` TEXT NOT NULL, `message` BLOB, `username` TEXT NOT NULL, `method` TEXT NOT NULL, `algorithm` TEXT NOT NULL, `host_key_algorithm` TEXT, `host_key_fingerprint` TEXT, `approval_evaluation_json` TEXT, `decision` TEXT, `completion_result` TEXT, `completion_reason` TEXT, `completion_message` TEXT, `decided_at` INTEGER, PRIMARY KEY(`request_id`), FOREIGN KEY(`request_id`) REFERENCES `inbox_requests`(`id`) ON UPDATE NO ACTION ON DELETE CASCADE )",
         "fields": [
           {
             "fieldPath": "requestId",
@@ -1576,8 +1576,7 @@
           {
             "fieldPath": "message",
             "columnName": "message",
-            "affinity": "BLOB",
-            "notNull": true
+            "affinity": "BLOB"
           },
           {
             "fieldPath": "username",
@@ -2050,7 +2049,7 @@
     ],
     "setupQueries": [
       "CREATE TABLE IF NOT EXISTS room_master_table (id INTEGER PRIMARY KEY,identity_hash TEXT)",
-      "INSERT OR REPLACE INTO room_master_table (id,identity_hash) VALUES(42, 'b7db1b0ec76a5b66ab5febf4239f8021')"
+      "INSERT OR REPLACE INTO room_master_table (id,identity_hash) VALUES(42, 'a02d06af05b5f0564eec6943aa689867')"
     ]
   }
 }

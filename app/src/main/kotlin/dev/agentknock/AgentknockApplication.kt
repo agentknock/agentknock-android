@@ -33,6 +33,7 @@ import dev.agentknock.storage.request.ClientRepository
 import dev.agentknock.storage.request.GitSigningRequests
 import dev.agentknock.storage.request.InvocationRequests
 import dev.agentknock.storage.request.SecretManagementRequests
+import dev.agentknock.storage.request.SshAuthenticationRequests
 import dev.agentknock.storage.device.DeviceIdentityRepository
 import dev.agentknock.storage.device.DeviceManagementRepository
 import dev.agentknock.subscription.SubscriptionRepository
@@ -159,6 +160,12 @@ internal class ApplicationContainer(application: Application) {
         audit = audit,
         writeTransaction = writeTransaction,
     )
+    private val sshAuthenticationRequests = SshAuthenticationRequests(
+        dao = database.requestDao(),
+        secrets = secrets,
+        audit = audit,
+        writeTransaction = writeTransaction,
+    )
 
     val requests: RequestRepository = RequestRepository(
         dao = database.requestDao(),
@@ -169,6 +176,7 @@ internal class ApplicationContainer(application: Application) {
         secretManagement = secretManagement,
         invocationRequests = invocationRequests,
         gitSigningRequests = gitSigningRequests,
+        sshAuthenticationRequests = sshAuthenticationRequests,
         approvalReviewer = HttpRelayApprovalReviewClient(
             RelayHttpTransport(approvalReviewHttpClient(httpClient)),
         ),

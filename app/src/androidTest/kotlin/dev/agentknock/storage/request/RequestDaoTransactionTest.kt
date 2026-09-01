@@ -889,15 +889,17 @@ class RequestDaoTransactionTest {
                 stale,
                 CLIENT_ID,
                 "ssh_authenticate",
+                "reviewing",
                 10,
             ),
         )
         assertEquals("action_required", dao.getRequestById(sshRequestId)?.state)
         assertNull(dao.getRequestById(sshRequestId)?.responseJson)
         assertNull(dao.getSshAuthenticationRequest(sshRequestId)?.decision)
+        assertNull(dao.getSshAuthenticationRequest(sshRequestId)?.approvalEvaluationJson)
         assertEquals(
-            "{\"review\":\"refreshed\"}",
-            dao.getSshAuthenticationRequest(sshRequestId)?.approvalEvaluationJson,
+            "authentication".encodeToByteArray().toList(),
+            dao.getSshAuthenticationRequest(sshRequestId)?.message?.toList(),
         )
 
         val exact = stale.copy(secretRevisions = mapOf("secret" to 2))
