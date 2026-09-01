@@ -10,9 +10,13 @@ internal enum class SecretType(val storedName: String) {
     ;
 
     companion object {
-        fun fromStoredName(value: String): SecretType = entries.singleOrNull {
+        fun fromStoredName(value: String): SecretType = requireNotNull(fromStoredNameOrNull(value)) {
+            "Unknown secret type: $value"
+        }
+
+        fun fromStoredNameOrNull(value: String): SecretType? = entries.singleOrNull {
             it.storedName == value
-        } ?: throw IllegalArgumentException("Unknown secret type: $value")
+        }
     }
 }
 
@@ -81,7 +85,7 @@ internal data class SecretSummary(
     val id: String,
     val name: String,
     val description: String,
-    val type: String,
+    val type: SecretType,
     val environmentVariableCount: Int,
     val sshKey: SshKeyMetadata?,
     val createdAt: Long,
@@ -93,7 +97,7 @@ internal data class SecretDetails(
     val id: String,
     val name: String,
     val description: String,
-    val type: String,
+    val type: SecretType,
     val environmentVariables: List<EnvironmentVariableMetadata>,
     val sshKey: SshKeyMetadata?,
     val approvalMode: SecretApprovalMode,
@@ -105,7 +109,7 @@ internal data class SecretDetails(
 )
 
 internal data class SshKeyMetadata(
-    val algorithm: String,
+    val algorithm: SshKeyAlgorithm,
     val publicKey: String,
     val fingerprint: String,
     val comment: String,

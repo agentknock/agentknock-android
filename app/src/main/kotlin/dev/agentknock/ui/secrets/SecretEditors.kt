@@ -60,10 +60,9 @@ import androidx.compose.ui.text.input.PasswordVisualTransformation
 import androidx.compose.ui.text.input.VisualTransformation
 import androidx.compose.ui.unit.dp
 import dev.agentknock.R
-import dev.agentknock.storage.secret.ENVIRONMENT_SECRET_TYPE
 import dev.agentknock.storage.secret.EnvironmentVariableMetadata
-import dev.agentknock.storage.secret.SSH_SECRET_TYPE
 import dev.agentknock.storage.secret.SecretDetails
+import dev.agentknock.storage.secret.SecretType
 import dev.agentknock.storage.secret.SshKeyAlgorithm
 import dev.agentknock.storage.secret.SshKeyMetadata
 import dev.agentknock.storage.secret.SshPrivateKey
@@ -90,7 +89,7 @@ internal data class SecretEditorState(
     val secret: SecretDetails?,
     val name: String,
     val description: String,
-    val type: String,
+    val type: SecretType,
     val sshKeyDraft: SshKeyDraft = SshKeyDraft(),
 )
 
@@ -183,11 +182,11 @@ internal fun SecretEditorScreen(
                         verticalArrangement = Arrangement.spacedBy(4.dp),
                     ) {
                         FilterChip(
-                            selected = editor.type == ENVIRONMENT_SECRET_TYPE,
+                            selected = editor.type == SecretType.ENVIRONMENT,
                             onClick = {
                                 onEditorChange(
                                     editor.copy(
-                                        type = ENVIRONMENT_SECRET_TYPE,
+                                        type = SecretType.ENVIRONMENT,
                                         sshKeyDraft = editor.sshKeyDraft.withoutPreparation(),
                                     ),
                                 )
@@ -195,11 +194,11 @@ internal fun SecretEditorScreen(
                             label = { Text("Environment variables", maxLines = 1) },
                         )
                         FilterChip(
-                            selected = editor.type == SSH_SECRET_TYPE,
+                            selected = editor.type == SecretType.SSH,
                             onClick = {
                                 onEditorChange(
                                     editor.copy(
-                                        type = SSH_SECRET_TYPE,
+                                        type = SecretType.SSH,
                                         sshKeyDraft = editor.sshKeyDraft.copy(error = null),
                                     ),
                                 )
@@ -245,7 +244,7 @@ internal fun SecretEditorScreen(
                 minLines = 2,
                 modifier = Modifier.fillMaxWidth(),
             )
-            if (secret == null && editor.type == SSH_SECRET_TYPE) {
+            if (secret == null && editor.type == SecretType.SSH) {
                 SshKeyInput(
                     draft = editor.sshKeyDraft,
                     onDraftChange = { draft ->
@@ -255,7 +254,7 @@ internal fun SecretEditorScreen(
                 )
             }
             if (
-                secret != null || editor.type != SSH_SECRET_TYPE ||
+                secret != null || editor.type != SecretType.SSH ||
                 editor.sshKeyDraft.preparedKey != null
             ) {
                 Button(
@@ -415,7 +414,7 @@ private fun SshKeyInput(
 private fun SshKeyPreview(key: SshPrivateKey) {
     InformationSurface {
         Text("Ready to save", style = MaterialTheme.typography.titleMedium)
-        InformationRow("Algorithm", key.algorithm.storedName.sshAlgorithmDisplayName())
+        InformationRow("Algorithm", key.algorithm.displayName())
         InformationRow("Fingerprint", key.fingerprint)
         if (key.comment.isNotBlank()) InformationRow("Comment", key.comment)
         Column(verticalArrangement = Arrangement.spacedBy(3.dp)) {
@@ -450,7 +449,7 @@ internal fun SshKeyEditorScreen(
     val draft = editor.sshKeyDraft
     val dirty = draft.privateKeyText.isNotEmpty() || draft.preparedKey != null ||
         draft.comment != editor.currentKey.comment ||
-        draft.algorithm.storedName != editor.currentKey.algorithm
+        draft.algorithm != editor.currentKey.algorithm
     LaunchedEffect(draft.preparedKey) {
         if (draft.preparedKey != null) {
             withFrameNanos { }

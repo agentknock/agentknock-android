@@ -74,23 +74,28 @@ internal class SecretMaterialStore(
         )
     }
 
-    suspend fun decryptSshKey(key: SshKeyEntity): DecryptionResult {
-        val algorithm = SshKeyAlgorithm.fromStoredName(key.algorithm)
-            ?: return DecryptionResult.UnsupportedFormat
-        return withContext(cryptographyDispatcher) {
-            encryption.decrypt(
-                encrypted = key.encryptedPrivateKey,
-                location = sshKeyLocation(
-                    key.secretId,
-                    algorithm,
-                    key.publicKey,
-                ),
-            )
-        }
+    suspend fun decryptSshKey(
+        key: SshKeyEntity,
+        algorithm: SshKeyAlgorithm,
+    ): DecryptionResult = withContext(cryptographyDispatcher) {
+        encryption.decrypt(
+            encrypted = key.encryptedPrivateKey,
+            location = sshKeyLocation(
+                key.secretId,
+                algorithm,
+                key.publicKey,
+            ),
+        )
     }
 
-    fun storedPrivateKey(key: SshKeyEntity, plaintext: ByteArray): SshPrivateKey =
-        sshKeys.fromStored(key.algorithm, plaintext, key.publicKey, key.comment)
+    fun storedPrivateKey(
+        key: SshKeyEntity,
+        algorithm: SshKeyAlgorithm,
+        plaintext: ByteArray,
+    ): SshPrivateKey = sshKeys.fromStored(algorithm, plaintext, key.publicKey, key.comment)
+
+    fun publicKey(key: SshKeyEntity, algorithm: SshKeyAlgorithm): SshPublicKey =
+        sshKeys.publicKey(algorithm, key.publicKey, key.comment)
 
     fun publicKey(key: SshKeyEntity): SshPublicKey =
         sshKeys.publicKey(key.algorithm, key.publicKey, key.comment)
@@ -100,7 +105,7 @@ internal class SecretMaterialStore(
 
     fun validateSshPrivateKey(key: SshPrivateKey) {
         sshKeys.fromStored(
-            key.algorithm.storedName,
+            key.algorithm,
             key.privateKey,
             key.publicKey,
             key.comment,

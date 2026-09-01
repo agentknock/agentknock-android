@@ -12,6 +12,28 @@ internal data class SecretResolution(
     val values: RequestedSecretsResult,
 )
 
+private data class ParsedSshKey(
+    val entity: SshKeyEntity,
+    val algorithm: SshKeyAlgorithm,
+)
+
+private class ParsedSecretSnapshot(snapshot: SecretSnapshot) {
+    val secrets: List<SecretEntity> = snapshot.secrets
+    val secretsByName: Map<String, SecretEntity> = snapshot.secretsByName
+    val variablesBySecret: Map<String, List<EnvironmentVariableEntity>> =
+        snapshot.variablesBySecret
+    val sshKeysBySecret: Map<String, ParsedSshKey> = snapshot.sshKeys.mapNotNull { key ->
+        SshKeyAlgorithm.fromStoredName(key.algorithm)?.let { algorithm ->
+            key.secretId to ParsedSshKey(key, algorithm)
+        }
+    }.toMap()
+    private val secretTypesById: Map<String, SecretType> = snapshot.secrets.mapNotNull { secret ->
+        SecretType.fromStoredNameOrNull(secret.type)?.let { type -> secret.id to type }
+    }.toMap()
+
+    fun typeOf(secret: SecretEntity): SecretType? = secretTypesById[secret.id]
+}
+
 /** Resolves one immutable database snapshot into review facts and, when requested, values. */
 internal class SecretResolver(
     private val dao: SecretDao,
@@ -20,9 +42,9 @@ internal class SecretResolver(
     private val cryptographyDispatcher: CoroutineDispatcher,
 ) {
     suspend fun listSecretsForClient(): List<SecretMetadata> {
-        val snapshot = dao.getSecretSnapshot()
+        val snapshot = ParsedSecretSnapshot(dao.getSecretSnapshot())
         return snapshot.secrets.mapNotNull { secret ->
-            when (runCatching { secret.secretType }.getOrNull()) {
+            when (snapshot.typeOf(secret)) {
                 SecretType.ENVIRONMENT -> SecretMetadata(
                     name = secret.name,
                     description = secret.description,
@@ -36,7 +58,7 @@ internal class SecretResolver(
                         name = secret.name,
                         description = secret.description,
                         type = SecretType.SSH.storedName,
-                        sshPublicKey = material.publicKey(key).line,
+                        sshPublicKey = material.publicKey(key.entity, key.algorithm).line,
                     )
                 }
                 null -> null
@@ -49,7 +71,7 @@ internal class SecretResolver(
         environmentSelections: Map<String, EnvironmentVariableSelection> = emptyMap(),
         includeValues: Boolean,
     ): SecretResolution {
-        val snapshot = dao.getSecretSnapshot()
+        val snapshot = ParsedSecretSnapshot(dao.getSecretSnapshot())
         val selection = select(snapshot, names, environmentSelections)
         val description = selection.description()
         return SecretResolution(
@@ -115,20 +137,20 @@ internal class SecretResolver(
         secretName: String,
         expectedPublicKey: String,
     ): SigningKeyLoadResult {
-        val snapshot = dao.getSecretSnapshot()
+        val snapshot = ParsedSecretSnapshot(dao.getSecretSnapshot())
         val secret = snapshot.secretsByName[secretName] ?: return SigningKeyLoadResult.NotFound
-        if (runCatching { secret.secretType }.getOrNull() != SecretType.SSH) {
+        if (snapshot.typeOf(secret) != SecretType.SSH) {
             return SigningKeyLoadResult.WrongType
         }
-        val row = snapshot.sshKeysBySecret[secret.id] ?: return SigningKeyLoadResult.Corrupted
-        val currentPublic = runCatching { material.publicKey(row) }
+        val key = snapshot.sshKeysBySecret[secret.id] ?: return SigningKeyLoadResult.Corrupted
+        val currentPublic = runCatching { material.publicKey(key.entity, key.algorithm) }
             .getOrElse { return SigningKeyLoadResult.Corrupted }
         val expectedPublic = runCatching { sshKeys.importOpenSshPublicKey(expectedPublicKey) }
             .getOrElse { return SigningKeyLoadResult.Corrupted }
         if (!MessageDigest.isEqual(currentPublic.blob(), expectedPublic.blob())) {
             return SigningKeyLoadResult.KeyChanged
         }
-        val plaintext = when (val decrypted = material.decryptSshKey(row)) {
+        val plaintext = when (val decrypted = material.decryptSshKey(key.entity, key.algorithm)) {
             is DecryptionResult.Plaintext -> decrypted.value
             DecryptionResult.KeyUnavailable -> return SigningKeyLoadResult.Unavailable
             DecryptionResult.AuthenticationFailed -> return SigningKeyLoadResult.Corrupted
@@ -136,19 +158,21 @@ internal class SecretResolver(
                 return SigningKeyLoadResult.UnsupportedEncryption
             }
         }
-        val key = runCatching { material.storedPrivateKey(row, plaintext) }
+        val privateKey = runCatching {
+            material.storedPrivateKey(key.entity, key.algorithm, plaintext)
+        }
             .getOrElse { return SigningKeyLoadResult.Corrupted }
-        return SigningKeyLoadResult.Available(key)
+        return SigningKeyLoadResult.Available(privateKey)
     }
 
     private fun select(
-        snapshot: SecretSnapshot,
+        snapshot: ParsedSecretSnapshot,
         names: List<String>,
         environmentSelections: Map<String, EnvironmentVariableSelection>,
     ): Selection = Selection(snapshot, names.distinct(), environmentSelections)
 
     private inner class Selection(
-        private val snapshot: SecretSnapshot,
+        private val snapshot: ParsedSecretSnapshot,
         private val requestedNames: List<String>,
         private val selections: Map<String, EnvironmentVariableSelection>,
     ) {
@@ -178,7 +202,7 @@ internal class SecretResolver(
             },
             missingSecrets = requestedNames.filterNot(secretByName::containsKey),
             containsSensitiveMaterial = secretByName.values.any { secret ->
-                runCatching { secret.secretType }.getOrNull() == SecretType.ENVIRONMENT &&
+                snapshot.typeOf(secret) == SecretType.ENVIRONMENT &&
                     selectedVariables(secret).any(EnvironmentVariableEntity::sensitive)
             },
         )
@@ -189,7 +213,7 @@ internal class SecretResolver(
             val missing = requestedNames.filterNot(secretByName::containsKey)
             if (missing.isNotEmpty()) return RequestedSecretsResult.MissingSecrets(missing)
             val typed = secretByName.values.associateWith {
-                runCatching { it.secretType }.getOrNull()
+                snapshot.typeOf(it)
                     ?: return RequestedSecretsResult.UnsupportedSecretType
             }
             if (typed.values.count { it == SecretType.SSH } > 1) {
@@ -254,9 +278,11 @@ internal class SecretResolver(
                         environments.getValue(secret.id),
                     )
                     SecretType.SSH -> {
-                        val row = snapshot.sshKeysBySecret[secret.id]
+                        val key = snapshot.sshKeysBySecret[secret.id]
                             ?: return RequestedSecretsResult.SecretCorrupted
-                        val publicKey = runCatching { material.publicKey(row) }
+                        val publicKey = runCatching {
+                            material.publicKey(key.entity, key.algorithm)
+                        }
                             .getOrElse { return RequestedSecretsResult.SecretCorrupted }
                         SecretValues.Ssh(secret.description, publicKey.line)
                     }
@@ -267,7 +293,7 @@ internal class SecretResolver(
 
         private fun SecretEntity.metadata(
             variables: List<EnvironmentVariableEntity>,
-        ): SecretMetadata? = when (runCatching { secretType }.getOrNull()) {
+        ): SecretMetadata? = when (snapshot.typeOf(this)) {
             SecretType.ENVIRONMENT -> SecretMetadata(
                 name = name,
                 description = description,
@@ -281,7 +307,7 @@ internal class SecretResolver(
                     name = name,
                     description = description,
                     type = SecretType.SSH.storedName,
-                    sshPublicKey = material.publicKey(key).line,
+                    sshPublicKey = material.publicKey(key.entity, key.algorithm).line,
                 )
             }
             null -> null
@@ -291,7 +317,7 @@ internal class SecretResolver(
             selected: List<EnvironmentVariableEntity>,
         ): SecretReviewMetadata? {
             val selectedNames = selected.mapTo(hashSetOf(), EnvironmentVariableEntity::name)
-            return when (runCatching { secretType }.getOrNull()) {
+            return when (snapshot.typeOf(this)) {
                 SecretType.ENVIRONMENT -> SecretReviewMetadata(
                     id = id,
                     revision = revision,

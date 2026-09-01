@@ -47,11 +47,12 @@ import dev.agentknock.storage.secret.CreateEnvironmentVariableResult
 import dev.agentknock.storage.secret.CreateSecretResult
 import dev.agentknock.storage.secret.EnvironmentVariableMetadata
 import dev.agentknock.storage.secret.EnvironmentVariableValue
-import dev.agentknock.storage.secret.SSH_SECRET_TYPE
 import dev.agentknock.storage.secret.SaveEnvironmentVariableResult
 import dev.agentknock.storage.secret.SaveSecretResult
 import dev.agentknock.storage.secret.SaveSshSecretResult
 import dev.agentknock.storage.secret.SecretDetails
+import dev.agentknock.storage.secret.SecretType
+import dev.agentknock.storage.secret.SshKeyAlgorithm
 import dev.agentknock.ui.components.AdaptiveListDetail
 import kotlinx.coroutines.launch
 import java.util.UUID
@@ -399,14 +400,14 @@ internal fun SecretsScreen(
                         if (!viewModel.editorIsCurrent(activeEditor)) return@launch
                         val error = if (editorState.secret == null) {
                             when (
-                                val result = if (editorState.type == SSH_SECRET_TYPE) {
-                                    viewModel.createSshSecret(
-                                        name,
-                                        description,
-                                        checkNotNull(editorState.sshKeyDraft.preparedKey),
-                                    )
-                                } else {
-                                    viewModel.createSecret(name, description)
+                                val result = when (editorState.type) {
+                                    SecretType.SSH -> viewModel.createSshSecret(
+                                            name,
+                                            description,
+                                            checkNotNull(editorState.sshKeyDraft.preparedKey),
+                                        )
+                                    SecretType.ENVIRONMENT ->
+                                        viewModel.createSecret(name, description)
                                 }
                             ) {
                                 is CreateSecretResult.Created -> {
@@ -659,16 +660,14 @@ internal fun Loading(modifier: Modifier = Modifier) {
     }
 }
 
-internal fun String.displayName(): String = when (this) {
-    "environment" -> "Environment variables"
-    "ssh" -> "SSH key"
-    else -> this
+internal fun SecretType.displayName(): String = when (this) {
+    SecretType.ENVIRONMENT -> "Environment variables"
+    SecretType.SSH -> "SSH key"
 }
 
-internal fun String.sshAlgorithmDisplayName(): String = when (this) {
-    "ed25519", "ssh-ed25519" -> "Ed25519"
-    "rsa", "ssh-rsa" -> "RSA"
-    else -> this
+internal fun SshKeyAlgorithm.displayName(): String = when (this) {
+    SshKeyAlgorithm.ED25519 -> "Ed25519"
+    SshKeyAlgorithm.RSA -> "RSA"
 }
 
 private fun copyToClipboard(

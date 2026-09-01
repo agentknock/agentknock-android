@@ -11,12 +11,11 @@ import dev.agentknock.storage.request.SecretUploadRequestState
 import dev.agentknock.storage.request.SecretUploadVariableValue
 import dev.agentknock.storage.secret.CreateEnvironmentVariableResult
 import dev.agentknock.storage.secret.CreateSecretResult
-import dev.agentknock.storage.secret.ENVIRONMENT_SECRET_TYPE
 import dev.agentknock.storage.secret.EnvironmentVariableMetadata
 import dev.agentknock.storage.secret.EnvironmentVariableValue
-import dev.agentknock.storage.secret.SSH_SECRET_TYPE
 import dev.agentknock.storage.secret.SecretDetails
 import dev.agentknock.storage.secret.SecretSummary
+import dev.agentknock.storage.secret.SecretType
 import dev.agentknock.storage.secret.SecretApprovalMode
 import dev.agentknock.storage.secret.TemporaryAccessOperation
 import dev.agentknock.storage.secret.SshPrivateKey
@@ -176,7 +175,7 @@ internal class SecretsViewModel(
                 secret = null,
                 name = "",
                 description = "",
-                type = ENVIRONMENT_SECRET_TYPE,
+                type = SecretType.ENVIRONMENT,
             ),
         )
     }
@@ -197,7 +196,7 @@ internal class SecretsViewModel(
         editorState.update { editor ->
             when {
                 editor !is SecretsEditor.Secret || editor.session != session -> editor
-                state.type != SSH_SECRET_TYPE -> editor.copy(
+                state.type != SecretType.SSH -> editor.copy(
                     state = state.copy(
                         sshKeyDraft = state.sshKeyDraft.copy(
                             privateKeyText = "",
@@ -218,8 +217,7 @@ internal class SecretsViewModel(
                 secretName = secret.name,
                 currentKey = key,
                 sshKeyDraft = SshKeyDraft(
-                    algorithm = SshKeyAlgorithm.fromStoredName(key.algorithm)
-                        ?: SshKeyAlgorithm.ED25519,
+                    algorithm = key.algorithm,
                     comment = key.comment,
                 ),
             ),
@@ -315,7 +313,7 @@ internal class SecretsViewModel(
     fun prepareSecretSshKey() {
         val current = editorState.value as? SecretsEditor.Secret ?: return
         val source = current.state
-        if (source.type != SSH_SECRET_TYPE) return
+        if (source.type != SecretType.SSH) return
         val sourceDraft = source.sshKeyDraft
         val editor = current.copy(
             session = newEditorSession(),

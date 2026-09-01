@@ -143,12 +143,23 @@ internal class SshKeyCodec(
         privateKey: ByteArray,
         publicKey: ByteArray,
         comment: String,
-    ): SshPrivateKey {
-        val parsedAlgorithm = requireNotNull(SshKeyAlgorithm.fromStoredName(algorithm)) {
+    ): SshPrivateKey = fromStored(
+        algorithm = requireNotNull(SshKeyAlgorithm.fromStoredName(algorithm)) {
             "Unsupported SSH key algorithm"
-        }
+        },
+        privateKey = privateKey,
+        publicKey = publicKey,
+        comment = comment,
+    )
+
+    fun fromStored(
+        algorithm: SshKeyAlgorithm,
+        privateKey: ByteArray,
+        publicKey: ByteArray,
+        comment: String,
+    ): SshPrivateKey {
         validateComment(comment)
-        when (parsedAlgorithm) {
+        when (algorithm) {
             SshKeyAlgorithm.ED25519 -> {
                 require(privateKey.size == Ed25519PrivateKeyParameters.KEY_SIZE) {
                     "Invalid Ed25519 private key"
@@ -172,25 +183,34 @@ internal class SshKeyCodec(
                 ) { "The SSH public key does not match its private key" }
             }
         }
-        return SshPrivateKey(parsedAlgorithm, privateKey.copyOf(), publicKey.copyOf(), comment)
+        return SshPrivateKey(algorithm, privateKey.copyOf(), publicKey.copyOf(), comment)
     }
 
     fun publicKey(
         algorithm: String,
         publicKey: ByteArray,
         comment: String,
-    ): SshPublicKey {
-        val parsedAlgorithm = requireNotNull(SshKeyAlgorithm.fromStoredName(algorithm)) {
+    ): SshPublicKey = publicKey(
+        algorithm = requireNotNull(SshKeyAlgorithm.fromStoredName(algorithm)) {
             "Unsupported SSH key algorithm"
-        }
-        when (parsedAlgorithm) {
+        },
+        publicKey = publicKey,
+        comment = comment,
+    )
+
+    fun publicKey(
+        algorithm: SshKeyAlgorithm,
+        publicKey: ByteArray,
+        comment: String,
+    ): SshPublicKey {
+        when (algorithm) {
             SshKeyAlgorithm.ED25519 -> require(publicKey.size == ED25519_PUBLIC_KEY_BYTES) {
                 "Invalid Ed25519 public key"
             }
             SshKeyAlgorithm.RSA -> parseRsaPublicKey(publicKey)
         }
         validateComment(comment)
-        return SshPublicKey(parsedAlgorithm, publicKey.copyOf(), comment)
+        return SshPublicKey(algorithm, publicKey.copyOf(), comment)
     }
 
     fun importOpenSshPublicKey(value: String): SshPublicKey {

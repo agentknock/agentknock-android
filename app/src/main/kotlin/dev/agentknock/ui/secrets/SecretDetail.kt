@@ -63,11 +63,10 @@ import dev.agentknock.R
 import dev.agentknock.presentation.formatTimestamp
 import dev.agentknock.relay.RelayClientState
 import dev.agentknock.storage.request.ClientSummary
-import dev.agentknock.storage.secret.ENVIRONMENT_SECRET_TYPE
 import dev.agentknock.storage.secret.EnvironmentVariableMetadata
-import dev.agentknock.storage.secret.SSH_SECRET_TYPE
 import dev.agentknock.storage.secret.SecretApprovalMode
 import dev.agentknock.storage.secret.SecretDetails
+import dev.agentknock.storage.secret.SecretType
 import dev.agentknock.storage.secret.SshKeyMetadata
 import dev.agentknock.storage.secret.TemporaryAccessGrant
 import dev.agentknock.storage.secret.TemporaryAccessOperation
@@ -176,78 +175,84 @@ internal fun SecretDetail(
                     InformationRow(stringResource(R.string.secret_type), secret.type.displayName())
                 }
             }
-            if (secret.type == ENVIRONMENT_SECRET_TYPE) {
-                item {
-                    FlowRow(
-                        modifier = Modifier.fillMaxWidth(),
-                        horizontalArrangement = Arrangement.SpaceBetween,
-                        itemVerticalAlignment = Alignment.CenterVertically,
-                        verticalArrangement = Arrangement.spacedBy(8.dp),
-                        maxItemsInEachRow = if (fontScale >= 1.5f) 1 else Int.MAX_VALUE,
-                    ) {
-                        Text("Environment variables", style = MaterialTheme.typography.titleLarge)
-                        FilledTonalButton(
-                            onClick = actions.onAddVariable,
-                            modifier = Modifier.semantics {
-                                contentDescription = "Add environment variable"
-                            },
+            when (secret.type) {
+                SecretType.ENVIRONMENT -> {
+                    item {
+                        FlowRow(
+                            modifier = Modifier.fillMaxWidth(),
+                            horizontalArrangement = Arrangement.SpaceBetween,
+                            itemVerticalAlignment = Alignment.CenterVertically,
+                            verticalArrangement = Arrangement.spacedBy(8.dp),
+                            maxItemsInEachRow = if (fontScale >= 1.5f) 1 else Int.MAX_VALUE,
                         ) {
-                            Icon(Icons.Outlined.Add, contentDescription = null)
-                            Spacer(Modifier.width(6.dp))
-                            Text("Add")
+                            Text(
+                                "Environment variables",
+                                style = MaterialTheme.typography.titleLarge,
+                            )
+                            FilledTonalButton(
+                                onClick = actions.onAddVariable,
+                                modifier = Modifier.semantics {
+                                    contentDescription = "Add environment variable"
+                                },
+                            ) {
+                                Icon(Icons.Outlined.Add, contentDescription = null)
+                                Spacer(Modifier.width(6.dp))
+                                Text("Add")
+                            }
                         }
                     }
-                }
-                if (secret.environmentVariables.isEmpty()) {
-                    item {
-                        EmptyMessage(
-                            title = stringResource(R.string.no_variables),
-                            description = stringResource(R.string.no_variables_description),
-                            modifier = Modifier.fillMaxWidth().padding(vertical = 24.dp),
-                        )
-                    }
-                } else {
-                    item {
-                        InformationSurface(contentPadding = PaddingValues(0.dp)) {
-                            secret.environmentVariables.forEachIndexed { index, variable ->
-                                EnvironmentVariableCard(
-                                    variable = variable,
-                                    revealedValue = revealedValues[variable.id],
-                                    onReveal = { actions.onReveal(variable) },
-                                    onReadValue = { actions.onReadValue(variable) },
-                                    onCopy = { actions.onCopy(variable) },
-                                    onEdit = { actions.onEditVariable(variable) },
-                                    embedded = true,
-                                )
-                                if (index != secret.environmentVariables.lastIndex) {
-                                    HorizontalDivider(Modifier.padding(start = 16.dp))
+                    if (secret.environmentVariables.isEmpty()) {
+                        item {
+                            EmptyMessage(
+                                title = stringResource(R.string.no_variables),
+                                description = stringResource(R.string.no_variables_description),
+                                modifier = Modifier.fillMaxWidth().padding(vertical = 24.dp),
+                            )
+                        }
+                    } else {
+                        item {
+                            InformationSurface(contentPadding = PaddingValues(0.dp)) {
+                                secret.environmentVariables.forEachIndexed { index, variable ->
+                                    EnvironmentVariableCard(
+                                        variable = variable,
+                                        revealedValue = revealedValues[variable.id],
+                                        onReveal = { actions.onReveal(variable) },
+                                        onReadValue = { actions.onReadValue(variable) },
+                                        onCopy = { actions.onCopy(variable) },
+                                        onEdit = { actions.onEditVariable(variable) },
+                                        embedded = true,
+                                    )
+                                    if (index != secret.environmentVariables.lastIndex) {
+                                        HorizontalDivider(Modifier.padding(start = 16.dp))
+                                    }
                                 }
                             }
                         }
                     }
                 }
-            } else {
-                secret.sshKey?.let { key ->
-                    item {
-                        Text("Public key", style = MaterialTheme.typography.titleLarge)
-                    }
-                    item {
-                        SshPublicKeyCard(
-                            key = key,
-                            onCopy = actions.onCopyPublicKey,
-                            onEditComment = {
-                                sshComment = key.comment
-                                editingSshComment = true
-                            },
-                            onReplace = actions.onReplaceSshKey,
+                SecretType.SSH -> {
+                    secret.sshKey?.let { key ->
+                        item {
+                            Text("Public key", style = MaterialTheme.typography.titleLarge)
+                        }
+                        item {
+                            SshPublicKeyCard(
+                                key = key,
+                                onCopy = actions.onCopyPublicKey,
+                                onEditComment = {
+                                    sshComment = key.comment
+                                    editingSshComment = true
+                                },
+                                onReplace = actions.onReplaceSshKey,
+                            )
+                        }
+                    } ?: item {
+                        EmptyMessage(
+                            title = "SSH key unavailable",
+                            description = "The encrypted private key could not be recovered on this device.",
+                            modifier = Modifier.fillMaxWidth().padding(vertical = 24.dp),
                         )
                     }
-                } ?: item {
-                    EmptyMessage(
-                        title = "SSH key unavailable",
-                        description = "The encrypted private key could not be recovered on this device.",
-                        modifier = Modifier.fillMaxWidth().padding(vertical = 24.dp),
-                    )
                 }
             }
             item {
@@ -256,12 +261,13 @@ internal fun SecretDetail(
             item {
                 InformationSurface {
                     Text(
-                        if (secret.type == ENVIRONMENT_SECRET_TYPE) {
-                            "Sensitive environment variable values follow these settings. " +
-                                "Non-sensitive values are provided without approval."
-                        } else {
-                            "Private key use follows these settings. " +
-                                "The public key is provided without approval."
+                        when (secret.type) {
+                            SecretType.ENVIRONMENT ->
+                                "Sensitive environment variable values follow these settings. " +
+                                    "Non-sensitive values are provided without approval."
+                            SecretType.SSH ->
+                                "Private key use follows these settings. " +
+                                    "The public key is provided without approval."
                         },
                         color = MaterialTheme.colorScheme.onSurfaceVariant,
                     )
@@ -486,7 +492,7 @@ private fun ApprovalModeDialog(
     title: String,
     selected: SecretApprovalMode?,
     defaultMode: SecretApprovalMode?,
-    secretType: String,
+    secretType: SecretType,
     onSelect: (SecretApprovalMode?) -> Unit,
     onDismiss: () -> Unit,
 ) {
@@ -539,17 +545,18 @@ private fun SecretApprovalMode.displayName(): String = when (this) {
     SecretApprovalMode.DENY -> "Always deny"
 }
 
-private fun SecretApprovalMode.description(secretType: String): String = when (this) {
+private fun SecretApprovalMode.description(secretType: SecretType): String = when (this) {
     SecretApprovalMode.APPROVE -> "Allow protected use without asking."
     SecretApprovalMode.ASK_AI ->
         "Requires AI review access. AI may approve, deny, or ask you to decide. " +
             "If asked, you can also allow 4-hour access."
-    SecretApprovalMode.TEMPORARY -> if (secretType == SSH_SECRET_TYPE) {
-        "When asked, you can sign once or allow that client to request Git signatures with " +
-            "this key for any repository for 4 hours."
-    } else {
-        "When asked, you can approve once or allow that client to receive protected values " +
-            "from this secret for any command for 4 hours."
+    SecretApprovalMode.TEMPORARY -> when (secretType) {
+        SecretType.SSH ->
+            "When asked, you can sign once or allow that client to request Git signatures " +
+                "with this key for any repository for 4 hours."
+        SecretType.ENVIRONMENT ->
+            "When asked, you can approve once or allow that client to receive protected " +
+                "values from this secret for any command for 4 hours."
     }
     SecretApprovalMode.ASK_ME -> "Always require your decision."
     SecretApprovalMode.DENY -> "Reject protected use without asking."
@@ -577,7 +584,7 @@ private fun SshPublicKeyCard(
             Modifier.fillMaxWidth().padding(16.dp),
             verticalArrangement = Arrangement.spacedBy(12.dp),
         ) {
-            InformationRow("Algorithm", key.algorithm.sshAlgorithmDisplayName())
+            InformationRow("Algorithm", key.algorithm.displayName())
             InformationRow("Fingerprint", key.fingerprint)
             Row(
                 modifier = Modifier.fillMaxWidth(),

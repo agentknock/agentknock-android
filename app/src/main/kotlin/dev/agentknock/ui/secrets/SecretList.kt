@@ -51,8 +51,8 @@ import dev.agentknock.R
 import dev.agentknock.presentation.formatTimestamp
 import dev.agentknock.storage.request.InboxRequestState
 import dev.agentknock.storage.request.InboxRequestSummary
-import dev.agentknock.storage.secret.SSH_SECRET_TYPE
 import dev.agentknock.storage.secret.SecretSummary
+import dev.agentknock.storage.secret.SecretType
 import dev.agentknock.ui.components.ActionListSurface
 import dev.agentknock.ui.components.TonalIcon
 
@@ -200,16 +200,18 @@ internal fun SecretList(
                                         )
                                     }
                                     Text(
-                                        if (secret.type == SSH_SECRET_TYPE) {
-                                            secret.sshKey?.fingerprint?.let { "SSH key · $it" }
-                                                ?: "SSH key unavailable"
-                                        } else {
-                                            "${secret.environmentVariableCount} environment " +
-                                                if (secret.environmentVariableCount == 1) {
-                                                    "variable"
-                                                } else {
-                                                    "variables"
-                                                }
+                                        when (secret.type) {
+                                            SecretType.SSH ->
+                                                secret.sshKey?.fingerprint?.let {
+                                                    "SSH key · $it"
+                                                } ?: "SSH key unavailable"
+                                            SecretType.ENVIRONMENT ->
+                                                "${secret.environmentVariableCount} environment " +
+                                                    if (secret.environmentVariableCount == 1) {
+                                                        "variable"
+                                                    } else {
+                                                        "variables"
+                                                    }
                                         },
                                         style = MaterialTheme.typography.labelMedium,
                                         maxLines = 1,
@@ -242,10 +244,9 @@ internal fun SecretList(
                             },
                             leadingContent = {
                                 TonalIcon(
-                                    if (secret.type == SSH_SECRET_TYPE) {
-                                        Icons.Outlined.Key
-                                    } else {
-                                        Icons.Outlined.DataObject
+                                    when (secret.type) {
+                                        SecretType.SSH -> Icons.Outlined.Key
+                                        SecretType.ENVIRONMENT -> Icons.Outlined.DataObject
                                     },
                                     contentDescription = null,
                                 )

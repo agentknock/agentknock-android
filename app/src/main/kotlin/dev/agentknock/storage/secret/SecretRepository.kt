@@ -55,27 +55,24 @@ internal class SecretRepository(
         observeTemporaryAccessGrants(),
     ) { rows, grants ->
         val grantCounts = grants.groupingBy(TemporaryAccessGrant::secretId).eachCount()
-        rows.map { row ->
+        rows.mapNotNull { row ->
+            val type = SecretType.fromStoredNameOrNull(row.type) ?: return@mapNotNull null
             SecretSummary(
                 id = row.id,
                 name = row.name,
                 description = row.description,
-                type = row.type,
+                type = type,
                 environmentVariableCount = row.environmentVariableCount,
                 sshKey = row.sshAlgorithm?.let { algorithm ->
                     val publicKey = checkNotNull(row.sshPublicKey)
                     val comment = checkNotNull(row.sshComment)
-                    val rendered = sshKeys.publicKey(algorithm, publicKey, comment)
-                    SshKeyMetadata(
-                        algorithm = rendered.algorithm.storedName,
-                        publicKey = rendered.line,
-                        fingerprint = rendered.fingerprint,
-                        comment = rendered.comment,
-                        privateKeyAvailable = if (row.sshEncryptionKeyId == null) {
-                            false
-                        } else {
-                            keyManager.keyAvailable(row.sshEncryptionKeyId)
-                        },
+                    sshKeyMetadata(
+                        storedAlgorithm = algorithm,
+                        publicKey = publicKey,
+                        comment = comment,
+                        privateKeyAvailable = row.sshEncryptionKeyId?.let {
+                            keyManager.keyAvailable(it)
+                        } ?: false,
                     )
                 },
                 createdAt = row.createdAt,
@@ -92,50 +89,65 @@ internal class SecretRepository(
         dao.observeClientApprovalOverrides(id),
         observeTemporaryAccessGrants(),
     ) { secret, variables, sshKey, overrides, grants ->
-        secret?.let {
-            val availability = variables
-                .map(EnvironmentVariableMetadataRow::encryptionKeyId)
-                .distinct()
-                .associateWith { keyId -> keyManager.keyAvailable(keyId) }
-            SecretDetails(
-                id = secret.id,
-                name = secret.name,
-                description = secret.description,
-                type = secret.type,
-                environmentVariables = variables.map { variable ->
-                    EnvironmentVariableMetadata(
-                        id = variable.id,
-                        secretId = variable.secretId,
-                        name = variable.name,
-                        sensitive = variable.sensitive,
-                        notes = variable.notes,
-                        valueAvailable = availability.getValue(variable.encryptionKeyId),
-                        valueUpdatedAt = variable.valueUpdatedAt,
-                    )
-                },
-                sshKey = sshKey?.let { key ->
-                    val rendered = sshKeys.publicKey(key.algorithm, key.publicKey, key.comment)
-                    SshKeyMetadata(
-                        algorithm = rendered.algorithm.storedName,
-                        publicKey = rendered.line,
-                        fingerprint = rendered.fingerprint,
-                        comment = rendered.comment,
-                        privateKeyAvailable = keyManager.keyAvailable(key.encryptionKeyId),
-                    )
-                },
-                approvalMode = secret.approvalMode.toSecretApprovalMode(),
-                instructions = secret.instructions,
-                clientApprovalOverrides = overrides.map { override ->
-                    SecretClientApprovalOverride(
-                        clientId = override.clientId,
-                        mode = override.approvalMode.toSecretApprovalMode(),
-                    )
-                },
-                temporaryAccessGrants = grants.filter { it.secretId == secret.id },
-                createdAt = secret.createdAt,
-                updatedAt = secret.updatedAt,
-            )
-        }
+        if (secret == null) return@combine null
+        val type = SecretType.fromStoredNameOrNull(secret.type) ?: return@combine null
+        val availability = variables
+            .map(EnvironmentVariableMetadataRow::encryptionKeyId)
+            .distinct()
+            .associateWith { keyId -> keyManager.keyAvailable(keyId) }
+        SecretDetails(
+            id = secret.id,
+            name = secret.name,
+            description = secret.description,
+            type = type,
+            environmentVariables = variables.map { variable ->
+                EnvironmentVariableMetadata(
+                    id = variable.id,
+                    secretId = variable.secretId,
+                    name = variable.name,
+                    sensitive = variable.sensitive,
+                    notes = variable.notes,
+                    valueAvailable = availability.getValue(variable.encryptionKeyId),
+                    valueUpdatedAt = variable.valueUpdatedAt,
+                )
+            },
+            sshKey = sshKey?.let { key ->
+                sshKeyMetadata(
+                    storedAlgorithm = key.algorithm,
+                    publicKey = key.publicKey,
+                    comment = key.comment,
+                    privateKeyAvailable = keyManager.keyAvailable(key.encryptionKeyId),
+                )
+            },
+            approvalMode = secret.approvalMode.toSecretApprovalMode(),
+            instructions = secret.instructions,
+            clientApprovalOverrides = overrides.map { override ->
+                SecretClientApprovalOverride(
+                    clientId = override.clientId,
+                    mode = override.approvalMode.toSecretApprovalMode(),
+                )
+            },
+            temporaryAccessGrants = grants.filter { it.secretId == secret.id },
+            createdAt = secret.createdAt,
+            updatedAt = secret.updatedAt,
+        )
+    }
+
+    private fun sshKeyMetadata(
+        storedAlgorithm: String,
+        publicKey: ByteArray,
+        comment: String,
+        privateKeyAvailable: Boolean,
+    ): SshKeyMetadata? {
+        val algorithm = SshKeyAlgorithm.fromStoredName(storedAlgorithm) ?: return null
+        val rendered = sshKeys.publicKey(algorithm, publicKey, comment)
+        return SshKeyMetadata(
+            algorithm = algorithm,
+            publicKey = rendered.line,
+            fingerprint = rendered.fingerprint,
+            comment = rendered.comment,
+            privateKeyAvailable = privateKeyAvailable,
+        )
     }
 
     fun observeTemporaryAccessGrants(): Flow<List<TemporaryAccessGrant>> = combine(
@@ -421,7 +433,9 @@ internal class SecretRepository(
     suspend fun replaceSshKey(id: String, privateKey: SshPrivateKey): SaveSshSecretResult {
         material.validateSshPrivateKey(privateKey)
         val secret = dao.getSecret(id) ?: return SaveSshSecretResult.NotFound
-        if (secret.type != SSH_SECRET_TYPE) return SaveSshSecretResult.WrongType
+        if (SecretType.fromStoredNameOrNull(secret.type) != SecretType.SSH) {
+            return SaveSshSecretResult.WrongType
+        }
         dao.getSshKey(id) ?: return SaveSshSecretResult.NotFound
         val now = currentTimeMillis()
         val encryptedKey = material.encryptedSshKey(id, privateKey)
@@ -447,7 +461,9 @@ internal class SecretRepository(
     suspend fun saveSshComment(id: String, comment: String): SaveSshSecretResult {
         val trimmed = comment.trim()
         val secret = dao.getSecret(id) ?: return SaveSshSecretResult.NotFound
-        if (secret.type != SSH_SECRET_TYPE) return SaveSshSecretResult.WrongType
+        if (SecretType.fromStoredNameOrNull(secret.type) != SecretType.SSH) {
+            return SaveSshSecretResult.WrongType
+        }
         val key = dao.getSshKey(id) ?: return SaveSshSecretResult.NotFound
         runCatching { sshKeys.publicKey(key.algorithm, key.publicKey, trimmed) }
             .getOrElse { throw IllegalArgumentException(it.message, it) }

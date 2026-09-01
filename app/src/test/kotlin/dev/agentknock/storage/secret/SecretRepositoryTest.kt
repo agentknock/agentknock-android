@@ -41,9 +41,14 @@ class SecretRepositoryTest {
         assertEquals(key.publicKey.toList(), stored.publicKey.toList())
 
         val details = checkNotNull(fixture.repository.observeSecret(created.id).first())
-        assertEquals(SSH_SECRET_TYPE, details.type)
+        assertEquals(SecretType.SSH, details.type)
         assertEquals(key.publicKeyLine, details.sshKey?.publicKey)
         assertEquals(key.fingerprint, details.sshKey?.fingerprint)
+        assertEquals(SshKeyAlgorithm.ED25519, details.sshKey?.algorithm)
+
+        val summary = fixture.repository.observeSecrets().first().single()
+        assertEquals(SecretType.SSH, summary.type)
+        assertEquals(SshKeyAlgorithm.ED25519, summary.sshKey?.algorithm)
 
         val requested = fixture.repository.requestedSecrets(listOf("production-ssh"))
         check(requested is RequestedSecretsResult.Available)
@@ -74,8 +79,59 @@ class SecretRepositoryTest {
         assertEquals(RSA_PRIVATE_KEY_FORMAT, SshKeyAlgorithm.RSA.canonicalPrivateKeyFormat())
         assertFalse(stored.encryptedPrivateKey.ciphertext.contentEquals(key.privateKey))
         val details = checkNotNull(fixture.repository.observeSecret(created.id).first())
-        assertEquals("rsa", details.sshKey?.algorithm)
+        assertEquals(SshKeyAlgorithm.RSA, details.sshKey?.algorithm)
         assertTrue(details.sshKey?.publicKey?.startsWith("ssh-rsa ") == true)
+    }
+
+    @Test
+    fun `omits a persisted secret with an unknown type from UI models`() = runTest {
+        val fixture = Fixture()
+        fixture.dao.secrets.value = listOf(
+            SecretEntity(
+                id = "corrupt",
+                name = "corrupt",
+                description = "",
+                type = "unknown",
+                createdAt = 1,
+                updatedAt = 1,
+            ),
+        )
+
+        assertTrue(fixture.repository.observeSecrets().first().isEmpty())
+        assertNull(fixture.repository.observeSecret("corrupt").first())
+        assertTrue(fixture.repository.listSecretsForClient().isEmpty())
+        val description = fixture.repository.describeRequestedSecrets(listOf("corrupt"))
+        assertTrue(description.secrets.isEmpty())
+        assertTrue(description.reviewMetadata.isEmpty())
+        assertEquals(
+            RequestedSecretsResult.UnsupportedSecretType,
+            fixture.repository.requestedSecrets(listOf("corrupt")),
+        )
+    }
+
+    @Test
+    fun `omits SSH metadata with an unknown persisted algorithm`() = runTest {
+        val fixture = Fixture()
+        val key = fixture.repository.generateSshKey(SshKeyAlgorithm.ED25519, "test@example")
+        val created = fixture.repository.createSshSecret("production-ssh", "", key)
+        check(created is CreateSecretResult.Created)
+        val stored = fixture.dao.sshKeys.value.single()
+        fixture.dao.directlyReplaceSshKey(stored.copy(algorithm = "unknown"))
+
+        val summary = fixture.repository.observeSecrets().first().single()
+        assertEquals(SecretType.SSH, summary.type)
+        assertNull(summary.sshKey)
+        val details = checkNotNull(fixture.repository.observeSecret(created.id).first())
+        assertEquals(SecretType.SSH, details.type)
+        assertNull(details.sshKey)
+        assertTrue(fixture.repository.listSecretsForClient().isEmpty())
+        val description = fixture.repository.describeRequestedSecrets(listOf("production-ssh"))
+        assertTrue(description.secrets.isEmpty())
+        assertTrue(description.reviewMetadata.isEmpty())
+        assertEquals(
+            RequestedSecretsResult.SecretCorrupted,
+            fixture.repository.requestedSecrets(listOf("production-ssh")),
+        )
     }
 
     @Test
@@ -705,6 +761,11 @@ class SecretRepositoryTest {
         check(result is ApplyEnvironmentSecretUploadResult.Applied)
         val secret = fixture.repository.observeSecret(result.secretId).first()
         checkNotNull(secret)
+        assertEquals(SecretType.ENVIRONMENT, secret.type)
+        assertEquals(
+            SecretType.ENVIRONMENT,
+            fixture.repository.observeSecrets().first().single().type,
+        )
         assertEquals("Cloudflare production account", secret.description)
         assertEquals(SecretApprovalMode.TEMPORARY, secret.approvalMode)
         assertTrue(secret.environmentVariables.all(EnvironmentVariableMetadata::sensitive))
@@ -1267,10 +1328,13 @@ private class FakeSecretDao : SecretDao {
     override fun observeSecrets(): Flow<List<SecretSummaryRow>> = combine(
         secrets,
         variables,
-    ) { currentSecrets, currentVariables ->
+        sshKeys,
+    ) { currentSecrets, currentVariables, currentSshKeys ->
+        val keysBySecret = currentSshKeys.associateBy(SshKeyEntity::secretId)
         currentSecrets
             .sortedWith(compareBy(String.CASE_INSENSITIVE_ORDER, SecretEntity::name))
             .map { secret ->
+                val key = keysBySecret[secret.id]
                 SecretSummaryRow(
                     id = secret.id,
                     name = secret.name,
@@ -1281,6 +1345,10 @@ private class FakeSecretDao : SecretDao {
                     environmentVariableCount = currentVariables.count {
                         it.secretId == secret.id
                     },
+                    sshAlgorithm = key?.algorithm,
+                    sshPublicKey = key?.publicKey,
+                    sshComment = key?.comment,
+                    sshEncryptionKeyId = key?.encryptedPrivateKey?.keyId,
                 )
             }
     }
