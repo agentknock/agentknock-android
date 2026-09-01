@@ -155,6 +155,9 @@ internal class AuditRepository(
 
     fun observeEvent(id: Long): Flow<AuditEvent?> = dao.observeEvent(id).map { it?.toModel() }
 
+    suspend fun pruneExpired(): Int =
+        dao.deleteBefore(currentTimeMillis() - RETENTION_MILLIS)
+
     override suspend fun record(record: AuditRecord) {
         append(listOf(record), currentTimeMillis())
     }

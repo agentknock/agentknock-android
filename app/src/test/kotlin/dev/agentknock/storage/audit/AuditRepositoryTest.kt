@@ -112,6 +112,42 @@ class AuditRepositoryTest {
             dao.events.value.map { it.eventType },
         )
     }
+
+    @Test
+    fun `startup pruning retains events at the one year cutoff`() = runTest {
+        val now = 400L * 24 * 60 * 60 * 1000
+        val cutoff = now - 365L * 24 * 60 * 60 * 1000
+        val dao = FakeAuditDao()
+        dao.insertEvents(
+            listOf(
+                auditEvent(occurredAt = cutoff - 1),
+                auditEvent(occurredAt = cutoff),
+                auditEvent(occurredAt = cutoff + 1),
+            ),
+        )
+        val repository = AuditRepository(dao, currentTimeMillis = { now })
+
+        assertEquals(1, repository.pruneExpired())
+
+        assertEquals(
+            listOf(cutoff, cutoff + 1),
+            dao.events.value.map(AuditEventEntity::occurredAt),
+        )
+    }
+
+    private fun auditEvent(occurredAt: Long) = AuditEventEntity(
+        occurredAt = occurredAt,
+        eventType = AuditEventType.SECRET_UPDATED.code,
+        subject = null,
+        context = null,
+        detail = null,
+        outcome = AuditOutcome.CHANGED.code,
+        decisionSource = null,
+        expiresAt = null,
+        clientId = null,
+        clientName = null,
+        relayRequestId = null,
+    )
 }
 
 private class FakeAuditDao : AuditDao {

@@ -264,6 +264,7 @@ internal class ApplicationContainer(application: Application) {
             clearAll = { database.secretDao().deleteAllTemporaryAccessGrants() },
             clearExpired = { now -> database.secretDao().deleteExpiredTemporaryAccessGrants(now) },
         )
+        audit.pruneExpired()
         database.requestDao().discardDecidedSecretUploadValues()
         database.requestDao().deleteEndedRequestPsks()
         requestMaterial.deleteExpiredPreviousClientPsks()
