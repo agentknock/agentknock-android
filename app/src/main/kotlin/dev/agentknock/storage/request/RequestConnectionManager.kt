@@ -5,13 +5,13 @@ import android.util.Log
 import androidx.lifecycle.DefaultLifecycleObserver
 import androidx.lifecycle.LifecycleOwner
 import kotlinx.coroutines.CancellationException
+import kotlinx.coroutines.CompletableDeferred
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.ExperimentalCoroutinesApi
 import kotlinx.coroutines.Job
 import kotlinx.coroutines.NonCancellable
 import kotlinx.coroutines.currentCoroutineContext
 import kotlinx.coroutines.delay
-import kotlinx.coroutines.ensureActive
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.asStateFlow
@@ -22,7 +22,6 @@ import kotlinx.coroutines.flow.flatMapLatest
 import kotlinx.coroutines.flow.flow
 import kotlinx.coroutines.flow.update
 import kotlinx.coroutines.isActive
-import kotlinx.coroutines.joinAll
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.sync.Mutex
 import kotlinx.coroutines.sync.withLock
@@ -95,12 +94,9 @@ internal class RequestConnectionManager(
                                     current.copy(backgroundHandoffPending = false)
                                 }
                             }
-                            _syncing.value = false
                             scheduleBackgroundSynchronization()
                         }
-                        ConnectionTarget.Inactive -> {
-                            _syncing.value = false
-                        }
+                        ConnectionTarget.Inactive -> Unit
                     }
                 }
         }
@@ -184,39 +180,28 @@ internal class RequestConnectionManager(
     /**
      * Runs one finite synchronization when no foreground session covers the device.
      *
-     * Each caller owns its finite relay operation. Concurrent callers wait for the current owner,
-     * then run a follow-up pass so work announced near a caught-up boundary is still covered. A
-     * server retry deadline is returned to durable work without occupying a process-scope job.
-     * This method returns immediately instead of waiting behind a live foreground socket.
+     * The unique background work chain owns its finite relay operation. A server retry deadline is
+     * returned to durable work without occupying a process-scope job. This method returns
+     * immediately instead of waiting behind an existing relay session.
      */
     suspend fun synchronizeOnce(): OneShotSynchronizationResult {
         val callerJob = checkNotNull(currentCoroutineContext()[Job])
-        while (true) {
-            currentCoroutineContext().ensureActive()
-            val reservation = sessionLock.withLock {
-                val retryDelayMillis = relayRetryDeadline.remainingMillis()
-                when {
-                    demand.value.paused || demand.value.hasLiveForegroundOwner() ->
-                        OneShotReservation.Covered
-                    retryDelayMillis > 0 -> OneShotReservation.Deferred(retryDelayMillis)
-                    activeSession is ActiveSession.Foreground -> OneShotReservation.Covered
-                    activeSession is ActiveSession.OneShot ->
-                        OneShotReservation.Wait(checkNotNull(activeSession).job)
-                    else -> {
-                        val session = ActiveSession.OneShot(callerJob)
-                        activeSession = session
-                        OneShotReservation.Acquired(session)
-                    }
+        val session = sessionLock.withLock {
+            val retryDelayMillis = relayRetryDeadline.remainingMillis()
+            when {
+                demand.value.paused || demand.value.hasLiveForegroundOwner() ->
+                    return OneShotSynchronizationResult.Covered
+                retryDelayMillis > 0 ->
+                    return OneShotSynchronizationResult.Deferred(retryDelayMillis)
+                activeSession != null -> return OneShotSynchronizationResult.Covered
+                else -> {
+                    val session = ActiveSession.OneShot(callerJob)
+                    activeSession = session
+                    session
                 }
             }
-            when (reservation) {
-                OneShotReservation.Covered -> return OneShotSynchronizationResult.Covered
-                is OneShotReservation.Deferred ->
-                    return OneShotSynchronizationResult.Deferred(reservation.delayMillis)
-                is OneShotReservation.Wait -> reservation.job.join()
-                is OneShotReservation.Acquired -> return runOneShot(reservation.session)
-            }
         }
+        return runOneShot(session)
     }
 
     /** Stops new sessions, cancels the current owner, and does not return until it has exited. */
@@ -229,12 +214,12 @@ internal class RequestConnectionManager(
         }
 
         while (true) {
-            val jobs = sessionLock.withLock {
-                activeSession?.job?.let(::listOf).orEmpty()
+            val sessions = sessionLock.withLock {
+                activeSession?.let(::listOf).orEmpty()
             }
-            if (jobs.isEmpty()) break
-            jobs.forEach { job -> job.cancel() }
-            jobs.joinAll()
+            if (sessions.isEmpty()) break
+            sessions.forEach { session -> session.ownerJob.cancel() }
+            sessions.forEach { session -> session.released.await() }
         }
         _syncing.value = false
     }
@@ -281,9 +266,10 @@ internal class RequestConnectionManager(
             withContext(NonCancellable) {
                 sessionLock.withLock {
                     if (activeSession === session) activeSession = null
+                    if (activeSession == null) _syncing.value = false
+                    session.released.complete(Unit)
                 }
             }
-            _syncing.value = false
         }
     }
 
@@ -358,9 +344,10 @@ internal class RequestConnectionManager(
             withContext(NonCancellable) {
                 sessionLock.withLock {
                     if (activeSession === session) activeSession = null
+                    if (activeSession == null) _syncing.value = false
+                    session.released.complete(Unit)
                 }
             }
-            _syncing.value = false
         }
     }
 
@@ -405,25 +392,17 @@ internal class RequestConnectionManager(
     private suspend fun reserveForegroundSession(): ActiveSession.Foreground? {
         val foregroundJob = checkNotNull(currentCoroutineContext()[Job])
         while (currentCoroutineContext().isActive && !demand.value.paused) {
-            val reservation = sessionLock.withLock {
+            val existingSessionRelease = sessionLock.withLock {
                 if (demand.value.paused || !demand.value.foregroundVisible) {
-                    ForegroundReservation.Stop
-                } else {
-                    when (val active = activeSession) {
-                        null -> {
-                            val session = ActiveSession.Foreground(foregroundJob)
-                            activeSession = session
-                            ForegroundReservation.Acquired(session)
-                        }
-                        else -> ForegroundReservation.Wait(active.job)
-                    }
+                    return null
+                }
+                activeSession?.released ?: run {
+                    val session = ActiveSession.Foreground(foregroundJob)
+                    activeSession = session
+                    return session
                 }
             }
-            when (reservation) {
-                is ForegroundReservation.Acquired -> return reservation.session
-                is ForegroundReservation.Wait -> reservation.job.join()
-                ForegroundReservation.Stop -> return null
-            }
+            existingSessionRelease.await()
         }
         return null
     }
@@ -455,24 +434,18 @@ internal class RequestConnectionManager(
     )
 
     private sealed interface ActiveSession {
-        val job: Job
+        val ownerJob: Job
+        val released: CompletableDeferred<Unit>
 
-        class Foreground(override val job: Job) : ActiveSession
+        class Foreground(
+            override val ownerJob: Job,
+            override val released: CompletableDeferred<Unit> = CompletableDeferred(),
+        ) : ActiveSession
 
-        class OneShot(override val job: Job) : ActiveSession
-    }
-
-    private sealed interface OneShotReservation {
-        data object Covered : OneShotReservation
-        data class Deferred(val delayMillis: Long) : OneShotReservation
-        data class Wait(val job: Job) : OneShotReservation
-        data class Acquired(val session: ActiveSession.OneShot) : OneShotReservation
-    }
-
-    private sealed interface ForegroundReservation {
-        data class Acquired(val session: ActiveSession.Foreground) : ForegroundReservation
-        data class Wait(val job: Job) : ForegroundReservation
-        data object Stop : ForegroundReservation
+        class OneShot(
+            override val ownerJob: Job,
+            override val released: CompletableDeferred<Unit> = CompletableDeferred(),
+        ) : ActiveSession
     }
 
     private data class ConnectionDemand(

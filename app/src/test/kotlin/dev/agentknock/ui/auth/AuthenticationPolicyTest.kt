@@ -4,21 +4,89 @@ import org.junit.Assert.assertFalse
 import org.junit.Assert.assertEquals
 import org.junit.Assert.assertTrue
 import org.junit.Test
+import kotlinx.coroutines.CoroutineStart
+import kotlinx.coroutines.async
+import kotlinx.coroutines.cancelAndJoin
+import kotlinx.coroutines.test.runTest
 
 class AuthenticationPolicyTest {
     @Test
-    fun `an active authentication attempt keeps ownership of its callbacks`() {
-        val attempt = AuthenticationAttempt()
-        val events = mutableListOf<String>()
+    fun `one authentication request owns the typed result until completion`() = runTest {
+        val attempt = DeviceAuthenticationCoordinator()
+        val first = async(start = CoroutineStart.UNDISPATCHED) { attempt.authenticate("First") }
+        assertTrue(attempt.request.value != null)
+        assertEquals("First", attempt.request.value?.title)
+        assertEquals(
+            DeviceAuthenticationResult.Error("Another authentication is already in progress"),
+            attempt.authenticate("Second"),
+        )
 
-        assertTrue(attempt.start({ events += "first success" }, { events += "first: $it" }))
-        assertFalse(attempt.start({ events += "second success" }, { events += "second: $it" }))
+        attempt.succeed(checkNotNull(attempt.request.value).id)
+        assertEquals(DeviceAuthenticationResult.Success, first.await())
+        assertEquals(null, attempt.request.value)
+        val third = async(start = CoroutineStart.UNDISPATCHED) { attempt.authenticate("Third") }
+        attempt.fail(checkNotNull(attempt.request.value).id, "cancelled")
+        assertEquals(DeviceAuthenticationResult.Error("cancelled"), third.await())
+        assertEquals(null, attempt.request.value)
+    }
 
-        attempt.succeed()
-        assertEquals(listOf("first success"), events)
-        assertTrue(attempt.start({ events += "third success" }, { events += "third: $it" }))
-        attempt.fail("cancelled")
-        assertEquals(listOf("first success", "third: cancelled"), events)
+    @Test
+    fun `authentication result survives a host recreation`() = runTest {
+        val coordinator = DeviceAuthenticationCoordinator()
+        val result = async(start = CoroutineStart.UNDISPATCHED) {
+            coordinator.authenticate("Reveal secret")
+        }
+        val request = checkNotNull(coordinator.request.value)
+        assertTrue(coordinator.claimForLaunch(request))
+        assertFalse(coordinator.claimForLaunch(request))
+
+        coordinator.succeed(request.id)
+        coordinator.succeed(request.id)
+
+        assertEquals(DeviceAuthenticationResult.Success, result.await())
+        assertEquals(null, coordinator.request.value)
+        assertEquals(null, coordinator.request.value)
+    }
+
+    @Test
+    fun `late callback cannot complete a newer authentication`() = runTest {
+        val coordinator = DeviceAuthenticationCoordinator()
+        val abandoned = async(start = CoroutineStart.UNDISPATCHED) {
+            coordinator.authenticate("Reveal secret")
+        }
+        val oldRequest = checkNotNull(coordinator.request.value)
+        abandoned.cancelAndJoin()
+        val replacement = async(start = CoroutineStart.UNDISPATCHED) {
+            coordinator.authenticate("Copy secret")
+        }
+        val newRequest = checkNotNull(coordinator.request.value)
+
+        coordinator.succeed(oldRequest.id)
+
+        assertTrue(coordinator.request.value != null)
+        assertFalse(replacement.isCompleted)
+        coordinator.succeed(newRequest.id)
+        assertEquals(DeviceAuthenticationResult.Success, replacement.await())
+    }
+
+    @Test
+    fun `cancelling the owner releases authentication for a new host`() = runTest {
+        val coordinator = DeviceAuthenticationCoordinator()
+        val abandoned = async(start = CoroutineStart.UNDISPATCHED) {
+            coordinator.authenticate("Reveal secret")
+        }
+        val abandonedRequest = checkNotNull(coordinator.request.value)
+        assertTrue(coordinator.claimForLaunch(abandonedRequest))
+
+        abandoned.cancelAndJoin()
+
+        assertEquals(null, coordinator.request.value)
+        assertEquals(null, coordinator.request.value)
+        val replacement = async(start = CoroutineStart.UNDISPATCHED) {
+            coordinator.authenticate("Copy secret")
+        }
+        coordinator.succeed(checkNotNull(coordinator.request.value).id)
+        assertEquals(DeviceAuthenticationResult.Success, replacement.await())
     }
 
     @Test

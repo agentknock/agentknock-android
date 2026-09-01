@@ -35,10 +35,7 @@ import dev.agentknock.storage.approval.ApprovalAction
 import dev.agentknock.storage.approval.ApprovalEvaluation
 import dev.agentknock.storage.request.ApprovalCompletionResult
 import dev.agentknock.storage.request.ApprovalDecision
-import dev.agentknock.storage.request.InvocationDecisionResult
 import dev.agentknock.storage.request.ApprovalRequestState
-import dev.agentknock.storage.request.GitSignDecisionResult
-import dev.agentknock.storage.request.SshAuthenticationDecisionResult
 import dev.agentknock.storage.secret.TemporaryAccessOperation
 import dev.agentknock.ui.components.DetailPage
 import dev.agentknock.ui.components.Notice
@@ -345,77 +342,4 @@ internal fun sshAuthenticationStatusLabel(
         ApprovalCompletionResult.ABORTED -> "Aborted"
         null -> "Completed"
     }
-}
-
-internal fun InvocationDecisionResult.message(): String = when (this) {
-    InvocationDecisionResult.Decided -> "Decision saved"
-    InvocationDecisionResult.SecretsChanged ->
-        "A requested secret changed; review the request again"
-    InvocationDecisionResult.NotPending -> "This request no longer needs a decision"
-    InvocationDecisionResult.NotFound -> "Request is no longer available"
-    is InvocationDecisionResult.MissingSecrets -> "Missing secrets: ${names.joinToString()}"
-    is InvocationDecisionResult.ConflictingVariable ->
-        "Conflicting environment variable: $name"
-    is InvocationDecisionResult.Invalid -> message
-    InvocationDecisionResult.SecretUnavailable ->
-        "A secret value is unavailable on this device"
-    InvocationDecisionResult.SecretCorrupted -> "A secret value could not be authenticated"
-    InvocationDecisionResult.UnsupportedEncryption ->
-        "A secret value uses unsupported encryption"
-    InvocationDecisionResult.PairingUnavailable -> "The paired client is unavailable"
-    InvocationDecisionResult.TemporaryAccessUnavailable ->
-        "Temporary access is no longer available"
-    InvocationDecisionResult.TemporaryAccessNotStarted ->
-        "Request approved once, but temporary access could not be started"
-}
-
-internal fun GitSignDecisionResult.message(): String = when (this) {
-    GitSignDecisionResult.Decided -> "Decision saved"
-    GitSignDecisionResult.NotPending ->
-        "This Git signing request no longer needs a decision"
-    GitSignDecisionResult.NotFound -> "Git signing request is no longer available"
-    GitSignDecisionResult.InvocationUnavailable -> "The original command request is unavailable"
-    GitSignDecisionResult.PairingUnavailable -> "The paired client is unavailable"
-    GitSignDecisionResult.ApprovalChanged ->
-        "The SSH key or approval setting changed; review the request again"
-    GitSignDecisionResult.KeyChanged ->
-        "The SSH key changed or was renamed after the command began; start the command again"
-    GitSignDecisionResult.SecretUnavailable ->
-        "The SSH private key is unavailable on this device"
-    GitSignDecisionResult.SecretCorrupted ->
-        "The SSH private key could not be authenticated"
-    GitSignDecisionResult.UnsupportedEncryption ->
-        "The SSH private key uses unsupported encryption"
-    GitSignDecisionResult.TemporaryAccessUnavailable ->
-        "Temporary access is no longer available"
-    GitSignDecisionResult.TemporaryAccessNotStarted ->
-        "Signature approved once, but temporary access could not be started"
-}
-
-internal fun SshAuthenticationDecisionResult.message(): String = when (this) {
-    SshAuthenticationDecisionResult.Decided -> "Decision saved"
-    SshAuthenticationDecisionResult.NotPending ->
-        "This SSH authentication request no longer needs a decision"
-    SshAuthenticationDecisionResult.NotFound ->
-        "SSH authentication request is no longer available"
-    SshAuthenticationDecisionResult.InvocationUnavailable ->
-        "The original command request is unavailable"
-    SshAuthenticationDecisionResult.PairingUnavailable ->
-        "The paired client is unavailable"
-    SshAuthenticationDecisionResult.ApprovalChanged ->
-        "The SSH key or approval setting changed; review the request again"
-    SshAuthenticationDecisionResult.KeyChanged ->
-        "The SSH key changed or was renamed after the command began; start the command again"
-    SshAuthenticationDecisionResult.InvalidMessage ->
-        "The SSH authentication data changed or is invalid; start the command again"
-    SshAuthenticationDecisionResult.SecretUnavailable ->
-        "The SSH private key is unavailable on this device"
-    SshAuthenticationDecisionResult.SecretCorrupted ->
-        "The SSH private key could not be authenticated"
-    SshAuthenticationDecisionResult.UnsupportedEncryption ->
-        "The SSH private key uses unsupported encryption"
-    SshAuthenticationDecisionResult.TemporaryAccessUnavailable ->
-        "Temporary access is no longer available"
-    SshAuthenticationDecisionResult.TemporaryAccessNotStarted ->
-        "Authentication approved once, but temporary access could not be started"
 }

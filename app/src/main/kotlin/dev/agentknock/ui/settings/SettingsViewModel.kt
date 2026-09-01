@@ -5,17 +5,21 @@ import androidx.lifecycle.viewModelScope
 import dev.agentknock.storage.crypto.VaultProtection
 import dev.agentknock.storage.crypto.VaultKeyManager
 import dev.agentknock.storage.device.DeviceConfiguration
-import dev.agentknock.storage.device.DeviceIdentityRepository
 import dev.agentknock.storage.request.ClientSummary
 import dev.agentknock.storage.secret.SecretSummary
 import dev.agentknock.push.PushRegistrationRepository
+import dev.agentknock.ui.auth.DeviceAuthenticationMode
+import dev.agentknock.ui.auth.DeviceAuthenticationResult
+import dev.agentknock.ui.auth.ProtectedActionAuthorizer
 import kotlinx.coroutines.CancellationException
+import kotlinx.coroutines.channels.Channel
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.SharingStarted
 import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.asStateFlow
 import kotlinx.coroutines.flow.combine
 import kotlinx.coroutines.flow.collect
+import kotlinx.coroutines.flow.receiveAsFlow
 import kotlinx.coroutines.flow.stateIn
 import kotlinx.coroutines.launch
 
@@ -32,7 +36,7 @@ internal sealed interface FactoryResetUiState {
 }
 
 internal class SettingsViewModel(
-    deviceIdentity: DeviceIdentityRepository,
+    val configuration: StateFlow<DeviceConfiguration?>,
     secretSummaries: StateFlow<List<SecretSummary>>,
     clientSummaries: StateFlow<List<ClientSummary>>,
     pushRegistration: PushRegistrationRepository,
@@ -41,13 +45,12 @@ internal class SettingsViewModel(
     private val cancelFactoryReset: () -> Unit,
     private val clearApplicationData: () -> Boolean,
     private val awaitStorageReady: suspend () -> Unit,
+    private val protectedActions: ProtectedActionAuthorizer,
 ) : ViewModel() {
     private val _vaultProtection = MutableStateFlow<VaultProtection?>(null)
     private val _factoryReset = MutableStateFlow<FactoryResetUiState>(FactoryResetUiState.Idle)
+    private val messageEvents = Channel<String>(Channel.BUFFERED)
 
-    val configuration: StateFlow<DeviceConfiguration?> = deviceIdentity
-        .observeConfiguration()
-        .stateIn(viewModelScope, SharingStarted.Eagerly, null)
     val dataCounts: StateFlow<DataCounts> = combine(
         secretSummaries,
         clientSummaries,
@@ -64,6 +67,7 @@ internal class SettingsViewModel(
     val pushRegistrationState = pushRegistration.registrationState
     val vaultProtection: StateFlow<VaultProtection?> = _vaultProtection.asStateFlow()
     val factoryReset: StateFlow<FactoryResetUiState> = _factoryReset.asStateFlow()
+    val messages = messageEvents.receiveAsFlow()
 
     init {
         viewModelScope.launch {
@@ -87,6 +91,13 @@ internal class SettingsViewModel(
             }
             if (remoteDeleted) requestApplicationDataClear()
             else _factoryReset.value = FactoryResetUiState.ConfirmLocalClear
+        }
+    }
+
+    fun changeAuthenticationMode(mode: DeviceAuthenticationMode) {
+        viewModelScope.launch {
+            val result = protectedActions.changeMode(mode)
+            if (result is DeviceAuthenticationResult.Error) messageEvents.send(result.message)
         }
     }
 

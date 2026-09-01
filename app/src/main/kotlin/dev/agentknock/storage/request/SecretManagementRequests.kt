@@ -565,8 +565,14 @@ internal class SecretManagementRequests(
             val current = dao.getRequestById(request.id) ?: return@execute false
             if (current.exchangeEndedAt != null) return@execute true
             if (opened == CompletionOpenResult.RetryLater) return@execute false
-            val valid = decoded == current.clientSoftwareJson?.let(::decodeStoredClientSoftware)
-            val error = if (valid) null else SECRET_LIST_COMPLETION_VERIFICATION_ERROR
+            val priorError = current.error
+            val valid = priorError == null &&
+                decoded == current.clientSoftwareJson?.let(::decodeStoredClientSoftware)
+            val error = priorError ?: if (valid) {
+                null
+            } else {
+                SECRET_LIST_COMPLETION_VERIFICATION_ERROR
+            }
             dao.updateSecretListRequest(
                 current.copy(
                     state = InboxRequestState.COMPLETED.storedName,
@@ -615,11 +621,16 @@ internal class SecretManagementRequests(
             } else {
                 SecretUploadProtocol.RESULT_REJECTED
             }
-            val valid = result != null &&
+            val priorError = current.error
+            val valid = priorError == null && result != null &&
                 result.clientSoftware == current.clientSoftwareJson?.let(::decodeStoredClientSoftware) &&
                 result.result == expectedResult &&
                 result.message == upload.intakeError
-            val error = if (valid) null else SECRET_UPLOAD_COMPLETION_VERIFICATION_ERROR
+            val error = priorError ?: if (valid) {
+                null
+            } else {
+                SECRET_UPLOAD_COMPLETION_VERIFICATION_ERROR
+            }
             val lifecycle = secretUploadLifecycle(upload.decision, transportFinished = true)
             dao.updateSecretUploadRequest(
                 request = current.copy(

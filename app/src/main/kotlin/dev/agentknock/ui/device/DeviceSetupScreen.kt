@@ -2,6 +2,7 @@
 
 package dev.agentknock.ui.device
 
+import androidx.activity.compose.BackHandler
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.Row
@@ -25,8 +26,6 @@ import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.OutlinedButton
 import androidx.compose.material3.OutlinedTextField
 import androidx.compose.material3.Scaffold
-import androidx.compose.material3.SnackbarHost
-import androidx.compose.material3.SnackbarHostState
 import androidx.compose.material3.Text
 import androidx.compose.material3.TextButton
 import androidx.compose.material3.TopAppBar
@@ -39,12 +38,10 @@ import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
-import androidx.compose.runtime.rememberCoroutineScope
 import androidx.compose.runtime.saveable.rememberSaveable
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
-import androidx.compose.ui.platform.LocalResources
 import androidx.compose.ui.res.stringResource
 import androidx.compose.ui.text.font.FontFamily
 import androidx.compose.ui.text.TextRange
@@ -62,22 +59,17 @@ import dev.agentknock.storage.device.DeviceConfiguration
 import dev.agentknock.storage.device.DeviceIdentity
 import dev.agentknock.ui.theme.agentknockColors
 import dev.agentknock.ui.components.NavigationBackButton
-import kotlinx.coroutines.launch
 
 @Composable
 internal fun DeviceSetupScreen(
     configuration: DeviceConfiguration,
     onDone: (() -> Unit)?,
     changeAddressInitially: Boolean = false,
-    onDeviceClaimed: () -> Unit,
     onOpenSettings: (() -> Unit)? = null,
     viewModel: DeviceSetupViewModel,
 ) {
     val claiming by viewModel.claiming.collectAsStateWithLifecycle()
     val lastResult by viewModel.lastClaimResult.collectAsStateWithLifecycle()
-    val resources = LocalResources.current
-    val scope = rememberCoroutineScope()
-    val snackbar = remember { SnackbarHostState() }
     var editing by rememberSaveable(changeAddressInitially) {
         mutableStateOf(
             changeAddressInitially ||
@@ -89,28 +81,20 @@ internal fun DeviceSetupScreen(
     val active = configuration.active
     val candidate = configuration.candidate
 
-    fun report(message: String) {
-        scope.launch { snackbar.showSnackbar(message) }
-    }
-
     fun performClaim() {
-        scope.launch {
-            editing = false
-            val result = viewModel.stageAndClaim(address)
-            reportClaimResult(result, resources::getString, ::report)
-            if (result == ClaimPairingAddressResult.Claimed) {
-                onDeviceClaimed()
-                if (changeAddressInitially) onDone?.invoke()
-            }
-        }
+        editing = false
+        viewModel.stageAndClaim(address)
     }
 
     fun claim() {
         if (active == null) performClaim() else confirmChange = true
     }
 
+    BackHandler(enabled = changeAddressInitially && onDone != null) {
+        onDone?.invoke()
+    }
+
     Scaffold(
-        snackbarHost = { SnackbarHost(snackbar) },
         contentWindowInsets = WindowInsets.navigationBars,
     ) { padding ->
         Column(Modifier.fillMaxSize().padding(padding)) {
@@ -162,32 +146,13 @@ internal fun DeviceSetupScreen(
                         candidate = candidate,
                         result = lastResult,
                         claiming = claiming,
-                        onRetry = {
-                            scope.launch {
-                                val result = viewModel.retryClaim()
-                                reportClaimResult(
-                                    result,
-                                    resources::getString,
-                                    ::report,
-                                )
-                                if (result == ClaimPairingAddressResult.Claimed) {
-                                    onDeviceClaimed()
-                                    if (changeAddressInitially) onDone?.invoke()
-                                }
-                            }
-                        },
+                        onRetry = viewModel::retryClaim,
                         onChooseAnother = {
                             viewModel.clearClaimResult()
                             address = viewModel.generateAddress()
                             editing = true
                         },
-                        onDiscard = active?.let {
-                            {
-                                scope.launch {
-                                    viewModel.discardCandidate()
-                                }
-                            }
-                        },
+                        onDiscard = active?.let { viewModel::discardCandidate },
                     )
                 } else if (editing || active == null) {
                     AddressEditor(
@@ -306,27 +271,38 @@ private fun CandidateCard(
     onDiscard: (() -> Unit)?,
 ) {
     val unavailable = result == ClaimPairingAddressResult.AddressUnavailable
+    val title = stringResource(
+        if (unavailable) {
+            R.string.pairing_address_unavailable
+        } else {
+            R.string.pairing_address_claim_incomplete
+        },
+    )
+    val explanation = stringResource(
+        when (result) {
+            ClaimPairingAddressResult.AddressUnavailable ->
+                R.string.pairing_address_unavailable_explanation
+            ClaimPairingAddressResult.CredentialsCorrupted -> R.string.device_keys_corrupted
+            ClaimPairingAddressResult.UnsupportedEncryption -> R.string.device_keys_unsupported
+            is ClaimPairingAddressResult.RelayRejected -> R.string.device_setup_relay_rejected
+            is ClaimPairingAddressResult.RelayUnavailable -> R.string.device_setup_relay_unavailable
+            ClaimPairingAddressResult.InvalidRelayResponse ->
+                R.string.device_setup_relay_invalid_response
+            ClaimPairingAddressResult.NoCandidate -> R.string.pairing_address_claim_missing
+            ClaimPairingAddressResult.Claimed,
+            ClaimPairingAddressResult.SameAddress,
+            null,
+            -> R.string.pairing_address_claim_incomplete_explanation
+        },
+    )
     Card {
         Column(
             Modifier.padding(20.dp),
             verticalArrangement = Arrangement.spacedBy(12.dp),
         ) {
-            Text(
-                if (unavailable) {
-                    stringResource(R.string.pairing_address_unavailable)
-                } else {
-                    stringResource(R.string.pairing_address_claim_incomplete)
-                },
-                style = MaterialTheme.typography.titleMedium,
-            )
+            Text(title, style = MaterialTheme.typography.titleMedium)
             Text(candidate.address, fontFamily = FontFamily.Monospace)
-            Text(
-                if (unavailable) {
-                    stringResource(R.string.pairing_address_unavailable_explanation)
-                } else {
-                    stringResource(R.string.pairing_address_claim_incomplete_explanation)
-                },
-            )
+            Text(explanation)
             Column(verticalArrangement = Arrangement.spacedBy(8.dp)) {
                 if (!unavailable) {
                     Button(
@@ -453,23 +429,4 @@ private fun AddressEditor(
             }
         }
     }
-}
-
-private fun reportClaimResult(
-    result: ClaimPairingAddressResult,
-    getString: (Int) -> String,
-    report: (String) -> Unit,
-) {
-    val message = when (result) {
-        ClaimPairingAddressResult.Claimed -> getString(R.string.pairing_address_claimed)
-        ClaimPairingAddressResult.AddressUnavailable -> getString(R.string.pairing_address_unavailable)
-        ClaimPairingAddressResult.SameAddress -> getString(R.string.pairing_address_unchanged)
-        ClaimPairingAddressResult.NoCandidate -> getString(R.string.pairing_address_claim_missing)
-        ClaimPairingAddressResult.CredentialsCorrupted -> getString(R.string.device_keys_corrupted)
-        ClaimPairingAddressResult.UnsupportedEncryption -> getString(R.string.device_keys_unsupported)
-        is ClaimPairingAddressResult.RelayRejected -> getString(R.string.device_setup_relay_rejected)
-        is ClaimPairingAddressResult.RelayUnavailable -> getString(R.string.device_setup_relay_unavailable)
-        ClaimPairingAddressResult.InvalidRelayResponse -> getString(R.string.device_setup_relay_invalid_response)
-    }
-    report(message)
 }

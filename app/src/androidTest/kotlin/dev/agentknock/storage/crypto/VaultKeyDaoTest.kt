@@ -127,7 +127,6 @@ class VaultKeyDaoTest {
                 ),
             ),
         )
-
         val environmentSecret = secret("environment-secret", "environment")
         secretDao.insertSecret(environmentSecret)
         secretDao.insertEnvironmentVariableRow(
@@ -315,7 +314,6 @@ class VaultKeyDaoTest {
         const val CLIENT_PSK_KEY = "client-psk-key"
         const val REQUEST_PSK_KEY = "request-psk-key"
         const val PENDING_PSK_KEY = "pending-psk-key"
-
         val SECRET_VALUE_KEYS = setOf(
             ENVIRONMENT_KEY,
             SSH_KEY,

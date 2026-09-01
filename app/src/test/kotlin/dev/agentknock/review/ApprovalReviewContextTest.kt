@@ -429,8 +429,6 @@ class ApprovalReviewContextTest {
         secretId = id,
         secretName = name,
         mode = mode,
-        defaultMode = mode,
-        overridden = false,
         instructions = instructions,
         revision = 1,
     )

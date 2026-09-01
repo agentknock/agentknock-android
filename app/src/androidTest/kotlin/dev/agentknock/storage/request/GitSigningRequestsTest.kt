@@ -231,11 +231,11 @@ class GitSigningRequestsTest {
         val requestId = "git-valid-intake"
 
         val processed = requests(audit).processIncoming(
-            pairing = client(),
+            client = client(),
             relayRequestId = requestId,
             requestPayload = Json.parseToJsonElement("""{"envelope":"request"}"""),
             plaintext = gitSignPlaintext(token),
-            acceptedSecrets = acceptedPsks(requestId),
+            acceptedPsks = acceptedPsks(requestId),
             credentials = credentials(),
             sealResponse = { error("An actionable request must not be sealed") },
             launchAiReview = { _, _, _, _ ->
@@ -243,7 +243,7 @@ class GitSigningRequestsTest {
             },
         )
 
-        assertEquals(ProcessedRelayMessage(), processed)
+        assertEquals(ProcessedRelayMessage, processed)
         val request = checkNotNull(database.requestDao().getRequestById(requestId))
         val signing = checkNotNull(database.requestDao().getGitSignRequest(requestId))
         assertEquals(InboxRequestState.ACTION_REQUIRED.storedName, request.state)
@@ -276,11 +276,11 @@ class GitSigningRequestsTest {
         val requestId = "git-completed-parent"
 
         val processed = requests(audit).processIncoming(
-            pairing = client(),
+            client = client(),
             relayRequestId = requestId,
             requestPayload = Json.parseToJsonElement("{}"),
             plaintext = gitSignPlaintext(token),
-            acceptedSecrets = acceptedPsks(requestId),
+            acceptedPsks = acceptedPsks(requestId),
             credentials = credentials(),
             sealResponse = { error("A rejected request must not be sealed") },
             launchAiReview = { _, _, _, _ -> error("A rejected request must not launch review") },
@@ -301,11 +301,11 @@ class GitSigningRequestsTest {
         val requestId = "git-malformed-parent"
 
         val processed = requests(audit).processIncoming(
-            pairing = client(),
+            client = client(),
             relayRequestId = requestId,
             requestPayload = Json.parseToJsonElement("{}"),
             plaintext = gitSignPlaintext(token),
-            acceptedSecrets = acceptedPsks(requestId),
+            acceptedPsks = acceptedPsks(requestId),
             credentials = credentials(),
             sealResponse = { error("A rejected request must not be sealed") },
             launchAiReview = { _, _, _, _ -> error("A rejected request must not launch review") },
@@ -325,11 +325,11 @@ class GitSigningRequestsTest {
         var launched = false
 
         val processed = requests(audit).processIncoming(
-            pairing = client(),
+            client = client(),
             relayRequestId = requestId,
             requestPayload = Json.parseToJsonElement("{}"),
             plaintext = gitSignPlaintext(suppliedToken),
-            acceptedSecrets = acceptedPsks(requestId),
+            acceptedPsks = acceptedPsks(requestId),
             credentials = credentials(),
             sealResponse = {
                 sealed = true
@@ -361,11 +361,11 @@ class GitSigningRequestsTest {
         var sealed = false
 
         val processed = requests(audit).processIncoming(
-            pairing = client(),
+            client = client(),
             relayRequestId = requestId,
             requestPayload = Json.parseToJsonElement("{}"),
             plaintext = gitSignPlaintext(token),
-            acceptedSecrets = acceptedPsks(requestId),
+            acceptedPsks = acceptedPsks(requestId),
             credentials = credentials(),
             sealResponse = {
                 sealed = true
@@ -425,11 +425,11 @@ class GitSigningRequestsTest {
             reviewer.result = reviewed(relayDecision, "Review result $index")
             var pendingReview: PendingAiReview? = null
             val processed = target.processIncoming(
-                pairing = client(),
+                client = client(),
                 relayRequestId = requestId,
                 requestPayload = Json.parseToJsonElement("{}"),
                 plaintext = gitSignPlaintext(token),
-                acceptedSecrets = acceptedPsks(requestId),
+                acceptedPsks = acceptedPsks(requestId),
                 credentials = credentials(),
                 sealResponse = { Json.parseToJsonElement(RESPONSE_JSON) },
                 launchAiReview = { launchedId, _, review, complete ->
@@ -439,7 +439,7 @@ class GitSigningRequestsTest {
                 },
             )
 
-            assertEquals(ProcessedRelayMessage(), processed)
+            assertEquals(ProcessedRelayMessage, processed)
             assertEquals(
                 InboxRequestState.REVIEWING.storedName,
                 database.requestDao().getRequestById(requestId)?.state,
@@ -497,13 +497,13 @@ class GitSigningRequestsTest {
         var pendingReview: PendingAiReview? = null
 
         assertEquals(
-            ProcessedRelayMessage(),
+            ProcessedRelayMessage,
             target.processIncoming(
-                pairing = client(),
+                client = client(),
                 relayRequestId = requestId,
                 requestPayload = Json.parseToJsonElement("{}"),
                 plaintext = gitSignPlaintext(token),
-                acceptedSecrets = acceptedPsks(requestId),
+                acceptedPsks = acceptedPsks(requestId),
                 credentials = credentials(),
                 sealResponse = { Json.parseToJsonElement(RESPONSE_JSON) },
                 launchAiReview = { _, _, review, complete ->

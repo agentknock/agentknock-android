@@ -4,16 +4,20 @@ package dev.agentknock.ui.secrets
 
 import androidx.activity.compose.BackHandler
 import androidx.compose.foundation.layout.Arrangement
+import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.FlowRow
+import androidx.compose.foundation.layout.fillMaxHeight
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.padding
+import androidx.compose.foundation.layout.widthIn
 import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.text.KeyboardOptions
 import androidx.compose.foundation.verticalScroll
 import androidx.compose.material3.Button
 import androidx.compose.material3.FilterChip
+import androidx.compose.material3.LinearProgressIndicator
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.OutlinedTextField
 import androidx.compose.material3.Scaffold
@@ -28,6 +32,7 @@ import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.saveable.rememberSaveable
 import androidx.compose.runtime.setValue
 import androidx.compose.runtime.withFrameNanos
+import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.platform.LocalFocusManager
 import androidx.compose.ui.res.stringResource
@@ -44,6 +49,7 @@ import dev.agentknock.ui.components.NavigationBackButton
 @Composable
 internal fun SecretEditorScreen(
     editor: SecretEditorState,
+    enabled: Boolean,
     onEditorChange: (SecretEditorState) -> Unit,
     onDismiss: () -> Unit,
     onPrepareSshKey: () -> Unit,
@@ -66,6 +72,7 @@ internal fun SecretEditorScreen(
         name != secret.name || description != secret.description
     }
     fun requestDismiss() {
+        if (!enabled) return
         if (dirty) confirmDiscard = true else onDismiss()
     }
 
@@ -84,26 +91,37 @@ internal fun SecretEditorScreen(
     BackHandler(onBack = ::requestDismiss)
     Scaffold(
         topBar = {
-            TopAppBar(
-                title = {
-                    Text(
-                        stringResource(
-                            if (secret == null) R.string.new_secret else R.string.edit_secret,
-                        ),
-                    )
-                },
-                navigationIcon = {
-                    NavigationBackButton(::requestDismiss)
-                },
-            )
+            Column {
+                TopAppBar(
+                    title = {
+                        Text(
+                            stringResource(
+                                if (secret == null) R.string.new_secret else R.string.edit_secret,
+                            ),
+                        )
+                    },
+                    navigationIcon = {
+                        NavigationBackButton(
+                            onClick = ::requestDismiss,
+                            enabled = enabled,
+                        )
+                    },
+                )
+                if (!enabled) LinearProgressIndicator(Modifier.fillMaxWidth())
+            }
         },
         snackbarHost = { SnackbarHost(snackbar) },
     ) { padding ->
-        Column(
-            Modifier.fillMaxSize().padding(padding).verticalScroll(scrollState)
-                .padding(20.dp),
-            verticalArrangement = Arrangement.spacedBy(18.dp),
-        ) {
+        Box(Modifier.fillMaxSize().padding(padding)) {
+            Column(
+                Modifier
+                    .fillMaxHeight()
+                    .widthIn(max = 720.dp)
+                    .align(Alignment.TopCenter)
+                    .verticalScroll(scrollState)
+                    .padding(20.dp),
+                verticalArrangement = Arrangement.spacedBy(18.dp),
+            ) {
             if (secret == null) {
                 Column(verticalArrangement = Arrangement.spacedBy(8.dp)) {
                     Text("Secret type", style = MaterialTheme.typography.titleMedium)
@@ -113,6 +131,7 @@ internal fun SecretEditorScreen(
                     ) {
                         FilterChip(
                             selected = editor.type == SecretType.ENVIRONMENT,
+                            enabled = enabled,
                             onClick = {
                                 onEditorChange(
                                     editor.copy(
@@ -125,6 +144,7 @@ internal fun SecretEditorScreen(
                         )
                         FilterChip(
                             selected = editor.type == SecretType.SSH,
+                            enabled = enabled,
                             onClick = {
                                 onEditorChange(
                                     editor.copy(
@@ -154,6 +174,7 @@ internal fun SecretEditorScreen(
                     validationError = null
                 },
                 label = { Text(stringResource(R.string.secret_name)) },
+                enabled = enabled,
                 singleLine = true,
                 isError = validationError != null,
                 supportingText = validationError?.let { error ->
@@ -171,12 +192,14 @@ internal fun SecretEditorScreen(
                 value = description,
                 onValueChange = { onEditorChange(editor.copy(description = it)) },
                 label = { Text(stringResource(R.string.description_optional)) },
+                enabled = enabled,
                 minLines = 2,
                 modifier = Modifier.fillMaxWidth(),
             )
             if (secret == null && editor.type == SecretType.SSH) {
                 SshKeyInput(
                     draft = editor.sshKeyDraft,
+                    enabled = enabled,
                     onDraftChange = { draft ->
                         onEditorChange(editor.copy(sshKeyDraft = draft))
                     },
@@ -196,7 +219,7 @@ internal fun SecretEditorScreen(
                         }
                         if (validationError == null) onSave(name, description)
                     },
-                    enabled = name.isNotBlank() && (
+                    enabled = enabled && name.isNotBlank() && (
                         secret == null ||
                             name != secret.name ||
                             description != secret.description
@@ -210,10 +233,12 @@ internal fun SecretEditorScreen(
                     )
                 }
             }
+            }
         }
     }
     if (confirmDiscard) {
         DiscardChangesDialog(
+            enabled = enabled,
             onDismiss = { confirmDiscard = false },
             onDiscard = onDismiss,
         )

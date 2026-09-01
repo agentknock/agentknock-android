@@ -11,26 +11,26 @@ class MainActivityNavigationSavedStateTest {
     @Test
     fun pendingTargetsSurviveActivityStateAndConsumedTargetsDoNot() {
         val original = MainActivityNavigationState().apply {
-            openRequest(null)
-            openSubscription(SubscriptionNavigation.Redemption(REDEMPTION_TOKEN))
+            open(ExternalNavigation.Request(null))
         }
         val restored = MainActivityNavigationState().apply { restore(original.save()) }
 
-        assertEquals(RequestNavigation(null), restored.request.value)
-        assertEquals(
-            SubscriptionNavigation.Redemption(REDEMPTION_TOKEN),
-            restored.subscription.value,
-        )
+        assertEquals(ExternalNavigation.Request(null), restored.target.value)
 
-        restored.consumeRequest(RequestNavigation(null))
-        restored.consumeSubscription(SubscriptionNavigation.Redemption(REDEMPTION_TOKEN))
+        restored.consume(ExternalNavigation.Request(null))
         val afterConsumption = MainActivityNavigationState().apply { restore(restored.save()) }
 
-        assertNull(afterConsumption.request.value)
-        assertNull(afterConsumption.subscription.value)
+        assertNull(afterConsumption.target.value)
     }
 
-    private companion object {
-        const val REDEMPTION_TOKEN = "DDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDI"
+    @Test
+    fun redemptionTokenIsNotWrittenToActivityState() {
+        val original = MainActivityNavigationState().apply {
+            open(ExternalNavigation.SubscriptionRedemption("token"))
+        }
+
+        val restored = MainActivityNavigationState().apply { restore(original.save()) }
+
+        assertNull(restored.target.value)
     }
 }

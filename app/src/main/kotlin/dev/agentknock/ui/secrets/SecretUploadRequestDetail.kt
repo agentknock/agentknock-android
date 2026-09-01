@@ -29,11 +29,9 @@ import androidx.compose.material3.Switch
 import androidx.compose.material3.Text
 import androidx.compose.material3.TextButton
 import androidx.compose.runtime.Composable
-import androidx.compose.runtime.DisposableEffect
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
-import androidx.compose.runtime.remember
-import androidx.compose.runtime.rememberCoroutineScope
+import androidx.compose.runtime.saveable.rememberSaveable
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
@@ -43,18 +41,14 @@ import androidx.compose.ui.semantics.semantics
 import androidx.compose.ui.text.font.FontFamily
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
-import androidx.lifecycle.Lifecycle
-import androidx.lifecycle.LifecycleEventObserver
-import androidx.lifecycle.compose.LocalLifecycleOwner
 import dev.agentknock.presentation.formatTimestamp
 import dev.agentknock.presentation.renderSoftware
 import dev.agentknock.protocol.SecretUploadMode
 import dev.agentknock.storage.request.InboxRequestContent
 import dev.agentknock.storage.request.InboxRequestDetails
-import dev.agentknock.storage.request.SecretUploadDecisionResult
 import dev.agentknock.storage.request.SecretUploadRequestDetails
 import dev.agentknock.storage.request.SecretUploadRequestState
-import dev.agentknock.storage.request.SecretUploadVariableValue
+import dev.agentknock.storage.request.SecretUploadVariableDetails
 import dev.agentknock.ui.components.ClientIdentity
 import dev.agentknock.ui.components.DetailPage
 import dev.agentknock.ui.components.DetailValue
@@ -65,25 +59,6 @@ import dev.agentknock.ui.components.Notice
 import dev.agentknock.ui.components.NoticeTone
 import dev.agentknock.ui.components.StatusLine
 import dev.agentknock.ui.theme.agentknockColors
-import kotlinx.coroutines.launch
-
-private class SecretRevealEpoch {
-    private var epoch = 0L
-    private var active = true
-
-    fun begin(): Long? = epoch.takeIf { active }
-
-    fun isCurrent(value: Long): Boolean = active && value == epoch
-
-    fun invalidate() {
-        epoch += 1
-    }
-
-    fun close() {
-        active = false
-        invalidate()
-    }
-}
 
 @Composable
 internal fun SecretUploadRequestDetail(
@@ -92,38 +67,16 @@ internal fun SecretUploadRequestDetail(
     showBack: Boolean,
     onApprove: (String) -> Unit,
     onReject: () -> Unit,
-    authorizeProtectedAction: (String, () -> Unit, (String) -> Unit) -> Unit,
-    onReveal: suspend (String) -> SecretUploadVariableValue,
-    onSensitivityChange: suspend (String, Boolean) -> Boolean,
-    report: (String) -> Unit,
+    revealedValues: Map<String, String>,
+    onReveal: (SecretUploadVariableDetails) -> Unit,
+    onSensitivityChange: (SecretUploadVariableDetails, Boolean) -> Unit,
     modifier: Modifier,
 ) {
     val upload = (request.content as InboxRequestContent.SecretUpload).details
-    var approvedName by remember(upload.uploadedName, upload.approvedName) {
+    var approvedName by rememberSaveable(request.id, upload.uploadedName, upload.approvedName) {
         mutableStateOf(upload.approvedName ?: upload.uploadedName)
     }
-    var editingName by remember { mutableStateOf(false) }
-    var revealedValues by remember(request.id) {
-        mutableStateOf<Map<String, String>>(emptyMap())
-    }
-    val revealEpoch = remember(request.id) { SecretRevealEpoch() }
-    val scope = rememberCoroutineScope()
-    val lifecycle = LocalLifecycleOwner.current.lifecycle
-
-    DisposableEffect(lifecycle, request.id) {
-        val observer = LifecycleEventObserver { _, event ->
-            if (event == Lifecycle.Event.ON_STOP) {
-                revealEpoch.invalidate()
-                revealedValues = emptyMap()
-            }
-        }
-        lifecycle.addObserver(observer)
-        onDispose {
-            lifecycle.removeObserver(observer)
-            revealEpoch.close()
-            revealedValues = emptyMap()
-        }
-    }
+    var editingName by rememberSaveable(request.id) { mutableStateOf(false) }
     DetailPage(
         title = "Secret upload",
         onBack = onBack,
@@ -219,30 +172,8 @@ internal fun SecretUploadRequestDetail(
             EnvironmentVariableUploadDetails(
                 upload = upload,
                 revealedValues = revealedValues,
-                onUpdateRevealedValues = { update ->
-                    revealedValues = update(revealedValues)
-                },
-                authorizeProtectedAction = authorizeProtectedAction,
-                onReveal = { variableId ->
-                    val epoch = if (
-                        lifecycle.currentState.isAtLeast(Lifecycle.State.STARTED)
-                    ) {
-                        revealEpoch.begin()
-                    } else {
-                        null
-                    }
-                    if (epoch == null) {
-                        null
-                    } else {
-                        val result = onReveal(variableId)
-                        result.takeIf {
-                            revealEpoch.isCurrent(epoch) &&
-                                lifecycle.currentState.isAtLeast(Lifecycle.State.STARTED)
-                        }
-                    }
-                },
+                onReveal = onReveal,
                 onSensitivityChange = onSensitivityChange,
-                report = report,
             )
         }
 
@@ -279,7 +210,9 @@ internal fun SecretUploadRequestDetail(
         }
     }
     if (editingName) {
-        var editedName by remember(approvedName) { mutableStateOf(approvedName) }
+        var editedName by rememberSaveable(request.id, approvedName) {
+            mutableStateOf(approvedName)
+        }
         AlertDialog(
             onDismissRequest = { editingName = false },
             title = { Text("Secret name") },
@@ -311,13 +244,9 @@ internal fun SecretUploadRequestDetail(
 private fun EnvironmentVariableUploadDetails(
     upload: SecretUploadRequestDetails,
     revealedValues: Map<String, String>,
-    onUpdateRevealedValues: ((Map<String, String>) -> Map<String, String>) -> Unit,
-    authorizeProtectedAction: (String, () -> Unit, (String) -> Unit) -> Unit,
-    onReveal: suspend (String) -> SecretUploadVariableValue?,
-    onSensitivityChange: suspend (String, Boolean) -> Boolean,
-    report: (String) -> Unit,
+    onReveal: (SecretUploadVariableDetails) -> Unit,
+    onSensitivityChange: (SecretUploadVariableDetails, Boolean) -> Unit,
 ) {
-    val scope = rememberCoroutineScope()
     if (upload.mode != SecretUploadMode.CREATE) {
         Card(
             colors = CardDefaults.cardColors(
@@ -431,22 +360,7 @@ private fun EnvironmentVariableUploadDetails(
                             checked = variable.sensitive,
                             enabled = upload.state == SecretUploadRequestState.REVIEW_PENDING,
                             onCheckedChange = { sensitive ->
-                                val change: () -> Unit = {
-                                    scope.launch {
-                                        if (!onSensitivityChange(variable.id, sensitive)) {
-                                            report("Sensitivity could not be changed")
-                                        }
-                                    }
-                                }
-                                if (sensitive) {
-                                    change()
-                                } else {
-                                    authorizeProtectedAction(
-                                        "Mark ${variable.name} non-sensitive",
-                                        change,
-                                        report,
-                                    )
-                                }
+                                onSensitivityChange(variable, sensitive)
                             },
                             modifier = Modifier.semantics {
                                 contentDescription =
@@ -464,43 +378,7 @@ private fun EnvironmentVariableUploadDetails(
                         trailingIcon = {
                             IconButton(
                                 onClick = {
-                                    if (value != null) {
-                                        onUpdateRevealedValues { values ->
-                                            values - variable.id
-                                        }
-                                        return@IconButton
-                                    }
-                                    val reveal: () -> Unit = {
-                                        scope.launch {
-                                            when (val result = onReveal(variable.id)) {
-                                                null -> Unit
-                                                is SecretUploadVariableValue.Available -> {
-                                                    onUpdateRevealedValues { values ->
-                                                        values + (variable.id to result.value)
-                                                    }
-                                                }
-                                                SecretUploadVariableValue.NotFound ->
-                                                    report(
-                                                        "This environment variable is no longer available",
-                                                    )
-                                                SecretUploadVariableValue.Unavailable ->
-                                                    report("The encryption key is unavailable")
-                                                SecretUploadVariableValue.Corrupted ->
-                                                    report(
-                                                        "The uploaded value could not be authenticated",
-                                                    )
-                                                SecretUploadVariableValue.UnsupportedEncryption ->
-                                                    report(
-                                                        "The uploaded value uses unsupported encryption",
-                                                    )
-                                            }
-                                        }
-                                    }
-                                    authorizeProtectedAction(
-                                        "Show uploaded value",
-                                        reveal,
-                                        report,
-                                    )
+                                    onReveal(variable)
                                 },
                             ) {
                                 Icon(
@@ -637,18 +515,4 @@ private fun SecretUploadRequestState.label(): String = when (this) {
     SecretUploadRequestState.APPROVED -> "Approved"
     SecretUploadRequestState.REJECTED -> "Rejected"
     SecretUploadRequestState.VERIFICATION_FAILED -> "Verification failed"
-}
-
-internal fun SecretUploadDecisionResult.message(): String = when (this) {
-    is SecretUploadDecisionResult.Approved -> "Secret upload approved"
-    SecretUploadDecisionResult.Rejected -> "Secret upload rejected"
-    SecretUploadDecisionResult.NotPending -> "This upload no longer needs a decision"
-    SecretUploadDecisionResult.NotFound -> "Upload is no longer available"
-    is SecretUploadDecisionResult.Invalid -> message
-    SecretUploadDecisionResult.SecretUnavailable ->
-        "An uploaded value is unavailable on this device"
-    SecretUploadDecisionResult.SecretCorrupted ->
-        "An uploaded value could not be authenticated"
-    SecretUploadDecisionResult.UnsupportedEncryption ->
-        "An uploaded value uses unsupported encryption"
 }

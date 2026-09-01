@@ -16,6 +16,9 @@ import okhttp3.Response
 
 internal const val DEFAULT_RELAY_URL = "https://relay.agentknock.dev/"
 
+internal fun Int.isTransientRelayStatus(): Boolean =
+    this == 408 || this == 425 || this == 429 || this in 500..599
+
 internal sealed interface RelayEndpointResult<out T> {
     data class Success<T>(val value: T) : RelayEndpointResult<T>
 

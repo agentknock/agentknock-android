@@ -115,6 +115,41 @@ class RequestConnectionManagerTest {
     }
 
     @Test
+    fun `background handoff keeps synchronization visible until its finite pass completes`() =
+        runTest {
+            val oneShotStarted = CompletableDeferred<Unit>()
+            val finishOneShot = CompletableDeferred<Unit>()
+            lateinit var manager: RequestConnectionManager
+            manager = manager(
+                synchronizeOnce = {
+                    oneShotStarted.complete(Unit)
+                    finishOneShot.await()
+                    RequestSyncResult.Success
+                },
+                listen = { onCaughtUp ->
+                    onCaughtUp()
+                    awaitCancellation()
+                },
+                scheduleBackgroundSynchronization = {
+                    backgroundScope.launch { manager.synchronizeOnce() }
+                },
+                backgroundGracePeriodMillis = 0,
+            )
+            manager.appForegrounded()
+            runCurrent()
+
+            manager.appBackgrounded()
+            oneShotStarted.await()
+
+            assertTrue(manager.syncing.value)
+
+            finishOneShot.complete(Unit)
+            runCurrent()
+
+            assertFalse(manager.syncing.value)
+        }
+
+    @Test
     fun `pause during background grace suppresses handoff and background resume reconciles once`() =
         runTest {
             var scheduled = 0
@@ -238,77 +273,44 @@ class RequestConnectionManagerTest {
     }
 
     @Test
-    fun `requests arriving during a finite synchronization each run a sequential follow-up`() =
-        runTest {
-            val firstStarted = CompletableDeferred<Unit>()
-            val finishFirst = CompletableDeferred<Unit>()
-            var synchronizations = 0
-            val manager = manager(
-                synchronizeOnce = {
-                    synchronizations += 1
-                    if (synchronizations == 1) {
-                        firstStarted.complete(Unit)
-                        finishFirst.await()
-                    }
-                    RequestSyncResult.Success
-                },
-            )
-
-            val first = async { manager.synchronizeOnce() }
-            firstStarted.await()
-            val second = async { manager.synchronizeOnce() }
-            val third = async { manager.synchronizeOnce() }
-            runCurrent()
-            assertEquals(1, synchronizations)
-
-            finishFirst.complete(Unit)
-            val expected = OneShotSynchronizationResult.Completed(RequestSyncResult.Success)
-            assertEquals(expected, first.await())
-            assertEquals(expected, second.await())
-            assertEquals(expected, third.await())
-
-            assertEquals(3, synchronizations)
-            assertEquals(RequestSyncResult.Success, manager.lastSyncResult.value)
-            assertFalse(manager.syncing.value)
+    fun `foreground connection starts when the finite relay session releases`() = runTest {
+        val finiteStarted = CompletableDeferred<Unit>()
+        val finishFiniteSession = CompletableDeferred<Unit>()
+        val finiteReturned = CompletableDeferred<Unit>()
+        val finishCallerPostProcessing = CompletableDeferred<Unit>()
+        var connections = 0
+        val manager = manager(
+            synchronizeOnce = {
+                finiteStarted.complete(Unit)
+                finishFiniteSession.await()
+                RequestSyncResult.Success
+            },
+            listen = { onCaughtUp ->
+                connections += 1
+                onCaughtUp()
+                awaitCancellation()
+            },
+        )
+        val finiteCaller = launch {
+            manager.synchronizeOnce()
+            finiteReturned.complete(Unit)
+            finishCallerPostProcessing.await()
         }
+        finiteStarted.await()
+        manager.appForegrounded()
+        runCurrent()
+        assertEquals(0, connections)
 
-    @Test
-    fun `background synchronization request schedules durable work during a finite pass`() =
-        runTest {
-            val firstStarted = CompletableDeferred<Unit>()
-            val finishFirst = CompletableDeferred<Unit>()
-            var synchronizations = 0
-            var scheduled = 0
-            lateinit var manager: RequestConnectionManager
-            manager = manager(
-                synchronizeOnce = {
-                    synchronizations += 1
-                    if (synchronizations == 1) {
-                        firstStarted.complete(Unit)
-                        finishFirst.await()
-                    }
-                    RequestSyncResult.Success
-                },
-                scheduleBackgroundSynchronization = {
-                    scheduled += 1
-                    backgroundScope.launch { manager.synchronizeOnce() }
-                },
-            )
+        finishFiniteSession.complete(Unit)
+        finiteReturned.await()
+        runCurrent()
 
-            val first = launch { manager.synchronizeOnce() }
-            firstStarted.await()
-            manager.requestSynchronization()
-            runCurrent()
+        assertTrue(finiteCaller.isActive)
+        assertEquals(1, connections)
 
-            assertEquals(1, scheduled)
-            assertEquals(1, synchronizations)
-
-            finishFirst.complete(Unit)
-            first.join()
-            runCurrent()
-
-            assertEquals(2, synchronizations)
-        }
+        finishCallerPostProcessing.complete(Unit)
+        finiteCaller.join()
+    }
 
     @Test
     fun `foreground synchronization request keeps the healthy live session`() =
@@ -687,73 +689,6 @@ class RequestConnectionManagerTest {
         )
         assertEquals(2, attempts)
         assertEquals(0, deadlineWrites)
-    }
-
-    @Test
-    fun `server retry delay defers a concurrent follow-up without a sleeping session`() = runTest {
-        val started = CompletableDeferred<Unit>()
-        val finish = CompletableDeferred<Unit>()
-        var attempts = 0
-        val manager = manager(
-            synchronizeOnce = {
-                attempts += 1
-                started.complete(Unit)
-                finish.await()
-                RequestSyncResult.RelayUnavailable("rate limited", 60_000)
-            },
-        )
-
-        val first = async { manager.synchronizeOnce() }
-        started.await()
-        val concurrent = async { manager.synchronizeOnce() }
-        runCurrent()
-        finish.complete(Unit)
-
-        assertEquals(
-            OneShotSynchronizationResult.Completed(
-                RequestSyncResult.RelayUnavailable("rate limited", 60_000),
-            ),
-            first.await(),
-        )
-        assertEquals(OneShotSynchronizationResult.Deferred(60_000), concurrent.await())
-        assertEquals(1, attempts)
-        assertFalse(manager.syncing.value)
-    }
-
-    @Test
-    fun `concurrent caller follows an internal failure with a fresh pass`() = runTest {
-        val firstStarted = CompletableDeferred<Unit>()
-        val finishFirst = CompletableDeferred<Unit>()
-        var attempts = 0
-        val manager = manager(
-            synchronizeOnce = {
-                attempts += 1
-                if (attempts == 1) {
-                    firstStarted.complete(Unit)
-                    finishFirst.await()
-                    error("broken local state")
-                }
-                RequestSyncResult.Success
-            },
-        )
-
-        val first = async { manager.synchronizeOnce() }
-        firstStarted.await()
-        val second = async { manager.synchronizeOnce() }
-        runCurrent()
-        finishFirst.complete(Unit)
-
-        assertEquals(
-            OneShotSynchronizationResult.Completed(
-                RequestSyncResult.InternalFailure("IllegalStateException"),
-            ),
-            first.await(),
-        )
-        assertEquals(
-            OneShotSynchronizationResult.Completed(RequestSyncResult.Success),
-            second.await(),
-        )
-        assertEquals(2, attempts)
     }
 
     @Test

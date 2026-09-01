@@ -4,13 +4,16 @@ package dev.agentknock.ui.secrets
 
 import androidx.activity.compose.BackHandler
 import androidx.compose.foundation.layout.Arrangement
+import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.Spacer
+import androidx.compose.foundation.layout.fillMaxHeight
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.width
+import androidx.compose.foundation.layout.widthIn
 import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.selection.toggleable
 import androidx.compose.foundation.text.KeyboardOptions
@@ -23,6 +26,7 @@ import androidx.compose.material3.DropdownMenu
 import androidx.compose.material3.DropdownMenuItem
 import androidx.compose.material3.Icon
 import androidx.compose.material3.IconButton
+import androidx.compose.material3.LinearProgressIndicator
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.OutlinedTextField
 import androidx.compose.material3.Scaffold
@@ -55,6 +59,7 @@ private val environmentVariableName = Regex("[A-Za-z_][A-Za-z0-9_]*")
 @Composable
 internal fun EnvironmentVariableEditorScreen(
     editor: VariableEditorState,
+    enabled: Boolean,
     onEditorChange: (VariableEditorState) -> Unit,
     onDismiss: () -> Unit,
     onDelete: (() -> Unit)?,
@@ -89,57 +94,72 @@ internal fun EnvironmentVariableEditorScreen(
             (currentValue == null && valueEdited)
     }
     fun requestDismiss() {
+        if (!enabled) return
         if (dirty) confirmDiscard = true else onDismiss()
     }
 
     BackHandler(onBack = ::requestDismiss)
     Scaffold(
         topBar = {
-            TopAppBar(
-                title = {
-                    Text(
-                        stringResource(
-                            if (variable == null) {
-                                R.string.new_environment_variable
-                            } else {
-                                R.string.edit_environment_variable
-                            },
-                        ),
-                    )
-                },
-                navigationIcon = {
-                    NavigationBackButton(::requestDismiss)
-                },
-                actions = {
-                    if (onDelete != null) {
-                        IconButton(onClick = { menuExpanded = true }) {
-                            Icon(Icons.Outlined.MoreVert, contentDescription = "More options")
-                        }
-                        DropdownMenu(
-                            expanded = menuExpanded,
-                            onDismissRequest = { menuExpanded = false },
-                        ) {
-                            DropdownMenuItem(
-                                text = {
-                                    Text(
-                                        stringResource(R.string.delete),
-                                        color = MaterialTheme.colorScheme.error,
-                                    )
+            Column {
+                TopAppBar(
+                    title = {
+                        Text(
+                            stringResource(
+                                if (variable == null) {
+                                    R.string.new_environment_variable
+                                } else {
+                                    R.string.edit_environment_variable
                                 },
-                                onClick = {
-                                    menuExpanded = false
-                                    onDelete()
-                                },
-                            )
+                            ),
+                        )
+                    },
+                    navigationIcon = {
+                        NavigationBackButton(
+                            onClick = ::requestDismiss,
+                            enabled = enabled,
+                        )
+                    },
+                    actions = {
+                        if (onDelete != null) {
+                            IconButton(
+                                onClick = { menuExpanded = true },
+                                enabled = enabled,
+                            ) {
+                                Icon(Icons.Outlined.MoreVert, contentDescription = "More options")
+                            }
+                            DropdownMenu(
+                                expanded = menuExpanded,
+                                onDismissRequest = { menuExpanded = false },
+                            ) {
+                                DropdownMenuItem(
+                                    text = {
+                                        Text(
+                                            stringResource(R.string.delete),
+                                            color = MaterialTheme.colorScheme.error,
+                                        )
+                                    },
+                                    enabled = enabled,
+                                    onClick = {
+                                        menuExpanded = false
+                                        onDelete()
+                                    },
+                                )
+                            }
                         }
-                    }
-                },
-            )
+                    },
+                )
+                if (!enabled) LinearProgressIndicator(Modifier.fillMaxWidth())
+            }
         },
         snackbarHost = { SnackbarHost(snackbar) },
     ) { padding ->
+        Box(Modifier.fillMaxSize().padding(padding)) {
             LazyColumn(
-                modifier = Modifier.fillMaxSize().padding(padding),
+                modifier = Modifier
+                    .fillMaxHeight()
+                    .widthIn(max = 720.dp)
+                    .align(Alignment.TopCenter),
                 contentPadding = androidx.compose.foundation.layout.PaddingValues(20.dp),
                 verticalArrangement = Arrangement.spacedBy(16.dp),
             ) {
@@ -151,6 +171,7 @@ internal fun EnvironmentVariableEditorScreen(
                             nameInvalid = false
                         },
                         label = { Text(stringResource(R.string.variable_name)) },
+                        enabled = enabled,
                         singleLine = true,
                         isError = nameInvalid,
                         supportingText = if (nameInvalid) {
@@ -182,16 +203,28 @@ internal fun EnvironmentVariableEditorScreen(
                             onEditorChange(editor.copy(value = it, valueEdited = true))
                         },
                         label = { Text(stringResource(R.string.variable_value)) },
+                        enabled = enabled,
                         visualTransformation = if (sensitive && !showValue) {
                             PasswordVisualTransformation()
                         } else {
                             VisualTransformation.None
                         },
+                        keyboardOptions = KeyboardOptions(
+                            autoCorrectEnabled = false,
+                            keyboardType = if (sensitive) {
+                                KeyboardType.Password
+                            } else {
+                                KeyboardType.Text
+                            },
+                        ),
                         minLines = 1,
                         maxLines = 6,
                         trailingIcon = if (sensitive) {
                             {
-                                IconButton(onClick = { showValue = !showValue }) {
+                                IconButton(
+                                    onClick = { showValue = !showValue },
+                                    enabled = enabled,
+                                ) {
                                     Icon(
                                         if (showValue) {
                                             Icons.Outlined.VisibilityOff
@@ -216,6 +249,7 @@ internal fun EnvironmentVariableEditorScreen(
                             .fillMaxWidth()
                             .toggleable(
                                 value = sensitive,
+                                enabled = enabled,
                                 role = Role.Switch,
                                 onValueChange = {
                                     onEditorChange(editor.copy(sensitive = it))
@@ -233,7 +267,11 @@ internal fun EnvironmentVariableEditorScreen(
                             )
                         }
                         Spacer(Modifier.width(12.dp))
-                        Switch(checked = sensitive, onCheckedChange = null)
+                        Switch(
+                            checked = sensitive,
+                            onCheckedChange = null,
+                            enabled = enabled,
+                        )
                     }
                 }
                 item {
@@ -241,6 +279,7 @@ internal fun EnvironmentVariableEditorScreen(
                         value = notes,
                         onValueChange = { onEditorChange(editor.copy(notes = it)) },
                         label = { Text(stringResource(R.string.notes_optional)) },
+                        enabled = enabled,
                         minLines = 2,
                         modifier = Modifier.fillMaxWidth(),
                     )
@@ -258,7 +297,7 @@ internal fun EnvironmentVariableEditorScreen(
                                 onSave(name, value, sensitive, notes, valueChanged)
                             }
                         },
-                        enabled = environmentVariableName.matches(name) && (
+                        enabled = enabled && environmentVariableName.matches(name) && (
                             variable == null ||
                                 name != variable.name ||
                                 sensitive != variable.sensitive ||
@@ -280,9 +319,11 @@ internal fun EnvironmentVariableEditorScreen(
                     }
                 }
             }
+        }
     }
     if (confirmDiscard) {
         DiscardChangesDialog(
+            enabled = enabled,
             onDismiss = { confirmDiscard = false },
             onDiscard = onDismiss,
         )

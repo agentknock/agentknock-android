@@ -23,4 +23,13 @@ class PairedRequestProtocolTest {
             protocol.errorResponse(PairedRequestErrorCode.INVALID_REQUEST),
         )
     }
+
+    @Test
+    fun `encodes a stable response too large error`() {
+        assertArrayEquals(
+            """{"error":"RESPONSE_TOO_LARGE","message":"The response was too large to deliver."}"""
+                .encodeToByteArray(),
+            protocol.errorResponse(PairedRequestErrorCode.RESPONSE_TOO_LARGE),
+        )
+    }
 }

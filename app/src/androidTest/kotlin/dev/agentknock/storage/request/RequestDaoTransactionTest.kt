@@ -122,6 +122,60 @@ class RequestDaoTransactionTest {
     }
 
     @Test
+    fun retainedRequestKindLookupDoesNotDependOnListVisibility() = runTest {
+        val inbox = RequestInbox(dao)
+        val expected = listOf(
+            RequestKind.PAIRING to InboxRequestKind.PAIRING,
+            RequestKind.SECRET_USE to InboxRequestKind.SECRET_USE,
+            RequestKind.GIT_SIGN to InboxRequestKind.GIT_SIGN,
+            RequestKind.SSH_AUTHENTICATE to InboxRequestKind.SSH_AUTHENTICATE,
+            RequestKind.SECRET_UPLOAD to InboxRequestKind.SECRET_UPLOAD,
+        )
+        expected.forEachIndexed { index, (storedKind, _) ->
+            dao.insertRequest(
+                rootRequest().copy(
+                    id = "retained-$index",
+                    kind = storedKind.storedName,
+                    listed = false,
+                    state = InboxRequestState.COMPLETED.storedName,
+                    completedAt = 10L,
+                    exchangeEndedAt = 10L,
+                    responseOutboxFinished = true,
+                ),
+            )
+        }
+
+        expected.forEachIndexed { index, (_, visibleKind) ->
+            assertEquals(visibleKind, inbox.findRequestKind("retained-$index"))
+        }
+        assertNull(inbox.findRequestKind("missing"))
+    }
+
+    @Test
+    fun settledHiddenPruningRemovesAParentAndChildChain() = runTest {
+        dao.insertRequest(
+            rootRequest().copy(
+                state = InboxRequestState.COMPLETED.storedName,
+                listed = false,
+                completedAt = 1L,
+                exchangeEndedAt = 1L,
+                responseOutboxFinished = true,
+            ),
+        )
+        dao.insertRequest(
+            finishRequest(FINISH_REQUEST_ID, ROOT_REQUEST_ID).copy(
+                exchangeEndedAt = 1L,
+                responseOutboxFinished = true,
+            ),
+        )
+
+        dao.deleteAllSettledHiddenRequests(endedBefore = 1L)
+
+        assertNull(dao.getRequestById(FINISH_REQUEST_ID))
+        assertNull(dao.getRequestById(ROOT_REQUEST_ID))
+    }
+
+    @Test
     fun pairingRejectionErasesThePendingBindingWithoutCreatingAClient() = runTest {
         dao.insertPairingRequest(rootRequest(), pendingAttempt(withPendingPsk = true))
         val request = checkNotNull(dao.getRequestById(ROOT_REQUEST_ID))
@@ -417,6 +471,21 @@ class RequestDaoTransactionTest {
 
         val stored = checkNotNull(dao.getRequestById(requestId))
         assertTrue(stored.responseOutboxFinished)
+    }
+
+    @Test
+    fun responseOutboxWithoutPayloadCannotBeFinished() = runTest {
+        val requestId = "response-not-created"
+        dao.insertRequest(
+            rootRequest().copy(
+                id = requestId,
+                responseJson = null,
+                responseOutboxFinished = false,
+            ),
+        )
+
+        assertEquals(0, dao.markResponseOutboxFinished(requestId))
+        assertFalse(checkNotNull(dao.getRequestById(requestId)).responseOutboxFinished)
     }
 
     @Test

@@ -45,20 +45,8 @@ internal class SubscriptionViewModel(
         viewModelScope.launch {
             operations.withLock {
                 _state.update { it.copy(refreshing = true) }
-                val result = try {
-                    awaitStorageReady()
-                    repository.status()
-                } catch (cancelled: CancellationException) {
-                    throw cancelled
-                } catch (_: Exception) {
-                    null
-                }
-                _state.update { current ->
-                    current.copy(
-                        access = result.toAccess(),
-                        refreshing = false,
-                    )
-                }
+                val result = operation { repository.status() }
+                _state.update { it.copy(access = result.toAccess(), refreshing = false) }
             }
         }
     }
@@ -67,14 +55,7 @@ internal class SubscriptionViewModel(
         viewModelScope.launch {
             operations.withLock {
                 _state.update { it.copy(redeeming = true, notice = null) }
-                val result = try {
-                    awaitStorageReady()
-                    repository.redeem(redemptionToken)
-                } catch (cancelled: CancellationException) {
-                    throw cancelled
-                } catch (_: Exception) {
-                    null
-                }
+                val result = operation { repository.redeem(redemptionToken) }
                 _state.update { current ->
                     when (result) {
                         is SubscriptionResult.Status -> current.copy(
@@ -112,18 +93,27 @@ internal class SubscriptionViewModel(
     }
 
     fun reportInvalidLink() {
-        viewModelScope.launch {
-            operations.withLock {
-                _state.update {
-                    it.copy(
-                        notice = SubscriptionNotice(
-                            message = "This subscription link is invalid or incomplete",
-                            successful = false,
-                        ),
-                    )
-                }
-            }
+        _state.update {
+            it.copy(
+                notice = SubscriptionNotice(
+                    message = "This subscription link is invalid or incomplete",
+                    successful = false,
+                ),
+            )
         }
+    }
+
+    fun dismissNotice() {
+        _state.update { it.copy(notice = null) }
+    }
+
+    private suspend fun <T> operation(block: suspend () -> T): T? = try {
+        awaitStorageReady()
+        block()
+    } catch (cancelled: CancellationException) {
+        throw cancelled
+    } catch (_: Exception) {
+        null
     }
 }
 
@@ -148,9 +138,11 @@ private fun SubscriptionResult?.updateFailureMessage(): String = when (this) {
     SubscriptionResult.NoDevice -> "Finish device setup before activating a subscription"
     SubscriptionResult.DeviceCredentialsUnavailable,
     SubscriptionResult.DeviceCredentialsCorrupted,
-    SubscriptionResult.UnsupportedEncryption -> "Device authentication is unavailable"
+    SubscriptionResult.UnsupportedEncryption,
+    -> "Device authentication is unavailable"
     is SubscriptionResult.Unavailable,
     SubscriptionResult.InvalidRelayResponse,
-    null -> "The subscription could not be updated"
+    null,
+    -> "The subscription could not be updated"
     is SubscriptionResult.Status -> error("A status is not a failure")
 }

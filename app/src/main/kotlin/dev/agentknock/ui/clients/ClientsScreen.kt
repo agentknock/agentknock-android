@@ -13,6 +13,7 @@ import androidx.compose.material3.SnackbarHost
 import androidx.compose.material3.SnackbarHostState
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
+import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.key
 import androidx.compose.runtime.remember
@@ -22,17 +23,15 @@ import androidx.compose.ui.Modifier
 import androidx.compose.ui.unit.dp
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import dev.agentknock.relay.RelayClientState
-import dev.agentknock.storage.device.DeviceManagementResult
-import dev.agentknock.storage.request.ClientChangeResult
 import dev.agentknock.storage.request.InboxRequestContent
 import dev.agentknock.storage.request.InboxRequestDetails
 import dev.agentknock.storage.secret.TemporaryAccessGrant
 import dev.agentknock.ui.components.AdaptiveListDetail
+import kotlinx.coroutines.flow.collectLatest
 import kotlinx.coroutines.launch
 
 @Composable
 internal fun ClientsScreen(
-    authorizeProtectedAction: (String, () -> Unit, (String) -> Unit) -> Unit,
     onOpenSettings: () -> Unit,
     onChangePairingAddress: () -> Unit,
     onTopLevelChanged: (Boolean) -> Unit,
@@ -49,94 +48,12 @@ internal fun ClientsScreen(
         scope.launch { snackbar.showSnackbar(message) }
     }
 
-    fun chooseSas(request: InboxRequestDetails, choice: Int?) {
-        val pairing = (request.content as? InboxRequestContent.Pairing)?.details ?: return
-        if (choice == null) {
-            scope.launch { report(viewModel.chooseSas(request.id, null).message()) }
-            return
-        }
-        scope.launch {
-            if (viewModel.isMatchingPendingSas(request.id, choice)) {
-                authorizeProtectedAction(
-                    "Accept ${pairing.clientName}",
-                    {
-                        scope.launch {
-                            report(viewModel.chooseSas(request.id, choice).message())
-                        }
-                    },
-                    ::report,
-                )
-            } else {
-                report(viewModel.chooseSas(request.id, choice).message())
-            }
-        }
+    LaunchedEffect(viewModel, snackbar) {
+        viewModel.messages.collectLatest { message -> snackbar.showSnackbar(message) }
     }
 
-    fun rejectPairing(requestId: String) {
-        scope.launch {
-            report(viewModel.rejectPairing(requestId).message())
-            viewModel.clearSelection(ClientSelection.Pairing(requestId))
-        }
-    }
-
-    fun renameClient(clientId: String, name: String) {
-        scope.launch {
-            val result = viewModel.rename(clientId, name.trim())
-            report(
-                if (result == ClientChangeResult.CHANGED) {
-                    "Client renamed"
-                } else {
-                    "Client is no longer available"
-                },
-            )
-        }
-    }
-
-    fun setClientState(clientId: String, state: RelayClientState) {
-        scope.launch {
-            val result = viewModel.setState(clientId, state)
-            if (result == ClientChangeResult.CHANGED && state == RelayClientState.REVOKED) {
-                viewModel.clearSelection(ClientSelection.Client(clientId))
-            }
-            report(
-                if (result == ClientChangeResult.CHANGED) {
-                    state.successMessage()
-                } else {
-                    "Client state could not be changed"
-                },
-            )
-        }
-    }
-
-    fun saveClientInstructions(clientId: String, instructions: String) {
-        scope.launch {
-            val result = viewModel.saveInstructions(clientId, instructions)
-            report(
-                if (result == ClientChangeResult.CHANGED) {
-                    "Instructions updated"
-                } else {
-                    "Instructions could not be updated"
-                },
-            )
-        }
-    }
-
-    fun endTemporaryAccess(clientId: String, grant: TemporaryAccessGrant) {
-        scope.launch {
-            val ended = viewModel.endTemporaryAccess(
-                grant.secretId,
-                clientId,
-                grant.operation,
-            )
-            report(
-                if (ended) {
-                    "Temporary access ended"
-                } else {
-                    "Temporary access had already ended"
-                },
-            )
-        }
-    }
+    fun chooseSas(request: InboxRequestDetails, choice: Int?) =
+        viewModel.chooseSas(request.id, choice)
 
     Scaffold(
         snackbarHost = { SnackbarHost(snackbar) },
@@ -157,11 +74,9 @@ internal fun ClientsScreen(
                         (pane.selection as? ClientSelection.Pairing)?.requestId,
                     identity = configuration?.active,
                     onOpen = viewModel::selectClient,
-                    onOpenPairing = viewModel::selectPairing,
+                    onOpenPairing = { requestId -> viewModel.selectPairing(requestId) },
                     onChangePairingAddress = onChangePairingAddress,
-                    onSetPairingEnabled = { enabled ->
-                        scope.launch { report(viewModel.setPairingEnabled(enabled).message(enabled)) }
-                    },
+                    onSetPairingEnabled = viewModel::setPairingEnabled,
                     onOpenSettings = onOpenSettings,
                     report = ::report,
                     modifier = listModifier,
@@ -172,11 +87,17 @@ internal fun ClientsScreen(
                 ClientSelectionPane(
                     pane = pane,
                     onChooseSas = ::chooseSas,
-                    onRejectPairing = ::rejectPairing,
-                    onRenameClient = ::renameClient,
-                    onSetClientState = ::setClientState,
-                    onSaveClientInstructions = ::saveClientInstructions,
-                    onEndTemporaryAccess = ::endTemporaryAccess,
+                    onRejectPairing = viewModel::rejectPairing,
+                    onRenameClient = viewModel::rename,
+                    onSetClientState = viewModel::setState,
+                    onSaveClientInstructions = viewModel::saveInstructions,
+                    onEndTemporaryAccess = { clientId, grant ->
+                        viewModel.endTemporaryAccess(
+                            grant.secretId,
+                            clientId,
+                            grant.operation,
+                        )
+                    },
                     onBack = viewModel::clearSelection,
                     showBack = showBack,
                     modifier = detailModifier,
@@ -242,15 +163,4 @@ private fun EmptyClientSelection(modifier: Modifier = Modifier) {
             color = MaterialTheme.colorScheme.onSurfaceVariant,
         )
     }
-}
-
-private fun DeviceManagementResult.message(enabled: Boolean): String = when (this) {
-    DeviceManagementResult.Changed -> if (enabled) "New pairings resumed" else "New pairings paused"
-    DeviceManagementResult.NoDevice -> "Device setup is incomplete"
-    DeviceManagementResult.CredentialsUnavailable -> "Device keys are unavailable"
-    DeviceManagementResult.CredentialsCorrupted -> "Device keys could not be verified"
-    DeviceManagementResult.UnsupportedEncryption -> "Device keys use unsupported encryption"
-    is DeviceManagementResult.Rejected -> message ?: "The relay rejected the change"
-    is DeviceManagementResult.Unavailable -> message ?: "The relay is unavailable"
-    DeviceManagementResult.InvalidResponse -> "The relay returned an invalid response"
 }

@@ -28,7 +28,6 @@ import dev.agentknock.storage.device.RelayDeviceCredentialsResult
 import dev.agentknock.storage.secret.ENVIRONMENT_SECRET_TYPE
 import dev.agentknock.storage.secret.RequestedSecretDescription
 import dev.agentknock.storage.secret.RequestedSecretsResult
-import dev.agentknock.storage.secret.SecretApprovalMode
 import dev.agentknock.storage.secret.SecretApprovalPolicy
 import dev.agentknock.storage.secret.SecretMetadata
 import dev.agentknock.storage.secret.SecretRepository
@@ -77,13 +76,6 @@ internal sealed interface InvocationDecisionResult {
     data object TemporaryAccessNotStarted : InvocationDecisionResult
 }
 
-private data class InvocationTemporaryGrant(
-    val policies: List<SecretApprovalPolicy>,
-    val expiresAt: Long,
-    val evaluation: ApprovalEvaluation,
-    val decisionSource: String,
-)
-
 /**
  * Owns Invocation intake and durable transitions.
  *
@@ -102,11 +94,11 @@ internal class InvocationRequests(
     private val currentTimeMillis: () -> Long = System::currentTimeMillis,
 ) {
     suspend fun processIncoming(
-        pairing: ClientEntity,
+        client: ClientEntity,
         relayRequestId: String,
         requestPayload: JsonElement,
         plaintext: ByteArray,
-        acceptedSecrets: AcceptedRequestPsks,
+        acceptedPsks: AcceptedRequestPsks,
         credentials: RelayDeviceCredentials,
         sealResponse: suspend (ByteArray) -> JsonElement?,
         launchAiReview: (
@@ -133,7 +125,7 @@ internal class InvocationRequests(
         val approvalPolicies = if (automaticDenial == null) {
             secrets.approvalPoliciesForNames(
                 protectedSecretNames,
-                pairing.clientId,
+                client.clientId,
                 TemporaryAccessOperation.INVOCATION,
             )
         } else {
@@ -159,9 +151,9 @@ internal class InvocationRequests(
         val initialRequest = InboxRequestEntity(
             id = relayRequestId,
             parentRequestId = null,
-            deviceIdentityId = pairing.deviceIdentityId,
-            clientId = pairing.clientId,
-            clientNameSnapshot = pairing.name,
+            deviceIdentityId = client.deviceIdentityId,
+            clientId = client.clientId,
+            clientNameSnapshot = client.name,
             clientSoftwareJson = encodeClientSoftware(contents.clientSoftware),
             kind = RequestKind.SECRET_USE.storedName,
             state = if (needsAiReview) {
@@ -180,7 +172,7 @@ internal class InvocationRequests(
         )
         val initialSecretUse = secretUseRequestEntity(
             requestId = relayRequestId,
-            pairing = pairing,
+            client = client,
             contents = contents,
             description = description,
             now = now,
@@ -194,9 +186,9 @@ internal class InvocationRequests(
             reviewResult: AiReview?,
             requestAlreadyInserted: Boolean,
         ): ProcessedRelayMessage? {
-            val currentClient = if (needsAiReview) dao.getClient(pairing.clientId) else pairing
+            val currentClient = if (needsAiReview) dao.getClient(client.clientId) else client
             val clientUnavailable = currentClient == null ||
-                currentClient.deviceIdentityId != pairing.deviceIdentityId ||
+                currentClient.deviceIdentityId != client.deviceIdentityId ||
                 currentClient.relayClientState == RelayClientState.REVOKED.wireName ||
                 currentClient.desiredRelayClientState == RelayClientState.REVOKED.wireName
             val currentResolution = if (needsAiReview) {
@@ -221,7 +213,7 @@ internal class InvocationRequests(
             val currentApprovalPolicies = if (needsAiReview) {
                 secrets.approvalPoliciesForNames(
                     currentProtectedSecretNames,
-                    pairing.clientId,
+                    client.clientId,
                     TemporaryAccessOperation.INVOCATION,
                 )
             } else {
@@ -247,8 +239,8 @@ internal class InvocationRequests(
                     !checkNotNull(initialApprovalEvaluation)
                         .hasSameSecretPolicies(currentApprovalEvaluation) ||
                     currentCredentials?.instructions != credentials.instructions ||
-                    currentClient.name != pairing.name ||
-                    currentClient.instructions != pairing.instructions
+                    currentClient.name != client.name ||
+                    currentClient.instructions != client.instructions
             )
             val aiReview = if (aiInputsChanged) {
                 AiReview(
@@ -293,13 +285,8 @@ internal class InvocationRequests(
                     InvocationDenialReason.POLICY_DENIED to
                         "AI review denied access to a requested secret."
                 }
-            val aiApproved = aiReview?.decision == AiReviewDecision.APPROVE
             val allProtectedUsesApproved = !aiInputsChanged && approvalEvaluation
                 ?.isFullyApproved(aiReview?.decision) == true
-            val temporaryAccessUsed = approvalEvaluation?.secrets
-                ?.any { it.temporaryAccessExpiresAt != null } == true
-            val aiApprovalUsed = approvalEvaluation?.secrets
-                ?.any { it.action == ApprovalAction.ASK_AI } == true && aiApproved
             val clientDenial = if (clientUnavailable) {
                 InvocationDenialReason.OTHER to
                     "The paired client is no longer available."
@@ -330,12 +317,24 @@ internal class InvocationRequests(
             } else {
                 null
             }
-            val automaticDecision = when {
-                denial != null -> ApprovalDecision.DENIED
-                allProtectedUsesApproved -> ApprovalDecision.APPROVED
-                !currentDescription.containsSensitiveMaterial -> ApprovalDecision.APPROVED
-                else -> null
-            }
+            val automaticApproval = planAutomaticApproval(
+                outcome = when {
+                    denial != null -> AutomaticApprovalOutcome.DENIED
+                    allProtectedUsesApproved || !currentDescription.containsSensitiveMaterial ->
+                        AutomaticApprovalOutcome.APPROVED
+                    else -> AutomaticApprovalOutcome.ACTION_REQUIRED
+                },
+                evaluation = approvalEvaluation,
+                aiDecision = aiReview?.decision,
+                nonSensitive = denial == null &&
+                    !currentDescription.containsSensitiveMaterial,
+                denialSource = when {
+                    aiDenial != null -> AutomaticApprovalDenialSource.AI
+                    policyDenial != null -> AutomaticApprovalDenialSource.POLICY
+                    else -> null
+                },
+            )
+            val automaticDecision = automaticApproval.decision
             val decidedAt = currentTimeMillis()
             val requestToUpdate = if (requestAlreadyInserted) {
                 dao.getRequestById(relayRequestId) ?: return null
@@ -349,7 +348,7 @@ internal class InvocationRequests(
             val currentSecretUse = if (aiInputsChanged) {
                 secretUseRequestEntity(
                     requestId = relayRequestId,
-                    pairing = pairing,
+                    client = client,
                     contents = contents,
                     description = currentDescription,
                     now = now,
@@ -365,23 +364,7 @@ internal class InvocationRequests(
             } else {
                 currentSecretUse.copy(
                     decision = automaticDecision.storedName,
-                    decisionSource = if (aiDenial != null) {
-                        DECISION_SOURCE_AI
-                    } else if (policyDenial != null) {
-                        DECISION_SOURCE_POLICY
-                    } else if (temporaryAccessUsed && aiApprovalUsed) {
-                        DECISION_SOURCE_MIXED
-                    } else if (temporaryAccessUsed) {
-                        DECISION_SOURCE_TEMPORARY_ACCESS
-                    } else if (aiApprovalUsed) {
-                        DECISION_SOURCE_AI
-                    } else if (allProtectedUsesApproved) {
-                        DECISION_SOURCE_POLICY
-                    } else if (!currentDescription.containsSensitiveMaterial) {
-                        DECISION_SOURCE_NON_SENSITIVE
-                    } else {
-                        null
-                    },
+                    decisionSource = automaticApproval.decisionSource,
                     approvalEvaluationJson = approvalEvaluation?.let { json.encodeToString(it) },
                     // This snapshot contains only metadata, public SSH material, and values that the
                     // user explicitly marked non-sensitive. Keep it for denied requests as well so
@@ -399,8 +382,8 @@ internal class InvocationRequests(
                     decisionSource = AuditDecisionSource.AI_REVIEW,
                     subject = contents.secrets.joinToString(),
                     detail = reviewed.auditFailureDetail(),
-                    clientId = pairing.clientId,
-                    clientName = pairing.name,
+                    clientId = client.clientId,
+                    clientName = client.name,
                     relayRequestId = relayRequestId,
                 )
             }
@@ -413,27 +396,24 @@ internal class InvocationRequests(
                         aiDenial != null || policyDenial != null -> AuditOutcome.DENIED
                         else -> AuditOutcome.FAILED
                     },
-                    decisionSource = when {
-                        decision == ApprovalDecision.APPROVED &&
-                            !currentDescription.containsSensitiveMaterial ->
-                            AuditDecisionSource.NON_SENSITIVE
-                        denial?.first == InvocationDenialReason.INVALID_REQUEST ->
-                            AuditDecisionSource.VALIDATION
-                        aiApprovalUsed && temporaryAccessUsed -> AuditDecisionSource.MIXED
-                        aiApproved || aiDenial != null -> AuditDecisionSource.AI_REVIEW
-                        temporaryAccessUsed -> AuditDecisionSource.TEMPORARY_ACCESS
-                        policyDenial != null || allProtectedUsesApproved ->
-                            AuditDecisionSource.APPROVAL_SETTINGS
-                        else -> null
+                    decisionSource = if (
+                        denial?.first == InvocationDenialReason.INVALID_REQUEST
+                    ) {
+                        AuditDecisionSource.VALIDATION
+                    } else {
+                        automaticApproval.decisionSource?.toAuditDecisionSource()
                     },
                     subject = contents.secrets.joinToString(),
-                    detail = if (aiReview != null && (aiApprovalUsed || aiDenial != null)) {
+                    detail = if (
+                        aiReview != null &&
+                        (automaticApproval.aiApprovalUsed || aiDenial != null)
+                    ) {
                         aiReview.auditFailureDetail()
                     } else {
                         denial?.second
                     },
-                    clientId = pairing.clientId,
-                    clientName = pairing.name,
+                    clientId = client.clientId,
+                    clientName = client.name,
                     relayRequestId = relayRequestId,
                 )
             }
@@ -449,21 +429,21 @@ internal class InvocationRequests(
                 receive(
                     request = finalRequest,
                     secretUseRequest = finalSecretUse,
-                    client = pairing.copy(
+                    client = client.copy(
                         clientSoftwareJson = encodeClientSoftware(contents.clientSoftware),
                         lastSeenAt = now,
                     ),
-                    acceptedPsks = acceptedSecrets,
+                    acceptedPsks = acceptedPsks,
                     authorization = authorization.takeIf { automaticDecision != null },
                     automaticDecisionAudit = automaticDecisionAudit,
                 )
             }
             when (persistence) {
                 ConditionalRequestUpdate.APPLIED -> Unit
-                ConditionalRequestUpdate.ACTION_REQUIRED -> return ProcessedRelayMessage()
+                ConditionalRequestUpdate.ACTION_REQUIRED -> return ProcessedRelayMessage
                 ConditionalRequestUpdate.UNAVAILABLE -> return null
             }
-            return ProcessedRelayMessage(response)
+            return ProcessedRelayMessage
         }
 
         if (!needsAiReview) return finishReview(null, requestAlreadyInserted = false)
@@ -472,11 +452,11 @@ internal class InvocationRequests(
             val received = receive(
                 request = initialRequest,
                 secretUseRequest = initialSecretUse,
-                client = pairing.copy(
+                client = client.copy(
                     clientSoftwareJson = encodeClientSoftware(contents.clientSoftware),
                     lastSeenAt = now,
                 ),
-                acceptedPsks = acceptedSecrets,
+                acceptedPsks = acceptedPsks,
                 authorization = null,
                 automaticDecisionAudit = null,
             )
@@ -487,7 +467,7 @@ internal class InvocationRequests(
                     initialRequest.requestJson,
                     {
                         requestAiReview(
-                            pairing = pairing,
+                            client = client,
                             contents = contents,
                             description = description,
                             values = checkNotNull(initialAvailableSecrets),
@@ -505,7 +485,7 @@ internal class InvocationRequests(
                 )
             }
         }
-        return ProcessedRelayMessage()
+        return ProcessedRelayMessage
     }
 
 
@@ -635,10 +615,16 @@ internal class InvocationRequests(
             }
         }
         val temporaryGrant = if (allowTemporaryAccess) {
-            prepareTemporaryGrant(
-                request = request,
-                description = latestDescription,
+            storedEvaluation ?: return InvocationDecisionResult.TemporaryAccessUnavailable
+            val latestPolicies = secrets.approvalPoliciesForNames(
+                protectedNames,
+                request.clientId,
+                TemporaryAccessOperation.INVOCATION,
+            )
+            planTemporaryAccess(
+                policies = latestPolicies,
                 storedEvaluation = storedEvaluation,
+                now = currentTimeMillis(),
             ) ?: return InvocationDecisionResult.TemporaryAccessUnavailable
         } else {
             null
@@ -852,9 +838,10 @@ internal class InvocationRequests(
                 return@execute true
             }
             if (opened == CompletionOpenResult.RetryLater) return@execute false
+            val priorError = currentRequest.error
             val softwareMatches = completionResult?.clientSoftware ==
                 currentRequest.clientSoftwareJson?.let(::decodeStoredClientSoftware)
-            val valid = softwareMatches && when (completionResult) {
+            val valid = priorError == null && softwareMatches && when (completionResult) {
                 is InvocationCompletion.Approved -> {
                     secretUseRequest.decision == ApprovalDecision.APPROVED.storedName
                 }
@@ -873,8 +860,13 @@ internal class InvocationRequests(
                 is InvocationCompletion.Aborted -> true
                 null -> false
             }
-            val error = if (valid) null else SECRET_USE_COMPLETION_VERIFICATION_ERROR
+            val error = priorError ?: if (valid) {
+                null
+            } else {
+                SECRET_USE_COMPLETION_VERIFICATION_ERROR
+            }
             val auditDetail = when {
+                priorError != null -> priorError
                 !valid -> SECRET_USE_COMPLETION_VERIFICATION_ERROR
                 completionResult is InvocationCompletion.Denied ->
                     secretUseRequest.completionMessage ?: SECRET_USE_DENIAL_MESSAGE
@@ -1076,79 +1068,13 @@ internal class InvocationRequests(
         }
     }
 
-    private suspend fun prepareTemporaryGrant(
-        request: InboxRequestEntity,
-        description: RequestedSecretDescription,
-        storedEvaluation: ApprovalEvaluation?,
-    ): InvocationTemporaryGrant? {
-        storedEvaluation ?: return null
-        val evaluationsById = storedEvaluation.secrets.associateBy { it.secretId }
-        val aiCanEscalateToTemporaryAccess =
-            storedEvaluation.aiReview?.decision == AiReviewDecision.ASK_USER ||
-                storedEvaluation.aiReview?.failure != null ||
-                storedEvaluation.aiReview == null
-        val protectedNames = description.reviewMetadata
-            .filter { secret ->
-                secret.type == ENVIRONMENT_SECRET_TYPE &&
-                    secret.environmentVariables.any { it.sensitive }
-            }
-            .map { it.name }
-        val currentPolicies = secrets.approvalPoliciesForNames(
-            protectedNames,
-            request.clientId,
-            TemporaryAccessOperation.INVOCATION,
-        )
-        val currentEvaluation = ApprovalPolicyEvaluator.evaluate(
-            currentPolicies.map { it.toRequestedSecretApproval() },
-        )
-        if (!storedEvaluation.hasSameSecretPolicies(currentEvaluation)) return null
-        val grantablePolicies = currentPolicies.filter { policy ->
-            val evaluation = evaluationsById[policy.secretId]
-            evaluation?.temporaryAccessExpiresAt == null && when (policy.mode) {
-                SecretApprovalMode.TEMPORARY -> evaluation?.action == ApprovalAction.ASK_ME
-                SecretApprovalMode.ASK_AI ->
-                    evaluation?.action == ApprovalAction.ASK_AI &&
-                        aiCanEscalateToTemporaryAccess
-                else -> false
-            }
-        }
-        if (grantablePolicies.isEmpty()) return null
-        val expiresAt = currentTimeMillis() + TEMPORARY_ACCESS_DURATION_MILLIS
-        val grantedIds = grantablePolicies.map(SecretApprovalPolicy::secretId).toSet()
-        val alsoApprovedByAi = storedEvaluation.aiReview?.decision == AiReviewDecision.APPROVE &&
-            storedEvaluation.secrets.any {
-                it.action == ApprovalAction.ASK_AI && it.secretId !in grantedIds
-            }
-        val alsoApprovedOnce = storedEvaluation.secrets.any {
-            it.secretId !in grantedIds && it.action == ApprovalAction.ASK_ME
-        }
-        return InvocationTemporaryGrant(
-            policies = grantablePolicies,
-            expiresAt = expiresAt,
-            evaluation = storedEvaluation.copy(
-                secrets = storedEvaluation.secrets.map { evaluation ->
-                    if (grantablePolicies.any { it.secretId == evaluation.secretId }) {
-                        evaluation.copy(temporaryAccessExpiresAt = expiresAt)
-                    } else {
-                        evaluation
-                    }
-                },
-            ),
-            decisionSource = if (alsoApprovedByAi || alsoApprovedOnce) {
-                DECISION_SOURCE_MIXED
-            } else {
-                DECISION_SOURCE_TEMPORARY_ACCESS
-            },
-        )
-    }
-
     private suspend fun persistTemporaryDecision(
         request: InboxRequestEntity,
         secretUseRequest: SecretUseRequestEntity,
         response: JsonElement,
         providedSecretsJson: String,
         authorization: AuthorizationCommitment,
-        grant: InvocationTemporaryGrant,
+        grant: TemporaryAccessPlan,
     ): InvocationDecisionResult {
         val evaluationJson = json.encodeToString(grant.evaluation)
         return writeTransaction.execute {
@@ -1250,7 +1176,7 @@ internal class InvocationRequests(
     }
 
     private suspend fun requestAiReview(
-        pairing: ClientEntity,
+        client: ClientEntity,
         contents: InvocationRequestMessage,
         description: RequestedSecretDescription,
         values: Map<String, SecretValues>,
@@ -1259,7 +1185,7 @@ internal class InvocationRequests(
         credentials: RelayDeviceCredentials,
     ): AiReview {
         val request = approvalReviewRequest(
-            client = pairing,
+            client = client,
             contents = contents,
             description = description,
             values = values,
@@ -1272,17 +1198,17 @@ internal class InvocationRequests(
 
     private fun secretUseRequestEntity(
         requestId: String,
-        pairing: ClientEntity,
+        client: ClientEntity,
         contents: InvocationRequestMessage,
         description: RequestedSecretDescription,
         now: Long,
     ) = SecretUseRequestEntity(
         requestId = requestId,
-        hostname = pairing.hostname,
-        platform = pairing.platform,
-        architecture = pairing.architecture,
-        machineId = pairing.machineId,
-        osVersion = pairing.osVersion,
+        hostname = client.hostname,
+        platform = client.platform,
+        architecture = client.architecture,
+        machineId = client.machineId,
+        osVersion = client.osVersion,
         invocationTokenHash = invocationTokenHash(contents.invocationToken),
         containsSensitiveMaterial = description.containsSensitiveMaterial,
         secretsJson = encodeStringList(contents.secrets),

@@ -9,6 +9,12 @@ internal sealed interface CompletionOpenResult {
     data object RetryLater : CompletionOpenResult
 }
 
+internal inline fun <T> decodeWireCompletionOrNull(decode: () -> T): T? = try {
+    decode()
+} catch (_: SerializationException) {
+    null
+}
+
 internal fun Exception.isIrrecoverableCompletionFailure(): Boolean =
     this is SerializationException ||
         this is IllegalArgumentException ||

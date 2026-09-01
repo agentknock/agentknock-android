@@ -43,7 +43,6 @@ class PairingProtocolTest {
             """{"version":"agentknock-v1","commitment":"not base64"}""",
         )
 
-        assertTrue(protocol.isInitialRequest(request))
         assertTrue(protocol.validateInitialRequest(request))
         assertFalse(protocol.validateInitialRequest(wrongVersion))
         assertFalse(protocol.validateInitialRequest(wrongLength))

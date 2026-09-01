@@ -13,6 +13,7 @@ import androidx.compose.material3.SnackbarHost
 import androidx.compose.material3.SnackbarHostState
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
+import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.key
 import androidx.compose.runtime.remember
@@ -21,14 +22,11 @@ import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.unit.dp
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
-import dev.agentknock.storage.request.ApprovalRequestState
-import dev.agentknock.storage.request.InboxRequestKind
 import dev.agentknock.storage.request.InboxRequestContent
 import dev.agentknock.storage.request.InboxRequestDetails
-import dev.agentknock.storage.request.InboxRequestStatus
-import dev.agentknock.storage.request.InboxRequestSummary
 import dev.agentknock.storage.request.RequestSyncResult
 import dev.agentknock.ui.components.AdaptiveListDetail
+import kotlinx.coroutines.flow.collectLatest
 import kotlinx.coroutines.launch
 
 @Composable
@@ -49,87 +47,8 @@ internal fun RequestsScreen(
         scope.launch { snackbar.showSnackbar(message) }
     }
 
-    fun approve(request: InboxRequestSummary) {
-        scope.launch {
-            val approval = request.status as? InboxRequestStatus.Approval
-            if (approval?.state != ApprovalRequestState.APPROVAL_PENDING) return@launch
-            when (request.kind) {
-                InboxRequestKind.SECRET_USE -> {
-                    report(viewModel.approveSecretUseRequest(request.id).message())
-                }
-                InboxRequestKind.GIT_SIGN -> {
-                    report(viewModel.approveGitSignRequest(request.id).message())
-                }
-                InboxRequestKind.SSH_AUTHENTICATE -> {
-                    report(viewModel.approveSshAuthenticationRequest(request.id).message())
-                }
-                else -> Unit
-            }
-        }
-    }
-
-    fun reject(request: InboxRequestSummary) {
-        scope.launch {
-            val approval = request.status as? InboxRequestStatus.Approval
-            if (approval?.state != ApprovalRequestState.APPROVAL_PENDING) return@launch
-            when (request.kind) {
-                InboxRequestKind.SECRET_USE -> {
-                    report(viewModel.denySecretUseRequest(request.id).message())
-                }
-                InboxRequestKind.GIT_SIGN -> {
-                    report(viewModel.denyGitSignRequest(request.id).message())
-                }
-                InboxRequestKind.SSH_AUTHENTICATE -> {
-                    report(viewModel.denySshAuthenticationRequest(request.id).message())
-                }
-                else -> Unit
-            }
-        }
-    }
-
-    fun approveRequest(request: InboxRequestDetails) {
-        scope.launch {
-            val result = when (request.content) {
-                is InboxRequestContent.SecretUse ->
-                    viewModel.approveSecretUseRequest(request.id).message()
-                is InboxRequestContent.GitSign ->
-                    viewModel.approveGitSignRequest(request.id).message()
-                is InboxRequestContent.SshAuthentication ->
-                    viewModel.approveSshAuthenticationRequest(request.id).message()
-                else -> return@launch
-            }
-            report(result)
-        }
-    }
-
-    fun denyRequest(request: InboxRequestDetails) {
-        scope.launch {
-            val result = when (request.content) {
-                is InboxRequestContent.SecretUse ->
-                    viewModel.denySecretUseRequest(request.id).message()
-                is InboxRequestContent.GitSign ->
-                    viewModel.denyGitSignRequest(request.id).message()
-                is InboxRequestContent.SshAuthentication ->
-                    viewModel.denySshAuthenticationRequest(request.id).message()
-                else -> return@launch
-            }
-            report(result)
-        }
-    }
-
-    fun allowRequestTemporarily(request: InboxRequestDetails) {
-        scope.launch {
-            val result = when (request.content) {
-                is InboxRequestContent.SecretUse ->
-                    viewModel.allowSecretUseTemporarily(request.id).message()
-                is InboxRequestContent.GitSign ->
-                    viewModel.allowGitSignTemporarily(request.id).message()
-                is InboxRequestContent.SshAuthentication ->
-                    viewModel.allowSshAuthenticationTemporarily(request.id).message()
-                else -> return@launch
-            }
-            report(result)
-        }
+    LaunchedEffect(viewModel, snackbar) {
+        viewModel.messages.collectLatest { message -> snackbar.showSnackbar(message) }
     }
 
     Scaffold(
@@ -153,8 +72,7 @@ internal fun RequestsScreen(
                     onOpenSettings = onOpenSettings,
                     notificationsEnabled = notificationsEnabled,
                     onOpen = viewModel::selectRequest,
-                    onApprove = ::approve,
-                    onReject = ::reject,
+                    onDecision = viewModel::decideRequest,
                     modifier = listModifier,
                 )
             },
@@ -162,9 +80,7 @@ internal fun RequestsScreen(
             detail = { showBack, detailModifier ->
                 RequestSelectionDetail(
                     selection = selection,
-                    onApprove = ::approveRequest,
-                    onDeny = ::denyRequest,
-                    onAllowTemporarily = ::allowRequestTemporarily,
+                    onDecision = viewModel::decideRequest,
                     onBack = { viewModel.selectRequest(null) },
                     showBack = showBack,
                     modifier = detailModifier,
@@ -177,9 +93,7 @@ internal fun RequestsScreen(
 @Composable
 private fun RequestSelectionDetail(
     selection: RequestPaneState,
-    onApprove: (InboxRequestDetails) -> Unit,
-    onDeny: (InboxRequestDetails) -> Unit,
-    onAllowTemporarily: (InboxRequestDetails) -> Unit,
+    onDecision: (InboxRequestDetails, RequestDecisionAction) -> Unit,
     onBack: () -> Unit,
     showBack: Boolean,
     modifier: Modifier,
@@ -192,9 +106,7 @@ private fun RequestSelectionDetail(
         is RequestPaneState.Ready -> key(selection.requestId) {
             RequestDetail(
                 request = selection.request,
-                onApprove = onApprove,
-                onDeny = onDeny,
-                onAllowTemporarily = onAllowTemporarily,
+                onDecision = onDecision,
                 onBack = onBack,
                 showBack = showBack,
                 modifier = modifier,
@@ -206,9 +118,7 @@ private fun RequestSelectionDetail(
 @Composable
 private fun RequestDetail(
     request: InboxRequestDetails,
-    onApprove: (InboxRequestDetails) -> Unit,
-    onDeny: (InboxRequestDetails) -> Unit,
-    onAllowTemporarily: (InboxRequestDetails) -> Unit,
+    onDecision: (InboxRequestDetails, RequestDecisionAction) -> Unit,
     onBack: () -> Unit,
     showBack: Boolean,
     modifier: Modifier,
@@ -218,27 +128,33 @@ private fun RequestDetail(
             request = request,
             onBack = onBack,
             showBack = showBack,
-            onApprove = { onApprove(request) },
-            onDeny = { onDeny(request) },
-            onAllowTemporarily = { onAllowTemporarily(request) },
+            onApprove = { onDecision(request, RequestDecisionAction.APPROVE) },
+            onDeny = { onDecision(request, RequestDecisionAction.DENY) },
+            onAllowTemporarily = {
+                onDecision(request, RequestDecisionAction.ALLOW_TEMPORARILY)
+            },
             modifier = modifier,
         )
         is InboxRequestContent.GitSign -> GitSignRequestDetail(
             request = request,
             onBack = onBack,
             showBack = showBack,
-            onApprove = { onApprove(request) },
-            onDeny = { onDeny(request) },
-            onAllowTemporarily = { onAllowTemporarily(request) },
+            onApprove = { onDecision(request, RequestDecisionAction.APPROVE) },
+            onDeny = { onDecision(request, RequestDecisionAction.DENY) },
+            onAllowTemporarily = {
+                onDecision(request, RequestDecisionAction.ALLOW_TEMPORARILY)
+            },
             modifier = modifier,
         )
         is InboxRequestContent.SshAuthentication -> SshAuthenticationRequestDetail(
             request = request,
             onBack = onBack,
             showBack = showBack,
-            onApprove = { onApprove(request) },
-            onDeny = { onDeny(request) },
-            onAllowTemporarily = { onAllowTemporarily(request) },
+            onApprove = { onDecision(request, RequestDecisionAction.APPROVE) },
+            onDeny = { onDecision(request, RequestDecisionAction.DENY) },
+            onAllowTemporarily = {
+                onDecision(request, RequestDecisionAction.ALLOW_TEMPORARILY)
+            },
             modifier = modifier,
         )
         else -> MissingRequestDetail(onBack, showBack, modifier)

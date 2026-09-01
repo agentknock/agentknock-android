@@ -974,10 +974,23 @@ internal interface RequestDao {
     @Query(
         """
         UPDATE inbox_requests SET response_outbox_finished = 1
-        WHERE id = :requestId AND response_outbox_finished = 0
+        WHERE id = :requestId
+          AND response_json IS NOT NULL
+          AND response_outbox_finished = 0
         """,
     )
     suspend fun markResponseOutboxFinished(requestId: String): Int
+
+    @Query(
+        """
+        UPDATE inbox_requests SET response_outbox_finished = 0
+        WHERE id = :requestId
+          AND response_json IS NOT NULL
+          AND response_outbox_finished = 1
+          AND exchange_ended_at IS NULL
+        """,
+    )
+    suspend fun reopenResponseOutbox(requestId: String): Int
 
     @Query(
         """
@@ -1021,6 +1034,13 @@ internal interface RequestDao {
         """,
     )
     suspend fun deleteSettledHiddenRequests(endedBefore: Long): Int
+
+    @Transaction
+    suspend fun deleteAllSettledHiddenRequests(endedBefore: Long) {
+        while (deleteSettledHiddenRequests(endedBefore) > 0) {
+            // Child exchanges are deleted before the parent invocation that references them.
+        }
+    }
 
     @Query(
         """

@@ -5,9 +5,27 @@ import dev.agentknock.relay.RelayPushRegistrationResult
 import dev.agentknock.relay.RelayPushRegistrationState
 import dev.agentknock.storage.device.RelayDeviceAuthorizationSource
 import org.junit.Assert.assertEquals
+import org.junit.Assert.assertFalse
+import org.junit.Assert.assertTrue
 import org.junit.Test
 
 class PushRegistrationRepositoryTest {
+    @Test
+    fun `transient relay status classification is shared by push registration`() {
+        listOf(408, 425, 429, 500, 503, 599).forEach { status ->
+            assertTrue(
+                PushRegistrationResult.RelayRejected(status, null, null)
+                    .needsAutomaticRetry(),
+            )
+        }
+        listOf(400, 401, 403, 404, 409, 422, 600).forEach { status ->
+            assertFalse(
+                PushRegistrationResult.RelayRejected(status, null, null)
+                    .needsAutomaticRetry(),
+            )
+        }
+    }
+
     @Test
     fun `relay state is owned here and missing registration requests a refresh`() {
         var refreshes = 0

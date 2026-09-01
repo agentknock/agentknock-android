@@ -101,13 +101,13 @@ internal fun SubscriptionAndBillingScreen(
                 enabled = !state.refreshing && !state.redeeming,
                 modifier = Modifier.fillMaxWidth(),
             ) {
-                if (state.refreshing) {
+                if (state.refreshing || state.redeeming) {
                     CircularProgressIndicator(Modifier.size(20.dp), strokeWidth = 2.dp)
                 } else {
                     Icon(Icons.Outlined.Refresh, contentDescription = null)
                 }
                 Spacer(Modifier.size(8.dp))
-                Text("Refresh subscription status")
+                Text(if (state.redeeming) "Activating…" else "Refresh subscription status")
             }
         }
     }

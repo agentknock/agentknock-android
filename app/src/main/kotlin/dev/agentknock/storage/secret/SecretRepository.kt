@@ -190,14 +190,12 @@ internal class SecretRepository(
         val byName = secrets.associateBy(SecretEntity::name)
         return requestedNames.mapNotNull { name ->
             byName[name]?.let { secret ->
-                val defaultMode = secret.approvalMode.toSecretApprovalMode()
                 val override = overrides[secret.id]
                 SecretApprovalPolicy(
                     secretId = secret.id,
                     secretName = secret.name,
-                    mode = override?.approvalMode?.toSecretApprovalMode() ?: defaultMode,
-                    defaultMode = defaultMode,
-                    overridden = override != null,
+                    mode = override?.approvalMode?.toSecretApprovalMode()
+                        ?: secret.approvalMode.toSecretApprovalMode(),
                     instructions = secret.instructions,
                     revision = secret.revision,
                     temporaryAccessExpiresAt = grants[secret.id]?.expiresAt,
@@ -249,21 +247,26 @@ internal class SecretRepository(
         clientId: String,
         mode: SecretApprovalMode?,
     ): SaveSecretResult {
-        val now = currentTimeMillis()
         return writeTransaction.execute {
             val secret = dao.getSecret(secretId) ?: return@execute SaveSecretResult.NOT_FOUND
-            if (mode == null) {
-                dao.deleteClientApprovalOverrideAndTemporaryAccess(secretId, clientId, now)
-            } else {
-                dao.upsertClientApprovalOverrideAndDeleteTemporaryAccess(
-                    SecretClientApprovalOverrideEntity(
-                        secretId = secretId,
-                        clientId = clientId,
-                        approvalMode = mode.storedName,
-                    ),
-                    updatedAt = now,
-                )
+            val currentOverride = dao.getClientApprovalOverrides(
+                clientId = clientId,
+                secretIds = listOf(secretId),
+            ).singleOrNull()
+            if (currentOverride?.approvalMode == mode?.storedName) {
+                return@execute SaveSecretResult.SAVED
             }
+            val now = currentTimeMillis()
+            val defaultMode = secret.approvalMode.toSecretApprovalMode()
+            dao.replaceClientApprovalOverride(
+                secretId = secretId,
+                clientId = clientId,
+                approvalMode = mode?.storedName,
+                effectiveModeChanged =
+                    (currentOverride?.approvalMode?.toSecretApprovalMode() ?: defaultMode) !=
+                    (mode ?: defaultMode),
+                updatedAt = now,
+            )
             audit.record(
                 AuditRecord(
                     type = AuditEventType.CLIENT_APPROVAL_OVERRIDE_CHANGED,

@@ -5,6 +5,7 @@ import android.content.Intent
 import android.content.pm.PackageManager
 import android.os.Build
 import android.os.Bundle
+import android.view.WindowManager
 import androidx.activity.result.contract.ActivityResultContracts
 import androidx.activity.compose.setContent
 import androidx.activity.enableEdgeToEdge
@@ -21,49 +22,35 @@ import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.asStateFlow
 import kotlinx.coroutines.launch
 
-internal data class RequestNavigation(val requestId: String?)
+internal sealed interface ExternalNavigation {
+    data class Request(val requestId: String?) : ExternalNavigation
 
-internal sealed interface SubscriptionNavigation {
-    data class Redemption(val token: String) : SubscriptionNavigation
+    data class SubscriptionRedemption(val token: String) : ExternalNavigation
 
-    data object InvalidLink : SubscriptionNavigation
+    data object InvalidSubscriptionLink : ExternalNavigation
 }
 
 internal class MainActivityNavigationState {
-    private val _request = MutableStateFlow<RequestNavigation?>(null)
-    private val _subscription = MutableStateFlow<SubscriptionNavigation?>(null)
+    private val _target = MutableStateFlow<ExternalNavigation?>(null)
 
-    val request: StateFlow<RequestNavigation?> = _request.asStateFlow()
-    val subscription: StateFlow<SubscriptionNavigation?> = _subscription.asStateFlow()
+    val target: StateFlow<ExternalNavigation?> = _target.asStateFlow()
 
-    fun openRequest(requestId: String?) {
-        _request.value = RequestNavigation(requestId)
+    fun open(target: ExternalNavigation) {
+        _target.value = target
     }
 
-    fun openSubscription(target: SubscriptionNavigation) {
-        _subscription.value = target
-    }
-
-    fun consumeRequest(target: RequestNavigation) {
-        _request.compareAndSet(target, null)
-    }
-
-    fun consumeSubscription(target: SubscriptionNavigation) {
-        _subscription.compareAndSet(target, null)
-    }
+    fun consume(target: ExternalNavigation): Boolean = _target.compareAndSet(target, null)
 
     fun save(): Bundle = Bundle().apply {
-        _request.value?.let { target ->
-            putBoolean(REQUEST_PENDING_KEY, true)
-            target.requestId?.let { putString(REQUEST_ID_KEY, it) }
-        }
-        when (val target = _subscription.value) {
-            is SubscriptionNavigation.Redemption -> {
-                putString(SUBSCRIPTION_KIND_KEY, SUBSCRIPTION_REDEMPTION_KIND)
-                putString(SUBSCRIPTION_TOKEN_KEY, target.token)
+        when (val target = _target.value) {
+            is ExternalNavigation.Request -> {
+                putString(TARGET_KIND_KEY, REQUEST_KIND)
+                putBoolean(REQUEST_HAS_ID_KEY, target.requestId != null)
+                target.requestId?.let { putString(REQUEST_ID_KEY, it) }
             }
-            SubscriptionNavigation.InvalidLink -> {
-                putString(SUBSCRIPTION_KIND_KEY, SUBSCRIPTION_INVALID_LINK_KIND)
+            is ExternalNavigation.SubscriptionRedemption -> Unit
+            ExternalNavigation.InvalidSubscriptionLink -> {
+                putString(TARGET_KIND_KEY, SUBSCRIPTION_INVALID_LINK_KIND)
             }
             null -> Unit
         }
@@ -71,23 +58,22 @@ internal class MainActivityNavigationState {
 
     fun restore(savedState: Bundle?) {
         if (savedState == null) return
-        if (savedState.getBoolean(REQUEST_PENDING_KEY)) {
-            _request.value = RequestNavigation(savedState.getString(REQUEST_ID_KEY))
-        }
-        _subscription.value = when (savedState.getString(SUBSCRIPTION_KIND_KEY)) {
-            SUBSCRIPTION_REDEMPTION_KIND -> savedState.getString(SUBSCRIPTION_TOKEN_KEY)
-                ?.let { SubscriptionNavigation.Redemption(it) }
-            SUBSCRIPTION_INVALID_LINK_KIND -> SubscriptionNavigation.InvalidLink
+        _target.value = when (savedState.getString(TARGET_KIND_KEY)) {
+            REQUEST_KIND -> ExternalNavigation.Request(
+                savedState.getString(REQUEST_ID_KEY).takeIf {
+                    savedState.getBoolean(REQUEST_HAS_ID_KEY)
+                },
+            )
+            SUBSCRIPTION_INVALID_LINK_KIND -> ExternalNavigation.InvalidSubscriptionLink
             else -> null
         }
     }
 
     private companion object {
-        const val REQUEST_PENDING_KEY = "request_pending"
+        const val TARGET_KIND_KEY = "target_kind"
+        const val REQUEST_KIND = "request"
+        const val REQUEST_HAS_ID_KEY = "request_has_id"
         const val REQUEST_ID_KEY = "request_id"
-        const val SUBSCRIPTION_KIND_KEY = "subscription_kind"
-        const val SUBSCRIPTION_TOKEN_KEY = "subscription_token"
-        const val SUBSCRIPTION_REDEMPTION_KIND = "redemption"
         const val SUBSCRIPTION_INVALID_LINK_KIND = "invalid_link"
     }
 }
@@ -109,22 +95,33 @@ class MainActivity : FragmentActivity() {
         navigation.restore(savedInstanceState?.getBundle(NAVIGATION_STATE_KEY))
         if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.TIRAMISU) {
             setRecentsScreenshotEnabled(false)
+        } else {
+            // Older Android versions have no recents-only protection API.
+            window.addFlags(WindowManager.LayoutParams.FLAG_SECURE)
         }
         enableEdgeToEdge()
         handleIntent(intent)
-        val authenticator = DeviceAuthenticator(this)
         val container = (application as AgentknockApplication).container
+        val deviceAuthentication = container.deviceAuthentication
+        val authenticator = DeviceAuthenticator(this, deviceAuthentication)
+        lifecycleScope.launch {
+            deviceAuthentication.request.collect { request ->
+                authenticator.bind(request)
+                if (request != null && deviceAuthentication.claimForLaunch(request)) {
+                    authenticator.launch(request)
+                }
+            }
+        }
         val authentication = container.authentication
         val viewModelFactory = agentknockViewModelFactory(application, container)
         setContent {
             AgentknockTheme {
                 AgentknockScreen(
-                    authenticate = authenticator::authenticate,
+                    authenticationRequest = deviceAuthentication.request,
+                    sensitiveDataBackgroundGuard = container.sensitiveDataBackgroundGuard,
                     authentication = authentication,
-                    requestNavigation = navigation.request,
-                    consumeRequestNavigation = navigation::consumeRequest,
-                    subscriptionNavigation = navigation.subscription,
-                    consumeSubscriptionNavigation = navigation::consumeSubscription,
+                    externalNavigation = navigation.target,
+                    consumeExternalNavigation = ::consumeNavigation,
                     notificationStateGeneration = notificationStateGeneration,
                     requestNotificationPermission = ::requestNotificationPermission,
                     viewModelFactory = viewModelFactory,
@@ -174,28 +171,38 @@ class MainActivity : FragmentActivity() {
 
     private fun handleIntent(intent: Intent) {
         if (intent.action == Intent.ACTION_VIEW) {
-            val recognized = when (val link = SubscriptionRedemptionLink.parse(intent.dataString)) {
+            when (val link = SubscriptionRedemptionLink.parse(intent.dataString)) {
                 is SubscriptionRedemptionLink.Valid -> {
-                    navigation.openSubscription(SubscriptionNavigation.Redemption(link.token))
-                    true
+                    navigation.open(ExternalNavigation.SubscriptionRedemption(link.token))
                 }
                 SubscriptionRedemptionLink.Invalid -> {
-                    navigation.openSubscription(SubscriptionNavigation.InvalidLink)
-                    true
+                    navigation.open(ExternalNavigation.InvalidSubscriptionLink)
+                    scrubLink(intent)
                 }
-                SubscriptionRedemptionLink.Unrelated -> false
-            }
-            if (recognized) {
-                intent.action = null
-                intent.data = null
+                SubscriptionRedemptionLink.Unrelated -> Unit
             }
         }
         if (
             intent.action == RequestNotifications.OPEN_REQUESTS_ACTION ||
             intent.action == RequestNotifications.OPEN_REQUEST_ACTION
         ) {
-            navigation.openRequest(intent.getStringExtra(RequestNotifications.REQUEST_ID_EXTRA))
+            navigation.open(
+                ExternalNavigation.Request(
+                    intent.getStringExtra(RequestNotifications.REQUEST_ID_EXTRA),
+                ),
+            )
             intent.action = null
+        }
+    }
+
+    private fun scrubLink(intent: Intent) {
+        intent.action = null
+        intent.data = null
+    }
+
+    private fun consumeNavigation(target: ExternalNavigation) {
+        if (navigation.consume(target) && target is ExternalNavigation.SubscriptionRedemption) {
+            scrubLink(intent)
         }
     }
 

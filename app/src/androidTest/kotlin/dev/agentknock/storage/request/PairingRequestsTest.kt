@@ -116,7 +116,7 @@ class PairingRequestsTest {
         var sealedPlaintext: ByteArray? = null
 
         assertEquals(
-            ProcessedRelayMessage(RESPONSE),
+            ProcessedRelayMessage,
             requests.receiveFinish(
                 pairing = pairing,
                 relayRequestId = FINISH_REQUEST_ID,
@@ -209,7 +209,7 @@ class PairingRequestsTest {
 
         val regular = requests(audit)
         assertEquals(
-            ProcessedRelayMessage(RESPONSE),
+            ProcessedRelayMessage,
             regular.receiveFinish(
                 pairing = pairing,
                 relayRequestId = FINISH_REQUEST_ID,

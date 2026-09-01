@@ -15,15 +15,22 @@ import dev.agentknock.storage.secret.SshPrivateKey
 
 internal enum class SshKeyInputMode { GENERATE, IMPORT }
 
+internal enum class EditorPhase { EDITING, COMMITTING }
+
 internal data class SshKeyDraft(
     val inputMode: SshKeyInputMode = SshKeyInputMode.GENERATE,
     val algorithm: SshKeyAlgorithm = SshKeyAlgorithm.ED25519,
     val privateKeyText: String = "",
     val comment: String = "",
     val preparedKey: SshPrivateKey? = null,
+    val preparing: Boolean = false,
     val error: String? = null,
 ) {
-    fun withoutPreparation(): SshKeyDraft = copy(preparedKey = null, error = null)
+    fun withoutPreparation(): SshKeyDraft = copy(
+        preparedKey = null,
+        preparing = false,
+        error = null,
+    )
 }
 
 internal data class SecretEditorState(
@@ -53,12 +60,20 @@ internal data class VariableEditorState(
 )
 
 @Composable
-internal fun DiscardChangesDialog(onDismiss: () -> Unit, onDiscard: () -> Unit) {
+internal fun DiscardChangesDialog(
+    enabled: Boolean,
+    onDismiss: () -> Unit,
+    onDiscard: () -> Unit,
+) {
     AlertDialog(
-        onDismissRequest = onDismiss,
+        onDismissRequest = { if (enabled) onDismiss() },
         title = { Text("Discard changes?") },
         text = { Text("Your unsaved changes will be lost.") },
-        confirmButton = { TextButton(onClick = onDiscard) { Text("Discard") } },
-        dismissButton = { TextButton(onClick = onDismiss) { Text("Keep editing") } },
+        confirmButton = {
+            TextButton(onClick = onDiscard, enabled = enabled) { Text("Discard") }
+        },
+        dismissButton = {
+            TextButton(onClick = onDismiss, enabled = enabled) { Text("Keep editing") }
+        },
     )
 }

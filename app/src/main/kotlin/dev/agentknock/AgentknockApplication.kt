@@ -1,11 +1,10 @@
 package dev.agentknock
 
 import android.app.Application
-import android.util.Log
 import androidx.lifecycle.ProcessLifecycleOwner
-import com.google.firebase.messaging.FirebaseMessaging
 import dev.agentknock.network.AgentknockUserAgentInterceptor
 import dev.agentknock.push.PushRegistrationRepository
+import dev.agentknock.push.FirebaseRegistrationWorker
 import dev.agentknock.push.RequestNotifications
 import dev.agentknock.push.PushSynchronizationWorker
 import dev.agentknock.push.RequestNotificationCoordinator
@@ -41,9 +40,13 @@ import dev.agentknock.storage.request.SecretManagementRequests
 import dev.agentknock.storage.request.SshAuthenticationRequests
 import dev.agentknock.storage.device.DeviceIdentityRepository
 import dev.agentknock.storage.device.DeviceManagementRepository
+import dev.agentknock.storage.device.DeviceSettingsCoordinator
 import dev.agentknock.protocol.PairingProtocol
 import dev.agentknock.subscription.SubscriptionRepository
 import dev.agentknock.ui.auth.AuthenticationSession
+import dev.agentknock.ui.auth.DeviceAuthenticationCoordinator
+import dev.agentknock.ui.auth.ProtectedActionAuthorizer
+import dev.agentknock.ui.auth.SensitiveDataBackgroundGuard
 import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.CoroutineStart
@@ -73,8 +76,11 @@ class AgentknockApplication : Application() {
     }
 }
 
-internal class ApplicationContainer(application: Application) {
+internal class ApplicationContainer(private val application: Application) {
     val authentication = AuthenticationSession(application)
+    val deviceAuthentication = DeviceAuthenticationCoordinator()
+    val protectedActions = ProtectedActionAuthorizer(authentication, deviceAuthentication)
+    val sensitiveDataBackgroundGuard = SensitiveDataBackgroundGuard()
     private val database = AgentknockDatabase.create(application)
     private val writeTransaction = RoomWriteTransaction(database)
     private val encryptionKeyStore = AndroidEncryptionKeyStore(application.packageManager)
@@ -118,22 +124,22 @@ internal class ApplicationContainer(application: Application) {
         audit = audit,
         writeTransaction = writeTransaction,
     )
+    val deviceConfiguration = deviceIdentity.observeConfiguration().stateIn(
+        scope = applicationScope,
+        started = SharingStarted.Eagerly,
+        initialValue = null,
+    )
 
     val pushRegistration = PushRegistrationRepository(
         deviceAuthorization = deviceIdentity,
         relay = HttpRelayPushRegistrationClient(relayHttp),
-        requestRegistration = {
-            FirebaseMessaging.getInstance().register().addOnFailureListener { failure ->
-                Log.w("Agentknock", "FCM registration failed", failure)
-            }
-        },
+        requestRegistration = { FirebaseRegistrationWorker.enqueue(application) },
     )
 
     val subscription = SubscriptionRepository(
         deviceAuthorization = deviceIdentity,
         relay = HttpRelaySubscriptionClient(relayHttp),
     )
-
     val deviceManagement = DeviceManagementRepository(
         deviceIdentityDao = database.deviceIdentityDao(),
         deviceAuthorization = deviceIdentity,
@@ -141,7 +147,6 @@ internal class ApplicationContainer(application: Application) {
         audit = audit,
         writeTransaction = writeTransaction,
     )
-
     private val aiReviews = AiReviewCoordinator(applicationScope)
     private val requestMaterial = RequestMaterialStore(
         dao = database.requestDao(),
@@ -249,9 +254,9 @@ internal class ApplicationContainer(application: Application) {
         displayWake = { RequestNotifications.showWake(application) },
     )
 
-    // Every worker, UI mutation, and connection entry point awaits this same initialization.
-    // Recovering REVIEWING here is race-free: no relay synchronization can begin before storage
-    // is ready, and process-local review jobs do not survive application creation.
+    // Relay synchronization and request decisions await this initialization. Recovering
+    // REVIEWING here is race-free: no relay synchronization can begin before storage is ready,
+    // and process-local review jobs do not survive application creation.
     val localStorage = applicationScope.async(start = CoroutineStart.LAZY) {
         initializeLocalStorage(application)
     }
@@ -269,6 +274,8 @@ internal class ApplicationContainer(application: Application) {
         database.requestDao().deleteEndedRequestPsks()
         requestMaterial.deleteExpiredPreviousClientPsks()
         requests.recoverInterruptedAiReviews()
+        requests.pruneExpiredRequestState()
+        deviceIdentity.pruneRetiredIdentities()
         if (requests.hasPendingRelayWork()) {
             requestConnection.requestSynchronization()
         }
@@ -291,6 +298,16 @@ internal class ApplicationContainer(application: Application) {
             PushSynchronizationWorker.enqueue(application)
         },
         relayRetryDeadline = persistentRelayRetryDeadline(application),
+    )
+
+    val deviceSettings = DeviceSettingsCoordinator(
+        identities = deviceIdentity,
+        management = deviceManagement,
+        awaitStorageReady = { localStorage.await() },
+        onIdentityChanged = {
+            requestConnection.refresh()
+            requestConnection.requestSynchronization()
+        },
     )
 
     init {

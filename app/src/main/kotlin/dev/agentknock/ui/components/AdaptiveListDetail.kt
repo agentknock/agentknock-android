@@ -1,21 +1,25 @@
 package dev.agentknock.ui.components
 
 import androidx.activity.compose.BackHandler
-import androidx.compose.foundation.layout.BoxWithConstraints
-import androidx.compose.foundation.layout.Row
-import androidx.compose.foundation.layout.fillMaxHeight
 import androidx.compose.foundation.layout.fillMaxSize
-import androidx.compose.foundation.layout.width
-import androidx.compose.material3.VerticalDivider
+import androidx.compose.material3.adaptive.ExperimentalMaterial3AdaptiveApi
+import androidx.compose.material3.adaptive.currentWindowAdaptiveInfoV2
+import androidx.compose.material3.adaptive.layout.AnimatedPane
+import androidx.compose.material3.adaptive.layout.ListDetailPaneScaffold
+import androidx.compose.material3.adaptive.layout.ListDetailPaneScaffoldDefaults
+import androidx.compose.material3.adaptive.layout.ListDetailPaneScaffoldRole
+import androidx.compose.material3.adaptive.layout.PaneAdaptedValue
+import androidx.compose.material3.adaptive.layout.PaneScaffoldDirective
+import androidx.compose.material3.adaptive.layout.ThreePaneScaffoldDestinationItem
+import androidx.compose.material3.adaptive.layout.calculatePaneScaffoldDirective
+import androidx.compose.material3.adaptive.layout.calculateThreePaneScaffoldValue
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.LaunchedEffect
-import androidx.compose.runtime.movableContentOf
-import androidx.compose.runtime.remember
-import androidx.compose.runtime.rememberUpdatedState
+import androidx.compose.runtime.saveable.rememberSaveableStateHolder
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.unit.Dp
-import androidx.compose.ui.unit.dp
 
+@OptIn(ExperimentalMaterial3AdaptiveApi::class)
 @Composable
 internal fun AdaptiveListDetail(
     hasDetail: Boolean,
@@ -23,45 +27,59 @@ internal fun AdaptiveListDetail(
     onBack: () -> Unit,
     onTopLevelChanged: (Boolean) -> Unit,
     modifier: Modifier = Modifier,
-    obscured: Boolean = false,
+    directive: PaneScaffoldDirective = calculatePaneScaffoldDirective(
+        currentWindowAdaptiveInfoV2(),
+    ),
     list: @Composable (Modifier) -> Unit,
     emptyDetail: @Composable (Modifier) -> Unit,
     detail: @Composable (showBack: Boolean, Modifier) -> Unit,
 ) {
-    val currentList = rememberUpdatedState(list)
-    val currentDetail = rememberUpdatedState(detail)
-    val retainedList = remember {
-        movableContentOf<Modifier> { childModifier -> currentList.value(childModifier) }
-    }
-    val retainedDetail = remember {
-        movableContentOf<Boolean, Modifier> { showBack, childModifier ->
-            currentDetail.value(showBack, childModifier)
-        }
+    val paneState = rememberSaveableStateHolder()
+    val destination = ThreePaneScaffoldDestinationItem<String>(
+        if (hasDetail) {
+            ListDetailPaneScaffoldRole.Detail
+        } else {
+            ListDetailPaneScaffoldRole.List
+        },
+    )
+    val scaffoldValue = calculateThreePaneScaffoldValue(
+        maxHorizontalPartitions = directive.maxHorizontalPartitions,
+        adaptStrategies = ListDetailPaneScaffoldDefaults.adaptStrategies(),
+        currentDestination = destination,
+        maxVerticalPartitions = directive.maxVerticalPartitions,
+    )
+    val listVisible = scaffoldValue[ListDetailPaneScaffoldRole.List] != PaneAdaptedValue.Hidden
+
+    BackHandler(enabled = hasDetail, onBack = onBack)
+
+    LaunchedEffect(listVisible, hasDetail) {
+        onTopLevelChanged(listVisible || !hasDetail)
     }
 
-    BoxWithConstraints(modifier) {
-        val expanded = maxWidth >= EXPANDED_CONTENT_WIDTH
-        LaunchedEffect(expanded, hasDetail, obscured) {
-            onTopLevelChanged((expanded || !hasDetail) && !obscured)
-        }
-
-        if (expanded) {
-            Row(Modifier.fillMaxSize()) {
-                retainedList(Modifier.width(listWidth).fillMaxHeight())
-                VerticalDivider()
-                if (hasDetail) {
-                    retainedDetail(false, Modifier.weight(1f).fillMaxHeight())
-                } else {
-                    emptyDetail(Modifier.weight(1f).fillMaxHeight())
+    ListDetailPaneScaffold(
+        directive = directive,
+        value = scaffoldValue,
+        modifier = modifier,
+        listPane = {
+            AnimatedPane(modifier = Modifier.preferredWidth(listWidth)) {
+                paneState.SaveableStateProvider(LIST_PANE_KEY) {
+                    list(Modifier.fillMaxSize())
                 }
             }
-        } else if (hasDetail) {
-            BackHandler(onBack = onBack)
-            retainedDetail(true, Modifier.fillMaxSize())
-        } else {
-            retainedList(Modifier.fillMaxSize())
-        }
-    }
+        },
+        detailPane = {
+            AnimatedPane {
+                if (hasDetail) {
+                    paneState.SaveableStateProvider(DETAIL_PANE_KEY) {
+                        detail(!listVisible, Modifier.fillMaxSize())
+                    }
+                } else {
+                    emptyDetail(Modifier.fillMaxSize())
+                }
+            }
+        },
+    )
 }
 
-private val EXPANDED_CONTENT_WIDTH = 720.dp
+private const val LIST_PANE_KEY = "list"
+private const val DETAIL_PANE_KEY = "detail"

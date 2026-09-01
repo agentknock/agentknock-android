@@ -34,7 +34,7 @@ import androidx.compose.material3.TopAppBar
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
-import androidx.compose.runtime.remember
+import androidx.compose.runtime.saveable.rememberSaveable
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
@@ -64,12 +64,15 @@ internal fun ClientDetail(
     onEndTemporaryAccess: (TemporaryAccessGrant) -> Unit,
     modifier: Modifier = Modifier,
 ) {
-    var showRename by remember { mutableStateOf(false) }
-    var showInstructions by remember { mutableStateOf(false) }
-    var instructions by remember(client.clientId, client.instructions) {
+    var showRename by rememberSaveable(client.clientId) { mutableStateOf(false) }
+    var rename by rememberSaveable(client.clientId, client.name) { mutableStateOf(client.name) }
+    var showInstructions by rememberSaveable(client.clientId) { mutableStateOf(false) }
+    var instructions by rememberSaveable(client.clientId, client.instructions) {
         mutableStateOf(client.instructions)
     }
-    var confirmation by remember { mutableStateOf<RelayClientState?>(null) }
+    var confirmation by rememberSaveable(client.clientId) {
+        mutableStateOf<RelayClientState?>(null)
+    }
     Column(modifier) {
         TopAppBar(
             title = { Text(client.name, maxLines = 1, overflow = TextOverflow.Ellipsis) },
@@ -79,7 +82,10 @@ internal fun ClientDetail(
                 }
             },
             actions = {
-                IconButton(onClick = { showRename = true }) {
+                IconButton(onClick = {
+                    rename = client.name
+                    showRename = true
+                }) {
                     Icon(Icons.Outlined.Edit, contentDescription = "Rename client")
                 }
             },
@@ -272,7 +278,6 @@ internal fun ClientDetail(
     }
 
     if (showRename) {
-        var name by remember(client.clientId) { mutableStateOf(client.name) }
         AlertDialog(
             onDismissRequest = { showRename = false },
             title = { Text("Rename client") },
@@ -283,8 +288,8 @@ internal fun ClientDetail(
                 ) {
                     Text("This only changes how the client appears in Agentknock.")
                     OutlinedTextField(
-                        value = name,
-                        onValueChange = { name = it },
+                        value = rename,
+                        onValueChange = { rename = it },
                         label = { Text("Name") },
                         singleLine = true,
                     )
@@ -292,9 +297,9 @@ internal fun ClientDetail(
             },
             confirmButton = {
                 TextButton(
-                    enabled = name.isNotBlank() && name.trim() != client.name,
+                    enabled = rename.isNotBlank() && rename.trim() != client.name,
                     onClick = {
-                        onRename(name)
+                        onRename(rename)
                         showRename = false
                     },
                 ) { Text("Save") }

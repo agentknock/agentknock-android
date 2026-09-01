@@ -48,6 +48,7 @@ import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
+import androidx.compose.runtime.saveable.rememberSaveable
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
@@ -102,14 +103,14 @@ internal fun SecretDetail(
     modifier: Modifier = Modifier,
 ) {
     var menuExpanded by remember(secret.id) { mutableStateOf(false) }
-    var editingSshComment by remember(secret.id) { mutableStateOf(false) }
-    var sshComment by remember(secret.id, secret.sshKey?.comment) {
+    var editingSshComment by rememberSaveable(secret.id) { mutableStateOf(false) }
+    var sshComment by rememberSaveable(secret.id, secret.sshKey?.comment) {
         mutableStateOf(secret.sshKey?.comment.orEmpty())
     }
-    var editingDefaultApproval by remember(secret.id) { mutableStateOf(false) }
-    var editingClientApproval by remember(secret.id) { mutableStateOf<String?>(null) }
-    var editingInstructions by remember(secret.id) { mutableStateOf(false) }
-    var instructions by remember(secret.id, secret.instructions) {
+    var editingDefaultApproval by rememberSaveable(secret.id) { mutableStateOf(false) }
+    var editingClientApproval by rememberSaveable(secret.id) { mutableStateOf<String?>(null) }
+    var editingInstructions by rememberSaveable(secret.id) { mutableStateOf(false) }
+    var instructions by rememberSaveable(secret.id, secret.instructions) {
         mutableStateOf(secret.instructions)
     }
     val overrides = secret.clientApprovalOverrides.associateBy { it.clientId }

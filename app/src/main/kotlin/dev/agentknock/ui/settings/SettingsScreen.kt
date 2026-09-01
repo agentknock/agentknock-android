@@ -40,7 +40,6 @@ internal enum class SettingsPage {
 internal fun SettingsScreen(
     onClose: () -> Unit,
     authenticationMode: DeviceAuthenticationMode,
-    onAuthenticationModeChange: (DeviceAuthenticationMode, (String) -> Unit) -> Unit,
     notificationStateGeneration: Long,
     requestNotificationPermission: () -> Unit,
     openPlanInitially: Boolean,
@@ -59,7 +58,9 @@ internal fun SettingsScreen(
     val snackbar = remember { SnackbarHostState() }
     val scope = rememberCoroutineScope()
 
-    LaunchedEffect(subscriptionViewModel) { subscriptionViewModel.refresh() }
+    LaunchedEffect(viewModel) {
+        viewModel.messages.collect { snackbar.showSnackbar(it) }
+    }
     LaunchedEffect(openPlanInitially) {
         if (openPlanInitially) {
             page = SettingsPage.SUBSCRIPTION
@@ -79,6 +80,10 @@ internal fun SettingsScreen(
                 FactoryResetUiState.Idle,
                 FactoryResetUiState.ClearFailed,
                 -> page = SettingsPage.SECURITY_BACKUP
+            }
+            SettingsPage.SUBSCRIPTION -> {
+                subscriptionViewModel.dismissNotice()
+                page = SettingsPage.OVERVIEW
             }
             else -> page = SettingsPage.OVERVIEW
         }
@@ -110,11 +115,7 @@ internal fun SettingsScreen(
                     counts = counts,
                     protection = protection,
                     authenticationMode = authenticationMode,
-                    onAuthenticationModeChange = { mode ->
-                        onAuthenticationModeChange(mode) { error ->
-                            scope.launch { snackbar.showSnackbar(error) }
-                        }
-                    },
+                    onAuthenticationModeChange = viewModel::changeAuthenticationMode,
                     onFactoryReset = { page = SettingsPage.FACTORY_RESET },
                     onBack = ::back,
                     modifier = modifier,
@@ -129,7 +130,10 @@ internal fun SettingsScreen(
                 SettingsPage.SUBSCRIPTION -> SubscriptionAndBillingScreen(
                     state = subscription,
                     onBack = ::back,
-                    onRefresh = subscriptionViewModel::refresh,
+                    onRefresh = {
+                        subscriptionViewModel.dismissNotice()
+                        subscriptionViewModel.refresh()
+                    },
                     modifier = modifier,
                 )
                 SettingsPage.AUDIT -> AuditSettings(

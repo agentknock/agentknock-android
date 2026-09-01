@@ -8,57 +8,35 @@ import androidx.compose.material3.SnackbarHostState
 import androidx.compose.material3.Text
 import androidx.compose.material3.TextButton
 import androidx.compose.runtime.Composable
-import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
-import androidx.compose.runtime.rememberCoroutineScope
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.platform.LocalResources
 import androidx.compose.ui.res.stringResource
 import dev.agentknock.R
-import dev.agentknock.storage.secret.CreateEnvironmentVariableResult
-import dev.agentknock.storage.secret.CreateSecretResult
 import dev.agentknock.storage.secret.EnvironmentVariableMetadata
-import dev.agentknock.storage.secret.SaveEnvironmentVariableResult
-import dev.agentknock.storage.secret.SaveSecretResult
-import dev.agentknock.storage.secret.SaveSshSecretResult
-import dev.agentknock.storage.secret.SecretType
-import kotlinx.coroutines.launch
 
 private data class PendingVariableDeletion(
     val variable: EnvironmentVariableMetadata,
-    val editorSession: Long,
+    val editor: SecretsEditor.Variable,
 )
 
 @Composable
 internal fun SecretsEditorHost(
     editor: SecretsEditor,
-    selectedTarget: SecretTarget?,
-    authorizeProtectedAction: (
-        title: String,
-        onSuccess: () -> Unit,
-        onError: (String) -> Unit,
-    ) -> Unit,
     viewModel: SecretsViewModel,
     snackbar: SnackbarHostState,
-    report: (String) -> Unit,
-    onVariableValueHidden: (String) -> Unit,
 ) {
-    val scope = rememberCoroutineScope()
     val resources = LocalResources.current
-    var variablePendingDeletion by remember { mutableStateOf<PendingVariableDeletion?>(null) }
-
-    LaunchedEffect(selectedTarget) {
-        variablePendingDeletion = null
+    val editorSession = when (editor) {
+        SecretsEditor.None -> null
+        is SecretsEditor.Secret -> editor.session
+        is SecretsEditor.SshKey -> editor.session
+        is SecretsEditor.Variable -> editor.session
     }
-
-    fun afterProtection(title: String, action: suspend () -> Unit) {
-        authorizeProtectedAction(
-            title,
-            { scope.launch { action() } },
-            report,
-        )
+    var variablePendingDeletion by remember(editorSession) {
+        mutableStateOf<PendingVariableDeletion?>(null)
     }
 
     when (val activeEditor = editor) {
@@ -67,53 +45,12 @@ internal fun SecretsEditorHost(
             val editorState = activeEditor.state
             SecretEditorScreen(
                 editor = editorState,
+                enabled = activeEditor.phase == EditorPhase.EDITING,
                 onEditorChange = { viewModel.updateSecretEditor(activeEditor.session, it) },
                 onDismiss = { viewModel.closeEditor(activeEditor.session) },
                 onPrepareSshKey = viewModel::prepareSecretSshKey,
                 onSave = { name, description ->
-                    scope.launch {
-                        if (!viewModel.editorIsCurrent(activeEditor)) return@launch
-                        val error = if (editorState.secret == null) {
-                            when (
-                                val result = when (editorState.type) {
-                                    SecretType.SSH -> viewModel.createSshSecret(
-                                            name,
-                                            description,
-                                            checkNotNull(editorState.sshKeyDraft.preparedKey),
-                                        )
-                                    SecretType.ENVIRONMENT ->
-                                        viewModel.createSecret(name, description)
-                                }
-                            ) {
-                                is CreateSecretResult.Created -> {
-                                    viewModel.showCreatedSecretIfEditorCurrent(
-                                        activeEditor,
-                                        result.id,
-                                    )
-                                    null
-                                }
-                                CreateSecretResult.NameInUse -> resources.getString(
-                                    R.string.secret_name_in_use,
-                                )
-                            }
-                        } else {
-                            when (
-                                viewModel.saveSecret(editorState.secret.id, name, description)
-                            ) {
-                                SaveSecretResult.SAVED -> {
-                                    viewModel.closeEditorIfCurrent(activeEditor)
-                                    null
-                                }
-                                SaveSecretResult.NAME_IN_USE -> resources.getString(
-                                    R.string.secret_name_in_use,
-                                )
-                                SaveSecretResult.NOT_FOUND -> resources.getString(
-                                    R.string.secret_not_found,
-                                )
-                            }
-                        }
-                        if (error != null && viewModel.editorIsCurrent(activeEditor)) report(error)
-                    }
+                    viewModel.saveSecretEditor(activeEditor, name, description)
                 },
                 snackbar = snackbar,
             )
@@ -122,26 +59,11 @@ internal fun SecretsEditorHost(
             val editorState = activeEditor.state
             SshKeyEditorScreen(
                 editor = editorState,
+                enabled = activeEditor.phase == EditorPhase.EDITING,
                 onEditorChange = { viewModel.updateSshKeyEditor(activeEditor.session, it) },
                 onDismiss = { viewModel.closeEditor(activeEditor.session) },
                 onPrepare = viewModel::prepareReplacementSshKey,
-                onReplace = {
-                    scope.launch {
-                        if (!viewModel.editorIsCurrent(activeEditor)) return@launch
-                        when (
-                            viewModel.replaceSshKey(
-                                editorState.secretId,
-                                checkNotNull(editorState.sshKeyDraft.preparedKey),
-                            )
-                        ) {
-                            is SaveSshSecretResult.Saved -> {
-                                viewModel.closeEditorIfCurrent(activeEditor)
-                                report("SSH key replaced")
-                            }
-                            else -> report("SSH key could not be replaced")
-                        }
-                    }
-                },
+                onReplace = { viewModel.replaceSshKey(activeEditor) },
                 snackbar = snackbar,
             )
         }
@@ -150,81 +72,30 @@ internal fun SecretsEditorHost(
             val variable = editorState.variable
             EnvironmentVariableEditorScreen(
                 editor = editorState,
+                enabled = activeEditor.phase == EditorPhase.EDITING,
                 onEditorChange = { viewModel.updateVariableEditor(activeEditor.session, it) },
                 onDismiss = { viewModel.closeEditor(activeEditor.session) },
                 onDelete = variable?.let {
-                    { variablePendingDeletion = PendingVariableDeletion(it, activeEditor.session) }
+                    { variablePendingDeletion = PendingVariableDeletion(it, activeEditor) }
                 },
                 onSave = { name, value, sensitive, notes, replaceValue ->
-                    val save: suspend () -> Unit = save@{
-                        if (!viewModel.editorIsCurrent(activeEditor)) return@save
-                        val error = if (editorState.variable == null) {
-                            when (
-                                viewModel.createEnvironmentVariable(
-                                    secretId = editorState.secretId,
-                                    name = name,
-                                    value = value,
-                                    sensitive = sensitive,
-                                    notes = notes,
-                                )
-                            ) {
-                                is CreateEnvironmentVariableResult.Created -> {
-                                    viewModel.closeEditorIfCurrent(activeEditor)
-                                    null
-                                }
-                                CreateEnvironmentVariableResult.NameInUse -> resources.getString(
-                                    R.string.variable_name_in_use,
-                                )
-                                CreateEnvironmentVariableResult.SecretNotFound -> resources.getString(
-                                    R.string.secret_not_found,
-                                )
-                            }
-                        } else {
-                            when (
-                                viewModel.saveEnvironmentVariable(
-                                    id = editorState.variable.id,
-                                    name = name,
-                                    sensitive = sensitive,
-                                    notes = notes,
-                                    replacementValue = value.takeIf { replaceValue },
-                                )
-                            ) {
-                                SaveEnvironmentVariableResult.SAVED -> {
-                                    viewModel.closeEditorIfCurrent(activeEditor)
-                                    onVariableValueHidden(editorState.variable.id)
-                                    null
-                                }
-                                SaveEnvironmentVariableResult.NAME_IN_USE -> resources.getString(
-                                    R.string.variable_name_in_use,
-                                )
-                                SaveEnvironmentVariableResult.NOT_FOUND -> resources.getString(
-                                    R.string.variable_not_found,
-                                )
-                                SaveEnvironmentVariableResult.VALUE_UNAVAILABLE -> resources.getString(
-                                    R.string.stored_value_unavailable,
-                                )
-                                SaveEnvironmentVariableResult.VALUE_CORRUPTED -> resources.getString(
-                                    R.string.stored_value_corrupted,
-                                )
-                                SaveEnvironmentVariableResult.UNSUPPORTED_FORMAT -> resources.getString(
-                                    R.string.stored_value_unsupported,
-                                )
-                            }
-                        }
-                        if (error != null && viewModel.editorIsCurrent(activeEditor)) report(error)
-                    }
                     val weakensProtection = !sensitive && editorState.variable?.sensitive != false
-                    if (weakensProtection) {
-                        afterProtection(
+                    viewModel.saveVariableEditor(
+                        expected = activeEditor,
+                        name = name,
+                        value = value,
+                        sensitive = sensitive,
+                        notes = notes,
+                        replaceValue = replaceValue,
+                        protectionTitle = if (weakensProtection) {
                             resources.getString(
                                 R.string.confirm_mark_variable_non_sensitive,
                                 name,
-                            ),
-                            save,
-                        )
-                    } else {
-                        scope.launch { save() }
-                    }
+                            )
+                        } else {
+                            null
+                        },
+                    )
                 },
                 snackbar = snackbar,
             )
@@ -239,15 +110,7 @@ internal fun SecretsEditorHost(
             onDismiss = { variablePendingDeletion = null },
             onDelete = {
                 variablePendingDeletion = null
-                scope.launch {
-                    if (viewModel.deleteEnvironmentVariable(variable.id)) {
-                        viewModel.closeEditor(pending.editorSession)
-                        onVariableValueHidden(variable.id)
-                        report(resources.getString(R.string.variable_deleted))
-                    } else {
-                        report(resources.getString(R.string.variable_not_found))
-                    }
-                }
+                viewModel.deleteEnvironmentVariable(pending.editor)
             },
         )
     }

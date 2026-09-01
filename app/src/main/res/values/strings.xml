@@ -36,6 +36,20 @@
     <string name="delete_secret_explanation">This permanently deletes the secret and any values or private keys stored in it.</string>
     <string name="delete">Delete</string>
     <string name="secret_deleted">Secret deleted</string>
+    <string name="ssh_key_replaced">SSH key replaced</string>
+    <string name="ssh_key_replace_failed">SSH key could not be replaced</string>
+    <string name="ssh_public_comment_updated">Public key comment updated</string>
+    <string name="ssh_public_comment_update_failed">Public key comment could not be updated</string>
+    <string name="default_approval_updated">Default approval updated</string>
+    <string name="default_approval_update_failed">Approval setting could not be updated</string>
+    <string name="instructions_updated">Instructions updated</string>
+    <string name="instructions_update_failed">Instructions could not be updated</string>
+    <string name="general_instructions_updated">General instructions updated</string>
+    <string name="general_instructions_update_failed">General instructions could not be updated</string>
+    <string name="client_approval_updated">Client approval updated</string>
+    <string name="client_approval_update_failed">Client approval could not be updated</string>
+    <string name="temporary_access_ended">Temporary access ended</string>
+    <string name="temporary_access_already_ended">Temporary access had already ended</string>
     <string name="new_environment_variable">New environment variable</string>
     <string name="edit_environment_variable">Edit environment variable</string>
     <string name="variable_name">Environment variable name</string>
@@ -55,6 +69,8 @@
     <string name="delete_variable_question">Delete %1$s?</string>
     <string name="delete_variable_explanation">This permanently deletes this environment variable\'s stored value and metadata from the secret.</string>
     <string name="variable_deleted">Environment variable deleted</string>
+    <string name="environment_variable_updated">Environment variable updated</string>
+    <string name="sensitivity_update_failed">Sensitivity could not be changed</string>
     <string name="reveal_sensitive_value">Reveal %1$s</string>
     <string name="edit_sensitive_value">Edit %1$s</string>
     <string name="copy_sensitive_value">Copy %1$s</string>
@@ -76,7 +92,6 @@
     <string name="pairing_address_unchanged">This is already your pairing address</string>
     <string name="claim_pairing_address">Claim pairing address</string>
     <string name="another_suggestion">Another suggestion</string>
-    <string name="pairing_address_claimed">Pairing address claimed</string>
     <string name="pairing_address_claim_incomplete">Claim not completed</string>
     <string name="pairing_address_claim_incomplete_explanation">Your device identity is saved. Retry to continue setup without replacing it.</string>
     <string name="pairing_address_unavailable">That pairing address is unavailable</string>

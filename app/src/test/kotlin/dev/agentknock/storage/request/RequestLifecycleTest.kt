@@ -1,7 +1,5 @@
 package dev.agentknock.storage.request
 
-import kotlinx.coroutines.CancellationException
-import kotlinx.coroutines.test.runTest
 import kotlinx.serialization.SerializationException
 import org.junit.Assert.assertEquals
 import org.junit.Assert.assertFalse
@@ -48,17 +46,6 @@ class RequestLifecycleTest {
     }
 
     @Test
-    fun rejectedRequestIsHandledOnlyAfterDurablePersistence() = runTest {
-        assertTrue(persistRejectedRequest {})
-        assertFalse(persistRejectedRequest { error("injected database failure") })
-
-        val cancellation = runCatching {
-            persistRejectedRequest { throw CancellationException("cancelled") }
-        }
-        assertTrue(cancellation.exceptionOrNull() is CancellationException)
-    }
-
-    @Test
     fun completionDecoderDistinguishesMalformedWireFromInternalFailure() {
         assertNull(
             decodeWireCompletionOrNull<String> {
@@ -70,5 +57,13 @@ class RequestLifecycleTest {
             decodeWireCompletionOrNull<String> { error("decoder bug") }
         }
         assertTrue(internalFailure.exceptionOrNull() is IllegalStateException)
+    }
+
+    @Test
+    fun storedRequestKindParsingIsExhaustiveAndFutureValuesMapToUnknown() {
+        RequestKind.entries.forEach { kind ->
+            assertEquals(kind, kind.storedName.toRequestKind())
+        }
+        assertEquals(RequestKind.UNKNOWN, "future_method".toRequestKind())
     }
 }

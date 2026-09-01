@@ -1,6 +1,5 @@
 package dev.agentknock.storage.request
 
-import dev.agentknock.protocol.InvocationDenialReason
 import dev.agentknock.protocol.InvocationProtocol
 import dev.agentknock.protocol.GitSignProtocol
 import dev.agentknock.protocol.OpenedPairedRequest
@@ -18,6 +17,7 @@ import dev.agentknock.relay.RelayDeviceConnectionResult
 import dev.agentknock.relay.RelayDeviceErrorScope
 import dev.agentknock.relay.RelayDeviceEvent
 import dev.agentknock.relay.RelayDeviceFrame
+import dev.agentknock.relay.RelayFrameSendResult
 import dev.agentknock.relay.RelayExchangeState
 import dev.agentknock.relay.RelayMessageKind
 import dev.agentknock.relay.RelayMessageState
@@ -39,21 +39,10 @@ import kotlinx.coroutines.flow.Flow
 import kotlinx.coroutines.selects.select
 import kotlinx.coroutines.sync.Mutex
 import kotlinx.coroutines.sync.withLock
+import kotlinx.serialization.SerializationException
 import kotlinx.serialization.json.Json
 import kotlinx.serialization.json.JsonElement
 import kotlinx.serialization.json.JsonObject
-import kotlinx.serialization.decodeFromString
-import kotlinx.serialization.encodeToString
-import kotlinx.serialization.SerializationException
-
-internal suspend fun persistRejectedRequest(persist: suspend () -> Unit): Boolean = try {
-    persist()
-    true
-} catch (cancelled: kotlinx.coroutines.CancellationException) {
-    throw cancelled
-} catch (_: Exception) {
-    false
-}
 
 private data class IncomingRelayMessage(
     val clientId: String,
@@ -63,13 +52,7 @@ private data class IncomingRelayMessage(
     val addressId: String? = null,
 )
 
-internal data class ProcessedRelayMessage(val response: JsonElement? = null)
-
-internal inline fun <T> decodeWireCompletionOrNull(decode: () -> T): T? = try {
-    decode()
-} catch (_: SerializationException) {
-    null
-}
+internal object ProcessedRelayMessage
 
 internal sealed interface RequestSyncResult {
     data object Success : RequestSyncResult
@@ -102,20 +85,95 @@ private sealed interface SynchronizationInput {
     data object PendingChanges : SynchronizationInput
 }
 
-internal sealed interface SshAuthenticationDecisionResult {
-    data object Decided : SshAuthenticationDecisionResult
-    data object NotPending : SshAuthenticationDecisionResult
-    data object NotFound : SshAuthenticationDecisionResult
-    data object InvocationUnavailable : SshAuthenticationDecisionResult
-    data object PairingUnavailable : SshAuthenticationDecisionResult
-    data object ApprovalChanged : SshAuthenticationDecisionResult
-    data object KeyChanged : SshAuthenticationDecisionResult
-    data object InvalidMessage : SshAuthenticationDecisionResult
-    data object SecretUnavailable : SshAuthenticationDecisionResult
-    data object SecretCorrupted : SshAuthenticationDecisionResult
-    data object UnsupportedEncryption : SshAuthenticationDecisionResult
-    data object TemporaryAccessUnavailable : SshAuthenticationDecisionResult
-    data object TemporaryAccessNotStarted : SshAuthenticationDecisionResult
+private sealed interface DurableRelayOperation {
+    data class ClientState(
+        val clientId: String,
+        val desired: RelayClientState,
+    ) : DurableRelayOperation
+
+    data class Response(
+        val clientId: String,
+        val requestId: String,
+    ) : DurableRelayOperation
+
+    data class Resume(
+        val clientId: String,
+        val requestId: String,
+    ) : DurableRelayOperation
+}
+
+private class DurableRelayState {
+    var outstanding: DurableRelayOperation? = null
+    val rejectedClientStateMutations = mutableMapOf<String, RelayClientState>()
+    val resumedRequestIds = mutableSetOf<String>()
+
+    fun clearClientState(clientId: String) {
+        if ((outstanding as? DurableRelayOperation.ClientState)?.clientId == clientId) {
+            outstanding = null
+        }
+    }
+
+    fun clearResponse(clientId: String, requestId: String) {
+        val response = outstanding as? DurableRelayOperation.Response ?: return
+        if (response.clientId == clientId && response.requestId == requestId) outstanding = null
+    }
+
+    fun clearResume(clientId: String, requestId: String) {
+        val resume = outstanding as? DurableRelayOperation.Resume ?: return
+        if (resume.clientId == clientId && resume.requestId == requestId) outstanding = null
+    }
+
+    fun clearExchange(clientId: String, requestId: String) {
+        when (val operation = outstanding) {
+            is DurableRelayOperation.Response -> if (
+                operation.clientId == clientId && operation.requestId == requestId
+            ) {
+                outstanding = null
+            }
+            is DurableRelayOperation.Resume -> if (
+                operation.clientId == clientId && operation.requestId == requestId
+            ) {
+                outstanding = null
+            }
+            is DurableRelayOperation.ClientState,
+            null,
+            -> Unit
+        }
+    }
+
+    fun resolveState(event: RelayDeviceEvent.State, ended: Boolean) {
+        when (val operation = outstanding) {
+            is DurableRelayOperation.Resume -> if (
+                operation.clientId == event.clientId && operation.requestId == event.requestId
+            ) {
+                outstanding = null
+            }
+            is DurableRelayOperation.Response -> if (
+                operation.clientId == event.clientId &&
+                operation.requestId == event.requestId &&
+                (
+                    ended ||
+                        event.response != RelayMessageState.ABSENT ||
+                        event.exchange == RelayExchangeState.CLOSING
+                    )
+            ) {
+                outstanding = null
+            }
+            is DurableRelayOperation.ClientState,
+            null,
+            -> Unit
+        }
+    }
+}
+
+private fun pairedMethodRequestKind(method: String): RequestKind? = when (method) {
+    InvocationProtocol.METHOD -> RequestKind.SECRET_USE
+    GitSignProtocol.METHOD -> RequestKind.GIT_SIGN
+    SshAuthenticationProtocol.METHOD -> RequestKind.SSH_AUTHENTICATE
+    SecretListProtocol.METHOD -> RequestKind.SECRET_LIST
+    SecretUploadProtocol.METHOD -> RequestKind.SECRET_UPLOAD
+    PairingRemoveProtocol.METHOD -> RequestKind.PAIRING_REMOVE
+    else -> null
 }
 
 internal class RequestRepository(
@@ -145,6 +203,12 @@ internal class RequestRepository(
 
     suspend fun recoverInterruptedAiReviews(): Int = operationMutex.withLock {
         dao.recoverInterruptedAiReviews()
+    }
+
+    suspend fun pruneExpiredRequestState() = operationMutex.withLock {
+        dao.deleteAllSettledHiddenRequests(
+            currentTimeMillis() - IDEMPOTENCY_RETENTION_MILLIS,
+        )
     }
 
     suspend fun sync(): RequestSyncResult = runConnection(keepConnected = false)
@@ -280,25 +344,17 @@ internal class RequestRepository(
         keepConnected: Boolean,
         onCaughtUp: suspend () -> Unit,
     ): RequestSyncResult {
-        val awaitingClientStates = mutableMapOf<String, RelayClientState>()
-        val rejectedClientStateMutations = mutableMapOf<String, RelayClientState>()
-        val awaitingResponses = mutableMapOf<String, String>()
-        val awaitingStates = mutableMapOf<String, String>()
+        val durableRelayState = DurableRelayState()
         flushPendingChanges(
             credentials = credentials,
             connection = connection,
-            awaitingClientStates = awaitingClientStates,
-            rejectedClientStateMutations = rejectedClientStateMutations,
-            awaitingResponses = awaitingResponses,
-            awaitingStates = awaitingStates,
+            durableRelayState = durableRelayState,
         )?.let { return it }
 
         var caughtUp = false
         while (keepConnected || !initialSynchronizationComplete(
                 caughtUp,
-                awaitingClientStates,
-                awaitingResponses,
-                awaitingStates,
+                durableRelayState,
             )
         ) {
             val input = if (keepConnected) {
@@ -321,10 +377,7 @@ internal class RequestRepository(
                 flushPendingChanges(
                     credentials = credentials,
                     connection = connection,
-                    awaitingClientStates = awaitingClientStates,
-                    rejectedClientStateMutations = rejectedClientStateMutations,
-                    awaitingResponses = awaitingResponses,
-                    awaitingStates = awaitingStates,
+                    durableRelayState = durableRelayState,
                 )?.let { return it }
                 continue
             }
@@ -333,24 +386,19 @@ internal class RequestRepository(
             if (event == RelayDeviceEvent.CaughtUp) {
                 if (!caughtUp) onCaughtUp()
                 caughtUp = true
-                // An event immediately before CaughtUp can create follow-up work. In
-                // particular, a locally rejected pending pairing can race with a late ACTIVE
-                // state and must be revoked on this connection rather than waiting for another
-                // sync trigger.
-                if (pendingChanges.tryReceive().isSuccess) {
-                    flushPendingChanges(
-                        credentials = credentials,
-                        connection = connection,
-                        awaitingClientStates = awaitingClientStates,
-                        rejectedClientStateMutations = rejectedClientStateMutations,
-                        awaitingResponses = awaitingResponses,
-                        awaitingStates = awaitingStates,
-                    )?.let { return it }
-                }
+                // An event immediately before CaughtUp can create follow-up work. Always pump
+                // here so that work is observed even when its conflated notification was already
+                // drained while another durable operation was outstanding.
+                flushPendingChanges(
+                    credentials = credentials,
+                    connection = connection,
+                    durableRelayState = durableRelayState,
+                )?.let { return it }
+                pruneExpiredRequestState()
                 continue
             }
             val failure = operationMutex.withLock {
-                when (event) {
+                val eventFailure = when (event) {
                     is RelayDeviceEvent.Message -> {
                         val update = when (event.kind) {
                             RelayMessageKind.REQUEST -> processRequest(
@@ -374,45 +422,27 @@ internal class RequestRepository(
                             RelayMessageKind.RESPONSE -> null
                         }
                         val acknowledgedKind = event.kind.takeIf {
-                            update != null && (
-                                it == RelayMessageKind.REQUEST ||
-                                    it == RelayMessageKind.COMPLETION
+                            it == RelayMessageKind.REQUEST || it == RelayMessageKind.COMPLETION
+                        }
+                        if (acknowledgedKind != null && update == null) {
+                            return@withLock RequestSyncResult.RelayUnavailable(
+                                "Could not durably process relay ${acknowledgedKind.wireName}; " +
+                                    "reconnecting for replay.",
                             )
                         }
-                        if (acknowledgedKind != null) {
-                            if (
-                                !connection.send(
-                                    RelayDeviceFrame.Acknowledgement(
-                                        event.clientId,
-                                        event.requestId,
-                                        acknowledgedKind,
-                                    ),
-                                )
-                            ) {
-                                return@withLock RequestSyncResult.RelayUnavailable(
-                                    "Could not acknowledge relay message.",
-                                )
-                            }
-                        }
-                        if (update?.response != null) {
-                            if (
-                                !connection.send(
-                                    RelayDeviceFrame.Response(
-                                        event.clientId,
-                                        event.requestId,
-                                        update.response,
-                                    ),
-                                )
-                            ) {
-                                return@withLock RequestSyncResult.RelayUnavailable(
-                                    "Could not send relay response.",
-                                )
-                            }
-                            awaitingResponses[event.requestId] = event.clientId
+                        if (acknowledgedKind != null && update != null) {
+                            connection.send(
+                                RelayDeviceFrame.Acknowledgement(
+                                    event.clientId,
+                                    event.requestId,
+                                    acknowledgedKind,
+                                ),
+                            ).controlFrameFailure(
+                                "Could not acknowledge relay message.",
+                            )?.let { return@withLock it }
                         }
                         if (dao.getRequestById(event.requestId)?.exchangeEndedAt != null) {
-                            awaitingResponses.remove(event.requestId)
-                            awaitingStates.remove(event.requestId)
+                            durableRelayState.clearExchange(event.clientId, event.requestId)
                         }
                         null
                     }
@@ -425,7 +455,7 @@ internal class RequestRepository(
                         )?.let { return@withLock it }
                         if (event.kind == RelayMessageKind.RESPONSE) {
                             dao.markResponseOutboxFinished(event.requestId)
-                            awaitingResponses.remove(event.requestId)
+                            durableRelayState.clearResponse(event.clientId, event.requestId)
                         }
                         null
                     }
@@ -438,24 +468,17 @@ internal class RequestRepository(
                         )?.let { return@withLock it }
                         if (event.kind == RelayMessageKind.RESPONSE) {
                             dao.markResponseOutboxFinished(event.requestId)
-                            awaitingResponses.remove(event.requestId)
+                            durableRelayState.clearResponse(event.clientId, event.requestId)
                         }
                         null
                     }
                     is RelayDeviceEvent.ClientState -> {
                         applyClientState(event)
-                        rejectedClientStateMutations.remove(event.clientId)
+                        durableRelayState.rejectedClientStateMutations.remove(event.clientId)
                         // Every state event is an authoritative answer to the outstanding
                         // mutation. If it differs from the desired state, applyClientState keeps
                         // that desire and queues a new pass; a terminal REVOKED state clears it.
-                        if (awaitingClientStates.remove(event.clientId) != null) {
-                            sendNextClientState(
-                                credentials = credentials,
-                                connection = connection,
-                                awaitingClientStates = awaitingClientStates,
-                                rejectedClientStateMutations = rejectedClientStateMutations,
-                            )?.let { return@withLock it }
-                        }
+                        durableRelayState.clearClientState(event.clientId)
                         null
                     }
                     is RelayDeviceEvent.PushRegistration -> {
@@ -470,17 +493,7 @@ internal class RequestRepository(
                             eventName = "state",
                         )?.let { return@withLock it }
                         val ended = applyRelayState(event)
-                        awaitingStates.remove(event.requestId)
-                        if (
-                            event.response != RelayMessageState.ABSENT ||
-                            event.exchange == RelayExchangeState.CLOSING
-                        ) {
-                            awaitingResponses.remove(event.requestId)
-                        }
-                        if (ended) {
-                            awaitingResponses.remove(event.requestId)
-                            awaitingStates.remove(event.requestId)
-                        }
+                        durableRelayState.resolveState(event, ended)
                         null
                     }
                     is RelayDeviceEvent.Inactive -> {
@@ -490,29 +503,31 @@ internal class RequestRepository(
                             requestId = event.requestId,
                             eventName = "inactive event",
                         )?.let { return@withLock it }
-                        awaitingStates.remove(event.requestId)
+                        val responseWasOutstanding = durableRelayState.outstanding ==
+                            DurableRelayOperation.Response(event.clientId, event.requestId)
                         if (event.kind == RelayMessageKind.RESPONSE) {
                             dao.markResponseOutboxFinished(event.requestId)
-                            awaitingResponses.remove(event.requestId)
+                            durableRelayState.clearExchange(event.clientId, event.requestId)
+                            if (responseWasOutstanding) {
+                                // A response-specific inactive reply does not associate the socket;
+                                // resume once to reconcile the exchange itself.
+                                durableRelayState.resumedRequestIds.remove(event.requestId)
+                            }
                         } else if (event.kind == null) {
                             endRequestExchange(
                                 event.requestId,
                                 currentTimeMillis(),
                                 "The relay no longer has this exchange.",
                             )
-                            awaitingResponses.remove(event.requestId)
-                            awaitingStates.remove(event.requestId)
+                            durableRelayState.clearExchange(event.clientId, event.requestId)
+                        } else {
+                            durableRelayState.clearResume(event.clientId, event.requestId)
                         }
                         null
                     }
                     is RelayDeviceEvent.Error -> handleRelayError(
                         event = event,
-                        credentials = credentials,
-                        connection = connection,
-                        awaitingClientStates = awaitingClientStates,
-                        rejectedClientStateMutations = rejectedClientStateMutations,
-                        awaitingResponses = awaitingResponses,
-                        awaitingStates = awaitingStates,
+                        durableRelayState = durableRelayState,
                     )
                     is RelayDeviceEvent.Closed -> RequestSyncResult.RelayUnavailable(
                         "Relay connection closed (${event.code}): ${event.reason}",
@@ -522,13 +537,14 @@ internal class RequestRepository(
                     }
                     RelayDeviceEvent.CaughtUp -> null
                 }
-            }
-            if (failure != null) return failure
-            operationMutex.withLock {
-                dao.deleteSettledHiddenRequests(
-                    currentTimeMillis() - IDEMPOTENCY_RETENTION_MILLIS,
+                eventFailure ?: sendNextDurableOperation(
+                    credentials = credentials,
+                    connection = connection,
+                    durableRelayState = durableRelayState,
                 )
             }
+            if (failure != null) return failure
+            pruneExpiredRequestState()
         }
         return RequestSyncResult.Success
     }
@@ -556,86 +572,86 @@ internal class RequestRepository(
     private suspend fun flushPendingChanges(
         credentials: RelayDeviceCredentials,
         connection: RelayDeviceConnection,
-        awaitingClientStates: MutableMap<String, RelayClientState>,
-        rejectedClientStateMutations: Map<String, RelayClientState>,
-        awaitingResponses: MutableMap<String, String>,
-        awaitingStates: MutableMap<String, String>,
+        durableRelayState: DurableRelayState,
     ): RequestSyncResult? {
         while (pendingChanges.tryReceive().isSuccess) {
             // Changes made after this drain remain queued for the next pass.
         }
         return operationMutex.withLock {
-            sendNextClientState(
+            sendNextDurableOperation(
                 credentials = credentials,
                 connection = connection,
-                awaitingClientStates = awaitingClientStates,
-                rejectedClientStateMutations = rejectedClientStateMutations,
-            )?.let { return@withLock it }
-
-            for (request in dao.getUnfinishedResponseOutboxes()) {
-                if (request.id in awaitingResponses) continue
-                if (request.deviceIdentityId != credentials.deviceIdentityId) continue
-                if (
-                    !connection.send(
-                        RelayDeviceFrame.Response(
-                            clientId = request.clientId,
-                            requestId = request.id,
-                            payload = json.parseToJsonElement(checkNotNull(request.responseJson)),
-                        ),
-                    )
-                ) {
-                    return@withLock RequestSyncResult.RelayUnavailable(
-                        "Could not send relay response.",
-                    )
-                }
-                awaitingResponses[request.id] = request.clientId
-            }
-
-            for (request in dao.getOpenExchanges()) {
-                if (request.id in awaitingStates) continue
-                if (request.deviceIdentityId != credentials.deviceIdentityId) continue
-                if (
-                    !connection.send(
-                        RelayDeviceFrame.Resume(request.clientId, request.id),
-                    )
-                ) {
-                    return@withLock RequestSyncResult.RelayUnavailable(
-                        "Could not resume relay exchange.",
-                    )
-                }
-                awaitingStates[request.id] = request.clientId
-            }
-            null
+                durableRelayState = durableRelayState,
+            )
         }
+    }
+
+    private suspend fun sendNextDurableOperation(
+        credentials: RelayDeviceCredentials,
+        connection: RelayDeviceConnection,
+        durableRelayState: DurableRelayState,
+    ): RequestSyncResult? {
+        if (durableRelayState.outstanding != null) return null
+
+        sendNextClientState(
+            credentials = credentials,
+            connection = connection,
+            durableRelayState = durableRelayState,
+        )?.let { return it }
+        if (durableRelayState.outstanding != null) return null
+
+        for (request in dao.getUnfinishedResponseOutboxes()) {
+            if (request.deviceIdentityId != credentials.deviceIdentityId) continue
+            sendDurableResponse(
+                connection = connection,
+                clientId = request.clientId,
+                requestId = request.id,
+                response = json.parseToJsonElement(checkNotNull(request.responseJson)),
+                durableRelayState = durableRelayState,
+            )?.let { return it }
+            if (durableRelayState.outstanding != null) return null
+        }
+
+        for (request in dao.getOpenExchanges()) {
+            if (request.id in durableRelayState.resumedRequestIds) continue
+            if (request.deviceIdentityId != credentials.deviceIdentityId) continue
+            connection.send(
+                RelayDeviceFrame.Resume(request.clientId, request.id),
+            ).controlFrameFailure(
+                "Could not resume relay exchange.",
+            )?.let { return it }
+            durableRelayState.resumedRequestIds += request.id
+            durableRelayState.outstanding = DurableRelayOperation.Resume(
+                clientId = request.clientId,
+                requestId = request.id,
+            )
+            return null
+        }
+        return null
     }
 
     private suspend fun sendNextClientState(
         credentials: RelayDeviceCredentials,
         connection: RelayDeviceConnection,
-        awaitingClientStates: MutableMap<String, RelayClientState>,
-        rejectedClientStateMutations: Map<String, RelayClientState>,
+        durableRelayState: DurableRelayState,
     ): RequestSyncResult? {
-        if (awaitingClientStates.isNotEmpty()) return null
-
         for (attempt in dao.getPairingAttempts()) {
             val rootRequest = dao.getRequestById(attempt.requestId) ?: continue
             if (rootRequest.deviceIdentityId != credentials.deviceIdentityId) continue
-            if (
-                attempt.state == PairingState.REJECTED.storedName &&
-                attempt.relayClientState == RelayClientState.PENDING.wireName &&
-                attempt.desiredRelayClientState == RelayClientState.REVOKED.wireName
-            ) {
-                // A pending candidate cannot be revoked yet. Preserve the desired state so a
-                // late activation acknowledgement is followed by revocation.
-                continue
-            }
             val desired = attempt.desiredRelayClientState?.toRelayClientState() ?: continue
             if (attempt.relayClientState == desired.wireName) continue
-            if (rejectedClientStateMutations[attempt.clientId] == desired) continue
-            if (!connection.send(RelayDeviceFrame.SetClientState(attempt.clientId, desired))) {
-                return RequestSyncResult.RelayUnavailable("Could not send relay client state.")
+            if (durableRelayState.rejectedClientStateMutations[attempt.clientId] == desired) {
+                continue
             }
-            awaitingClientStates[attempt.clientId] = desired
+            connection.send(
+                RelayDeviceFrame.SetClientState(attempt.clientId, desired),
+            ).controlFrameFailure(
+                "Could not send relay client state.",
+            )?.let { return it }
+            durableRelayState.outstanding = DurableRelayOperation.ClientState(
+                clientId = attempt.clientId,
+                desired = desired,
+            )
             return null
         }
 
@@ -643,11 +659,16 @@ internal class RequestRepository(
             if (client.deviceIdentityId != credentials.deviceIdentityId) continue
             val desired = client.desiredRelayClientState?.toRelayClientState() ?: continue
             if (client.relayClientState == desired.wireName) continue
-            if (rejectedClientStateMutations[client.clientId] == desired) continue
-            if (!connection.send(RelayDeviceFrame.SetClientState(client.clientId, desired))) {
-                return RequestSyncResult.RelayUnavailable("Could not send relay client state.")
-            }
-            awaitingClientStates[client.clientId] = desired
+            if (durableRelayState.rejectedClientStateMutations[client.clientId] == desired) continue
+            connection.send(
+                RelayDeviceFrame.SetClientState(client.clientId, desired),
+            ).controlFrameFailure(
+                "Could not send relay client state.",
+            )?.let { return it }
+            durableRelayState.outstanding = DurableRelayOperation.ClientState(
+                clientId = client.clientId,
+                desired = desired,
+            )
             return null
         }
         return null
@@ -655,34 +676,28 @@ internal class RequestRepository(
 
     private suspend fun handleRelayError(
         event: RelayDeviceEvent.Error,
-        credentials: RelayDeviceCredentials,
-        connection: RelayDeviceConnection,
-        awaitingClientStates: MutableMap<String, RelayClientState>,
-        rejectedClientStateMutations: MutableMap<String, RelayClientState>,
-        awaitingResponses: MutableMap<String, String>,
-        awaitingStates: MutableMap<String, String>,
+        durableRelayState: DurableRelayState,
     ): RequestSyncResult? {
         val scope = when (val scope = event.scope) {
             RelayDeviceErrorScope.Unscoped -> {
                 if (event.code == "INVALID_CLIENT_STATE" && !event.retryable) {
-                    val rejected = awaitingClientStates.entries.singleOrNull()
+                    val rejected = durableRelayState.outstanding
+                        as? DurableRelayOperation.ClientState
                         ?: return event.toSynchronizationFailure()
-                    awaitingClientStates.remove(rejected.key)
-                    rejectedClientStateMutations[rejected.key] = rejected.value
-                    return sendNextClientState(
-                        credentials = credentials,
-                        connection = connection,
-                        awaitingClientStates = awaitingClientStates,
-                        rejectedClientStateMutations = rejectedClientStateMutations,
-                    )
+                    durableRelayState.outstanding = null
+                    durableRelayState.rejectedClientStateMutations[rejected.clientId] =
+                        rejected.desired
+                    return null
                 }
                 return event.toSynchronizationFailure()
             }
             is RelayDeviceErrorScope.Exchange -> scope
         }
         val matchesOutstandingOperation = when (scope.kind) {
-            RelayMessageKind.RESPONSE -> awaitingResponses[scope.requestId] == scope.clientId
-            null -> awaitingStates[scope.requestId] == scope.clientId
+            RelayMessageKind.RESPONSE -> durableRelayState.outstanding ==
+                DurableRelayOperation.Response(scope.clientId, scope.requestId)
+            null -> durableRelayState.outstanding ==
+                DurableRelayOperation.Resume(scope.clientId, scope.requestId)
             RelayMessageKind.REQUEST,
             RelayMessageKind.COMPLETION,
             -> false
@@ -695,12 +710,12 @@ internal class RequestRepository(
         when (scope.kind) {
             RelayMessageKind.RESPONSE -> {
                 dao.markResponseOutboxFinished(scope.requestId)
-                awaitingResponses.remove(scope.requestId)
+                durableRelayState.clearResponse(scope.clientId, scope.requestId)
+                durableRelayState.resumedRequestIds.remove(scope.requestId)
             }
             null -> {
                 endRequestExchange(scope.requestId, currentTimeMillis(), event.message)
-                awaitingResponses.remove(scope.requestId)
-                awaitingStates.remove(scope.requestId)
+                durableRelayState.clearExchange(scope.clientId, scope.requestId)
             }
             RelayMessageKind.REQUEST,
             RelayMessageKind.COMPLETION,
@@ -721,13 +736,8 @@ internal class RequestRepository(
 
     private fun initialSynchronizationComplete(
         caughtUp: Boolean,
-        awaitingClientStates: Map<String, RelayClientState>,
-        awaitingResponses: Map<String, String>,
-        awaitingStates: Map<String, String>,
-    ): Boolean = caughtUp &&
-        awaitingClientStates.isEmpty() &&
-        awaitingResponses.isEmpty() &&
-        awaitingStates.isEmpty()
+        durableRelayState: DurableRelayState,
+    ): Boolean = caughtUp && durableRelayState.outstanding == null
 
     private suspend fun applyClientState(event: RelayDeviceEvent.ClientState) {
         // Apply the independently retryable durable-client transaction first. If its audit insert
@@ -785,32 +795,32 @@ internal class RequestRepository(
     ) {
         val request = dao.getRequestById(relayRequestId) ?: return
         if (request.exchangeEndedAt != null) return
-        when (request.kind) {
-            RequestKind.PAIRING.storedName -> {
+        when (request.kind.toRequestKind()) {
+            RequestKind.PAIRING -> {
                 pairingRequests.endInitialExchange(request.id, now, message)
             }
-            RequestKind.SECRET_USE.storedName -> {
+            RequestKind.SECRET_USE -> {
                 invocationRequests.expire(request, message, now)
             }
-            RequestKind.GIT_SIGN.storedName -> {
+            RequestKind.GIT_SIGN -> {
                 gitSigningRequests.expire(request, message, now)
             }
-            RequestKind.SSH_AUTHENTICATE.storedName -> {
+            RequestKind.SSH_AUTHENTICATE -> {
                 sshAuthenticationRequests.expire(request, message, now)
             }
-            RequestKind.SECRET_LIST.storedName -> {
+            RequestKind.SECRET_LIST -> {
                 secretManagement.expireSecretList(request, message, now)
             }
-            RequestKind.SECRET_UPLOAD.storedName -> {
+            RequestKind.SECRET_UPLOAD -> {
                 secretManagement.expireSecretUpload(request, message, now)
             }
-            RequestKind.PAIRING_REMOVE.storedName -> {
+            RequestKind.PAIRING_REMOVE -> {
                 clientRemovalRequests.expire(request, message, now)
             }
-            RequestKind.PAIRING_FINISH.storedName -> {
+            RequestKind.PAIRING_FINISH -> {
                 pairingRequests.endFinishExchange(request.id, now, message)
             }
-            RequestKind.UNKNOWN.storedName -> {
+            RequestKind.UNKNOWN -> {
                 dao.updateEndedRequest(
                     request.copy(
                         state = InboxRequestState.COMPLETED.storedName,
@@ -822,6 +832,79 @@ internal class RequestRepository(
                 )
             }
         }
+    }
+
+    private suspend fun sendDurableResponse(
+        connection: RelayDeviceConnection,
+        clientId: String,
+        requestId: String,
+        response: JsonElement,
+        durableRelayState: DurableRelayState,
+    ): RequestSyncResult? {
+        val firstResult = connection.send(
+            RelayDeviceFrame.Response(clientId, requestId, response),
+        )
+        if (firstResult == RelayFrameSendResult.Sent) {
+            durableRelayState.outstanding = DurableRelayOperation.Response(clientId, requestId)
+            // Publishing a response associates this device connection with the exchange.
+            durableRelayState.resumedRequestIds += requestId
+            return null
+        }
+        if (firstResult == RelayFrameSendResult.Unavailable) {
+            return RequestSyncResult.RelayUnavailable("Could not send relay response.")
+        }
+
+        val fallback = replaceOversizedResponse(requestId)
+        if (fallback == null) {
+            endUndeliverableResponse(requestId)
+            return null
+        }
+        return when (
+            connection.send(RelayDeviceFrame.Response(clientId, requestId, fallback))
+        ) {
+            RelayFrameSendResult.Sent -> {
+                durableRelayState.outstanding =
+                    DurableRelayOperation.Response(clientId, requestId)
+                durableRelayState.resumedRequestIds += requestId
+                null
+            }
+            RelayFrameSendResult.Unavailable -> {
+                RequestSyncResult.RelayUnavailable("Could not send relay response.")
+            }
+            RelayFrameSendResult.FrameTooLarge -> {
+                endUndeliverableResponse(requestId)
+                null
+            }
+        }
+    }
+
+    private suspend fun replaceOversizedResponse(requestId: String): JsonElement? {
+        val request = dao.getRequestById(requestId) ?: return null
+        if (request.exchangeEndedAt != null) return null
+        val fallback = sealStoredPairedResponsePayload(
+            request = request,
+            plaintext = pairedRequestProtocol.errorResponse(
+                PairedRequestErrorCode.RESPONSE_TOO_LARGE,
+            ),
+        ) ?: return null
+        check(
+            dao.updateRequest(
+                request.copy(
+                    responseJson = fallback.toString(),
+                    responseOutboxFinished = false,
+                    error = PairedRequestErrorCode.RESPONSE_TOO_LARGE.message,
+                ),
+            ) == 1,
+        )
+        return fallback
+    }
+
+    private suspend fun endUndeliverableResponse(requestId: String) {
+        endRequestExchange(
+            requestId,
+            currentTimeMillis(),
+            RESPONSE_FRAME_TOO_LARGE_MESSAGE,
+        )
     }
 
     suspend fun chooseSas(requestId: String, selectedIndex: Int?): PairingDecisionResult =
@@ -861,7 +944,7 @@ internal class RequestRepository(
             requestId = requestId,
             allowTemporaryAccess = allowTemporaryAccess,
             openRequest = ::openStoredPairedRequest,
-            sealResponse = ::sealInvocationResponse,
+            sealResponse = ::sealStoredPairedResponse,
         )
     }.also { result ->
         if (
@@ -874,12 +957,12 @@ internal class RequestRepository(
 
     suspend fun denySecretUseRequest(requestId: String): InvocationDecisionResult =
         operationMutex.withLock {
-            invocationRequests.deny(requestId, ::sealInvocationResponse)
+            invocationRequests.deny(requestId, ::sealStoredPairedResponse)
         }.also { result ->
             if (result == InvocationDecisionResult.Decided) requestSync()
         }
 
-    private suspend fun sealInvocationResponse(
+    private suspend fun sealStoredPairedResponse(
         request: InboxRequestEntity,
         plaintext: ByteArray,
     ): JsonElement? {
@@ -890,6 +973,13 @@ internal class RequestRepository(
         ) {
             return null
         }
+        return sealStoredPairedResponsePayload(request, plaintext)
+    }
+
+    private suspend fun sealStoredPairedResponsePayload(
+        request: InboxRequestEntity,
+        plaintext: ByteArray,
+    ): JsonElement? {
         val credentials = credentialsForRequest(request) ?: return null
         val clientPsk = material.decryptRequestPsk(request) ?: return null
         return runCatching {
@@ -940,7 +1030,7 @@ internal class RequestRepository(
         gitSigningRequests.approve(
             requestId = requestId,
             allowTemporaryAccess = allowTemporaryAccess,
-            sealResponse = ::sealInvocationResponse,
+            sealResponse = ::sealStoredPairedResponse,
         )
     }.also { result ->
         if (
@@ -953,7 +1043,7 @@ internal class RequestRepository(
 
     suspend fun denyGitSignRequest(requestId: String): GitSignDecisionResult =
         operationMutex.withLock {
-            gitSigningRequests.deny(requestId, ::sealInvocationResponse)
+            gitSigningRequests.deny(requestId, ::sealStoredPairedResponse)
         }.also { result ->
             if (result == GitSignDecisionResult.Decided) requestSync()
         }
@@ -975,7 +1065,7 @@ internal class RequestRepository(
         sshAuthenticationRequests.approve(
             requestId = requestId,
             allowTemporaryAccess = allowTemporaryAccess,
-            sealResponse = ::sealInvocationResponse,
+            sealResponse = ::sealStoredPairedResponse,
         )
     }.also { result ->
         if (
@@ -989,7 +1079,7 @@ internal class RequestRepository(
     suspend fun denySshAuthenticationRequest(
         requestId: String,
     ): SshAuthenticationDecisionResult = operationMutex.withLock {
-        sshAuthenticationRequests.deny(requestId, ::sealInvocationResponse)
+        sshAuthenticationRequests.deny(requestId, ::sealStoredPairedResponse)
     }.also { result ->
         if (result == SshAuthenticationDecisionResult.Decided) requestSync()
     }
@@ -1008,11 +1098,12 @@ internal class RequestRepository(
             ) {
                 return null
             }
-            if (existing.exchangeEndedAt != null) return ProcessedRelayMessage()
+            if (existing.exchangeEndedAt != null) return ProcessedRelayMessage
             if (existing.requestJson != requestPayload.toString()) return null
-            return ProcessedRelayMessage(
-                response = existing.responseJson?.let(json::parseToJsonElement),
-            )
+            if (existing.responseJson != null) {
+                dao.reopenResponseOutbox(existing.id)
+            }
+            return ProcessedRelayMessage
         }
 
         return processNewRequest(credentials, message, requestPayload)
@@ -1072,7 +1163,6 @@ internal class RequestRepository(
         val now = currentTimeMillis()
         if (!isFreshRelayRequestId(message.requestId, now)) return null
         if (message.addressId != null) {
-            if (!pairingRequests.isInitialRequest(requestPayload)) return null
             return startPairing(credentials, message, requestPayload)
         }
 
@@ -1168,7 +1258,7 @@ internal class RequestRepository(
                 request = requestPayload,
             )
         }.getOrNull() ?: return null
-        val acceptedSecrets = material.acceptedRequestPsks(
+        val acceptedPsks = material.acceptedRequestPsks(
             client = client,
             relayRequestId = message.requestId,
             opened = opened,
@@ -1178,112 +1268,103 @@ internal class RequestRepository(
         val method = runCatching { pairedRequestProtocol.method(opened.plaintext) }.getOrNull()
         if (method == null) {
             return rejectAuthenticatedRequest(
-                pairing = client,
+                client = client,
                 relayRequestId = message.requestId,
                 requestPayload = requestPayload,
                 opened = opened,
-                acceptedSecrets = acceptedSecrets,
+                acceptedPsks = acceptedPsks,
                 code = PairedRequestErrorCode.INVALID_REQUEST,
                 now = now,
             )
         }
         if (method == PairedRequestProtocol.FINISH_PAIRING_METHOD) {
             return rejectAuthenticatedRequest(
-                pairing = client,
+                client = client,
                 relayRequestId = message.requestId,
                 requestPayload = requestPayload,
                 opened = opened,
-                acceptedSecrets = acceptedSecrets,
+                acceptedPsks = acceptedPsks,
                 code = PairedRequestErrorCode.INVALID_STATE,
                 now = now,
             )
         }
-        val processed = if (method == InvocationProtocol.METHOD) {
-            invocationRequests.processIncoming(
-                pairing = client,
-                relayRequestId = message.requestId,
-                requestPayload = requestPayload,
-                plaintext = opened.plaintext,
-                acceptedSecrets = acceptedSecrets,
-                credentials = credentials,
-                sealResponse = { responsePlaintext ->
-                    runCatching {
-                        pairedRequestProtocol.sealPairedResponse(opened, responsePlaintext)
-                    }.getOrNull()
-                },
-                launchAiReview = ::launchAiReview,
-            )
-        } else if (method == GitSignProtocol.METHOD) {
-            gitSigningRequests.processIncoming(
-                pairing = client,
-                relayRequestId = message.requestId,
-                requestPayload = requestPayload,
-                plaintext = opened.plaintext,
-                acceptedSecrets = acceptedSecrets,
-                credentials = credentials,
-                sealResponse = { responsePlaintext ->
-                    runCatching {
-                        pairedRequestProtocol.sealPairedResponse(opened, responsePlaintext)
-                    }.getOrNull()
-                },
-                launchAiReview = ::launchAiReview,
-            )
-        } else if (method == SshAuthenticationProtocol.METHOD) {
-            sshAuthenticationRequests.processIncoming(
-                pairing = client,
-                relayRequestId = message.requestId,
-                requestPayload = requestPayload,
-                plaintext = opened.plaintext,
-                acceptedSecrets = acceptedSecrets,
-                credentials = credentials,
-                sealResponse = { responsePlaintext ->
-                    runCatching {
-                        pairedRequestProtocol.sealPairedResponse(opened, responsePlaintext)
-                    }.getOrNull()
-                },
-                launchAiReview = ::launchAiReview,
-            )
-        } else if (method == SecretListProtocol.METHOD) {
-            processSecretListRequest(
-                pairing = client,
-                relayRequestId = message.requestId,
-                requestPayload = requestPayload,
-                opened = opened,
-                acceptedSecrets = acceptedSecrets,
-            )
-        } else if (method == SecretUploadProtocol.METHOD) {
-            processSecretUploadRequest(
-                pairing = client,
-                relayRequestId = message.requestId,
-                requestPayload = requestPayload,
-                opened = opened,
-                acceptedSecrets = acceptedSecrets,
-            )
-        } else if (method == PairingRemoveProtocol.METHOD) {
-            processPairingRemoveRequest(
-                pairing = client,
-                relayRequestId = message.requestId,
-                requestPayload = requestPayload,
-                opened = opened,
-                acceptedSecrets = acceptedSecrets,
-            )
-        } else {
-            return rejectAuthenticatedRequest(
-                pairing = client,
-                relayRequestId = message.requestId,
-                requestPayload = requestPayload,
-                opened = opened,
-                acceptedSecrets = acceptedSecrets,
-                code = PairedRequestErrorCode.UNSUPPORTED_METHOD,
-                now = now,
-            )
-        }
-        return processed ?: rejectAuthenticatedRequest(
-            pairing = client,
+        val requestKind = pairedMethodRequestKind(method) ?: return rejectAuthenticatedRequest(
+            client = client,
             relayRequestId = message.requestId,
             requestPayload = requestPayload,
             opened = opened,
-            acceptedSecrets = acceptedSecrets,
+            acceptedPsks = acceptedPsks,
+            code = PairedRequestErrorCode.UNSUPPORTED_METHOD,
+            now = now,
+        )
+        val sealResponse: (ByteArray) -> JsonElement? = { responsePlaintext ->
+            runCatching {
+                pairedRequestProtocol.sealPairedResponse(opened, responsePlaintext)
+            }.getOrNull()
+        }
+        val processed = when (requestKind) {
+            RequestKind.SECRET_USE -> invocationRequests.processIncoming(
+                client = client,
+                relayRequestId = message.requestId,
+                requestPayload = requestPayload,
+                plaintext = opened.plaintext,
+                acceptedPsks = acceptedPsks,
+                credentials = credentials,
+                sealResponse = sealResponse,
+                launchAiReview = ::launchAiReview,
+            )
+            RequestKind.GIT_SIGN -> gitSigningRequests.processIncoming(
+                client = client,
+                relayRequestId = message.requestId,
+                requestPayload = requestPayload,
+                plaintext = opened.plaintext,
+                acceptedPsks = acceptedPsks,
+                credentials = credentials,
+                sealResponse = sealResponse,
+                launchAiReview = ::launchAiReview,
+            )
+            RequestKind.SSH_AUTHENTICATE -> sshAuthenticationRequests.processIncoming(
+                client = client,
+                relayRequestId = message.requestId,
+                requestPayload = requestPayload,
+                plaintext = opened.plaintext,
+                acceptedPsks = acceptedPsks,
+                credentials = credentials,
+                sealResponse = sealResponse,
+                launchAiReview = ::launchAiReview,
+            )
+            RequestKind.SECRET_LIST -> processSecretListRequest(
+                client = client,
+                relayRequestId = message.requestId,
+                requestPayload = requestPayload,
+                opened = opened,
+                acceptedPsks = acceptedPsks,
+            )
+            RequestKind.SECRET_UPLOAD -> processSecretUploadRequest(
+                client = client,
+                relayRequestId = message.requestId,
+                requestPayload = requestPayload,
+                opened = opened,
+                acceptedPsks = acceptedPsks,
+            )
+            RequestKind.PAIRING_REMOVE -> processPairingRemoveRequest(
+                client = client,
+                relayRequestId = message.requestId,
+                requestPayload = requestPayload,
+                opened = opened,
+                acceptedPsks = acceptedPsks,
+            )
+            RequestKind.PAIRING,
+            RequestKind.PAIRING_FINISH,
+            RequestKind.UNKNOWN,
+            -> error("$requestKind is not a paired request method")
+        }
+        return processed ?: rejectAuthenticatedRequest(
+            client = client,
+            relayRequestId = message.requestId,
+            requestPayload = requestPayload,
+            opened = opened,
+            acceptedPsks = acceptedPsks,
             code = PairedRequestErrorCode.INVALID_REQUEST,
             now = now,
         )
@@ -1291,74 +1372,74 @@ internal class RequestRepository(
 
 
     private suspend fun processSecretListRequest(
-        pairing: ClientEntity,
+        client: ClientEntity,
         relayRequestId: String,
         requestPayload: JsonElement,
         opened: OpenedPairedRequest,
-        acceptedSecrets: AcceptedRequestPsks,
+        acceptedPsks: AcceptedRequestPsks,
     ): ProcessedRelayMessage? {
-        val response = secretManagement.receiveSecretList(
-            client = pairing,
+        secretManagement.receiveSecretList(
+            client = client,
             relayRequestId = relayRequestId,
             requestPayload = requestPayload,
             plaintext = opened.plaintext,
-            acceptedPsks = acceptedSecrets,
+            acceptedPsks = acceptedPsks,
         ) { responsePlaintext ->
             runCatching {
                 pairedRequestProtocol.sealPairedResponse(opened, responsePlaintext)
             }.getOrNull()
         } ?: return null
-        return ProcessedRelayMessage(response)
+        return ProcessedRelayMessage
     }
 
     private suspend fun processSecretUploadRequest(
-        pairing: ClientEntity,
+        client: ClientEntity,
         relayRequestId: String,
         requestPayload: JsonElement,
         opened: OpenedPairedRequest,
-        acceptedSecrets: AcceptedRequestPsks,
+        acceptedPsks: AcceptedRequestPsks,
     ): ProcessedRelayMessage? {
-        val response = secretManagement.receiveSecretUpload(
-            client = pairing,
+        secretManagement.receiveSecretUpload(
+            client = client,
             relayRequestId = relayRequestId,
             requestPayload = requestPayload,
             plaintext = opened.plaintext,
-            acceptedPsks = acceptedSecrets,
+            acceptedPsks = acceptedPsks,
         ) { responsePlaintext ->
             runCatching {
                 pairedRequestProtocol.sealPairedResponse(opened, responsePlaintext)
             }.getOrNull()
         } ?: return null
-        return ProcessedRelayMessage(response)
+        return ProcessedRelayMessage
     }
     private suspend fun processPairingRemoveRequest(
-        pairing: ClientEntity,
+        client: ClientEntity,
         relayRequestId: String,
         requestPayload: JsonElement,
         opened: OpenedPairedRequest,
-        acceptedSecrets: AcceptedRequestPsks,
+        acceptedPsks: AcceptedRequestPsks,
     ): ProcessedRelayMessage? {
-        val response = clientRemovalRequests.receive(
-            client = pairing,
+        clientRemovalRequests.receive(
+            client = client,
             relayRequestId = relayRequestId,
             requestPayload = requestPayload,
             plaintext = opened.plaintext,
-            requestPsk = acceptedSecrets.requestPsk,
+            requestPsk = acceptedPsks.requestPsk,
         ) { responsePlaintext ->
             runCatching {
                 pairedRequestProtocol.sealPairedResponse(opened, responsePlaintext)
             }.getOrNull()
         } ?: return null
         requestSync()
-        return ProcessedRelayMessage(response)
+        return ProcessedRelayMessage
     }
 
     private suspend fun rejectAuthenticatedRequest(
-        pairing: ClientEntity,
+        client: ClientEntity,
         relayRequestId: String,
         requestPayload: JsonElement,
         opened: OpenedPairedRequest,
-        acceptedSecrets: AcceptedRequestPsks,
+        acceptedPsks: AcceptedRequestPsks,
         code: PairedRequestErrorCode,
         now: Long,
     ): ProcessedRelayMessage? {
@@ -1374,10 +1455,10 @@ internal class RequestRepository(
                     request = InboxRequestEntity(
                         id = relayRequestId,
                         parentRequestId = null,
-                        deviceIdentityId = pairing.deviceIdentityId,
-                        clientId = pairing.clientId,
-                        clientNameSnapshot = pairing.name,
-                        clientSoftwareJson = pairing.clientSoftwareJson,
+                        deviceIdentityId = client.deviceIdentityId,
+                        clientId = client.clientId,
+                        clientNameSnapshot = client.name,
+                        clientSoftwareJson = client.clientSoftwareJson,
                         kind = RequestKind.UNKNOWN.storedName,
                         state = InboxRequestState.COMPLETED.storedName,
                         listed = false,
@@ -1389,16 +1470,16 @@ internal class RequestRepository(
                         exchangeEndedAt = null,
                         responseOutboxFinished = false,
                     ),
-                    client = pairing.copy(lastSeenAt = now),
-                    requestPsk = acceptedSecrets.requestPsk,
-                    currentClientPsk = acceptedSecrets.currentClientPsk,
-                    previousClientPsk = acceptedSecrets.previousClientPsk,
+                    client = client.copy(lastSeenAt = now),
+                    requestPsk = acceptedPsks.requestPsk,
+                    currentClientPsk = acceptedPsks.currentClientPsk,
+                    previousClientPsk = acceptedPsks.previousClientPsk,
                 )
                 audit.append(
                     records = listOf(
                         rejectedRequestAudit(
-                            clientId = pairing.clientId,
-                            clientName = pairing.auditClientName(),
+                            clientId = client.clientId,
+                            clientName = client.auditClientName(),
                             relayRequestId = relayRequestId,
                             code = code,
                         ),
@@ -1407,7 +1488,16 @@ internal class RequestRepository(
                 )
             }
         }) return null
-        return ProcessedRelayMessage(response)
+        return ProcessedRelayMessage
+    }
+
+    private suspend fun persistRejectedRequest(persist: suspend () -> Unit): Boolean = try {
+        persist()
+        true
+    } catch (cancelled: CancellationException) {
+        throw cancelled
+    } catch (_: Exception) {
+        false
     }
 
     private suspend fun rejectPendingPairingRequest(
@@ -1433,7 +1523,7 @@ internal class RequestRepository(
                 code = code,
             )
         ) return null
-        return ProcessedRelayMessage(response)
+        return ProcessedRelayMessage
     }
 
     private fun rejectedRequestAudit(
@@ -1459,12 +1549,12 @@ internal class RequestRepository(
         if (message.addressId != credentials.addressId || message.clientId != message.requestId) {
             return null
         }
-        val response = pairingRequests.start(
+        if (!pairingRequests.start(
             credentials = credentials,
             requestId = message.requestId,
             requestPayload = requestPayload,
-        ) ?: return null
-        return ProcessedRelayMessage(response)
+        )) return null
+        return ProcessedRelayMessage
     }
 
     private suspend fun processInitialCompletion(
@@ -1473,7 +1563,7 @@ internal class RequestRepository(
         completion: JsonElement,
     ): ProcessedRelayMessage? {
         return if (pairingRequests.completeInitial(credentials, request.id, completion)) {
-            ProcessedRelayMessage()
+            ProcessedRelayMessage
         } else {
             null
         }
@@ -1487,50 +1577,50 @@ internal class RequestRepository(
         val request = dao.getRequestById(message.requestId) ?: return null
         if (request.clientId != message.clientId) return null
         if (request.deviceIdentityId != activeCredentials.deviceIdentityId) return null
-        val isInitialPairing = request.kind == RequestKind.PAIRING.storedName
+        val requestKind = request.kind.toRequestKind()
+        val isInitialPairing = requestKind == RequestKind.PAIRING
         if (isInitialPairing != (message.addressId != null)) return null
-        if (request.exchangeEndedAt != null) return ProcessedRelayMessage()
-        val processed = when (request.kind) {
-            RequestKind.PAIRING.storedName -> {
+        if (request.exchangeEndedAt != null) return ProcessedRelayMessage
+        val processed = when (requestKind) {
+            RequestKind.PAIRING -> {
                 processInitialCompletion(activeCredentials, request, completion)
             }
-            RequestKind.PAIRING_FINISH.storedName -> {
+            RequestKind.PAIRING_FINISH -> {
                 processFinishCompletion(activeCredentials, request, completion)
             }
-            RequestKind.SECRET_USE.storedName -> {
+            RequestKind.SECRET_USE -> {
                 val completed = invocationRequests.complete(request) {
                     openStoredCompletion(activeCredentials, request, completion)
                 }
-                if (completed) ProcessedRelayMessage() else null
+                if (completed) ProcessedRelayMessage else null
             }
-            RequestKind.GIT_SIGN.storedName -> {
+            RequestKind.GIT_SIGN -> {
                 val completed = gitSigningRequests.complete(request) {
                     openStoredCompletion(activeCredentials, request, completion)
                 }
-                if (completed) ProcessedRelayMessage() else null
+                if (completed) ProcessedRelayMessage else null
             }
-            RequestKind.SSH_AUTHENTICATE.storedName -> {
+            RequestKind.SSH_AUTHENTICATE -> {
                 val completed = sshAuthenticationRequests.complete(request) {
                     openStoredCompletion(activeCredentials, request, completion)
                 }
-                if (completed) ProcessedRelayMessage() else null
+                if (completed) ProcessedRelayMessage else null
             }
-            RequestKind.SECRET_LIST.storedName -> {
+            RequestKind.SECRET_LIST -> {
                 processSecretListCompletion(activeCredentials, request, completion)
             }
-            RequestKind.SECRET_UPLOAD.storedName -> {
+            RequestKind.SECRET_UPLOAD -> {
                 processSecretUploadCompletion(activeCredentials, request, completion)
             }
-            RequestKind.PAIRING_REMOVE.storedName -> {
+            RequestKind.PAIRING_REMOVE -> {
                 val completed = clientRemovalRequests.complete(request) {
                     openStoredCompletion(activeCredentials, request, completion)
                 }
-                if (completed) ProcessedRelayMessage() else null
+                if (completed) ProcessedRelayMessage else null
             }
-            RequestKind.UNKNOWN.storedName -> {
+            RequestKind.UNKNOWN -> {
                 processUnknownCompletion(activeCredentials, request, completion)
             }
-            else -> null
         }
         return processed
     }
@@ -1553,7 +1643,7 @@ internal class RequestRepository(
                 exchangeEndedAt = now,
             ),
         )
-        return ProcessedRelayMessage()
+        return ProcessedRelayMessage
     }
 
     private suspend fun processSecretListCompletion(
@@ -1564,7 +1654,7 @@ internal class RequestRepository(
         val processed = secretManagement.completeSecretList(request) {
             openStoredCompletion(activeCredentials, request, completion)
         }
-        return if (processed) ProcessedRelayMessage() else null
+        return if (processed) ProcessedRelayMessage else null
     }
 
     private suspend fun processSecretUploadCompletion(
@@ -1575,7 +1665,7 @@ internal class RequestRepository(
         val processed = secretManagement.completeSecretUpload(request) {
             openStoredCompletion(activeCredentials, request, completion)
         }
-        return if (processed) ProcessedRelayMessage() else null
+        return if (processed) ProcessedRelayMessage else null
     }
     private suspend fun processFinishCompletion(
         activeCredentials: RelayDeviceCredentials,
@@ -1588,7 +1678,7 @@ internal class RequestRepository(
             completion,
         )
         return if (pairingRequests.completeFinish(finishRequest.id, opened)) {
-            ProcessedRelayMessage()
+            ProcessedRelayMessage
         } else {
             null
         }
@@ -1651,8 +1741,18 @@ internal class RequestRepository(
 
     private companion object {
         const val IDEMPOTENCY_RETENTION_MILLIS = 25 * 60 * 60 * 1_000L
+        const val RESPONSE_FRAME_TOO_LARGE_MESSAGE =
+            "The encrypted relay response exceeded the maximum frame size."
     }
 
+}
+
+private fun RelayFrameSendResult.controlFrameFailure(
+    unavailableMessage: String,
+): RequestSyncResult? = when (this) {
+    RelayFrameSendResult.Sent -> null
+    RelayFrameSendResult.Unavailable -> RequestSyncResult.RelayUnavailable(unavailableMessage)
+    RelayFrameSendResult.FrameTooLarge -> RequestSyncResult.InternalFailure("RelayFrameTooLarge")
 }
 
 private fun ClientEntity.auditClientName(): String = name

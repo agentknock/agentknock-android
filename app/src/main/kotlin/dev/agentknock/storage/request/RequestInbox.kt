@@ -110,6 +110,9 @@ internal enum class RequestKind(val storedName: String) {
     UNKNOWN("unknown"),
 }
 
+internal fun String.toRequestKind(): RequestKind =
+    RequestKind.entries.firstOrNull { it.storedName == this } ?: RequestKind.UNKNOWN
+
 internal fun approvalRequestState(
     state: InboxRequestState,
     error: String?,
@@ -327,6 +330,9 @@ internal class RequestInbox(
     private val dao: RequestDao,
     private val pairingProtocol: PairingProtocol = PairingProtocol(),
 ) {
+    suspend fun findRequestKind(id: String): InboxRequestKind? =
+        dao.getRequestById(id)?.kind?.toInboxRequestKind()
+
     fun observeRequests(): Flow<List<InboxRequestSummary>> {
         val visibleRequests = combine(
             dao.observeListedRequests(),
@@ -955,4 +961,13 @@ internal class RequestInbox(
     private companion object {
         val STRING_LIST_SERIALIZER = ListSerializer(String.serializer())
     }
+}
+
+private fun String.toInboxRequestKind(): InboxRequestKind? = when (this) {
+    RequestKind.PAIRING.storedName -> InboxRequestKind.PAIRING
+    RequestKind.SECRET_USE.storedName -> InboxRequestKind.SECRET_USE
+    RequestKind.GIT_SIGN.storedName -> InboxRequestKind.GIT_SIGN
+    RequestKind.SSH_AUTHENTICATE.storedName -> InboxRequestKind.SSH_AUTHENTICATE
+    RequestKind.SECRET_UPLOAD.storedName -> InboxRequestKind.SECRET_UPLOAD
+    else -> null
 }

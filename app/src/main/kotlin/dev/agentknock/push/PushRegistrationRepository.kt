@@ -4,6 +4,7 @@ import dev.agentknock.relay.RelayEndpointResult
 import dev.agentknock.relay.RelayPushRegistrationClient
 import dev.agentknock.relay.RelayPushRegistrationResult
 import dev.agentknock.relay.RelayPushRegistrationState
+import dev.agentknock.relay.isTransientRelayStatus
 import dev.agentknock.storage.device.RelayDeviceAuthorizationResult
 import dev.agentknock.storage.device.RelayDeviceAuthorizationSource
 import kotlinx.coroutines.flow.MutableStateFlow
@@ -31,6 +32,9 @@ internal sealed interface PushRegistrationResult {
 
     data object InvalidRelayResponse : PushRegistrationResult
 }
+
+internal fun PushRegistrationResult.needsAutomaticRetry(): Boolean =
+    this is PushRegistrationResult.RelayRejected && status.isTransientRelayStatus()
 
 internal class PushRegistrationRepository(
     private val deviceAuthorization: RelayDeviceAuthorizationSource,

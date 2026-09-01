@@ -4,18 +4,23 @@ package dev.agentknock.ui.secrets
 
 import androidx.activity.compose.BackHandler
 import androidx.compose.foundation.layout.Arrangement
+import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.FlowRow
 import androidx.compose.foundation.layout.Row
+import androidx.compose.foundation.layout.fillMaxHeight
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.padding
+import androidx.compose.foundation.layout.widthIn
 import androidx.compose.foundation.rememberScrollState
+import androidx.compose.foundation.text.KeyboardOptions
 import androidx.compose.foundation.text.selection.SelectionContainer
 import androidx.compose.foundation.verticalScroll
 import androidx.compose.material3.Button
 import androidx.compose.material3.FilledTonalButton
 import androidx.compose.material3.FilterChip
+import androidx.compose.material3.LinearProgressIndicator
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.OutlinedTextField
 import androidx.compose.material3.Scaffold
@@ -30,9 +35,12 @@ import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.saveable.rememberSaveable
 import androidx.compose.runtime.setValue
 import androidx.compose.runtime.withFrameNanos
+import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.platform.LocalFocusManager
 import androidx.compose.ui.text.font.FontFamily
+import androidx.compose.ui.text.input.KeyboardType
+import androidx.compose.ui.text.input.PasswordVisualTransformation
 import androidx.compose.ui.unit.dp
 import dev.agentknock.storage.secret.SshKeyAlgorithm
 import dev.agentknock.storage.secret.SshPrivateKey
@@ -43,14 +51,32 @@ import dev.agentknock.ui.components.NavigationBackButton
 @Composable
 internal fun SshKeyInput(
     draft: SshKeyDraft,
+    enabled: Boolean,
     onDraftChange: (SshKeyDraft) -> Unit,
     onPrepare: () -> Unit,
 ) {
+    val sourceEnabled = enabled && !draft.preparing
     Column(verticalArrangement = Arrangement.spacedBy(12.dp)) {
         Text("Key material", style = MaterialTheme.typography.titleMedium)
+        if (draft.preparedKey != null) {
+            SshKeyPreview(draft.preparedKey)
+            FilledTonalButton(
+                onClick = {
+                    onDraftChange(
+                        draft.withoutPreparation().copy(privateKeyText = ""),
+                    )
+                },
+                enabled = sourceEnabled,
+                modifier = Modifier.fillMaxWidth(),
+            ) {
+                Text("Choose another key")
+            }
+            return@Column
+        }
         Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
             FilterChip(
                 selected = draft.inputMode == SshKeyInputMode.GENERATE,
+                enabled = sourceEnabled,
                 onClick = {
                     onDraftChange(
                         draft.copy(inputMode = SshKeyInputMode.GENERATE).withoutPreparation(),
@@ -60,6 +86,7 @@ internal fun SshKeyInput(
             )
             FilterChip(
                 selected = draft.inputMode == SshKeyInputMode.IMPORT,
+                enabled = sourceEnabled,
                 onClick = {
                     onDraftChange(
                         draft.copy(inputMode = SshKeyInputMode.IMPORT).withoutPreparation(),
@@ -76,6 +103,7 @@ internal fun SshKeyInput(
             ) {
                 FilterChip(
                     selected = draft.algorithm == SshKeyAlgorithm.ED25519,
+                    enabled = sourceEnabled,
                     onClick = {
                         onDraftChange(
                             draft.copy(algorithm = SshKeyAlgorithm.ED25519)
@@ -86,6 +114,7 @@ internal fun SshKeyInput(
                 )
                 FilterChip(
                     selected = draft.algorithm == SshKeyAlgorithm.RSA,
+                    enabled = sourceEnabled,
                     onClick = {
                         onDraftChange(
                             draft.copy(algorithm = SshKeyAlgorithm.RSA).withoutPreparation(),
@@ -109,6 +138,7 @@ internal fun SshKeyInput(
                     onDraftChange(draft.copy(comment = comment).withoutPreparation())
                 },
                 label = { Text("Public key comment (optional)") },
+                enabled = sourceEnabled,
                 singleLine = true,
                 modifier = Modifier.fillMaxWidth(),
             )
@@ -126,30 +156,37 @@ internal fun SshKeyInput(
                     )
                 },
                 label = { Text("OpenSSH private key") },
+                enabled = sourceEnabled,
                 minLines = 6,
                 maxLines = 12,
+                keyboardOptions = KeyboardOptions(
+                    autoCorrectEnabled = false,
+                    keyboardType = KeyboardType.Password,
+                ),
+                visualTransformation = PasswordVisualTransformation(),
                 textStyle = MaterialTheme.typography.bodySmall.copy(fontFamily = FontFamily.Monospace),
                 modifier = Modifier.fillMaxWidth(),
             )
         }
-        if (draft.preparedKey == null) {
-            FilledTonalButton(
+        if (draft.preparing) LinearProgressIndicator(Modifier.fillMaxWidth())
+        FilledTonalButton(
                 onClick = onPrepare,
-                enabled = draft.inputMode == SshKeyInputMode.GENERATE ||
-                    draft.privateKeyText.isNotBlank(),
+                enabled = enabled && !draft.preparing && (
+                    draft.inputMode == SshKeyInputMode.GENERATE ||
+                        draft.privateKeyText.isNotBlank()
+                    ),
                 modifier = Modifier.fillMaxWidth(),
             ) {
                 Text(
-                    if (draft.inputMode == SshKeyInputMode.GENERATE) {
+                    if (draft.preparing) {
+                        "Preparing key…"
+                    } else if (draft.inputMode == SshKeyInputMode.GENERATE) {
                         "Generate and review"
                     } else {
                         "Review key"
                     },
                 )
             }
-        } else {
-            SshKeyPreview(draft.preparedKey)
-        }
         draft.error?.let {
             Text(
                 it,
@@ -186,6 +223,7 @@ private fun SshKeyPreview(key: SshPrivateKey) {
 @Composable
 internal fun SshKeyEditorScreen(
     editor: SshKeyEditorState,
+    enabled: Boolean,
     onEditorChange: (SshKeyEditorState) -> Unit,
     onDismiss: () -> Unit,
     onPrepare: () -> Unit,
@@ -207,25 +245,37 @@ internal fun SshKeyEditorScreen(
         }
     }
     fun requestDismiss() {
+        if (!enabled) return
         if (dirty) confirmDiscard = true else onDismiss()
     }
     BackHandler(onBack = ::requestDismiss)
     Scaffold(
         topBar = {
-            TopAppBar(
-                title = { Text("Replace SSH key") },
-                navigationIcon = {
-                    NavigationBackButton(::requestDismiss)
-                },
-            )
+            Column {
+                TopAppBar(
+                    title = { Text("Replace SSH key") },
+                    navigationIcon = {
+                        NavigationBackButton(
+                            onClick = ::requestDismiss,
+                            enabled = enabled,
+                        )
+                    },
+                )
+                if (!enabled) LinearProgressIndicator(Modifier.fillMaxWidth())
+            }
         },
         snackbarHost = { SnackbarHost(snackbar) },
     ) { padding ->
-        Column(
-            Modifier.fillMaxSize().padding(padding).verticalScroll(scrollState)
-                .padding(20.dp),
-            verticalArrangement = Arrangement.spacedBy(18.dp),
-        ) {
+        Box(Modifier.fillMaxSize().padding(padding)) {
+            Column(
+                Modifier
+                    .fillMaxHeight()
+                    .widthIn(max = 720.dp)
+                    .align(Alignment.TopCenter)
+                    .verticalScroll(scrollState)
+                    .padding(20.dp),
+                verticalArrangement = Arrangement.spacedBy(18.dp),
+            ) {
             InformationSurface {
                 Text(editor.secretName, style = MaterialTheme.typography.titleMedium)
                 InformationRow("Current fingerprint", editor.currentKey.fingerprint)
@@ -237,6 +287,7 @@ internal fun SshKeyEditorScreen(
             }
             SshKeyInput(
                 draft = draft,
+                enabled = enabled,
                 onDraftChange = { sshKeyDraft ->
                     onEditorChange(editor.copy(sshKeyDraft = sshKeyDraft))
                 },
@@ -247,13 +298,15 @@ internal fun SshKeyEditorScreen(
             )
             Button(
                 onClick = onReplace,
-                enabled = draft.preparedKey != null,
+                enabled = enabled && draft.preparedKey != null,
                 modifier = Modifier.fillMaxWidth(),
             ) { Text("Replace key") }
+            }
         }
     }
     if (confirmDiscard) {
         DiscardChangesDialog(
+            enabled = enabled,
             onDismiss = { confirmDiscard = false },
             onDiscard = onDismiss,
         )

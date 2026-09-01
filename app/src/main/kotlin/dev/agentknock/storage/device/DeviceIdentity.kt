@@ -137,14 +137,34 @@ internal interface DeviceIdentityDao {
     ): Int
 
     @Query(
-        "UPDATE device_identities SET role = :retiredRole " +
-            "WHERE id = :activeId AND role = :activeRole",
+        """
+        UPDATE device_identities
+        SET role = :retiredRole,
+            address = '',
+            device_id = '',
+            claim_attempted_at = NULL,
+            pairing_enabled = 0,
+            instructions = ''
+        WHERE id = :activeId AND role = :activeRole
+        """,
     )
     suspend fun retireActiveIdentity(
         activeId: String,
         activeRole: String,
         retiredRole: String,
     ): Int
+
+    @Query(
+        """
+        DELETE FROM device_identities
+        WHERE role = :retiredRole
+          AND NOT EXISTS (
+            SELECT 1 FROM inbox_requests
+            WHERE inbox_requests.device_identity_id = device_identities.id
+          )
+        """,
+    )
+    suspend fun deleteOrphanedRetiredIdentities(retiredRole: String): Int
 
     @Query(
         """
@@ -186,6 +206,17 @@ internal interface DeviceIdentityDao {
         """,
     )
     suspend fun abandonPairingAttempts(identityId: String, now: Long): Int
+
+    @Query(
+        """
+        UPDATE ssh_authentication_requests
+        SET message = NULL
+        WHERE request_id IN (
+            SELECT id FROM inbox_requests WHERE device_identity_id = :identityId
+        )
+        """,
+    )
+    suspend fun discardSshAuthenticationMessages(identityId: String): Int
 
     @Query(
         """
@@ -241,34 +272,8 @@ internal interface DeviceIdentityDao {
     )
     suspend fun deleteRequestPsks(identityId: String): Int
 
-    @Query(
-        """
-        DELETE FROM client_psks
-        WHERE client_id IN (
-            SELECT client_id FROM clients WHERE device_identity_id = :identityId
-        )
-        """,
-    )
-    suspend fun deleteClientPsks(identityId: String): Int
-
-    @Query(
-        """
-        DELETE FROM temporary_access_grants
-        WHERE client_id IN (
-            SELECT client_id FROM clients WHERE device_identity_id = :identityId
-        )
-        """,
-    )
-    suspend fun deleteTemporaryAccessGrants(identityId: String): Int
-
-    @Query(
-        """
-        UPDATE clients
-        SET desired_relay_client_state = NULL
-        WHERE device_identity_id = :identityId
-        """,
-    )
-    suspend fun clearClientRelayIntent(identityId: String): Int
+    @Query("DELETE FROM clients WHERE device_identity_id = :identityId")
+    suspend fun deleteClients(identityId: String): Int
 
     @Query(
         """
@@ -290,6 +295,20 @@ internal interface DeviceIdentityDao {
     suspend fun updateCandidateAddress(
         candidateId: String,
         address: String,
+        candidateRole: String,
+    ): Int
+
+    @Query(
+        """
+        UPDATE device_identities
+        SET pairing_enabled = 1,
+            instructions = :instructions
+        WHERE id = :candidateId AND role = :candidateRole
+        """,
+    )
+    suspend fun prepareReplacementCandidate(
+        candidateId: String,
+        instructions: String,
         candidateRole: String,
     ): Int
 
@@ -361,21 +380,28 @@ internal interface DeviceIdentityDao {
             return true
         }
         if (active != null) {
+            check(
+                prepareReplacementCandidate(
+                    candidateId = candidate.id,
+                    instructions = active.instructions,
+                    candidateRole = candidateRole,
+                ) == 1,
+            )
             abandonRequests(
                 identityId = active.id,
                 now = now,
                 error = DEVICE_IDENTITY_REPLACED_REQUEST_ERROR,
             )
             abandonPairingAttempts(active.id, now)
+            discardSshAuthenticationMessages(active.id)
             deleteUploadEnvironmentValues(active.id)
             deleteUploadSshKeys(active.id)
             rejectPendingUploads(active.id, now)
             deleteRequestPsks(active.id)
-            deleteClientPsks(active.id)
-            deleteTemporaryAccessGrants(active.id)
-            clearClientRelayIntent(active.id)
+            deleteClients(active.id)
             deleteCredentials(active.id)
             check(retireActiveIdentity(active.id, activeRole, retiredRole) == 1)
+            deleteOrphanedRetiredIdentities(retiredRole)
         }
         return markCandidateActive(
             candidateId = candidateId,

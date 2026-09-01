@@ -29,6 +29,7 @@ import androidx.work.WorkManager
 import androidx.work.WorkerParameters
 import androidx.work.await
 import androidx.work.workDataOf
+import com.google.firebase.messaging.FirebaseMessaging
 import com.google.firebase.messaging.FirebaseMessagingService
 import com.google.firebase.messaging.RemoteMessage
 import dev.agentknock.AgentknockApplication
@@ -42,7 +43,10 @@ import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.SupervisorJob
 import kotlinx.coroutines.launch
+import kotlinx.coroutines.suspendCancellableCoroutine
 import java.util.concurrent.TimeUnit
+import kotlin.coroutines.resume
+import kotlin.coroutines.resumeWithException
 
 @SuppressLint("MissingFirebaseInstanceTokenRefresh")
 class AgentknockMessagingService : FirebaseMessagingService() {
@@ -97,7 +101,7 @@ class PushRegistrationWorker(
                     TAG,
                     "Relay rejected FCM registration (HTTP ${result.status}, ${result.code})",
                 )
-                Result.failure()
+                if (result.needsAutomaticRetry()) Result.retry() else Result.failure()
             }
             PushRegistrationResult.InvalidRelayResponse -> {
                 Log.w(TAG, "Relay returned an invalid FCM registration response")
@@ -124,6 +128,65 @@ class PushRegistrationWorker(
                 ExistingWorkPolicy.REPLACE,
                 request,
             )
+        }
+    }
+}
+
+/** Re-establishes the FCM installation registration when the relay reports it missing. */
+class FirebaseRegistrationWorker(
+    applicationContext: Context,
+    parameters: WorkerParameters,
+) : CoroutineWorker(applicationContext, parameters) {
+    override suspend fun doWork(): Result {
+        val container = (applicationContext as AgentknockApplication).container
+        if (container.factoryResetInProgress) return Result.success()
+        return try {
+            FirebaseMessaging.getInstance().awaitRegistration()
+            Result.success()
+        } catch (cancelled: CancellationException) {
+            throw cancelled
+        } catch (failure: Exception) {
+            Log.w(TAG, "Could not register this installation with FCM", failure)
+            Result.retry()
+        }
+    }
+
+    companion object {
+        private const val WORK_NAME = "firebase-registration"
+        private const val TAG = "AgentknockPush"
+
+        fun enqueue(context: Context) {
+            val request = OneTimeWorkRequestBuilder<FirebaseRegistrationWorker>()
+                .setConstraints(networkConstraints())
+                .setBackoffCriteria(BackoffPolicy.EXPONENTIAL, 10, TimeUnit.SECONDS)
+                .build()
+            WorkManager.getInstance(context).enqueueUniqueWork(
+                WORK_NAME,
+                ExistingWorkPolicy.KEEP,
+                request,
+            )
+        }
+    }
+}
+
+private suspend fun FirebaseMessaging.awaitRegistration() {
+    suspendCancellableCoroutine { continuation ->
+        val registration = try {
+            register()
+        } catch (failure: Exception) {
+            continuation.resumeWithException(failure)
+            return@suspendCancellableCoroutine
+        }
+        registration.addOnCompleteListener { completed ->
+            if (!continuation.isActive) return@addOnCompleteListener
+            if (completed.isSuccessful) {
+                continuation.resume(Unit)
+            } else {
+                continuation.resumeWithException(
+                    completed.exception
+                        ?: IllegalStateException("FCM registration failed without a cause"),
+                )
+            }
         }
     }
 }

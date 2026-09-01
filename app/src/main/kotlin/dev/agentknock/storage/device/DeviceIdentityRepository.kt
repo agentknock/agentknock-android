@@ -125,6 +125,9 @@ internal class DeviceIdentityRepository(
     private val currentTimeMillis: () -> Long = System::currentTimeMillis,
     private val cryptographyDispatcher: CoroutineDispatcher = Dispatchers.IO,
 ) : RelayDeviceCredentialSource, RelayDeviceAuthorizationSource {
+    suspend fun pruneRetiredIdentities(): Int =
+        dao.deleteOrphanedRetiredIdentities(DeviceIdentityRole.RETIRED.storedName)
+
     fun observeConfiguration(): Flow<DeviceConfiguration> = combine(
         dao.observeIdentities(),
         dao.observeCredentials(),
@@ -213,7 +216,9 @@ internal class DeviceIdentityRepository(
             deviceId = device.deviceId,
             createdAt = now,
             claimAttemptedAt = null,
-            pairingEnabled = settings?.pairingEnabled ?: true,
+            pairingEnabled = settings?.pairingEnabled
+                ?.takeIf { settings.deviceId == device.deviceId }
+                ?: true,
             instructions = settings?.instructions.orEmpty(),
         )
         val credentials = listOf(
@@ -263,12 +268,12 @@ internal class DeviceIdentityRepository(
                 return ClaimPairingAddressResult.UnsupportedEncryption
             }
             DeviceMaterialResult.Unavailable -> {
-                val replacement = if (previous == null) {
-                    newDeviceMaterial()
+                val (replacement, replacementSettings) = if (previous == null) {
+                    newDeviceMaterial() to candidate
                 } else {
                     when (val activeMaterial = deviceMaterial(previous)) {
-                        is DeviceMaterialResult.Available -> activeMaterial.value
-                        DeviceMaterialResult.Unavailable -> newDeviceMaterial()
+                        is DeviceMaterialResult.Available -> activeMaterial.value to previous
+                        DeviceMaterialResult.Unavailable -> newDeviceMaterial() to candidate
                         DeviceMaterialResult.Corrupted -> {
                             return ClaimPairingAddressResult.CredentialsCorrupted
                         }
@@ -280,7 +285,7 @@ internal class DeviceIdentityRepository(
                 candidate = stageCandidate(
                     address = candidate.address,
                     device = replacement,
-                    settings = candidate,
+                    settings = replacementSettings,
                 )
                 replacement
             }

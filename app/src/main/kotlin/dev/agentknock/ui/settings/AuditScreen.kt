@@ -4,7 +4,6 @@ package dev.agentknock.ui.settings
 
 import android.content.ClipData
 import android.content.ClipboardManager
-import androidx.activity.compose.BackHandler
 import androidx.compose.foundation.Canvas
 import androidx.compose.foundation.background
 import androidx.compose.foundation.clickable
@@ -88,7 +87,6 @@ internal fun AuditSettings(
     val back = {
         if (selectedEventId == null) onBack() else viewModel.selectEvent(null)
     }
-    BackHandler(enabled = selectedEventId != null) { viewModel.selectEvent(null) }
     AuditBrowser(
         events = events,
         selectedEventId = selectedEventId,

@@ -36,10 +36,6 @@ internal class PairingProtocol(
     private val json: Json = Json { ignoreUnknownKeys = true },
     private val random: SecureRandom = SecureRandom(),
 ) {
-    fun isInitialRequest(request: JsonElement): Boolean = runCatching {
-        json.decodeFromJsonElement(PairingRequest.serializer(), request)
-    }.isSuccess
-
     fun generateDeviceRandom(): ByteArray = ByteArray(DEVICE_RANDOM_BYTES).also(random::nextBytes)
 
     fun validateInitialRequest(request: JsonElement): Boolean =

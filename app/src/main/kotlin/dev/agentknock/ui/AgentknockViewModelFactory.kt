@@ -31,10 +31,17 @@ internal fun agentknockViewModelFactory(
 
     return viewModelFactory {
         initializer {
+            AgentknockViewModel(
+                configuration = container.deviceConfiguration,
+                requests = container.requestSummaries,
+                inbox = container.requestInbox,
+                protectedActions = container.protectedActions,
+            )
+        }
+        initializer {
             DeviceSetupViewModel(
-                repository = container.deviceIdentity,
+                settings = container.deviceSettings,
                 addressGenerator = pairingAddresses,
-                refreshConnection = container.requestConnection::refresh,
             )
         }
         initializer {
@@ -56,8 +63,10 @@ internal fun agentknockViewModelFactory(
                 requestSummaries = container.requestSummaries,
                 clientSummaries = container.clientSummaries,
                 secretSummaries = container.secretSummaries,
-                deviceIdentity = container.deviceIdentity,
+                configuration = container.deviceConfiguration,
+                deviceSettings = container.deviceSettings,
                 awaitStorageReady = awaitStorageReady,
+                protectedActions = container.protectedActions,
             )
         }
         initializer {
@@ -68,9 +77,10 @@ internal fun agentknockViewModelFactory(
                 requestSummaries = container.requestSummaries,
                 clientSummaries = container.clientSummaries,
                 secrets = container.secrets,
-                deviceIdentity = container.deviceIdentity,
-                deviceManagement = container.deviceManagement,
+                configuration = container.deviceConfiguration,
+                deviceManagement = container.deviceSettings,
                 awaitStorageReady = awaitStorageReady,
+                protectedActions = container.protectedActions,
             )
         }
         initializer {
@@ -87,7 +97,7 @@ internal fun agentknockViewModelFactory(
         }
         initializer {
             SettingsViewModel(
-                deviceIdentity = container.deviceIdentity,
+                configuration = container.deviceConfiguration,
                 secretSummaries = container.secretSummaries,
                 clientSummaries = container.clientSummaries,
                 pushRegistration = container.pushRegistration,
@@ -99,6 +109,7 @@ internal fun agentknockViewModelFactory(
                         .clearApplicationUserData()
                 },
                 awaitStorageReady = awaitStorageReady,
+                protectedActions = container.protectedActions,
             )
         }
     }

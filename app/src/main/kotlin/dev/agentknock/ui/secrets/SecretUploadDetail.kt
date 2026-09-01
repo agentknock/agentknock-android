@@ -1,23 +1,19 @@
 package dev.agentknock.ui.secrets
 
 import androidx.compose.runtime.Composable
-import androidx.compose.runtime.rememberCoroutineScope
 import androidx.compose.ui.Modifier
 import dev.agentknock.storage.request.InboxRequestContent
 import dev.agentknock.storage.request.InboxRequestDetails
-import kotlinx.coroutines.launch
 
 @Composable
 internal fun SecretUploadSelectionDetail(
     request: InboxRequestDetails?,
-    authorizeProtectedAction: (String, () -> Unit, (String) -> Unit) -> Unit,
+    revealedValues: Map<String, String>,
     viewModel: SecretsViewModel,
-    report: (String) -> Unit,
     onBack: () -> Unit,
     showBack: Boolean,
     modifier: Modifier,
 ) {
-    val scope = rememberCoroutineScope()
     if (request?.content !is InboxRequestContent.SecretUpload) {
         Loading(modifier)
         return
@@ -27,25 +23,31 @@ internal fun SecretUploadSelectionDetail(
         onBack = onBack,
         showBack = showBack,
         onApprove = { name ->
-            scope.launch {
-                report(viewModel.approveSecretUpload(request.id, name).message())
-                viewModel.selectUpload(null)
-            }
+            viewModel.approveSecretUpload(request.id, name)
         },
         onReject = {
-            scope.launch {
-                report(viewModel.rejectSecretUpload(request.id).message())
-                viewModel.selectUpload(null)
-            }
+            viewModel.rejectSecretUpload(request.id)
         },
-        authorizeProtectedAction = authorizeProtectedAction,
-        onReveal = { variableId ->
-            viewModel.readSecretUploadVariable(request.id, variableId)
+        revealedValues = revealedValues,
+        onReveal = { variable ->
+            viewModel.toggleSecretUploadVariableReveal(
+                request.id,
+                variable,
+                "Show uploaded value",
+            )
         },
-        onSensitivityChange = { variableId, sensitive ->
-            viewModel.setSecretUploadVariableSensitivity(request.id, variableId, sensitive)
+        onSensitivityChange = { variable, sensitive ->
+            viewModel.setSecretUploadVariableSensitivity(
+                requestId = request.id,
+                variable = variable,
+                sensitive = sensitive,
+                protectionTitle = if (sensitive) {
+                    null
+                } else {
+                    "Mark ${variable.name} non-sensitive"
+                },
+            )
         },
-        report = report,
         modifier = modifier,
     )
 }

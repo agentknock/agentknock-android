@@ -18,9 +18,11 @@ import androidx.compose.ui.unit.dp
 internal fun NavigationBackButton(
     onClick: () -> Unit,
     modifier: Modifier = Modifier,
+    enabled: Boolean = true,
 ) {
     Surface(
         onClick = onClick,
+        enabled = enabled,
         shape = CircleShape,
         color = MaterialTheme.colorScheme.surfaceContainerHigh,
         modifier = modifier.padding(start = 8.dp).size(44.dp),

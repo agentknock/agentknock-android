@@ -81,8 +81,7 @@ internal fun RequestList(
     onOpenSettings: () -> Unit,
     notificationsEnabled: Boolean,
     onOpen: (String) -> Unit,
-    onApprove: (InboxRequestSummary) -> Unit,
-    onReject: (InboxRequestSummary) -> Unit,
+    onDecision: (InboxRequestSummary, RequestDecisionAction) -> Unit,
     modifier: Modifier = Modifier,
 ) {
     val listState = rememberLazyListState()
@@ -172,8 +171,7 @@ internal fun RequestList(
                         request = request,
                         selected = request.id == selectedRequestId,
                         onClick = { onOpen(request.id) },
-                        onApprove = { onApprove(request) },
-                        onReject = { onReject(request) },
+                        onDecision = { action -> onDecision(request, action) },
                     )
                 }
             }
@@ -186,8 +184,7 @@ private fun RequestRow(
     request: InboxRequestSummary,
     selected: Boolean,
     onClick: () -> Unit,
-    onApprove: () -> Unit,
-    onReject: () -> Unit,
+    onDecision: (RequestDecisionAction) -> Unit,
 ) {
     val approval = request.status as? InboxRequestStatus.Approval
     val canApprove = request.userDecisionAvailable &&
@@ -202,11 +199,15 @@ private fun RequestRow(
         if (completedSwipe == SwipeToDismissBoxValue.Settled) return@LaunchedEffect
 
         when (completedSwipe) {
-            SwipeToDismissBoxValue.StartToEnd -> if (canApprove) onApprove()
-            SwipeToDismissBoxValue.EndToStart -> if (canReject) onReject()
+            SwipeToDismissBoxValue.StartToEnd -> if (canApprove) {
+                onDecision(RequestDecisionAction.APPROVE)
+            }
+            SwipeToDismissBoxValue.EndToStart -> if (canReject) {
+                onDecision(RequestDecisionAction.DENY)
+            }
             SwipeToDismissBoxValue.Settled -> return@LaunchedEffect
         }
-        // The decision runs in its own UI coroutine. Snap back synchronously while it starts;
+        // The view model owns the decision job. Snap back synchronously while it starts;
         // an animated reset can be interrupted by the backing-list update and strand the row.
         swipeState.snapTo(SwipeToDismissBoxValue.Settled)
     }
@@ -220,13 +221,13 @@ private fun RequestRow(
                 customActions = buildList {
                     if (canApprove) {
                         add(CustomAccessibilityAction("Approve once") {
-                            onApprove()
+                            onDecision(RequestDecisionAction.APPROVE)
                             true
                         })
                     }
                     if (canReject) {
                         add(CustomAccessibilityAction(rejectLabel) {
-                            onReject()
+                            onDecision(RequestDecisionAction.DENY)
                             true
                         })
                     }

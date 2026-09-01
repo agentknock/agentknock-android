@@ -333,7 +333,11 @@ private fun PairingControls(
         ) {
             Row(verticalAlignment = Alignment.CenterVertically) {
                 Text(
-                    if (identity.pairingEnabled) "Pairing address" else "Pairing address · paused",
+                    if (identity.pairingEnabled) {
+                        "Pairing address"
+                    } else {
+                        "Pairing address · paused"
+                    },
                     style = MaterialTheme.typography.labelMedium,
                     color = MaterialTheme.colorScheme.onSurfaceVariant,
                     modifier = Modifier.weight(1f),
@@ -351,8 +355,16 @@ private fun PairingControls(
                 }
                 IconButton(onClick = { onSetPairingEnabled(!identity.pairingEnabled) }) {
                     Icon(
-                        if (identity.pairingEnabled) Icons.Outlined.PauseCircle else Icons.Outlined.PlayCircle,
-                        contentDescription = if (identity.pairingEnabled) "Pause new pairings" else "Resume new pairings",
+                        if (identity.pairingEnabled) {
+                            Icons.Outlined.PauseCircle
+                        } else {
+                            Icons.Outlined.PlayCircle
+                        },
+                        contentDescription = if (identity.pairingEnabled) {
+                            "Pause new pairings"
+                        } else {
+                            "Resume new pairings"
+                        },
                     )
                 }
             }

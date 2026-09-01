@@ -388,7 +388,17 @@ class DeviceIdentityRepositoryTest {
         assertEquals("silent-forest-cloud", replacement.address)
         assertNotEquals(original.id, replacement.id)
         assertNotEquals(original.deviceId, replacement.deviceId)
-        assertEquals(original.copy(role = DeviceIdentityRole.RETIRED.storedName), retired)
+        assertEquals(
+            original.copy(
+                role = DeviceIdentityRole.RETIRED.storedName,
+                address = "",
+                deviceId = "",
+                claimAttemptedAt = null,
+                pairingEnabled = false,
+                instructions = "",
+            ),
+            retired,
+        )
         assertTrue(fixture.relay.claims.last().providedAttestation)
         assertEquals(
             setOf("device_token", "device_private_key"),
@@ -397,9 +407,51 @@ class DeviceIdentityRepositoryTest {
         assertEquals(0, fixture.dao.credentials.value.count { it.identityId == original.id })
         assertEquals(2, fixture.dao.credentials.value.count { it.identityId == replacement.id })
         assertEquals(listOf(original.id), fixture.dao.requestPskDeletionIdentityIds)
-        assertEquals(listOf(original.id), fixture.dao.clientPskDeletionIdentityIds)
-        assertEquals(listOf(original.id), fixture.dao.temporaryGrantDeletionIdentityIds)
-        assertEquals(listOf(original.id), fixture.dao.clearedRelayIntentIdentityIds)
+        assertEquals(listOf(original.id), fixture.dao.sshMessageDiscardIdentityIds)
+        assertEquals(listOf(original.id), fixture.dao.clientDeletionIdentityIds)
+    }
+
+    @Test
+    fun `a replacement mailbox starts with pairing enabled`() = runTest {
+        val fixture = Fixture(UnconfinedTestDispatcher(testScheduler))
+        fixture.repository.stageAndClaim("amber-river-maple")
+        val original = fixture.dao.identities.value.single().copy(
+            pairingEnabled = false,
+            instructions = "Only approve work requests.",
+        )
+        fixture.dao.identities.value = listOf(original)
+
+        val replacementKeys = FakeEncryptionKeyStore()
+        val replacementIds = ArrayDeque(listOf("replacement-secret-key", "replacement-device-key"))
+        val replacementManager = VaultKeyManager(
+            dao = fixture.encryptionMetadata,
+            keyStore = replacementKeys,
+            newKeyId = { replacementIds.removeFirst() },
+            currentTimeMillis = { 999L },
+        )
+        replacementManager.initialize()
+        val restored = DeviceIdentityRepository(
+            dao = fixture.dao,
+            keyManager = replacementManager,
+            encryption = AesGcmEncryption(replacementKeys),
+            relay = fixture.relay,
+            audit = NoOpAuditSink,
+            writeTransaction = ImmediateWriteTransaction,
+            currentTimeMillis = { 1_000L },
+            cryptographyDispatcher = UnconfinedTestDispatcher(testScheduler),
+        )
+
+        assertEquals(
+            ClaimPairingAddressResult.Claimed,
+            restored.stageAndClaim("silent-forest-cloud"),
+        )
+
+        val replacement = fixture.dao.identities.value.single {
+            it.role == DeviceIdentityRole.ACTIVE.storedName
+        }
+        assertNotEquals(original.deviceId, replacement.deviceId)
+        assertTrue(replacement.pairingEnabled)
+        assertEquals(original.instructions, replacement.instructions)
     }
 
     private class Fixture(dispatcher: CoroutineDispatcher) {
@@ -464,9 +516,8 @@ private class FakeDeviceIdentityDao : DeviceIdentityDao {
     val identities = MutableStateFlow<List<DeviceIdentityEntity>>(emptyList())
     val credentials = MutableStateFlow<List<DeviceCredentialEntity>>(emptyList())
     val requestPskDeletionIdentityIds = mutableListOf<String>()
-    val clientPskDeletionIdentityIds = mutableListOf<String>()
-    val temporaryGrantDeletionIdentityIds = mutableListOf<String>()
-    val clearedRelayIntentIdentityIds = mutableListOf<String>()
+    val sshMessageDiscardIdentityIds = mutableListOf<String>()
+    val clientDeletionIdentityIds = mutableListOf<String>()
 
     override fun observeIdentities(): Flow<List<DeviceIdentityEntity>> = identities
 
@@ -544,7 +595,14 @@ private class FakeDeviceIdentityDao : DeviceIdentityDao {
         if (identities.value.none { it.id == activeId && it.role == activeRole }) return 0
         identities.value = identities.value.map { identity ->
             if (identity.id == activeId && identity.role == activeRole) {
-                identity.copy(role = retiredRole)
+                identity.copy(
+                    role = retiredRole,
+                    address = "",
+                    deviceId = "",
+                    claimAttemptedAt = null,
+                    pairingEnabled = false,
+                    instructions = "",
+                )
             } else {
                 identity
             }
@@ -555,6 +613,13 @@ private class FakeDeviceIdentityDao : DeviceIdentityDao {
     override suspend fun abandonRequests(identityId: String, now: Long, error: String): Int = 0
 
     override suspend fun abandonPairingAttempts(identityId: String, now: Long): Int = 0
+
+    override suspend fun deleteOrphanedRetiredIdentities(retiredRole: String): Int = 0
+
+    override suspend fun discardSshAuthenticationMessages(identityId: String): Int {
+        sshMessageDiscardIdentityIds += identityId
+        return 0
+    }
 
     override suspend fun deleteUploadEnvironmentValues(identityId: String): Int = 0
 
@@ -573,18 +638,8 @@ private class FakeDeviceIdentityDao : DeviceIdentityDao {
         return 0
     }
 
-    override suspend fun deleteClientPsks(identityId: String): Int {
-        clientPskDeletionIdentityIds += identityId
-        return 0
-    }
-
-    override suspend fun deleteTemporaryAccessGrants(identityId: String): Int {
-        temporaryGrantDeletionIdentityIds += identityId
-        return 0
-    }
-
-    override suspend fun clearClientRelayIntent(identityId: String): Int {
-        clearedRelayIntentIdentityIds += identityId
+    override suspend fun deleteClients(identityId: String): Int {
+        clientDeletionIdentityIds += identityId
         return 0
     }
 
@@ -613,6 +668,25 @@ private class FakeDeviceIdentityDao : DeviceIdentityDao {
         identities.value = identities.value.map { identity ->
             if (identity.id == candidateId && identity.role == candidateRole) {
                 identity.copy(address = address)
+            } else {
+                identity
+            }
+        }
+        return 1
+    }
+
+    override suspend fun prepareReplacementCandidate(
+        candidateId: String,
+        instructions: String,
+        candidateRole: String,
+    ): Int {
+        if (identities.value.none { it.id == candidateId && it.role == candidateRole }) return 0
+        identities.value = identities.value.map { identity ->
+            if (identity.id == candidateId && identity.role == candidateRole) {
+                identity.copy(
+                    pairingEnabled = true,
+                    instructions = instructions,
+                )
             } else {
                 identity
             }

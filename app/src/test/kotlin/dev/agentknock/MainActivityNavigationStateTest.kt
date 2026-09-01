@@ -6,31 +6,30 @@ import org.junit.Test
 
 class MainActivityNavigationStateTest {
     @Test
-    fun `consume clears only the request target that was handled`() {
+    fun `the latest target wins across navigation kinds`() {
         val state = MainActivityNavigationState()
-        val first = RequestNavigation("first")
-        val replacement = RequestNavigation("replacement")
+        val first = ExternalNavigation.Request("first")
+        val replacement = ExternalNavigation.SubscriptionRedemption("token")
 
-        state.openRequest(first.requestId)
-        state.openRequest(replacement.requestId)
-        state.consumeRequest(first)
+        state.open(first)
+        state.open(replacement)
+        state.consume(first)
 
-        assertEquals(replacement, state.request.value)
-        state.consumeRequest(replacement)
-        assertNull(state.request.value)
+        assertEquals(replacement, state.target.value)
+        state.consume(replacement)
+        assertNull(state.target.value)
     }
 
     @Test
-    fun `consume clears only the subscription target that was handled`() {
+    fun `a request can replace a subscription target`() {
         val state = MainActivityNavigationState()
-        val first = SubscriptionNavigation.Redemption("first")
+        val first = ExternalNavigation.InvalidSubscriptionLink
+        val replacement = ExternalNavigation.Request(null)
 
-        state.openSubscription(first)
-        state.openSubscription(SubscriptionNavigation.InvalidLink)
-        state.consumeSubscription(first)
+        state.open(first)
+        state.open(replacement)
+        state.consume(first)
 
-        assertEquals(SubscriptionNavigation.InvalidLink, state.subscription.value)
-        state.consumeSubscription(SubscriptionNavigation.InvalidLink)
-        assertNull(state.subscription.value)
+        assertEquals(replacement, state.target.value)
     }
 }

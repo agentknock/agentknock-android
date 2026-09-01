@@ -29,9 +29,15 @@ internal class DeviceManagementRepository(
     private val writeTransaction: WriteTransaction,
 ) {
     suspend fun setPairingEnabled(enabled: Boolean): DeviceManagementResult {
-        val active = when (val lookup = authorizationLookup()) {
-            is AuthorizationLookup.Available -> lookup.authorization
-            is AuthorizationLookup.Failed -> return lookup.result
+        val active = when (val authorization = deviceAuthorization.activeDeviceAuthorization()) {
+            is RelayDeviceAuthorizationResult.Available -> authorization.authorization
+            RelayDeviceAuthorizationResult.Missing -> return DeviceManagementResult.NoDevice
+            RelayDeviceAuthorizationResult.Unavailable ->
+                return DeviceManagementResult.CredentialsUnavailable
+            RelayDeviceAuthorizationResult.Corrupted ->
+                return DeviceManagementResult.CredentialsCorrupted
+            RelayDeviceAuthorizationResult.UnsupportedEncryption ->
+                return DeviceManagementResult.UnsupportedEncryption
         }
         return when (
             val result = relay.setPairingEnabled(
@@ -40,27 +46,25 @@ internal class DeviceManagementRepository(
                 enabled = enabled,
             )
         ) {
-            is RelayEndpointResult.Success -> {
-                writeTransaction.execute {
-                    check(
-                        deviceIdentityDao.updatePairingEnabled(
-                            identityId = active.deviceIdentityId,
-                            enabled = enabled,
-                            activeRole = DeviceIdentityRole.ACTIVE.storedName,
-                        ) == 1,
-                    )
-                    audit.record(
-                        AuditRecord(
-                            type = if (enabled) {
-                                AuditEventType.NEW_PAIRINGS_RESUMED
-                            } else {
-                                AuditEventType.NEW_PAIRINGS_PAUSED
-                            },
-                            outcome = AuditOutcome.CHANGED,
-                        ),
-                    )
-                    DeviceManagementResult.Changed
-                }
+            is RelayEndpointResult.Success -> writeTransaction.execute {
+                check(
+                    deviceIdentityDao.updatePairingEnabled(
+                        identityId = active.deviceIdentityId,
+                        enabled = enabled,
+                        activeRole = DeviceIdentityRole.ACTIVE.storedName,
+                    ) == 1,
+                )
+                audit.record(
+                    AuditRecord(
+                        type = if (enabled) {
+                            AuditEventType.NEW_PAIRINGS_RESUMED
+                        } else {
+                            AuditEventType.NEW_PAIRINGS_PAUSED
+                        },
+                        outcome = AuditOutcome.CHANGED,
+                    ),
+                )
+                DeviceManagementResult.Changed
             }
             is RelayEndpointResult.Rejected -> DeviceManagementResult.Rejected(
                 result.status,
@@ -80,29 +84,5 @@ internal class DeviceManagementRepository(
                 as? RelayDeviceAuthorizationResult.Available
             )?.authorization ?: return false
         return relay.deleteDevice(active.deviceId, active.deviceToken) is RelayEndpointResult.Success
-    }
-
-    private suspend fun authorizationLookup(): AuthorizationLookup =
-        when (val result = deviceAuthorization.activeDeviceAuthorization()) {
-            is RelayDeviceAuthorizationResult.Available -> AuthorizationLookup.Available(
-                result.authorization,
-            )
-            RelayDeviceAuthorizationResult.Missing -> AuthorizationLookup.Failed(
-                DeviceManagementResult.NoDevice,
-            )
-            RelayDeviceAuthorizationResult.Unavailable -> AuthorizationLookup.Failed(
-                DeviceManagementResult.CredentialsUnavailable,
-            )
-            RelayDeviceAuthorizationResult.Corrupted -> AuthorizationLookup.Failed(
-                DeviceManagementResult.CredentialsCorrupted,
-            )
-            RelayDeviceAuthorizationResult.UnsupportedEncryption -> AuthorizationLookup.Failed(
-                DeviceManagementResult.UnsupportedEncryption,
-            )
-        }
-
-    private sealed interface AuthorizationLookup {
-        data class Available(val authorization: RelayDeviceAuthorization) : AuthorizationLookup
-        data class Failed(val result: DeviceManagementResult) : AuthorizationLookup
     }
 }

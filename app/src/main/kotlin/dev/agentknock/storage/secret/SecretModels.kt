@@ -30,15 +30,12 @@ internal fun SshKeyAlgorithm.canonicalPrivateKeyFormat(): String = when (this) {
     SshKeyAlgorithm.RSA -> RSA_PRIVATE_KEY_FORMAT
 }
 
-internal enum class SecretApprovalMode(
-    val storedName: String,
-    val precedence: Int,
-) {
-    DENY("deny", 0),
-    ASK_ME("ask_me", 1),
-    TEMPORARY("temporary", 1),
-    ASK_AI("ask_ai", 2),
-    APPROVE("approve", 3),
+internal enum class SecretApprovalMode(val storedName: String) {
+    DENY("deny"),
+    ASK_ME("ask_me"),
+    TEMPORARY("temporary"),
+    ASK_AI("ask_ai"),
+    APPROVE("approve"),
 }
 
 internal enum class TemporaryAccessOperation(val storedName: String) {
@@ -74,8 +71,6 @@ internal data class SecretApprovalPolicy(
     val secretId: String,
     val secretName: String,
     val mode: SecretApprovalMode,
-    val defaultMode: SecretApprovalMode,
-    val overridden: Boolean,
     val instructions: String,
     val revision: Long,
     val temporaryAccessExpiresAt: Long? = null,

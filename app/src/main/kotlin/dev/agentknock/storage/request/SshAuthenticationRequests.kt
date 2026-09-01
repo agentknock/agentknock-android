@@ -26,7 +26,6 @@ import dev.agentknock.storage.device.RelayDeviceCredentialSource
 import dev.agentknock.storage.device.RelayDeviceCredentials
 import dev.agentknock.storage.device.RelayDeviceCredentialsResult
 import dev.agentknock.storage.secret.SSH_SECRET_TYPE
-import dev.agentknock.storage.secret.SecretApprovalMode
 import dev.agentknock.storage.secret.SecretApprovalPolicy
 import dev.agentknock.storage.secret.SecretMetadata
 import dev.agentknock.storage.secret.SecretRepository
@@ -41,6 +40,22 @@ import kotlinx.serialization.encodeToString
 import kotlinx.serialization.json.Json
 import kotlinx.serialization.json.JsonElement
 
+internal sealed interface SshAuthenticationDecisionResult {
+    data object Decided : SshAuthenticationDecisionResult
+    data object NotPending : SshAuthenticationDecisionResult
+    data object NotFound : SshAuthenticationDecisionResult
+    data object InvocationUnavailable : SshAuthenticationDecisionResult
+    data object PairingUnavailable : SshAuthenticationDecisionResult
+    data object ApprovalChanged : SshAuthenticationDecisionResult
+    data object KeyChanged : SshAuthenticationDecisionResult
+    data object InvalidMessage : SshAuthenticationDecisionResult
+    data object SecretUnavailable : SshAuthenticationDecisionResult
+    data object SecretCorrupted : SshAuthenticationDecisionResult
+    data object UnsupportedEncryption : SshAuthenticationDecisionResult
+    data object TemporaryAccessUnavailable : SshAuthenticationDecisionResult
+    data object TemporaryAccessNotStarted : SshAuthenticationDecisionResult
+}
+
 internal const val SSH_AUTHENTICATION_DENIAL_MESSAGE =
     "SSH authentication denied on device."
 internal const val SSH_AUTHENTICATION_POLICY_DENIAL_MESSAGE =
@@ -49,12 +64,6 @@ private const val SSH_AUTHENTICATION_COMPLETION_ABORTED_DETAIL =
     "SSH authentication was aborted by the client."
 private const val SSH_AUTHENTICATION_COMPLETION_VERIFICATION_ERROR =
     "SSH authentication completion could not be verified."
-
-private data class SshAuthenticationTemporaryGrant(
-    val policy: SecretApprovalPolicy,
-    val expiresAt: Long,
-    val evaluation: ApprovalEvaluation,
-)
 
 private data class SshInvocationSnapshot(
     val requestId: String,
@@ -80,11 +89,11 @@ internal class SshAuthenticationRequests(
     private val currentTimeMillis: () -> Long = System::currentTimeMillis,
 ) {
     suspend fun processIncoming(
-        pairing: ClientEntity,
+        client: ClientEntity,
         relayRequestId: String,
         requestPayload: JsonElement,
         plaintext: ByteArray,
-        acceptedSecrets: AcceptedRequestPsks,
+        acceptedPsks: AcceptedRequestPsks,
         credentials: RelayDeviceCredentials,
         sealResponse: suspend (ByteArray) -> JsonElement?,
         launchAiReview: (
@@ -100,8 +109,8 @@ internal class SshAuthenticationRequests(
         if (invocationRequest.kind != RequestKind.SECRET_USE.storedName) return null
         val invocation = dao.getSecretUseRequest(invocationRequest.id) ?: return null
         if (
-            invocationRequest.clientId != pairing.clientId ||
-            invocationRequest.deviceIdentityId != pairing.deviceIdentityId ||
+            invocationRequest.clientId != client.clientId ||
+            invocationRequest.deviceIdentityId != client.deviceIdentityId ||
             invocationRequest.state != InboxRequestState.WAITING.storedName ||
             invocationRequest.exchangeEndedAt != null ||
             invocation.decision != ApprovalDecision.APPROVED.storedName ||
@@ -136,7 +145,7 @@ internal class SshAuthenticationRequests(
         val description = secrets.describeRequestedSecrets(listOf(contents.secret))
         val approvalPolicies = secrets.approvalPoliciesForNames(
             listOf(contents.secret),
-            pairing.clientId,
+            client.clientId,
             TemporaryAccessOperation.SSH_AUTHENTICATE,
         )
         val policy = approvalPolicies.singleOrNull()
@@ -159,9 +168,9 @@ internal class SshAuthenticationRequests(
         val initialRequest = InboxRequestEntity(
             id = relayRequestId,
             parentRequestId = invocationRequest.id,
-            deviceIdentityId = pairing.deviceIdentityId,
-            clientId = pairing.clientId,
-            clientNameSnapshot = pairing.name,
+            deviceIdentityId = client.deviceIdentityId,
+            clientId = client.clientId,
+            clientNameSnapshot = client.name,
             clientSoftwareJson = encodeClientSoftware(contents.clientSoftware),
             kind = RequestKind.SSH_AUTHENTICATE.storedName,
             state = if (needsAiReview) {
@@ -199,9 +208,9 @@ internal class SshAuthenticationRequests(
             reviewResult: AiReview?,
             requestAlreadyInserted: Boolean,
         ): ProcessedRelayMessage? {
-            val currentClient = if (needsAiReview) dao.getClient(pairing.clientId) else pairing
+            val currentClient = if (needsAiReview) dao.getClient(client.clientId) else client
             val clientUnavailable = currentClient == null ||
-                currentClient.deviceIdentityId != pairing.deviceIdentityId ||
+                currentClient.deviceIdentityId != client.deviceIdentityId ||
                 currentClient.relayClientState == RelayClientState.REVOKED.wireName ||
                 currentClient.desiredRelayClientState == RelayClientState.REVOKED.wireName
             val invocationUnavailable = !parentInvocationIsActive(initialRequest)
@@ -213,7 +222,7 @@ internal class SshAuthenticationRequests(
             val currentPolicies = if (needsAiReview) {
                 secrets.approvalPoliciesForNames(
                     listOf(contents.secret),
-                    pairing.clientId,
+                    client.clientId,
                     TemporaryAccessOperation.SSH_AUTHENTICATE,
                 )
             } else {
@@ -239,8 +248,8 @@ internal class SshAuthenticationRequests(
                     currentEvaluation == null ||
                     !checkNotNull(initialEvaluation).hasSameSecretPolicies(currentEvaluation) ||
                     currentCredentials?.instructions != credentials.instructions ||
-                    currentClient.name != pairing.name ||
-                    currentClient.instructions != pairing.instructions
+                    currentClient.name != client.name ||
+                    currentClient.instructions != client.instructions
                 )
             val aiReview = if (aiInputsChanged) {
                 AiReview(
@@ -289,8 +298,6 @@ internal class SshAuthenticationRequests(
             }
             val shouldApprove = !aiInputsChanged && denial == null &&
                 evaluation?.isFullyApproved(aiReview?.decision) == true
-            val temporaryAccessUsed = evaluation?.secrets
-                ?.any { it.temporaryAccessExpiresAt != null } == true
             var signature: ByteArray? = null
             if (shouldApprove) {
                 when (
@@ -327,22 +334,27 @@ internal class SshAuthenticationRequests(
                 sealResponse(plaintextResponse) ?: return null
             }
             val decidedAt = currentTimeMillis()
-            val automaticDecision = when {
-                signature != null -> ApprovalDecision.APPROVED
-                denial != null -> ApprovalDecision.DENIED
-                else -> null
-            }
-            val automaticDecisionSource = when {
-                signature != null && aiReview?.decision == AiReviewDecision.APPROVE &&
-                    temporaryAccessUsed -> DECISION_SOURCE_MIXED
-                signature != null && aiReview?.decision == AiReviewDecision.APPROVE ->
-                    DECISION_SOURCE_AI
-                signature != null && temporaryAccessUsed -> DECISION_SOURCE_TEMPORARY_ACCESS
-                signature != null -> DECISION_SOURCE_POLICY
-                aiDenied -> DECISION_SOURCE_AI
-                approvalSettingsDenied -> DECISION_SOURCE_POLICY
-                denial?.first == InvocationDenialReason.INVALID_REQUEST -> DECISION_SOURCE_VALIDATION
-                else -> null
+            val automaticApproval = planAutomaticApproval(
+                outcome = when {
+                    signature != null -> AutomaticApprovalOutcome.APPROVED
+                    denial != null -> AutomaticApprovalOutcome.DENIED
+                    else -> AutomaticApprovalOutcome.ACTION_REQUIRED
+                },
+                evaluation = evaluation,
+                aiDecision = aiReview?.decision,
+                denialSource = when {
+                    aiDenied -> AutomaticApprovalDenialSource.AI
+                    approvalSettingsDenied -> AutomaticApprovalDenialSource.POLICY
+                    else -> null
+                },
+            )
+            val automaticDecision = automaticApproval.decision
+            val automaticDecisionSource = automaticApproval.decisionSource ?: if (
+                denial?.first == InvocationDenialReason.INVALID_REQUEST
+            ) {
+                DECISION_SOURCE_VALIDATION
+            } else {
+                null
             }
             val requestToUpdate = if (requestAlreadyInserted) {
                 dao.getRequestById(relayRequestId) ?: return null
@@ -379,8 +391,8 @@ internal class SshAuthenticationRequests(
                     } else {
                         denial?.second
                     },
-                    clientId = pairing.clientId,
-                    clientName = pairing.name,
+                    clientId = client.clientId,
+                    clientName = client.name,
                     relayRequestId = relayRequestId,
                 )
             }
@@ -395,8 +407,8 @@ internal class SshAuthenticationRequests(
                         decisionSource = AuditDecisionSource.AI_REVIEW,
                         subject = contents.secret,
                         detail = aiReview.auditFailureDetail(),
-                        clientId = pairing.clientId,
-                        clientName = pairing.name,
+                        clientId = client.clientId,
+                        clientName = client.name,
                         relayRequestId = relayRequestId,
                     ),
                     automaticDecisionAudit = automaticDecisionAudit,
@@ -405,18 +417,18 @@ internal class SshAuthenticationRequests(
                 receive(
                     request = finalRequest,
                     authentication = finalAuthentication,
-                    client = pairing.copy(
+                    client = client.copy(
                         clientSoftwareJson = encodeClientSoftware(contents.clientSoftware),
                         lastSeenAt = now,
                     ),
-                    acceptedPsks = acceptedSecrets,
+                    acceptedPsks = acceptedPsks,
                     authorization = authorization.takeIf { automaticDecision != null },
                     automaticDecisionAudit = automaticDecisionAudit,
                 )
             }
             return when (persisted) {
-                ConditionalRequestUpdate.APPLIED -> ProcessedRelayMessage(response)
-                ConditionalRequestUpdate.ACTION_REQUIRED -> ProcessedRelayMessage()
+                ConditionalRequestUpdate.APPLIED -> ProcessedRelayMessage
+                ConditionalRequestUpdate.ACTION_REQUIRED -> ProcessedRelayMessage
                 ConditionalRequestUpdate.UNAVAILABLE -> null
             }
         }
@@ -428,11 +440,11 @@ internal class SshAuthenticationRequests(
                 receive(
                     request = initialRequest,
                     authentication = initialAuthentication,
-                    client = pairing.copy(
+                    client = client.copy(
                         clientSoftwareJson = encodeClientSoftware(contents.clientSoftware),
                         lastSeenAt = now,
                     ),
-                    acceptedPsks = acceptedSecrets,
+                    acceptedPsks = acceptedPsks,
                     authorization = null,
                     automaticDecisionAudit = null,
                 ) == ConditionalRequestUpdate.APPLIED,
@@ -443,7 +455,7 @@ internal class SshAuthenticationRequests(
                     initialRequest.requestJson,
                     {
                         requestAiReview(
-                            pairing = pairing,
+                            client = client,
                             contents = contents,
                             messageDetails = messageDetails,
                             invocation = invocation,
@@ -461,7 +473,7 @@ internal class SshAuthenticationRequests(
                 ),
             )
         }
-        return ProcessedRelayMessage()
+        return ProcessedRelayMessage
     }
 
     suspend fun approve(
@@ -563,7 +575,11 @@ internal class SshAuthenticationRequests(
             }
         }
         val grant = if (allowTemporaryAccess) {
-            prepareTemporaryGrant(policy, storedEvaluation)
+            planTemporaryAccess(
+                policies = listOf(policy),
+                storedEvaluation = storedEvaluation,
+                now = currentTimeMillis(),
+            )
                 ?: return SshAuthenticationDecisionResult.TemporaryAccessUnavailable
         } else {
             null
@@ -875,9 +891,10 @@ internal class SshAuthenticationRequests(
                 return@execute true
             }
             if (opened == CompletionOpenResult.RetryLater) return@execute false
+            val priorError = currentRequest.error
             val softwareMatches = completionResult?.clientSoftware ==
                 currentRequest.clientSoftwareJson?.let(::decodeStoredClientSoftware)
-            val valid = softwareMatches && when (completionResult) {
+            val valid = priorError == null && softwareMatches && when (completionResult) {
                 is SshAuthenticationCompletion.Approved -> {
                     authentication.decision == ApprovalDecision.APPROVED.storedName
                 }
@@ -894,7 +911,11 @@ internal class SshAuthenticationRequests(
                 is SshAuthenticationCompletion.Aborted -> true
                 null -> false
             }
-            val error = if (valid) null else SSH_AUTHENTICATION_COMPLETION_VERIFICATION_ERROR
+            val error = priorError ?: if (valid) {
+                null
+            } else {
+                SSH_AUTHENTICATION_COMPLETION_VERIFICATION_ERROR
+            }
             val now = currentTimeMillis()
             dao.updateSshAuthenticationRequest(
                 request = currentRequest.copy(
@@ -1114,33 +1135,6 @@ internal class SshAuthenticationRequests(
         }
     }
 
-    private fun prepareTemporaryGrant(
-        policy: SecretApprovalPolicy,
-        storedEvaluation: ApprovalEvaluation,
-    ): SshAuthenticationTemporaryGrant? {
-        val secretEvaluation = storedEvaluation.secrets.singleOrNull() ?: return null
-        val aiCanEscalateToTemporaryAccess =
-            storedEvaluation.aiReview?.decision == AiReviewDecision.ASK_USER ||
-                storedEvaluation.aiReview?.failure != null ||
-                storedEvaluation.aiReview == null
-        val eligible = secretEvaluation.temporaryAccessExpiresAt == null && when (policy.mode) {
-            SecretApprovalMode.TEMPORARY -> secretEvaluation.action == ApprovalAction.ASK_ME
-            SecretApprovalMode.ASK_AI -> {
-                secretEvaluation.action == ApprovalAction.ASK_AI && aiCanEscalateToTemporaryAccess
-            }
-            else -> false
-        }
-        if (!eligible) return null
-        val expiresAt = currentTimeMillis() + TEMPORARY_ACCESS_DURATION_MILLIS
-        return SshAuthenticationTemporaryGrant(
-            policy = policy,
-            expiresAt = expiresAt,
-            evaluation = storedEvaluation.copy(
-                secrets = listOf(secretEvaluation.copy(temporaryAccessExpiresAt = expiresAt)),
-            ),
-        )
-    }
-
     private suspend fun persistTemporaryDecision(
         request: InboxRequestEntity,
         authentication: SshAuthenticationRequestEntity,
@@ -1148,7 +1142,7 @@ internal class SshAuthenticationRequests(
         message: ByteArray,
         response: JsonElement,
         authorization: AuthorizationCommitment,
-        grant: SshAuthenticationTemporaryGrant,
+        grant: TemporaryAccessPlan,
     ): SshAuthenticationDecisionResult = writeTransaction.execute {
         val now = currentTimeMillis()
         val currentRequest = dao.getRequestById(request.id)
@@ -1177,13 +1171,13 @@ internal class SshAuthenticationRequests(
             return@execute SshAuthenticationDecisionResult.ApprovalChanged
         }
         val temporaryAccessStarted = secrets.allowTemporaryAccess(
-            policies = listOf(grant.policy),
+            policies = grant.policies,
             clientId = currentRequest.clientId,
             operation = TemporaryAccessOperation.SSH_AUTHENTICATE,
             expiresAt = grant.expiresAt,
         )
         val decisionSource = if (temporaryAccessStarted) {
-            DECISION_SOURCE_TEMPORARY_ACCESS
+            grant.decisionSource
         } else {
             DECISION_SOURCE_USER
         }
@@ -1255,7 +1249,7 @@ internal class SshAuthenticationRequests(
         }
 
     private suspend fun requestAiReview(
-        pairing: ClientEntity,
+        client: ClientEntity,
         contents: SshAuthenticationRequestMessage,
         messageDetails: SshAuthenticationMessageDetails,
         invocation: SecretUseRequestEntity,
@@ -1275,7 +1269,7 @@ internal class SshAuthenticationRequests(
             explanation = "The parent invocation context is unavailable.",
         )
         val request = approvalReviewSshAuthenticationRequest(
-            client = pairing,
+            client = client,
             secretName = contents.secret,
             details = messageDetails,
             invocation = invocation,

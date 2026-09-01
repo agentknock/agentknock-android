@@ -40,32 +40,23 @@ internal class AuthenticationSession(context: Context) {
     val mode: StateFlow<DeviceAuthenticationMode> = _mode.asStateFlow()
     val authenticated: StateFlow<Boolean> = _authenticated.asStateFlow()
 
-    fun authorizeProtectedAction(
+    suspend fun authorizeProtectedAction(
         title: String,
-        authenticate: (String, () -> Unit, (String) -> Unit) -> Unit,
-        onSuccess: () -> Unit,
-        onError: (String) -> Unit,
-    ) {
+        authenticate: suspend (String) -> DeviceAuthenticationResult,
+    ): DeviceAuthenticationResult {
         if (_mode.value.protectedActionAvailable(_authenticated.value)) {
-            onSuccess()
-            return
+            return DeviceAuthenticationResult.Success
         }
-        authenticate(
-            title,
-            {
-                _authenticated.value = true
-                onSuccess()
-            },
-            onError,
-        )
+        return authenticate(title).also { result ->
+            if (result == DeviceAuthenticationResult.Success) _authenticated.value = true
+        }
     }
 
-    fun changeMode(
+    suspend fun changeMode(
         newMode: DeviceAuthenticationMode,
-        authenticate: (String, () -> Unit, (String) -> Unit) -> Unit,
-        onError: (String) -> Unit,
-    ) {
-        if (newMode == _mode.value) return
+        authenticate: suspend (String) -> DeviceAuthenticationResult,
+    ): DeviceAuthenticationResult {
+        if (newMode == _mode.value) return DeviceAuthenticationResult.Success
         val applyChange = {
             preferences.edit { putString(MODE_KEY, newMode.storedName) }
             _mode.value = newMode
@@ -73,16 +64,14 @@ internal class AuthenticationSession(context: Context) {
         }
         if (_authenticated.value) {
             applyChange()
-        } else {
-            authenticate(
-                "Change device authentication",
-                {
-                    _authenticated.value = true
-                    applyChange()
-                },
-                onError,
-            )
+            return DeviceAuthenticationResult.Success
         }
+        val result = authenticate("Change device authentication")
+        if (result == DeviceAuthenticationResult.Success) {
+            _authenticated.value = true
+            applyChange()
+        }
+        return result
     }
 
     fun onForeground() {
@@ -91,7 +80,7 @@ internal class AuthenticationSession(context: Context) {
 
     fun onBackground() {
         handler.removeCallbacks(lockSession)
-        handler.postDelayed(lockSession, BACKGROUND_GRACE_MILLIS)
+        handler.postDelayed(lockSession, AUTHENTICATION_BACKGROUND_GRACE_MILLIS)
     }
 
     private fun readMode(): DeviceAuthenticationMode {
@@ -103,6 +92,18 @@ internal class AuthenticationSession(context: Context) {
     private companion object {
         const val PREFERENCES_NAME = "agentknock_authentication"
         const val MODE_KEY = "mode"
-        const val BACKGROUND_GRACE_MILLIS = 15_000L
     }
+}
+
+internal const val AUTHENTICATION_BACKGROUND_GRACE_MILLIS = 15_000L
+
+internal class ProtectedActionAuthorizer(
+    private val session: AuthenticationSession,
+    private val deviceAuthentication: DeviceAuthenticationCoordinator,
+) {
+    suspend fun authorize(title: String): DeviceAuthenticationResult =
+        session.authorizeProtectedAction(title, deviceAuthentication::authenticate)
+
+    suspend fun changeMode(mode: DeviceAuthenticationMode): DeviceAuthenticationResult =
+        session.changeMode(mode, deviceAuthentication::authenticate)
 }

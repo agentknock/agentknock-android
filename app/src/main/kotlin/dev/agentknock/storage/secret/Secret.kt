@@ -443,8 +443,8 @@ internal interface SecretDao {
     ): Int
 
     @Query(
-        "UPDATE secrets SET approval_mode = :approvalMode, updated_at = :updatedAt, " +
-            "revision = revision + 1 WHERE id = :secretId",
+        "UPDATE secrets SET approval_mode = :approvalMode, updated_at = :updatedAt " +
+            "WHERE id = :secretId",
     )
     suspend fun updateSecretApprovalMode(
         secretId: String,
@@ -551,6 +551,19 @@ internal interface SecretDao {
         secretId: String,
         clientId: String,
     ): Int
+
+    @Query(
+        """
+        DELETE FROM temporary_access_grants
+        WHERE secret_id = :secretId
+          AND NOT EXISTS (
+            SELECT 1 FROM secret_client_approval_overrides
+            WHERE secret_id = temporary_access_grants.secret_id
+              AND client_id = temporary_access_grants.client_id
+          )
+        """,
+    )
+    suspend fun deleteTemporaryAccessGrantsUsingDefaultApproval(secretId: String): Int
 
     @Query("DELETE FROM temporary_access_grants WHERE expires_at <= :now")
     suspend fun deleteExpiredTemporaryAccessGrants(now: Long): Int
@@ -673,7 +686,7 @@ internal interface SecretDao {
         updatedAt: Long,
     ): Boolean {
         if (updateSecretApprovalMode(secretId, approvalMode, updatedAt) != 1) return false
-        deleteTemporaryAccessGrantsForSecret(secretId)
+        deleteTemporaryAccessGrantsUsingDefaultApproval(secretId)
         return true
     }
 
@@ -712,24 +725,22 @@ internal interface SecretDao {
     }
 
     @Transaction
-    suspend fun upsertClientApprovalOverrideAndDeleteTemporaryAccess(
-        override: SecretClientApprovalOverrideEntity,
-        updatedAt: Long,
-    ) {
-        upsertClientApprovalOverride(override)
-        deleteTemporaryAccessGrantsForSecretClient(override.secretId, override.clientId)
-        reviseSecret(override.secretId, updatedAt)
-    }
-
-    @Transaction
-    suspend fun deleteClientApprovalOverrideAndTemporaryAccess(
+    suspend fun replaceClientApprovalOverride(
         secretId: String,
         clientId: String,
+        approvalMode: String?,
+        effectiveModeChanged: Boolean,
         updatedAt: Long,
     ) {
-        val deleted = deleteClientApprovalOverride(secretId, clientId)
-        deleteTemporaryAccessGrantsForSecretClient(secretId, clientId)
-        if (deleted == 1) reviseSecret(secretId, updatedAt)
+        if (approvalMode == null) {
+            deleteClientApprovalOverride(secretId, clientId)
+        } else {
+            upsertClientApprovalOverride(
+                SecretClientApprovalOverrideEntity(secretId, clientId, approvalMode),
+            )
+        }
+        if (effectiveModeChanged) deleteTemporaryAccessGrantsForSecretClient(secretId, clientId)
+        touchSecret(secretId, updatedAt)
     }
 
     @Transaction

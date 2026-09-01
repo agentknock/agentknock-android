@@ -26,7 +26,6 @@ import dev.agentknock.storage.device.RelayDeviceCredentials
 import dev.agentknock.storage.device.RelayDeviceCredentialsResult
 import dev.agentknock.storage.secret.GitSignatureResult
 import dev.agentknock.storage.secret.SSH_SECRET_TYPE
-import dev.agentknock.storage.secret.SecretApprovalMode
 import dev.agentknock.storage.secret.SecretApprovalPolicy
 import dev.agentknock.storage.secret.SecretMetadata
 import dev.agentknock.storage.secret.SecretRepository
@@ -62,12 +61,6 @@ internal sealed interface GitSignDecisionResult {
     data object TemporaryAccessNotStarted : GitSignDecisionResult
 }
 
-private data class GitSignTemporaryGrant(
-    val policy: SecretApprovalPolicy,
-    val expiresAt: Long,
-    val evaluation: ApprovalEvaluation,
-)
-
 /**
  * Owns Git-signing intake and durable transitions.
  *
@@ -86,11 +79,11 @@ internal class GitSigningRequests(
     private val currentTimeMillis: () -> Long = System::currentTimeMillis,
 ) {
     suspend fun processIncoming(
-        pairing: ClientEntity,
+        client: ClientEntity,
         relayRequestId: String,
         requestPayload: JsonElement,
         plaintext: ByteArray,
-        acceptedSecrets: AcceptedRequestPsks,
+        acceptedPsks: AcceptedRequestPsks,
         credentials: RelayDeviceCredentials,
         sealResponse: suspend (ByteArray) -> JsonElement?,
         launchAiReview: (
@@ -108,8 +101,8 @@ internal class GitSigningRequests(
         val invocation = dao.getSecretUseRequest(invocationRequest.id) ?: return null
         val expectedTokenHash = invocation.invocationTokenHash
         if (
-            invocationRequest.clientId != pairing.clientId ||
-            invocationRequest.deviceIdentityId != pairing.deviceIdentityId ||
+            invocationRequest.clientId != client.clientId ||
+            invocationRequest.deviceIdentityId != client.deviceIdentityId ||
             invocationRequest.state != InboxRequestState.WAITING.storedName ||
             invocationRequest.exchangeEndedAt != null ||
             invocation.decision != ApprovalDecision.APPROVED.storedName ||
@@ -134,7 +127,7 @@ internal class GitSigningRequests(
         val description = secrets.describeRequestedSecrets(listOf(contents.secret))
         val approvalPolicies = secrets.approvalPoliciesForNames(
             listOf(contents.secret),
-            pairing.clientId,
+            client.clientId,
             TemporaryAccessOperation.GIT_SIGN,
         )
         val policy = approvalPolicies.singleOrNull()
@@ -159,9 +152,9 @@ internal class GitSigningRequests(
         val initialRequest = InboxRequestEntity(
             id = relayRequestId,
             parentRequestId = invocationRequest.id,
-            deviceIdentityId = pairing.deviceIdentityId,
-            clientId = pairing.clientId,
-            clientNameSnapshot = pairing.name,
+            deviceIdentityId = client.deviceIdentityId,
+            clientId = client.clientId,
+            clientNameSnapshot = client.name,
             clientSoftwareJson = encodeClientSoftware(contents.clientSoftware),
             kind = RequestKind.GIT_SIGN.storedName,
             state = if (needsAiReview) {
@@ -194,9 +187,9 @@ internal class GitSigningRequests(
             reviewResult: AiReview?,
             requestAlreadyInserted: Boolean,
         ): ProcessedRelayMessage? {
-            val currentClient = if (needsAiReview) dao.getClient(pairing.clientId) else pairing
+            val currentClient = if (needsAiReview) dao.getClient(client.clientId) else client
             val clientUnavailable = currentClient == null ||
-                currentClient.deviceIdentityId != pairing.deviceIdentityId ||
+                currentClient.deviceIdentityId != client.deviceIdentityId ||
                 currentClient.relayClientState == RelayClientState.REVOKED.wireName ||
                 currentClient.desiredRelayClientState == RelayClientState.REVOKED.wireName
             val invocationUnavailable = !parentInvocationIsActive(initialRequest)
@@ -208,7 +201,7 @@ internal class GitSigningRequests(
             val currentPolicies = if (needsAiReview) {
                 secrets.approvalPoliciesForNames(
                     listOf(contents.secret),
-                    pairing.clientId,
+                    client.clientId,
                     TemporaryAccessOperation.GIT_SIGN,
                 )
             } else {
@@ -234,8 +227,8 @@ internal class GitSigningRequests(
                     currentEvaluation == null ||
                     !checkNotNull(initialEvaluation).hasSameSecretPolicies(currentEvaluation) ||
                     currentCredentials?.instructions != credentials.instructions ||
-                    currentClient.name != pairing.name ||
-                    currentClient.instructions != pairing.instructions
+                    currentClient.name != client.name ||
+                    currentClient.instructions != client.instructions
                 )
             val aiReview = if (aiInputsChanged) {
                 AiReview(
@@ -285,8 +278,6 @@ internal class GitSigningRequests(
             }
             val shouldApprove = !aiInputsChanged && denial == null &&
                 evaluation?.isFullyApproved(aiReview?.decision) == true
-            val temporaryAccessUsed = evaluation?.secrets
-                ?.any { it.temporaryAccessExpiresAt != null } == true
             var signature: String? = null
             if (shouldApprove) {
                 when (
@@ -322,22 +313,27 @@ internal class GitSigningRequests(
                 sealResponse(responsePlaintext) ?: return null
             }
             val decidedAt = currentTimeMillis()
-            val automaticDecision = when {
-                signature != null -> ApprovalDecision.APPROVED
-                denial != null -> ApprovalDecision.DENIED
-                else -> null
-            }
-            val automaticDecisionSource = when {
-                signature != null && aiReview?.decision == AiReviewDecision.APPROVE &&
-                    temporaryAccessUsed -> DECISION_SOURCE_MIXED
-                signature != null && aiReview?.decision == AiReviewDecision.APPROVE ->
-                    DECISION_SOURCE_AI
-                signature != null && temporaryAccessUsed -> DECISION_SOURCE_TEMPORARY_ACCESS
-                signature != null -> DECISION_SOURCE_POLICY
-                aiDenied -> DECISION_SOURCE_AI
-                approvalSettingsDenied -> DECISION_SOURCE_POLICY
-                denial?.first == InvocationDenialReason.INVALID_REQUEST -> DECISION_SOURCE_VALIDATION
-                else -> null
+            val automaticApproval = planAutomaticApproval(
+                outcome = when {
+                    signature != null -> AutomaticApprovalOutcome.APPROVED
+                    denial != null -> AutomaticApprovalOutcome.DENIED
+                    else -> AutomaticApprovalOutcome.ACTION_REQUIRED
+                },
+                evaluation = evaluation,
+                aiDecision = aiReview?.decision,
+                denialSource = when {
+                    aiDenied -> AutomaticApprovalDenialSource.AI
+                    approvalSettingsDenied -> AutomaticApprovalDenialSource.POLICY
+                    else -> null
+                },
+            )
+            val automaticDecision = automaticApproval.decision
+            val automaticDecisionSource = automaticApproval.decisionSource ?: if (
+                denial?.first == InvocationDenialReason.INVALID_REQUEST
+            ) {
+                DECISION_SOURCE_VALIDATION
+            } else {
+                null
             }
             val requestToUpdate = if (requestAlreadyInserted) {
                 dao.getRequestById(relayRequestId) ?: return null
@@ -377,8 +373,8 @@ internal class GitSigningRequests(
                     } else {
                         denial?.second
                     },
-                    clientId = pairing.clientId,
-                    clientName = pairing.name,
+                    clientId = client.clientId,
+                    clientName = client.name,
                     relayRequestId = relayRequestId,
                 )
             }
@@ -393,8 +389,8 @@ internal class GitSigningRequests(
                         decisionSource = AuditDecisionSource.AI_REVIEW,
                         subject = contents.secret,
                         detail = aiReview.auditFailureDetail(),
-                        clientId = pairing.clientId,
-                        clientName = pairing.name,
+                        clientId = client.clientId,
+                        clientName = client.name,
                         relayRequestId = relayRequestId,
                     ),
                     automaticDecisionAudit = automaticDecisionAudit,
@@ -403,18 +399,18 @@ internal class GitSigningRequests(
                 receive(
                     request = finalRequest,
                     gitSign = finalGitSign,
-                    client = pairing.copy(
+                    client = client.copy(
                         clientSoftwareJson = encodeClientSoftware(contents.clientSoftware),
                         lastSeenAt = now,
                     ),
-                    acceptedPsks = acceptedSecrets,
+                    acceptedPsks = acceptedPsks,
                     authorization = authorization.takeIf { automaticDecision != null },
                     automaticDecisionAudit = automaticDecisionAudit,
                 )
             }
             return when (persisted) {
-                ConditionalRequestUpdate.APPLIED -> ProcessedRelayMessage(response)
-                ConditionalRequestUpdate.ACTION_REQUIRED -> ProcessedRelayMessage()
+                ConditionalRequestUpdate.APPLIED -> ProcessedRelayMessage
+                ConditionalRequestUpdate.ACTION_REQUIRED -> ProcessedRelayMessage
                 ConditionalRequestUpdate.UNAVAILABLE -> null
             }
         }
@@ -426,11 +422,11 @@ internal class GitSigningRequests(
                 receive(
                     request = initialRequest,
                     gitSign = initialGitSign,
-                    client = pairing.copy(
+                    client = client.copy(
                         clientSoftwareJson = encodeClientSoftware(contents.clientSoftware),
                         lastSeenAt = now,
                     ),
-                    acceptedPsks = acceptedSecrets,
+                    acceptedPsks = acceptedPsks,
                     authorization = null,
                     automaticDecisionAudit = null,
                 ) == ConditionalRequestUpdate.APPLIED,
@@ -441,7 +437,7 @@ internal class GitSigningRequests(
                     initialRequest.requestJson,
                     {
                         requestAiReview(
-                            pairing = pairing,
+                            client = client,
                             contents = contents,
                             invocation = invocation,
                             parentElapsedSeconds = if (now >= invocationRequest.receivedAt) {
@@ -458,7 +454,7 @@ internal class GitSigningRequests(
                 ),
             )
         }
-        return ProcessedRelayMessage()
+        return ProcessedRelayMessage
     }
 
     suspend fun approve(
@@ -542,7 +538,11 @@ internal class GitSigningRequests(
             }
         }
         val grant = if (allowTemporaryAccess) {
-            prepareTemporaryGrant(policy, checkNotNull(storedEvaluation))
+            planTemporaryAccess(
+                policies = listOf(policy),
+                storedEvaluation = checkNotNull(storedEvaluation),
+                now = currentTimeMillis(),
+            )
                 ?: return GitSignDecisionResult.TemporaryAccessUnavailable
         } else {
             null
@@ -790,9 +790,10 @@ internal class GitSigningRequests(
                 return@execute true
             }
             if (opened == CompletionOpenResult.RetryLater) return@execute false
+            val priorError = currentRequest.error
             val softwareMatches = completionResult?.clientSoftware ==
                 currentRequest.clientSoftwareJson?.let(::decodeStoredClientSoftware)
-            val valid = softwareMatches && when (completionResult) {
+            val valid = priorError == null && softwareMatches && when (completionResult) {
                 is GitSignCompletion.Approved -> {
                     gitSign.decision == ApprovalDecision.APPROVED.storedName
                 }
@@ -808,7 +809,11 @@ internal class GitSigningRequests(
                 is GitSignCompletion.Aborted -> true
                 null -> false
             }
-            val error = if (valid) null else GIT_SIGN_COMPLETION_VERIFICATION_ERROR
+            val error = priorError ?: if (valid) {
+                null
+            } else {
+                GIT_SIGN_COMPLETION_VERIFICATION_ERROR
+            }
             val now = currentTimeMillis()
             dao.updateGitSignRequest(
                 request = currentRequest.copy(
@@ -1018,39 +1023,12 @@ internal class GitSigningRequests(
         }
     }
 
-    private fun prepareTemporaryGrant(
-        policy: SecretApprovalPolicy,
-        storedEvaluation: ApprovalEvaluation,
-    ): GitSignTemporaryGrant? {
-        val secretEvaluation = storedEvaluation.secrets.singleOrNull() ?: return null
-        val aiCanEscalateToTemporaryAccess =
-            storedEvaluation.aiReview?.decision == AiReviewDecision.ASK_USER ||
-                storedEvaluation.aiReview?.failure != null ||
-                storedEvaluation.aiReview == null
-        val eligible = secretEvaluation.temporaryAccessExpiresAt == null && when (policy.mode) {
-            SecretApprovalMode.TEMPORARY -> secretEvaluation.action == ApprovalAction.ASK_ME
-            SecretApprovalMode.ASK_AI -> {
-                secretEvaluation.action == ApprovalAction.ASK_AI && aiCanEscalateToTemporaryAccess
-            }
-            else -> false
-        }
-        if (!eligible) return null
-        val expiresAt = currentTimeMillis() + TEMPORARY_ACCESS_DURATION_MILLIS
-        return GitSignTemporaryGrant(
-            policy = policy,
-            expiresAt = expiresAt,
-            evaluation = storedEvaluation.copy(
-                secrets = listOf(secretEvaluation.copy(temporaryAccessExpiresAt = expiresAt)),
-            ),
-        )
-    }
-
     private suspend fun persistTemporaryDecision(
         request: InboxRequestEntity,
         gitSign: GitSignRequestEntity,
         response: JsonElement,
         authorization: AuthorizationCommitment,
-        grant: GitSignTemporaryGrant,
+        grant: TemporaryAccessPlan,
     ): GitSignDecisionResult = writeTransaction.execute {
         val now = currentTimeMillis()
         val currentRequest = dao.getRequestById(request.id)
@@ -1080,13 +1058,13 @@ internal class GitSigningRequests(
             return@execute GitSignDecisionResult.ApprovalChanged
         }
         val temporaryAccessStarted = secrets.allowTemporaryAccess(
-            policies = listOf(grant.policy),
+            policies = grant.policies,
             clientId = currentRequest.clientId,
             operation = TemporaryAccessOperation.GIT_SIGN,
             expiresAt = grant.expiresAt,
         )
         val decisionSource = if (temporaryAccessStarted) {
-            DECISION_SOURCE_TEMPORARY_ACCESS
+            grant.decisionSource
         } else {
             DECISION_SOURCE_USER
         }
@@ -1148,7 +1126,7 @@ internal class GitSigningRequests(
     }
 
     private suspend fun requestAiReview(
-        pairing: ClientEntity,
+        client: ClientEntity,
         contents: GitSignRequestMessage,
         invocation: SecretUseRequestEntity,
         parentElapsedSeconds: Long?,
@@ -1179,7 +1157,7 @@ internal class GitSigningRequests(
             explanation = "The parent invocation context is unavailable.",
         )
         val request = approvalReviewGitSignRequest(
-            client = pairing,
+            client = client,
             contents = contents,
             signedContent = signedContent,
             invocation = invocation,

@@ -22,7 +22,6 @@ import androidx.compose.material3.SnackbarHost
 import androidx.compose.material3.SnackbarHostState
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
-import androidx.compose.runtime.DisposableEffect
 import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.key
@@ -36,29 +35,20 @@ import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.platform.LocalResources
 import androidx.compose.ui.res.stringResource
 import androidx.compose.ui.unit.dp
-import androidx.lifecycle.Lifecycle
-import androidx.lifecycle.LifecycleEventObserver
-import androidx.lifecycle.compose.LocalLifecycleOwner
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import dev.agentknock.R
 import dev.agentknock.storage.secret.EnvironmentVariableMetadata
 import dev.agentknock.storage.secret.EnvironmentVariableValue
-import dev.agentknock.storage.secret.SaveSecretResult
-import dev.agentknock.storage.secret.SaveSshSecretResult
 import dev.agentknock.storage.secret.SecretDetails
 import dev.agentknock.storage.secret.SecretType
 import dev.agentknock.storage.secret.SshKeyAlgorithm
 import dev.agentknock.ui.components.AdaptiveListDetail
+import kotlinx.coroutines.flow.collectLatest
 import kotlinx.coroutines.launch
 import java.util.UUID
 
 @Composable
 internal fun SecretsScreen(
-    authorizeProtectedAction: (
-        title: String,
-        onSuccess: () -> Unit,
-        onError: (String) -> Unit,
-    ) -> Unit,
     onOpenSettings: () -> Unit,
     onTopLevelChanged: (Boolean) -> Unit,
     aiReviewActive: Boolean,
@@ -70,23 +60,14 @@ internal fun SecretsScreen(
     val pendingUploads by viewModel.pendingUploads.collectAsStateWithLifecycle()
     val content by viewModel.content.collectAsStateWithLifecycle()
     val editor by viewModel.editor.collectAsStateWithLifecycle()
+    val revealedValues by viewModel.revealedValues.collectAsStateWithLifecycle()
+    val revealedUploadValues by viewModel.revealedUploadValues.collectAsStateWithLifecycle()
+    val clipboard by viewModel.clipboard.collectAsStateWithLifecycle()
     val scope = rememberCoroutineScope()
     val snackbar = remember { SnackbarHostState() }
     val context = LocalContext.current
     val resources = LocalResources.current
     var secretPendingDeletion by remember { mutableStateOf<SecretDetails?>(null) }
-    var revealedValues by remember { mutableStateOf<Map<String, String>>(emptyMap()) }
-    val lifecycle = LocalLifecycleOwner.current.lifecycle
-
-    DisposableEffect(lifecycle) {
-        val observer = LifecycleEventObserver { _, event ->
-            if (event == Lifecycle.Event.ON_STOP) {
-                revealedValues = emptyMap()
-            }
-        }
-        lifecycle.addObserver(observer)
-        onDispose { lifecycle.removeObserver(observer) }
-    }
 
     val target = when (val selected = content) {
         SecretsContent.List -> null
@@ -95,12 +76,48 @@ internal fun SecretsScreen(
         is SecretsContent.Upload -> SecretTarget.Upload(selected.request.id)
     }
     LaunchedEffect(target) {
-        revealedValues = emptyMap()
         secretPendingDeletion = null
     }
 
     fun report(message: String) {
         scope.launch { snackbar.showSnackbar(message) }
+    }
+
+    LaunchedEffect(viewModel) {
+        viewModel.events.collectLatest { message ->
+            snackbar.showSnackbar(
+                when (message) {
+                    is SecretsUiMessage.Resource -> resources.getString(message.id)
+                    is SecretsUiMessage.Text -> message.value
+                },
+            )
+        }
+    }
+
+    LaunchedEffect(clipboard) {
+        val pending = clipboard ?: return@LaunchedEffect
+        copyToClipboard(context, pending.label, pending.value, pending.sensitive)
+        viewModel.consumeClipboard(pending)
+        snackbar.showSnackbar(
+            resources.getString(
+                if (pending.sensitive) {
+                    R.string.sensitive_copied_to_clipboard
+                } else {
+                    R.string.copied_to_clipboard
+                },
+                pending.label,
+            ),
+        )
+    }
+
+    if (editor !is SecretsEditor.None) {
+        LaunchedEffect(Unit) { onTopLevelChanged(false) }
+        SecretsEditorHost(
+            editor = editor,
+            viewModel = viewModel,
+            snackbar = snackbar,
+        )
+        return
     }
 
     suspend fun readValue(variable: EnvironmentVariableMetadata): String? =
@@ -121,86 +138,36 @@ internal fun SecretsScreen(
         }
 
     fun reveal(variable: EnvironmentVariableMetadata) {
-        if (revealedValues.containsKey(variable.id)) {
-            revealedValues -= variable.id
-            return
-        }
-        val action: () -> Unit = action@{
-            val epoch = viewModel.beginSecretRead(variable.secretId) ?: return@action
-            scope.launch {
-                if (!viewModel.secretReadIsCurrent(variable.secretId, epoch)) return@launch
-                val value = readValue(variable) ?: return@launch
-                if (viewModel.secretReadIsCurrent(variable.secretId, epoch)) {
-                    revealedValues += variable.id to value
-                }
-            }
-        }
-        if (variable.sensitive) {
-            authorizeProtectedAction(
-                resources.getString(R.string.reveal_sensitive_value, variable.name),
-                action,
-                ::report,
-            )
-        } else {
-            action()
-        }
+        viewModel.toggleEnvironmentVariableReveal(
+            variable = variable,
+            protectionTitle = if (variable.sensitive) {
+                resources.getString(R.string.reveal_sensitive_value, variable.name)
+            } else {
+                null
+            },
+        )
     }
 
     fun copy(variable: EnvironmentVariableMetadata) {
-        val action: () -> Unit = action@{
-            val epoch = viewModel.beginSecretRead(variable.secretId) ?: return@action
-            scope.launch {
-                if (!viewModel.secretReadIsCurrent(variable.secretId, epoch)) return@launch
-                val value = readValue(variable) ?: return@launch
-                if (!viewModel.secretReadIsCurrent(variable.secretId, epoch)) return@launch
-                copyToClipboard(context, variable.name, value, variable.sensitive)
-                report(
-                    resources.getString(
-                        if (variable.sensitive) {
-                            R.string.sensitive_copied_to_clipboard
-                        } else {
-                            R.string.copied_to_clipboard
-                        },
-                        variable.name,
-                    ),
-                )
-            }
-        }
-        if (variable.sensitive) {
-            authorizeProtectedAction(
-                resources.getString(R.string.copy_sensitive_value, variable.name),
-                action,
-                ::report,
-            )
-        } else {
-            action()
-        }
+        viewModel.copyEnvironmentVariable(
+            variable = variable,
+            protectionTitle = if (variable.sensitive) {
+                resources.getString(R.string.copy_sensitive_value, variable.name)
+            } else {
+                null
+            },
+        )
     }
 
     fun edit(variable: EnvironmentVariableMetadata) {
-        if (!variable.valueAvailable) {
-            viewModel.startEditingEnvironmentVariable(variable, null)
-            return
-        }
-        val action: () -> Unit = action@{
-            val epoch = viewModel.beginSecretRead(variable.secretId) ?: return@action
-            scope.launch {
-                if (!viewModel.secretReadIsCurrent(variable.secretId, epoch)) return@launch
-                val value = readValue(variable) ?: return@launch
-                if (viewModel.secretReadIsCurrent(variable.secretId, epoch)) {
-                    viewModel.startEditingEnvironmentVariable(variable, value)
-                }
-            }
-        }
-        if (variable.sensitive) {
-            authorizeProtectedAction(
-                resources.getString(R.string.edit_sensitive_value, variable.name),
-                action,
-                ::report,
-            )
-        } else {
-            action()
-        }
+        viewModel.editEnvironmentVariable(
+            variable = variable,
+            protectionTitle = if (variable.sensitive) {
+                resources.getString(R.string.edit_sensitive_value, variable.name)
+            } else {
+                null
+            },
+        )
     }
 
     fun copyPublicKey(secret: SecretDetails) {
@@ -218,83 +185,26 @@ internal fun SecretsScreen(
         onDeleteSecret = { secretPendingDeletion = secret },
         onAddVariable = { viewModel.startNewEnvironmentVariable(secret.id) },
         onReplaceSshKey = { viewModel.startReplacingSshKey(secret) },
-        onSaveSshComment = { comment ->
-            scope.launch {
-                when (viewModel.saveSshComment(secret.id, comment)) {
-                    is SaveSshSecretResult.Saved -> report("Public key comment updated")
-                    else -> report("Public key comment could not be updated")
-                }
-            }
-        },
+        onSaveSshComment = { comment -> viewModel.saveSshComment(secret.id, comment) },
         onCopyPublicKey = { copyPublicKey(secret) },
         onEditVariable = ::edit,
         onReveal = ::reveal,
         onReadValue = ::readValue,
         onCopy = ::copy,
-        onSetApprovalMode = { mode ->
-            scope.launch {
-                val result = viewModel.saveApprovalMode(secret.id, mode)
-                report(
-                    if (result == SaveSecretResult.SAVED) {
-                        "Default approval updated"
-                    } else {
-                        "Approval setting could not be updated"
-                    },
-                )
-            }
-        },
+        onSetApprovalMode = { mode -> viewModel.saveApprovalMode(secret.id, mode) },
         onSetClientApprovalOverride = { clientId, mode ->
-            scope.launch {
-                val result = viewModel.setClientApprovalOverride(secret.id, clientId, mode)
-                report(
-                    if (result == SaveSecretResult.SAVED) {
-                        "Client approval updated"
-                    } else {
-                        "Client approval could not be updated"
-                    },
-                )
-            }
+            viewModel.setClientApprovalOverride(secret.id, clientId, mode)
         },
         onSaveInstructions = { instructions ->
-            scope.launch {
-                val result = viewModel.saveInstructions(secret.id, instructions)
-                report(
-                    if (result == SaveSecretResult.SAVED) {
-                        "Instructions updated"
-                    } else {
-                        "Instructions could not be updated"
-                    },
-                )
-            }
+            viewModel.saveInstructions(secret.id, instructions)
         },
         onEndTemporaryAccess = { grant ->
-            scope.launch {
-                val ended = viewModel.endTemporaryAccess(
-                    secret.id,
-                    grant.clientId,
-                    grant.operation,
-                )
-                report(
-                    if (ended) {
-                        "Temporary access ended"
-                    } else {
-                        "Temporary access had already ended"
-                    },
-                )
-            }
+            viewModel.endTemporaryAccess(secret.id, grant.clientId, grant.operation)
         },
     )
 
     fun saveGeneralInstructions(instructions: String) {
-        scope.launch {
-            report(
-                if (viewModel.saveGeneralInstructions(instructions)) {
-                    "General instructions updated"
-                } else {
-                    "General instructions could not be updated"
-                },
-            )
-        }
+        viewModel.saveGeneralInstructions(instructions)
     }
 
     fun clearSelection() {
@@ -314,7 +224,6 @@ internal fun SecretsScreen(
             listWidth = 320.dp,
             onBack = ::clearSelection,
             onTopLevelChanged = onTopLevelChanged,
-            obscured = editor !is SecretsEditor.None,
             modifier = Modifier.fillMaxSize().padding(padding),
             list = { listModifier ->
                 SecretList(
@@ -323,7 +232,7 @@ internal fun SecretsScreen(
                     selectedSecretId = (target as? SecretTarget.Stored)?.id,
                     selectedUploadRequestId = (target as? SecretTarget.Upload)?.requestId,
                     onSelect = viewModel::selectSecret,
-                    onSelectUpload = viewModel::selectUpload,
+                    onSelectUpload = { requestId -> viewModel.selectUpload(requestId) },
                     onCreate = viewModel::startNewSecret,
                     generalInstructions = configuration?.active?.instructions.orEmpty(),
                     aiReviewActive = aiReviewActive,
@@ -340,9 +249,8 @@ internal fun SecretsScreen(
                     is SecretsContent.Upload -> key(selected.request.id) {
                         SecretUploadSelectionDetail(
                             request = selected.request,
-                            authorizeProtectedAction = authorizeProtectedAction,
+                            revealedValues = revealedUploadValues,
                             viewModel = viewModel,
-                            report = ::report,
                             onBack = ::clearSelection,
                             showBack = showBack,
                             modifier = detailModifier,
@@ -366,16 +274,6 @@ internal fun SecretsScreen(
         )
     }
 
-    SecretsEditorHost(
-        editor = editor,
-        selectedTarget = target,
-        authorizeProtectedAction = authorizeProtectedAction,
-        viewModel = viewModel,
-        snackbar = snackbar,
-        report = ::report,
-        onVariableValueHidden = { variableId -> revealedValues -= variableId },
-    )
-
     secretPendingDeletion?.let { secret ->
         DeleteDialog(
             title = stringResource(R.string.delete_secret_question, secret.name),
@@ -383,13 +281,7 @@ internal fun SecretsScreen(
             onDismiss = { secretPendingDeletion = null },
             onDelete = {
                 secretPendingDeletion = null
-                scope.launch {
-                    if (viewModel.deleteSecret(secret.id)) {
-                        report(resources.getString(R.string.secret_deleted))
-                    } else {
-                        report(resources.getString(R.string.secret_not_found))
-                    }
-                }
+                viewModel.deleteSecret(secret.id)
             },
         )
     }

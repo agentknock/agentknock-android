@@ -3,24 +3,111 @@ package dev.agentknock.ui.requests
 import androidx.lifecycle.SavedStateHandle
 import androidx.lifecycle.ViewModel
 import androidx.lifecycle.viewModelScope
-import dev.agentknock.storage.request.InvocationDecisionResult
+import dev.agentknock.storage.request.ApprovalRequestState
+import dev.agentknock.storage.request.InboxRequestContent
 import dev.agentknock.storage.request.InboxRequestDetails
+import dev.agentknock.storage.request.InboxRequestKind
+import dev.agentknock.storage.request.InboxRequestStatus
 import dev.agentknock.storage.request.InboxRequestSummary
-import dev.agentknock.storage.request.RequestSyncResult
-import dev.agentknock.storage.request.RequestConnectionManager
-import dev.agentknock.storage.request.RequestRepository
-import dev.agentknock.storage.request.RequestInbox
+import dev.agentknock.storage.request.InvocationDecisionResult
 import dev.agentknock.storage.request.GitSignDecisionResult
 import dev.agentknock.storage.request.SshAuthenticationDecisionResult
+import dev.agentknock.storage.request.RequestConnectionManager
+import dev.agentknock.storage.request.RequestInbox
+import dev.agentknock.storage.request.RequestRepository
+import dev.agentknock.storage.request.RequestSyncResult
 import dev.agentknock.ui.requestHistory
+import kotlinx.coroutines.channels.Channel
 import kotlinx.coroutines.ExperimentalCoroutinesApi
+import kotlinx.coroutines.flow.Flow
 import kotlinx.coroutines.flow.SharingStarted
 import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.flatMapLatest
 import kotlinx.coroutines.flow.flowOf
 import kotlinx.coroutines.flow.map
 import kotlinx.coroutines.flow.onStart
+import kotlinx.coroutines.flow.receiveAsFlow
 import kotlinx.coroutines.flow.stateIn
+import kotlinx.coroutines.launch
+
+internal enum class RequestDecisionAction {
+    APPROVE,
+    DENY,
+    ALLOW_TEMPORARILY,
+}
+
+private fun InvocationDecisionResult.message(): String = when (this) {
+    InvocationDecisionResult.Decided -> "Decision saved"
+    InvocationDecisionResult.SecretsChanged ->
+        "A requested secret changed; review the request again"
+    InvocationDecisionResult.NotPending -> "This request no longer needs a decision"
+    InvocationDecisionResult.NotFound -> "Request is no longer available"
+    is InvocationDecisionResult.MissingSecrets -> "Missing secrets: ${names.joinToString()}"
+    is InvocationDecisionResult.ConflictingVariable ->
+        "Conflicting environment variable: $name"
+    is InvocationDecisionResult.Invalid -> message
+    InvocationDecisionResult.SecretUnavailable ->
+        "A secret value is unavailable on this device"
+    InvocationDecisionResult.SecretCorrupted -> "A secret value could not be authenticated"
+    InvocationDecisionResult.UnsupportedEncryption ->
+        "A secret value uses unsupported encryption"
+    InvocationDecisionResult.PairingUnavailable -> "The paired client is unavailable"
+    InvocationDecisionResult.TemporaryAccessUnavailable ->
+        "Temporary access is no longer available"
+    InvocationDecisionResult.TemporaryAccessNotStarted ->
+        "Request approved once, but temporary access could not be started"
+}
+
+private fun GitSignDecisionResult.message(): String = when (this) {
+    GitSignDecisionResult.Decided -> "Decision saved"
+    GitSignDecisionResult.NotPending ->
+        "This Git signing request no longer needs a decision"
+    GitSignDecisionResult.NotFound -> "Git signing request is no longer available"
+    GitSignDecisionResult.InvocationUnavailable -> "The original command request is unavailable"
+    GitSignDecisionResult.PairingUnavailable -> "The paired client is unavailable"
+    GitSignDecisionResult.ApprovalChanged ->
+        "The SSH key or approval setting changed; review the request again"
+    GitSignDecisionResult.KeyChanged ->
+        "The SSH key changed or was renamed after the command began; start the command again"
+    GitSignDecisionResult.SecretUnavailable ->
+        "The SSH private key is unavailable on this device"
+    GitSignDecisionResult.SecretCorrupted ->
+        "The SSH private key could not be authenticated"
+    GitSignDecisionResult.UnsupportedEncryption ->
+        "The SSH private key uses unsupported encryption"
+    GitSignDecisionResult.TemporaryAccessUnavailable ->
+        "Temporary access is no longer available"
+    GitSignDecisionResult.TemporaryAccessNotStarted ->
+        "Signature approved once, but temporary access could not be started"
+}
+
+private fun SshAuthenticationDecisionResult.message(): String = when (this) {
+    SshAuthenticationDecisionResult.Decided -> "Decision saved"
+    SshAuthenticationDecisionResult.NotPending ->
+        "This SSH authentication request no longer needs a decision"
+    SshAuthenticationDecisionResult.NotFound ->
+        "SSH authentication request is no longer available"
+    SshAuthenticationDecisionResult.InvocationUnavailable ->
+        "The original command request is unavailable"
+    SshAuthenticationDecisionResult.PairingUnavailable ->
+        "The paired client is unavailable"
+    SshAuthenticationDecisionResult.ApprovalChanged ->
+        "The SSH key or approval setting changed; review the request again"
+    SshAuthenticationDecisionResult.KeyChanged ->
+        "The SSH key changed or was renamed after the command began; start the command again"
+    SshAuthenticationDecisionResult.InvalidMessage ->
+        "The SSH authentication data changed or is invalid; start the command again"
+    SshAuthenticationDecisionResult.SecretUnavailable ->
+        "The SSH private key is unavailable on this device"
+    SshAuthenticationDecisionResult.SecretCorrupted ->
+        "The SSH private key could not be authenticated"
+    SshAuthenticationDecisionResult.UnsupportedEncryption ->
+        "The SSH private key uses unsupported encryption"
+    SshAuthenticationDecisionResult.TemporaryAccessUnavailable ->
+        "Temporary access is no longer available"
+    SshAuthenticationDecisionResult.TemporaryAccessNotStarted ->
+        "Authentication approved once, but temporary access could not be started"
+}
 
 internal sealed interface RequestPaneState {
     val requestId: String?
@@ -52,9 +139,10 @@ internal class RequestsViewModel(
         SELECTED_REQUEST_ID,
         null,
     )
+    private val messageEvents = Channel<String>(Channel.BUFFERED)
 
-    val allRequests: StateFlow<List<InboxRequestSummary>> = requestSummaries
-    val requests: StateFlow<List<InboxRequestSummary>> = allRequests
+    val messages: Flow<String> = messageEvents.receiveAsFlow()
+    val requests: StateFlow<List<InboxRequestSummary>> = requestSummaries
         .map(List<InboxRequestSummary>::requestHistory)
         .stateIn(
             scope = viewModelScope,
@@ -89,55 +177,70 @@ internal class RequestsViewModel(
         connection.refresh()
     }
 
-    suspend fun approveSecretUseRequest(requestId: String): InvocationDecisionResult {
-        awaitStorageReady()
-        return repository.approveSecretUseRequest(requestId)
+    fun decideRequest(request: InboxRequestSummary, action: RequestDecisionAction) {
+        val approval = request.status as? InboxRequestStatus.Approval ?: return
+        if (
+            !request.userDecisionAvailable ||
+            approval.state != ApprovalRequestState.APPROVAL_PENDING
+        ) {
+            return
+        }
+        decideRequest(request.id, request.kind, action)
     }
 
-    suspend fun denySecretUseRequest(requestId: String): InvocationDecisionResult {
-        awaitStorageReady()
-        return repository.denySecretUseRequest(requestId)
+    fun decideRequest(request: InboxRequestDetails, action: RequestDecisionAction) {
+        if (!request.userDecisionAvailable) return
+        val kind = when (request.content) {
+            is InboxRequestContent.SecretUse -> InboxRequestKind.SECRET_USE
+            is InboxRequestContent.GitSign -> InboxRequestKind.GIT_SIGN
+            is InboxRequestContent.SshAuthentication -> InboxRequestKind.SSH_AUTHENTICATE
+            else -> return
+        }
+        decideRequest(request.id, kind, action)
     }
 
-    suspend fun allowSecretUseTemporarily(requestId: String): InvocationDecisionResult {
-        awaitStorageReady()
-        return repository.allowSecretUseTemporarily(requestId)
-    }
-
-    suspend fun approveGitSignRequest(requestId: String): GitSignDecisionResult {
-        awaitStorageReady()
-        return repository.approveGitSignRequest(requestId)
-    }
-
-    suspend fun denyGitSignRequest(requestId: String): GitSignDecisionResult {
-        awaitStorageReady()
-        return repository.denyGitSignRequest(requestId)
-    }
-
-    suspend fun allowGitSignTemporarily(requestId: String): GitSignDecisionResult {
-        awaitStorageReady()
-        return repository.allowGitSignTemporarily(requestId)
-    }
-
-    suspend fun approveSshAuthenticationRequest(
+    private fun decideRequest(
         requestId: String,
-    ): SshAuthenticationDecisionResult {
-        awaitStorageReady()
-        return repository.approveSshAuthenticationRequest(requestId)
-    }
-
-    suspend fun denySshAuthenticationRequest(
-        requestId: String,
-    ): SshAuthenticationDecisionResult {
-        awaitStorageReady()
-        return repository.denySshAuthenticationRequest(requestId)
-    }
-
-    suspend fun allowSshAuthenticationTemporarily(
-        requestId: String,
-    ): SshAuthenticationDecisionResult {
-        awaitStorageReady()
-        return repository.allowSshAuthenticationTemporarily(requestId)
+        kind: InboxRequestKind,
+        action: RequestDecisionAction,
+    ) {
+        if (
+            kind != InboxRequestKind.SECRET_USE &&
+            kind != InboxRequestKind.GIT_SIGN &&
+            kind != InboxRequestKind.SSH_AUTHENTICATE
+        ) {
+            return
+        }
+        viewModelScope.launch {
+            awaitStorageReady()
+            val message = when (kind) {
+                InboxRequestKind.SECRET_USE -> when (action) {
+                    RequestDecisionAction.APPROVE ->
+                        repository.approveSecretUseRequest(requestId).message()
+                    RequestDecisionAction.DENY ->
+                        repository.denySecretUseRequest(requestId).message()
+                    RequestDecisionAction.ALLOW_TEMPORARILY ->
+                        repository.allowSecretUseTemporarily(requestId).message()
+                }
+                InboxRequestKind.GIT_SIGN -> when (action) {
+                    RequestDecisionAction.APPROVE ->
+                        repository.approveGitSignRequest(requestId).message()
+                    RequestDecisionAction.DENY ->
+                        repository.denyGitSignRequest(requestId).message()
+                    RequestDecisionAction.ALLOW_TEMPORARILY ->
+                        repository.allowGitSignTemporarily(requestId).message()
+                }
+                InboxRequestKind.SSH_AUTHENTICATE -> when (action) {
+                    RequestDecisionAction.APPROVE ->
+                        repository.approveSshAuthenticationRequest(requestId).message()
+                    RequestDecisionAction.DENY ->
+                        repository.denySshAuthenticationRequest(requestId).message()
+                    RequestDecisionAction.ALLOW_TEMPORARILY ->
+                        repository.allowSshAuthenticationTemporarily(requestId).message()
+                }
+            }
+            messageEvents.send(message)
+        }
     }
 
     private companion object {

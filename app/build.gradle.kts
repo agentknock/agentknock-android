@@ -96,6 +96,8 @@ dependencies {
     implementation(libs.androidx.biometric)
     implementation(platform(libs.androidx.compose.bom))
     implementation(libs.androidx.compose.material3)
+    implementation(libs.androidx.compose.material3.adaptive.layout)
+    implementation(libs.androidx.compose.material3.adaptive.navigation.suite)
     implementation(libs.androidx.compose.material.icons.extended)
     implementation(libs.androidx.compose.ui)
     implementation(libs.androidx.fragment)
@@ -111,6 +113,8 @@ dependencies {
     implementation(libs.kotlinx.serialization.json)
     implementation(libs.okhttp)
 
+    debugImplementation(libs.androidx.compose.ui.test.manifest)
+
     ksp(libs.androidx.room3.compiler)
 
     testImplementation(libs.junit)
@@ -118,6 +122,9 @@ dependencies {
     testImplementation(libs.okhttp.mockwebserver3)
 
     androidTestImplementation(libs.androidx.room3.testing)
+    androidTestImplementation(platform(libs.androidx.compose.bom))
+    androidTestImplementation(libs.androidx.compose.ui.test.junit4)
+    androidTestImplementation(libs.androidx.espresso.core)
     androidTestImplementation(libs.androidx.test.ext.junit)
     androidTestImplementation(libs.androidx.test.runner)
     androidTestImplementation(libs.kotlinx.coroutines.test)

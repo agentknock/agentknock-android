@@ -14,6 +14,8 @@ import kotlinx.coroutines.CancellationException
 import kotlinx.serialization.encodeToString
 import kotlinx.serialization.json.Json
 import kotlinx.serialization.json.JsonElement
+import kotlinx.serialization.json.buildJsonObject
+import kotlinx.serialization.json.put
 
 internal enum class PairingDecisionResult {
     VERIFIED,
@@ -40,29 +42,31 @@ internal class PairingRequests(
     private val json: Json,
     private val currentTimeMillis: () -> Long,
 ) {
-    fun isInitialRequest(request: JsonElement): Boolean =
-        pairingProtocol.isInitialRequest(request)
-
     suspend fun start(
         credentials: RelayDeviceCredentials,
         requestId: String,
         requestPayload: JsonElement,
-    ): JsonElement? {
-        if (!pairingProtocol.validateInitialRequest(requestPayload)) return null
-
+    ): Boolean {
         val deviceRandom = pairingProtocol.generateDeviceRandom()
-        val response = pairingProtocol.initialResponse(
-            deviceId = credentials.deviceId,
-            devicePublicKey = credentials.devicePublicKey,
-            deviceRandom = deviceRandom,
-        )
         val now = currentTimeMillis()
-        val persisted = writeTransaction.execute {
+        return writeTransaction.execute {
             if (dao.getRequestById(requestId) != null) return@execute false
-            if (dao.getClientById(requestId) != null) return@execute false
-            if (dao.getPairingAttempts().any { it.state.toPairingState().blocksAdmission }) {
-                return@execute false
+            val collidesWithClient = dao.getClientById(requestId) != null
+            val rejection = when {
+                !pairingProtocol.validateInitialRequest(requestPayload) -> {
+                    PairedRequestErrorCode.INVALID_REQUEST
+                }
+                collidesWithClient || dao.getPairingAttempts().any {
+                    it.state.toPairingState().blocksAdmission
+                } -> PairedRequestErrorCode.INVALID_STATE
+                else -> null
             }
+            val response = rejection?.publicResponse() ?: pairingProtocol.initialResponse(
+                deviceId = credentials.deviceId,
+                devicePublicKey = credentials.devicePublicKey,
+                deviceRandom = deviceRandom,
+            )
+            val accepted = rejection == null
 
             dao.insertPairingRequest(
                 request = InboxRequestEntity(
@@ -73,13 +77,17 @@ internal class PairingRequests(
                     clientNameSnapshot = requestId,
                     clientSoftwareJson = null,
                     kind = RequestKind.PAIRING.storedName,
-                    state = InboxRequestState.WAITING.storedName,
-                    listed = true,
+                    state = if (accepted) {
+                        InboxRequestState.WAITING.storedName
+                    } else {
+                        InboxRequestState.COMPLETED.storedName
+                    },
+                    listed = accepted,
                     requestJson = requestPayload.toString(),
                     responseJson = response.toString(),
-                    error = null,
+                    error = rejection?.message,
                     receivedAt = now,
-                    completedAt = null,
+                    completedAt = now.takeUnless { accepted },
                     exchangeEndedAt = null,
                     responseOutboxFinished = false,
                 ),
@@ -90,7 +98,11 @@ internal class PairingRequests(
                     deviceRandom = deviceRandom,
                     desiredRelayClientState = null,
                     relayClientState = RelayClientState.PENDING.wireName,
-                    state = PairingState.EXCHANGE_PENDING.storedName,
+                    state = if (accepted) {
+                        PairingState.EXCHANGE_PENDING.storedName
+                    } else {
+                        PairingState.REJECTED.storedName
+                    },
                     sasOption0 = null,
                     sasOption1 = null,
                     sasOption2 = null,
@@ -101,14 +113,16 @@ internal class PairingRequests(
                     machineId = null,
                     osVersion = null,
                     pendingPsk = null,
-                    decidedAt = null,
+                    decidedAt = now.takeUnless { accepted },
                 ),
             )
             audit.append(
                 records = listOf(
                     AuditRecord(
                         type = AuditEventType.PAIRING_REQUESTED,
-                        outcome = AuditOutcome.RECEIVED,
+                        outcome = if (accepted) AuditOutcome.RECEIVED else AuditOutcome.REJECTED,
+                        decisionSource = AuditDecisionSource.VALIDATION.takeUnless { accepted },
+                        detail = rejection?.message,
                         clientId = requestId,
                         relayRequestId = requestId,
                     ),
@@ -117,7 +131,6 @@ internal class PairingRequests(
             )
             true
         }
-        return response.takeIf { persisted }
     }
 
     /** Returns true when the completion is terminal and can be acknowledged. */
@@ -199,7 +212,7 @@ internal class PairingRequests(
                     state = InboxRequestState.ACTION_REQUIRED.storedName,
                     clientSoftwareJson = metadata?.clientSoftware?.let(json::encodeToString),
                     responseOutboxFinished = true,
-                    error = METADATA_WARNING.takeIf { metadata == null },
+                    error = currentRequest.error ?: METADATA_WARNING.takeIf { metadata == null },
                     exchangeEndedAt = now,
                 ),
                 attempt = currentAttempt.copy(
@@ -475,7 +488,7 @@ internal class PairingRequests(
         } catch (_: Exception) {
             false
         }
-        return ProcessedRelayMessage(response).takeIf { promoted }
+        return ProcessedRelayMessage.takeIf { promoted }
     }
 
     suspend fun recordRejectedRequest(
@@ -556,11 +569,12 @@ internal class PairingRequests(
             if (request.kind != RequestKind.PAIRING_FINISH.storedName) return@execute false
             if (request.exchangeEndedAt != null) return@execute true
 
-            val detail = when (accepted) {
+            val detail = request.error ?: when (accepted) {
                 true -> null
                 false -> FINISH_REJECTED_ERROR
                 null -> FINISH_VERIFICATION_ERROR
             }
+            val valid = request.error == null && accepted == true
             dao.updateEndedRequest(
                 request.copy(
                     responseOutboxFinished = true,
@@ -572,7 +586,7 @@ internal class PairingRequests(
                 records = listOf(
                     AuditRecord(
                         type = AuditEventType.PAIRING_CONFIRMATION_RECEIVED,
-                        outcome = if (accepted == true) {
+                        outcome = if (valid) {
                             AuditOutcome.COMPLETED
                         } else {
                             AuditOutcome.FAILED
@@ -627,7 +641,7 @@ internal class PairingRequests(
                 request = request.copy(
                     state = InboxRequestState.ACTION_REQUIRED.storedName,
                     responseOutboxFinished = true,
-                    error = INITIAL_COMPLETION_VERIFICATION_ERROR,
+                    error = request.error ?: INITIAL_COMPLETION_VERIFICATION_ERROR,
                     exchangeEndedAt = now,
                 ),
                 attempt = attempt.withoutEstablishedMaterial(PairingState.EXCHANGE_FAILED),
@@ -713,6 +727,11 @@ internal class PairingRequests(
         const val FINISH_VERIFICATION_ERROR =
             "The pairing confirmation could not be verified."
     }
+}
+
+private fun PairedRequestErrorCode.publicResponse(): JsonElement = buildJsonObject {
+    put("error", wireName)
+    put("message", message)
 }
 
 internal fun PairingAttemptEntity.auditClientName(): String =

@@ -2,6 +2,7 @@ package dev.agentknock.storage.secret
 
 import dev.agentknock.protocol.SecretUploadMode
 import dev.agentknock.storage.ImmediateWriteTransaction
+import dev.agentknock.storage.audit.AuditEventType
 import dev.agentknock.storage.audit.AuditRecord
 import dev.agentknock.storage.audit.AuditSink
 import dev.agentknock.storage.audit.NoOpAuditSink
@@ -897,11 +898,9 @@ class SecretRepositoryTest {
                     listOf("github"),
                     "workstation",
                     TemporaryAccessOperation.INVOCATION,
-                )
+            )
                 .single()
             assertEquals(SecretApprovalMode.APPROVE, overridden.mode)
-            assertEquals(SecretApprovalMode.ASK_AI, overridden.defaultMode)
-            assertTrue(overridden.overridden)
             assertEquals(
                 "Allow issue triage but never publish a release.",
                 overridden.instructions,
@@ -920,8 +919,232 @@ class SecretRepositoryTest {
                 )
                 .single()
             assertEquals(SecretApprovalMode.ASK_AI, inherited.mode)
-            assertFalse(inherited.overridden)
         }
+
+    @Test
+    fun `reselecting an explicit client approval override changes nothing`() = runTest {
+        val audit = RecordingAuditSink()
+        val fixture = Fixture(audit = audit)
+        val secretId = fixture.createSecret("github")
+        fixture.repository.setClientApprovalOverride(
+            secretId,
+            "workstation",
+            SecretApprovalMode.ASK_AI,
+        )
+        fixture.repository.allowTemporaryAccess(
+            policies = fixture.repository.approvalPoliciesForNames(
+                listOf("github"),
+                "workstation",
+                TemporaryAccessOperation.INVOCATION,
+            ),
+            clientId = "workstation",
+            operation = TemporaryAccessOperation.INVOCATION,
+            expiresAt = 10_000,
+        )
+        val overrideRows = fixture.dao.approvalOverrides.value.toList()
+        val revision = checkNotNull(fixture.dao.getSecret(secretId)).revision
+        val grants = fixture.dao.temporaryAccessGrants.value.toList()
+        val auditRecords = audit.records.toList()
+        assertEquals(1, overrideRows.size)
+        assertEquals(1, grants.size)
+
+        assertEquals(
+            SaveSecretResult.SAVED,
+            fixture.repository.setClientApprovalOverride(
+                secretId,
+                "workstation",
+                SecretApprovalMode.ASK_AI,
+            ),
+        )
+
+        assertEquals(overrideRows, fixture.dao.approvalOverrides.value)
+        assertEquals(revision, checkNotNull(fixture.dao.getSecret(secretId)).revision)
+        assertEquals(grants, fixture.dao.temporaryAccessGrants.value)
+        assertEquals(auditRecords, audit.records)
+    }
+
+    @Test
+    fun `reselecting inherited client approval changes nothing`() = runTest {
+        val audit = RecordingAuditSink()
+        val fixture = Fixture(audit = audit)
+        val secretId = fixture.createSecret("github")
+        fixture.repository.allowTemporaryAccess(
+            policies = fixture.repository.approvalPoliciesForNames(
+                listOf("github"),
+                "workstation",
+                TemporaryAccessOperation.INVOCATION,
+            ),
+            clientId = "workstation",
+            operation = TemporaryAccessOperation.INVOCATION,
+            expiresAt = 10_000,
+        )
+        val overrideRows = fixture.dao.approvalOverrides.value.toList()
+        val revision = checkNotNull(fixture.dao.getSecret(secretId)).revision
+        val grants = fixture.dao.temporaryAccessGrants.value.toList()
+        val auditRecords = audit.records.toList()
+        assertTrue(overrideRows.isEmpty())
+        assertEquals(1, grants.size)
+
+        assertEquals(
+            SaveSecretResult.SAVED,
+            fixture.repository.setClientApprovalOverride(secretId, "workstation", null),
+        )
+
+        assertEquals(overrideRows, fixture.dao.approvalOverrides.value)
+        assertEquals(revision, checkNotNull(fixture.dao.getSecret(secretId)).revision)
+        assertEquals(grants, fixture.dao.temporaryAccessGrants.value)
+        assertEquals(auditRecords, audit.records)
+    }
+
+    @Test
+    fun `explicit and inherited forms of the same client mode preserve temporary access`() =
+        runTest {
+            val fixture = Fixture()
+            val secretId = fixture.createSecret("github")
+            fixture.repository.allowTemporaryAccess(
+                policies = fixture.repository.approvalPoliciesForNames(
+                    listOf("github"),
+                    "workstation",
+                    TemporaryAccessOperation.INVOCATION,
+                ),
+                clientId = "workstation",
+                operation = TemporaryAccessOperation.INVOCATION,
+                expiresAt = 10_000,
+            )
+            val revision = checkNotNull(fixture.dao.getSecret(secretId)).revision
+
+            fixture.repository.setClientApprovalOverride(
+                secretId,
+                "workstation",
+                SecretApprovalMode.TEMPORARY,
+            )
+
+            assertEquals(1, fixture.dao.temporaryAccessGrants.value.size)
+            assertEquals(revision, checkNotNull(fixture.dao.getSecret(secretId)).revision)
+
+            fixture.repository.setClientApprovalOverride(secretId, "workstation", null)
+
+            assertEquals(1, fixture.dao.temporaryAccessGrants.value.size)
+            assertEquals(revision, checkNotNull(fixture.dao.getSecret(secretId)).revision)
+        }
+
+    @Test
+    fun `changing the default mode ends only access inherited from that default`() = runTest {
+        val fixture = Fixture()
+        val secretId = fixture.createSecret("github")
+        fixture.repository.setClientApprovalOverride(
+            secretId,
+            "pinned-client",
+            SecretApprovalMode.TEMPORARY,
+        )
+        listOf("inheriting-client", "pinned-client").forEach { clientId ->
+            fixture.repository.allowTemporaryAccess(
+                policies = fixture.repository.approvalPoliciesForNames(
+                    listOf("github"),
+                    clientId,
+                    TemporaryAccessOperation.INVOCATION,
+                ),
+                clientId = clientId,
+                operation = TemporaryAccessOperation.INVOCATION,
+                expiresAt = 10_000,
+            )
+        }
+        val revision = checkNotNull(fixture.dao.getSecret(secretId)).revision
+
+        fixture.repository.saveApprovalMode(secretId, SecretApprovalMode.ASK_ME)
+
+        assertEquals(
+            listOf("pinned-client"),
+            fixture.dao.temporaryAccessGrants.value.map { it.clientId },
+        )
+        assertEquals(revision, checkNotNull(fixture.dao.getSecret(secretId)).revision)
+        assertEquals(
+            SecretApprovalMode.ASK_ME,
+            fixture.repository.approvalPoliciesForNames(
+                listOf("github"),
+                "inheriting-client",
+                TemporaryAccessOperation.INVOCATION,
+            ).single().mode,
+        )
+        assertEquals(
+            SecretApprovalMode.TEMPORARY,
+            fixture.repository.approvalPoliciesForNames(
+                listOf("github"),
+                "pinned-client",
+                TemporaryAccessOperation.INVOCATION,
+            ).single().mode,
+        )
+    }
+
+    @Test
+    fun `client approval override changes touch the secret and end scoped temporary access`() =
+        runTest {
+        val audit = RecordingAuditSink()
+        val fixture = Fixture(audit = audit)
+        val secretId = fixture.createSecret("github")
+        fixture.repository.allowTemporaryAccess(
+            policies = fixture.repository.approvalPoliciesForNames(
+                listOf("github"),
+                "workstation",
+                TemporaryAccessOperation.INVOCATION,
+            ),
+            clientId = "workstation",
+            operation = TemporaryAccessOperation.INVOCATION,
+            expiresAt = 10_000,
+        )
+        val initialRevision = checkNotNull(fixture.dao.getSecret(secretId)).revision
+        val initialAuditCount = audit.records.size
+        assertEquals(1, fixture.dao.temporaryAccessGrants.value.size)
+
+        fixture.repository.setClientApprovalOverride(
+            secretId,
+            "workstation",
+            SecretApprovalMode.ASK_AI,
+        )
+
+        assertEquals(
+            listOf(
+                SecretClientApprovalOverrideEntity(
+                    secretId = secretId,
+                    clientId = "workstation",
+                    approvalMode = SecretApprovalMode.ASK_AI.storedName,
+                ),
+            ),
+            fixture.dao.approvalOverrides.value,
+        )
+        assertEquals(initialRevision, checkNotNull(fixture.dao.getSecret(secretId)).revision)
+        assertTrue(fixture.dao.temporaryAccessGrants.value.isEmpty())
+        assertEquals(initialAuditCount + 1, audit.records.size)
+        assertEquals(
+            AuditEventType.CLIENT_APPROVAL_OVERRIDE_CHANGED,
+            audit.records.last().type,
+        )
+
+        fixture.repository.allowTemporaryAccess(
+            policies = fixture.repository.approvalPoliciesForNames(
+                listOf("github"),
+                "workstation",
+                TemporaryAccessOperation.INVOCATION,
+            ),
+            clientId = "workstation",
+            operation = TemporaryAccessOperation.INVOCATION,
+            expiresAt = 10_000,
+        )
+        val overriddenRevision = checkNotNull(fixture.dao.getSecret(secretId)).revision
+        val overriddenAuditCount = audit.records.size
+        assertEquals(1, fixture.dao.temporaryAccessGrants.value.size)
+
+        fixture.repository.setClientApprovalOverride(secretId, "workstation", null)
+
+        assertTrue(fixture.dao.approvalOverrides.value.isEmpty())
+        assertEquals(overriddenRevision, checkNotNull(fixture.dao.getSecret(secretId)).revision)
+        assertTrue(fixture.dao.temporaryAccessGrants.value.isEmpty())
+        assertEquals(overriddenAuditCount + 1, audit.records.size)
+        assertEquals(
+            AuditEventType.CLIENT_APPROVAL_OVERRIDE_CHANGED,
+            audit.records.last().type,
+        )
+    }
 
     @Test
     fun `temporary access is scoped to client secret and operation`() = runTest {
@@ -1388,6 +1611,18 @@ class SecretRepositoryTest {
     }
 }
 
+private class RecordingAuditSink : AuditSink {
+    val records = mutableListOf<AuditRecord>()
+
+    override suspend fun record(record: AuditRecord) {
+        records += record
+    }
+
+    override suspend fun append(records: List<AuditRecord>, occurredAt: Long) {
+        this.records += records
+    }
+}
+
 private class FakeSecretDao : SecretDao {
     val secrets = MutableStateFlow<List<SecretEntity>>(emptyList())
     val variables = MutableStateFlow<List<EnvironmentVariableEntity>>(emptyList())
@@ -1596,7 +1831,6 @@ private class FakeSecretDao : SecretDao {
                 secret.copy(
                     approvalMode = approvalMode,
                     updatedAt = updatedAt,
-                    revision = secret.revision + 1,
                 )
             } else {
                 secret
@@ -1675,6 +1909,17 @@ private class FakeSecretDao : SecretDao {
         val before = temporaryAccessGrants.value.size
         temporaryAccessGrants.value = temporaryAccessGrants.value.filterNot {
             it.secretId == secretId && it.clientId == clientId
+        }
+        return before - temporaryAccessGrants.value.size
+    }
+
+    override suspend fun deleteTemporaryAccessGrantsUsingDefaultApproval(secretId: String): Int {
+        val overriddenClients = approvalOverrides.value
+            .filter { it.secretId == secretId }
+            .mapTo(mutableSetOf(), SecretClientApprovalOverrideEntity::clientId)
+        val before = temporaryAccessGrants.value.size
+        temporaryAccessGrants.value = temporaryAccessGrants.value.filterNot {
+            it.secretId == secretId && it.clientId !in overriddenClients
         }
         return before - temporaryAccessGrants.value.size
     }

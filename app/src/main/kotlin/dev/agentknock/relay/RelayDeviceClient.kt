@@ -177,10 +177,18 @@ internal sealed interface RelayDeviceConnectionResult {
     }
 }
 
+internal sealed interface RelayFrameSendResult {
+    data object Sent : RelayFrameSendResult
+
+    data object Unavailable : RelayFrameSendResult
+
+    data object FrameTooLarge : RelayFrameSendResult
+}
+
 internal interface RelayDeviceConnection {
     val events: ReceiveChannel<RelayDeviceEvent>
 
-    fun send(frame: RelayDeviceFrame): Boolean
+    fun send(frame: RelayDeviceFrame): RelayFrameSendResult
 
     suspend fun close()
 }
@@ -293,7 +301,7 @@ internal class WebSocketRelayDeviceClient(
         }
         val body = runCatching { response.body.string() }.getOrNull()
         val error = body?.let(::decodeRelayError)
-        if (response.code.isTemporarilyUnavailable()) {
+        if (response.code.isTransientRelayStatus()) {
             return RelayDeviceConnectionResult.Unavailable(
                 message = error?.message
                     ?: "Relay is temporarily unavailable (HTTP ${response.code}).",
@@ -310,9 +318,6 @@ internal class WebSocketRelayDeviceClient(
         )
     }
 }
-
-private fun Int.isTemporarilyUnavailable(): Boolean =
-    this == 408 || this == 425 || this == 429 || this in 500..599
 
 internal class RelayEventBuffer(capacity: Int) {
     private val channel: Channel<RelayDeviceEvent>
@@ -371,9 +376,16 @@ private class OkHttpRelayDeviceConnection(
     private val codec: RelayFrameCodec,
     private val terminated: CompletableDeferred<Unit>,
 ) : RelayDeviceConnection {
-    override fun send(frame: RelayDeviceFrame): Boolean {
+    override fun send(frame: RelayDeviceFrame): RelayFrameSendResult {
         val encoded = codec.encode(frame)
-        return encoded.encodeToByteArray().size <= MAXIMUM_FRAME_BYTES && socket.send(encoded)
+        if (encoded.encodeToByteArray().size > MAXIMUM_FRAME_BYTES) {
+            return RelayFrameSendResult.FrameTooLarge
+        }
+        return if (socket.send(encoded)) {
+            RelayFrameSendResult.Sent
+        } else {
+            RelayFrameSendResult.Unavailable
+        }
     }
 
     override suspend fun close() {

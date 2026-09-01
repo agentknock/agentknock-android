@@ -5,6 +5,7 @@ import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.test.runTest
 import kotlinx.coroutines.withContext
 import kotlinx.coroutines.withTimeout
+import kotlinx.serialization.json.JsonPrimitive
 import mockwebserver3.MockResponse
 import mockwebserver3.MockWebServer
 import okhttp3.OkHttpClient
@@ -407,7 +408,8 @@ class RelayDeviceClientTest {
             assertEquals("/v1/device/$DEVICE_ID", request.target)
             assertEquals("Bearer $DEVICE_TOKEN", request.headers["Authorization"])
 
-            assertTrue(
+            assertEquals(
+                RelayFrameSendResult.Sent,
                 connection.send(
                     RelayDeviceFrame.Resume(CLIENT_ID, REQUEST_ID),
                 ),
@@ -430,6 +432,59 @@ class RelayDeviceClientTest {
                 RelayDeviceEvent.Closed(1000, "test complete"),
                 connection.events.receive(),
             )
+            assertEquals(
+                RelayFrameSendResult.Unavailable,
+                connection.send(RelayDeviceFrame.Resume(CLIENT_ID, REQUEST_ID)),
+            )
+        }
+    }
+
+    @Test
+    fun `rejects an oversized frame without writing it to the websocket`() = runTest {
+        MockWebServer().use { server ->
+            val received = CompletableDeferred<String>()
+            server.start()
+            server.enqueue(
+                MockResponse.Builder()
+                    .webSocketUpgrade(
+                        object : WebSocketListener() {
+                            override fun onMessage(webSocket: WebSocket, text: String) {
+                                received.complete(text)
+                            }
+
+                            override fun onClosing(
+                                webSocket: WebSocket,
+                                code: Int,
+                                reason: String,
+                            ) {
+                                webSocket.close(code, reason)
+                            }
+                        },
+                    )
+                    .build(),
+            )
+            val client = WebSocketRelayDeviceClient(
+                client = OkHttpClient(),
+                relayUrl = server.url("/").toString(),
+            )
+            val result = client.connect(DEVICE_ID, DEVICE_TOKEN)
+            val connection = (result as RelayDeviceConnectionResult.Connected).connection
+
+            assertEquals(
+                RelayFrameSendResult.FrameTooLarge,
+                connection.send(
+                    RelayDeviceFrame.Response(
+                        clientId = CLIENT_ID,
+                        requestId = REQUEST_ID,
+                        payload = JsonPrimitive("x".repeat(256 * 1024)),
+                    ),
+                ),
+            )
+            assertFalse(received.isCompleted)
+
+            withContext(Dispatchers.IO) {
+                connection.close()
+            }
         }
     }
 

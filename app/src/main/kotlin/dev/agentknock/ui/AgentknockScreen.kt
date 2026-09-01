@@ -2,13 +2,13 @@ package dev.agentknock.ui
 
 import androidx.activity.compose.LocalActivity
 import androidx.compose.foundation.layout.Box
-import androidx.compose.foundation.layout.BoxWithConstraints
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.Arrangement
-import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.WindowInsets
+import androidx.compose.foundation.layout.WindowInsetsSides
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.navigationBars
+import androidx.compose.foundation.layout.only
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.layout.windowInsetsPadding
@@ -21,17 +21,19 @@ import androidx.compose.material3.Badge
 import androidx.compose.material3.BadgedBox
 import androidx.compose.material3.Icon
 import androidx.compose.material3.CircularProgressIndicator
-import androidx.compose.material3.NavigationBar
-import androidx.compose.material3.NavigationBarItem
-import androidx.compose.material3.NavigationRail
-import androidx.compose.material3.NavigationRailItem
 import androidx.compose.material3.AlertDialog
-import androidx.compose.material3.Scaffold
 import androidx.compose.material3.Surface
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.Text
 import androidx.compose.material3.TextButton
 import androidx.compose.material3.Button
+import androidx.compose.material3.adaptive.currentWindowAdaptiveInfoV2
+import androidx.compose.material3.adaptive.navigationsuite.NavigationSuiteItem
+import androidx.compose.material3.adaptive.navigationsuite.NavigationSuiteScaffold
+import androidx.compose.material3.adaptive.navigationsuite.NavigationSuiteScaffoldDefaults
+import androidx.compose.material3.adaptive.navigationsuite.NavigationSuiteScaffoldValue
+import androidx.compose.material3.adaptive.navigationsuite.NavigationSuiteType
+import androidx.compose.material3.adaptive.navigationsuite.rememberNavigationSuiteScaffoldState
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.DisposableEffect
 import androidx.compose.runtime.LaunchedEffect
@@ -45,6 +47,7 @@ import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.res.stringResource
+import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import androidx.lifecycle.Lifecycle
@@ -53,11 +56,11 @@ import androidx.lifecycle.ViewModelProvider
 import androidx.lifecycle.compose.LocalLifecycleOwner
 import androidx.lifecycle.viewmodel.compose.viewModel
 import dev.agentknock.R
-import dev.agentknock.RequestNavigation
-import dev.agentknock.SubscriptionNavigation
+import dev.agentknock.ExternalNavigation
 import dev.agentknock.ui.clients.ClientsScreen
 import dev.agentknock.ui.clients.ClientsViewModel
 import dev.agentknock.ui.secrets.SecretsScreen
+import dev.agentknock.ui.secrets.SecretsEditor
 import dev.agentknock.ui.secrets.SecretsViewModel
 import dev.agentknock.ui.requests.RequestsScreen
 import dev.agentknock.ui.requests.RequestsViewModel
@@ -70,45 +73,54 @@ import dev.agentknock.ui.device.DeviceSetupScreen
 import dev.agentknock.ui.device.DeviceSetupViewModel
 import dev.agentknock.ui.auth.AuthenticationSession
 import dev.agentknock.ui.auth.DeviceAuthenticationMode
+import dev.agentknock.ui.auth.SensitiveDataBackgroundGuard
+import dev.agentknock.ui.auth.DeviceAuthenticationRequest
 import dev.agentknock.push.RequestNotifications
+import dev.agentknock.storage.device.DeviceIdentity
 import dev.agentknock.storage.request.InboxRequestKind
 import kotlinx.coroutines.flow.StateFlow
 
 @Composable
 internal fun AgentknockScreen(
-    authenticate: (
-        title: String,
-        onSuccess: () -> Unit,
-        onError: (String) -> Unit,
-    ) -> Unit,
+    authenticationRequest: StateFlow<DeviceAuthenticationRequest?>,
+    sensitiveDataBackgroundGuard: SensitiveDataBackgroundGuard,
     authentication: AuthenticationSession,
-    requestNavigation: StateFlow<RequestNavigation?>,
-    consumeRequestNavigation: (RequestNavigation) -> Unit,
-    subscriptionNavigation: StateFlow<SubscriptionNavigation?>,
-    consumeSubscriptionNavigation: (SubscriptionNavigation) -> Unit,
+    externalNavigation: StateFlow<ExternalNavigation?>,
+    consumeExternalNavigation: (ExternalNavigation) -> Unit,
     notificationStateGeneration: StateFlow<Long>,
     requestNotificationPermission: () -> Unit,
     viewModelFactory: ViewModelProvider.Factory,
-    deviceSetupViewModel: DeviceSetupViewModel = viewModel(factory = viewModelFactory),
+    agentknockViewModel: AgentknockViewModel = viewModel(factory = viewModelFactory),
+    deviceSetupViewModel: @Composable () -> DeviceSetupViewModel = {
+        viewModel(factory = viewModelFactory)
+    },
     requestsViewModel: RequestsViewModel = viewModel(factory = viewModelFactory),
     secretsViewModel: SecretsViewModel = viewModel(factory = viewModelFactory),
     clientsViewModel: ClientsViewModel = viewModel(factory = viewModelFactory),
     subscriptionViewModel: SubscriptionViewModel = viewModel(factory = viewModelFactory),
-    auditViewModel: AuditViewModel = viewModel(factory = viewModelFactory),
-    settingsViewModel: SettingsViewModel = viewModel(factory = viewModelFactory),
+    auditViewModel: @Composable () -> AuditViewModel = {
+        viewModel(factory = viewModelFactory)
+    },
+    settingsViewModel: @Composable () -> SettingsViewModel = {
+        viewModel(factory = viewModelFactory)
+    },
 ) {
     val authenticationMode by authentication.mode.collectAsStateWithLifecycle()
     val sessionAuthenticated by authentication.authenticated.collectAsStateWithLifecycle()
-    val configuration by deviceSetupViewModel.configuration.collectAsStateWithLifecycle()
+    val unlockError by agentknockViewModel.unlockError.collectAsStateWithLifecycle()
+    val configuration by agentknockViewModel.configuration.collectAsStateWithLifecycle()
     var section by rememberSaveable { mutableStateOf(MainSection.REQUESTS) }
     var destination by rememberSaveable { mutableStateOf(RootDestination.MAIN) }
-    val mainStateHolder = rememberSaveableStateHolder()
+    var addressEditorIdentityId by rememberSaveable { mutableStateOf<String?>(null) }
+    var addressEditorOriginalAddress by rememberSaveable { mutableStateOf<String?>(null) }
+    var waitingForInitialClaim by rememberSaveable { mutableStateOf(false) }
+    val rootStateHolder = rememberSaveableStateHolder()
     var showNavigation by rememberSaveable { mutableStateOf(true) }
     var offerNotifications by rememberSaveable { mutableStateOf(false) }
-    val requestNavigationTarget by requestNavigation.collectAsStateWithLifecycle()
-    val subscriptionNavigationTarget by subscriptionNavigation.collectAsStateWithLifecycle()
+    val externalNavigationTarget by externalNavigation.collectAsStateWithLifecycle()
     val notificationRefreshGeneration by notificationStateGeneration.collectAsStateWithLifecycle()
-    val requestSummaries by requestsViewModel.allRequests.collectAsStateWithLifecycle()
+    val requestSummaries by agentknockViewModel.requests.collectAsStateWithLifecycle()
+    val secretsEditor by secretsViewModel.editor.collectAsStateWithLifecycle()
     val subscription by subscriptionViewModel.state.collectAsStateWithLifecycle()
     val context = LocalContext.current
     val lifecycle = LocalLifecycleOwner.current.lifecycle
@@ -117,17 +129,43 @@ internal fun AgentknockScreen(
         RequestNotifications.actionNotificationsEnabled(context)
     }
 
-    DisposableEffect(lifecycle, activity, secretsViewModel) {
+    DisposableEffect(
+        lifecycle,
+        activity,
+        secretsViewModel,
+        authenticationRequest,
+        sensitiveDataBackgroundGuard,
+    ) {
         val observer = LifecycleEventObserver { _, event ->
             if (
                 event == Lifecycle.Event.ON_STOP &&
                 activity?.isChangingConfigurations != true
             ) {
-                secretsViewModel.clearSensitiveEditor()
+                if (sensitiveDataBackgroundGuard.onStop(authenticationRequest.value != null)) {
+                    secretsViewModel.clearSensitiveData()
+                }
             }
         }
         lifecycle.addObserver(observer)
         onDispose { lifecycle.removeObserver(observer) }
+    }
+
+    LaunchedEffect(
+        authenticationRequest,
+        lifecycle,
+        secretsViewModel,
+        sensitiveDataBackgroundGuard,
+    ) {
+        authenticationRequest.collect { request ->
+            if (
+                sensitiveDataBackgroundGuard.onAuthenticationChanged(
+                    inProgress = request != null,
+                    foreground = lifecycle.currentState.isAtLeast(Lifecycle.State.STARTED),
+                )
+            ) {
+                secretsViewModel.clearSensitiveData()
+            }
+        }
     }
     val actionRequiredCounts = MainSection.entries.associateWith { section ->
         when (section) {
@@ -142,176 +180,233 @@ internal fun AgentknockScreen(
     }
     val current = configuration
 
+    fun openAddressEditor() {
+        addressEditorIdentityId = current?.active?.id
+        addressEditorOriginalAddress = current?.active?.address
+        destination = RootDestination.ADDRESS_EDITOR
+    }
+
+    fun closeAddressEditor() {
+        addressEditorIdentityId = null
+        addressEditorOriginalAddress = null
+        destination = RootDestination.MAIN
+        rootStateHolder.removeState(ADDRESS_EDITOR_STATE_KEY)
+    }
+
+    fun closeSettings() {
+        destination = RootDestination.MAIN
+        rootStateHolder.removeState(SETTINGS_STATE_KEY)
+    }
+
     LaunchedEffect(current?.active?.deviceId, subscriptionViewModel) {
         if (current?.active?.credentialsAvailable == true) subscriptionViewModel.refresh()
     }
 
-    fun authorizeProtectedAction(
-        title: String,
-        onSuccess: () -> Unit,
-        onError: (String) -> Unit,
-    ) {
-        authentication.authorizeProtectedAction(title, authenticate, onSuccess, onError)
+    LaunchedEffect(current) {
+        val active = current?.active
+        val addressEditorTargetChanged = addressEditorCompleted(
+            originalIdentityId = addressEditorIdentityId,
+            originalAddress = addressEditorOriginalAddress,
+            active = active,
+        )
+        if (current != null && active == null) {
+            waitingForInitialClaim = true
+        } else if (active?.credentialsAvailable == true && waitingForInitialClaim) {
+            waitingForInitialClaim = false
+            offerNotifications = true
+        }
+        if (
+            destination == RootDestination.ADDRESS_EDITOR &&
+            addressEditorTargetChanged
+        ) {
+            closeAddressEditor()
+        }
     }
 
-    LaunchedEffect(requestNavigationTarget, requestSummaries) {
-        val target = requestNavigationTarget ?: return@LaunchedEffect
-        val requestId = target.requestId
-        val targetSection = if (requestId == null) {
-            MainSection.REQUESTS
-        } else {
-            when (requestSummaries.firstOrNull { it.id == requestId }?.kind ?: return@LaunchedEffect) {
-                InboxRequestKind.SECRET_USE -> MainSection.REQUESTS
-                InboxRequestKind.GIT_SIGN -> MainSection.REQUESTS
-                InboxRequestKind.SSH_AUTHENTICATE -> MainSection.REQUESTS
-                InboxRequestKind.SECRET_UPLOAD -> MainSection.SECRETS
-                InboxRequestKind.PAIRING -> MainSection.CLIENTS
-            }
+    LaunchedEffect(current?.active?.credentialsAvailable) {
+        if (current?.active?.credentialsAvailable == true) {
+            rootStateHolder.removeState(SETUP_STATE_KEY)
         }
-        section = targetSection
-        destination = RootDestination.MAIN
-        when (targetSection) {
-            MainSection.REQUESTS -> requestsViewModel.selectRequest(requestId)
-            MainSection.SECRETS -> secretsViewModel.selectUpload(requestId)
-            MainSection.CLIENTS -> clientsViewModel.selectPairing(requestId)
+    }
+
+    LaunchedEffect(section, destination) {
+        if (section != MainSection.SECRETS || destination != RootDestination.MAIN) {
+            secretsViewModel.clearRevealedValues()
         }
-        consumeRequestNavigation(target)
     }
 
     LaunchedEffect(
-        subscriptionNavigationTarget,
+        externalNavigationTarget,
         current,
+        destination,
         authenticationMode,
         sessionAuthenticated,
+        secretsEditor is SecretsEditor.None,
     ) {
-        val target = subscriptionNavigationTarget ?: return@LaunchedEffect
+        val target = externalNavigationTarget ?: return@LaunchedEffect
         if (
-            current?.active?.credentialsAvailable != true ||
-            (authenticationMode == DeviceAuthenticationMode.APP_LOCK && !sessionAuthenticated)
+            destination == RootDestination.ADDRESS_EDITOR ||
+            current?.active?.credentialsAvailable != true
         ) {
             return@LaunchedEffect
         }
-        destination = RootDestination.PLAN
-        when (target) {
-            is SubscriptionNavigation.Redemption -> subscriptionViewModel.redeem(target.token)
-            SubscriptionNavigation.InvalidLink -> subscriptionViewModel.reportInvalidLink()
+        if (secretsEditor !is SecretsEditor.None) {
+            section = MainSection.SECRETS
+            destination = RootDestination.MAIN
+            return@LaunchedEffect
         }
-        consumeSubscriptionNavigation(target)
+        if (
+            authenticationMode == DeviceAuthenticationMode.APP_LOCK &&
+            !sessionAuthenticated
+        ) {
+            return@LaunchedEffect
+        }
+        when (target) {
+            is ExternalNavigation.Request -> {
+                val requestId = target.requestId
+                val targetSection = if (requestId == null) {
+                    MainSection.REQUESTS
+                } else {
+                    when (agentknockViewModel.findRequestKind(requestId)) {
+                        InboxRequestKind.SECRET_USE -> MainSection.REQUESTS
+                        InboxRequestKind.GIT_SIGN -> MainSection.REQUESTS
+                        InboxRequestKind.SSH_AUTHENTICATE -> MainSection.REQUESTS
+                        InboxRequestKind.SECRET_UPLOAD -> MainSection.SECRETS
+                        InboxRequestKind.PAIRING -> MainSection.CLIENTS
+                        null -> {
+                            consumeExternalNavigation(target)
+                            return@LaunchedEffect
+                        }
+                    }
+                }
+                section = targetSection
+                destination = RootDestination.MAIN
+                when (targetSection) {
+                    MainSection.REQUESTS -> requestsViewModel.selectRequest(requestId)
+                    MainSection.SECRETS -> {
+                        secretsViewModel.selectUpload(requestId, retainResolved = true)
+                    }
+                    MainSection.CLIENTS -> {
+                        clientsViewModel.selectPairing(requestId, retainResolved = true)
+                    }
+                }
+                consumeExternalNavigation(target)
+            }
+            is ExternalNavigation.SubscriptionRedemption -> {
+                subscriptionViewModel.redeem(target.token)
+                destination = RootDestination.PLAN
+                consumeExternalNavigation(target)
+            }
+            ExternalNavigation.InvalidSubscriptionLink -> {
+                subscriptionViewModel.reportInvalidLink()
+                destination = RootDestination.PLAN
+                consumeExternalNavigation(target)
+            }
+        }
     }
 
     when {
         authenticationMode == DeviceAuthenticationMode.APP_LOCK && !sessionAuthenticated ->
             AgentknockLockedScreen(
-                onUnlock = { onSuccess, onError ->
-                    authentication.authorizeProtectedAction(
-                        "Unlock Agentknock",
-                        authenticate,
-                        onSuccess,
-                        onError,
-                    )
-                },
+                error = unlockError,
+                onUnlock = agentknockViewModel::unlock,
             )
         current == null -> Box(Modifier.fillMaxSize(), contentAlignment = Alignment.Center) {
             CircularProgressIndicator()
         }
         destination == RootDestination.SETTINGS ||
-            destination == RootDestination.PLAN -> SettingsScreen(
-            onClose = { destination = RootDestination.MAIN },
-            authenticationMode = authenticationMode,
-            onAuthenticationModeChange = { mode, onError ->
-                authentication.changeMode(mode, authenticate, onError)
-            },
-            notificationStateGeneration = notificationRefreshGeneration,
-            requestNotificationPermission = requestNotificationPermission,
-            openPlanInitially = destination == RootDestination.PLAN,
-            onPlanOpened = {
-                if (destination == RootDestination.PLAN) {
-                    destination = RootDestination.SETTINGS
-                }
-            },
-            subscriptionViewModel = subscriptionViewModel,
-            auditViewModel = auditViewModel,
-            viewModel = settingsViewModel,
-        )
-        current.active == null || !current.active.credentialsAvailable -> DeviceSetupScreen(
-            configuration = current,
-            onDone = current.active?.takeIf { it.credentialsAvailable }?.let {
-                { section = MainSection.REQUESTS }
-            },
-            onDeviceClaimed = { offerNotifications = true },
-            onOpenSettings = { destination = RootDestination.SETTINGS },
-            viewModel = deviceSetupViewModel,
-        )
-        destination == RootDestination.ADDRESS_EDITOR -> DeviceSetupScreen(
-            configuration = current,
-            onDone = {
-                destination = RootDestination.MAIN
-            },
-            changeAddressInitially = true,
-            onDeviceClaimed = {},
-            viewModel = deviceSetupViewModel,
-        )
-        else -> mainStateHolder.SaveableStateProvider(section.name) {
-            BoxWithConstraints(Modifier.fillMaxSize()) {
-                val useNavigationRail = maxWidth >= 600.dp
-                LaunchedEffect(useNavigationRail) {
-                    if (useNavigationRail) showNavigation = true
-                }
-                if (useNavigationRail) {
-                    Row(Modifier.fillMaxSize().windowInsetsPadding(WindowInsets.navigationBars)) {
-                        if (showNavigation) {
-                            MainNavigationRail(
-                                section = section,
-                                actionRequiredCounts = actionRequiredCounts,
-                                onSelect = { section = it },
-                            )
-                        }
-                        MainContent(
-                            section = section,
-                            authorizeProtectedAction = ::authorizeProtectedAction,
-                            onOpenSettings = { destination = RootDestination.SETTINGS },
-                            onChangePairingAddress = {
-                                destination = RootDestination.ADDRESS_EDITOR
-                            },
-                            notificationsEnabled = notificationsEnabled,
-                            aiReviewActive = subscription.access == SubscriptionAccess.ACTIVE,
-                            onTopLevelChanged = { showNavigation = true },
-                            requestsViewModel = requestsViewModel,
-                            secretsViewModel = secretsViewModel,
-                            clientsViewModel = clientsViewModel,
-                            modifier = Modifier.weight(1f),
-                        )
+            destination == RootDestination.PLAN -> rootStateHolder.SaveableStateProvider(
+            SETTINGS_STATE_KEY,
+        ) {
+            SettingsScreen(
+                onClose = ::closeSettings,
+                authenticationMode = authenticationMode,
+                notificationStateGeneration = notificationRefreshGeneration,
+                requestNotificationPermission = requestNotificationPermission,
+                openPlanInitially = destination == RootDestination.PLAN,
+                onPlanOpened = {
+                    if (destination == RootDestination.PLAN) {
+                        destination = RootDestination.SETTINGS
                     }
+                },
+                subscriptionViewModel = subscriptionViewModel,
+                auditViewModel = auditViewModel(),
+                viewModel = settingsViewModel(),
+            )
+        }
+        current.active == null || !current.active.credentialsAvailable ->
+            rootStateHolder.SaveableStateProvider(SETUP_STATE_KEY) {
+                DeviceSetupScreen(
+                    configuration = current,
+                    onDone = null,
+                    onOpenSettings = { destination = RootDestination.SETTINGS },
+                    viewModel = deviceSetupViewModel(),
+                )
+            }
+        destination == RootDestination.ADDRESS_EDITOR ->
+            rootStateHolder.SaveableStateProvider(ADDRESS_EDITOR_STATE_KEY) {
+                DeviceSetupScreen(
+                    configuration = current,
+                    onDone = ::closeAddressEditor,
+                    changeAddressInitially = true,
+                    viewModel = deviceSetupViewModel(),
+                )
+            }
+        else -> rootStateHolder.SaveableStateProvider("$MAIN_STATE_PREFIX${section.name}") {
+            val navigationSuiteType = NavigationSuiteScaffoldDefaults.navigationSuiteType(
+                currentWindowAdaptiveInfoV2(),
+            )
+            val navigationState = rememberNavigationSuiteScaffoldState(
+                initialValue = if (showNavigation) {
+                    NavigationSuiteScaffoldValue.Visible
                 } else {
-                    Scaffold(
-                        contentWindowInsets = WindowInsets.navigationBars,
-                        bottomBar = {
-                            if (showNavigation) {
-                                MainNavigationBar(
-                                    section = section,
-                                    actionRequiredCounts = actionRequiredCounts,
-                                    onSelect = { section = it },
-                                )
-                            }
+                    NavigationSuiteScaffoldValue.Hidden
+                },
+            )
+            LaunchedEffect(showNavigation, navigationState) {
+                if (showNavigation) navigationState.show() else navigationState.hide()
+            }
+            val navigationIsVertical =
+                navigationSuiteType == NavigationSuiteType.WideNavigationRailCollapsed ||
+                    navigationSuiteType == NavigationSuiteType.WideNavigationRailExpanded
+            val contentNeedsBottomInset = navigationIsVertical ||
+                (navigationState.currentValue == NavigationSuiteScaffoldValue.Hidden &&
+                    !navigationState.isAnimating)
+
+            NavigationSuiteScaffold(
+                navigationItems = {
+                    MainNavigationItems(
+                        section = section,
+                        actionRequiredCounts = actionRequiredCounts,
+                        onSelect = { section = it },
+                    )
+                },
+                navigationSuiteType = navigationSuiteType,
+                state = navigationState,
+                modifier = Modifier.fillMaxSize().windowInsetsPadding(
+                    WindowInsets.navigationBars.only(WindowInsetsSides.Horizontal),
+                ),
+            ) {
+                MainContent(
+                    section = section,
+                    onOpenSettings = { destination = RootDestination.SETTINGS },
+                    onChangePairingAddress = ::openAddressEditor,
+                    notificationsEnabled = notificationsEnabled,
+                    aiReviewActive = subscription.access == SubscriptionAccess.ACTIVE,
+                    onTopLevelChanged = { showNavigation = it },
+                    requestsViewModel = requestsViewModel,
+                    secretsViewModel = secretsViewModel,
+                    clientsViewModel = clientsViewModel,
+                    modifier = Modifier.fillMaxSize().then(
+                        if (contentNeedsBottomInset) {
+                            Modifier.windowInsetsPadding(
+                                WindowInsets.navigationBars.only(WindowInsetsSides.Bottom),
+                            )
+                        } else {
+                            Modifier
                         },
-                    ) { padding ->
-                        MainContent(
-                            section = section,
-                            authorizeProtectedAction = ::authorizeProtectedAction,
-                            onOpenSettings = { destination = RootDestination.SETTINGS },
-                            onChangePairingAddress = {
-                                destination = RootDestination.ADDRESS_EDITOR
-                            },
-                            notificationsEnabled = notificationsEnabled,
-                            aiReviewActive = subscription.access == SubscriptionAccess.ACTIVE,
-                            onTopLevelChanged = { showNavigation = it },
-                            requestsViewModel = requestsViewModel,
-                            secretsViewModel = secretsViewModel,
-                            clientsViewModel = clientsViewModel,
-                            modifier = Modifier.fillMaxSize().padding(padding),
-                        )
-                    }
-                }
+                    ),
+                )
             }
         }
     }
@@ -345,9 +440,9 @@ internal fun AgentknockScreen(
 
 @Composable
 private fun AgentknockLockedScreen(
-    onUnlock: (onSuccess: () -> Unit, onError: (String) -> Unit) -> Unit,
+    error: String?,
+    onUnlock: () -> Unit,
 ) {
-    var error by remember { mutableStateOf<String?>(null) }
     Surface(
         modifier = Modifier.fillMaxSize(),
         color = MaterialTheme.colorScheme.background,
@@ -376,7 +471,7 @@ private fun AgentknockLockedScreen(
                 )
             }
             Button(
-                onClick = { onUnlock({ error = null }, { error = it }) },
+                onClick = onUnlock,
                 modifier = Modifier.padding(top = 20.dp),
             ) {
                 Text("Unlock Agentknock")
@@ -388,7 +483,6 @@ private fun AgentknockLockedScreen(
 @Composable
 private fun MainContent(
     section: MainSection,
-    authorizeProtectedAction: (String, () -> Unit, (String) -> Unit) -> Unit,
     onOpenSettings: () -> Unit,
     onChangePairingAddress: () -> Unit,
     notificationsEnabled: Boolean,
@@ -408,14 +502,12 @@ private fun MainContent(
                 onTopLevelChanged = onTopLevelChanged,
             )
             MainSection.SECRETS -> SecretsScreen(
-                authorizeProtectedAction = authorizeProtectedAction,
                 onOpenSettings = onOpenSettings,
                 onTopLevelChanged = onTopLevelChanged,
                 aiReviewActive = aiReviewActive,
                 viewModel = secretsViewModel,
             )
             MainSection.CLIENTS -> ClientsScreen(
-                authorizeProtectedAction = authorizeProtectedAction,
                 onOpenSettings = onOpenSettings,
                 onChangePairingAddress = onChangePairingAddress,
                 onTopLevelChanged = onTopLevelChanged,
@@ -426,38 +518,24 @@ private fun MainContent(
 }
 
 @Composable
-private fun MainNavigationBar(
+private fun MainNavigationItems(
     section: MainSection,
     actionRequiredCounts: Map<MainSection, Int>,
     onSelect: (MainSection) -> Unit,
 ) {
-    NavigationBar {
-        MainSection.entries.forEach { item ->
-            NavigationBarItem(
-                selected = section == item,
-                onClick = { onSelect(item) },
-                icon = { MainSectionIcon(item, actionRequiredCounts[item] ?: 0) },
-                label = { Text(item.label()) },
-            )
-        }
-    }
-}
-
-@Composable
-private fun MainNavigationRail(
-    section: MainSection,
-    actionRequiredCounts: Map<MainSection, Int>,
-    onSelect: (MainSection) -> Unit,
-) {
-    NavigationRail {
-        MainSection.entries.forEach { item ->
-            NavigationRailItem(
-                selected = section == item,
-                onClick = { onSelect(item) },
-                icon = { MainSectionIcon(item, actionRequiredCounts[item] ?: 0) },
-                label = { Text(item.label()) },
-            )
-        }
+    MainSection.entries.forEach { item ->
+        NavigationSuiteItem(
+            selected = section == item,
+            onClick = { onSelect(item) },
+            icon = { MainSectionIcon(item, actionRequiredCounts[item] ?: 0) },
+            label = {
+                Text(
+                    text = item.label(),
+                    maxLines = 1,
+                    overflow = TextOverflow.Ellipsis,
+                )
+            },
+        )
     }
 }
 
@@ -505,3 +583,17 @@ private enum class RootDestination {
     PLAN,
     ADDRESS_EDITOR,
 }
+
+internal fun addressEditorCompleted(
+    originalIdentityId: String?,
+    originalAddress: String?,
+    active: DeviceIdentity?,
+): Boolean = originalIdentityId != null && active != null && (
+    active.id != originalIdentityId ||
+        active.address != originalAddress
+    )
+
+private const val SETUP_STATE_KEY = "setup"
+private const val SETTINGS_STATE_KEY = "settings"
+private const val ADDRESS_EDITOR_STATE_KEY = "address_editor"
+private const val MAIN_STATE_PREFIX = "main:"

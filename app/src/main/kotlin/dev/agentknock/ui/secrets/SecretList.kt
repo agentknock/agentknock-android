@@ -38,7 +38,7 @@ import androidx.compose.material3.TopAppBar
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
-import androidx.compose.runtime.remember
+import androidx.compose.runtime.saveable.rememberSaveable
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
@@ -71,8 +71,8 @@ internal fun SecretList(
     onOpenSettings: () -> Unit,
     modifier: Modifier = Modifier,
 ) {
-    var showGeneralInstructions by remember { mutableStateOf(false) }
-    var editedGeneralInstructions by remember(generalInstructions) {
+    var showGeneralInstructions by rememberSaveable { mutableStateOf(false) }
+    var editedGeneralInstructions by rememberSaveable(generalInstructions) {
         mutableStateOf(generalInstructions)
     }
     Column(modifier) {

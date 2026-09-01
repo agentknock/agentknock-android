@@ -136,17 +136,17 @@ class SshAuthenticationRequestsTest {
         val requestId = "ssh-valid-intake"
 
         val processed = requests(audit).processIncoming(
-            pairing = client(),
+            client = client(),
             relayRequestId = requestId,
             requestPayload = Json.parseToJsonElement("""{"envelope":"request"}"""),
             plaintext = sshAuthenticationPlaintext(token, key),
-            acceptedSecrets = acceptedPsks(requestId),
+            acceptedPsks = acceptedPsks(requestId),
             credentials = credentials(),
             sealResponse = { error("An actionable request must not be sealed") },
             launchAiReview = { _, _, _, _ -> error("Ask-me mode must not launch AI review") },
         )
 
-        assertEquals(ProcessedRelayMessage(), processed)
+        assertEquals(ProcessedRelayMessage, processed)
         val request = checkNotNull(database.requestDao().getRequestById(requestId))
         val authentication = checkNotNull(
             database.requestDao().getSshAuthenticationRequest(requestId),
@@ -206,11 +206,11 @@ class SshAuthenticationRequestsTest {
         var sealed = false
 
         val processed = requests(audit).processIncoming(
-            pairing = client(),
+            client = client(),
             relayRequestId = requestId,
             requestPayload = Json.parseToJsonElement("{}"),
             plaintext = sshAuthenticationPlaintext(token, key),
-            acceptedSecrets = acceptedPsks(requestId),
+            acceptedPsks = acceptedPsks(requestId),
             credentials = credentials(),
             sealResponse = {
                 sealed = true
@@ -254,13 +254,13 @@ class SshAuthenticationRequestsTest {
             reviewer.result = reviewed(relayDecision, "Review $index")
             var pendingReview: PendingAiReview? = null
             assertEquals(
-                ProcessedRelayMessage(),
+                ProcessedRelayMessage,
                 target.processIncoming(
-                    pairing = client(),
+                    client = client(),
                     relayRequestId = requestId,
                     requestPayload = Json.parseToJsonElement("{}"),
                     plaintext = sshAuthenticationPlaintext(token, key),
-                    acceptedSecrets = acceptedPsks(requestId),
+                    acceptedPsks = acceptedPsks(requestId),
                     credentials = credentials(),
                     sealResponse = { Json.parseToJsonElement(RESPONSE_JSON) },
                     launchAiReview = { _, _, review, complete ->
@@ -283,13 +283,13 @@ class SshAuthenticationRequestsTest {
         val staleId = "ssh-ai-ended-parent"
         var pendingReview: PendingAiReview? = null
         assertEquals(
-            ProcessedRelayMessage(),
+            ProcessedRelayMessage,
             target.processIncoming(
-                pairing = client(),
+                client = client(),
                 relayRequestId = staleId,
                 requestPayload = Json.parseToJsonElement("{}"),
                 plaintext = sshAuthenticationPlaintext(token, key),
-                acceptedSecrets = acceptedPsks(staleId),
+                acceptedPsks = acceptedPsks(staleId),
                 credentials = credentials(),
                 sealResponse = { Json.parseToJsonElement(RESPONSE_JSON) },
                 launchAiReview = { _, _, review, complete ->
@@ -341,13 +341,13 @@ class SshAuthenticationRequestsTest {
         var pendingReview: PendingAiReview? = null
 
         assertEquals(
-            ProcessedRelayMessage(),
+            ProcessedRelayMessage,
             target.processIncoming(
-                pairing = client(),
+                client = client(),
                 relayRequestId = requestId,
                 requestPayload = Json.parseToJsonElement("{}"),
                 plaintext = sshAuthenticationPlaintext(token, key),
-                acceptedSecrets = acceptedPsks(requestId),
+                acceptedPsks = acceptedPsks(requestId),
                 credentials = credentials(),
                 sealResponse = {
                     endParentInvocation()
@@ -1042,11 +1042,11 @@ class SshAuthenticationRequestsTest {
         var sealed = false
         var launched = false
         val processed = requests(audit).processIncoming(
-            pairing = client(),
+            client = client(),
             relayRequestId = requestId,
             requestPayload = Json.parseToJsonElement("{}"),
             plaintext = sshAuthenticationPlaintext(suppliedToken, key),
-            acceptedSecrets = acceptedPsks(requestId),
+            acceptedPsks = acceptedPsks(requestId),
             credentials = credentials(),
             sealResponse = {
                 sealed = true

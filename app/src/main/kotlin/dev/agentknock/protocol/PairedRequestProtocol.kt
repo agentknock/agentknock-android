@@ -338,6 +338,10 @@ internal enum class PairedRequestErrorCode(
         wireName = "INVALID_STATE",
         message = "The requested operation is not available in the current state.",
     ),
+    RESPONSE_TOO_LARGE(
+        wireName = "RESPONSE_TOO_LARGE",
+        message = "The response was too large to deliver.",
+    ),
 }
 
 private data class OpenedPairedContext(

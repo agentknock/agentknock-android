@@ -173,6 +173,7 @@ class DeviceAuditTransactionTest {
                     .getIdentity(DeviceIdentityRole.ACTIVE.storedName),
             ).pairingEnabled,
         )
+        assertEquals(listOf(false, false), relay.pairingChanges)
         assertEquals(
             listOf(AuditEventType.NEW_PAIRINGS_PAUSED),
             audit.observeEvents().first().map { it.type },
