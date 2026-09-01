@@ -703,6 +703,7 @@ private fun PendingPairingRow(
 
 private fun PairingState.pairingListDescription(): String = when (this) {
     PairingState.RECEIVING -> "Waiting for the secure exchange"
+    PairingState.EXCHANGE_FAILED -> "Secure exchange failed; reject to continue"
     PairingState.SAS_VERIFICATION_PENDING -> "Compare the security code"
     PairingState.RELAY_ACTIVATION_PENDING -> "Applying the pairing"
     PairingState.WAITING_FOR_FINISH -> "Code verified; waiting for the client"

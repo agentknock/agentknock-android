@@ -6,6 +6,7 @@ import java.security.MessageDigest
 import java.util.Base64
 import kotlinx.serialization.SerialName
 import kotlinx.serialization.Serializable
+import kotlinx.serialization.SerializationException
 import kotlinx.serialization.encodeToString
 import kotlinx.serialization.json.Json
 
@@ -157,22 +158,30 @@ internal class SshAuthenticationProtocol(
         )
         return when (completion.result) {
             RESULT_APPROVED -> {
-                require(completion.signature == null) {
-                    "Approved SSH authentication completion contains a signature"
+                if (completion.signature != null) {
+                    throw SerializationException(
+                        "Approved SSH authentication completion contains a signature",
+                    )
                 }
                 SshAuthenticationCompletion.Approved(clientSoftware)
             }
             RESULT_DENIED -> SshAuthenticationCompletion.Denied(
                 clientSoftware = clientSoftware,
-                reason = requireNotNull(completion.reason) { "Denied completion has no reason" },
-                message = requireNotNull(completion.message) { "Denied completion has no message" },
+                reason = completion.reason
+                    ?: throw SerializationException("Denied completion has no reason"),
+                message = completion.message
+                    ?: throw SerializationException("Denied completion has no message"),
             )
             RESULT_ABORTED -> SshAuthenticationCompletion.Aborted(
                 clientSoftware = clientSoftware,
-                reason = requireNotNull(completion.reason) { "Aborted completion has no reason" },
-                message = requireNotNull(completion.message) { "Aborted completion has no message" },
+                reason = completion.reason
+                    ?: throw SerializationException("Aborted completion has no reason"),
+                message = completion.message
+                    ?: throw SerializationException("Aborted completion has no message"),
             )
-            else -> error("Unsupported SSH authentication completion result")
+            else -> throw SerializationException(
+                "Unsupported SSH authentication completion result",
+            )
         }
     }
 

@@ -293,10 +293,10 @@ internal class GitSigningRequests(
                 request = currentRequest.copy(
                     state = request.state,
                     responseJson = request.responseJson,
-                    responseAcknowledged = if (request.responseJson != null) {
+                    responseOutboxFinished = if (request.responseJson != null) {
                         false
                     } else {
-                        currentRequest.responseAcknowledged
+                        currentRequest.responseOutboxFinished
                     },
                 ),
                 gitSignRequest = currentGitSign.copy(
@@ -337,21 +337,21 @@ internal class GitSigningRequests(
     suspend fun complete(
         request: InboxRequestEntity,
         completion: JsonElement,
-        openCompletion: suspend () -> ByteArray?,
+        openCompletion: suspend () -> CompletionOpenResult,
     ): Boolean {
         val completionJson = completion.toString()
-        terminalCompletionReplay(request.id, completionJson)?.let { return it }
-        val plaintext = openCompletion()
-            ?: return terminalCompletionReplay(request.id, completionJson) ?: false
-        val completionResult = runCatching { gitSignProtocol.decodeCompletion(plaintext) }
-            .getOrNull()
+        terminalCompletionHandled(request.id)?.let { return it }
+        val opened = openCompletion()
+        val completionResult = (opened as? CompletionOpenResult.Opened)?.plaintext?.let {
+            decodeWireCompletionOrNull { gitSignProtocol.decodeCompletion(it) }
+        }
         return writeTransaction.execute {
             val currentRequest = dao.getRequestById(request.id) ?: return@execute false
             val gitSign = dao.getGitSignRequest(request.id) ?: return@execute false
-            if (currentRequest.completedAt != null) {
-                dao.deleteTerminalGitSignRequestPsk(request.id)
-                return@execute currentRequest.completionJson == completionJson
+            if (currentRequest.exchangeEndedAt != null) {
+                return@execute true
             }
+            if (opened == CompletionOpenResult.RetryLater) return@execute false
             val softwareMatches = completionResult?.clientSoftware ==
                 currentRequest.clientSoftwareJson?.let(::decodeClientSoftware)
             val valid = softwareMatches && when (completionResult) {
@@ -375,11 +375,13 @@ internal class GitSigningRequests(
             dao.updateGitSignRequest(
                 request = currentRequest.copy(
                     state = InboxRequestState.COMPLETED.storedName,
-                    completionJson = completionJson,
-                    responseAcknowledged = true,
-                    completionAcknowledged = false,
+                    completionJson = completionJson.takeIf {
+                        opened is CompletionOpenResult.Opened
+                    },
+                    responseOutboxFinished = true,
                     error = error,
                     completedAt = now,
+                    exchangeEndedAt = now,
                 ),
                 gitSignRequest = gitSign.copy(
                     completionResult = when {
@@ -441,28 +443,32 @@ internal class GitSigningRequests(
                 ),
                 now,
             )
-            dao.deleteTerminalGitSignRequestPsk(currentRequest.id)
+            dao.deleteEndedRequestPsk(currentRequest.id)
             true
         }
     }
 
-    private suspend fun terminalCompletionReplay(
-        requestId: String,
-        completionJson: String,
-    ): Boolean? = writeTransaction.execute {
-        val terminal = dao.getRequestById(requestId) ?: return@execute null
-        if (dao.getGitSignRequest(requestId) == null || terminal.completedAt == null) {
-            return@execute null
+    private suspend fun terminalCompletionHandled(requestId: String): Boolean? =
+        writeTransaction.execute {
+            val terminal = dao.getRequestById(requestId) ?: return@execute null
+            if (dao.getGitSignRequest(requestId) == null || terminal.exchangeEndedAt == null) {
+                return@execute null
+            }
+            true
         }
-        dao.deleteTerminalGitSignRequestPsk(requestId)
-        terminal.completionJson == completionJson
-    }
 
     suspend fun expire(request: InboxRequestEntity, message: String, now: Long) {
         writeTransaction.execute {
             val currentRequest = dao.getRequestById(request.id) ?: return@execute
+            if (currentRequest.exchangeEndedAt != null) return@execute
             if (currentRequest.completedAt != null) {
-                dao.deleteTerminalGitSignRequestPsk(request.id)
+                dao.updateRequest(
+                    currentRequest.copy(
+                        exchangeEndedAt = now,
+                        responseOutboxFinished = true,
+                    ),
+                )
+                dao.deleteEndedRequestPsk(request.id)
                 return@execute
             }
             val gitSign = dao.getGitSignRequest(request.id) ?: return@execute
@@ -471,6 +477,8 @@ internal class GitSigningRequests(
                     state = InboxRequestState.COMPLETED.storedName,
                     error = message,
                     completedAt = now,
+                    exchangeEndedAt = now,
+                    responseOutboxFinished = true,
                 ),
                 gitSign,
             )
@@ -488,7 +496,7 @@ internal class GitSigningRequests(
                 ),
                 now,
             )
-            dao.deleteTerminalGitSignRequestPsk(currentRequest.id)
+            dao.deleteEndedRequestPsk(currentRequest.id)
         }
     }
 
@@ -525,7 +533,7 @@ internal class GitSigningRequests(
             val updatedRequest = currentRequest.copy(
                 state = InboxRequestState.WAITING.storedName,
                 responseJson = response.toString(),
-                responseAcknowledged = false,
+                responseOutboxFinished = false,
             )
             val updatedGitSign = currentGitSign.copy(
                 decision = decision.storedName,
@@ -643,7 +651,7 @@ internal class GitSigningRequests(
             currentRequest.copy(
                 state = InboxRequestState.WAITING.storedName,
                 responseJson = response.toString(),
-                responseAcknowledged = false,
+                responseOutboxFinished = false,
             ),
             currentGitSign.copy(
                 approvalEvaluationJson = if (temporaryAccessStarted) {

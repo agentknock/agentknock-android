@@ -2,7 +2,7 @@
   "formatVersion": 1,
   "database": {
     "version": 1,
-    "identityHash": "a02d06af05b5f0564eec6943aa689867",
+    "identityHash": "2a98624c9bca51df9fbc90f51b0646ca",
     "entities": [
       {
         "tableName": "vault_keys",
@@ -666,7 +666,7 @@
       },
       {
         "tableName": "inbox_requests",
-        "createSql": "CREATE TABLE IF NOT EXISTS `${TABLE_NAME}` (`id` TEXT NOT NULL, `parent_request_id` TEXT, `device_identity_id` TEXT NOT NULL, `client_id` TEXT NOT NULL, `client_name_snapshot` TEXT NOT NULL, `client_software_json` TEXT, `kind` TEXT NOT NULL, `state` TEXT NOT NULL, `listed` INTEGER NOT NULL, `request_json` TEXT NOT NULL, `response_json` TEXT, `completion_json` TEXT, `error` TEXT, `received_at` INTEGER NOT NULL, `completed_at` INTEGER, `request_acknowledged` INTEGER NOT NULL, `response_acknowledged` INTEGER NOT NULL, `completion_acknowledged` INTEGER NOT NULL, PRIMARY KEY(`id`), FOREIGN KEY(`parent_request_id`) REFERENCES `inbox_requests`(`id`) ON UPDATE NO ACTION ON DELETE RESTRICT , FOREIGN KEY(`device_identity_id`) REFERENCES `device_identities`(`id`) ON UPDATE NO ACTION ON DELETE RESTRICT )",
+        "createSql": "CREATE TABLE IF NOT EXISTS `${TABLE_NAME}` (`id` TEXT NOT NULL, `parent_request_id` TEXT, `device_identity_id` TEXT NOT NULL, `client_id` TEXT NOT NULL, `client_name_snapshot` TEXT NOT NULL, `client_software_json` TEXT, `kind` TEXT NOT NULL, `state` TEXT NOT NULL, `listed` INTEGER NOT NULL, `request_json` TEXT NOT NULL, `response_json` TEXT, `completion_json` TEXT, `error` TEXT, `received_at` INTEGER NOT NULL, `completed_at` INTEGER, `exchange_ended_at` INTEGER, `response_outbox_finished` INTEGER NOT NULL, PRIMARY KEY(`id`), FOREIGN KEY(`parent_request_id`) REFERENCES `inbox_requests`(`id`) ON UPDATE NO ACTION ON DELETE RESTRICT , FOREIGN KEY(`device_identity_id`) REFERENCES `device_identities`(`id`) ON UPDATE NO ACTION ON DELETE RESTRICT )",
         "fields": [
           {
             "fieldPath": "id",
@@ -753,20 +753,13 @@
             "affinity": "INTEGER"
           },
           {
-            "fieldPath": "requestAcknowledged",
-            "columnName": "request_acknowledged",
-            "affinity": "INTEGER",
-            "notNull": true
+            "fieldPath": "exchangeEndedAt",
+            "columnName": "exchange_ended_at",
+            "affinity": "INTEGER"
           },
           {
-            "fieldPath": "responseAcknowledged",
-            "columnName": "response_acknowledged",
-            "affinity": "INTEGER",
-            "notNull": true
-          },
-          {
-            "fieldPath": "completionAcknowledged",
-            "columnName": "completion_acknowledged",
+            "fieldPath": "responseOutboxFinished",
+            "columnName": "response_outbox_finished",
             "affinity": "INTEGER",
             "notNull": true
           }
@@ -2049,7 +2042,7 @@
     ],
     "setupQueries": [
       "CREATE TABLE IF NOT EXISTS room_master_table (id INTEGER PRIMARY KEY,identity_hash TEXT)",
-      "INSERT OR REPLACE INTO room_master_table (id,identity_hash) VALUES(42, 'a02d06af05b5f0564eec6943aa689867')"
+      "INSERT OR REPLACE INTO room_master_table (id,identity_hash) VALUES(42, '2a98624c9bca51df9fbc90f51b0646ca')"
     ]
   }
 }

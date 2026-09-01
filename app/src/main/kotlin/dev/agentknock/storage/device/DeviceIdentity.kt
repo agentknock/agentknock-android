@@ -151,12 +151,14 @@ internal interface DeviceIdentityDao {
         UPDATE inbox_requests
         SET state = CASE WHEN completed_at IS NULL THEN 'completed' ELSE state END,
             listed = 0,
+            response_outbox_finished = 1,
             error = CASE
                 WHEN completed_at IS NOT NULL THEN error
                 WHEN error IS NULL THEN :error
                 ELSE error || '\n\n' || :error
             END,
-            completed_at = COALESCE(completed_at, :now)
+            completed_at = COALESCE(completed_at, :now),
+            exchange_ended_at = COALESCE(exchange_ended_at, :now)
         WHERE device_identity_id = :identityId
         """,
     )

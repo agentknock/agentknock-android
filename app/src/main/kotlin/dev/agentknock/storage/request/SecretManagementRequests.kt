@@ -171,9 +171,8 @@ internal class SecretManagementRequests(
                     error = null,
                     receivedAt = now,
                     completedAt = null,
-                    requestAcknowledged = false,
-                    responseAcknowledged = false,
-                    completionAcknowledged = false,
+                    exchangeEndedAt = null,
+                    responseOutboxFinished = false,
                 ),
                 client = client.copy(clientSoftwareJson = software, lastSeenAt = now),
                 requestPsk = acceptedPsks.requestPsk,
@@ -282,9 +281,8 @@ internal class SecretManagementRequests(
                     error = null,
                     receivedAt = now,
                     completedAt = null,
-                    requestAcknowledged = false,
-                    responseAcknowledged = false,
-                    completionAcknowledged = false,
+                    exchangeEndedAt = null,
+                    responseOutboxFinished = false,
                 ),
                 secretUpload = SecretUploadRequestEntity(
                     requestId = relayRequestId,
@@ -361,7 +359,7 @@ internal class SecretManagementRequests(
         val now = currentTimeMillis()
         val lifecycle = secretUploadLifecycle(
             SecretUploadRequestState.APPROVED.storedName,
-            transportFinished = request.completionJson != null || request.error != null,
+            transportFinished = request.exchangeEndedAt != null,
         )
         return writeTransaction.execute {
             val secretId = when (preparedUpload) {
@@ -477,7 +475,7 @@ internal class SecretManagementRequests(
         val now = currentTimeMillis()
         val lifecycle = secretUploadLifecycle(
             SecretUploadRequestState.REJECTED.storedName,
-            transportFinished = request.completionJson != null || request.error != null,
+            transportFinished = request.exchangeEndedAt != null,
         )
         return writeTransaction.execute {
             dao.updateSecretUploadRequest(
@@ -516,13 +514,18 @@ internal class SecretManagementRequests(
         now: Long,
     ) {
         writeTransaction.execute {
+            val current = dao.getRequestById(request.id) ?: return@execute
+            if (current.exchangeEndedAt != null) return@execute
             dao.updateSecretListRequest(
-                request.copy(
+                current.copy(
                     state = InboxRequestState.COMPLETED.storedName,
+                    responseOutboxFinished = true,
                     error = message,
                     completedAt = now,
+                    exchangeEndedAt = now,
                 ),
             )
+            dao.deleteEndedRequestPsk(request.id)
         }
     }
 
@@ -532,45 +535,54 @@ internal class SecretManagementRequests(
         now: Long,
     ) {
         writeTransaction.execute {
+            val current = dao.getRequestById(request.id) ?: return@execute
+            if (current.exchangeEndedAt != null) return@execute
             val upload = dao.getSecretUploadRequest(request.id) ?: return@execute
-            val pending = upload.decision == null
+            val lifecycle = secretUploadLifecycle(upload.decision, transportFinished = true)
             dao.updateSecretUploadRequest(
-                request.copy(
-                    state = if (pending) {
-                        InboxRequestState.ACTION_REQUIRED.storedName
-                    } else {
-                        InboxRequestState.COMPLETED.storedName
-                    },
+                current.copy(
+                    state = lifecycle.state.storedName,
+                    responseOutboxFinished = true,
                     error = message,
-                    completedAt = if (pending) null else now,
+                    completedAt = current.completedAt ?: if (lifecycle.completed) now else null,
+                    exchangeEndedAt = now,
                 ),
                 upload,
             )
+            dao.deleteEndedRequestPsk(request.id)
         }
     }
 
     suspend fun completeSecretList(
         request: InboxRequestEntity,
         completion: JsonElement,
-        openCompletion: suspend () -> ByteArray?,
+        openCompletion: suspend () -> CompletionOpenResult,
     ): Boolean {
-        if (request.completedAt != null) return true
-        val plaintext = openCompletion() ?: return false
-        val decoded = runCatching { secretListProtocol.decodeCompletion(plaintext) }
-        val valid = decoded.getOrNull() == request.clientSoftwareJson?.let(::decodeClientSoftware)
-        val error = if (valid) null else SECRET_LIST_COMPLETION_VERIFICATION_ERROR
+        terminalCompletionHandled(request.id)?.let { return it }
+        val opened = openCompletion()
+        val decoded = (opened as? CompletionOpenResult.Opened)?.plaintext?.let {
+            decodeWireCompletionOrNull { secretListProtocol.decodeCompletion(it) }
+        }
         val now = currentTimeMillis()
-        writeTransaction.execute {
+        return writeTransaction.execute {
+            val current = dao.getRequestById(request.id) ?: return@execute false
+            if (current.exchangeEndedAt != null) return@execute true
+            if (opened == CompletionOpenResult.RetryLater) return@execute false
+            val valid = decoded == current.clientSoftwareJson?.let(::decodeClientSoftware)
+            val error = if (valid) null else SECRET_LIST_COMPLETION_VERIFICATION_ERROR
             dao.updateSecretListRequest(
-                request.copy(
+                current.copy(
                     state = InboxRequestState.COMPLETED.storedName,
-                    completionJson = completion.toString(),
-                    responseAcknowledged = true,
-                    completionAcknowledged = false,
+                    completionJson = completion.toString().takeIf {
+                        opened is CompletionOpenResult.Opened
+                    },
+                    responseOutboxFinished = true,
                     error = error,
                     completedAt = now,
+                    exchangeEndedAt = now,
                 ),
             )
+            dao.deleteEndedRequestPsk(request.id)
             audit.append(
                 listOf(
                     AuditRecord(
@@ -585,44 +597,51 @@ internal class SecretManagementRequests(
                 ),
                 now,
             )
+            true
         }
-        return true
     }
 
     suspend fun completeSecretUpload(
         request: InboxRequestEntity,
         completion: JsonElement,
-        openCompletion: suspend () -> ByteArray?,
+        openCompletion: suspend () -> CompletionOpenResult,
     ): Boolean {
-        val upload = dao.getSecretUploadRequest(request.id) ?: return false
-        if (request.completionJson != null || request.error != null) return true
-        val plaintext = openCompletion() ?: return false
-        val decoded = runCatching { secretUploadProtocol.decodeCompletion(plaintext) }
-        val result = decoded.getOrNull()
-        val expectedResult = if (upload.intakeError == null) {
-            SecretUploadProtocol.RESULT_RECEIVED
-        } else {
-            SecretUploadProtocol.RESULT_REJECTED
+        terminalCompletionHandled(request.id)?.let { return it }
+        val opened = openCompletion()
+        val result = (opened as? CompletionOpenResult.Opened)?.plaintext?.let {
+            decodeWireCompletionOrNull { secretUploadProtocol.decodeCompletion(it) }
         }
-        val valid = result != null &&
-            result.clientSoftware == request.clientSoftwareJson?.let(::decodeClientSoftware) &&
-            result.result == expectedResult &&
-            result.message == upload.intakeError
-        val error = if (valid) null else SECRET_UPLOAD_COMPLETION_VERIFICATION_ERROR
         val now = currentTimeMillis()
-        val lifecycle = secretUploadLifecycle(upload.decision, transportFinished = true)
-        writeTransaction.execute {
+        return writeTransaction.execute {
+            val current = dao.getRequestById(request.id) ?: return@execute false
+            val upload = dao.getSecretUploadRequest(request.id) ?: return@execute false
+            if (current.exchangeEndedAt != null) return@execute true
+            if (opened == CompletionOpenResult.RetryLater) return@execute false
+            val expectedResult = if (upload.intakeError == null) {
+                SecretUploadProtocol.RESULT_RECEIVED
+            } else {
+                SecretUploadProtocol.RESULT_REJECTED
+            }
+            val valid = result != null &&
+                result.clientSoftware == current.clientSoftwareJson?.let(::decodeClientSoftware) &&
+                result.result == expectedResult &&
+                result.message == upload.intakeError
+            val error = if (valid) null else SECRET_UPLOAD_COMPLETION_VERIFICATION_ERROR
+            val lifecycle = secretUploadLifecycle(upload.decision, transportFinished = true)
             dao.updateSecretUploadRequest(
-                request = request.copy(
+                request = current.copy(
                     state = lifecycle.state.storedName,
-                    completionJson = completion.toString(),
-                    responseAcknowledged = true,
-                    completionAcknowledged = false,
+                    completionJson = completion.toString().takeIf {
+                        opened is CompletionOpenResult.Opened
+                    },
+                    responseOutboxFinished = true,
                     error = error,
-                    completedAt = request.completedAt ?: if (lifecycle.completed) now else null,
+                    completedAt = current.completedAt ?: if (lifecycle.completed) now else null,
+                    exchangeEndedAt = now,
                 ),
                 secretUpload = upload,
             )
+            dao.deleteEndedRequestPsk(request.id)
             audit.append(
                 listOf(
                     AuditRecord(
@@ -637,9 +656,16 @@ internal class SecretManagementRequests(
                 ),
                 now,
             )
+            true
         }
-        return true
     }
+
+    private suspend fun terminalCompletionHandled(requestId: String): Boolean? =
+        writeTransaction.execute {
+            val terminal = dao.getRequestById(requestId) ?: return@execute null
+            if (terminal.exchangeEndedAt == null) return@execute null
+            true
+        }
 
     private suspend fun prepareSshUpload(
         client: ClientEntity,

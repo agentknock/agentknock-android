@@ -32,6 +32,7 @@ internal fun List<InboxRequestSummary>.actionRequiredCount(vararg kinds: InboxRe
 
 private val pendingPairingStates = setOf(
     PairingState.RECEIVING,
+    PairingState.EXCHANGE_FAILED,
     PairingState.SAS_VERIFICATION_PENDING,
     PairingState.RELAY_ACTIVATION_PENDING,
     PairingState.WAITING_FOR_FINISH,

@@ -379,56 +379,62 @@ internal class InvocationRequests(
     suspend fun complete(
         request: InboxRequestEntity,
         completion: JsonElement,
-        openCompletion: suspend () -> ByteArray?,
+        openCompletion: suspend () -> CompletionOpenResult,
     ): Boolean {
-        val secretUseRequest = dao.getSecretUseRequest(request.id) ?: return false
-        if (request.completedAt != null) {
-            dao.deleteTerminalInvocationRequestPsk(request.id)
-            return request.completionJson == completion.toString()
+        terminalCompletionHandled(request.id)?.let { return it }
+        val opened = openCompletion()
+        val plaintext = (opened as? CompletionOpenResult.Opened)?.plaintext
+        val completionResult = plaintext?.let {
+            decodeWireCompletionOrNull { invocationProtocol.decodeCompletion(it) }
         }
-        val plaintext = openCompletion() ?: return false
-        val decoded = runCatching { invocationProtocol.decodeCompletion(plaintext) }
-        val completionResult = decoded.getOrNull()
-        val softwareMatches = completionResult?.clientSoftware ==
-            request.clientSoftwareJson?.let(::decodeClientSoftware)
-        val valid = softwareMatches && when (completionResult) {
-            is InvocationCompletion.Approved -> {
-                secretUseRequest.decision == ApprovalDecision.APPROVED.storedName
+        return writeTransaction.execute {
+            val currentRequest = dao.getRequestById(request.id) ?: return@execute false
+            val secretUseRequest = dao.getSecretUseRequest(request.id) ?: return@execute false
+            if (currentRequest.exchangeEndedAt != null) {
+                return@execute true
             }
-            is InvocationCompletion.Denied -> {
-                if (secretUseRequest.decision != ApprovalDecision.DENIED.storedName) {
-                    false
-                } else {
-                    val expectedReason = secretUseRequest.completionReason
-                        ?: InvocationDenialReason.USER_DENIED.wireName
-                    val expectedMessage = secretUseRequest.completionMessage
-                        ?: SECRET_USE_DENIAL_MESSAGE
-                    completionResult.reason == expectedReason &&
-                        completionResult.message == expectedMessage
+            if (opened == CompletionOpenResult.RetryLater) return@execute false
+            val softwareMatches = completionResult?.clientSoftware ==
+                currentRequest.clientSoftwareJson?.let(::decodeClientSoftware)
+            val valid = softwareMatches && when (completionResult) {
+                is InvocationCompletion.Approved -> {
+                    secretUseRequest.decision == ApprovalDecision.APPROVED.storedName
                 }
+                is InvocationCompletion.Denied -> {
+                    if (secretUseRequest.decision != ApprovalDecision.DENIED.storedName) {
+                        false
+                    } else {
+                        val expectedReason = secretUseRequest.completionReason
+                            ?: InvocationDenialReason.USER_DENIED.wireName
+                        val expectedMessage = secretUseRequest.completionMessage
+                            ?: SECRET_USE_DENIAL_MESSAGE
+                        completionResult.reason == expectedReason &&
+                            completionResult.message == expectedMessage
+                    }
+                }
+                is InvocationCompletion.Aborted -> true
+                null -> false
             }
-            is InvocationCompletion.Aborted -> true
-            null -> false
-        }
-        val error = if (valid) null else SECRET_USE_COMPLETION_VERIFICATION_ERROR
-        val auditDetail = when {
-            !valid -> SECRET_USE_COMPLETION_VERIFICATION_ERROR
-            completionResult is InvocationCompletion.Denied ->
-                secretUseRequest.completionMessage ?: SECRET_USE_DENIAL_MESSAGE
-            completionResult is InvocationCompletion.Aborted ->
-                "Secret use was aborted by the client."
-            else -> null
-        }
-        val now = currentTimeMillis()
-        writeTransaction.execute {
+            val error = if (valid) null else SECRET_USE_COMPLETION_VERIFICATION_ERROR
+            val auditDetail = when {
+                !valid -> SECRET_USE_COMPLETION_VERIFICATION_ERROR
+                completionResult is InvocationCompletion.Denied ->
+                    secretUseRequest.completionMessage ?: SECRET_USE_DENIAL_MESSAGE
+                completionResult is InvocationCompletion.Aborted ->
+                    "Secret use was aborted by the client."
+                else -> null
+            }
+            val now = currentTimeMillis()
             dao.updateSecretUseRequest(
-                request = request.copy(
+                request = currentRequest.copy(
                     state = InboxRequestState.COMPLETED.storedName,
-                    completionJson = completion.toString(),
-                    responseAcknowledged = true,
-                    completionAcknowledged = false,
+                    completionJson = completion.toString().takeIf {
+                        opened is CompletionOpenResult.Opened
+                    },
+                    responseOutboxFinished = true,
                     error = error,
                     completedAt = now,
+                    exchangeEndedAt = now,
                 ),
                 secretUseRequest = secretUseRequest.copy(
                     completionResult = when {
@@ -471,30 +477,49 @@ internal class InvocationRequests(
                         },
                         subject = decodeStringList(secretUseRequest.secretsJson).joinToString(),
                         detail = auditDetail,
-                        clientId = request.clientId,
-                        clientName = request.clientNameSnapshot,
-                        relayRequestId = request.id,
+                        clientId = currentRequest.clientId,
+                        clientName = currentRequest.clientNameSnapshot,
+                        relayRequestId = currentRequest.id,
                     ),
                 ),
                 now,
             )
-            dao.deleteTerminalInvocationRequestPsk(request.id)
+            dao.deleteEndedRequestPsk(request.id)
+            true
         }
-        return true
     }
 
-    suspend fun expire(request: InboxRequestEntity, message: String, now: Long) {
-        if (request.completedAt != null) {
-            dao.deleteTerminalInvocationRequestPsk(request.id)
-            return
-        }
-        val secretUseRequest = dao.getSecretUseRequest(request.id) ?: return
+    private suspend fun terminalCompletionHandled(requestId: String): Boolean? =
         writeTransaction.execute {
+            val terminal = dao.getRequestById(requestId) ?: return@execute null
+            if (dao.getSecretUseRequest(requestId) == null || terminal.exchangeEndedAt == null) {
+                return@execute null
+            }
+            true
+        }
+
+    suspend fun expire(request: InboxRequestEntity, message: String, now: Long) {
+        writeTransaction.execute {
+            val currentRequest = dao.getRequestById(request.id) ?: return@execute
+            if (currentRequest.exchangeEndedAt != null) return@execute
+            if (currentRequest.completedAt != null) {
+                dao.updateRequest(
+                    currentRequest.copy(
+                        exchangeEndedAt = now,
+                        responseOutboxFinished = true,
+                    ),
+                )
+                dao.deleteEndedRequestPsk(request.id)
+                return@execute
+            }
+            val secretUseRequest = dao.getSecretUseRequest(request.id) ?: return@execute
             dao.updateSecretUseRequest(
-                request.copy(
+                currentRequest.copy(
                     state = InboxRequestState.COMPLETED.storedName,
                     error = message,
                     completedAt = now,
+                    exchangeEndedAt = now,
+                    responseOutboxFinished = true,
                 ),
                 secretUseRequest,
             )
@@ -505,14 +530,14 @@ internal class InvocationRequests(
                         outcome = AuditOutcome.FAILED,
                         subject = decodeStringList(secretUseRequest.secretsJson).joinToString(),
                         detail = message,
-                        clientId = request.clientId,
-                        clientName = request.clientNameSnapshot,
-                        relayRequestId = request.id,
+                        clientId = currentRequest.clientId,
+                        clientName = currentRequest.clientNameSnapshot,
+                        relayRequestId = currentRequest.id,
                     ),
                 ),
                 now,
             )
-            dao.deleteTerminalInvocationRequestPsk(request.id)
+            dao.deleteEndedRequestPsk(request.id)
         }
     }
 
@@ -544,7 +569,7 @@ internal class InvocationRequests(
             val updatedRequest = request.copy(
                 state = InboxRequestState.WAITING.storedName,
                 responseJson = response.toString(),
-                responseAcknowledged = false,
+                responseOutboxFinished = false,
             )
             val updatedSecretUse = secretUseRequest.copy(
                 decision = decision.storedName,
@@ -698,7 +723,7 @@ internal class InvocationRequests(
                 request.copy(
                     state = InboxRequestState.WAITING.storedName,
                     responseJson = response.toString(),
-                    responseAcknowledged = false,
+                    responseOutboxFinished = false,
                 ),
                 secretUseRequest.copy(
                     decision = ApprovalDecision.APPROVED.storedName,

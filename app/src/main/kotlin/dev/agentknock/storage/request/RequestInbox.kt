@@ -34,6 +34,7 @@ internal enum class InboxRequestState(val storedName: String) {
 
 internal enum class PairingState(val storedName: String) {
     RECEIVING("receiving"),
+    EXCHANGE_FAILED("exchange_failed"),
     SAS_VERIFICATION_PENDING("sas_verification_pending"),
     RELAY_ACTIVATION_PENDING("relay_activation_pending"),
     WAITING_FOR_FINISH("waiting_for_finish"),
@@ -793,8 +794,10 @@ internal class RequestInbox(
                             RequestNotificationDetail(
                                 null,
                                 when (pairing.state.toPairingState()) {
-                                    PairingState.RECEIVING -> request.error
-                                        ?: "Waiting for the client to complete the secure exchange."
+                                    PairingState.RECEIVING ->
+                                        "Waiting for the client to complete the secure exchange."
+                                    PairingState.EXCHANGE_FAILED -> request.error
+                                        ?: "The secure exchange failed. Reject this pairing to continue."
                                     PairingState.SAS_VERIFICATION_PENDING ->
                                         "Open Agentknock and compare the security code."
                                     PairingState.RELAY_ACTIVATION_PENDING,

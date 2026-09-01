@@ -2,8 +2,10 @@ package dev.agentknock.storage.request
 
 import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.test.runTest
+import kotlinx.serialization.SerializationException
 import org.junit.Assert.assertEquals
 import org.junit.Assert.assertFalse
+import org.junit.Assert.assertNull
 import org.junit.Assert.assertTrue
 import org.junit.Test
 
@@ -54,5 +56,19 @@ class RequestLifecycleTest {
             persistRejectedRequest { throw CancellationException("cancelled") }
         }
         assertTrue(cancellation.exceptionOrNull() is CancellationException)
+    }
+
+    @Test
+    fun completionDecoderDistinguishesMalformedWireFromInternalFailure() {
+        assertNull(
+            decodeWireCompletionOrNull<String> {
+                throw SerializationException("malformed completion")
+            },
+        )
+
+        val internalFailure = runCatching {
+            decodeWireCompletionOrNull<String> { error("decoder bug") }
+        }
+        assertTrue(internalFailure.exceptionOrNull() is IllegalStateException)
     }
 }

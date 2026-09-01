@@ -155,7 +155,9 @@ class SecretManagementRequestsTest {
             requests(audit).completeSecretList(
                 request = request,
                 completion = Json.parseToJsonElement("""{"ciphertext":"completion"}"""),
-                openCompletion = { "{not-json-$malicious".encodeToByteArray() },
+                openCompletion = {
+                    CompletionOpenResult.Opened("{not-json-$malicious".encodeToByteArray())
+                },
             ),
         )
 
@@ -279,7 +281,7 @@ class SecretManagementRequestsTest {
                 requests(InsertThenFailAuditSink(audit)).completeSecretUpload(
                     request,
                     completion,
-                ) { uploadCompletionPlaintext() }
+                ) { CompletionOpenResult.Opened(uploadCompletionPlaintext()) }
             }.isFailure,
         )
         assertNull(database.requestDao().getRequestById(requestId)?.completionJson)
@@ -287,7 +289,9 @@ class SecretManagementRequestsTest {
 
         val regular = requests(audit)
         assertTrue(
-            regular.completeSecretUpload(request, completion) { uploadCompletionPlaintext() },
+            regular.completeSecretUpload(request, completion) {
+                CompletionOpenResult.Opened(uploadCompletionPlaintext())
+            },
         )
         val completedTransport = checkNotNull(database.requestDao().getRequestById(requestId))
         assertEquals(InboxRequestState.ACTION_REQUIRED.storedName, completedTransport.state)
@@ -318,7 +322,9 @@ class SecretManagementRequestsTest {
             requests(audit).completeSecretUpload(
                 request = request,
                 completion = Json.parseToJsonElement("""{"ciphertext":"completion"}"""),
-                openCompletion = { "{not-json-$malicious".encodeToByteArray() },
+                openCompletion = {
+                    CompletionOpenResult.Opened("{not-json-$malicious".encodeToByteArray())
+                },
             ),
         )
 

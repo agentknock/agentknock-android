@@ -401,10 +401,10 @@ internal class SshAuthenticationRequests(
                 request = currentRequest.copy(
                     state = request.state,
                     responseJson = request.responseJson,
-                    responseAcknowledged = if (request.responseJson != null) {
+                    responseOutboxFinished = if (request.responseJson != null) {
                         false
                     } else {
-                        currentRequest.responseAcknowledged
+                        currentRequest.responseOutboxFinished
                     },
                 ),
                 authentication = currentAuthentication.copy(
@@ -445,21 +445,22 @@ internal class SshAuthenticationRequests(
     suspend fun complete(
         request: InboxRequestEntity,
         completion: JsonElement,
-        openCompletion: suspend () -> ByteArray?,
+        openCompletion: suspend () -> CompletionOpenResult,
     ): Boolean {
         val completionJson = completion.toString()
         terminalCompletionHandled(request.id)?.let { return it }
-        val plaintext = openCompletion()
-            ?: return terminalCompletionHandled(request.id) ?: false
-        val completionResult = runCatching { protocol.decodeCompletion(plaintext) }.getOrNull()
+        val opened = openCompletion()
+        val completionResult = (opened as? CompletionOpenResult.Opened)?.plaintext?.let {
+            decodeWireCompletionOrNull { protocol.decodeCompletion(it) }
+        }
         return writeTransaction.execute {
             val currentRequest = dao.getRequestById(request.id) ?: return@execute false
             val authentication = dao.getSshAuthenticationRequest(request.id)
                 ?: return@execute false
-            if (currentRequest.completedAt != null) {
-                dao.deleteTerminalSshAuthenticationRequestPsk(request.id)
+            if (currentRequest.exchangeEndedAt != null) {
                 return@execute true
             }
+            if (opened == CompletionOpenResult.RetryLater) return@execute false
             val softwareMatches = completionResult?.clientSoftware ==
                 currentRequest.clientSoftwareJson?.let(::decodeClientSoftware)
             val valid = softwareMatches && when (completionResult) {
@@ -484,11 +485,13 @@ internal class SshAuthenticationRequests(
             dao.updateSshAuthenticationRequest(
                 request = currentRequest.copy(
                     state = InboxRequestState.COMPLETED.storedName,
-                    completionJson = completionJson,
-                    responseAcknowledged = true,
-                    completionAcknowledged = false,
+                    completionJson = completionJson.takeIf {
+                        opened is CompletionOpenResult.Opened
+                    },
+                    responseOutboxFinished = true,
                     error = error,
                     completedAt = now,
+                    exchangeEndedAt = now,
                 ),
                 authentication = authentication.copy(
                     message = null,
@@ -556,7 +559,7 @@ internal class SshAuthenticationRequests(
                 ),
                 now,
             )
-            dao.deleteTerminalSshAuthenticationRequestPsk(currentRequest.id)
+            dao.deleteEndedRequestPsk(currentRequest.id)
             true
         }
     }
@@ -564,8 +567,15 @@ internal class SshAuthenticationRequests(
     suspend fun expire(request: InboxRequestEntity, message: String, now: Long) {
         writeTransaction.execute {
             val currentRequest = dao.getRequestById(request.id) ?: return@execute
+            if (currentRequest.exchangeEndedAt != null) return@execute
             if (currentRequest.completedAt != null) {
-                dao.deleteTerminalSshAuthenticationRequestPsk(request.id)
+                dao.updateRequest(
+                    currentRequest.copy(
+                        exchangeEndedAt = now,
+                        responseOutboxFinished = true,
+                    ),
+                )
+                dao.deleteEndedRequestPsk(request.id)
                 return@execute
             }
             val authentication = dao.getSshAuthenticationRequest(request.id) ?: return@execute
@@ -574,6 +584,8 @@ internal class SshAuthenticationRequests(
                     state = InboxRequestState.COMPLETED.storedName,
                     error = message,
                     completedAt = now,
+                    exchangeEndedAt = now,
+                    responseOutboxFinished = true,
                 ),
                 authentication.copy(message = null),
             )
@@ -591,7 +603,7 @@ internal class SshAuthenticationRequests(
                 ),
                 now,
             )
-            dao.deleteTerminalSshAuthenticationRequestPsk(currentRequest.id)
+            dao.deleteEndedRequestPsk(currentRequest.id)
         }
     }
 
@@ -641,7 +653,7 @@ internal class SshAuthenticationRequests(
             val updatedRequest = currentRequest.copy(
                 state = InboxRequestState.WAITING.storedName,
                 responseJson = response.toString(),
-                responseAcknowledged = false,
+                responseOutboxFinished = false,
             )
             val updatedAuthentication = currentAuthentication.copy(
                 message = null,
@@ -763,7 +775,7 @@ internal class SshAuthenticationRequests(
             currentRequest.copy(
                 state = InboxRequestState.WAITING.storedName,
                 responseJson = response.toString(),
-                responseAcknowledged = false,
+                responseOutboxFinished = false,
             ),
             currentAuthentication.copy(
                 message = null,
@@ -819,11 +831,10 @@ internal class SshAuthenticationRequests(
             val terminal = dao.getRequestById(requestId) ?: return@execute null
             if (
                 dao.getSshAuthenticationRequest(requestId) == null ||
-                terminal.completedAt == null
+                terminal.exchangeEndedAt == null
             ) {
                 return@execute null
             }
-            dao.deleteTerminalSshAuthenticationRequestPsk(requestId)
             true
         }
 

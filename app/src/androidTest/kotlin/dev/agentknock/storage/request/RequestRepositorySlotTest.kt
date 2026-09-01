@@ -233,7 +233,7 @@ class RequestRepositorySlotTest {
     }
 
     @Test
-    fun failedCompletionLeavesSlotEmptyAndAcceptedCompletionIgnoresLaterDeliveries() = runTest {
+    fun firstInvalidPairingCompletionEndsExchangeAndLaterCompletionIsIgnored() = runTest {
         val clientSecret = ByteArray(32) { it.toByte() }
         val pairingRequest = pairingRequest(clientSecret)
         val acceptedCompletion = pairingCompletion(clientSecret)
@@ -270,11 +270,16 @@ class RequestRepositorySlotTest {
         )
         val requestAfterFailure = checkNotNull(database.requestDao().getRequestById(root.id))
         assertNull(requestAfterFailure.completionJson)
-        assertEquals("waiting", requestAfterFailure.state)
+        assertEquals(InboxRequestState.ACTION_REQUIRED.storedName, requestAfterFailure.state)
         val pairingAfterFailure = checkNotNull(database.requestDao().getPairingAttempt(root.id))
-        assertEquals("receiving", pairingAfterFailure.state)
+        assertEquals(PairingState.EXCHANGE_FAILED.storedName, pairingAfterFailure.state)
         assertNotNull(requestAfterFailure.error)
+        assertNotNull(requestAfterFailure.exchangeEndedAt)
         assertNull(pairingAfterFailure.pendingPsk)
+        assertEquals(
+            listOf(CLIENT_ID),
+            inbox.observeRequests().first().map(InboxRequestSummary::id),
+        )
 
         now += 1
         synchronize(
@@ -286,15 +291,11 @@ class RequestRepositorySlotTest {
                 addressId = ADDRESS_ID,
             ),
         )
-        val acceptedRequest = checkNotNull(database.requestDao().getRequestById(root.id))
-        val acceptedPairing = checkNotNull(database.requestDao().getPairingAttempt(root.id))
-        assertEquals(acceptedCompletion.toString(), acceptedRequest.completionJson)
-        assertEquals("sas_verification_pending", acceptedPairing.state)
-        val pendingKeyId = checkNotNull(acceptedPairing.pendingPsk).keyId
-        assertEquals(
-            VaultKeyPurpose.DEVICE_STATE.storedName,
-            database.vaultKeyDao().getKey(pendingKeyId)?.purpose,
-        )
+        val afterReplay = checkNotNull(database.requestDao().getRequestById(root.id))
+        val pairingAfterReplay = checkNotNull(database.requestDao().getPairingAttempt(root.id))
+        assertNull(afterReplay.completionJson)
+        assertEquals(PairingState.EXCHANGE_FAILED.storedName, pairingAfterReplay.state)
+        assertNull(pairingAfterReplay.pendingPsk)
 
         now += 1
         synchronize(
@@ -306,15 +307,12 @@ class RequestRepositorySlotTest {
                 addressId = ADDRESS_ID,
             ),
         )
-        assertEquals(
-            acceptedCompletion.toString(),
-            database.requestDao().getRequestById(root.id)?.completionJson,
-        )
-        assertTrue(checkNotNull(database.requestDao().getRequestById(root.id)).completionAcknowledged)
+        assertNull(database.requestDao().getRequestById(root.id)?.completionJson)
+        assertNotNull(checkNotNull(database.requestDao().getRequestById(root.id)).exchangeEndedAt)
     }
 
     @Test
-    fun authenticatedInitialPairingCompletionInfersResponseReceipt() = runTest {
+    fun authenticatedInitialPairingCompletionEndsExchangeWithoutResponseStatus() = runTest {
         val clientSecret = ByteArray(32) { it.toByte() }
         connect(
             RelayDeviceEvent.Message(
@@ -324,13 +322,15 @@ class RequestRepositorySlotTest {
                 payload = pairingRequest(clientSecret),
                 addressId = ADDRESS_ID,
             ),
-            RelayDeviceEvent.Failed("disconnect before response receipt"),
+            RelayDeviceEvent.Failed("disconnect before response status"),
         )
         assertEquals(
-            RequestSyncResult.RelayUnavailable("disconnect before response receipt"),
+            RequestSyncResult.RelayUnavailable("disconnect before response status"),
             repository.sync(),
         )
-        assertFalse(checkNotNull(database.requestDao().getRequestById(CLIENT_ID)).responseAcknowledged)
+        assertFalse(
+            checkNotNull(database.requestDao().getRequestById(CLIENT_ID)).responseOutboxFinished,
+        )
 
         now += 1
         connect(
@@ -347,7 +347,9 @@ class RequestRepositorySlotTest {
             RequestSyncResult.RelayUnavailable("disconnect after completion"),
             repository.sync(),
         )
-        assertTrue(checkNotNull(database.requestDao().getRequestById(CLIENT_ID)).responseAcknowledged)
+        assertTrue(
+            checkNotNull(database.requestDao().getRequestById(CLIENT_ID)).responseOutboxFinished,
+        )
     }
 
     @Test
@@ -371,7 +373,152 @@ class RequestRepositorySlotTest {
     }
 
     @Test
-    fun authenticatedUnknownCompletionInfersResponseReceipt() = runTest {
+    fun openAndClosingStatesDoNotEndExchangeButClosingFinishesResponseOutbox() = runTest {
+        insertOpenUnknownRequest()
+        connect(
+            relayState(UNSUPPORTED_REQUEST_ID).copy(
+                exchange = RelayExchangeState.CLOSING,
+                response = RelayMessageState.ABSENT,
+            ),
+            RelayDeviceEvent.CaughtUp,
+        )
+
+        assertEquals(RequestSyncResult.Success, repository.sync())
+        val closing = checkNotNull(database.requestDao().getRequestById(UNSUPPORTED_REQUEST_ID))
+        assertTrue(closing.responseOutboxFinished)
+        assertNull(closing.exchangeEndedAt)
+
+        now += 1
+        connect(
+            relayState(UNSUPPORTED_REQUEST_ID).copy(exchange = RelayExchangeState.SETTLED),
+            RelayDeviceEvent.CaughtUp,
+        )
+        assertEquals(RequestSyncResult.Success, repository.sync())
+        val settled = checkNotNull(database.requestDao().getRequestById(UNSUPPORTED_REQUEST_ID))
+        assertEquals(now, settled.exchangeEndedAt)
+        assertEquals(now, settled.completedAt)
+    }
+
+    @Test
+    fun responseInactiveOnlyFinishesOutboxAndLeavesExchangeOpen() = runTest {
+        insertOpenUnknownRequest()
+        connect(
+            RelayDeviceEvent.Inactive(
+                CLIENT_ID,
+                UNSUPPORTED_REQUEST_ID,
+                RelayMessageKind.RESPONSE,
+            ),
+            RelayDeviceEvent.CaughtUp,
+        )
+
+        assertEquals(RequestSyncResult.Success, repository.sync())
+        val stored = checkNotNull(database.requestDao().getRequestById(UNSUPPORTED_REQUEST_ID))
+        assertTrue(stored.responseOutboxFinished)
+        assertNull(stored.exchangeEndedAt)
+    }
+
+    @Test
+    fun bareInactiveEndsExchange() = runTest {
+        insertOpenUnknownRequest()
+        connect(
+            RelayDeviceEvent.Inactive(CLIENT_ID, UNSUPPORTED_REQUEST_ID, null),
+            RelayDeviceEvent.CaughtUp,
+        )
+
+        assertEquals(RequestSyncResult.Success, repository.sync())
+        val stored = checkNotNull(database.requestDao().getRequestById(UNSUPPORTED_REQUEST_ID))
+        assertEquals(now, stored.exchangeEndedAt)
+        assertEquals(now, stored.completedAt)
+        assertTrue(stored.responseOutboxFinished)
+    }
+
+    @Test
+    fun requestAndCompletionInactiveEventsLeaveExchangeOpen() = runTest {
+        insertOpenUnknownRequest()
+        connect(
+            RelayDeviceEvent.Inactive(
+                CLIENT_ID,
+                UNSUPPORTED_REQUEST_ID,
+                RelayMessageKind.REQUEST,
+            ),
+            RelayDeviceEvent.Acknowledgement(
+                CLIENT_ID,
+                UNSUPPORTED_REQUEST_ID,
+                RelayMessageKind.RESPONSE,
+            ),
+            RelayDeviceEvent.CaughtUp,
+        )
+        assertEquals(RequestSyncResult.Success, repository.sync())
+        assertNull(
+            database.requestDao().getRequestById(UNSUPPORTED_REQUEST_ID)?.exchangeEndedAt,
+        )
+
+        connect(
+            RelayDeviceEvent.Inactive(
+                CLIENT_ID,
+                UNSUPPORTED_REQUEST_ID,
+                RelayMessageKind.COMPLETION,
+            ),
+            RelayDeviceEvent.CaughtUp,
+        )
+        assertEquals(RequestSyncResult.Success, repository.sync())
+        assertNull(
+            database.requestDao().getRequestById(UNSUPPORTED_REQUEST_ID)?.exchangeEndedAt,
+        )
+    }
+
+    @Test
+    fun expiredStateEndsExchange() = runTest {
+        insertOpenUnknownRequest()
+        connect(
+            RelayDeviceEvent.State(
+                clientId = CLIENT_ID,
+                requestId = UNSUPPORTED_REQUEST_ID,
+                exchange = RelayExchangeState.EXPIRED,
+                request = RelayMessageState.DELIVERED,
+                response = RelayMessageState.ABSENT,
+                completion = RelayMessageState.ABSENT,
+            ),
+            RelayDeviceEvent.CaughtUp,
+        )
+
+        assertEquals(RequestSyncResult.Success, repository.sync())
+        val stored = checkNotNull(database.requestDao().getRequestById(UNSUPPORTED_REQUEST_ID))
+        assertNotNull(stored.exchangeEndedAt)
+        assertTrue(checkNotNull(stored.error).contains("expired"))
+    }
+
+    @Test
+    fun acceptedAndDiscardedResponseStatesFinishOnlyTheOutbox() = runTest {
+        insertOpenUnknownRequest()
+        for (responseState in listOf(RelayMessageState.ACCEPTED, RelayMessageState.DISCARDED)) {
+            val current = checkNotNull(
+                database.requestDao().getRequestById(UNSUPPORTED_REQUEST_ID),
+            )
+            database.requestDao().updateRequest(current.copy(responseOutboxFinished = false))
+            connect(
+                RelayDeviceEvent.State(
+                    clientId = CLIENT_ID,
+                    requestId = UNSUPPORTED_REQUEST_ID,
+                    exchange = RelayExchangeState.OPEN,
+                    request = RelayMessageState.DELIVERED,
+                    response = responseState,
+                    completion = RelayMessageState.ABSENT,
+                ),
+                RelayDeviceEvent.CaughtUp,
+            )
+
+            assertEquals(RequestSyncResult.Success, repository.sync())
+            val stored = checkNotNull(
+                database.requestDao().getRequestById(UNSUPPORTED_REQUEST_ID),
+            )
+            assertTrue(stored.responseOutboxFinished)
+            assertNull(stored.exchangeEndedAt)
+        }
+    }
+
+    @Test
+    fun authenticatedUnknownCompletionEndsExchangeWithoutResponseStatus() = runTest {
         val clientPsk = establishActivePairing()
         val exchange = pairedExchange(
             requestId = UNSUPPORTED_REQUEST_ID,
@@ -379,11 +526,55 @@ class RequestRepositorySlotTest {
             requestPlaintext = unsupportedPlaintext(),
             completionPlaintext = "{}".encodeToByteArray(),
         )
-        assertResponseReceiptInferredFromCompletion(UNSUPPORTED_REQUEST_ID, exchange)
+        assertCompletionEndsExchangeWithoutResponseStatus(UNSUPPORTED_REQUEST_ID, exchange)
     }
 
     @Test
-    fun authenticatedPairingRemovalCompletionInfersResponseReceipt() = runTest {
+    fun unsupportedStoredRequestEncryptionFormatEndsCompletionAsInvalid() = runTest {
+        val clientPsk = establishActivePairing()
+        val exchange = pairedExchange(
+            requestId = UNSUPPORTED_REQUEST_ID,
+            clientPsk = clientPsk,
+            requestPlaintext = unsupportedPlaintext(),
+            completionPlaintext = "{}".encodeToByteArray(),
+        )
+        connect(
+            requestEvent(UNSUPPORTED_REQUEST_ID, exchange.request),
+            RelayDeviceEvent.Acknowledgement(
+                CLIENT_ID,
+                UNSUPPORTED_REQUEST_ID,
+                RelayMessageKind.RESPONSE,
+            ),
+            RelayDeviceEvent.Failed("disconnect before completion"),
+        )
+        assertEquals(
+            RequestSyncResult.RelayUnavailable("disconnect before completion"),
+            repository.sync(),
+        )
+        database.useWriterConnection { connection ->
+            connection.executeSQL(
+                "UPDATE request_psks SET encryption_format = 999 " +
+                    "WHERE request_id = '$UNSUPPORTED_REQUEST_ID'",
+            )
+        }
+
+        connect(
+            completionEvent(UNSUPPORTED_REQUEST_ID, exchange.completion),
+            RelayDeviceEvent.CaughtUp,
+        )
+        assertEquals(RequestSyncResult.Success, repository.sync())
+
+        val ended = checkNotNull(
+            database.requestDao().getRequestById(UNSUPPORTED_REQUEST_ID),
+        )
+        assertNotNull(ended.exchangeEndedAt)
+        assertNull(ended.completionJson)
+        assertEquals("The completion could not be verified.", ended.error)
+        assertNull(database.requestDao().getRequestPsk(UNSUPPORTED_REQUEST_ID))
+    }
+
+    @Test
+    fun authenticatedPairingRemovalCompletionEndsExchangeWithoutResponseStatus() = runTest {
         val clientPsk = establishActivePairing()
         val exchange = pairedExchange(
             requestId = REMOVE_REQUEST_ID,
@@ -393,7 +584,55 @@ class RequestRepositorySlotTest {
                     .encodeToByteArray(),
             completionPlaintext = """{${clientSoftwareFields()}}""".encodeToByteArray(),
         )
-        assertResponseReceiptInferredFromCompletion(REMOVE_REQUEST_ID, exchange)
+        assertCompletionEndsExchangeWithoutResponseStatus(REMOVE_REQUEST_ID, exchange)
+    }
+
+    @Test
+    fun responseDeliveryDoesNotCompletePairingRemoval() = runTest {
+        val clientPsk = establishActivePairing()
+        val exchange = pairedExchange(
+            requestId = REMOVE_REQUEST_ID,
+            clientPsk = clientPsk,
+            requestPlaintext =
+                """{${clientSoftwareFields()},"method":"PairingRemove"}"""
+                    .encodeToByteArray(),
+            completionPlaintext = """{${clientSoftwareFields()}}""".encodeToByteArray(),
+        )
+        connect(
+            requestEvent(REMOVE_REQUEST_ID, exchange.request),
+            RelayDeviceEvent.State(
+                clientId = CLIENT_ID,
+                requestId = REMOVE_REQUEST_ID,
+                exchange = RelayExchangeState.OPEN,
+                request = RelayMessageState.DELIVERED,
+                response = RelayMessageState.DELIVERED,
+                completion = RelayMessageState.ABSENT,
+            ),
+            RelayDeviceEvent.ClientState(CLIENT_ID, RelayClientState.REVOKED),
+            RelayDeviceEvent.CaughtUp,
+            RelayDeviceEvent.State(
+                clientId = CLIENT_ID,
+                requestId = REMOVE_REQUEST_ID,
+                exchange = RelayExchangeState.OPEN,
+                request = RelayMessageState.DELIVERED,
+                response = RelayMessageState.DELIVERED,
+                completion = RelayMessageState.ABSENT,
+            ),
+        )
+
+        assertEquals(RequestSyncResult.Success, repository.sync())
+
+        val request = checkNotNull(database.requestDao().getRequestById(REMOVE_REQUEST_ID))
+        assertTrue(request.responseOutboxFinished)
+        assertNull(request.completedAt)
+        assertNull(request.exchangeEndedAt)
+        assertNull(database.requestDao().getClient(CLIENT_ID))
+        assertFalse(
+            AuditRepository(database.auditDao()).observeEvents().first().any {
+                it.type == AuditEventType.CLIENT_UNPAIRED_ITSELF &&
+                    it.relayRequestId == REMOVE_REQUEST_ID
+            },
+        )
     }
 
     @Test
@@ -434,7 +673,7 @@ class RequestRepositorySlotTest {
     }
 
     @Test
-    fun authenticatedFinishCompletionInfersResponseReceipt() = runTest {
+    fun authenticatedFinishCompletionEndsExchangeWithoutResponseStatus() = runTest {
         val material = verifyPairingSas()
         connect(
             RelayDeviceEvent.ClientState(CLIENT_ID, RelayClientState.ACTIVE),
@@ -452,7 +691,7 @@ class RequestRepositorySlotTest {
                 """{${clientSoftwareFields()},"result":"ACCEPTED"}"""
                     .encodeToByteArray(),
         )
-        assertResponseReceiptInferredFromCompletion(FINISH_REQUEST_ID, exchange)
+        assertCompletionEndsExchangeWithoutResponseStatus(FINISH_REQUEST_ID, exchange)
     }
 
     @Test
@@ -485,6 +724,49 @@ class RequestRepositorySlotTest {
         val rejected = checkNotNull(database.requestDao().getPairingAttempt(CLIENT_ID))
         assertEquals("rejected", rejected.state)
         assertNull(rejected.pendingPsk)
+    }
+
+    @Test
+    fun completionAfterPairingWasRejectedEndsTheRelayExchange() = runTest {
+        val clientSecret = ByteArray(32) { it.toByte() }
+        synchronize(
+            RelayDeviceEvent.Message(
+                clientId = CLIENT_ID,
+                requestId = CLIENT_ID,
+                kind = RelayMessageKind.REQUEST,
+                payload = pairingRequest(clientSecret),
+                addressId = ADDRESS_ID,
+            ),
+        )
+        assertEquals(PairingDecisionResult.REJECTED, repository.rejectPairing(CLIENT_ID))
+        assertNull(database.requestDao().getRequestById(CLIENT_ID)?.exchangeEndedAt)
+
+        val connection = connect(
+            RelayDeviceEvent.Message(
+                clientId = CLIENT_ID,
+                requestId = CLIENT_ID,
+                kind = RelayMessageKind.COMPLETION,
+                payload = pairingCompletion(clientSecret),
+                addressId = ADDRESS_ID,
+            ),
+            RelayDeviceEvent.CaughtUp,
+        )
+        assertEquals(RequestSyncResult.Success, repository.sync())
+
+        assertNotNull(database.requestDao().getRequestById(CLIENT_ID)?.exchangeEndedAt)
+        assertEquals(
+            PairingState.REJECTED.storedName,
+            database.requestDao().getPairingAttempt(CLIENT_ID)?.state,
+        )
+        assertTrue(
+            connection.sentFrames.contains(
+                RelayDeviceFrame.Acknowledgement(
+                    CLIENT_ID,
+                    CLIENT_ID,
+                    RelayMessageKind.COMPLETION,
+                ),
+            ),
+        )
     }
 
     @Test
@@ -599,6 +881,9 @@ class RequestRepositorySlotTest {
                 FINISH_REQUEST_ID,
                 RelayMessageKind.RESPONSE,
             ),
+            relayState(FINISH_REQUEST_ID, completion = RelayMessageState.DELIVERED).copy(
+                exchange = RelayExchangeState.SETTLED,
+            ),
             RelayDeviceEvent.CaughtUp,
         )
         assertEquals(RequestSyncResult.Success, repository.sync())
@@ -667,8 +952,7 @@ class RequestRepositorySlotTest {
         val persistedResponse = Json.parseToJsonElement(checkNotNull(stored.responseJson))
         assertEquals(invocation.toString(), stored.requestJson)
         assertEquals("waiting", stored.state)
-        assertTrue(stored.requestAcknowledged)
-        assertFalse(stored.responseAcknowledged)
+        assertFalse(stored.responseOutboxFinished)
         assertEquals("approved", storedInvocation.decision)
         assertEquals("git-signing", storedInvocation.secretsJson.removeSurrounding("[\"", "\"]"))
         assertEquals(
@@ -726,7 +1010,7 @@ class RequestRepositorySlotTest {
         assertEquals(stored.id, afterReplay.id)
         assertEquals(stored.receivedAt, afterReplay.receivedAt)
         assertEquals(stored.responseJson, afterReplay.responseJson)
-        assertTrue(afterReplay.responseAcknowledged)
+        assertTrue(afterReplay.responseOutboxFinished)
     }
 
     @Test
@@ -751,7 +1035,6 @@ class RequestRepositorySlotTest {
             database.requestDao().getRequestById(AI_INVOCATION_REQUEST_ID),
         )
         assertEquals(InboxRequestState.REVIEWING.storedName, reviewing.state)
-        assertTrue(reviewing.requestAcknowledged)
         assertEquals(1, approvalReviewer.callCount)
         assertEquals(
             RelayPushRegistrationState.REGISTERED,
@@ -961,7 +1244,7 @@ class RequestRepositorySlotTest {
         )
         assertTrue(
             checkNotNull(database.requestDao().getRequestById(AI_INVOCATION_REQUEST_ID))
-                .responseAcknowledged,
+                .responseOutboxFinished,
         )
     }
 
@@ -1170,6 +1453,35 @@ class RequestRepositorySlotTest {
     }
 
     @Test
+    fun clientStateMutationRetriesWhenRelayReportsAContraryState() = runTest {
+        establishActivePairing()
+        assertEquals(
+            ClientChangeResult.CHANGED,
+            repository.setClientState(CLIENT_ID, RelayClientState.SUSPENDED),
+        )
+
+        val connection = connect(
+            RelayDeviceEvent.ClientState(CLIENT_ID, RelayClientState.ACTIVE),
+            RelayDeviceEvent.CaughtUp,
+            RelayDeviceEvent.ClientState(CLIENT_ID, RelayClientState.SUSPENDED),
+        )
+        assertEquals(RequestSyncResult.Success, repository.sync())
+
+        assertEquals(
+            2,
+            connection.sentFrames.count {
+                it == RelayDeviceFrame.SetClientState(
+                    CLIENT_ID,
+                    RelayClientState.SUSPENDED,
+                )
+            },
+        )
+        val client = checkNotNull(database.requestDao().getClient(CLIENT_ID))
+        assertEquals(RelayClientState.SUSPENDED.wireName, client.relayClientState)
+        assertNull(client.desiredRelayClientState)
+    }
+
+    @Test
     fun pendingUnrestrictedInvocationReopensItsExactDeliverySelection() = runTest {
         assertPendingInvocationSelectionAfterVariableAdded(
             delivery = "{}",
@@ -1215,9 +1527,8 @@ class RequestRepositorySlotTest {
                 error = null,
                 receivedAt = now,
                 completedAt = null,
-                requestAcknowledged = true,
-                responseAcknowledged = false,
-                completionAcknowledged = false,
+                exchangeEndedAt = null,
+                responseOutboxFinished = false,
             ),
         )
 
@@ -1294,7 +1605,7 @@ class RequestRepositorySlotTest {
     }
 
     @Test
-    fun sameClientAndRequestIdWithDifferentPayloadIsNotTreatedAsReplay() = runTest {
+    fun terminalRequestIdCollisionIsAcknowledgedWithoutReplayingResponse() = runTest {
         establishActivePairing()
         val collision = connect(
             RelayDeviceEvent.Message(
@@ -1310,7 +1621,16 @@ class RequestRepositorySlotTest {
         )
 
         assertEquals(RequestSyncResult.Success, repository.sync())
-        assertTrue(collision.sentFrames.isEmpty())
+        assertEquals(
+            listOf(
+                RelayDeviceFrame.Acknowledgement(
+                    CLIENT_ID,
+                    CLIENT_ID,
+                    RelayMessageKind.REQUEST,
+                ),
+            ),
+            collision.sentFrames,
+        )
         assertEquals(
             pairingRequest(ByteArray(32) { it.toByte() }).toString(),
             database.requestDao().getRequestById(CLIENT_ID)?.requestJson,
@@ -1345,9 +1665,8 @@ class RequestRepositorySlotTest {
             error = null,
             receivedAt = now - 1,
             completedAt = null,
-            requestAcknowledged = true,
-            responseAcknowledged = false,
-            completionAcknowledged = false,
+            exchangeEndedAt = null,
+            responseOutboxFinished = false,
         )
         database.requestDao().insertRequest(stored)
         val collision = connect(
@@ -1515,7 +1834,7 @@ class RequestRepositorySlotTest {
         val deniedSigning = checkNotNull(database.requestDao().getGitSignRequest(child.id))
         val persistedResponse = Json.parseToJsonElement(checkNotNull(denied.responseJson))
         assertEquals("waiting", denied.state)
-        assertFalse(denied.responseAcknowledged)
+        assertFalse(denied.responseOutboxFinished)
         assertEquals("denied", deniedSigning.decision)
         assertEquals("USER_DENIED", deniedSigning.completionReason)
         // Pairing belongs to Clients rather than request history. The active invocation and its
@@ -1556,7 +1875,7 @@ class RequestRepositorySlotTest {
         )
         val afterReplay = checkNotNull(database.requestDao().getRequestById(child.id))
         assertEquals(denied.responseJson, afterReplay.responseJson)
-        assertTrue(afterReplay.responseAcknowledged)
+        assertTrue(afterReplay.responseOutboxFinished)
     }
 
     @Test
@@ -1607,8 +1926,8 @@ class RequestRepositorySlotTest {
         )
         assertEquals(InboxRequestState.COMPLETED.storedName, completed.state)
         assertEquals(ApprovalCompletionResult.APPROVED.storedName, completedSigning.completionResult)
-        assertTrue(completed.responseAcknowledged)
-        assertTrue(completed.completionAcknowledged)
+        assertTrue(completed.responseOutboxFinished)
+        assertNotNull(completed.exchangeEndedAt)
         assertNull(database.requestDao().getRequestPsk(GIT_SIGN_REQUEST_ID))
     }
 
@@ -2027,6 +2346,9 @@ class RequestRepositorySlotTest {
                 FINISH_REQUEST_ID,
                 RelayMessageKind.RESPONSE,
             ),
+            relayState(FINISH_REQUEST_ID, completion = RelayMessageState.DELIVERED).copy(
+                exchange = RelayExchangeState.SETTLED,
+            ),
             RelayDeviceEvent.CaughtUp,
         )
         assertEquals(RequestSyncResult.Success, repository.sync())
@@ -2271,6 +2593,30 @@ class RequestRepositorySlotTest {
         withTimeout(5_000) { block() }
     }
 
+    private suspend fun insertOpenUnknownRequest() {
+        database.requestDao().insertRequest(
+            InboxRequestEntity(
+                id = UNSUPPORTED_REQUEST_ID,
+                parentRequestId = null,
+                deviceIdentityId = DEVICE_IDENTITY_ID,
+                clientId = CLIENT_ID,
+                clientNameSnapshot = "Test client",
+                clientSoftwareJson = null,
+                kind = RequestKind.UNKNOWN.storedName,
+                state = InboxRequestState.WAITING.storedName,
+                listed = false,
+                requestJson = "{}",
+                responseJson = "{}",
+                completionJson = null,
+                error = null,
+                receivedAt = now,
+                completedAt = null,
+                exchangeEndedAt = null,
+                responseOutboxFinished = false,
+            ),
+        )
+    }
+
     private fun connect(vararg events: RelayDeviceEvent): TestRelayDeviceConnection =
         TestRelayDeviceConnection(events.toList()).also(relay::enqueue)
 
@@ -2293,19 +2639,21 @@ class RequestRepositorySlotTest {
         addressId = null,
     )
 
-    private suspend fun assertResponseReceiptInferredFromCompletion(
+    private suspend fun assertCompletionEndsExchangeWithoutResponseStatus(
         requestId: String,
         exchange: PairedExchange,
     ) {
         connect(
             requestEvent(requestId, exchange.request),
-            RelayDeviceEvent.Failed("disconnect before response receipt"),
+            RelayDeviceEvent.Failed("disconnect before response status"),
         )
         assertEquals(
-            RequestSyncResult.RelayUnavailable("disconnect before response receipt"),
+            RequestSyncResult.RelayUnavailable("disconnect before response status"),
             repository.sync(),
         )
-        assertFalse(checkNotNull(database.requestDao().getRequestById(requestId)).responseAcknowledged)
+        assertFalse(
+            checkNotNull(database.requestDao().getRequestById(requestId)).responseOutboxFinished,
+        )
 
         now += 1
         connect(
@@ -2323,7 +2671,7 @@ class RequestRepositorySlotTest {
             repository.sync(),
         )
         assertTrue(
-            checkNotNull(database.requestDao().getRequestById(requestId)).responseAcknowledged,
+            checkNotNull(database.requestDao().getRequestById(requestId)).responseOutboxFinished,
         )
     }
 

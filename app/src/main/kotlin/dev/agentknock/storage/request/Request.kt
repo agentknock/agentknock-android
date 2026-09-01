@@ -76,12 +76,10 @@ internal data class InboxRequestEntity(
     val receivedAt: Long,
     @ColumnInfo(name = "completed_at")
     val completedAt: Long?,
-    @ColumnInfo(name = "request_acknowledged")
-    val requestAcknowledged: Boolean,
-    @ColumnInfo(name = "response_acknowledged")
-    val responseAcknowledged: Boolean,
-    @ColumnInfo(name = "completion_acknowledged")
-    val completionAcknowledged: Boolean,
+    @ColumnInfo(name = "exchange_ended_at")
+    val exchangeEndedAt: Long?,
+    @ColumnInfo(name = "response_outbox_finished")
+    val responseOutboxFinished: Boolean,
 )
 
 @Entity(
@@ -579,7 +577,7 @@ internal interface RequestDao {
             "WHERE device_identities.role = 'active' " +
             "AND inbox_requests.completed_at IS NULL " +
             "AND pairing_attempts.state IN " +
-            "('receiving', 'sas_verification_pending', " +
+            "('receiving', 'exchange_failed', 'sas_verification_pending', " +
             "'relay_activation_pending', 'waiting_for_finish') " +
             "ORDER BY inbox_requests.received_at DESC, inbox_requests.id DESC",
     )
@@ -829,41 +827,11 @@ internal interface RequestDao {
         WHERE request_id = :requestId
           AND EXISTS (
             SELECT 1 FROM inbox_requests
-            WHERE id = :requestId
-              AND kind = 'secret_use'
-              AND completed_at IS NOT NULL
+            WHERE id = :requestId AND exchange_ended_at IS NOT NULL
           )
         """,
     )
-    suspend fun deleteTerminalInvocationRequestPsk(requestId: String): Int
-
-    @Query(
-        """
-        DELETE FROM request_psks
-        WHERE request_id = :requestId
-          AND EXISTS (
-            SELECT 1 FROM inbox_requests
-            WHERE id = :requestId
-              AND kind = 'git_sign'
-              AND completed_at IS NOT NULL
-          )
-        """,
-    )
-    suspend fun deleteTerminalGitSignRequestPsk(requestId: String): Int
-
-    @Query(
-        """
-        DELETE FROM request_psks
-        WHERE request_id = :requestId
-          AND EXISTS (
-            SELECT 1 FROM inbox_requests
-            WHERE id = :requestId
-              AND kind = 'ssh_authenticate'
-              AND completed_at IS NOT NULL
-          )
-        """,
-    )
-    suspend fun deleteTerminalSshAuthenticationRequestPsk(requestId: String): Int
+    suspend fun deleteEndedRequestPsk(requestId: String): Int
 
     @Query(
         """
@@ -878,24 +846,22 @@ internal interface RequestDao {
     @Query(
         "SELECT inbox_requests.* FROM inbox_requests " +
             "JOIN device_identities ON device_identities.id = inbox_requests.device_identity_id " +
-            "WHERE response_json IS NOT NULL AND response_acknowledged = 0 " +
-            "AND device_identities.role = 'active' ORDER BY received_at, inbox_requests.id",
+            "WHERE response_json IS NOT NULL AND response_outbox_finished = 0 " +
+            "AND exchange_ended_at IS NULL AND device_identities.role = 'active' " +
+            "ORDER BY received_at, inbox_requests.id",
     )
-    suspend fun getUnacknowledgedResponses(): List<InboxRequestEntity>
+    suspend fun getUnfinishedResponseOutboxes(): List<InboxRequestEntity>
 
     @Query(
         """
         SELECT inbox_requests.* FROM inbox_requests
         JOIN device_identities ON device_identities.id = inbox_requests.device_identity_id
         WHERE device_identities.role = 'active'
-          AND (
-            completed_at IS NULL
-            OR response_acknowledged = 0 AND response_json IS NOT NULL
-          )
+          AND exchange_ended_at IS NULL
         ORDER BY received_at, inbox_requests.id
         """,
     )
-    suspend fun getUnsettledRequests(): List<InboxRequestEntity>
+    suspend fun getOpenExchanges(): List<InboxRequestEntity>
 
     @Insert
     suspend fun insertRequest(request: InboxRequestEntity)
@@ -937,6 +903,27 @@ internal interface RequestDao {
 
     @Update
     suspend fun updateRequest(request: InboxRequestEntity): Int
+
+    @Transaction
+    suspend fun updateEndedRequest(request: InboxRequestEntity) {
+        check(request.exchangeEndedAt != null)
+        check(updateRequest(request) == 1)
+        deleteEndedRequestPsk(request.id)
+        trimCompletedHistory()
+    }
+
+    @Transaction
+    suspend fun applyPairingRemoval(request: InboxRequestEntity) {
+        check(request.kind == "pairing_remove")
+        check(updateRequest(request) == 1)
+        val client = getClient(request.clientId)
+        if (client != null && client.desiredRelayClientState != "revoked") {
+            revokeClient(client.copy(desiredRelayClientState = "revoked"))
+        }
+        deleteTemporaryAccessGrantsForClient(request.clientId)
+        if (request.exchangeEndedAt != null) deleteEndedRequestPsk(request.id)
+        trimCompletedHistory()
+    }
 
     @Update
     suspend fun updatePairingAttempt(attempt: PairingAttemptEntity): Int
@@ -1027,27 +1014,11 @@ internal interface RequestDao {
 
     @Query(
         """
-        UPDATE inbox_requests SET request_acknowledged = 1
-        WHERE id = :requestId AND request_acknowledged = 0
+        UPDATE inbox_requests SET response_outbox_finished = 1
+        WHERE id = :requestId AND response_outbox_finished = 0
         """,
     )
-    suspend fun markRequestAcknowledged(requestId: String): Int
-
-    @Query(
-        """
-        UPDATE inbox_requests SET response_acknowledged = 1
-        WHERE id = :requestId AND response_acknowledged = 0
-        """,
-    )
-    suspend fun markResponseAcknowledged(requestId: String): Int
-
-    @Query(
-        """
-        UPDATE inbox_requests SET completion_acknowledged = 1
-        WHERE id = :requestId AND completion_acknowledged = 0
-        """,
-    )
-    suspend fun markCompletionAcknowledged(requestId: String): Int
+    suspend fun markResponseOutboxFinished(requestId: String): Int
 
     @Query(
         """
@@ -1082,19 +1053,8 @@ internal interface RequestDao {
         DELETE FROM inbox_requests
         WHERE listed = 0
           AND completed_at IS NOT NULL
-          AND received_at <= :receivedBefore
-          AND (
-            EXISTS (
-              SELECT 1 FROM device_identities
-              WHERE device_identities.id = inbox_requests.device_identity_id
-                AND device_identities.role = 'retired'
-            )
-            OR (
-              request_acknowledged = 1
-              AND (response_json IS NULL OR response_acknowledged = 1)
-              AND (completion_json IS NULL OR completion_acknowledged = 1)
-            )
-          )
+          AND exchange_ended_at IS NOT NULL
+          AND exchange_ended_at <= :endedBefore
           AND NOT EXISTS (
             SELECT 1 FROM inbox_requests AS child
             WHERE child.parent_request_id = inbox_requests.id
@@ -1109,7 +1069,7 @@ internal interface RequestDao {
           )
         """,
     )
-    suspend fun deleteSettledHiddenRequests(receivedBefore: Long): Int
+    suspend fun deleteSettledHiddenRequests(endedBefore: Long): Int
 
     @Query(
         """

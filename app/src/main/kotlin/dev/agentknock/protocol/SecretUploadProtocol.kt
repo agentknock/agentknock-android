@@ -1,6 +1,7 @@
 package dev.agentknock.protocol
 
 import kotlinx.serialization.Serializable
+import kotlinx.serialization.SerializationException
 import kotlinx.serialization.encodeToString
 import kotlinx.serialization.json.Json
 import kotlinx.serialization.json.JsonNull
@@ -77,12 +78,12 @@ internal class SecretUploadProtocol(
         val completion = json.decodeFromString<SecretUploadCompletionWire>(
             plaintext.decodeToString(),
         )
-        require(completion.result == RESULT_RECEIVED || completion.result == RESULT_REJECTED) {
-            "Unsupported secret upload completion result"
+        if (completion.result != RESULT_RECEIVED && completion.result != RESULT_REJECTED) {
+            throw SerializationException("Unsupported secret upload completion result")
         }
         if (completion.result == RESULT_REJECTED) {
-            require(!completion.message.isNullOrBlank()) {
-                "Rejected secret upload completion has no message"
+            if (completion.message.isNullOrBlank()) {
+                throw SerializationException("Rejected secret upload completion has no message")
             }
         }
         return SecretUploadCompletion(

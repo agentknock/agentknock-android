@@ -218,7 +218,7 @@ class RequestDaoTransactionTest {
         assertFalse(checkNotNull(dao.getRequestById(ROOT_REQUEST_ID)).listed)
         assertNotNull(dao.getClient(CLIENT_ID))
 
-        assertEquals(1, dao.deleteSettledHiddenRequests(receivedBefore = 2))
+        assertEquals(1, dao.deleteSettledHiddenRequests(endedBefore = 2))
         assertNull(dao.getRequestById(ROOT_REQUEST_ID))
         assertNull(dao.getPairingAttempt(ROOT_REQUEST_ID))
         assertNotNull(dao.getClient(CLIENT_ID))
@@ -241,13 +241,13 @@ class RequestDaoTransactionTest {
             ),
         )
 
-        assertEquals(0, dao.deleteSettledHiddenRequests(receivedBefore = 2))
+        assertEquals(0, dao.deleteSettledHiddenRequests(endedBefore = 2))
         assertNotNull(dao.getRequestById(ROOT_REQUEST_ID))
         val attempt = checkNotNull(dao.getPairingAttempt(ROOT_REQUEST_ID))
 
         dao.updatePairingAttempt(attempt.copy(relayClientState = "revoked"))
 
-        assertEquals(1, dao.deleteSettledHiddenRequests(receivedBefore = 2))
+        assertEquals(1, dao.deleteSettledHiddenRequests(endedBefore = 2))
         assertNull(dao.getRequestById(ROOT_REQUEST_ID))
         assertNull(dao.getPairingAttempt(ROOT_REQUEST_ID))
     }
@@ -386,7 +386,7 @@ class RequestDaoTransactionTest {
     }
 
     @Test
-    fun acknowledgementsAreIdempotent() = runTest {
+    fun finishingResponseOutboxIsIdempotent() = runTest {
         val requestId = "acknowledgement-request"
         dao.insertRequest(
             rootRequest().copy(
@@ -394,23 +394,15 @@ class RequestDaoTransactionTest {
                 kind = "unknown",
                 state = "completed",
                 completedAt = 10,
-                requestAcknowledged = false,
-                responseAcknowledged = false,
-                completionAcknowledged = false,
+                responseOutboxFinished = false,
             ),
         )
 
-        assertEquals(1, dao.markRequestAcknowledged(requestId))
-        assertEquals(1, dao.markResponseAcknowledged(requestId))
-        assertEquals(1, dao.markCompletionAcknowledged(requestId))
-        assertEquals(0, dao.markRequestAcknowledged(requestId))
-        assertEquals(0, dao.markResponseAcknowledged(requestId))
-        assertEquals(0, dao.markCompletionAcknowledged(requestId))
+        assertEquals(1, dao.markResponseOutboxFinished(requestId))
+        assertEquals(0, dao.markResponseOutboxFinished(requestId))
 
         val stored = checkNotNull(dao.getRequestById(requestId))
-        assertTrue(stored.requestAcknowledged)
-        assertTrue(stored.responseAcknowledged)
-        assertTrue(stored.completionAcknowledged)
+        assertTrue(stored.responseOutboxFinished)
     }
 
     @Test
@@ -438,6 +430,7 @@ class RequestDaoTransactionTest {
                 state = "completed",
                 completionJson = null,
                 completedAt = 5,
+                exchangeEndedAt = null,
             ),
         )
         dao.insertRequestPsk(requestPsk(requestId))
@@ -453,7 +446,7 @@ class RequestDaoTransactionTest {
         assertEquals(1, dao.deleteCompletedRequestPsks())
         assertNotNull(dao.getRequestPsk(requestId))
         assertNull(dao.getRequestPsk(completedRequestId))
-        assertEquals(0, dao.deleteTerminalInvocationRequestPsk(requestId))
+        assertEquals(0, dao.deleteEndedRequestPsk(requestId))
         assertNotNull(dao.getRequestPsk(requestId))
     }
 
@@ -498,6 +491,7 @@ class RequestDaoTransactionTest {
             state = "completed",
             listed = false,
             completedAt = 2,
+            exchangeEndedAt = 2,
         )
         val child = parent.copy(
             id = "child-request",
@@ -507,11 +501,11 @@ class RequestDaoTransactionTest {
         dao.insertRequest(parent)
         dao.insertRequest(child)
 
-        assertEquals(1, dao.deleteSettledHiddenRequests(receivedBefore = 2))
+        assertEquals(1, dao.deleteSettledHiddenRequests(endedBefore = 2))
         assertNotNull(dao.getRequestById(parent.id))
         assertNull(dao.getRequestById(child.id))
 
-        assertEquals(1, dao.deleteSettledHiddenRequests(receivedBefore = 2))
+        assertEquals(1, dao.deleteSettledHiddenRequests(endedBefore = 2))
         assertNull(dao.getRequestById(parent.id))
     }
 
@@ -1034,9 +1028,8 @@ class RequestDaoTransactionTest {
         error = null,
         receivedAt = 1,
         completedAt = null,
-        requestAcknowledged = true,
-        responseAcknowledged = true,
-        completionAcknowledged = true,
+        exchangeEndedAt = 1,
+        responseOutboxFinished = true,
     )
 
     private fun pendingAttempt(withPendingPsk: Boolean = false) = PairingAttemptEntity(
@@ -1106,9 +1099,8 @@ class RequestDaoTransactionTest {
         error = null,
         receivedAt = 2,
         completedAt = 2,
-        requestAcknowledged = false,
-        responseAcknowledged = false,
-        completionAcknowledged = false,
+        exchangeEndedAt = null,
+        responseOutboxFinished = false,
     )
 
     private fun pairingRemovalRequest(rootId: String) = InboxRequestEntity(
@@ -1127,9 +1119,8 @@ class RequestDaoTransactionTest {
         error = null,
         receivedAt = 2,
         completedAt = null,
-        requestAcknowledged = false,
-        responseAcknowledged = false,
-        completionAcknowledged = false,
+        exchangeEndedAt = null,
+        responseOutboxFinished = false,
     )
 
     private fun requestPsk(requestId: String) = RequestPskEntity(

@@ -405,14 +405,18 @@ class InvocationRequestsTest {
 
         assertTrue(
             runCatching {
-                requests(InsertThenFailAuditSink(audit)).complete(request, completion) { plaintext }
+                requests(InsertThenFailAuditSink(audit)).complete(request, completion) {
+                    CompletionOpenResult.Opened(plaintext)
+                }
             }.isFailure,
         )
         assertNull(database.requestDao().getRequestById(requestId)?.completionJson)
         assertNotNull(database.requestDao().getRequestPsk(requestId))
         assertEquals(eventCount, audit.observeEvents().first().size)
 
-        assertTrue(regular.complete(request, completion) { plaintext })
+        assertTrue(
+            regular.complete(request, completion) { CompletionOpenResult.Opened(plaintext) },
+        )
         val completed = checkNotNull(database.requestDao().getRequestById(requestId))
         assertNull(completed.error)
         assertEquals(
@@ -426,15 +430,13 @@ class InvocationRequestsTest {
         assertEquals(SECRET_USE_POLICY_DENIAL_MESSAGE, completedAudit.detail)
 
         val auditCountAfterCompletion = audit.observeEvents().first().size
-        database.requestDao().insertRequestPsk(acceptedPsks(requestId).requestPsk)
-        assertNotNull(database.requestDao().getRequestPsk(requestId))
         assertTrue(
             regular.complete(completed, completion) {
                 error("A completion replay must not be reopened")
             },
         )
         assertNull(database.requestDao().getRequestPsk(requestId))
-        assertFalse(
+        assertTrue(
             regular.complete(
                 completed,
                 Json.parseToJsonElement("""{"ciphertext":"conflicting-completion"}"""),
@@ -467,7 +469,7 @@ class InvocationRequestsTest {
             regular.complete(
                 request,
                 Json.parseToJsonElement("""{"ciphertext":"aborted"}"""),
-            ) { abortedCompletionPlaintext(malicious) },
+            ) { CompletionOpenResult.Opened(abortedCompletionPlaintext(malicious)) },
         )
 
         val completionAudit = audit.observeEvents().first().first()
@@ -501,7 +503,7 @@ class InvocationRequestsTest {
             regular.complete(
                 request,
                 Json.parseToJsonElement("""{"ciphertext":"invalid"}"""),
-            ) { wrongSoftwareCompletion },
+            ) { CompletionOpenResult.Opened(wrongSoftwareCompletion) },
         )
 
         val storedRequest = checkNotNull(database.requestDao().getRequestById(requestId))
@@ -513,6 +515,37 @@ class InvocationRequestsTest {
         val completionAudit = audit.observeEvents().first().first()
         assertEquals("Secret use completion could not be verified.", completionAudit.detail)
         assertFalse(checkNotNull(completionAudit.detail).contains(malicious))
+    }
+
+    @Test
+    fun irrecoverablyInvalidCompletionEndsExchangeWithoutStoringEnvelope() = runTest {
+        val requestId = "invocation-invalid-envelope"
+        val regular = requests(audit)
+        assertEquals(
+            ConditionalRequestUpdate.APPLIED,
+            regular.receive(
+                request = request(requestId),
+                secretUseRequest = secretUse(requestId),
+                client = client(),
+                acceptedPsks = acceptedPsks(requestId),
+                authorization = null,
+                automaticDecisionAudit = null,
+            ),
+        )
+        val request = checkNotNull(database.requestDao().getRequestById(requestId))
+
+        assertTrue(
+            regular.complete(
+                request,
+                Json.parseToJsonElement("""{"ciphertext":"invalid"}"""),
+            ) { CompletionOpenResult.IrrecoverablyInvalid },
+        )
+
+        val ended = checkNotNull(database.requestDao().getRequestById(requestId))
+        assertNotNull(ended.exchangeEndedAt)
+        assertNull(ended.completionJson)
+        assertEquals("Secret use completion could not be verified.", ended.error)
+        assertNull(database.requestDao().getRequestPsk(requestId))
     }
 
     @Test
@@ -553,8 +586,6 @@ class InvocationRequestsTest {
         assertEquals(EXPIRY_MESSAGE, expiryAudit.detail)
 
         val auditCountAfterExpiry = audit.observeEvents().first().size
-        database.requestDao().insertRequestPsk(acceptedPsks(requestId).requestPsk)
-        assertNotNull(database.requestDao().getRequestPsk(requestId))
         regular.expire(expired, EXPIRY_MESSAGE, NOW + 1)
         assertNull(database.requestDao().getRequestPsk(requestId))
         assertEquals(auditCountAfterExpiry, audit.observeEvents().first().size)
@@ -657,9 +688,8 @@ class InvocationRequestsTest {
         error = null,
         receivedAt = NOW,
         completedAt = null,
-        requestAcknowledged = false,
-        responseAcknowledged = false,
-        completionAcknowledged = false,
+        exchangeEndedAt = null,
+        responseOutboxFinished = false,
     )
 
     private fun secretUse(requestId: String) = SecretUseRequestEntity(

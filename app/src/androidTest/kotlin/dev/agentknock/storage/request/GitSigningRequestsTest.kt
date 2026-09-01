@@ -459,14 +459,18 @@ class GitSigningRequestsTest {
 
         assertTrue(
             runCatching {
-                requests(InsertThenFailAuditSink(audit)).complete(request, completion) { plaintext }
+                requests(InsertThenFailAuditSink(audit)).complete(request, completion) {
+                    CompletionOpenResult.Opened(plaintext)
+                }
             }.isFailure,
         )
         assertNull(database.requestDao().getRequestById(requestId)?.completedAt)
         assertNotNull(database.requestDao().getRequestPsk(requestId))
         assertEquals(eventCount, audit.observeEvents().first().size)
 
-        assertTrue(regular.complete(request, completion) { plaintext })
+        assertTrue(
+            regular.complete(request, completion) { CompletionOpenResult.Opened(plaintext) },
+        )
         val completed = checkNotNull(database.requestDao().getRequestById(requestId))
         val signing = checkNotNull(database.requestDao().getGitSignRequest(requestId))
         assertEquals(ApprovalCompletionResult.ABORTED.storedName, signing.completionResult)
@@ -478,10 +482,9 @@ class GitSigningRequestsTest {
         assertFalse(checkNotNull(completionAudit.detail).contains(malicious))
 
         val auditCount = audit.observeEvents().first().size
-        database.requestDao().insertRequestPsk(acceptedPsks(requestId).requestPsk)
         assertTrue(regular.complete(request, completion) { error("Must not reopen") })
         assertNull(database.requestDao().getRequestPsk(requestId))
-        assertFalse(
+        assertTrue(
             regular.complete(
                 completed,
                 Json.parseToJsonElement("""{"ciphertext":"different"}"""),
@@ -494,8 +497,12 @@ class GitSigningRequestsTest {
         val racingRequest = checkNotNull(database.requestDao().getRequestById(racingRequestId))
         assertTrue(
             regular.complete(racingRequest, completion) {
-                assertTrue(regular.complete(racingRequest, completion) { plaintext })
-                null
+                assertTrue(
+                    regular.complete(racingRequest, completion) {
+                        CompletionOpenResult.Opened(plaintext)
+                    },
+                )
+                CompletionOpenResult.RetryLater
             },
         )
         assertNull(database.requestDao().getRequestPsk(racingRequestId))
@@ -529,7 +536,6 @@ class GitSigningRequestsTest {
         assertEquals(AuditOutcome.FAILED, expiryAudit.outcome)
 
         val auditCount = audit.observeEvents().first().size
-        database.requestDao().insertRequestPsk(acceptedPsks(requestId).requestPsk)
         regular.expire(expired, EXPIRY_MESSAGE, NOW + 1)
         assertNull(database.requestDao().getRequestPsk(requestId))
         assertEquals(auditCount, audit.observeEvents().first().size)
@@ -585,9 +591,8 @@ class GitSigningRequestsTest {
         error = null,
         receivedAt = NOW - 1,
         completedAt = null,
-        requestAcknowledged = true,
-        responseAcknowledged = false,
-        completionAcknowledged = false,
+        exchangeEndedAt = null,
+        responseOutboxFinished = false,
     )
 
     private fun request(requestId: String) = InboxRequestEntity(
@@ -606,9 +611,8 @@ class GitSigningRequestsTest {
         error = null,
         receivedAt = NOW,
         completedAt = null,
-        requestAcknowledged = false,
-        responseAcknowledged = false,
-        completionAcknowledged = false,
+        exchangeEndedAt = null,
+        responseOutboxFinished = false,
     )
 
     private fun parentInvocation(secretDetailsJson: String) = SecretUseRequestEntity(

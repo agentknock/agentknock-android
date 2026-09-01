@@ -548,7 +548,9 @@ class SshAuthenticationRequestsTest {
 
         assertTrue(
             runCatching {
-                requests(InsertThenFailAuditSink(audit)).complete(request, completion) { plaintext }
+                requests(InsertThenFailAuditSink(audit)).complete(request, completion) {
+                    CompletionOpenResult.Opened(plaintext)
+                }
             }.isFailure,
         )
         assertNull(database.requestDao().getRequestById(requestId)?.completedAt)
@@ -562,7 +564,9 @@ class SshAuthenticationRequestsTest {
         val retryableId = "ssh-unopened-completion"
         receivePending(regular, retryableId)
         val retryable = checkNotNull(database.requestDao().getRequestById(retryableId))
-        assertFalse(regular.complete(retryable, completion) { null })
+        assertFalse(
+            regular.complete(retryable, completion) { CompletionOpenResult.RetryLater },
+        )
         assertNull(database.requestDao().getRequestById(retryableId)?.completedAt)
         assertNotNull(database.requestDao().getRequestPsk(retryableId))
         assertTrue(
@@ -570,7 +574,9 @@ class SshAuthenticationRequestsTest {
                 .contentEquals(AUTHENTICATION_MESSAGE),
         )
 
-        assertTrue(regular.complete(request, completion) { plaintext })
+        assertTrue(
+            regular.complete(request, completion) { CompletionOpenResult.Opened(plaintext) },
+        )
         val completed = checkNotNull(database.requestDao().getRequestById(requestId))
         val authentication = checkNotNull(
             database.requestDao().getSshAuthenticationRequest(requestId),
@@ -585,7 +591,6 @@ class SshAuthenticationRequestsTest {
         assertFalse(checkNotNull(completionAudit.detail).contains(malicious))
 
         val auditCount = audit.observeEvents().first().size
-        database.requestDao().insertRequestPsk(acceptedPsks(requestId).requestPsk)
         assertTrue(regular.complete(request, completion) { error("Must not reopen") })
         assertNull(database.requestDao().getRequestPsk(requestId))
         assertTrue(
@@ -601,7 +606,7 @@ class SshAuthenticationRequestsTest {
         val malformed = checkNotNull(database.requestDao().getRequestById(malformedId))
         assertTrue(
             regular.complete(malformed, completion) {
-                "not a completion".encodeToByteArray()
+                CompletionOpenResult.Opened("not a completion".encodeToByteArray())
             },
         )
         val failedRequest = checkNotNull(database.requestDao().getRequestById(malformedId))
@@ -633,8 +638,12 @@ class SshAuthenticationRequestsTest {
         val racing = checkNotNull(database.requestDao().getRequestById(racingId))
         assertTrue(
             regular.complete(racing, completion) {
-                assertTrue(regular.complete(racing, completion) { plaintext })
-                null
+                assertTrue(
+                    regular.complete(racing, completion) {
+                        CompletionOpenResult.Opened(plaintext)
+                    },
+                )
+                CompletionOpenResult.RetryLater
             },
         )
         assertNull(database.requestDao().getRequestPsk(racingId))
@@ -647,8 +656,12 @@ class SshAuthenticationRequestsTest {
         val preRaceAuditCount = audit.observeEvents().first().size
         assertTrue(
             regular.complete(postOpenRace, completion) {
-                assertTrue(regular.complete(postOpenRace, completion) { plaintext })
-                plaintext
+                assertTrue(
+                    regular.complete(postOpenRace, completion) {
+                        CompletionOpenResult.Opened(plaintext)
+                    },
+                )
+                CompletionOpenResult.Opened(plaintext)
             },
         )
         assertNull(database.requestDao().getRequestPsk(postOpenRaceId))
@@ -688,7 +701,6 @@ class SshAuthenticationRequestsTest {
         assertEquals(AuditOutcome.FAILED, expiryAudit.outcome)
 
         val auditCount = audit.observeEvents().first().size
-        database.requestDao().insertRequestPsk(acceptedPsks(requestId).requestPsk)
         regular.expire(expired, EXPIRY_MESSAGE, NOW + 1)
         assertNull(database.requestDao().getRequestPsk(requestId))
         assertEquals(auditCount, audit.observeEvents().first().size)
@@ -746,9 +758,8 @@ class SshAuthenticationRequestsTest {
         error = null,
         receivedAt = NOW - 1,
         completedAt = null,
-        requestAcknowledged = true,
-        responseAcknowledged = false,
-        completionAcknowledged = false,
+        exchangeEndedAt = null,
+        responseOutboxFinished = false,
     )
 
     private fun request(requestId: String) = InboxRequestEntity(
@@ -767,9 +778,8 @@ class SshAuthenticationRequestsTest {
         error = null,
         receivedAt = NOW,
         completedAt = null,
-        requestAcknowledged = false,
-        responseAcknowledged = false,
-        completionAcknowledged = false,
+        exchangeEndedAt = null,
+        responseOutboxFinished = false,
     )
 
     private fun parentInvocation(secretDetailsJson: String) = SecretUseRequestEntity(

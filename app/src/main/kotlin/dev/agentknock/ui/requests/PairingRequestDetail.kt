@@ -126,10 +126,16 @@ internal fun PairingRequestDetail(
                     NoticeTone.DANGER,
                 )
             }
+            PairingState.EXCHANGE_FAILED -> Notice(
+                "Pairing message rejected",
+                pairing.error ?: "The secure exchange could not be completed.",
+                NoticeTone.DANGER,
+            )
         }
         if (
             pairing.pairingState in setOf(
                 PairingState.RECEIVING,
+                PairingState.EXCHANGE_FAILED,
                 PairingState.RELAY_ACTIVATION_PENDING,
                 PairingState.WAITING_FOR_FINISH,
             )
@@ -165,6 +171,7 @@ internal fun PairingRequestDetail(
 
 private fun PairingState.label(): String = when (this) {
     PairingState.RECEIVING -> "Receiving"
+    PairingState.EXCHANGE_FAILED -> "Failed"
     PairingState.SAS_VERIFICATION_PENDING -> "Verify security code"
     PairingState.RELAY_ACTIVATION_PENDING -> "Activating"
     PairingState.WAITING_FOR_FINISH -> "Waiting for client"

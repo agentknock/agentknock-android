@@ -87,7 +87,11 @@ class DeviceIdentityRetentionTest {
         assertNull(database.requestDao().getClient(CLIENT_ID))
         assertNull(database.requestDao().getClientById(CLIENT_ID))
         assertEquals(
-            historicalRequest.copy(listed = false),
+            historicalRequest.copy(
+                listed = false,
+                exchangeEndedAt = 3,
+                responseOutboxFinished = true,
+            ),
             database.requestDao().getRequestById(REQUEST_ID),
         )
         assertAuditSnapshotRemains()
@@ -115,7 +119,11 @@ class DeviceIdentityRetentionTest {
         assertNull(database.requestDao().getClient(CLIENT_ID))
         assertNull(database.requestDao().getClientById(CLIENT_ID))
         assertEquals(
-            historicalRequest.copy(listed = false),
+            historicalRequest.copy(
+                listed = false,
+                exchangeEndedAt = 3,
+                responseOutboxFinished = true,
+            ),
             database.requestDao().getRequestById(REQUEST_ID),
         )
         assertAuditSnapshotRemains()
@@ -175,7 +183,6 @@ class DeviceIdentityRetentionTest {
                 listed = true,
                 error = "The pairing completion was malformed.",
                 completedAt = null,
-                requestAcknowledged = true,
             ),
             PairingAttemptEntity(
                 requestId = pairingId,
@@ -209,8 +216,7 @@ class DeviceIdentityRetentionTest {
                 listed = false,
                 responseJson = "{}",
                 completedAt = null,
-                requestAcknowledged = true,
-                responseAcknowledged = false,
+                responseOutboxFinished = false,
             ),
         )
         requestDao.insertRequestPsk(requestPsk(invocationId))
@@ -296,7 +302,11 @@ class DeviceIdentityRetentionTest {
             ).isEmpty(),
         )
         assertEquals(
-            completedBefore.copy(listed = false),
+            completedBefore.copy(
+                listed = false,
+                exchangeEndedAt = 30,
+                responseOutboxFinished = true,
+            ),
             requestDao.getRequestById(REQUEST_ID),
         )
         listOf(pairingId, invocationId, uploadId, approvedUploadId, REQUEST_ID).forEach { id ->
@@ -309,10 +319,10 @@ class DeviceIdentityRetentionTest {
         assertAuditSnapshotRemains()
 
         val abandonedInvocation = checkNotNull(requestDao.getRequestById(invocationId))
-        assertTrue(abandonedInvocation.requestAcknowledged)
-        assertTrue(!abandonedInvocation.responseAcknowledged)
-        assertTrue(requestDao.getUnacknowledgedResponses().isEmpty())
-        assertTrue(requestDao.getUnsettledRequests().isEmpty())
+        assertTrue(abandonedInvocation.responseOutboxFinished)
+        assertNotNull(abandonedInvocation.exchangeEndedAt)
+        assertTrue(requestDao.getUnfinishedResponseOutboxes().isEmpty())
+        assertTrue(requestDao.getOpenExchanges().isEmpty())
         assertTrue(requestDao.observeListedRequests().first().isEmpty())
         assertNull(requestDao.observeRequest(uploadId).first())
 
@@ -511,9 +521,8 @@ class DeviceIdentityRetentionTest {
         error = null,
         receivedAt = 12,
         completedAt = 12,
-        requestAcknowledged = true,
-        responseAcknowledged = false,
-        completionAcknowledged = false,
+        exchangeEndedAt = null,
+        responseOutboxFinished = false,
     )
 
     private companion object {

@@ -177,7 +177,11 @@ internal class RequestMaterialStore(
     }
 
     suspend fun decryptRequestPsk(request: InboxRequestEntity): ByteArray? {
-        val secret = dao.getRequestPsk(request.id) ?: return null
+        return (decryptRequestPskResult(request) as? DecryptionResult.Plaintext)?.value
+    }
+
+    suspend fun decryptRequestPskResult(request: InboxRequestEntity): DecryptionResult {
+        val secret = dao.getRequestPsk(request.id) ?: return DecryptionResult.AuthenticationFailed
         val result = withContext(cryptographyDispatcher) {
             encryption.decrypt(
                 encrypted = secret.encryptedPsk,
@@ -188,8 +192,10 @@ internal class RequestMaterialStore(
                 ),
             )
         }
-        return (result as? DecryptionResult.Plaintext)?.value?.takeIf {
-            it.size == CLIENT_PSK_BYTES
+        return if (result is DecryptionResult.Plaintext && result.value.size != CLIENT_PSK_BYTES) {
+            DecryptionResult.AuthenticationFailed
+        } else {
+            result
         }
     }
 
