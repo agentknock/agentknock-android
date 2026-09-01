@@ -3,7 +3,6 @@ package dev.agentknock.storage.request
 import dev.agentknock.protocol.ClientSoftware
 import dev.agentknock.protocol.InvocationDenialReason
 import dev.agentknock.protocol.InvocationProtocol
-import dev.agentknock.protocol.InvocationRequestMessage
 import dev.agentknock.protocol.GitSignProtocol
 import dev.agentknock.protocol.GitSignRequestMessage
 import dev.agentknock.protocol.OpenedPairedRequest
@@ -16,32 +15,23 @@ import dev.agentknock.protocol.SshAuthenticationMessageDetails
 import dev.agentknock.protocol.SshAuthenticationProtocol
 import dev.agentknock.protocol.SshAuthenticationRequestMessage
 import dev.agentknock.protocol.isFreshRelayRequestId
-import dev.agentknock.review.approvalReviewRequest
 import dev.agentknock.review.approvalReviewGitSignRequest
 import dev.agentknock.review.approvalReviewSshAuthenticationRequest
-import dev.agentknock.review.approvalReviewSecretFacts
-import dev.agentknock.review.ApprovalReviewRequest
 import dev.agentknock.relay.RelayClientState
 import dev.agentknock.relay.RelayApprovalReviewClient
-import dev.agentknock.relay.RelayApprovalReviewDecision
 import dev.agentknock.relay.RelayDeviceClient
 import dev.agentknock.relay.RelayDeviceConnection
 import dev.agentknock.relay.RelayDeviceConnectionResult
 import dev.agentknock.relay.RelayDeviceEvent
 import dev.agentknock.relay.RelayDeviceFrame
 import dev.agentknock.relay.RelayExchangeState
-import dev.agentknock.relay.RelayEndpointResult
 import dev.agentknock.relay.RelayMessageKind
 import dev.agentknock.relay.RelayMessageState
 import dev.agentknock.relay.RelayPushRegistrationState
-import dev.agentknock.storage.secret.RequestedSecretsResult
 import dev.agentknock.storage.secret.SecretMetadata
-import dev.agentknock.storage.secret.SecretValues
-import dev.agentknock.storage.secret.RequestedSecretDescription
 import dev.agentknock.storage.secret.SshKeyCodec
 import dev.agentknock.storage.secret.GitSignatureResult
 import dev.agentknock.storage.secret.SshAuthenticationSignatureResult
-import dev.agentknock.storage.secret.ENVIRONMENT_SECRET_TYPE
 import dev.agentknock.storage.secret.SSH_SECRET_TYPE
 import dev.agentknock.storage.secret.SecretRepository
 import dev.agentknock.storage.secret.SecretApprovalPolicy
@@ -49,7 +39,6 @@ import dev.agentknock.storage.secret.TemporaryAccessOperation
 import dev.agentknock.storage.approval.ApprovalAction
 import dev.agentknock.storage.approval.AiReview
 import dev.agentknock.storage.approval.AiReviewDecision
-import dev.agentknock.storage.approval.AiReviewFailure
 import dev.agentknock.storage.approval.ApprovalPolicyEvaluator
 import dev.agentknock.storage.approval.ApprovalEvaluation
 import dev.agentknock.storage.approval.requiresAiReview
@@ -79,14 +68,9 @@ import kotlinx.coroutines.withContext
 import kotlinx.serialization.json.Json
 import kotlinx.serialization.json.JsonElement
 import kotlinx.serialization.json.JsonObject
-import kotlinx.serialization.builtins.ListSerializer
-import kotlinx.serialization.builtins.serializer
 import kotlinx.serialization.decodeFromString
 import kotlinx.serialization.encodeToString
 import kotlinx.serialization.SerializationException
-
-internal fun reviewedRequestState(responseAvailable: Boolean): InboxRequestState =
-    if (responseAvailable) InboxRequestState.WAITING else InboxRequestState.ACTION_REQUIRED
 
 internal suspend fun persistRejectedRequest(persist: suspend () -> Unit): Boolean = try {
     persist()
@@ -105,7 +89,7 @@ private data class IncomingRelayMessage(
     val addressId: String? = null,
 )
 
-private data class ProcessedRelayMessage(val response: JsonElement? = null)
+internal data class ProcessedRelayMessage(val response: JsonElement? = null)
 
 internal inline fun <T> decodeWireCompletionOrNull(decode: () -> T): T? = try {
     decode()
@@ -149,34 +133,6 @@ internal enum class PairingDecisionResult {
     REJECTED,
     NOT_PENDING,
     NOT_FOUND,
-}
-
-internal sealed interface InvocationDecisionResult {
-    data object Decided : InvocationDecisionResult
-
-    data object SecretsChanged : InvocationDecisionResult
-
-    data object NotPending : InvocationDecisionResult
-
-    data object NotFound : InvocationDecisionResult
-
-    data class MissingSecrets(val names: List<String>) : InvocationDecisionResult
-
-    data class ConflictingVariable(val name: String) : InvocationDecisionResult
-
-    data class Invalid(val message: String) : InvocationDecisionResult
-
-    data object SecretUnavailable : InvocationDecisionResult
-
-    data object SecretCorrupted : InvocationDecisionResult
-
-    data object UnsupportedEncryption : InvocationDecisionResult
-
-    data object PairingUnavailable : InvocationDecisionResult
-
-    data object TemporaryAccessUnavailable : InvocationDecisionResult
-
-    data object TemporaryAccessNotStarted : InvocationDecisionResult
 }
 
 internal sealed interface GitSignDecisionResult {
@@ -231,7 +187,6 @@ internal class RequestRepository(
     private val updatePushRegistrationState: (RelayPushRegistrationState) -> Unit,
     private val sshKeys: SshKeyCodec = SshKeyCodec(),
     private val pairedRequestProtocol: PairedRequestProtocol = PairedRequestProtocol(),
-    private val invocationProtocol: InvocationProtocol = InvocationProtocol(),
     private val gitSignProtocol: GitSignProtocol = GitSignProtocol(),
     private val sshAuthenticationProtocol: SshAuthenticationProtocol = SshAuthenticationProtocol(),
     private val json: Json = Json,
@@ -815,7 +770,7 @@ internal class RequestRepository(
         invocationRequests.approve(
             requestId = requestId,
             allowTemporaryAccess = allowTemporaryAccess,
-            openRequest = ::openStoredInvocationRequest,
+            openRequest = ::openStoredPairedRequest,
             sealResponse = ::sealInvocationResponse,
         )
     }.also { result ->
@@ -861,9 +816,9 @@ internal class RequestRepository(
         }.getOrNull()
     }
 
-    private suspend fun openStoredInvocationRequest(
+    private suspend fun openStoredPairedRequest(
         request: InboxRequestEntity,
-    ): InvocationRequestMessage? {
+    ): ByteArray? {
         val credentials = credentialsForRequest(request) ?: return null
         val clientPsk = material.decryptRequestPsk(request) ?: return null
         val opened = runCatching {
@@ -879,9 +834,7 @@ internal class RequestRepository(
                 request = json.parseToJsonElement(request.requestJson),
             )
         }.getOrNull() ?: return null
-        return runCatching {
-            invocationProtocol.decodeRequest(opened.plaintext)
-        }.getOrNull()
+        return opened.plaintext
     }
 
     suspend fun approveGitSignRequest(requestId: String): GitSignDecisionResult =
@@ -1158,13 +1111,19 @@ internal class RequestRepository(
             )
         }
         val processed = if (method == InvocationProtocol.METHOD) {
-            processInvocationRequest(
+            invocationRequests.processIncoming(
                 pairing = client,
                 relayRequestId = message.requestId,
                 requestPayload = requestPayload,
-                opened = opened,
+                plaintext = opened.plaintext,
                 acceptedSecrets = acceptedSecrets,
                 credentials = credentials,
+                sealResponse = { responsePlaintext ->
+                    runCatching {
+                        pairedRequestProtocol.sealPairedResponse(opened, responsePlaintext)
+                    }.getOrNull()
+                },
+                launchAiReview = ::launchAiReview,
             )
         } else if (method == GitSignProtocol.METHOD) {
             processGitSignRequest(
@@ -1230,407 +1189,6 @@ internal class RequestRepository(
         )
     }
 
-    private suspend fun processInvocationRequest(
-        pairing: ClientEntity,
-        relayRequestId: String,
-        requestPayload: JsonElement,
-        opened: OpenedPairedRequest,
-        acceptedSecrets: AcceptedRequestPsks,
-        credentials: RelayDeviceCredentials,
-    ): ProcessedRelayMessage? {
-        val contents = runCatching {
-            invocationProtocol.decodeRequest(opened.plaintext)
-        }.getOrNull() ?: return null
-        val environmentSelections = contents.environmentSelections()
-        val resolution = secrets.resolveRequestedSecrets(contents.secrets, environmentSelections)
-        val description = resolution.description
-        val requestedSecrets = resolution.values
-        val automaticDenial = automaticSecretUseDenial(requestedSecrets)
-        val protectedSecretNames = description.reviewMetadata
-            .filter { secret ->
-                secret.type == ENVIRONMENT_SECRET_TYPE &&
-                    secret.environmentVariables.any { it.sensitive }
-            }
-            .map { it.name }
-        val approvalPolicies = if (automaticDenial == null) {
-            secrets.approvalPoliciesForNames(
-                protectedSecretNames,
-                pairing.clientId,
-                TemporaryAccessOperation.INVOCATION,
-            )
-        } else {
-            emptyList()
-        }
-        val initialApprovalEvaluation = if (automaticDenial == null && protectedSecretNames.isNotEmpty()) {
-            val approvals = approvalPolicies.map { it.toRequestedSecretApproval() }
-            if (approvals.size == protectedSecretNames.distinct().size) {
-                ApprovalPolicyEvaluator.evaluate(approvals)
-            } else {
-                null
-            }
-        } else {
-            null
-        }
-        val needsAiReview = initialApprovalEvaluation?.requiresAiReview() == true
-        val initialAvailableSecrets =
-            (requestedSecrets as? RequestedSecretsResult.Available)?.secrets
-        val initialProvidedSecretsJson = initialAvailableSecrets?.let { values ->
-            json.encodeToString(approvalReviewSecretFacts(description, values))
-        }
-        val now = currentTimeMillis()
-        val initialRequest = InboxRequestEntity(
-            id = relayRequestId,
-            parentRequestId = null,
-            deviceIdentityId = pairing.deviceIdentityId,
-            clientId = pairing.clientId,
-            clientNameSnapshot = pairing.name,
-            clientSoftwareJson = encodeClientSoftware(contents.clientSoftware),
-            kind = RequestKind.SECRET_USE.storedName,
-            state = if (needsAiReview) {
-                InboxRequestState.REVIEWING.storedName
-            } else {
-                InboxRequestState.ACTION_REQUIRED.storedName
-            },
-            listed = true,
-            requestJson = requestPayload.toString(),
-            responseJson = null,
-            error = null,
-            receivedAt = now,
-            completedAt = null,
-            exchangeEndedAt = null,
-            responseOutboxFinished = false,
-        )
-        val initialSecretUse = secretUseRequestEntity(
-            requestId = relayRequestId,
-            pairing = pairing,
-            contents = contents,
-            description = description,
-            now = now,
-        ).copy(
-            approvalEvaluationJson = initialApprovalEvaluation?.let { json.encodeToString(it) },
-            // Save the safe display snapshot before a potentially long AI call. It contains
-            // metadata, public SSH material, and values explicitly marked non-sensitive only.
-            providedSecretsJson = initialProvidedSecretsJson,
-        )
-        suspend fun finishReview(
-            reviewResult: AiReview?,
-            requestAlreadyInserted: Boolean,
-        ): ProcessedRelayMessage? {
-            val currentClient = if (needsAiReview) dao.getClient(pairing.clientId) else pairing
-            val clientUnavailable = currentClient == null ||
-                currentClient.deviceIdentityId != pairing.deviceIdentityId ||
-                currentClient.relayClientState == RelayClientState.REVOKED.wireName ||
-                currentClient.desiredRelayClientState == RelayClientState.REVOKED.wireName
-            val currentResolution = if (needsAiReview) {
-                secrets.resolveRequestedSecrets(contents.secrets, environmentSelections)
-            } else {
-                resolution
-            }
-            val currentDescription = currentResolution.description
-            val currentRequestedSecrets = currentResolution.values
-            val currentAutomaticDenial = automaticSecretUseDenial(currentRequestedSecrets)
-            val availableSecrets =
-                (currentRequestedSecrets as? RequestedSecretsResult.Available)?.secrets
-            val providedSecretsJson = availableSecrets?.let { values ->
-                json.encodeToString(approvalReviewSecretFacts(currentDescription, values))
-            }
-            val currentProtectedSecretNames = currentDescription.reviewMetadata
-                .filter { secret ->
-                    secret.type == ENVIRONMENT_SECRET_TYPE &&
-                        secret.environmentVariables.any { it.sensitive }
-                }
-                .map { it.name }
-            val currentApprovalPolicies = if (needsAiReview) {
-                secrets.approvalPoliciesForNames(
-                    currentProtectedSecretNames,
-                    pairing.clientId,
-                    TemporaryAccessOperation.INVOCATION,
-                )
-            } else {
-                approvalPolicies
-            }
-            val currentApprovalEvaluation = if (needsAiReview) {
-                ApprovalPolicyEvaluator.evaluate(
-                    currentApprovalPolicies.map { it.toRequestedSecretApproval() },
-                )
-            } else {
-                initialApprovalEvaluation
-            }
-            val currentCredentials = if (needsAiReview) {
-                currentClient?.let { credentialsForClient(it) }
-            } else {
-                credentials
-            }
-            val aiInputsChanged = needsAiReview && (
-                clientUnavailable ||
-                    currentAutomaticDenial != null ||
-                    !description.hasSameSecretRevisions(currentDescription) ||
-                    currentApprovalEvaluation == null ||
-                    !checkNotNull(initialApprovalEvaluation)
-                        .hasSameSecretPolicies(currentApprovalEvaluation) ||
-                    currentCredentials?.instructions != credentials.instructions ||
-                    currentClient.name != pairing.name ||
-                    currentClient.instructions != pairing.instructions
-            )
-            val aiReview = if (aiInputsChanged) {
-                AiReview(
-                    decision = AiReviewDecision.ASK_USER,
-                    explanation = "The client, secret, instructions, or approval settings changed during AI review.",
-                )
-            } else {
-                reviewResult
-            }
-            val approvalEvaluation = (if (aiInputsChanged) {
-                currentApprovalEvaluation
-            } else {
-                initialApprovalEvaluation
-            })?.copy(aiReview = aiReview)
-            val authorization = currentDescription.authorizationCommitment(
-                policies = currentApprovalPolicies,
-                instructions = if (needsAiReview) {
-                    currentCredentials?.let { current ->
-                        AuthorizationInstructionsCommitment(
-                            deviceIdentityId = current.deviceIdentityId,
-                            deviceInstructions = current.instructions,
-                            clientId = checkNotNull(currentClient).clientId,
-                            clientName = currentClient.name,
-                            clientInstructions = currentClient.instructions,
-                        )
-                    }
-                } else {
-                    null
-                },
-            )
-            val policyDenial = approvalEvaluation
-                ?.takeIf { evaluation ->
-                    evaluation.secrets.any { it.action == ApprovalAction.DENY }
-                }
-                ?.let {
-                    InvocationDenialReason.POLICY_DENIED to
-                        "Approval settings denied access to a requested secret."
-                }
-            val aiDenial = aiReview
-                ?.takeIf { it.decision == AiReviewDecision.DENY }
-                ?.let {
-                    InvocationDenialReason.POLICY_DENIED to
-                        "AI review denied access to a requested secret."
-                }
-            val aiApproved = aiReview?.decision == AiReviewDecision.APPROVE
-            val allProtectedUsesApproved = !aiInputsChanged && approvalEvaluation
-                ?.isFullyApproved(aiReview?.decision) == true
-            val temporaryAccessUsed = approvalEvaluation?.secrets
-                ?.any { it.temporaryAccessExpiresAt != null } == true
-            val aiApprovalUsed = approvalEvaluation?.secrets
-                ?.any { it.action == ApprovalAction.ASK_AI } == true && aiApproved
-            val clientDenial = if (clientUnavailable) {
-                InvocationDenialReason.OTHER to
-                    "The paired client is no longer available."
-            } else {
-                null
-            }
-            val denial = currentAutomaticDenial ?: clientDenial ?: policyDenial ?: aiDenial
-            val responsePlaintext = when {
-                denial != null -> invocationProtocol.deniedResponse(denial.first, denial.second)
-                allProtectedUsesApproved -> {
-                    invocationProtocol.approvedResponse(
-                        checkNotNull(availableSecrets).mapValues { (_, secret) ->
-                            secret.toResponseSecret()
-                        },
-                    )
-                }
-                !currentDescription.containsSensitiveMaterial -> {
-                    invocationProtocol.approvedResponse(
-                        checkNotNull(availableSecrets).mapValues { (_, secret) ->
-                            secret.toResponseSecret()
-                        },
-                    )
-                }
-                else -> null
-            }
-            val response = if (responsePlaintext != null) {
-                runCatching {
-                    pairedRequestProtocol.sealPairedResponse(opened, responsePlaintext)
-                }.getOrNull() ?: return null
-            } else {
-                null
-            }
-            val automaticDecision = when {
-                denial != null -> ApprovalDecision.DENIED
-                allProtectedUsesApproved -> ApprovalDecision.APPROVED
-                !currentDescription.containsSensitiveMaterial -> ApprovalDecision.APPROVED
-                else -> null
-            }
-            val decidedAt = currentTimeMillis()
-            val requestToUpdate = if (requestAlreadyInserted) {
-                dao.getRequestById(relayRequestId) ?: return null
-            } else {
-                initialRequest
-            }
-            val finalRequest = requestToUpdate.copy(
-                state = reviewedRequestState(response != null).storedName,
-                responseJson = response?.toString(),
-            )
-            val currentSecretUse = if (aiInputsChanged) {
-                secretUseRequestEntity(
-                    requestId = relayRequestId,
-                    pairing = pairing,
-                    contents = contents,
-                    description = currentDescription,
-                    now = now,
-                )
-            } else {
-                initialSecretUse
-            }
-            val finalSecretUse = if (automaticDecision == null) {
-                currentSecretUse.copy(
-                    approvalEvaluationJson = approvalEvaluation?.let { json.encodeToString(it) },
-                    providedSecretsJson = providedSecretsJson,
-                )
-            } else {
-                currentSecretUse.copy(
-                    decision = automaticDecision.storedName,
-                    decisionSource = if (aiDenial != null) {
-                        DECISION_SOURCE_AI
-                    } else if (policyDenial != null) {
-                        DECISION_SOURCE_POLICY
-                    } else if (temporaryAccessUsed && aiApprovalUsed) {
-                        DECISION_SOURCE_MIXED
-                    } else if (temporaryAccessUsed) {
-                        DECISION_SOURCE_TEMPORARY_ACCESS
-                    } else if (aiApprovalUsed) {
-                        DECISION_SOURCE_AI
-                    } else if (allProtectedUsesApproved) {
-                        DECISION_SOURCE_POLICY
-                    } else if (!currentDescription.containsSensitiveMaterial) {
-                        DECISION_SOURCE_NON_SENSITIVE
-                    } else {
-                        null
-                    },
-                    approvalEvaluationJson = approvalEvaluation?.let { json.encodeToString(it) },
-                    // This snapshot contains only metadata, public SSH material, and values that the
-                    // user explicitly marked non-sensitive. Keep it for denied requests as well so
-                    // their history still shows the complete, safe-to-display request context.
-                    providedSecretsJson = providedSecretsJson,
-                    completionReason = denial?.first?.wireName,
-                    completionMessage = denial?.second,
-                    decidedAt = decidedAt,
-                )
-            }
-            val aiReviewAudit = aiReview?.let { reviewed ->
-                AuditRecord(
-                    type = AuditEventType.SECRET_USE_AI_REVIEWED,
-                    outcome = reviewed.auditOutcome(),
-                    decisionSource = AuditDecisionSource.AI_REVIEW,
-                    subject = contents.secrets.joinToString(),
-                    detail = reviewed.auditFailureDetail(),
-                    clientId = pairing.clientId,
-                    clientName = pairing.auditClientName(),
-                    relayRequestId = relayRequestId,
-                )
-            }
-            val automaticDecisionAudit = automaticDecision?.let { decision ->
-                AuditRecord(
-                    type = AuditEventType.SECRET_USE_DECIDED,
-                    outcome = when {
-                        decision == ApprovalDecision.APPROVED -> AuditOutcome.APPROVED
-                        denial?.first == InvocationDenialReason.INVALID_REQUEST -> AuditOutcome.REJECTED
-                        aiDenial != null || policyDenial != null -> AuditOutcome.DENIED
-                        else -> AuditOutcome.FAILED
-                    },
-                    decisionSource = when {
-                        decision == ApprovalDecision.APPROVED &&
-                            !currentDescription.containsSensitiveMaterial ->
-                            AuditDecisionSource.NON_SENSITIVE
-                        denial?.first == InvocationDenialReason.INVALID_REQUEST ->
-                            AuditDecisionSource.VALIDATION
-                        aiApprovalUsed && temporaryAccessUsed -> AuditDecisionSource.MIXED
-                        aiApproved || aiDenial != null -> AuditDecisionSource.AI_REVIEW
-                        temporaryAccessUsed -> AuditDecisionSource.TEMPORARY_ACCESS
-                        policyDenial != null || allProtectedUsesApproved ->
-                            AuditDecisionSource.APPROVAL_SETTINGS
-                        else -> null
-                    },
-                    subject = contents.secrets.joinToString(),
-                    detail = if (aiReview != null && (aiApprovalUsed || aiDenial != null)) {
-                        aiReview.auditFailureDetail()
-                    } else {
-                        denial?.second
-                    },
-                    clientId = pairing.clientId,
-                    clientName = pairing.auditClientName(),
-                    relayRequestId = relayRequestId,
-                )
-            }
-            val persistence = if (requestAlreadyInserted) {
-                invocationRequests.finishAiReview(
-                    request = finalRequest,
-                    secretUseRequest = finalSecretUse,
-                    authorization = authorization,
-                    aiReviewAudit = checkNotNull(aiReviewAudit),
-                    automaticDecisionAudit = automaticDecisionAudit,
-                )
-            } else {
-                invocationRequests.receive(
-                    request = finalRequest,
-                    secretUseRequest = finalSecretUse,
-                    client = pairing.copy(
-                        clientSoftwareJson = encodeClientSoftware(contents.clientSoftware),
-                        lastSeenAt = now,
-                    ),
-                    acceptedPsks = acceptedSecrets,
-                    authorization = authorization.takeIf { automaticDecision != null },
-                    automaticDecisionAudit = automaticDecisionAudit,
-                )
-            }
-            when (persistence) {
-                ConditionalRequestUpdate.APPLIED -> Unit
-                ConditionalRequestUpdate.ACTION_REQUIRED -> return ProcessedRelayMessage()
-                ConditionalRequestUpdate.UNAVAILABLE -> return null
-            }
-            return ProcessedRelayMessage(response)
-        }
-
-        if (!needsAiReview) return finishReview(null, requestAlreadyInserted = false)
-
-        withContext(NonCancellable) {
-            val received = invocationRequests.receive(
-                request = initialRequest,
-                secretUseRequest = initialSecretUse,
-                client = pairing.copy(
-                    clientSoftwareJson = encodeClientSoftware(contents.clientSoftware),
-                    lastSeenAt = now,
-                ),
-                acceptedPsks = acceptedSecrets,
-                authorization = null,
-                automaticDecisionAudit = null,
-            )
-            check(received == ConditionalRequestUpdate.APPLIED)
-            if (
-                !launchAiReview(
-                    requestId = relayRequestId,
-                    requestJson = initialRequest.requestJson,
-                    review = {
-                        requestAiReview(
-                            pairing = pairing,
-                            contents = contents,
-                            description = description,
-                            values = checkNotNull(initialAvailableSecrets),
-                            evaluation = initialApprovalEvaluation,
-                            policies = approvalPolicies,
-                            credentials = credentials,
-                        )
-                    },
-                    complete = { finishReview(it, requestAlreadyInserted = true) },
-                )
-            ) {
-                dao.recoverInterruptedAiReview(
-                    relayRequestId,
-                    initialRequest.requestJson,
-                )
-            }
-        }
-        return ProcessedRelayMessage()
-    }
 
     private suspend fun processGitSignRequest(
         pairing: ClientEntity,
@@ -2374,60 +1932,6 @@ internal class RequestRepository(
         return ProcessedRelayMessage()
     }
 
-    private suspend fun automaticSecretUseDenial(
-        result: RequestedSecretsResult,
-    ): Pair<InvocationDenialReason, String>? = when (result) {
-        is RequestedSecretsResult.Available -> null
-        is RequestedSecretsResult.MissingSecrets ->
-            InvocationDenialReason.INVALID_REQUEST to
-                "Missing secrets: ${result.names.joinToString()}"
-        is RequestedSecretsResult.ConflictingVariable ->
-            InvocationDenialReason.INVALID_REQUEST to
-                "Requested secrets provide conflicting values for the environment variable ${result.name}."
-        is RequestedSecretsResult.MissingEnvironmentVariables ->
-            InvocationDenialReason.INVALID_REQUEST to
-                "Secret ${result.secretName} has no ${result.names.joinToString()} variable."
-        is RequestedSecretsResult.EnvironmentOptionsForSshSecret ->
-            InvocationDenialReason.INVALID_REQUEST to
-                "Secret ${result.secretName} is not an environment-variable secret."
-        RequestedSecretsResult.MultipleSshKeys ->
-            InvocationDenialReason.INVALID_REQUEST to
-                "A request can use at most one SSH key."
-        RequestedSecretsResult.UnsupportedSecretType ->
-            InvocationDenialReason.INVALID_REQUEST to
-                "A requested secret type is unsupported."
-        RequestedSecretsResult.SecretUnavailable ->
-            InvocationDenialReason.OTHER to
-                "A requested secret value is unavailable on this device."
-        RequestedSecretsResult.SecretCorrupted ->
-            InvocationDenialReason.OTHER to
-                "A requested secret value could not be authenticated."
-        RequestedSecretsResult.UnsupportedEncryption ->
-            InvocationDenialReason.OTHER to
-                "A requested secret value uses an unsupported encryption format."
-    }
-
-    private suspend fun requestAiReview(
-        pairing: ClientEntity,
-        contents: InvocationRequestMessage,
-        description: RequestedSecretDescription,
-        values: Map<String, SecretValues>,
-        evaluation: ApprovalEvaluation,
-        policies: List<SecretApprovalPolicy>,
-        credentials: RelayDeviceCredentials,
-    ): AiReview {
-        val request = approvalReviewRequest(
-            client = pairing,
-            contents = contents,
-            description = description,
-            values = values,
-            evaluation = evaluation,
-            policies = policies,
-            deviceInstructions = credentials.instructions,
-        )
-        return performAiReview(approvalReviewer, credentials, request)
-    }
-
     private suspend fun requestGitSignAiReview(
         pairing: ClientEntity,
         contents: GitSignRequestMessage,
@@ -2505,45 +2009,6 @@ internal class RequestRepository(
             deviceInstructions = credentials.instructions,
         )
         return performAiReview(approvalReviewer, credentials, request)
-    }
-
-    private suspend fun performAiReview(
-        reviewer: RelayApprovalReviewClient,
-        credentials: RelayDeviceCredentials,
-        request: ApprovalReviewRequest,
-    ): AiReview {
-        val result = try {
-            reviewer.review(credentials.deviceId, credentials.deviceToken, request)
-        } catch (cancelled: kotlinx.coroutines.CancellationException) {
-            throw cancelled
-        } catch (_: Exception) {
-            return AiReview(failure = AiReviewFailure.UNAVAILABLE)
-        }
-        return when (result) {
-            is RelayEndpointResult.Success -> AiReview(
-                decision = when (result.value.decision) {
-                    RelayApprovalReviewDecision.APPROVE -> AiReviewDecision.APPROVE
-                    RelayApprovalReviewDecision.DENY -> AiReviewDecision.DENY
-                    RelayApprovalReviewDecision.ASK_USER -> AiReviewDecision.ASK_USER
-                },
-                explanation = result.value.explanation,
-            )
-            is RelayEndpointResult.Rejected -> AiReview(
-                failure = if (
-                    result.status == 402 || result.code == "SUBSCRIPTION_REQUIRED"
-                ) {
-                    AiReviewFailure.SUBSCRIPTION_REQUIRED
-                } else {
-                    AiReviewFailure.RELAY_REJECTED
-                },
-                httpStatus = result.status,
-                errorCode = result.code,
-            )
-            is RelayEndpointResult.Unavailable ->
-                AiReview(failure = AiReviewFailure.UNAVAILABLE)
-            RelayEndpointResult.InvalidResponse ->
-                AiReview(failure = AiReviewFailure.INVALID_RESPONSE)
-        }
     }
 
     private suspend fun processSecretListRequest(
@@ -2755,45 +2220,6 @@ internal class RequestRepository(
         ) ?: return null
         return ProcessedRelayMessage(response)
     }
-
-    private fun secretUseRequestEntity(
-        requestId: String,
-        pairing: ClientEntity,
-        contents: InvocationRequestMessage,
-        description: RequestedSecretDescription,
-        now: Long,
-    ) = SecretUseRequestEntity(
-        requestId = requestId,
-        hostname = pairing.hostname,
-        platform = pairing.platform,
-        architecture = pairing.architecture,
-        machineId = pairing.machineId,
-        osVersion = pairing.osVersion,
-        invocationTokenHash = invocationTokenHash(contents.invocationToken),
-        containsSensitiveMaterial = description.containsSensitiveMaterial,
-        secretsJson = encodeStringList(contents.secrets),
-        secretDetailsJson = json.encodeToString(description.secrets),
-        providedSecretsJson = null,
-        missingSecretsJson = encodeStringList(description.missingSecrets),
-        reason = contents.reason,
-        command = contents.operation.command,
-        argumentsJson = encodeStringList(contents.operation.arguments),
-        workingDirectory = contents.operation.workingDirectory,
-        executablePath = contents.operation.executablePath,
-        executableHash = contents.operation.executableHash,
-        executableMode = contents.operation.executableMode.wireName,
-        stdinKind = contents.operation.stdin.wireName,
-        stdoutKind = contents.operation.stdout.wireName,
-        stderrKind = contents.operation.stderr.wireName,
-        launcherChainJson = encodeStringList(contents.launcherChain),
-        decision = null,
-        decisionSource = null,
-        approvalEvaluationJson = null,
-        completionResult = null,
-        completionReason = null,
-        completionMessage = null,
-        decidedAt = null,
-    )
 
     private suspend fun processInitialCompletion(
         credentials: RelayDeviceCredentials,
@@ -3022,41 +2448,13 @@ internal class RequestRepository(
     private fun String.toRelayClientState(): RelayClientState =
         checkNotNull(RelayClientState.entries.find { it.wireName == this })
 
-    private fun encodeStringList(values: List<String>): String =
-        json.encodeToString(STRING_LIST_SERIALIZER, values)
-
-    private fun invocationTokenHash(token: ByteArray): ByteArray =
-        MessageDigest.getInstance("SHA-256").digest(token)
-
     private fun encodeClientSoftware(value: ClientSoftware): String = json.encodeToString(value)
 
     private companion object {
         const val IDEMPOTENCY_RETENTION_MILLIS = 25 * 60 * 60 * 1_000L
         const val MAX_AI_REVIEW_GIT_CONTENT_BYTES = 128 * 1024
-        val STRING_LIST_SERIALIZER = ListSerializer(String.serializer())
     }
 
-    private fun RequestedSecretDescription.hasSameSecretRevisions(
-        other: RequestedSecretDescription,
-    ): Boolean = reviewMetadata.associate { it.id to it.revision } ==
-        other.reviewMetadata.associate { it.id to it.revision }
-
-}
-
-private fun AiReview.auditFailureDetail(): String? = when (failure) {
-    AiReviewFailure.SUBSCRIPTION_REQUIRED -> "AI review requires a subscription."
-    AiReviewFailure.RELAY_REJECTED -> "The relay rejected AI review."
-    AiReviewFailure.UNAVAILABLE -> "AI review was unavailable."
-    AiReviewFailure.INVALID_RESPONSE -> "AI review returned an invalid response."
-    null -> null
-}
-
-private fun AiReview.auditOutcome(): AuditOutcome = when {
-    failure != null -> AuditOutcome.FAILED
-    decision == AiReviewDecision.APPROVE -> AuditOutcome.APPROVED
-    decision == AiReviewDecision.DENY -> AuditOutcome.DENIED
-    decision == AiReviewDecision.ASK_USER -> AuditOutcome.DEFERRED
-    else -> AuditOutcome.FAILED
 }
 
 private fun ClientEntity.auditClientName(): String = name

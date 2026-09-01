@@ -2,15 +2,25 @@ package dev.agentknock.storage.request
 
 import dev.agentknock.protocol.InvocationRequestMessage
 import dev.agentknock.protocol.InvocationResponseSecret
+import dev.agentknock.relay.RelayApprovalReviewClient
+import dev.agentknock.relay.RelayApprovalReviewDecision
+import dev.agentknock.relay.RelayEndpointResult
+import dev.agentknock.review.ApprovalReviewRequest
 import dev.agentknock.storage.approval.ApprovalAction
+import dev.agentknock.storage.approval.AiReview
+import dev.agentknock.storage.approval.AiReviewDecision
+import dev.agentknock.storage.approval.AiReviewFailure
 import dev.agentknock.storage.approval.ApprovalEvaluation
 import dev.agentknock.storage.approval.RequestedSecretApproval
 import dev.agentknock.storage.audit.AuditDecisionSource
+import dev.agentknock.storage.audit.AuditOutcome
+import dev.agentknock.storage.device.RelayDeviceCredentials
 import dev.agentknock.storage.secret.EnvironmentVariableSelection
 import dev.agentknock.storage.secret.RequestedSecretDescription
 import dev.agentknock.storage.secret.SecretApprovalMode
 import dev.agentknock.storage.secret.SecretApprovalPolicy
 import dev.agentknock.storage.secret.SecretValues
+import java.security.MessageDigest
 import kotlinx.serialization.decodeFromString
 
 internal const val DECISION_SOURCE_USER = "user"
@@ -21,6 +31,12 @@ internal const val DECISION_SOURCE_TEMPORARY_ACCESS = "temporary_access"
 internal const val DECISION_SOURCE_MIXED = "mixed"
 internal const val DECISION_SOURCE_VALIDATION = "validation"
 internal const val TEMPORARY_ACCESS_DURATION_MILLIS = 4 * 60 * 60 * 1_000L
+
+internal fun reviewedRequestState(responseAvailable: Boolean): InboxRequestState =
+    if (responseAvailable) InboxRequestState.WAITING else InboxRequestState.ACTION_REQUIRED
+
+internal fun invocationTokenHash(token: ByteArray): ByteArray =
+    MessageDigest.getInstance("SHA-256").digest(token)
 
 internal fun InvocationRequestMessage.environmentSelections():
     Map<String, EnvironmentVariableSelection> = secretDelivery.mapNotNull { (secret, delivery) ->
@@ -98,4 +114,59 @@ internal fun String.toAuditDecisionSource(): AuditDecisionSource = when (this) {
     DECISION_SOURCE_MIXED -> AuditDecisionSource.MIXED
     DECISION_SOURCE_VALIDATION -> AuditDecisionSource.VALIDATION
     else -> error("Unknown decision source: $this")
+}
+
+internal suspend fun performAiReview(
+    reviewer: RelayApprovalReviewClient,
+    credentials: RelayDeviceCredentials,
+    request: ApprovalReviewRequest,
+): AiReview {
+    val result = try {
+        reviewer.review(credentials.deviceId, credentials.deviceToken, request)
+    } catch (cancelled: kotlinx.coroutines.CancellationException) {
+        throw cancelled
+    } catch (_: Exception) {
+        return AiReview(failure = AiReviewFailure.UNAVAILABLE)
+    }
+    return when (result) {
+        is RelayEndpointResult.Success -> AiReview(
+            decision = when (result.value.decision) {
+                RelayApprovalReviewDecision.APPROVE -> AiReviewDecision.APPROVE
+                RelayApprovalReviewDecision.DENY -> AiReviewDecision.DENY
+                RelayApprovalReviewDecision.ASK_USER -> AiReviewDecision.ASK_USER
+            },
+            explanation = result.value.explanation,
+        )
+        is RelayEndpointResult.Rejected -> AiReview(
+            failure = if (
+                result.status == 402 || result.code == "SUBSCRIPTION_REQUIRED"
+            ) {
+                AiReviewFailure.SUBSCRIPTION_REQUIRED
+            } else {
+                AiReviewFailure.RELAY_REJECTED
+            },
+            httpStatus = result.status,
+            errorCode = result.code,
+        )
+        is RelayEndpointResult.Unavailable ->
+            AiReview(failure = AiReviewFailure.UNAVAILABLE)
+        RelayEndpointResult.InvalidResponse ->
+            AiReview(failure = AiReviewFailure.INVALID_RESPONSE)
+    }
+}
+
+internal fun AiReview.auditFailureDetail(): String? = when (failure) {
+    AiReviewFailure.SUBSCRIPTION_REQUIRED -> "AI review requires a subscription."
+    AiReviewFailure.RELAY_REJECTED -> "The relay rejected AI review."
+    AiReviewFailure.UNAVAILABLE -> "AI review was unavailable."
+    AiReviewFailure.INVALID_RESPONSE -> "AI review returned an invalid response."
+    null -> null
+}
+
+internal fun AiReview.auditOutcome(): AuditOutcome = when {
+    failure != null -> AuditOutcome.FAILED
+    decision == AiReviewDecision.APPROVE -> AuditOutcome.APPROVED
+    decision == AiReviewDecision.DENY -> AuditOutcome.DENIED
+    decision == AiReviewDecision.ASK_USER -> AuditOutcome.DEFERRED
+    else -> AuditOutcome.FAILED
 }

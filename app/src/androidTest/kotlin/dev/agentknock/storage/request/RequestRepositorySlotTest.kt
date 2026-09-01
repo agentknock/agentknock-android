@@ -191,6 +191,8 @@ class RequestRepositorySlotTest {
         val invocationRequests = InvocationRequests(
             dao = database.requestDao(),
             secrets = secrets,
+            deviceCredentials = credentialSource,
+            approvalReviewer = approvalReviewer,
             audit = audit,
             writeTransaction = RoomWriteTransaction(database),
             currentTimeMillis = { now },

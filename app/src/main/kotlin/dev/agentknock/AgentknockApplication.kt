@@ -173,9 +173,14 @@ internal class ApplicationContainer(application: Application) {
         audit = audit,
         writeTransaction = writeTransaction,
     )
+    private val approvalReviewer = HttpRelayApprovalReviewClient(
+        RelayHttpTransport(approvalReviewHttpClient(httpClient)),
+    )
     private val invocationRequests = InvocationRequests(
         dao = database.requestDao(),
         secrets = secrets,
+        deviceCredentials = deviceIdentity,
+        approvalReviewer = approvalReviewer,
         audit = audit,
         writeTransaction = writeTransaction,
     )
@@ -204,9 +209,7 @@ internal class ApplicationContainer(application: Application) {
         sshAuthenticationRequests = sshAuthenticationRequests,
         pairingRequests = pairingRequests,
         clientRemovalRequests = clientRemovalRequests,
-        approvalReviewer = HttpRelayApprovalReviewClient(
-            RelayHttpTransport(approvalReviewHttpClient(httpClient)),
-        ),
+        approvalReviewer = approvalReviewer,
         relay = WebSocketRelayDeviceClient(httpClient),
         aiReviews = aiReviews,
         scheduleSynchronization = { scheduleRequestSynchronization() },

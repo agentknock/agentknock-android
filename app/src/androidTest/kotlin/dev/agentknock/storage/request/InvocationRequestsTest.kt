@@ -6,6 +6,9 @@ import androidx.test.platform.app.InstrumentationRegistry
 import dev.agentknock.protocol.InvocationDenialReason
 import dev.agentknock.protocol.InvocationProtocol
 import dev.agentknock.protocol.InvocationRequestMessage
+import dev.agentknock.relay.RelayApprovalReviewClient
+import dev.agentknock.relay.RelayApprovalReviewResult
+import dev.agentknock.review.ApprovalReviewRequest
 import dev.agentknock.storage.AgentknockDatabase
 import dev.agentknock.storage.RoomWriteTransaction
 import dev.agentknock.storage.approval.ApprovalAction
@@ -26,6 +29,8 @@ import dev.agentknock.storage.crypto.VaultKeyEntity
 import dev.agentknock.storage.crypto.VaultKeyManager
 import dev.agentknock.storage.crypto.VaultKeyPurpose
 import dev.agentknock.storage.device.DeviceIdentityEntity
+import dev.agentknock.storage.device.RelayDeviceCredentialSource
+import dev.agentknock.storage.device.RelayDeviceCredentialsResult
 import dev.agentknock.storage.secret.CreateEnvironmentVariableResult
 import dev.agentknock.storage.secret.CreateSecretResult
 import dev.agentknock.storage.secret.SaveSecretResult
@@ -197,14 +202,46 @@ class InvocationRequestsTest {
     }
 
     @Test
+    fun approvalTreatsMalformedStoredPlaintextAsPairingUnavailable() = runTest {
+        val requestId = "invocation-malformed-stored-plaintext"
+        val regular = requests(audit)
+        assertEquals(
+            ConditionalRequestUpdate.APPLIED,
+            regular.receive(
+                request = request(requestId),
+                secretUseRequest = secretUse(requestId),
+                client = client(),
+                acceptedPsks = acceptedPsks(requestId),
+                authorization = null,
+                automaticDecisionAudit = null,
+            ),
+        )
+        var sealCalled = false
+
+        assertEquals(
+            InvocationDecisionResult.PairingUnavailable,
+            regular.approve(
+                requestId = requestId,
+                allowTemporaryAccess = false,
+                openRequest = { "not an invocation".encodeToByteArray() },
+                sealResponse = { _, _ ->
+                    sealCalled = true
+                    Json.parseToJsonElement(RESPONSE_JSON)
+                },
+            ),
+        )
+        assertFalse(sealCalled)
+        assertNull(database.requestDao().getRequestById(requestId)?.responseJson)
+        assertNull(database.requestDao().getSecretUseRequest(requestId)?.decision)
+    }
+
+    @Test
     fun temporaryGrantAuditsAndDecisionRollBackTogetherAndCanBeRetried() = runTest {
         val requestId = "invocation-temporary-grant"
         val pending = receivePendingEnvironmentInvocation(requestId)
-        val contents = pending.contents
         val regular = requests(audit)
         val auditCount = audit.observeEvents().first().size
-        val open: suspend (InboxRequestEntity) -> InvocationRequestMessage? =
-            { contents }
+        val open: suspend (InboxRequestEntity) -> ByteArray? = { pending.plaintext }
         val seal: suspend (InboxRequestEntity, ByteArray) -> JsonElement? =
             { _, _ -> Json.parseToJsonElement(RESPONSE_JSON) }
 
@@ -386,7 +423,7 @@ class InvocationRequestsTest {
             regular.approve(
                 requestId = requestId,
                 allowTemporaryAccess = false,
-                openRequest = { pending.contents },
+                openRequest = { pending.plaintext },
                 sealResponse = { _, _ -> Json.parseToJsonElement(RESPONSE_JSON) },
             ),
         )
@@ -598,10 +635,10 @@ class InvocationRequestsTest {
                 notes = "",
             ) is CreateEnvironmentVariableResult.Created,
         )
-        val contents = InvocationProtocol().decodeRequest(
+        val plaintext =
             """{$SOFTWARE_FIELDS,"method":"Invocation","secrets":{"github":{}},"operation":{"type":"exec","command":"deploy","arguments":[],"working_directory":"/tmp","executable_path":"/usr/bin/deploy","executable_mode":"BINARY","stdin":"TERMINAL","stdout":"TERMINAL","stderr":"TERMINAL"},"launcher_chain":[],"invocation_token":"AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA="}"""
-                .encodeToByteArray(),
-        )
+                .encodeToByteArray()
+        val contents = InvocationProtocol().decodeRequest(plaintext)
         val description = secrets.resolveRequestedSecrets(contents.secrets, emptyMap()).description
         val policy = secrets.approvalPoliciesForNames(
             names = listOf("github"),
@@ -636,12 +673,14 @@ class InvocationRequestsTest {
                 automaticDecisionAudit = null,
             ),
         )
-        return PendingEnvironmentInvocation(secretId, contents)
+        return PendingEnvironmentInvocation(secretId, contents, plaintext)
     }
 
     private fun requests(auditSink: AuditSink) = InvocationRequests(
         dao = database.requestDao(),
         secrets = secrets,
+        deviceCredentials = MissingDeviceCredentials,
+        approvalReviewer = UnexpectedApprovalReviewer,
         audit = auditSink,
         writeTransaction = RoomWriteTransaction(database),
         currentTimeMillis = { NOW },
@@ -650,6 +689,7 @@ class InvocationRequestsTest {
     private data class PendingEnvironmentInvocation(
         val secretId: String,
         val contents: InvocationRequestMessage,
+        val plaintext: ByteArray,
     )
 
     private fun authorizationCommitment(clientName: String = "Test client") =
@@ -831,4 +871,21 @@ class InvocationRequestsTest {
                 "\"lib_info\":{\"name\":\"agentknock\",\"version\":\"0.3.0\"}"
         const val SOFTWARE_JSON = "{$SOFTWARE_FIELDS}"
     }
+}
+
+private data object MissingDeviceCredentials : RelayDeviceCredentialSource {
+    override suspend fun activeDeviceCredentials(): RelayDeviceCredentialsResult =
+        RelayDeviceCredentialsResult.Missing
+
+    override suspend fun deviceCredentials(
+        deviceIdentityId: String,
+    ): RelayDeviceCredentialsResult = RelayDeviceCredentialsResult.Missing
+}
+
+private data object UnexpectedApprovalReviewer : RelayApprovalReviewClient {
+    override suspend fun review(
+        deviceId: String,
+        deviceToken: String,
+        request: ApprovalReviewRequest,
+    ): RelayApprovalReviewResult = error("AI review was not expected")
 }
