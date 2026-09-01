@@ -2,7 +2,7 @@
   "formatVersion": 1,
   "database": {
     "version": 1,
-    "identityHash": "9ab4193e6cc14abc70775d981e704d3f",
+    "identityHash": "653d422a548f187dda08e97e7e29b0df",
     "entities": [
       {
         "tableName": "vault_keys",
@@ -799,7 +799,7 @@
       },
       {
         "tableName": "pairing_attempts",
-        "createSql": "CREATE TABLE IF NOT EXISTS `${TABLE_NAME}` (`request_id` TEXT NOT NULL, `pairing_address` TEXT NOT NULL, `client_id` TEXT NOT NULL, `friendly_name` TEXT, `device_random` BLOB NOT NULL, `desired_relay_client_state` TEXT, `relay_client_state` TEXT NOT NULL, `state` TEXT NOT NULL, `sas_option_0` INTEGER, `sas_option_1` INTEGER, `sas_option_2` INTEGER, `correct_sas_index` INTEGER, `platform` TEXT, `architecture` TEXT, `hostname` TEXT, `machine_id` TEXT, `os_version` TEXT, `decided_at` INTEGER, `pending_psk_encryption_format` INTEGER, `pending_psk_encryption_key_id` TEXT, `pending_psk_nonce` BLOB, `pending_psk_ciphertext` BLOB, PRIMARY KEY(`request_id`), FOREIGN KEY(`request_id`) REFERENCES `inbox_requests`(`id`) ON UPDATE NO ACTION ON DELETE CASCADE , FOREIGN KEY(`pending_psk_encryption_key_id`) REFERENCES `vault_keys`(`id`) ON UPDATE NO ACTION ON DELETE RESTRICT )",
+        "createSql": "CREATE TABLE IF NOT EXISTS `${TABLE_NAME}` (`request_id` TEXT NOT NULL, `pairing_address` TEXT NOT NULL, `friendly_name` TEXT, `device_random` BLOB NOT NULL, `desired_relay_client_state` TEXT, `relay_client_state` TEXT NOT NULL, `state` TEXT NOT NULL, `sas_option_0` INTEGER, `sas_option_1` INTEGER, `sas_option_2` INTEGER, `correct_sas_index` INTEGER, `platform` TEXT, `architecture` TEXT, `hostname` TEXT, `machine_id` TEXT, `os_version` TEXT, `decided_at` INTEGER, `pending_psk_encryption_format` INTEGER, `pending_psk_encryption_key_id` TEXT, `pending_psk_nonce` BLOB, `pending_psk_ciphertext` BLOB, PRIMARY KEY(`request_id`), FOREIGN KEY(`request_id`) REFERENCES `inbox_requests`(`id`) ON UPDATE NO ACTION ON DELETE CASCADE , FOREIGN KEY(`pending_psk_encryption_key_id`) REFERENCES `vault_keys`(`id`) ON UPDATE NO ACTION ON DELETE RESTRICT )",
         "fields": [
           {
             "fieldPath": "requestId",
@@ -810,12 +810,6 @@
           {
             "fieldPath": "pairingAddress",
             "columnName": "pairing_address",
-            "affinity": "TEXT",
-            "notNull": true
-          },
-          {
-            "fieldPath": "clientId",
-            "columnName": "client_id",
             "affinity": "TEXT",
             "notNull": true
           },
@@ -925,15 +919,6 @@
           ]
         },
         "indices": [
-          {
-            "name": "index_pairing_attempts_client_id",
-            "unique": true,
-            "columnNames": [
-              "client_id"
-            ],
-            "orders": [],
-            "createSql": "CREATE UNIQUE INDEX IF NOT EXISTS `index_pairing_attempts_client_id` ON `${TABLE_NAME}` (`client_id`)"
-          },
           {
             "name": "index_pairing_attempts_pending_psk_encryption_key_id",
             "unique": false,
@@ -2002,7 +1987,7 @@
     ],
     "setupQueries": [
       "CREATE TABLE IF NOT EXISTS room_master_table (id INTEGER PRIMARY KEY,identity_hash TEXT)",
-      "INSERT OR REPLACE INTO room_master_table (id,identity_hash) VALUES(42, '9ab4193e6cc14abc70775d981e704d3f')"
+      "INSERT OR REPLACE INTO room_master_table (id,identity_hash) VALUES(42, '653d422a548f187dda08e97e7e29b0df')"
     ]
   }
 }

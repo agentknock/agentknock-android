@@ -219,7 +219,7 @@ internal class RequestMaterialStore(
         clientPsk: ByteArray,
     ): PairingAttemptEntity {
         require(attempt.requestId == request.id)
-        require(attempt.clientId == request.clientId)
+        require(attempt.requestId == request.clientId)
         require(clientPsk.size == CLIENT_PSK_BYTES)
         val key = keyManager.activeKey(VaultKeyPurpose.DEVICE_STATE)
         val encrypted = withContext(cryptographyDispatcher) {
@@ -237,7 +237,7 @@ internal class RequestMaterialStore(
         request: InboxRequestEntity,
     ): ByteArray? {
         require(attempt.requestId == request.id)
-        require(attempt.clientId == request.clientId)
+        require(attempt.requestId == request.clientId)
         val pendingPsk = attempt.pendingPsk ?: return null
         val result = withContext(cryptographyDispatcher) {
             encryption.decrypt(
@@ -357,7 +357,7 @@ internal class RequestMaterialStore(
         recordId = attempt.requestId,
         fieldName = "pending_client_psk",
         bindings = listOf(
-            EncryptionBinding("client_id", attempt.clientId),
+            EncryptionBinding("client_id", request.clientId),
             EncryptionBinding("device_identity_id", request.deviceIdentityId),
         ),
     )

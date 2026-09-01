@@ -5,6 +5,7 @@ import androidx.room3.Dao
 import androidx.room3.Embedded
 import androidx.room3.Entity
 import androidx.room3.ForeignKey
+import androidx.room3.Ignore
 import androidx.room3.Index
 import androidx.room3.Insert
 import androidx.room3.PrimaryKey
@@ -99,7 +100,6 @@ internal data class InboxRequestEntity(
         ),
     ],
     indices = [
-        Index(value = ["client_id"], unique = true),
         Index(value = ["pending_psk_encryption_key_id"]),
     ],
 )
@@ -109,8 +109,6 @@ internal data class PairingAttemptEntity(
     val requestId: String,
     @ColumnInfo(name = "pairing_address")
     val pairingAddress: String,
-    @ColumnInfo(name = "client_id")
-    val clientId: String,
     @ColumnInfo(name = "friendly_name")
     val friendlyName: String?,
     @ColumnInfo(name = "device_random")
@@ -143,7 +141,11 @@ internal data class PairingAttemptEntity(
     val pendingPsk: EncryptedValue?,
     @ColumnInfo(name = "decided_at")
     val decidedAt: Long?,
-)
+) {
+    @get:Ignore
+    val clientId: String
+        get() = requestId
+}
 
 private fun PairingAttemptEntity.hasCompletePendingPsk(): Boolean =
     pendingPsk != null
@@ -705,15 +707,6 @@ internal interface RequestDao {
             "AND device_identities.role = 'active'",
     )
     suspend fun getPairingAttempt(requestId: String): PairingAttemptEntity?
-
-    @Query(
-        "SELECT pairing_attempts.* FROM pairing_attempts " +
-            "JOIN inbox_requests ON inbox_requests.id = pairing_attempts.request_id " +
-            "JOIN device_identities ON device_identities.id = inbox_requests.device_identity_id " +
-            "WHERE pairing_attempts.client_id = :clientId " +
-            "AND device_identities.role = 'active'",
-    )
-    suspend fun getPairingAttemptByClientId(clientId: String): PairingAttemptEntity?
 
     @Query(
         "SELECT clients.* FROM clients " +

@@ -37,7 +37,6 @@ internal class PairingRequests(
     suspend fun start(
         credentials: RelayDeviceCredentials,
         requestId: String,
-        clientId: String,
         requestPayload: JsonElement,
     ): JsonElement? {
         if (!pairingProtocol.validateInitialRequest(requestPayload)) return null
@@ -51,7 +50,7 @@ internal class PairingRequests(
         val now = currentTimeMillis()
         val persisted = writeTransaction.execute {
             if (dao.getRequestById(requestId) != null) return@execute false
-            if (dao.getClientById(clientId) != null) return@execute false
+            if (dao.getClientById(requestId) != null) return@execute false
             if (dao.getPairingAttempts().any { it.state.toPairingState().blocksAdmission }) {
                 return@execute false
             }
@@ -61,8 +60,8 @@ internal class PairingRequests(
                     id = requestId,
                     parentRequestId = null,
                     deviceIdentityId = credentials.deviceIdentityId,
-                    clientId = clientId,
-                    clientNameSnapshot = clientId,
+                    clientId = requestId,
+                    clientNameSnapshot = requestId,
                     clientSoftwareJson = null,
                     kind = RequestKind.PAIRING.storedName,
                     state = InboxRequestState.WAITING.storedName,
@@ -78,7 +77,6 @@ internal class PairingRequests(
                 attempt = PairingAttemptEntity(
                     requestId = requestId,
                     pairingAddress = credentials.address,
-                    clientId = clientId,
                     friendlyName = null,
                     deviceRandom = deviceRandom,
                     desiredRelayClientState = null,
@@ -102,7 +100,7 @@ internal class PairingRequests(
                     AuditRecord(
                         type = AuditEventType.PAIRING_REQUESTED,
                         outcome = AuditOutcome.RECEIVED,
-                        clientId = clientId,
+                        clientId = requestId,
                         relayRequestId = requestId,
                     ),
                 ),
@@ -299,7 +297,7 @@ internal class PairingRequests(
     /** Applies relay state to the still-pending pairing and reports whether a retry is needed. */
     suspend fun applyRelayClientState(clientId: String, state: RelayClientState): Boolean =
         writeTransaction.execute {
-            val attempt = dao.getPairingAttemptByClientId(clientId) ?: return@execute false
+            val attempt = dao.getPairingAttempt(clientId) ?: return@execute false
             val updated = attempt.copy(
                 relayClientState = state.wireName,
                 desiredRelayClientState = if (state == RelayClientState.REVOKED) {

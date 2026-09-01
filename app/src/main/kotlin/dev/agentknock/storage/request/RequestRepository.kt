@@ -990,7 +990,7 @@ internal class RequestRepository(
         if (client != null) {
             return processActiveClientRequest(credentials, message, requestPayload, client, now)
         }
-        val attempt = dao.getPairingAttemptByClientId(message.clientId) ?: return null
+        val attempt = dao.getPairingAttempt(message.clientId) ?: return null
         val rootRequest = dao.getRequestById(attempt.requestId) ?: return null
         if (rootRequest.deviceIdentityId != credentials.deviceIdentityId) return null
         if (!attempt.state.toPairingState().acceptsFinishRequest) return null
@@ -2215,7 +2215,6 @@ internal class RequestRepository(
         val response = pairingRequests.start(
             credentials = credentials,
             requestId = message.requestId,
-            clientId = message.clientId,
             requestPayload = requestPayload,
         ) ?: return null
         return ProcessedRelayMessage(response)

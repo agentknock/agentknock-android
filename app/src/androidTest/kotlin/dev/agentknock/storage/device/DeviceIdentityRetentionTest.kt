@@ -173,7 +173,7 @@ class DeviceIdentityRetentionTest {
         )
         database.auditDao().insertEvents(listOf(auditEvent()))
 
-        val pairingId = "pending-pairing"
+        val pairingId = "pending-client"
         requestDao.insertPairingRequest(
             request(original.id).copy(
                 id = pairingId,
@@ -187,7 +187,6 @@ class DeviceIdentityRetentionTest {
             PairingAttemptEntity(
                 requestId = pairingId,
                 pairingAddress = original.address,
-                clientId = "pending-client",
                 friendlyName = "Pending client",
                 deviceRandom = ByteArray(32),
                 desiredRelayClientState = "active",

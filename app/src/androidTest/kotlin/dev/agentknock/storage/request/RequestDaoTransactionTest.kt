@@ -308,7 +308,7 @@ class RequestDaoTransactionTest {
             )
         }
 
-        val pairingId = "old-pending-pairing"
+        val pairingId = "pending-pairing-client"
         dao.insertPairingRequest(
             rootRequest().copy(
                 id = pairingId,
@@ -319,12 +319,11 @@ class RequestDaoTransactionTest {
             ),
             pendingAttempt().copy(
                 requestId = pairingId,
-                clientId = "pending-pairing-client",
                 state = "exchange_pending",
                 decidedAt = null,
             ),
         )
-        val resolvedPairingId = "resolved-pairing"
+        val resolvedPairingId = "resolved-pairing-client"
         dao.insertPairingRequest(
             rootRequest().copy(
                 id = resolvedPairingId,
@@ -336,7 +335,6 @@ class RequestDaoTransactionTest {
             ),
             completedAttempt(pendingAttempt()).copy(
                 requestId = resolvedPairingId,
-                clientId = "resolved-pairing-client",
             ),
         )
 
@@ -1031,7 +1029,6 @@ class RequestDaoTransactionTest {
     private fun pendingAttempt(withPendingPsk: Boolean = false) = PairingAttemptEntity(
         requestId = ROOT_REQUEST_ID,
         pairingAddress = "write-leader-hungry",
-        clientId = CLIENT_ID,
         friendlyName = "Test client",
         deviceRandom = ByteArray(32),
         desiredRelayClientState = null,
@@ -1143,7 +1140,7 @@ class RequestDaoTransactionTest {
         const val PREVIOUS_SLOT = "previous"
         const val DEVICE_ID = "01K2ENXDTW1P3XAR4J7V7C9D0H"
         const val CLIENT_ID = "01K2EP16NWNAGJYF8J1Q2V6P3X"
-        const val ROOT_REQUEST_ID = "01ARZ3NDEKTSV4RRFFQ69G5FAV"
+        const val ROOT_REQUEST_ID = CLIENT_ID
         const val FINISH_REQUEST_ID = "01ARZ3NDEKTSV4RRFFQ69G5FAW"
         const val REMOVE_REQUEST_ID = "01ARZ3NDEKTSV4RRFFQ69G5FAY"
         const val UPLOAD_REQUEST_ID = "01ARZ3NDEKTSV4RRFFQ69G5FAZ"
