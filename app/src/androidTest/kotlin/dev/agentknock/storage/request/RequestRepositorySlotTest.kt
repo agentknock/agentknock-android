@@ -201,6 +201,8 @@ class RequestRepositorySlotTest {
         val gitSigningRequests = GitSigningRequests(
             dao = database.requestDao(),
             secrets = secrets,
+            deviceCredentials = credentialSource,
+            approvalReviewer = approvalReviewer,
             audit = audit,
             writeTransaction = RoomWriteTransaction(database),
             currentTimeMillis = { now },

@@ -187,6 +187,8 @@ internal class ApplicationContainer(application: Application) {
     private val gitSigningRequests = GitSigningRequests(
         dao = database.requestDao(),
         secrets = secrets,
+        deviceCredentials = deviceIdentity,
+        approvalReviewer = approvalReviewer,
         audit = audit,
         writeTransaction = writeTransaction,
     )

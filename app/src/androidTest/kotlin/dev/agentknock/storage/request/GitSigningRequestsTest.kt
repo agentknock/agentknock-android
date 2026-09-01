@@ -3,10 +3,21 @@ package dev.agentknock.storage.request
 import androidx.room3.Room
 import androidx.test.ext.junit.runners.AndroidJUnit4
 import androidx.test.platform.app.InstrumentationRegistry
+import dev.agentknock.relay.RelayApprovalReview
+import dev.agentknock.relay.RelayApprovalReviewClient
+import dev.agentknock.relay.RelayApprovalReviewDecision
+import dev.agentknock.relay.RelayApprovalReviewResult
+import dev.agentknock.relay.RelayEndpointResult
+import dev.agentknock.review.ApprovalReviewRequest
+import dev.agentknock.review.ApprovalReviewOperation
+import dev.agentknock.review.ApprovalReviewSecretFacts
+import dev.agentknock.review.ApprovalReviewSshSecretFacts
 import dev.agentknock.storage.AgentknockDatabase
 import dev.agentknock.storage.RoomWriteTransaction
 import dev.agentknock.storage.approval.ApprovalAction
 import dev.agentknock.storage.approval.ApprovalEvaluation
+import dev.agentknock.storage.approval.AiReview
+import dev.agentknock.storage.approval.AiReviewDecision
 import dev.agentknock.storage.approval.SecretApprovalEvaluation
 import dev.agentknock.storage.audit.AuditDecisionSource
 import dev.agentknock.storage.audit.AuditEventType
@@ -23,6 +34,9 @@ import dev.agentknock.storage.crypto.VaultKeyEntity
 import dev.agentknock.storage.crypto.VaultKeyManager
 import dev.agentknock.storage.crypto.VaultKeyPurpose
 import dev.agentknock.storage.device.DeviceIdentityEntity
+import dev.agentknock.storage.device.RelayDeviceCredentialSource
+import dev.agentknock.storage.device.RelayDeviceCredentials
+import dev.agentknock.storage.device.RelayDeviceCredentialsResult
 import dev.agentknock.storage.secret.CreateSecretResult
 import dev.agentknock.storage.secret.SaveSecretResult
 import dev.agentknock.storage.secret.SecretApprovalMode
@@ -30,6 +44,7 @@ import dev.agentknock.storage.secret.SecretEntity
 import dev.agentknock.storage.secret.SecretRepository
 import dev.agentknock.storage.secret.SshKeyAlgorithm
 import dev.agentknock.storage.secret.TemporaryAccessOperation
+import java.util.Base64
 import javax.crypto.SecretKey
 import javax.crypto.spec.SecretKeySpec
 import kotlinx.coroutines.Dispatchers
@@ -197,6 +212,404 @@ class GitSigningRequestsTest {
         assertEquals(
             AuditDecisionSource.VALIDATION,
             events.first { it.type == AuditEventType.GIT_SIGN_DECIDED }.decisionSource,
+        )
+    }
+
+    @Test
+    fun incomingRequestValidatesAndPersistsAnActionableSigningRequest() = runTest {
+        val key = secrets.generateSshKey(SshKeyAlgorithm.ED25519, "test@example")
+        assertTrue(
+            secrets.createSshSecret(SECRET_NAME, "Signing key", key) is
+                CreateSecretResult.Created,
+        )
+        val description = secrets.describeRequestedSecrets(listOf(SECRET_NAME))
+        val token = ByteArray(32) { it.toByte() }
+        insertParent(
+            secretDetailsJson = Json.encodeToString(description.secrets),
+            invocationTokenHash = invocationTokenHash(token),
+        )
+        val requestId = "git-valid-intake"
+
+        val processed = requests(audit).processIncoming(
+            pairing = client(),
+            relayRequestId = requestId,
+            requestPayload = Json.parseToJsonElement("""{"envelope":"request"}"""),
+            plaintext = gitSignPlaintext(token),
+            acceptedSecrets = acceptedPsks(requestId),
+            credentials = credentials(),
+            sealResponse = { error("An actionable request must not be sealed") },
+            launchAiReview = { _, _, _, _ ->
+                error("Temporary approval mode must not launch AI review")
+            },
+        )
+
+        assertEquals(ProcessedRelayMessage(), processed)
+        val request = checkNotNull(database.requestDao().getRequestById(requestId))
+        val signing = checkNotNull(database.requestDao().getGitSignRequest(requestId))
+        assertEquals(InboxRequestState.ACTION_REQUIRED.storedName, request.state)
+        assertEquals(PARENT_ID, request.parentRequestId)
+        assertEquals("git-signing", signing.secretName)
+        assertEquals("commit to sign", signing.message.decodeToString())
+        assertNotNull(signing.approvalEvaluationJson)
+        assertNotNull(database.requestDao().getRequestPsk(requestId))
+        assertEquals(
+            AuditEventType.GIT_SIGN_RECEIVED,
+            audit.observeEvents().first()
+                .single { it.relayRequestId == requestId }
+                .type,
+        )
+    }
+
+    @Test
+    fun incomingRequestRejectsACompletedParentInvocation() = runTest {
+        val token = ByteArray(32) { it.toByte() }
+        insertParent(invocationTokenHash = invocationTokenHash(token))
+        val parent = checkNotNull(database.requestDao().getRequestById(PARENT_ID))
+        database.requestDao().updateRequest(
+            parent.copy(
+                state = InboxRequestState.COMPLETED.storedName,
+                completedAt = NOW,
+                exchangeEndedAt = NOW,
+                responseOutboxFinished = true,
+            ),
+        )
+        val requestId = "git-completed-parent"
+
+        val processed = requests(audit).processIncoming(
+            pairing = client(),
+            relayRequestId = requestId,
+            requestPayload = Json.parseToJsonElement("{}"),
+            plaintext = gitSignPlaintext(token),
+            acceptedSecrets = acceptedPsks(requestId),
+            credentials = credentials(),
+            sealResponse = { error("A rejected request must not be sealed") },
+            launchAiReview = { _, _, _, _ -> error("A rejected request must not launch review") },
+        )
+
+        assertNull(processed)
+        assertNull(database.requestDao().getRequestById(requestId))
+        assertNull(database.requestDao().getGitSignRequest(requestId))
+    }
+
+    @Test
+    fun incomingRequestRejectsMalformedParentSecretMetadataCleanly() = runTest {
+        val token = ByteArray(32) { it.toByte() }
+        insertParent(
+            secretDetailsJson = "not-json",
+            invocationTokenHash = invocationTokenHash(token),
+        )
+        val requestId = "git-malformed-parent"
+
+        val processed = requests(audit).processIncoming(
+            pairing = client(),
+            relayRequestId = requestId,
+            requestPayload = Json.parseToJsonElement("{}"),
+            plaintext = gitSignPlaintext(token),
+            acceptedSecrets = acceptedPsks(requestId),
+            credentials = credentials(),
+            sealResponse = { error("A rejected request must not be sealed") },
+            launchAiReview = { _, _, _, _ -> error("A rejected request must not launch review") },
+        )
+
+        assertNull(processed)
+        assertNull(database.requestDao().getRequestById(requestId))
+    }
+
+    @Test
+    fun incomingRequestRejectsAnInvocationTokenMismatch() = runTest {
+        val expectedToken = ByteArray(32) { it.toByte() }
+        val suppliedToken = expectedToken.copyOf().also { it[0] = (it[0] + 1).toByte() }
+        insertParent(invocationTokenHash = invocationTokenHash(expectedToken))
+        val requestId = "git-token-mismatch"
+        var sealed = false
+        var launched = false
+
+        val processed = requests(audit).processIncoming(
+            pairing = client(),
+            relayRequestId = requestId,
+            requestPayload = Json.parseToJsonElement("{}"),
+            plaintext = gitSignPlaintext(suppliedToken),
+            acceptedSecrets = acceptedPsks(requestId),
+            credentials = credentials(),
+            sealResponse = {
+                sealed = true
+                Json.parseToJsonElement(RESPONSE_JSON)
+            },
+            launchAiReview = { _, _, _, _ ->
+                launched = true
+                true
+            },
+        )
+
+        assertNull(processed)
+        assertFalse(sealed)
+        assertFalse(launched)
+        assertNull(database.requestDao().getRequestById(requestId))
+        assertNull(database.requestDao().getGitSignRequest(requestId))
+        assertNull(database.requestDao().getRequestPsk(requestId))
+    }
+
+    @Test
+    fun automaticSigningDoesNotPersistAfterItsParentEndsWhileSealing() = runTest {
+        val metadata = createSigningSecret(SecretApprovalMode.APPROVE)
+        val token = ByteArray(32) { it.toByte() }
+        insertParent(
+            secretDetailsJson = Json.encodeToString(metadata),
+            invocationTokenHash = invocationTokenHash(token),
+        )
+        val requestId = "git-parent-ended-during-seal"
+        var sealed = false
+
+        val processed = requests(audit).processIncoming(
+            pairing = client(),
+            relayRequestId = requestId,
+            requestPayload = Json.parseToJsonElement("{}"),
+            plaintext = gitSignPlaintext(token),
+            acceptedSecrets = acceptedPsks(requestId),
+            credentials = credentials(),
+            sealResponse = {
+                sealed = true
+                endParentInvocation()
+                Json.parseToJsonElement(RESPONSE_JSON)
+            },
+            launchAiReview = { _, _, _, _ ->
+                error("Approve-always mode must not launch AI review")
+            },
+        )
+
+        assertNull(processed)
+        assertTrue(sealed)
+        assertNull(database.requestDao().getRequestById(requestId))
+        assertNull(database.requestDao().getGitSignRequest(requestId))
+        assertNull(database.requestDao().getRequestPsk(requestId))
+        assertFalse(
+            audit.observeEvents().first().any { it.relayRequestId == requestId },
+        )
+    }
+
+    @Test
+    fun askAiIntakeMapsEveryRelayVerdictToItsDurableOutcome() = runTest {
+        val metadata = createSigningSecret(SecretApprovalMode.ASK_AI)
+        val token = ByteArray(32) { it.toByte() }
+        insertParent(
+            secretDetailsJson = Json.encodeToString(metadata),
+            invocationTokenHash = invocationTokenHash(token),
+            providedSecretsJson = sshSecretFactsJson(),
+        )
+        val reviewer = RecordingApprovalReviewer()
+        val target = requests(
+            auditSink = audit,
+            credentialSource = StaticCredentialSource(credentials()),
+            reviewer = reviewer,
+        )
+        val outcomes = listOf(
+            Triple(
+                RelayApprovalReviewDecision.ASK_USER,
+                InboxRequestState.ACTION_REQUIRED,
+                null,
+            ),
+            Triple(
+                RelayApprovalReviewDecision.DENY,
+                InboxRequestState.WAITING,
+                ApprovalDecision.DENIED,
+            ),
+            Triple(
+                RelayApprovalReviewDecision.APPROVE,
+                InboxRequestState.WAITING,
+                ApprovalDecision.APPROVED,
+            ),
+        )
+
+        outcomes.forEachIndexed { index, (relayDecision, expectedState, expectedDecision) ->
+            val requestId = "git-ai-verdict-$index"
+            reviewer.result = reviewed(relayDecision, "Review result $index")
+            var pendingReview: PendingAiReview? = null
+            val processed = target.processIncoming(
+                pairing = client(),
+                relayRequestId = requestId,
+                requestPayload = Json.parseToJsonElement("{}"),
+                plaintext = gitSignPlaintext(token),
+                acceptedSecrets = acceptedPsks(requestId),
+                credentials = credentials(),
+                sealResponse = { Json.parseToJsonElement(RESPONSE_JSON) },
+                launchAiReview = { launchedId, _, review, complete ->
+                    assertEquals(requestId, launchedId)
+                    pendingReview = PendingAiReview(review, complete)
+                    true
+                },
+            )
+
+            assertEquals(ProcessedRelayMessage(), processed)
+            assertEquals(
+                InboxRequestState.REVIEWING.storedName,
+                database.requestDao().getRequestById(requestId)?.state,
+            )
+            val pending = checkNotNull(pendingReview)
+            val mappedReview = pending.review()
+            assertEquals(relayDecision.toAiDecision(), mappedReview.decision)
+            pending.complete(mappedReview)
+
+            val storedRequest = checkNotNull(database.requestDao().getRequestById(requestId))
+            val storedGitSign = checkNotNull(database.requestDao().getGitSignRequest(requestId))
+            val evaluation = Json.decodeFromString<ApprovalEvaluation>(
+                checkNotNull(storedGitSign.approvalEvaluationJson),
+            )
+            assertEquals(expectedState.storedName, storedRequest.state)
+            assertEquals(expectedDecision?.storedName, storedGitSign.decision)
+            assertEquals(relayDecision.toAiDecision(), evaluation.aiReview?.decision)
+            assertEquals(
+                expectedDecision != null,
+                storedRequest.responseJson != null,
+            )
+        }
+
+        assertEquals(3, reviewer.requests.size)
+        reviewer.requests.forEach { call ->
+            assertEquals(DEVICE_ID, call.deviceId)
+            assertEquals("device-token", call.deviceToken)
+            assertEquals(ApprovalReviewOperation.GIT_SIGN, call.request.facts.operation)
+            assertEquals(SECRET_NAME, call.request.facts.secret)
+            assertEquals(SECRET_NAME, call.request.instructions.secrets.keys.single())
+        }
+    }
+
+    @Test
+    fun aiApprovalRevalidatesTheParentBeforePersisting() = runTest {
+        val metadata = createSigningSecret(SecretApprovalMode.ASK_AI)
+        val token = ByteArray(32) { it.toByte() }
+        insertParent(
+            secretDetailsJson = Json.encodeToString(metadata),
+            invocationTokenHash = invocationTokenHash(token),
+            providedSecretsJson = sshSecretFactsJson(),
+        )
+        val reviewer = RecordingApprovalReviewer().apply {
+            result = reviewed(
+                RelayApprovalReviewDecision.APPROVE,
+                "The original invocation permits signing.",
+            )
+        }
+        val target = requests(
+            auditSink = audit,
+            credentialSource = StaticCredentialSource(credentials()),
+            reviewer = reviewer,
+        )
+        val requestId = "git-ai-ended-parent"
+        var pendingReview: PendingAiReview? = null
+
+        assertEquals(
+            ProcessedRelayMessage(),
+            target.processIncoming(
+                pairing = client(),
+                relayRequestId = requestId,
+                requestPayload = Json.parseToJsonElement("{}"),
+                plaintext = gitSignPlaintext(token),
+                acceptedSecrets = acceptedPsks(requestId),
+                credentials = credentials(),
+                sealResponse = { Json.parseToJsonElement(RESPONSE_JSON) },
+                launchAiReview = { _, _, review, complete ->
+                    pendingReview = PendingAiReview(review, complete)
+                    true
+                },
+            ),
+        )
+        val pending = checkNotNull(pendingReview)
+        val approved = pending.review()
+        assertEquals(AiReviewDecision.APPROVE, approved.decision)
+        endParentInvocation()
+        pending.complete(approved)
+
+        val storedRequest = checkNotNull(database.requestDao().getRequestById(requestId))
+        val storedGitSign = checkNotNull(database.requestDao().getGitSignRequest(requestId))
+        val evaluation = Json.decodeFromString<ApprovalEvaluation>(
+            checkNotNull(storedGitSign.approvalEvaluationJson),
+        )
+        assertEquals(InboxRequestState.WAITING.storedName, storedRequest.state)
+        assertNotNull(storedRequest.responseJson)
+        assertEquals(ApprovalDecision.DENIED.storedName, storedGitSign.decision)
+        assertEquals("OTHER", storedGitSign.completionReason)
+        assertEquals(
+            "The parent invocation is no longer active.",
+            storedGitSign.completionMessage,
+        )
+        assertEquals(AiReviewDecision.ASK_USER, evaluation.aiReview?.decision)
+        assertTrue(
+            evaluation.aiReview?.explanation?.contains("changed during AI review") == true,
+        )
+        assertFalse(
+            audit.observeEvents().first().any {
+                it.relayRequestId == requestId &&
+                    it.type == AuditEventType.GIT_SIGN_DECIDED &&
+                    it.outcome == AuditOutcome.APPROVED
+            },
+        )
+    }
+
+    @Test
+    fun manualApprovalRejectsMalformedStoredParentMetadataBeforeSealing() = runTest {
+        createSigningSecret(SecretApprovalMode.ASK_ME)
+        insertParent(secretDetailsJson = "not-json")
+        val requestId = "git-malformed-parent-manual"
+        val evaluation = currentGitSignEvaluation()
+        val target = requests(audit)
+        receivePending(
+            target,
+            requestId,
+            evaluationJson = Json.encodeToString(evaluation),
+        )
+        var sealed = false
+
+        assertEquals(
+            GitSignDecisionResult.InvocationUnavailable,
+            target.approve(
+                requestId,
+                allowTemporaryAccess = false,
+                sealResponse = { _, _ ->
+                    sealed = true
+                    Json.parseToJsonElement(RESPONSE_JSON)
+                },
+            ),
+        )
+        assertFalse(sealed)
+        assertEquals(
+            InboxRequestState.ACTION_REQUIRED.storedName,
+            database.requestDao().getRequestById(requestId)?.state,
+        )
+        assertNull(database.requestDao().getRequestById(requestId)?.responseJson)
+        assertNull(database.requestDao().getGitSignRequest(requestId)?.decision)
+    }
+
+    @Test
+    fun completedParentBlocksManualApprovalButStillAllowsDenial() = runTest {
+        insertParent()
+        val requestId = "git-stale-parent-decision"
+        val target = requests(audit)
+        receivePending(target, requestId)
+        val parent = checkNotNull(database.requestDao().getRequestById(PARENT_ID))
+        database.requestDao().updateRequest(
+            parent.copy(
+                state = InboxRequestState.COMPLETED.storedName,
+                completedAt = NOW,
+                exchangeEndedAt = NOW,
+                responseOutboxFinished = true,
+            ),
+        )
+        var sealed = false
+        val seal: suspend (InboxRequestEntity, ByteArray) -> JsonElement? = { _, _ ->
+            sealed = true
+            Json.parseToJsonElement(RESPONSE_JSON)
+        }
+
+        assertEquals(
+            GitSignDecisionResult.InvocationUnavailable,
+            target.approve(requestId, allowTemporaryAccess = true, sealResponse = seal),
+        )
+        assertFalse(sealed)
+        assertNull(database.requestDao().getGitSignRequest(requestId)?.decision)
+        assertEquals(GitSignDecisionResult.Decided, target.deny(requestId, seal))
+        assertTrue(sealed)
+        assertEquals(
+            ApprovalDecision.DENIED.storedName,
+            database.requestDao().getGitSignRequest(requestId)?.decision,
         )
     }
 
@@ -539,12 +952,59 @@ class GitSigningRequestsTest {
         assertEquals(auditCount, audit.observeEvents().first().size)
     }
 
-    private suspend fun insertParent(secretDetailsJson: String = "[]") {
+    private suspend fun insertParent(
+        secretDetailsJson: String = "[]",
+        invocationTokenHash: ByteArray = ByteArray(32),
+        providedSecretsJson: String? = null,
+    ) {
         database.requestDao().insertRequest(parentRequest())
         database.requestDao().insertSecretUseRequestRow(
-            parentInvocation(secretDetailsJson),
+            parentInvocation(secretDetailsJson, invocationTokenHash, providedSecretsJson),
         )
     }
+
+    private suspend fun createSigningSecret(
+        approvalMode: SecretApprovalMode,
+    ): List<dev.agentknock.storage.secret.SecretMetadata> {
+        val key = secrets.generateSshKey(SshKeyAlgorithm.ED25519, "test@example")
+        assertTrue(
+            secrets.createSshSecret(SECRET_NAME, "Signing key", key) is
+                CreateSecretResult.Created,
+        )
+        assertEquals(
+            SaveSecretResult.SAVED,
+            secrets.saveApprovalMode(SECRET_ID, approvalMode),
+        )
+        return secrets.describeRequestedSecrets(listOf(SECRET_NAME)).secrets
+    }
+
+    private suspend fun currentGitSignEvaluation(): ApprovalEvaluation {
+        val policy = secrets.approvalPoliciesForNames(
+            listOf(SECRET_NAME),
+            CLIENT_ID,
+            TemporaryAccessOperation.GIT_SIGN,
+        ).single()
+        return dev.agentknock.storage.approval.ApprovalPolicyEvaluator.evaluate(
+            listOf(policy.toRequestedSecretApproval()),
+        )
+    }
+
+    private suspend fun endParentInvocation() {
+        val parent = checkNotNull(database.requestDao().getRequestById(PARENT_ID))
+        database.requestDao().updateRequest(
+            parent.copy(
+                state = InboxRequestState.COMPLETED.storedName,
+                completedAt = NOW,
+                exchangeEndedAt = NOW,
+                responseOutboxFinished = true,
+            ),
+        )
+    }
+
+    private fun sshSecretFactsJson(): String =
+        storedJson.encodeToString<Map<String, ApprovalReviewSecretFacts>>(
+            mapOf(SECRET_NAME to ApprovalReviewSshSecretFacts(provides = "public_key")),
+        )
 
     private suspend fun receivePending(
         target: GitSigningRequests,
@@ -565,9 +1025,15 @@ class GitSigningRequestsTest {
         )
     }
 
-    private fun requests(auditSink: AuditSink) = GitSigningRequests(
+    private fun requests(
+        auditSink: AuditSink,
+        credentialSource: RelayDeviceCredentialSource = UnavailableCredentialSource,
+        reviewer: RelayApprovalReviewClient = FailingApprovalReviewer,
+    ) = GitSigningRequests(
         dao = database.requestDao(),
         secrets = secrets,
+        deviceCredentials = credentialSource,
+        approvalReviewer = reviewer,
         audit = auditSink,
         writeTransaction = RoomWriteTransaction(database),
         currentTimeMillis = { NOW },
@@ -611,18 +1077,22 @@ class GitSigningRequestsTest {
         responseOutboxFinished = false,
     )
 
-    private fun parentInvocation(secretDetailsJson: String) = SecretUseRequestEntity(
+    private fun parentInvocation(
+        secretDetailsJson: String,
+        invocationTokenHash: ByteArray,
+        providedSecretsJson: String?,
+    ) = SecretUseRequestEntity(
         requestId = PARENT_ID,
         hostname = "test",
         platform = "linux",
         architecture = "x86_64",
         machineId = null,
         osVersion = null,
-        invocationTokenHash = ByteArray(32),
+        invocationTokenHash = invocationTokenHash,
         containsSensitiveMaterial = true,
         secretsJson = Json.encodeToString(listOf(SECRET_NAME)),
         secretDetailsJson = secretDetailsJson,
-        providedSecretsJson = null,
+        providedSecretsJson = providedSecretsJson,
         missingSecretsJson = "[]",
         reason = null,
         command = "git",
@@ -673,6 +1143,33 @@ class GitSigningRequestsTest {
         pairedAt = 2,
         lastSeenAt = 2,
     )
+
+    private fun credentials() = RelayDeviceCredentials(
+        deviceIdentityId = DEVICE_IDENTITY_ID,
+        address = "quiet-river-maple",
+        addressId = "address-id",
+        deviceId = DEVICE_ID,
+        devicePublicKey = ByteArray(32),
+        devicePrivateKey = ByteArray(32),
+        deviceToken = "device-token",
+    )
+
+    private fun gitSignPlaintext(invocationToken: ByteArray): ByteArray {
+        val encodedToken = Base64.getEncoder().encodeToString(invocationToken)
+        val encodedMessage = Base64.getEncoder().encodeToString(
+            "commit to sign".encodeToByteArray(),
+        )
+        return """
+            {
+              $SOFTWARE_FIELDS,
+              "method":"GitSign",
+              "invocation_id":"$PARENT_ID",
+              "invocation_token":"$encodedToken",
+              "secret":"$SECRET_NAME",
+              "message":"$encodedMessage"
+            }
+        """.trimIndent().encodeToByteArray()
+    }
 
     private fun acceptedPsks(requestId: String) = AcceptedRequestPsks(
         requestPsk = RequestPskEntity(
@@ -746,6 +1243,76 @@ class GitSigningRequestsTest {
             delegate.append(records, occurredAt)
             error("Injected audit failure")
         }
+    }
+
+    private object UnavailableCredentialSource : RelayDeviceCredentialSource {
+        override suspend fun activeDeviceCredentials(): RelayDeviceCredentialsResult =
+            RelayDeviceCredentialsResult.Missing
+
+        override suspend fun deviceCredentials(
+            deviceIdentityId: String,
+        ): RelayDeviceCredentialsResult = RelayDeviceCredentialsResult.Missing
+    }
+
+    private object FailingApprovalReviewer : RelayApprovalReviewClient {
+        override suspend fun review(
+            deviceId: String,
+            deviceToken: String,
+            request: ApprovalReviewRequest,
+        ): Nothing = error("AI review is not expected in this test")
+    }
+
+    private class StaticCredentialSource(
+        private val credentials: RelayDeviceCredentials,
+    ) : RelayDeviceCredentialSource {
+        override suspend fun activeDeviceCredentials(): RelayDeviceCredentialsResult =
+            RelayDeviceCredentialsResult.Available(credentials)
+
+        override suspend fun deviceCredentials(
+            deviceIdentityId: String,
+        ): RelayDeviceCredentialsResult = if (deviceIdentityId == credentials.deviceIdentityId) {
+            RelayDeviceCredentialsResult.Available(credentials)
+        } else {
+            RelayDeviceCredentialsResult.Missing
+        }
+    }
+
+    private data class ApprovalReviewCall(
+        val deviceId: String,
+        val deviceToken: String,
+        val request: ApprovalReviewRequest,
+    )
+
+    private class RecordingApprovalReviewer : RelayApprovalReviewClient {
+        lateinit var result: RelayApprovalReviewResult
+        val requests = mutableListOf<ApprovalReviewCall>()
+
+        override suspend fun review(
+            deviceId: String,
+            deviceToken: String,
+            request: ApprovalReviewRequest,
+        ): RelayApprovalReviewResult {
+            requests += ApprovalReviewCall(deviceId, deviceToken, request)
+            return result
+        }
+    }
+
+    private data class PendingAiReview(
+        val review: suspend () -> AiReview,
+        val complete: suspend (AiReview) -> Unit,
+    )
+
+    private fun reviewed(
+        decision: RelayApprovalReviewDecision,
+        explanation: String,
+    ): RelayApprovalReviewResult = RelayEndpointResult.Success(
+        RelayApprovalReview(decision, explanation),
+    )
+
+    private fun RelayApprovalReviewDecision.toAiDecision(): AiReviewDecision = when (this) {
+        RelayApprovalReviewDecision.APPROVE -> AiReviewDecision.APPROVE
+        RelayApprovalReviewDecision.DENY -> AiReviewDecision.DENY
+        RelayApprovalReviewDecision.ASK_USER -> AiReviewDecision.ASK_USER
     }
 
     private class MemoryEncryptionKeyStore : EncryptionKeyStore {

@@ -4,7 +4,6 @@ import dev.agentknock.protocol.ClientSoftware
 import dev.agentknock.protocol.InvocationDenialReason
 import dev.agentknock.protocol.InvocationProtocol
 import dev.agentknock.protocol.GitSignProtocol
-import dev.agentknock.protocol.GitSignRequestMessage
 import dev.agentknock.protocol.OpenedPairedRequest
 import dev.agentknock.protocol.PairedRequestErrorCode
 import dev.agentknock.protocol.PairedRequestProtocol
@@ -15,7 +14,6 @@ import dev.agentknock.protocol.SshAuthenticationMessageDetails
 import dev.agentknock.protocol.SshAuthenticationProtocol
 import dev.agentknock.protocol.SshAuthenticationRequestMessage
 import dev.agentknock.protocol.isFreshRelayRequestId
-import dev.agentknock.review.approvalReviewGitSignRequest
 import dev.agentknock.review.approvalReviewSshAuthenticationRequest
 import dev.agentknock.relay.RelayClientState
 import dev.agentknock.relay.RelayApprovalReviewClient
@@ -31,7 +29,6 @@ import dev.agentknock.relay.RelayMessageState
 import dev.agentknock.relay.RelayPushRegistrationState
 import dev.agentknock.storage.secret.SecretMetadata
 import dev.agentknock.storage.secret.SshKeyCodec
-import dev.agentknock.storage.secret.GitSignatureResult
 import dev.agentknock.storage.secret.SshAuthenticationSignatureResult
 import dev.agentknock.storage.secret.SSH_SECRET_TYPE
 import dev.agentknock.storage.secret.SecretRepository
@@ -136,21 +133,6 @@ internal enum class PairingDecisionResult {
     NOT_FOUND,
 }
 
-internal sealed interface GitSignDecisionResult {
-    data object Decided : GitSignDecisionResult
-    data object NotPending : GitSignDecisionResult
-    data object NotFound : GitSignDecisionResult
-    data object InvocationUnavailable : GitSignDecisionResult
-    data object PairingUnavailable : GitSignDecisionResult
-    data object ApprovalChanged : GitSignDecisionResult
-    data object KeyChanged : GitSignDecisionResult
-    data object SecretUnavailable : GitSignDecisionResult
-    data object SecretCorrupted : GitSignDecisionResult
-    data object UnsupportedEncryption : GitSignDecisionResult
-    data object TemporaryAccessUnavailable : GitSignDecisionResult
-    data object TemporaryAccessNotStarted : GitSignDecisionResult
-}
-
 internal sealed interface SshAuthenticationDecisionResult {
     data object Decided : SshAuthenticationDecisionResult
     data object NotPending : SshAuthenticationDecisionResult
@@ -188,7 +170,6 @@ internal class RequestRepository(
     private val updatePushRegistrationState: (RelayPushRegistrationState) -> Unit,
     private val sshKeys: SshKeyCodec = SshKeyCodec(),
     private val pairedRequestProtocol: PairedRequestProtocol = PairedRequestProtocol(),
-    private val gitSignProtocol: GitSignProtocol = GitSignProtocol(),
     private val sshAuthenticationProtocol: SshAuthenticationProtocol = SshAuthenticationProtocol(),
     private val json: Json = Json,
     private val newId: () -> String = { UUID.randomUUID().toString() },
@@ -1230,13 +1211,19 @@ internal class RequestRepository(
                 launchAiReview = ::launchAiReview,
             )
         } else if (method == GitSignProtocol.METHOD) {
-            processGitSignRequest(
+            gitSigningRequests.processIncoming(
                 pairing = client,
                 relayRequestId = message.requestId,
                 requestPayload = requestPayload,
-                opened = opened,
+                plaintext = opened.plaintext,
                 acceptedSecrets = acceptedSecrets,
                 credentials = credentials,
+                sealResponse = { responsePlaintext ->
+                    runCatching {
+                        pairedRequestProtocol.sealPairedResponse(opened, responsePlaintext)
+                    }.getOrNull()
+                },
+                launchAiReview = ::launchAiReview,
             )
         } else if (method == SshAuthenticationProtocol.METHOD) {
             processSshAuthenticationRequest(
@@ -1293,368 +1280,6 @@ internal class RequestRepository(
         )
     }
 
-
-    private suspend fun processGitSignRequest(
-        pairing: ClientEntity,
-        relayRequestId: String,
-        requestPayload: JsonElement,
-        opened: OpenedPairedRequest,
-        acceptedSecrets: AcceptedRequestPsks,
-        credentials: RelayDeviceCredentials,
-    ): ProcessedRelayMessage? {
-        val now = currentTimeMillis()
-        val contents = runCatching { gitSignProtocol.decodeRequest(opened.plaintext) }
-            .getOrNull() ?: return null
-        val invocationRequest = dao.getRequestById(contents.invocationId) ?: return null
-        if (invocationRequest.kind != RequestKind.SECRET_USE.storedName) return null
-        val invocation = dao.getSecretUseRequest(invocationRequest.id) ?: return null
-        val expectedTokenHash = invocation.invocationTokenHash
-        if (
-            invocationRequest.clientId != pairing.clientId ||
-            invocationRequest.deviceIdentityId != pairing.deviceIdentityId ||
-            invocation.decision != ApprovalDecision.APPROVED.storedName ||
-            invocationRequest.clientSoftwareJson?.let(::decodeStoredClientSoftware) !=
-                contents.clientSoftware ||
-            !MessageDigest.isEqual(
-                expectedTokenHash,
-                invocationTokenHash(contents.invocationToken),
-            )
-        ) {
-            return null
-        }
-
-        val sshMetadata = storedJson.decodeFromString<List<SecretMetadata>>(
-            invocation.secretDetailsJson,
-        ).singleOrNull { secret ->
-            secret.name == contents.secret &&
-                secret.type == SSH_SECRET_TYPE &&
-                secret.sshPublicKey != null
-        }
-        val description = secrets.describeRequestedSecrets(listOf(contents.secret))
-        val approvalPolicies = secrets.approvalPoliciesForNames(
-            listOf(contents.secret),
-            pairing.clientId,
-            TemporaryAccessOperation.GIT_SIGN,
-        )
-        val policy = approvalPolicies.singleOrNull()
-        var denial = if (
-            sshMetadata == null ||
-            description.reviewMetadata.singleOrNull()?.type != SSH_SECRET_TYPE ||
-            policy == null
-        ) {
-            InvocationDenialReason.INVALID_REQUEST to
-                "The Git signing request does not match its invocation."
-        } else {
-            null
-        }
-        val initialEvaluation = if (denial == null) {
-            ApprovalPolicyEvaluator.evaluate(
-                listOf(checkNotNull(policy).toRequestedSecretApproval()),
-            )
-        } else {
-            null
-        }
-        val needsAiReview = initialEvaluation?.requiresAiReview() == true
-        val initialRequest = InboxRequestEntity(
-            id = relayRequestId,
-            parentRequestId = invocationRequest.id,
-            deviceIdentityId = pairing.deviceIdentityId,
-            clientId = pairing.clientId,
-            clientNameSnapshot = pairing.name,
-            clientSoftwareJson = encodeClientSoftware(contents.clientSoftware),
-            kind = RequestKind.GIT_SIGN.storedName,
-            state = if (needsAiReview) {
-                InboxRequestState.REVIEWING.storedName
-            } else {
-                InboxRequestState.ACTION_REQUIRED.storedName
-            },
-            listed = true,
-            requestJson = requestPayload.toString(),
-            responseJson = null,
-            error = null,
-            receivedAt = now,
-            completedAt = null,
-            exchangeEndedAt = null,
-            responseOutboxFinished = false,
-        )
-        val initialGitSign = GitSignRequestEntity(
-            requestId = relayRequestId,
-            secretName = contents.secret,
-            message = contents.message,
-            repositoryJson = contents.repository?.let { json.encodeToString(it) },
-            approvalEvaluationJson = initialEvaluation?.let { json.encodeToString(it) },
-            decision = null,
-            completionResult = null,
-            completionReason = null,
-            completionMessage = null,
-            decidedAt = null,
-        )
-        suspend fun finishReview(
-            reviewResult: AiReview?,
-            requestAlreadyInserted: Boolean,
-        ): ProcessedRelayMessage? {
-            val currentClient = if (needsAiReview) dao.getClient(pairing.clientId) else pairing
-            val clientUnavailable = currentClient == null ||
-                currentClient.deviceIdentityId != pairing.deviceIdentityId ||
-                currentClient.relayClientState == RelayClientState.REVOKED.wireName ||
-                currentClient.desiredRelayClientState == RelayClientState.REVOKED.wireName
-            val currentDescription = if (needsAiReview) {
-                secrets.describeRequestedSecrets(listOf(contents.secret))
-            } else {
-                description
-            }
-            val currentPolicies = if (needsAiReview) {
-                secrets.approvalPoliciesForNames(
-                    listOf(contents.secret),
-                    pairing.clientId,
-                    TemporaryAccessOperation.GIT_SIGN,
-                )
-            } else {
-                approvalPolicies
-            }
-            val currentEvaluation = if (needsAiReview) {
-                currentPolicies.singleOrNull()?.let { currentPolicy ->
-                    ApprovalPolicyEvaluator.evaluate(
-                        listOf(currentPolicy.toRequestedSecretApproval()),
-                    )
-                }
-            } else {
-                initialEvaluation
-            }
-            val currentCredentials = if (needsAiReview) {
-                currentClient?.let { credentialsForClient(it) }
-            } else {
-                credentials
-            }
-            val aiInputsChanged = needsAiReview && (
-                clientUnavailable ||
-                    currentEvaluation == null ||
-                    !checkNotNull(initialEvaluation).hasSameSecretPolicies(currentEvaluation) ||
-                    currentCredentials?.instructions != credentials.instructions ||
-                    currentClient.name != pairing.name ||
-                    currentClient.instructions != pairing.instructions
-                )
-            val aiReview = if (aiInputsChanged) {
-                AiReview(
-                    decision = AiReviewDecision.ASK_USER,
-                    explanation = "The client, SSH key, instructions, or approval settings changed during AI review.",
-                )
-            } else {
-                reviewResult
-            }
-            val evaluation = (if (aiInputsChanged) currentEvaluation else initialEvaluation)
-                ?.copy(aiReview = aiReview)
-            val authorization = currentDescription.authorizationCommitment(
-                policies = currentPolicies,
-                instructions = if (needsAiReview) {
-                    currentCredentials?.let { current ->
-                        AuthorizationInstructionsCommitment(
-                            deviceIdentityId = current.deviceIdentityId,
-                            deviceInstructions = current.instructions,
-                            clientId = checkNotNull(currentClient).clientId,
-                            clientName = currentClient.name,
-                            clientInstructions = currentClient.instructions,
-                        )
-                    }
-                } else {
-                    null
-                },
-            )
-            if (clientUnavailable && denial == null) {
-                denial = InvocationDenialReason.OTHER to
-                    "The paired client is no longer available."
-            }
-            val approvalSettingsDenied =
-                denial == null &&
-                evaluation?.secrets?.any { it.action == ApprovalAction.DENY } == true
-            if (approvalSettingsDenied) {
-                denial = InvocationDenialReason.POLICY_DENIED to
-                    GIT_SIGN_POLICY_DENIAL_MESSAGE
-            }
-            val aiDenied = denial == null && aiReview?.decision == AiReviewDecision.DENY
-            if (aiDenied) {
-                denial = InvocationDenialReason.POLICY_DENIED to
-                    "AI review denied use of the SSH key."
-            }
-            val shouldApprove = !aiInputsChanged && denial == null &&
-                evaluation?.isFullyApproved(aiReview?.decision) == true
-            val temporaryAccessUsed = evaluation?.secrets
-                ?.any { it.temporaryAccessExpiresAt != null } == true
-            var signature: String? = null
-            if (shouldApprove) {
-                when (
-                    val result = secrets.signGitMessage(
-                        secretName = contents.secret,
-                        expectedPublicKey = checkNotNull(sshMetadata?.sshPublicKey),
-                        message = contents.message,
-                    )
-                ) {
-                    is GitSignatureResult.Signed -> signature = result.signature
-                    GitSignatureResult.NotFound,
-                    GitSignatureResult.WrongType,
-                    GitSignatureResult.KeyChanged,
-                    -> denial = InvocationDenialReason.INVALID_REQUEST to
-                        "The SSH key changed after the invocation began."
-                    GitSignatureResult.SecretUnavailable ->
-                        denial = InvocationDenialReason.OTHER to
-                            "The SSH private key is unavailable on this device."
-                    GitSignatureResult.SecretCorrupted ->
-                        denial = InvocationDenialReason.OTHER to
-                            "The SSH private key could not be authenticated."
-                    GitSignatureResult.UnsupportedEncryption ->
-                        denial = InvocationDenialReason.OTHER to
-                            "The SSH private key uses an unsupported encryption format."
-                }
-            }
-            val responsePlaintext = when {
-                denial != null -> gitSignProtocol.deniedResponse(denial.first, denial.second)
-                signature != null -> gitSignProtocol.approvedResponse(signature)
-                else -> null
-            }
-            val response = responsePlaintext?.let { plaintext ->
-                runCatching {
-                    pairedRequestProtocol.sealPairedResponse(opened, plaintext)
-                }.getOrNull() ?: return null
-            }
-            val decidedAt = currentTimeMillis()
-            val automaticDecision = when {
-                signature != null -> ApprovalDecision.APPROVED
-                denial != null -> ApprovalDecision.DENIED
-                else -> null
-            }
-            val automaticDecisionSource = when {
-                signature != null && aiReview?.decision == AiReviewDecision.APPROVE &&
-                    temporaryAccessUsed -> DECISION_SOURCE_MIXED
-                signature != null && aiReview?.decision == AiReviewDecision.APPROVE ->
-                    DECISION_SOURCE_AI
-                signature != null && temporaryAccessUsed -> DECISION_SOURCE_TEMPORARY_ACCESS
-                signature != null -> DECISION_SOURCE_POLICY
-                aiDenied -> DECISION_SOURCE_AI
-                approvalSettingsDenied -> DECISION_SOURCE_POLICY
-                denial?.first == InvocationDenialReason.INVALID_REQUEST -> DECISION_SOURCE_VALIDATION
-                else -> null
-            }
-            val requestToUpdate = if (requestAlreadyInserted) {
-                dao.getRequestById(relayRequestId) ?: return null
-            } else {
-                initialRequest
-            }
-            val finalRequest = requestToUpdate.copy(
-                state = reviewedRequestState(response != null).storedName,
-                responseJson = response?.toString(),
-            )
-            val finalGitSign = initialGitSign.copy(
-                decision = automaticDecision?.storedName,
-                approvalEvaluationJson = evaluation?.let { json.encodeToString(it) },
-                completionReason = denial?.first?.wireName,
-                completionMessage = denial?.second,
-                decidedAt = automaticDecision?.let { decidedAt },
-            )
-            val automaticDecisionAudit = automaticDecision?.let {
-                AuditRecord(
-                    type = AuditEventType.GIT_SIGN_DECIDED,
-                    outcome = when {
-                        signature != null -> AuditOutcome.APPROVED
-                        aiDenied || approvalSettingsDenied -> AuditOutcome.DENIED
-                        denial?.first == InvocationDenialReason.INVALID_REQUEST ->
-                            AuditOutcome.REJECTED
-                        else -> AuditOutcome.FAILED
-                    },
-                    decisionSource = when (automaticDecisionSource) {
-                        null -> null
-                        else -> automaticDecisionSource.toAuditDecisionSource()
-                    },
-                    subject = contents.secret,
-                    detail = if (
-                        aiReview != null && aiReview.decision != AiReviewDecision.ASK_USER
-                    ) {
-                        aiReview.auditFailureDetail()
-                    } else {
-                        denial?.second
-                    },
-                    clientId = pairing.clientId,
-                    clientName = pairing.auditClientName(),
-                    relayRequestId = relayRequestId,
-                )
-            }
-            val persisted = if (requestAlreadyInserted) {
-                gitSigningRequests.finishAiReview(
-                    request = finalRequest,
-                    gitSign = finalGitSign,
-                    authorization = authorization,
-                    aiReviewAudit = AuditRecord(
-                        type = AuditEventType.GIT_SIGN_AI_REVIEWED,
-                        outcome = checkNotNull(aiReview).auditOutcome(),
-                        decisionSource = AuditDecisionSource.AI_REVIEW,
-                        subject = contents.secret,
-                        detail = aiReview.auditFailureDetail(),
-                        clientId = pairing.clientId,
-                        clientName = pairing.auditClientName(),
-                        relayRequestId = relayRequestId,
-                    ),
-                    automaticDecisionAudit = automaticDecisionAudit,
-                )
-            } else {
-                gitSigningRequests.receive(
-                    request = finalRequest,
-                    gitSign = finalGitSign,
-                    client = pairing.copy(
-                        clientSoftwareJson = encodeClientSoftware(contents.clientSoftware),
-                        lastSeenAt = now,
-                    ),
-                    acceptedPsks = acceptedSecrets,
-                    authorization = authorization.takeIf { automaticDecision != null },
-                    automaticDecisionAudit = automaticDecisionAudit,
-                )
-            }
-            return when (persisted) {
-                ConditionalRequestUpdate.APPLIED -> ProcessedRelayMessage(response)
-                ConditionalRequestUpdate.ACTION_REQUIRED -> ProcessedRelayMessage()
-                ConditionalRequestUpdate.UNAVAILABLE -> null
-            }
-        }
-
-        if (!needsAiReview) return finishReview(null, requestAlreadyInserted = false)
-
-        withContext(NonCancellable) {
-            check(
-                gitSigningRequests.receive(
-                    request = initialRequest,
-                    gitSign = initialGitSign,
-                    client = pairing.copy(
-                        clientSoftwareJson = encodeClientSoftware(contents.clientSoftware),
-                        lastSeenAt = now,
-                    ),
-                    acceptedPsks = acceptedSecrets,
-                    authorization = null,
-                    automaticDecisionAudit = null,
-                ) == ConditionalRequestUpdate.APPLIED,
-            )
-            check(
-                launchAiReview(
-                    requestId = relayRequestId,
-                    requestJson = initialRequest.requestJson,
-                    review = {
-                        requestGitSignAiReview(
-                            pairing = pairing,
-                            contents = contents,
-                            invocation = invocation,
-                            parentElapsedSeconds = if (now >= invocationRequest.receivedAt) {
-                                (now - invocationRequest.receivedAt) / 1_000
-                            } else {
-                                null
-                            },
-                            evaluation = initialEvaluation,
-                            policies = approvalPolicies,
-                            credentials = credentials,
-                        )
-                    },
-                    complete = { finishReview(it, requestAlreadyInserted = true) },
-                ),
-            )
-        }
-        return ProcessedRelayMessage()
-    }
 
     private suspend fun processSshAuthenticationRequest(
         pairing: ClientEntity,
@@ -2034,51 +1659,6 @@ internal class RequestRepository(
             )
         }
         return ProcessedRelayMessage()
-    }
-
-    private suspend fun requestGitSignAiReview(
-        pairing: ClientEntity,
-        contents: GitSignRequestMessage,
-        invocation: SecretUseRequestEntity,
-        parentElapsedSeconds: Long?,
-        evaluation: ApprovalEvaluation,
-        policies: List<SecretApprovalPolicy>,
-        credentials: RelayDeviceCredentials,
-    ): AiReview {
-        val elapsedSeconds = parentElapsedSeconds ?: return AiReview(
-            decision = AiReviewDecision.ASK_USER,
-            explanation = "The relative timing of the parent invocation is unavailable.",
-        )
-        if (contents.message.size > MAX_AI_REVIEW_GIT_CONTENT_BYTES) {
-            return AiReview(
-                decision = AiReviewDecision.ASK_USER,
-                explanation = "The exact Git signing content is too large for AI review.",
-            )
-        }
-        val signedContent = runCatching {
-            contents.message.decodeToString(throwOnInvalidSequence = true)
-        }.getOrNull() ?: return AiReview(
-            decision = AiReviewDecision.ASK_USER,
-            explanation = "The exact Git signing content is not valid UTF-8.",
-        )
-        val invocationSecrets = invocation.providedSecretsJson?.let { stored ->
-            decodeStoredApprovalReviewSecretFacts(stored)
-        } ?: return AiReview(
-            decision = AiReviewDecision.ASK_USER,
-            explanation = "The parent invocation context is unavailable.",
-        )
-        val request = approvalReviewGitSignRequest(
-            client = pairing,
-            contents = contents,
-            signedContent = signedContent,
-            invocation = invocation,
-            invocationSecrets = invocationSecrets,
-            parentElapsedSeconds = elapsedSeconds,
-            evaluation = evaluation,
-            policies = policies,
-            deviceInstructions = credentials.instructions,
-        )
-        return performAiReview(approvalReviewer, credentials, request)
     }
 
     private suspend fun requestSshAuthenticationAiReview(
@@ -2555,7 +2135,6 @@ internal class RequestRepository(
 
     private companion object {
         const val IDEMPOTENCY_RETENTION_MILLIS = 25 * 60 * 60 * 1_000L
-        const val MAX_AI_REVIEW_GIT_CONTENT_BYTES = 128 * 1024
     }
 
 }
