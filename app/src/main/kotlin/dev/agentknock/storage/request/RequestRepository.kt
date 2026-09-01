@@ -148,8 +148,6 @@ internal class RequestRepository(
 ) {
     private val operationMutex = Mutex()
     private val pendingChanges = Channel<Unit>(Channel.CONFLATED)
-    fun observeClients(): Flow<List<ClientSummary>> = clients.observeClients()
-
     fun observeClient(clientId: String): Flow<ClientDetails?> = clients.observeClient(clientId)
 
     suspend fun recoverInterruptedAiReviews(): Int = operationMutex.withLock {
@@ -426,6 +424,12 @@ internal class RequestRepository(
                         null
                     }
                     is RelayDeviceEvent.Acknowledgement -> {
+                        relayRequestOwnershipMismatch(
+                            credentials = credentials,
+                            clientId = event.clientId,
+                            requestId = event.requestId,
+                            eventName = "acknowledgement",
+                        )?.let { return@withLock it }
                         if (event.kind == RelayMessageKind.RESPONSE) {
                             dao.markResponseOutboxFinished(event.requestId)
                             awaitingResponses.remove(event.requestId)
@@ -433,6 +437,12 @@ internal class RequestRepository(
                         null
                     }
                     is RelayDeviceEvent.Receipt -> {
+                        relayRequestOwnershipMismatch(
+                            credentials = credentials,
+                            clientId = event.clientId,
+                            requestId = event.requestId,
+                            eventName = "receipt",
+                        )?.let { return@withLock it }
                         if (event.kind == RelayMessageKind.RESPONSE) {
                             dao.markResponseOutboxFinished(event.requestId)
                             awaitingResponses.remove(event.requestId)
@@ -460,6 +470,12 @@ internal class RequestRepository(
                         null
                     }
                     is RelayDeviceEvent.State -> {
+                        relayRequestOwnershipMismatch(
+                            credentials = credentials,
+                            clientId = event.clientId,
+                            requestId = event.requestId,
+                            eventName = "state",
+                        )?.let { return@withLock it }
                         val ended = applyRelayState(event)
                         awaitingStates.remove(event.requestId)
                         if (
@@ -475,6 +491,12 @@ internal class RequestRepository(
                         null
                     }
                     is RelayDeviceEvent.Inactive -> {
+                        relayRequestOwnershipMismatch(
+                            credentials = credentials,
+                            clientId = event.clientId,
+                            requestId = event.requestId,
+                            eventName = "inactive event",
+                        )?.let { return@withLock it }
                         awaitingStates.remove(event.requestId)
                         if (event.kind == RelayMessageKind.RESPONSE) {
                             dao.markResponseOutboxFinished(event.requestId)
@@ -516,6 +538,26 @@ internal class RequestRepository(
             }
         }
         return RequestSyncResult.Success
+    }
+
+    private suspend fun relayRequestOwnershipMismatch(
+        credentials: RelayDeviceCredentials,
+        clientId: String,
+        requestId: String,
+        eventName: String,
+    ): RequestSyncResult.RelayRejected? {
+        val request = dao.getRequestById(requestId)
+        if (
+            request?.clientId == clientId &&
+            request.deviceIdentityId == credentials.deviceIdentityId
+        ) {
+            return null
+        }
+        return RequestSyncResult.RelayRejected(
+            status = 0,
+            message = "Relay protocol mismatch: $eventName does not match this device's " +
+                "stored request.",
+        )
     }
 
     private suspend fun flushPendingChanges(

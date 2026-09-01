@@ -710,6 +710,64 @@ class RequestRepositorySlotTest {
     }
 
     @Test
+    fun matchingAcknowledgementThenReceiptAreAcceptedForRetainedRequest() = runTest {
+        // Requests outlive revoked clients, so lifecycle frames are authenticated by the
+        // request's durable ownership rather than by the presence of a current client row.
+        assertNull(database.requestDao().getClient(CLIENT_ID))
+        val original = insertOpenUnknownRequest()
+        connect(
+            RelayDeviceEvent.Acknowledgement(
+                CLIENT_ID,
+                UNSUPPORTED_REQUEST_ID,
+                RelayMessageKind.RESPONSE,
+            ),
+            RelayDeviceEvent.Receipt(
+                CLIENT_ID,
+                UNSUPPORTED_REQUEST_ID,
+                RelayMessageKind.RESPONSE,
+            ),
+            relayState(UNSUPPORTED_REQUEST_ID).copy(response = RelayMessageState.ABSENT),
+            RelayDeviceEvent.CaughtUp,
+        )
+
+        assertEquals(RequestSyncResult.Success, repository.sync())
+        assertEquals(
+            original.copy(responseOutboxFinished = true),
+            database.requestDao().getRequestById(UNSUPPORTED_REQUEST_ID),
+        )
+    }
+
+    @Test
+    fun lifecycleEventsFromForeignClientDoNotMutateRequest() = runTest {
+        val original = insertOpenUnknownRequest()
+
+        assertLifecycleEventsRejected(relayLifecycleEvents(COLLISION_CLIENT_ID), original)
+    }
+
+    @Test
+    fun lifecycleEventsFromForeignIdentityDoNotMutateRequest() = runTest {
+        database.deviceIdentityDao().insertIdentity(
+            DeviceIdentityEntity(
+                id = RETIRED_DEVICE_IDENTITY_ID,
+                role = "retired",
+                address = "retired-address",
+                deviceId = "01K2ENXDTW1P3XAR4J7V7C9D0J",
+                createdAt = now - 1,
+            ),
+        )
+        val original = insertOpenUnknownRequest(
+            deviceIdentityId = RETIRED_DEVICE_IDENTITY_ID,
+        )
+
+        assertLifecycleEventsRejected(relayLifecycleEvents(CLIENT_ID), original)
+    }
+
+    @Test
+    fun lifecycleEventsWithoutDurableRequestAreRejected() = runTest {
+        assertLifecycleEventsRejected(relayLifecycleEvents(CLIENT_ID), expectedRequest = null)
+    }
+
+    @Test
     fun openAndClosingStatesDoNotEndExchangeButClosingFinishesResponseOutbox() = runTest {
         insertOpenUnknownRequest()
         connect(
@@ -3140,27 +3198,28 @@ class RequestRepositorySlotTest {
 
     private suspend fun insertOpenUnknownRequest(
         requestId: String = UNSUPPORTED_REQUEST_ID,
-    ) {
-        database.requestDao().insertRequest(
-            InboxRequestEntity(
-                id = requestId,
-                parentRequestId = null,
-                deviceIdentityId = DEVICE_IDENTITY_ID,
-                clientId = CLIENT_ID,
-                clientNameSnapshot = "Test client",
-                clientSoftwareJson = null,
-                kind = RequestKind.UNKNOWN.storedName,
-                state = InboxRequestState.WAITING.storedName,
-                listed = false,
-                requestJson = "{}",
-                responseJson = "{}",
-                error = null,
-                receivedAt = now,
-                completedAt = null,
-                exchangeEndedAt = null,
-                responseOutboxFinished = false,
-            ),
+        deviceIdentityId: String = DEVICE_IDENTITY_ID,
+    ): InboxRequestEntity {
+        val request = InboxRequestEntity(
+            id = requestId,
+            parentRequestId = null,
+            deviceIdentityId = deviceIdentityId,
+            clientId = CLIENT_ID,
+            clientNameSnapshot = "Test client",
+            clientSoftwareJson = null,
+            kind = RequestKind.UNKNOWN.storedName,
+            state = InboxRequestState.WAITING.storedName,
+            listed = false,
+            requestJson = "{}",
+            responseJson = "{}",
+            error = null,
+            receivedAt = now,
+            completedAt = null,
+            exchangeEndedAt = null,
+            responseOutboxFinished = false,
         )
+        database.requestDao().insertRequest(request)
+        return request
     }
 
     private suspend fun insertDesiredClient(clientId: String, pairedAt: Long) {
@@ -3248,6 +3307,76 @@ class RequestRepositorySlotTest {
         exchange = RelayExchangeState.OPEN,
         response = RelayMessageState.DELIVERED,
     )
+
+    private fun relayLifecycleEvents(
+        clientId: String,
+    ): List<Pair<RelayDeviceEvent, String>> = buildList {
+        RelayMessageKind.entries.forEach { kind ->
+            add(
+                RelayDeviceEvent.Acknowledgement(
+                    clientId,
+                    UNSUPPORTED_REQUEST_ID,
+                    kind,
+                ) to "acknowledgement",
+            )
+            add(
+                RelayDeviceEvent.Receipt(
+                    clientId,
+                    UNSUPPORTED_REQUEST_ID,
+                    kind,
+                ) to "receipt",
+            )
+            add(
+                RelayDeviceEvent.Inactive(
+                    clientId,
+                    UNSUPPORTED_REQUEST_ID,
+                    kind,
+                ) to "inactive event",
+            )
+        }
+        add(
+            RelayDeviceEvent.Inactive(
+                clientId,
+                UNSUPPORTED_REQUEST_ID,
+                null,
+            ) to "inactive event",
+        )
+        RelayExchangeState.entries.forEach { exchange ->
+            RelayMessageState.entries.forEach { response ->
+                add(
+                    RelayDeviceEvent.State(
+                        clientId,
+                        UNSUPPORTED_REQUEST_ID,
+                        exchange,
+                        response,
+                    ) to "state",
+                )
+            }
+        }
+    }
+
+    private suspend fun assertLifecycleEventsRejected(
+        events: List<Pair<RelayDeviceEvent, String>>,
+        expectedRequest: InboxRequestEntity?,
+    ) {
+        for ((event, eventName) in events) {
+            connect(event)
+            assertEquals(
+                event.toString(),
+                RequestSyncResult.RelayRejected(
+                    0,
+                    "Relay protocol mismatch: $eventName does not match this device's " +
+                        "stored request.",
+                ),
+                repository.sync(),
+            )
+            assertEquals(
+                event.toString(),
+                expectedRequest,
+                database.requestDao().getRequestById(UNSUPPORTED_REQUEST_ID),
+            )
+        }
+    }
 
     private fun invocationPlaintext(token: ByteArray): ByteArray =
         """{${clientSoftwareFields()},"method":"Invocation","secrets":{"git-signing":{}},"operation":{"type":"exec","command":"git","arguments":["commit"],"working_directory":"/tmp/project","executable_path":"/usr/bin/git","executable_mode":"BINARY","stdin":"TERMINAL","stdout":"TERMINAL","stderr":"TERMINAL"},"launcher_chain":[],"invocation_token":"${BASE64.encodeToString(token)}"}"""
