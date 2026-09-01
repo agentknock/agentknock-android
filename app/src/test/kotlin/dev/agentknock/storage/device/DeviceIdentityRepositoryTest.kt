@@ -397,7 +397,9 @@ class DeviceIdentityRepositoryTest {
         assertEquals(0, fixture.dao.credentials.value.count { it.identityId == original.id })
         assertEquals(2, fixture.dao.credentials.value.count { it.identityId == replacement.id })
         assertEquals(listOf(original.id), fixture.dao.requestPskDeletionIdentityIds)
-        assertEquals(listOf(original.id), fixture.dao.clientDeletionIdentityIds)
+        assertEquals(listOf(original.id), fixture.dao.clientPskDeletionIdentityIds)
+        assertEquals(listOf(original.id), fixture.dao.temporaryGrantDeletionIdentityIds)
+        assertEquals(listOf(original.id), fixture.dao.clearedRelayIntentIdentityIds)
     }
 
     private class Fixture(dispatcher: CoroutineDispatcher) {
@@ -462,7 +464,9 @@ private class FakeDeviceIdentityDao : DeviceIdentityDao {
     val identities = MutableStateFlow<List<DeviceIdentityEntity>>(emptyList())
     val credentials = MutableStateFlow<List<DeviceCredentialEntity>>(emptyList())
     val requestPskDeletionIdentityIds = mutableListOf<String>()
-    val clientDeletionIdentityIds = mutableListOf<String>()
+    val clientPskDeletionIdentityIds = mutableListOf<String>()
+    val temporaryGrantDeletionIdentityIds = mutableListOf<String>()
+    val clearedRelayIntentIdentityIds = mutableListOf<String>()
 
     override fun observeIdentities(): Flow<List<DeviceIdentityEntity>> = identities
 
@@ -552,9 +556,9 @@ private class FakeDeviceIdentityDao : DeviceIdentityDao {
 
     override suspend fun abandonPairingAttempts(identityId: String, now: Long): Int = 0
 
-    override suspend fun deletePendingUploadEnvironmentValues(identityId: String): Int = 0
+    override suspend fun deleteUploadEnvironmentValues(identityId: String): Int = 0
 
-    override suspend fun deletePendingUploadSshKeys(identityId: String): Int = 0
+    override suspend fun deleteUploadSshKeys(identityId: String): Int = 0
 
     override suspend fun rejectPendingUploads(identityId: String, now: Long): Int = 0
 
@@ -569,8 +573,18 @@ private class FakeDeviceIdentityDao : DeviceIdentityDao {
         return 0
     }
 
-    override suspend fun deleteClients(identityId: String): Int {
-        clientDeletionIdentityIds += identityId
+    override suspend fun deleteClientPsks(identityId: String): Int {
+        clientPskDeletionIdentityIds += identityId
+        return 0
+    }
+
+    override suspend fun deleteTemporaryAccessGrants(identityId: String): Int {
+        temporaryGrantDeletionIdentityIds += identityId
+        return 0
+    }
+
+    override suspend fun clearClientRelayIntent(identityId: String): Int {
+        clearedRelayIntentIdentityIds += identityId
         return 0
     }
 

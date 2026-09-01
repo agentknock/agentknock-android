@@ -386,9 +386,12 @@ internal interface SecretDao {
         """
         SELECT EXISTS(
             SELECT 1 FROM clients
-            WHERE client_id = :clientId
-              AND relay_client_state = 'active'
-              AND COALESCE(desired_relay_client_state, 'active') = 'active'
+            JOIN device_identities
+              ON device_identities.id = clients.device_identity_id
+            WHERE clients.client_id = :clientId
+              AND device_identities.role = 'active'
+              AND clients.relay_client_state = 'active'
+              AND COALESCE(clients.desired_relay_client_state, 'active') = 'active'
         )
         """,
     )

@@ -286,7 +286,16 @@ class RequestDaoTransactionTest {
     }
 
     @Test
-    fun historyLimitNeverHidesPendingPairingsOrUploads() = runTest {
+    fun historyLimitIsGlobalAndNeverHidesPendingPairingsOrUploads() = runTest {
+        database.deviceIdentityDao().insertIdentity(
+            DeviceIdentityEntity(
+                id = RETIRED_DEVICE_IDENTITY_ID,
+                role = "retired",
+                address = "retired-device-address",
+                deviceId = "retired-device",
+                createdAt = 0,
+            ),
+        )
         val pendingInvocationId = "old-pending-invocation"
         dao.insertRequest(
             rootRequest().copy(
@@ -300,6 +309,11 @@ class RequestDaoTransactionTest {
             dao.insertRequest(
                 rootRequest().copy(
                     id = "history-$index",
+                    deviceIdentityId = if (index < 50) {
+                        RETIRED_DEVICE_IDENTITY_ID
+                    } else {
+                        DEVICE_IDENTITY_ID
+                    },
                     kind = "secret_use",
                     state = "completed",
                     receivedAt = (index + 10).toLong(),
@@ -370,7 +384,9 @@ class RequestDaoTransactionTest {
         assertEquals(101, history.size)
         assertTrue(history.all { it.kind == "secret_use" })
         assertTrue(history.any { it.id == pendingInvocationId })
+        assertTrue(history.any { it.deviceIdentityId == RETIRED_DEVICE_IDENTITY_ID })
         assertEquals(100, history.count { it.completedAt != null })
+        assertEquals(false, dao.getRequestById("history-0")?.listed)
         assertEquals(
             listOf(pairingId),
             dao.observePendingPairingRequests().first().map(InboxRequestEntity::id),
@@ -1136,6 +1152,7 @@ class RequestDaoTransactionTest {
     private companion object {
         const val KEY_ID = "key"
         const val DEVICE_IDENTITY_ID = "device-identity"
+        const val RETIRED_DEVICE_IDENTITY_ID = "retired-device-identity"
         const val CURRENT_SLOT = "current"
         const val PREVIOUS_SLOT = "previous"
         const val DEVICE_ID = "01K2ENXDTW1P3XAR4J7V7C9D0H"

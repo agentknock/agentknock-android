@@ -559,8 +559,7 @@ internal enum class ConditionalRequestUpdate {
 internal interface RequestDao {
     @Query(
         "SELECT inbox_requests.* FROM inbox_requests " +
-            "JOIN device_identities ON device_identities.id = inbox_requests.device_identity_id " +
-        "WHERE inbox_requests.listed = 1 AND device_identities.role = 'active' " +
+        "WHERE inbox_requests.listed = 1 " +
             "AND inbox_requests.kind IN ('secret_use', 'git_sign', 'ssh_authenticate') " +
             "ORDER BY inbox_requests.received_at DESC, inbox_requests.id DESC",
     )
@@ -621,9 +620,7 @@ internal interface RequestDao {
     fun observeSecretUploadRequests(): Flow<List<SecretUploadRequestEntity>>
 
     @Query(
-        "SELECT inbox_requests.* FROM inbox_requests " +
-            "JOIN device_identities ON device_identities.id = inbox_requests.device_identity_id " +
-            "WHERE inbox_requests.id = :id AND device_identities.role = 'active'",
+        "SELECT * FROM inbox_requests WHERE id = :id",
     )
     fun observeRequest(id: String): Flow<InboxRequestEntity?>
 
@@ -987,22 +984,14 @@ internal interface RequestDao {
         UPDATE inbox_requests SET listed = 0
         WHERE listed = 1
           AND completed_at IS NOT NULL
-          AND EXISTS (
-            SELECT 1 FROM device_identities
-            WHERE device_identities.id = inbox_requests.device_identity_id
-              AND device_identities.role = 'active'
-          )
           AND (
             kind NOT IN ('secret_use', 'git_sign', 'ssh_authenticate')
             OR id NOT IN (
-              SELECT active_requests.id FROM inbox_requests AS active_requests
-              JOIN device_identities
-                ON device_identities.id = active_requests.device_identity_id
-              WHERE active_requests.listed = 1
-                AND active_requests.completed_at IS NOT NULL
-                AND active_requests.kind IN ('secret_use', 'git_sign', 'ssh_authenticate')
-                AND device_identities.role = 'active'
-              ORDER BY active_requests.received_at DESC, active_requests.id DESC
+              SELECT retained_requests.id FROM inbox_requests AS retained_requests
+              WHERE retained_requests.listed = 1
+                AND retained_requests.completed_at IS NOT NULL
+                AND retained_requests.kind IN ('secret_use', 'git_sign', 'ssh_authenticate')
+              ORDER BY retained_requests.received_at DESC, retained_requests.id DESC
               LIMIT 100
             )
           )

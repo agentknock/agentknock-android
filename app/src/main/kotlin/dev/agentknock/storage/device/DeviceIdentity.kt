@@ -150,7 +150,7 @@ internal interface DeviceIdentityDao {
         """
         UPDATE inbox_requests
         SET state = CASE WHEN completed_at IS NULL THEN 'completed' ELSE state END,
-            listed = 0,
+            listed = CASE WHEN completed_at IS NULL THEN 0 ELSE listed END,
             response_outbox_finished = 1,
             error = CASE
                 WHEN completed_at IS NOT NULL THEN error
@@ -196,11 +196,10 @@ internal interface DeviceIdentityDao {
             JOIN inbox_requests
               ON inbox_requests.id = secret_upload_requests.request_id
             WHERE inbox_requests.device_identity_id = :identityId
-              AND secret_upload_requests.decision IS NULL
         )
         """,
     )
-    suspend fun deletePendingUploadEnvironmentValues(identityId: String): Int
+    suspend fun deleteUploadEnvironmentValues(identityId: String): Int
 
     @Query(
         """
@@ -211,11 +210,10 @@ internal interface DeviceIdentityDao {
             JOIN inbox_requests
               ON inbox_requests.id = secret_upload_requests.request_id
             WHERE inbox_requests.device_identity_id = :identityId
-              AND secret_upload_requests.decision IS NULL
         )
         """,
     )
-    suspend fun deletePendingUploadSshKeys(identityId: String): Int
+    suspend fun deleteUploadSshKeys(identityId: String): Int
 
     @Query(
         """
@@ -243,8 +241,34 @@ internal interface DeviceIdentityDao {
     )
     suspend fun deleteRequestPsks(identityId: String): Int
 
-    @Query("DELETE FROM clients WHERE device_identity_id = :identityId")
-    suspend fun deleteClients(identityId: String): Int
+    @Query(
+        """
+        DELETE FROM client_psks
+        WHERE client_id IN (
+            SELECT client_id FROM clients WHERE device_identity_id = :identityId
+        )
+        """,
+    )
+    suspend fun deleteClientPsks(identityId: String): Int
+
+    @Query(
+        """
+        DELETE FROM temporary_access_grants
+        WHERE client_id IN (
+            SELECT client_id FROM clients WHERE device_identity_id = :identityId
+        )
+        """,
+    )
+    suspend fun deleteTemporaryAccessGrants(identityId: String): Int
+
+    @Query(
+        """
+        UPDATE clients
+        SET desired_relay_client_state = NULL
+        WHERE device_identity_id = :identityId
+        """,
+    )
+    suspend fun clearClientRelayIntent(identityId: String): Int
 
     @Query(
         """
@@ -343,11 +367,13 @@ internal interface DeviceIdentityDao {
                 error = DEVICE_IDENTITY_REPLACED_REQUEST_ERROR,
             )
             abandonPairingAttempts(active.id, now)
-            deletePendingUploadEnvironmentValues(active.id)
-            deletePendingUploadSshKeys(active.id)
+            deleteUploadEnvironmentValues(active.id)
+            deleteUploadSshKeys(active.id)
             rejectPendingUploads(active.id, now)
             deleteRequestPsks(active.id)
-            deleteClients(active.id)
+            deleteClientPsks(active.id)
+            deleteTemporaryAccessGrants(active.id)
+            clearClientRelayIntent(active.id)
             deleteCredentials(active.id)
             check(retireActiveIdentity(active.id, activeRole, retiredRole) == 1)
         }

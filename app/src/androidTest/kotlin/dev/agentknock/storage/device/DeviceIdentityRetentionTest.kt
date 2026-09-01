@@ -15,6 +15,7 @@ import dev.agentknock.storage.request.PairingAttemptEntity
 import dev.agentknock.storage.request.RequestPskEntity
 import dev.agentknock.storage.request.SecretUploadEnvironmentVariableEntity
 import dev.agentknock.storage.request.SecretUploadRequestEntity
+import dev.agentknock.storage.request.SecretUploadSshKeyEntity
 import dev.agentknock.storage.secret.SecretClientApprovalOverrideEntity
 import dev.agentknock.storage.secret.SecretEntity
 import dev.agentknock.storage.secret.TemporaryAccessGrantEntity
@@ -64,7 +65,10 @@ class DeviceIdentityRetentionTest {
         database.deviceIdentityDao().insertIdentity(replacement)
         database.deviceIdentityDao().insertCredentials(credentials(replacement.id, 2))
         database.requestDao().insertClient(client(original.id))
-        val historicalRequest = request(original.id).copy(listed = true)
+        val historicalRequest = request(original.id).copy(
+            kind = "secret_use",
+            listed = true,
+        )
         database.requestDao().insertRequest(historicalRequest)
         database.auditDao().insertEvents(listOf(auditEvent()))
 
@@ -85,14 +89,21 @@ class DeviceIdentityRetentionTest {
         assertTrue(database.deviceIdentityDao().getCredentials(original.id).isEmpty())
         assertEquals(2, database.deviceIdentityDao().getCredentials(replacement.id).size)
         assertNull(database.requestDao().getClient(CLIENT_ID))
-        assertNull(database.requestDao().getClientById(CLIENT_ID))
+        assertEquals(client(original.id), database.requestDao().getClientById(CLIENT_ID))
         assertEquals(
             historicalRequest.copy(
-                listed = false,
                 exchangeEndedAt = 3,
                 responseOutboxFinished = true,
             ),
             database.requestDao().getRequestById(REQUEST_ID),
+        )
+        assertEquals(
+            listOf(REQUEST_ID),
+            database.requestDao().observeListedRequests().first().map(InboxRequestEntity::id),
+        )
+        assertEquals(
+            REQUEST_ID,
+            database.requestDao().observeRequest(REQUEST_ID).first()?.id,
         )
         assertAuditSnapshotRemains()
 
@@ -117,10 +128,9 @@ class DeviceIdentityRetentionTest {
         assertTrue(database.deviceIdentityDao().getCredentials(replacement.id).isEmpty())
         assertEquals(2, database.deviceIdentityDao().getCredentials(secondReplacement.id).size)
         assertNull(database.requestDao().getClient(CLIENT_ID))
-        assertNull(database.requestDao().getClientById(CLIENT_ID))
+        assertEquals(client(original.id), database.requestDao().getClientById(CLIENT_ID))
         assertEquals(
             historicalRequest.copy(
-                listed = false,
                 exchangeEndedAt = 3,
                 responseOutboxFinished = true,
             ),
@@ -140,6 +150,15 @@ class DeviceIdentityRetentionTest {
                 backing = "SOFTWARE",
             ),
         )
+        database.vaultKeyDao().insertKey(
+            VaultKeyEntity(
+                id = "pending-pairing-key",
+                purpose = VaultKeyPurpose.DEVICE_STATE.storedName,
+                active = false,
+                createdAt = 0,
+                backing = "SOFTWARE",
+            ),
+        )
         val original = identity("identity-1", "device-1", "active", 1)
         val replacement = identity("identity-2", "device-2", "candidate", 2)
         database.deviceIdentityDao().insertIdentity(original)
@@ -152,7 +171,8 @@ class DeviceIdentityRetentionTest {
                 desiredRelayClientState = "suspended",
             ),
         )
-        requestDao.insertClientPsk(clientPsk())
+        requestDao.insertClientPsk(clientPsk("current"))
+        requestDao.insertClientPsk(clientPsk("previous"))
         database.secretDao().insertSecret(secret())
         database.secretDao().upsertClientApprovalOverride(
             SecretClientApprovalOverrideEntity(
@@ -201,7 +221,10 @@ class DeviceIdentityRetentionTest {
                 hostname = null,
                 machineId = null,
                 osVersion = null,
-                pendingPsk = encryptedValue(byteArrayOf(1)),
+                pendingPsk = encryptedValue(
+                    ciphertext = byteArrayOf(1),
+                    keyId = "pending-pairing-key",
+                ),
                 decidedAt = null,
             ),
         )
@@ -254,7 +277,32 @@ class DeviceIdentityRetentionTest {
             currentClientPsk = null,
             previousClientPsk = null,
         )
-        requestDao.insertRequest(request(original.id).copy(listed = true))
+        requestDao.insertSecretUploadEnvironmentVariables(
+            listOf(uploadValue(approvedUploadId)),
+        )
+        val sshUploadId = "pending-ssh-upload"
+        requestDao.insertSecretUploadRequest(
+            request = request(original.id).copy(
+                id = sshUploadId,
+                kind = "secret_upload",
+                state = "action_required",
+                listed = true,
+                completedAt = null,
+            ),
+            secretUpload = upload(sshUploadId, decision = null).copy(secretType = "ssh"),
+            client = checkNotNull(requestDao.getClientById(CLIENT_ID)),
+            environmentVariables = emptyList(),
+            sshKey = uploadSshKey(sshUploadId),
+            requestPsk = requestPsk(sshUploadId),
+            currentClientPsk = null,
+            previousClientPsk = null,
+        )
+        requestDao.insertRequest(
+            request(original.id).copy(
+                kind = "secret_use",
+                listed = true,
+            ),
+        )
         val completedBefore = checkNotNull(requestDao.getRequestById(REQUEST_ID))
 
         assertTrue(
@@ -267,7 +315,7 @@ class DeviceIdentityRetentionTest {
             ),
         )
 
-        listOf(pairingId, invocationId, uploadId, approvedUploadId).forEach { id ->
+        listOf(pairingId, invocationId, uploadId, approvedUploadId, sshUploadId).forEach { id ->
             val abandoned = checkNotNull(requestDao.getRequestById(id))
             assertEquals("completed", abandoned.state)
             assertEquals(false, abandoned.listed)
@@ -276,21 +324,40 @@ class DeviceIdentityRetentionTest {
         }
         assertNull(requestDao.getPairingAttempt(pairingId))
         assertTrue(
+            database.vaultKeyDao().observeReferencedKeys().first()
+                .none { it.id == "pending-pairing-key" },
+        )
+        assertTrue(
             checkNotNull(checkNotNull(requestDao.getRequestById(pairingId)).error)
                 .contains("pairing completion was malformed"),
         )
         assertEquals("rejected", requestDao.getSecretUploadRequest(uploadId)?.decision)
         assertEquals("approved", requestDao.getSecretUploadRequest(approvedUploadId)?.decision)
+        assertEquals("rejected", requestDao.getSecretUploadRequest(sshUploadId)?.decision)
         assertTrue(requestDao.getSecretUploadEnvironmentVariables(uploadId).isEmpty())
-        assertNull(requestDao.getClientById(CLIENT_ID))
+        assertTrue(requestDao.getSecretUploadEnvironmentVariables(approvedUploadId).isEmpty())
+        assertNull(requestDao.getSecretUploadSshKey(sshUploadId))
+        assertNull(requestDao.getClient(CLIENT_ID))
+        assertEquals(
+            client(original.id).copy(desiredRelayClientState = null),
+            requestDao.getClientById(CLIENT_ID),
+        )
         assertNull(requestDao.getClientPsk(CLIENT_ID, "current"))
-        listOf(invocationId, uploadId, approvedUploadId).forEach { id ->
+        assertNull(requestDao.getClientPsk(CLIENT_ID, "previous"))
+        listOf(invocationId, uploadId, approvedUploadId, sshUploadId).forEach { id ->
             assertNull(requestDao.getRequestPsk(id))
         }
         assertTrue(database.deviceIdentityDao().getCredentials(original.id).isEmpty())
         assertEquals(2, database.deviceIdentityDao().getCredentials(replacement.id).size)
-        assertTrue(
-            database.secretDao().getClientApprovalOverrides(CLIENT_ID, listOf(SECRET_ID)).isEmpty(),
+        assertEquals(
+            listOf(
+                SecretClientApprovalOverrideEntity(
+                    secretId = SECRET_ID,
+                    clientId = CLIENT_ID,
+                    approvalMode = "approve",
+                ),
+            ),
+            database.secretDao().getClientApprovalOverrides(CLIENT_ID, listOf(SECRET_ID)),
         )
         assertTrue(
             database.secretDao().getActiveTemporaryAccessGrants(
@@ -302,18 +369,24 @@ class DeviceIdentityRetentionTest {
         )
         assertEquals(
             completedBefore.copy(
-                listed = false,
                 exchangeEndedAt = 30,
                 responseOutboxFinished = true,
             ),
             requestDao.getRequestById(REQUEST_ID),
         )
-        listOf(pairingId, invocationId, uploadId, approvedUploadId, REQUEST_ID).forEach { id ->
+        listOf(
+            pairingId,
+            invocationId,
+            uploadId,
+            approvedUploadId,
+            sshUploadId,
+            REQUEST_ID,
+        ).forEach { id ->
             val historical = checkNotNull(requestDao.getRequestById(id))
             assertEquals(original.id, historical.deviceIdentityId)
             assertEquals(if (id == pairingId) "pending-client" else CLIENT_ID, historical.clientId)
             assertEquals("Original client", historical.clientNameSnapshot)
-            assertEquals(false, historical.listed)
+            assertEquals(id == REQUEST_ID, historical.listed)
         }
         assertAuditSnapshotRemains()
 
@@ -322,8 +395,37 @@ class DeviceIdentityRetentionTest {
         assertNotNull(abandonedInvocation.exchangeEndedAt)
         assertTrue(requestDao.getUnfinishedResponseOutboxes().isEmpty())
         assertTrue(requestDao.getOpenExchanges().isEmpty())
-        assertTrue(requestDao.observeListedRequests().first().isEmpty())
-        assertNull(requestDao.observeRequest(uploadId).first())
+        assertEquals(
+            listOf(REQUEST_ID),
+            requestDao.observeListedRequests().first().map(InboxRequestEntity::id),
+        )
+        assertEquals(uploadId, requestDao.observeRequest(uploadId).first()?.id)
+        assertTrue(requestDao.observeClients().first().isEmpty())
+        assertEquals(false, database.secretDao().clientCanReceiveTemporaryAccess(CLIENT_ID))
+        assertEquals(
+            false,
+            database.secretDao().upsertTemporaryAccessGrantsIfCurrent(
+                grants = listOf(
+                    TemporaryAccessGrantEntity(
+                        secretId = SECRET_ID,
+                        clientId = CLIENT_ID,
+                        operation = "secret_use",
+                        expiresAt = 2_000,
+                    ),
+                ),
+                expectedRevisions = mapOf(SECRET_ID to 1L),
+                expectedApprovalModes = mapOf(SECRET_ID to "approve"),
+                now = 1_000,
+            ),
+        )
+        assertTrue(
+            database.secretDao().getActiveTemporaryAccessGrants(
+                clientId = CLIENT_ID,
+                secretIds = listOf(SECRET_ID),
+                operation = "secret_use",
+                now = 1_000,
+            ).isEmpty(),
+        )
 
         val staleUploadWrite = runCatching {
             requestDao.updateSecretUploadRequest(
@@ -458,9 +560,9 @@ class DeviceIdentityRetentionTest {
         assertEquals("Historical audit detail", audit.detail)
     }
 
-    private fun clientPsk() = ClientPskEntity(
+    private fun clientPsk(slot: String) = ClientPskEntity(
         clientId = CLIENT_ID,
-        slot = "current",
+        slot = slot,
         encryptedPsk = encryptedValue(byteArrayOf(1)),
         storedAt = 10,
     )
@@ -494,12 +596,21 @@ class DeviceIdentityRetentionTest {
         encryptedValue = encryptedValue(byteArrayOf(3)),
     )
 
+    private fun uploadSshKey(requestId: String) = SecretUploadSshKeyEntity(
+        requestId = requestId,
+        algorithm = "ssh-ed25519",
+        publicKey = ByteArray(32) { 4 },
+        comment = "retired@example",
+        encryptedPrivateKey = encryptedValue(byteArrayOf(5)),
+    )
+
     private fun encryptedValue(
         ciphertext: ByteArray,
         nonce: ByteArray = ByteArray(12),
+        keyId: String = "device-state-key",
     ) = EncryptedValue(
         formatVersion = 1,
-        keyId = "device-state-key",
+        keyId = keyId,
         nonce = nonce,
         ciphertext = ciphertext,
     )
