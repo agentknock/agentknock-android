@@ -156,6 +156,13 @@ internal class ClientRepository(
         if (state == RelayClientState.PENDING) return@execute ClientChangeResult.INVALID_STATE
         val client = dao.getClient(clientId)
             ?: return@execute ClientChangeResult.NOT_FOUND
+        if (client.desiredRelayClientState == RelayClientState.REVOKED.wireName) {
+            return@execute if (state == RelayClientState.REVOKED) {
+                ClientChangeResult.CHANGED
+            } else {
+                ClientChangeResult.INVALID_STATE
+            }
+        }
         val current = client.relayClientState.toRelayClientState()
         val allowed = when (current) {
             RelayClientState.ACTIVE -> state == RelayClientState.SUSPENDED ||

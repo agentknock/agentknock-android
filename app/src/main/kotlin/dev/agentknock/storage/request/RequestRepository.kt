@@ -230,6 +230,7 @@ internal class RequestRepository(
     private val gitSigningRequests: GitSigningRequests,
     private val sshAuthenticationRequests: SshAuthenticationRequests,
     private val pairingRequests: PairingRequests,
+    private val clientRemovalRequests: ClientRemovalRequests,
     private val approvalReviewer: RelayApprovalReviewClient,
     private val relay: RelayDeviceClient,
     private val aiReviews: AiReviewCoordinator,
@@ -241,7 +242,6 @@ internal class RequestRepository(
     private val invocationProtocol: InvocationProtocol = InvocationProtocol(),
     private val gitSignProtocol: GitSignProtocol = GitSignProtocol(),
     private val sshAuthenticationProtocol: SshAuthenticationProtocol = SshAuthenticationProtocol(),
-    private val pairingRemoveProtocol: PairingRemoveProtocol = PairingRemoveProtocol(),
     private val json: Json = Json,
     private val newId: () -> String = { UUID.randomUUID().toString() },
     private val currentTimeMillis: () -> Long = System::currentTimeMillis,
@@ -776,28 +776,7 @@ internal class RequestRepository(
                 secretManagement.expireSecretUpload(request, message, now)
             }
             RequestKind.PAIRING_REMOVE.storedName -> {
-                dao.updateEndedRequest(
-                    request.copy(
-                        state = InboxRequestState.COMPLETED.storedName,
-                        responseOutboxFinished = true,
-                        error = request.error ?: message.takeIf { request.completedAt == null },
-                        completedAt = request.completedAt ?: now,
-                        exchangeEndedAt = now,
-                    ),
-                )
-                if (request.completedAt == null) {
-                    audit.record(
-                        AuditRecord(
-                            type = AuditEventType.CLIENT_REMOVAL_UNCONFIRMED,
-                            outcome = AuditOutcome.FAILED,
-                            subject = request.clientNameSnapshot,
-                            detail = message,
-                            clientId = request.clientId,
-                            clientName = request.clientNameSnapshot,
-                            relayRequestId = request.id,
-                        ),
-                    )
-                }
+                clientRemovalRequests.expire(request, message, now)
             }
             RequestKind.PAIRING_FINISH.storedName -> {
                 pairingRequests.endFinishExchange(request.id, now, message)
@@ -1249,7 +1228,6 @@ internal class RequestRepository(
                 requestPayload = requestPayload,
                 opened = opened,
                 acceptedSecrets = acceptedSecrets,
-                credentials = credentials,
             )
         } else {
             return rejectAuthenticatedRequest(
@@ -2690,50 +2668,18 @@ internal class RequestRepository(
         requestPayload: JsonElement,
         opened: OpenedPairedRequest,
         acceptedSecrets: AcceptedRequestPsks,
-        credentials: RelayDeviceCredentials,
     ): ProcessedRelayMessage? {
-        val clientSoftware = runCatching {
-            pairingRemoveProtocol.decodeRequest(opened.plaintext)
-        }.getOrNull() ?: return null
-        val response = runCatching {
-            pairedRequestProtocol.sealPairedResponse(
-                deviceId = credentials.deviceId,
-                requestId = relayRequestId,
-                clientId = pairing.clientId,
-                clientPsk = opened.clientPsk,
-                devicePrivateKey = credentials.devicePrivateKey,
-                devicePublicKey = credentials.devicePublicKey,
-                request = requestPayload,
-                plaintext = pairingRemoveProtocol.response(),
-            )
-        }.getOrNull() ?: return null
-        val now = currentTimeMillis()
-        dao.insertPairingRemoval(
-            request = InboxRequestEntity(
-                id = relayRequestId,
-                parentRequestId = null,
-                deviceIdentityId = pairing.deviceIdentityId,
-                clientId = pairing.clientId,
-                clientNameSnapshot = pairing.name,
-                clientSoftwareJson = encodeClientSoftware(clientSoftware),
-                kind = RequestKind.PAIRING_REMOVE.storedName,
-                state = InboxRequestState.WAITING.storedName,
-                listed = false,
-                requestJson = requestPayload.toString(),
-                responseJson = response.toString(),
-                completionJson = null,
-                error = null,
-                receivedAt = now,
-                completedAt = null,
-                exchangeEndedAt = null,
-                responseOutboxFinished = false,
-            ),
+        val response = clientRemovalRequests.receive(
+            client = pairing,
+            relayRequestId = relayRequestId,
+            requestPayload = requestPayload,
+            plaintext = opened.plaintext,
             requestPsk = acceptedSecrets.requestPsk,
-            client = pairing.copy(
-                desiredRelayClientState = RelayClientState.REVOKED.wireName,
-                lastSeenAt = now,
-            ),
-        )
+        ) { responsePlaintext ->
+            runCatching {
+                pairedRequestProtocol.sealPairedResponse(opened, responsePlaintext)
+            }.getOrNull()
+        } ?: return null
         requestSync()
         return ProcessedRelayMessage(response)
     }
@@ -3014,7 +2960,10 @@ internal class RequestRepository(
                 processSecretUploadCompletion(activeCredentials, request, completion)
             }
             RequestKind.PAIRING_REMOVE.storedName -> {
-                processPairingRemoveCompletion(activeCredentials, request, completion)
+                val completed = clientRemovalRequests.complete(request, completion) {
+                    openStoredCompletion(activeCredentials, request, completion)
+                }
+                if (completed) ProcessedRelayMessage() else null
             }
             RequestKind.UNKNOWN.storedName -> {
                 processUnknownCompletion(activeCredentials, request, completion)
@@ -3069,78 +3018,6 @@ internal class RequestRepository(
         }
         return if (processed) ProcessedRelayMessage() else null
     }
-    private suspend fun processPairingRemoveCompletion(
-        activeCredentials: RelayDeviceCredentials,
-        request: InboxRequestEntity,
-        completion: JsonElement,
-    ): ProcessedRelayMessage? {
-        val opened = openStoredCompletion(activeCredentials, request, completion)
-        if (opened == CompletionOpenResult.RetryLater) return null
-        val valid = (opened as? CompletionOpenResult.Opened)?.plaintext?.let {
-            decodeWireCompletionOrNull { pairingRemoveProtocol.decodeCompletion(it) }
-        } != null
-        if (valid) {
-            completePairingRemoval(request, completion)
-        } else {
-            val now = currentTimeMillis()
-            dao.updateEndedRequest(
-                request.copy(
-                    state = InboxRequestState.COMPLETED.storedName,
-                    completionJson = completion.toString().takeIf {
-                        opened is CompletionOpenResult.Opened
-                    },
-                    responseOutboxFinished = true,
-                    error = CLIENT_REMOVAL_COMPLETION_VERIFICATION_ERROR,
-                    completedAt = request.completedAt ?: now,
-                    exchangeEndedAt = now,
-                ),
-            )
-            audit.record(
-                AuditRecord(
-                    type = AuditEventType.CLIENT_REMOVAL_CONFIRMATION_FAILED,
-                    outcome = AuditOutcome.FAILED,
-                    subject = request.clientNameSnapshot,
-                    detail = CLIENT_REMOVAL_COMPLETION_VERIFICATION_ERROR,
-                    clientId = request.clientId,
-                    clientName = request.clientNameSnapshot,
-                    relayRequestId = request.id,
-                ),
-            )
-        }
-        return ProcessedRelayMessage()
-    }
-
-    private suspend fun completePairingRemoval(
-        request: InboxRequestEntity,
-        completion: JsonElement,
-    ) {
-        val current = dao.getRequestById(request.id) ?: return
-        if (current.exchangeEndedAt != null) return
-        val firstCompletion = current.completedAt == null
-        val now = currentTimeMillis()
-        val updated = current.copy(
-            state = InboxRequestState.COMPLETED.storedName,
-            completionJson = completion.toString(),
-            responseOutboxFinished = true,
-            completedAt = current.completedAt ?: now,
-            exchangeEndedAt = now,
-        )
-        dao.applyPairingRemoval(updated)
-        if (firstCompletion) {
-            audit.record(
-                AuditRecord(
-                    type = AuditEventType.CLIENT_UNPAIRED_ITSELF,
-                    outcome = AuditOutcome.COMPLETED,
-                    subject = request.clientNameSnapshot,
-                    clientId = request.clientId,
-                    clientName = request.clientNameSnapshot,
-                    relayRequestId = request.id,
-                ),
-            )
-        }
-        requestSync()
-    }
-
     private suspend fun processFinishCompletion(
         activeCredentials: RelayDeviceCredentials,
         finishRequest: InboxRequestEntity,
@@ -3258,8 +3135,6 @@ internal class RequestRepository(
 
     private companion object {
         const val IDEMPOTENCY_RETENTION_MILLIS = 25 * 60 * 60 * 1_000L
-        const val CLIENT_REMOVAL_COMPLETION_VERIFICATION_ERROR =
-            "Client removal completion could not be verified."
         const val MAX_AI_REVIEW_GIT_CONTENT_BYTES = 128 * 1024
         val STRING_LIST_SERIALIZER = ListSerializer(String.serializer())
     }

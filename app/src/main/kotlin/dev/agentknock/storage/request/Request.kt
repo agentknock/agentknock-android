@@ -910,19 +910,6 @@ internal interface RequestDao {
         trimCompletedHistory()
     }
 
-    @Transaction
-    suspend fun applyPairingRemoval(request: InboxRequestEntity) {
-        check(request.kind == "pairing_remove")
-        check(updateRequest(request) == 1)
-        val client = getClient(request.clientId)
-        if (client != null && client.desiredRelayClientState != "revoked") {
-            revokeClient(client.copy(desiredRelayClientState = "revoked"))
-        }
-        deleteTemporaryAccessGrantsForClient(request.clientId)
-        if (request.exchangeEndedAt != null) deleteEndedRequestPsk(request.id)
-        trimCompletedHistory()
-    }
-
     @Update
     suspend fun updatePairingAttempt(attempt: PairingAttemptEntity): Int
 

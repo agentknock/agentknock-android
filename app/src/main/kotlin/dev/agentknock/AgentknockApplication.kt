@@ -29,6 +29,7 @@ import dev.agentknock.storage.request.RequestConnectionManager
 import dev.agentknock.storage.request.RequestMaterialStore
 import dev.agentknock.storage.request.persistentRelayRetryDeadline
 import dev.agentknock.storage.request.AiReviewCoordinator
+import dev.agentknock.storage.request.ClientRemovalRequests
 import dev.agentknock.storage.request.ClientRepository
 import dev.agentknock.storage.request.GitSigningRequests
 import dev.agentknock.storage.request.InvocationRequests
@@ -145,6 +146,13 @@ internal class ApplicationContainer(application: Application) {
         json = Json,
         currentTimeMillis = System::currentTimeMillis,
     )
+    private val clientRemovalRequests = ClientRemovalRequests(
+        dao = database.requestDao(),
+        audit = audit,
+        writeTransaction = writeTransaction,
+        json = Json,
+        currentTimeMillis = System::currentTimeMillis,
+    )
 
     val requestInbox = RequestInbox(database.requestDao())
     private val clients = ClientRepository(
@@ -190,6 +198,7 @@ internal class ApplicationContainer(application: Application) {
         gitSigningRequests = gitSigningRequests,
         sshAuthenticationRequests = sshAuthenticationRequests,
         pairingRequests = pairingRequests,
+        clientRemovalRequests = clientRemovalRequests,
         approvalReviewer = HttpRelayApprovalReviewClient(
             RelayHttpTransport(approvalReviewHttpClient(httpClient)),
         ),

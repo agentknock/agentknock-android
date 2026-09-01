@@ -215,6 +215,13 @@ class RequestRepositorySlotTest {
             json = Json,
             currentTimeMillis = { now },
         )
+        val clientRemovalRequests = ClientRemovalRequests(
+            dao = database.requestDao(),
+            audit = audit,
+            writeTransaction = RoomWriteTransaction(database),
+            json = Json,
+            currentTimeMillis = { now },
+        )
         repository = RequestRepository(
             dao = database.requestDao(),
             material = requestMaterial,
@@ -226,6 +233,7 @@ class RequestRepositorySlotTest {
             gitSigningRequests = gitSigningRequests,
             sshAuthenticationRequests = sshAuthenticationRequests,
             pairingRequests = pairingRequests,
+            clientRemovalRequests = clientRemovalRequests,
             approvalReviewer = approvalReviewer,
             relay = relay,
             aiReviews = AiReviewCoordinator(reviewScope),

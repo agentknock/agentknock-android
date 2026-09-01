@@ -83,6 +83,31 @@ class ClientRepositoryTest {
     }
 
     @Test
+    fun desiredRevocationCannotBeOverwrittenBeforeRelayAcknowledgesIt() = runTest {
+        database.requestDao().insertClient(
+            client(desiredState = RelayClientState.REVOKED.wireName),
+        )
+        val repository = repository(audit)
+
+        assertEquals(
+            ClientChangeResult.INVALID_STATE,
+            repository.setDesiredRelayState(CLIENT_ID, RelayClientState.SUSPENDED),
+        )
+        assertEquals(
+            ClientChangeResult.INVALID_STATE,
+            repository.setDesiredRelayState(CLIENT_ID, RelayClientState.ACTIVE),
+        )
+        assertEquals(
+            ClientChangeResult.CHANGED,
+            repository.setDesiredRelayState(CLIENT_ID, RelayClientState.REVOKED),
+        )
+        assertEquals(
+            RelayClientState.REVOKED.wireName,
+            database.requestDao().getClient(CLIENT_ID)?.desiredRelayClientState,
+        )
+    }
+
+    @Test
     fun renameIsANoOpForTheExistingTrimmedNameAndRollsBackWithItsAudit() = runTest {
         database.requestDao().insertClient(client())
         val repository = repository(InsertThenFailAuditSink(audit))
