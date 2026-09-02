@@ -80,6 +80,12 @@ internal enum class ApprovalRequestState(val storedName: String) {
     VERIFICATION_FAILED("verification_failed"),
 }
 
+internal enum class RequestFailureKind(val storedName: String) {
+    VERIFICATION("verification"),
+    RELAY("relay"),
+    DELIVERY("delivery"),
+}
+
 internal enum class ApprovalDecision(val storedName: String) {
     APPROVED("approved"),
     DENIED("denied"),
@@ -95,6 +101,7 @@ internal enum class SecretUploadRequestState(val storedName: String) {
     REVIEW_PENDING("review_pending"),
     APPROVED("approved"),
     REJECTED("rejected"),
+    ENDED("ended"),
     VERIFICATION_FAILED("verification_failed"),
 }
 
@@ -115,17 +122,36 @@ internal fun String.toRequestKind(): RequestKind =
 
 internal fun approvalRequestState(
     state: InboxRequestState,
-    error: String?,
+    failureKind: String?,
 ): ApprovalRequestState = when (state) {
     InboxRequestState.REVIEWING,
     InboxRequestState.ACTION_REQUIRED,
     -> ApprovalRequestState.APPROVAL_PENDING
     InboxRequestState.WAITING -> ApprovalRequestState.WAITING_FOR_COMPLETION
-    InboxRequestState.COMPLETED -> if (error == null) {
-        ApprovalRequestState.COMPLETED
-    } else {
+    InboxRequestState.COMPLETED -> if (
+        failureKind == RequestFailureKind.VERIFICATION.storedName
+    ) {
         ApprovalRequestState.VERIFICATION_FAILED
+    } else {
+        ApprovalRequestState.COMPLETED
     }
+}
+
+internal fun secretUploadRequestState(
+    state: InboxRequestState,
+    failureKind: String?,
+    decision: String?,
+): SecretUploadRequestState = when {
+    decision == SecretUploadRequestState.APPROVED.storedName ->
+        SecretUploadRequestState.APPROVED
+    decision == SecretUploadRequestState.REJECTED.storedName ->
+        SecretUploadRequestState.REJECTED
+    state == InboxRequestState.COMPLETED &&
+        failureKind == RequestFailureKind.VERIFICATION.storedName ->
+        SecretUploadRequestState.VERIFICATION_FAILED
+    state == InboxRequestState.COMPLETED -> SecretUploadRequestState.ENDED
+    decision == null -> SecretUploadRequestState.REVIEW_PENDING
+    else -> error("Unknown secret upload decision: $decision")
 }
 
 internal data class InboxRequestSummary(
@@ -906,7 +932,7 @@ internal class RequestInbox(
         checkNotNull(InboxRequestState.entries.find { it.storedName == this })
 
     private fun InboxRequestEntity.toApprovalRequestState(): ApprovalRequestState =
-        approvalRequestState(state.toInboxRequestState(), error)
+        approvalRequestState(state.toInboxRequestState(), failureKind)
 
     private fun String.toApprovalDecision(): ApprovalDecision =
         checkNotNull(ApprovalDecision.entries.find { it.storedName == this })
@@ -916,16 +942,11 @@ internal class RequestInbox(
 
     private fun InboxRequestEntity.toSecretUploadRequestState(
         decision: String?,
-    ): SecretUploadRequestState = when {
-        state.toInboxRequestState() == InboxRequestState.COMPLETED && error != null ->
-            SecretUploadRequestState.VERIFICATION_FAILED
-        decision == null -> SecretUploadRequestState.REVIEW_PENDING
-        decision == SecretUploadRequestState.APPROVED.storedName ->
-            SecretUploadRequestState.APPROVED
-        decision == SecretUploadRequestState.REJECTED.storedName ->
-            SecretUploadRequestState.REJECTED
-        else -> error("Unknown secret upload decision: $decision")
-    }
+    ): SecretUploadRequestState = secretUploadRequestState(
+        state = state.toInboxRequestState(),
+        failureKind = failureKind,
+        decision = decision,
+    )
 
     private fun decodeStringList(value: String): List<String> =
         storedJson.decodeFromString(STRING_LIST_SERIALIZER, value)

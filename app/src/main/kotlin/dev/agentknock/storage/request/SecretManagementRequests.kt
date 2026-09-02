@@ -117,6 +117,7 @@ internal sealed interface SecretUploadDecisionResult {
     data object NotPending : SecretUploadDecisionResult
     data object NotFound : SecretUploadDecisionResult
     data class Invalid(val message: String) : SecretUploadDecisionResult
+    data class Invalidated(val message: String) : SecretUploadDecisionResult
     data object SecretUnavailable : SecretUploadDecisionResult
     data object SecretCorrupted : SecretUploadDecisionResult
     data object UnsupportedEncryption : SecretUploadDecisionResult
@@ -348,6 +349,24 @@ internal class SecretManagementRequests(
         ) {
             return SecretUploadDecisionResult.NotPending
         }
+        val mode = SecretUploadMode.entries.single { it.wireName == uploadRequest.mode }
+        if (mode != SecretUploadMode.CREATE) {
+            val currentTarget = secrets.targetForSecretUpload(mode, uploadRequest.uploadedName)
+            if (currentTarget != uploadRequest.target()) {
+                val message = if (currentTarget == null) {
+                    "The target secret no longer exists."
+                } else {
+                    "The target secret changed before the upload was approved."
+                }
+                rejectSecretUpload(
+                    request = request,
+                    upload = uploadRequest,
+                    decisionSource = AuditDecisionSource.VALIDATION,
+                    detail = message,
+                )
+                return SecretUploadDecisionResult.Invalidated(message)
+            }
+        }
         val finalName = approvedName.trim()
         val preparation = when (uploadRequest.secretType) {
             ENVIRONMENT_SECRET_TYPE -> prepareEnvironmentApproval(request, uploadRequest, finalName)
@@ -493,12 +512,26 @@ internal class SecretManagementRequests(
         ) {
             return SecretUploadDecisionResult.NotPending
         }
-        val now = currentTimeMillis()
-        val lifecycle = secretUploadLifecycle(
-            SecretUploadRequestState.REJECTED.storedName,
-            transportFinished = request.exchangeEndedAt != null,
+        rejectSecretUpload(
+            request = request,
+            upload = upload,
+            decisionSource = AuditDecisionSource.USER,
         )
-        return writeTransaction.execute {
+        return SecretUploadDecisionResult.Rejected
+    }
+
+    private suspend fun rejectSecretUpload(
+        request: InboxRequestEntity,
+        upload: SecretUploadRequestEntity,
+        decisionSource: AuditDecisionSource,
+        detail: String? = null,
+    ) {
+        writeTransaction.execute {
+            val now = currentTimeMillis()
+            val lifecycle = secretUploadLifecycle(
+                SecretUploadRequestState.REJECTED.storedName,
+                transportFinished = request.exchangeEndedAt != null,
+            )
             dao.updateSecretUploadRequest(
                 request = request.copy(
                     state = lifecycle.state.storedName,
@@ -516,8 +549,9 @@ internal class SecretManagementRequests(
                     AuditRecord(
                         type = AuditEventType.SECRET_UPLOAD_DECIDED,
                         outcome = AuditOutcome.REJECTED,
-                        decisionSource = AuditDecisionSource.USER,
+                        decisionSource = decisionSource,
                         subject = upload.uploadedName,
+                        detail = detail,
                         clientId = request.clientId,
                         clientName = request.clientNameSnapshot,
                         relayRequestId = request.id,
@@ -525,7 +559,6 @@ internal class SecretManagementRequests(
                 ),
                 now,
             )
-            SecretUploadDecisionResult.Rejected
         }
     }
 
@@ -542,6 +575,7 @@ internal class SecretManagementRequests(
                     state = InboxRequestState.COMPLETED.storedName,
                     responseOutboxFinished = true,
                     error = message,
+                    failureKind = current.failureKind ?: RequestFailureKind.RELAY.storedName,
                     completedAt = now,
                     exchangeEndedAt = now,
                 ),
@@ -565,6 +599,7 @@ internal class SecretManagementRequests(
                     state = lifecycle.state.storedName,
                     responseOutboxFinished = true,
                     error = message,
+                    failureKind = current.failureKind ?: RequestFailureKind.RELAY.storedName,
                     completedAt = current.completedAt ?: if (lifecycle.completed) now else null,
                     exchangeEndedAt = now,
                 ),
@@ -601,6 +636,11 @@ internal class SecretManagementRequests(
                     state = InboxRequestState.COMPLETED.storedName,
                     responseOutboxFinished = true,
                     error = error,
+                    failureKind = current.failureKind ?: if (!valid) {
+                        RequestFailureKind.VERIFICATION.storedName
+                    } else {
+                        null
+                    },
                     completedAt = now,
                     exchangeEndedAt = now,
                 ),
@@ -660,6 +700,11 @@ internal class SecretManagementRequests(
                     state = lifecycle.state.storedName,
                     responseOutboxFinished = true,
                     error = error,
+                    failureKind = current.failureKind ?: if (!valid) {
+                        RequestFailureKind.VERIFICATION.storedName
+                    } else {
+                        null
+                    },
                     completedAt = current.completedAt ?: if (lifecycle.completed) now else null,
                     exchangeEndedAt = now,
                 ),

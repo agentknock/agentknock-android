@@ -4,6 +4,8 @@ import android.content.Context
 import androidx.room3.Database
 import androidx.room3.Room
 import androidx.room3.RoomDatabase
+import androidx.room3.migration.Migration
+import androidx.sqlite.execSQL
 import dev.agentknock.storage.audit.AuditDao
 import dev.agentknock.storage.audit.AuditEventEntity
 import dev.agentknock.storage.crypto.VaultKeyDao
@@ -53,7 +55,7 @@ import dev.agentknock.storage.device.DeviceCredentialEntity
         SecretUploadSshKeyEntity::class,
         AuditEventEntity::class,
     ],
-    version = 1,
+    version = 2,
     exportSchema = true,
 )
 internal abstract class AgentknockDatabase : RoomDatabase() {
@@ -73,6 +75,11 @@ internal abstract class AgentknockDatabase : RoomDatabase() {
         fun create(context: Context): AgentknockDatabase =
             Room.databaseBuilder(context, AgentknockDatabase::class.java, NAME)
                 .setJournalMode(JournalMode.WRITE_AHEAD_LOGGING)
+                .addMigrations(MIGRATION_1_2)
                 .build()
     }
+}
+
+internal val MIGRATION_1_2 = Migration(1, 2) { connection ->
+    connection.execSQL("ALTER TABLE inbox_requests ADD COLUMN failure_kind TEXT")
 }

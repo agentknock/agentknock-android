@@ -24,6 +24,7 @@ import dev.agentknock.storage.approval.AiReviewDecision
 import dev.agentknock.storage.approval.ApprovalAction
 import dev.agentknock.storage.request.InboxRequestContent
 import dev.agentknock.storage.request.InboxRequestDetails
+import dev.agentknock.storage.request.InboxRequestState
 import dev.agentknock.storage.request.ApprovalDecision
 import dev.agentknock.storage.request.ApprovalCompletionResult
 import dev.agentknock.storage.request.SshAuthenticationRequestDetails
@@ -52,7 +53,7 @@ internal fun SshAuthenticationRequestDetail(
 ) {
     val authentication = (request.content as InboxRequestContent.SshAuthentication).details
     val pending = authentication.state == ApprovalRequestState.APPROVAL_PENDING
-    val aiReviewInFlight = !request.userDecisionAvailable
+    val aiReviewInFlight = request.state == InboxRequestState.REVIEWING
     val temporarySecretNames = authentication.approvalEvaluation.temporaryGrantSecretNames(
         aiReviewInFlight,
     )
@@ -231,6 +232,12 @@ private fun SshAuthenticationOutcome(authentication: SshAuthenticationRequestDet
             authentication.completionMessage ?: "The client ended the SSH authentication request.",
             NoticeTone.NEUTRAL,
         )
+        authentication.state == ApprovalRequestState.COMPLETED &&
+            authentication.error != null -> Notice(
+                "Request ended",
+                authentication.error,
+                NoticeTone.NEUTRAL,
+            )
         authentication.state == ApprovalRequestState.WAITING_FOR_COMPLETION &&
             authentication.decision == ApprovalDecision.APPROVED -> Notice(
             "Authentication signed",

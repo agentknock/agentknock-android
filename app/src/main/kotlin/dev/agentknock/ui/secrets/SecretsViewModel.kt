@@ -59,6 +59,7 @@ private fun SecretUploadDecisionResult.message(): String = when (this) {
     SecretUploadDecisionResult.NotPending -> "This upload no longer needs a decision"
     SecretUploadDecisionResult.NotFound -> "Upload is no longer available"
     is SecretUploadDecisionResult.Invalid -> message
+    is SecretUploadDecisionResult.Invalidated -> message
     SecretUploadDecisionResult.SecretUnavailable ->
         "An uploaded value is unavailable on this device"
     SecretUploadDecisionResult.SecretCorrupted ->
@@ -485,6 +486,10 @@ internal class SecretsViewModel(
         viewModelScope.launch {
             try {
                 action(commit)
+            } catch (failure: IllegalArgumentException) {
+                if (editorState.failEditorCommit(commit)) {
+                    publish(failure.message ?: "The entered value is invalid")
+                }
             } finally {
                 editorState.failEditorCommit(commit)
             }
@@ -548,8 +553,14 @@ internal class SecretsViewModel(
 
     fun saveSshComment(id: String, comment: String) {
         viewModelScope.launch {
+            val result = try {
+                secretRepository.saveSshComment(id, comment)
+            } catch (failure: IllegalArgumentException) {
+                publish(failure.message ?: "The SSH public key comment is invalid")
+                return@launch
+            }
             publish(
-                when (secretRepository.saveSshComment(id, comment)) {
+                when (result) {
                     is SaveSshSecretResult.Saved -> R.string.ssh_public_comment_updated
                     else -> R.string.ssh_public_comment_update_failed
                 },
@@ -841,7 +852,10 @@ internal class SecretsViewModel(
         viewModelScope.launch {
             val result = actions.approveSecretUpload(requestId, approvedName)
             publish(result.message())
-            if (result is SecretUploadDecisionResult.Approved) {
+            if (
+                result is SecretUploadDecisionResult.Approved ||
+                result is SecretUploadDecisionResult.Invalidated
+            ) {
                 clearDecidedUpload(requestId)
             }
         }

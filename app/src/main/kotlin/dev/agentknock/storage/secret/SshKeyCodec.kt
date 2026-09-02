@@ -580,7 +580,7 @@ internal class SshKeyCodec(
 
     private fun DataInputStream.requirePadding(blockSize: Int) {
         val paddingLength = available()
-        require(paddingLength in 1..blockSize) { "Invalid OpenSSH private key padding" }
+        require(paddingLength in 0..blockSize) { "Invalid OpenSSH private key padding" }
         for (expected in 1..paddingLength) {
             require(readUnsignedByte() == expected and 0xff) {
                 "Invalid OpenSSH private key padding"

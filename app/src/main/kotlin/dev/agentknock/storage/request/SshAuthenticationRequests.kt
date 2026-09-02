@@ -50,6 +50,8 @@ private const val SSH_AUTHENTICATION_COMPLETION_ABORTED_DETAIL =
     "SSH authentication was aborted by the client."
 private const val SSH_AUTHENTICATION_COMPLETION_VERIFICATION_ERROR =
     "SSH authentication completion could not be verified."
+private const val SSH_AUTHENTICATION_SECRET_CHANGED_MESSAGE =
+    "The SSH key changed after the command began; start the command again."
 
 private data class SshInvocationSnapshot(
     val requestId: String,
@@ -483,7 +485,13 @@ internal class SshAuthenticationRequests(
             listOf(authentication.secretName),
             request.clientId,
             TemporaryAccessOperation.SSH_AUTHENTICATE,
-        ).singleOrNull() ?: return RequestDecisionResult.ApprovalChanged
+        ).singleOrNull() ?: return rejectChangedSecret(
+            request,
+            authentication,
+            invocation,
+            message,
+            sealResponse,
+        )
         val currentEvaluation = ApprovalPolicyEvaluator.evaluate(
             listOf(policy.toRequestedSecretApproval()),
         )
@@ -507,7 +515,7 @@ internal class SshAuthenticationRequests(
                 denialReason = InvocationDenialReason.POLICY_DENIED,
                 denialMessage = SSH_AUTHENTICATION_POLICY_DENIAL_MESSAGE,
                 authorization = authorization,
-            )
+            ).asCurrentPolicyDenial()
         }
         val storedEvaluation = authentication.approvalEvaluationJson
             ?.let(::decodeApprovalEvaluation)
@@ -549,7 +557,13 @@ internal class SshAuthenticationRequests(
             SshAuthenticationSignatureResult.NotFound,
             SshAuthenticationSignatureResult.WrongType,
             SshAuthenticationSignatureResult.KeyChanged,
-            -> return RequestDecisionResult.SecretChangedSinceInvocation
+            -> return rejectChangedSecret(
+                request,
+                authentication,
+                invocation,
+                message,
+                sealResponse,
+            )
             SshAuthenticationSignatureResult.SecretUnavailable -> {
                 return RequestDecisionResult.SecretUnavailable
             }
@@ -594,6 +608,33 @@ internal class SshAuthenticationRequests(
                 grant = grant,
             )
         }
+    }
+
+    private suspend fun rejectChangedSecret(
+        request: InboxRequestEntity,
+        authentication: SshAuthenticationRequestEntity,
+        invocation: SshInvocationSnapshot,
+        message: ByteArray,
+        sealResponse: suspend (InboxRequestEntity, ByteArray) -> JsonElement?,
+    ): RequestDecisionResult {
+        val response = sealResponse(
+            request,
+            protocol.deniedResponse(
+                InvocationDenialReason.INVALID_REQUEST,
+                SSH_AUTHENTICATION_SECRET_CHANGED_MESSAGE,
+            ),
+        ) ?: return RequestDecisionResult.ClientUnavailable
+        return persistDecision(
+            request = request,
+            authentication = authentication,
+            invocation = invocation,
+            message = message,
+            decision = ApprovalDecision.DENIED,
+            response = response,
+            decisionSource = DECISION_SOURCE_VALIDATION,
+            denialReason = InvocationDenialReason.INVALID_REQUEST,
+            denialMessage = SSH_AUTHENTICATION_SECRET_CHANGED_MESSAGE,
+        ).asSecretChangedSinceInvocation()
     }
 
     suspend fun deny(
@@ -908,6 +949,11 @@ internal class SshAuthenticationRequests(
                     state = InboxRequestState.COMPLETED.storedName,
                     responseOutboxFinished = true,
                     error = error,
+                    failureKind = currentRequest.failureKind ?: if (!valid) {
+                        RequestFailureKind.VERIFICATION.storedName
+                    } else {
+                        null
+                    },
                     completedAt = now,
                     exchangeEndedAt = now,
                 ),
@@ -1001,6 +1047,8 @@ internal class SshAuthenticationRequests(
                 currentRequest.copy(
                     state = InboxRequestState.COMPLETED.storedName,
                     error = message,
+                    failureKind = currentRequest.failureKind
+                        ?: RequestFailureKind.RELAY.storedName,
                     completedAt = now,
                     exchangeEndedAt = now,
                     responseOutboxFinished = true,

@@ -129,7 +129,8 @@ internal fun SecretUploadRequestDetail(
                 upload.state.label(),
                 upload.state == SecretUploadRequestState.VERIFICATION_FAILED,
                 attention = upload.state == SecretUploadRequestState.REVIEW_PENDING,
-                subdued = upload.state == SecretUploadRequestState.REJECTED,
+                subdued = upload.state == SecretUploadRequestState.REJECTED ||
+                    upload.state == SecretUploadRequestState.ENDED,
             )
             Row(verticalAlignment = Alignment.CenterVertically) {
                 Text(
@@ -193,8 +194,30 @@ internal fun SecretUploadRequestDetail(
                     NoticeTone.SUCCESS,
                 )
             }
-            upload.error?.let {
-                Notice("Upload could not be verified", it, NoticeTone.DANGER)
+            upload.error?.let { error ->
+                when (upload.state) {
+                    SecretUploadRequestState.VERIFICATION_FAILED -> Notice(
+                        "Upload could not be verified",
+                        error,
+                        NoticeTone.DANGER,
+                    )
+                    SecretUploadRequestState.APPROVED -> Notice(
+                        "Client confirmation could not be verified",
+                        error,
+                        NoticeTone.NEUTRAL,
+                    )
+                    SecretUploadRequestState.REJECTED -> Notice(
+                        "Upload rejected",
+                        error,
+                        NoticeTone.DANGER,
+                    )
+                    SecretUploadRequestState.ENDED -> Notice(
+                        "Request ended",
+                        error,
+                        NoticeTone.NEUTRAL,
+                    )
+                    SecretUploadRequestState.REVIEW_PENDING -> Unit
+                }
             }
         }
 
@@ -514,5 +537,6 @@ private fun SecretUploadRequestState.label(): String = when (this) {
     SecretUploadRequestState.REVIEW_PENDING -> "Needs review"
     SecretUploadRequestState.APPROVED -> "Approved"
     SecretUploadRequestState.REJECTED -> "Rejected"
+    SecretUploadRequestState.ENDED -> "Ended"
     SecretUploadRequestState.VERIFICATION_FAILED -> "Verification failed"
 }

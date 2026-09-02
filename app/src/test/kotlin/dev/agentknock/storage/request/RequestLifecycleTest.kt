@@ -33,15 +33,53 @@ class RequestLifecycleTest {
         assertEquals(InboxRequestState.WAITING, reviewedRequestState(true))
         assertEquals(
             ApprovalRequestState.APPROVAL_PENDING,
-            approvalRequestState(InboxRequestState.REVIEWING, error = null),
+            approvalRequestState(InboxRequestState.REVIEWING, failureKind = null),
         )
         assertEquals(
             ApprovalRequestState.APPROVAL_PENDING,
-            approvalRequestState(InboxRequestState.ACTION_REQUIRED, error = null),
+            approvalRequestState(InboxRequestState.ACTION_REQUIRED, failureKind = null),
         )
         assertEquals(
             ApprovalRequestState.VERIFICATION_FAILED,
-            approvalRequestState(InboxRequestState.COMPLETED, error = "invalid completion"),
+            approvalRequestState(
+                InboxRequestState.COMPLETED,
+                failureKind = RequestFailureKind.VERIFICATION.storedName,
+            ),
+        )
+        assertEquals(
+            ApprovalRequestState.COMPLETED,
+            approvalRequestState(
+                InboxRequestState.COMPLETED,
+                failureKind = RequestFailureKind.RELAY.storedName,
+            ),
+        )
+    }
+
+    @Test
+    fun uploadDecisionsRemainAuthoritativeAfterTransportCompletion() {
+        assertEquals(
+            SecretUploadRequestState.APPROVED,
+            secretUploadRequestState(
+                state = InboxRequestState.COMPLETED,
+                failureKind = RequestFailureKind.VERIFICATION.storedName,
+                decision = SecretUploadRequestState.APPROVED.storedName,
+            ),
+        )
+        assertEquals(
+            SecretUploadRequestState.VERIFICATION_FAILED,
+            secretUploadRequestState(
+                state = InboxRequestState.COMPLETED,
+                failureKind = RequestFailureKind.VERIFICATION.storedName,
+                decision = null,
+            ),
+        )
+        assertEquals(
+            SecretUploadRequestState.ENDED,
+            secretUploadRequestState(
+                state = InboxRequestState.COMPLETED,
+                failureKind = RequestFailureKind.RELAY.storedName,
+                decision = null,
+            ),
         )
     }
 

@@ -45,6 +45,8 @@ private const val GIT_SIGN_COMPLETION_ABORTED_DETAIL =
     "Git signing was aborted by the client."
 private const val GIT_SIGN_COMPLETION_VERIFICATION_ERROR =
     "Git signing completion could not be verified."
+private const val GIT_SIGN_SECRET_CHANGED_MESSAGE =
+    "The SSH key changed after the command began; start the command again."
 
 /**
  * Owns Git-signing intake and durable transitions.
@@ -462,7 +464,7 @@ internal class GitSigningRequests(
             listOf(gitSign.secretName),
             request.clientId,
             TemporaryAccessOperation.GIT_SIGN,
-        ).singleOrNull() ?: return RequestDecisionResult.ApprovalChanged
+        ).singleOrNull() ?: return rejectChangedSecret(request, sealResponse)
         val currentEvaluation = ApprovalPolicyEvaluator.evaluate(
             listOf(policy.toRequestedSecretApproval()),
         )
@@ -483,7 +485,7 @@ internal class GitSigningRequests(
                 denialReason = InvocationDenialReason.POLICY_DENIED,
                 denialMessage = GIT_SIGN_POLICY_DENIAL_MESSAGE,
                 authorization = authorization,
-            )
+            ).asCurrentPolicyDenial()
         }
         val storedEvaluation = gitSign.approvalEvaluationJson?.let(::decodeApprovalEvaluation)
         if (
@@ -515,7 +517,7 @@ internal class GitSigningRequests(
             GitSignatureResult.NotFound,
             GitSignatureResult.WrongType,
             GitSignatureResult.KeyChanged,
-            -> return RequestDecisionResult.SecretChangedSinceInvocation
+            -> return rejectChangedSecret(request, sealResponse)
             GitSignatureResult.SecretUnavailable -> return RequestDecisionResult.SecretUnavailable
             GitSignatureResult.SecretCorrupted -> return RequestDecisionResult.SecretCorrupted
             GitSignatureResult.UnsupportedEncryption -> {
@@ -547,6 +549,27 @@ internal class GitSigningRequests(
         } else {
             persistTemporaryDecision(request, gitSign, response, authorization, grant)
         }
+    }
+
+    private suspend fun rejectChangedSecret(
+        request: InboxRequestEntity,
+        sealResponse: suspend (InboxRequestEntity, ByteArray) -> JsonElement?,
+    ): RequestDecisionResult {
+        val response = sealResponse(
+            request,
+            gitSignProtocol.deniedResponse(
+                InvocationDenialReason.INVALID_REQUEST,
+                GIT_SIGN_SECRET_CHANGED_MESSAGE,
+            ),
+        ) ?: return RequestDecisionResult.ClientUnavailable
+        return persistDecision(
+            request = request,
+            decision = ApprovalDecision.DENIED,
+            response = response,
+            decisionSource = DECISION_SOURCE_VALIDATION,
+            denialReason = InvocationDenialReason.INVALID_REQUEST,
+            denialMessage = GIT_SIGN_SECRET_CHANGED_MESSAGE,
+        ).asSecretChangedSinceInvocation()
     }
 
     suspend fun deny(
@@ -805,6 +828,11 @@ internal class GitSigningRequests(
                     state = InboxRequestState.COMPLETED.storedName,
                     responseOutboxFinished = true,
                     error = error,
+                    failureKind = currentRequest.failureKind ?: if (!valid) {
+                        RequestFailureKind.VERIFICATION.storedName
+                    } else {
+                        null
+                    },
                     completedAt = now,
                     exchangeEndedAt = now,
                 ),
@@ -901,6 +929,8 @@ internal class GitSigningRequests(
                 currentRequest.copy(
                     state = InboxRequestState.COMPLETED.storedName,
                     error = message,
+                    failureKind = currentRequest.failureKind
+                        ?: RequestFailureKind.RELAY.storedName,
                     completedAt = now,
                     exchangeEndedAt = now,
                     responseOutboxFinished = true,

@@ -51,8 +51,12 @@ internal fun DetailPage(
     content: @Composable () -> Unit,
 ) {
     val scrollState = rememberScrollState()
+    var previousScrollResetKey by remember { mutableStateOf(scrollResetKey) }
     LaunchedEffect(scrollResetKey) {
-        scrollState.scrollTo(0)
+        if (previousScrollResetKey != scrollResetKey) {
+            previousScrollResetKey = scrollResetKey
+            scrollState.scrollTo(0)
+        }
     }
     Column(modifier) {
         TopAppBar(

@@ -419,7 +419,7 @@ class InvocationRequestsTest {
             secrets.saveApprovalMode(pending.secretId, SecretApprovalMode.DENY),
         )
         assertEquals(
-            RequestDecisionResult.Decided,
+            RequestDecisionResult.DeniedByCurrentPolicy,
             regular.approve(
                 requestId = requestId,
                 allowTemporaryAccess = false,

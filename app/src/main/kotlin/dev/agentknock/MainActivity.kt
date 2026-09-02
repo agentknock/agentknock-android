@@ -10,7 +10,9 @@ import androidx.activity.result.contract.ActivityResultContracts
 import androidx.activity.compose.setContent
 import androidx.activity.enableEdgeToEdge
 import androidx.fragment.app.FragmentActivity
+import androidx.lifecycle.Lifecycle
 import androidx.lifecycle.lifecycleScope
+import androidx.lifecycle.repeatOnLifecycle
 import dev.agentknock.push.RequestNotifications
 import dev.agentknock.subscription.SubscriptionRedemptionLink
 import dev.agentknock.ui.AgentknockScreen
@@ -83,10 +85,12 @@ class MainActivity : FragmentActivity() {
     private val notificationStateGeneration = MutableStateFlow(0L)
     private val notificationPermissionRequestLauncher = registerForActivityResult(
         ActivityResultContracts.RequestPermission(),
-    ) {
+    ) { granted ->
         notificationStateGeneration.value += 1
         lifecycleScope.launch {
-            (application as AgentknockApplication).container.requestNotifications.reconcile()
+            val notifications =
+                (application as AgentknockApplication).container.requestNotifications
+            if (granted) notifications.redisplay() else notifications.reconcile()
         }
     }
 
@@ -105,10 +109,12 @@ class MainActivity : FragmentActivity() {
         val deviceAuthentication = container.deviceAuthentication
         val authenticator = DeviceAuthenticator(this, deviceAuthentication)
         lifecycleScope.launch {
-            deviceAuthentication.request.collect { request ->
-                authenticator.bind(request)
-                if (request != null && deviceAuthentication.claimForLaunch(request)) {
-                    authenticator.launch(request)
+            repeatOnLifecycle(Lifecycle.State.RESUMED) {
+                deviceAuthentication.request.collect { request ->
+                    authenticator.bind(request)
+                    if (request != null && deviceAuthentication.claimForLaunch(request)) {
+                        authenticator.launch(request)
+                    }
                 }
             }
         }

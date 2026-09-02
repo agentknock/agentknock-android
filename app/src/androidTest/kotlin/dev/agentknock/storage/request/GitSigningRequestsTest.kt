@@ -605,8 +605,11 @@ class GitSigningRequestsTest {
                 },
             ),
         )
-        assertFalse(sealed)
-        assertNull(database.requestDao().getGitSignRequest(requestId)?.decision)
+        assertTrue(sealed)
+        assertEquals(
+            ApprovalDecision.DENIED.storedName,
+            database.requestDao().getGitSignRequest(requestId)?.decision,
+        )
     }
 
     @Test

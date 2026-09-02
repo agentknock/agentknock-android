@@ -6,6 +6,11 @@ agentknock_data_home="${XDG_DATA_HOME:-${HOME}/.local/share}"
 agentknock_credentials_dir="${agentknock_data_home}/agentknock-android"
 agentknock_password_file="${agentknock_credentials_dir}/upload-keystore.password"
 
+if [[ -n "$(git -C "${agentknock_project_dir}" status --porcelain --untracked-files=all -- app build.gradle.kts settings.gradle.kts gradle.properties gradle gradlew flake.nix flake.lock publish-internal)" ]]; then
+    echo "Refusing to publish with uncommitted build inputs." >&2
+    exit 1
+fi
+
 export AGENTKNOCK_PLAY_CREDENTIALS_FILE="${agentknock_credentials_dir}/play-publisher.json"
 export AGENTKNOCK_UPLOAD_STORE_FILE="${agentknock_credentials_dir}/upload-keystore.p12"
 export AGENTKNOCK_UPLOAD_KEY_ALIAS="agentknock-upload"

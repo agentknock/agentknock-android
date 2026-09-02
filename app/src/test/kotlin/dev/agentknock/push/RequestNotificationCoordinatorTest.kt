@@ -32,7 +32,7 @@ class RequestNotificationCoordinatorTest {
     }
 
     @Test
-    fun `reconcile repeats unchanged state at a process lifetime boundary`() = runTest {
+    fun `reconcile does not redisplay unchanged state in the same process`() = runTest {
         val current = listOf(notification("current"))
         val displayed = mutableListOf<List<RequestNotification>>()
         val coordinator = RequestNotificationCoordinator(
@@ -44,6 +44,23 @@ class RequestNotificationCoordinatorTest {
         runCurrent()
 
         coordinator.reconcile()
+
+        assertEquals(listOf(current), displayed)
+    }
+
+    @Test
+    fun `permission grant explicitly redisplays current state`() = runTest {
+        val current = listOf(notification("current"))
+        val displayed = mutableListOf<List<RequestNotification>>()
+        val coordinator = RequestNotificationCoordinator(
+            scope = backgroundScope,
+            requests = MutableStateFlow(current),
+            displayRequests = { displayed += it },
+            displayWake = {},
+        )
+        runCurrent()
+
+        coordinator.redisplay()
 
         assertEquals(listOf(current, current), displayed)
     }

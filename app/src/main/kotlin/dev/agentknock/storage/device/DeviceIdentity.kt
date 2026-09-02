@@ -175,7 +175,7 @@ internal interface DeviceIdentityDao {
             error = CASE
                 WHEN completed_at IS NOT NULL THEN error
                 WHEN error IS NULL THEN :error
-                ELSE error || '\n\n' || :error
+                ELSE error || char(10) || char(10) || :error
             END,
             completed_at = COALESCE(completed_at, :now),
             exchange_ended_at = COALESCE(exchange_ended_at, :now)

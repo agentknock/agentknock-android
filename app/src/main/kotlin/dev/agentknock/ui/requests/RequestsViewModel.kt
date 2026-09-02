@@ -31,6 +31,8 @@ private fun RequestDecisionResult.message(): String = when (this) {
     RequestDecisionResult.NotFound -> "Request is no longer available"
     RequestDecisionResult.ParentUnavailable -> "The original command request is unavailable"
     RequestDecisionResult.ClientUnavailable -> "The paired client is unavailable"
+    RequestDecisionResult.DeniedByCurrentPolicy ->
+        "Request denied by its current approval setting"
     RequestDecisionResult.ApprovalChanged ->
         "The secret or approval setting changed; review the request again"
     RequestDecisionResult.SecretChanged ->

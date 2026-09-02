@@ -34,6 +34,7 @@ import dev.agentknock.storage.request.GitSignRequestDetails
 import dev.agentknock.storage.request.ApprovalRequestState
 import dev.agentknock.storage.request.InboxRequestContent
 import dev.agentknock.storage.request.InboxRequestDetails
+import dev.agentknock.storage.request.InboxRequestState
 import dev.agentknock.storage.request.ApprovalDecision
 import dev.agentknock.storage.secret.TemporaryAccessOperation
 import dev.agentknock.ui.components.ClientIdentity
@@ -61,7 +62,7 @@ internal fun GitSignRequestDetail(
     val signing = (request.content as InboxRequestContent.GitSign).details
     val pending = signing.state == ApprovalRequestState.APPROVAL_PENDING
     var confirmTemporaryAccess by remember(request.id) { mutableStateOf(false) }
-    val aiReviewInFlight = !request.userDecisionAvailable
+    val aiReviewInFlight = request.state == InboxRequestState.REVIEWING
     val temporarySecretNames = signing.approvalEvaluation.temporaryGrantSecretNames(
         aiReviewInFlight,
     )
@@ -344,6 +345,11 @@ private fun GitSignOutcome(signing: GitSignRequestDetails) {
         signing.completionResult == ApprovalCompletionResult.ABORTED -> Notice(
             "Request ended",
             signing.completionMessage ?: "The client ended the Git signing request.",
+            NoticeTone.NEUTRAL,
+        )
+        signing.state == ApprovalRequestState.COMPLETED && signing.error != null -> Notice(
+            "Request ended",
+            signing.error,
             NoticeTone.NEUTRAL,
         )
         signing.state == ApprovalRequestState.WAITING_FOR_COMPLETION &&

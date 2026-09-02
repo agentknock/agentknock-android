@@ -29,7 +29,15 @@ internal class RequestNotificationCoordinator(
     /** Reconciles notifications before a finite synchronization owner may lose process lifetime. */
     suspend fun reconcile() {
         mutex.withLock {
-            displayIfNeeded(requests.first(), force = true)
+            displayIfNeeded(requests.first())
+        }
+    }
+
+    /** Displays current requests after notification permission is granted. */
+    suspend fun redisplay() {
+        mutex.withLock {
+            displayedRequests = null
+            displayIfNeeded(requests.first())
         }
     }
 
@@ -38,15 +46,12 @@ internal class RequestNotificationCoordinator(
     suspend fun performAction(action: suspend () -> Unit) {
         mutex.withLock {
             action()
-            displayIfNeeded(requests.first(), force = true)
+            displayIfNeeded(requests.first())
         }
     }
 
-    private suspend fun displayIfNeeded(
-        requests: List<RequestNotification>,
-        force: Boolean = false,
-    ) {
-        if (!force && requests == displayedRequests) return
+    private suspend fun displayIfNeeded(requests: List<RequestNotification>) {
+        if (requests == displayedRequests) return
         displayRequests(requests)
         displayedRequests = requests
     }

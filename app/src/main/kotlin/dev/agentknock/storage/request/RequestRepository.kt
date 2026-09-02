@@ -66,6 +66,7 @@ internal sealed interface RequestDecisionResult {
     data object NotFound : RequestDecisionResult
     data object ParentUnavailable : RequestDecisionResult
     data object ClientUnavailable : RequestDecisionResult
+    data object DeniedByCurrentPolicy : RequestDecisionResult
     data object ApprovalChanged : RequestDecisionResult
     data object SecretChanged : RequestDecisionResult
     data object SecretChangedSinceInvocation : RequestDecisionResult
@@ -78,6 +79,20 @@ internal sealed interface RequestDecisionResult {
     data object TemporaryAccessUnavailable : RequestDecisionResult
     data object TemporaryAccessNotStarted : RequestDecisionResult
 }
+
+internal fun RequestDecisionResult.asCurrentPolicyDenial(): RequestDecisionResult =
+    if (this == RequestDecisionResult.Decided) {
+        RequestDecisionResult.DeniedByCurrentPolicy
+    } else {
+        this
+    }
+
+internal fun RequestDecisionResult.asSecretChangedSinceInvocation(): RequestDecisionResult =
+    if (this == RequestDecisionResult.Decided) {
+        RequestDecisionResult.SecretChangedSinceInvocation
+    } else {
+        this
+    }
 
 internal sealed interface RequestSyncResult {
     data object Success : RequestSyncResult
@@ -296,6 +311,8 @@ internal class RequestRepository(
     }.also { result ->
         if (
             result == RequestDecisionResult.Decided ||
+            result == RequestDecisionResult.DeniedByCurrentPolicy ||
+            result == RequestDecisionResult.SecretChangedSinceInvocation ||
             result == RequestDecisionResult.TemporaryAccessNotStarted
         ) {
             requestSync()
@@ -658,6 +675,14 @@ internal class RequestRepository(
     ): RequestSyncResult? {
         if (durableRelayState.outstanding != null) return null
 
+        sendNextResponse(
+            credentials = credentials,
+            connection = connection,
+            durableRelayState = durableRelayState,
+            pairingRemoval = true,
+        )?.let { return it }
+        if (durableRelayState.outstanding != null) return null
+
         sendNextClientState(
             credentials = credentials,
             connection = connection,
@@ -665,17 +690,13 @@ internal class RequestRepository(
         )?.let { return it }
         if (durableRelayState.outstanding != null) return null
 
-        for (request in dao.getUnfinishedResponseOutboxes()) {
-            if (request.deviceIdentityId != credentials.deviceIdentityId) continue
-            sendDurableResponse(
-                connection = connection,
-                clientId = request.clientId,
-                requestId = request.id,
-                response = json.parseToJsonElement(checkNotNull(request.responseJson)),
-                durableRelayState = durableRelayState,
-            )?.let { return it }
-            if (durableRelayState.outstanding != null) return null
-        }
+        sendNextResponse(
+            credentials = credentials,
+            connection = connection,
+            durableRelayState = durableRelayState,
+            pairingRemoval = false,
+        )?.let { return it }
+        if (durableRelayState.outstanding != null) return null
 
         for (request in dao.getOpenExchanges()) {
             if (request.id in durableRelayState.resumedRequestIds) continue
@@ -691,6 +712,27 @@ internal class RequestRepository(
                 requestId = request.id,
             )
             return null
+        }
+        return null
+    }
+
+    private suspend fun sendNextResponse(
+        credentials: RelayDeviceCredentials,
+        connection: RelayDeviceConnection,
+        durableRelayState: DurableRelayState,
+        pairingRemoval: Boolean,
+    ): RequestSyncResult? {
+        for (request in dao.getUnfinishedResponseOutboxes()) {
+            if (request.deviceIdentityId != credentials.deviceIdentityId) continue
+            if ((request.kind == RequestKind.PAIRING_REMOVE.storedName) != pairingRemoval) continue
+            sendDurableResponse(
+                connection = connection,
+                clientId = request.clientId,
+                requestId = request.id,
+                response = json.parseToJsonElement(checkNotNull(request.responseJson)),
+                durableRelayState = durableRelayState,
+            )?.let { return it }
+            if (durableRelayState.outstanding != null) return null
         }
         return null
     }
@@ -891,6 +933,8 @@ internal class RequestRepository(
                         state = InboxRequestState.COMPLETED.storedName,
                         responseOutboxFinished = true,
                         error = request.error ?: message,
+                        failureKind = request.failureKind
+                            ?: RequestFailureKind.RELAY.storedName,
                         completedAt = request.completedAt ?: now,
                         exchangeEndedAt = now,
                     ),
@@ -958,6 +1002,7 @@ internal class RequestRepository(
                     responseJson = fallback.toString(),
                     responseOutboxFinished = false,
                     error = PairedRequestErrorCode.RESPONSE_TOO_LARGE.message,
+                    failureKind = RequestFailureKind.DELIVERY.storedName,
                 ),
             ) == 1,
         )
@@ -1057,7 +1102,7 @@ internal class RequestRepository(
         credentials: RelayDeviceCredentials,
         message: IncomingRelayMessage,
     ): ProcessedRelayMessage? {
-        val requestPayload = message.request ?: return null
+        val requestPayload = message.request ?: return ProcessedRelayMessage
         val existing = dao.getRequestById(message.requestId)
         if (existing != null) {
             if (
@@ -1065,10 +1110,10 @@ internal class RequestRepository(
                 existing.deviceIdentityId != credentials.deviceIdentityId ||
                 (existing.kind == RequestKind.PAIRING.storedName) != (message.addressId != null)
             ) {
-                return null
+                return ProcessedRelayMessage
             }
             if (existing.exchangeEndedAt != null) return ProcessedRelayMessage
-            if (existing.requestJson != requestPayload.toString()) return null
+            if (existing.requestJson != requestPayload.toString()) return ProcessedRelayMessage
             if (existing.responseJson != null) {
                 dao.reopenResponseOutbox(existing.id)
             }
@@ -1141,7 +1186,7 @@ internal class RequestRepository(
         requestPayload: JsonElement,
     ): ProcessedRelayMessage? {
         val now = currentTimeMillis()
-        if (!isFreshRelayRequestId(message.requestId, now)) return null
+        if (!isFreshRelayRequestId(message.requestId, now)) return ProcessedRelayMessage
         if (message.addressId != null) {
             return startPairing(credentials, message, requestPayload)
         }
@@ -1150,7 +1195,8 @@ internal class RequestRepository(
         if (client != null) {
             return processActiveClientRequest(credentials, message, requestPayload, client, now)
         }
-        val pairing = pairingRequests.finishContext(credentials, message.clientId) ?: return null
+        val pairing = pairingRequests.finishContext(credentials, message.clientId)
+            ?: return ProcessedRelayMessage
         val opened = runCatching {
             pairedRequestProtocol.openPairedRequest(
                 deviceId = credentials.deviceId,
@@ -1163,7 +1209,7 @@ internal class RequestRepository(
                 devicePublicKey = credentials.devicePublicKey,
                 request = requestPayload,
             )
-        }.getOrNull() ?: return null
+        }.getOrNull() ?: return ProcessedRelayMessage
         val acceptedPsks = try {
             AcceptedRequestPsks(
                 requestPsk = material.encryptRequestPsk(
@@ -1216,14 +1262,14 @@ internal class RequestRepository(
         client: ClientEntity,
         now: Long,
     ): ProcessedRelayMessage? {
-        if (client.deviceIdentityId != credentials.deviceIdentityId) return null
+        if (client.deviceIdentityId != credentials.deviceIdentityId) return ProcessedRelayMessage
         if (
             client.relayClientState != RelayClientState.ACTIVE.wireName ||
             client.desiredRelayClientState?.let { it != RelayClientState.ACTIVE.wireName } == true
         ) {
-            return null
+            return ProcessedRelayMessage
         }
-        val clientPsk = material.decryptClientPsk(client) ?: return null
+        val clientPsk = material.decryptClientPsk(client) ?: return ProcessedRelayMessage
         val previousClientPsk = material.decryptPreviousClientPsk(client)
         val opened = runCatching {
             pairedRequestProtocol.openPairedRequest(
@@ -1237,7 +1283,7 @@ internal class RequestRepository(
                 devicePublicKey = credentials.devicePublicKey,
                 request = requestPayload,
             )
-        }.getOrNull() ?: return null
+        }.getOrNull() ?: return ProcessedRelayMessage
         val acceptedPsks = material.acceptedRequestPsks(
             client = client,
             relayRequestId = message.requestId,
@@ -1527,7 +1573,7 @@ internal class RequestRepository(
         requestPayload: JsonElement,
     ): ProcessedRelayMessage? {
         if (message.addressId != credentials.addressId || message.clientId != message.requestId) {
-            return null
+            return ProcessedRelayMessage
         }
         if (!pairingRequests.start(
             credentials = credentials,
@@ -1553,13 +1599,15 @@ internal class RequestRepository(
         activeCredentials: RelayDeviceCredentials,
         message: IncomingRelayMessage,
     ): ProcessedRelayMessage? {
-        val completion = message.completion ?: return null
-        val request = dao.getRequestById(message.requestId) ?: return null
-        if (request.clientId != message.clientId) return null
-        if (request.deviceIdentityId != activeCredentials.deviceIdentityId) return null
+        val completion = message.completion ?: return ProcessedRelayMessage
+        val request = dao.getRequestById(message.requestId) ?: return ProcessedRelayMessage
+        if (request.clientId != message.clientId) return ProcessedRelayMessage
+        if (request.deviceIdentityId != activeCredentials.deviceIdentityId) {
+            return ProcessedRelayMessage
+        }
         val requestKind = request.kind.toRequestKind()
         val isInitialPairing = requestKind == RequestKind.PAIRING
-        if (isInitialPairing != (message.addressId != null)) return null
+        if (isInitialPairing != (message.addressId != null)) return ProcessedRelayMessage
         if (request.exchangeEndedAt != null) return ProcessedRelayMessage
         val processed = when (requestKind) {
             RequestKind.PAIRING -> {
@@ -1618,6 +1666,8 @@ internal class RequestRepository(
                 state = InboxRequestState.COMPLETED.storedName,
                 responseOutboxFinished = true,
                 error = request.error ?: "The completion could not be verified."
+                    .takeIf { opened == CompletionOpenResult.IrrecoverablyInvalid },
+                failureKind = request.failureKind ?: RequestFailureKind.VERIFICATION.storedName
                     .takeIf { opened == CompletionOpenResult.IrrecoverablyInvalid },
                 completedAt = request.completedAt ?: now,
                 exchangeEndedAt = now,

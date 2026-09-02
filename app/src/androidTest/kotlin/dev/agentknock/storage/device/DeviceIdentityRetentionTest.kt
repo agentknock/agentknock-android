@@ -365,9 +365,10 @@ class DeviceIdentityRetentionTest {
             database.vaultKeyDao().observeReferencedKeys().first()
                 .none { it.id == "pending-pairing-key" },
         )
-        assertTrue(
-            checkNotNull(checkNotNull(requestDao.getRequestById(pairingId)).error)
-                .contains("pairing completion was malformed"),
+        assertEquals(
+            "The pairing completion was malformed.\n\n" +
+                DEVICE_IDENTITY_REPLACED_REQUEST_ERROR,
+            checkNotNull(requestDao.getRequestById(pairingId)).error,
         )
         assertEquals("rejected", requestDao.getSecretUploadRequest(uploadId)?.decision)
         assertEquals("approved", requestDao.getSecretUploadRequest(approvedUploadId)?.decision)

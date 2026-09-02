@@ -44,6 +44,7 @@ import dev.agentknock.storage.approval.ApprovalAction
 import dev.agentknock.storage.approval.ApprovalEvaluation
 import dev.agentknock.storage.request.InboxRequestContent
 import dev.agentknock.storage.request.InboxRequestDetails
+import dev.agentknock.storage.request.InboxRequestState
 import dev.agentknock.storage.request.ApprovalCompletionResult
 import dev.agentknock.storage.request.ApprovalDecision
 import dev.agentknock.storage.request.SecretUseRequestDetails
@@ -70,7 +71,7 @@ internal fun InvocationRequestDetail(
 ) {
     val secretUse = (request.content as InboxRequestContent.SecretUse).details
     var confirmTemporaryAccess by remember(request.id) { mutableStateOf(false) }
-    val aiReviewInFlight = !request.userDecisionAvailable
+    val aiReviewInFlight = request.state == InboxRequestState.REVIEWING
     val temporarySecretNames = secretUse.approvalEvaluation.temporaryGrantSecretNames(
         aiReviewInFlight,
     )
@@ -343,7 +344,11 @@ private fun SecretUseOutcome(secretUse: SecretUseRequestDetails) {
                 secretUse.completionMessage ?: "The client stopped this request.",
                 NoticeTone.SUBDUED,
             )
-            null -> OutcomeNotice("Completed", "The request is complete.")
+            null -> if (secretUse.error != null) {
+                OutcomeNotice("Request ended", secretUse.error, NoticeTone.NEUTRAL)
+            } else {
+                OutcomeNotice("Completed", "The request is complete.")
+            }
         }
         ApprovalRequestState.VERIFICATION_FAILED -> OutcomeNotice(
             "Could not verify request",

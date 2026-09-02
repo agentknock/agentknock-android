@@ -383,7 +383,7 @@ private fun RequestRowContent(
                     if (request.secretNames.isNotEmpty()) {
                         SecretIdentities(
                             request.secretNames,
-                            unavailable = request.hasInvalidSecretReference(),
+                            unavailable = false,
                         )
                     }
                 }
@@ -467,9 +467,6 @@ private fun InboxRequestSummary.hasVerificationFailure(): Boolean =
 
 private fun InboxRequestSummary.wasAccepted(): Boolean =
     approvalStatus()?.completionResult == ApprovalCompletionResult.APPROVED
-
-private fun InboxRequestSummary.hasInvalidSecretReference(): Boolean =
-    approvalStatus()?.completionReason == "INVALID_REQUEST"
 
 private fun InboxRequestSummary.approvalStatus(): InboxRequestStatus.Approval? =
     status as? InboxRequestStatus.Approval

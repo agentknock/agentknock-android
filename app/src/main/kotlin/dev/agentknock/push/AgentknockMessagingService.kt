@@ -22,6 +22,7 @@ import androidx.work.BackoffPolicy
 import androidx.work.Constraints
 import androidx.work.CoroutineWorker
 import androidx.work.ExistingWorkPolicy
+import androidx.work.ForegroundInfo
 import androidx.work.NetworkType
 import androidx.work.OneTimeWorkRequestBuilder
 import androidx.work.OutOfQuotaPolicy
@@ -196,6 +197,19 @@ class PushSynchronizationWorker(
     applicationContext: Context,
     parameters: WorkerParameters,
 ) : CoroutineWorker(applicationContext, parameters) {
+    override suspend fun getForegroundInfo(): ForegroundInfo = ForegroundInfo(
+        FOREGROUND_NOTIFICATION_ID,
+        Notification.Builder(applicationContext, RequestNotifications.BACKGROUND_CHANNEL_ID)
+            .setSmallIcon(R.drawable.ic_notification)
+            .setColor(applicationContext.getColor(R.color.notification_accent))
+            .setContentTitle(applicationContext.getString(R.string.app_name))
+            .setContentText(applicationContext.getString(R.string.checking_for_requests))
+            .setCategory(Notification.CATEGORY_SERVICE)
+            .setVisibility(Notification.VISIBILITY_SECRET)
+            .setOngoing(true)
+            .build(),
+    )
+
     override suspend fun doWork(): Result {
         val container = (applicationContext as AgentknockApplication).container
         if (container.factoryResetInProgress) return Result.success()
@@ -246,6 +260,7 @@ class PushSynchronizationWorker(
     companion object {
         private const val WORK_NAME = "push-synchronization"
         private const val DEADLINE_WORK_NAME = "push-synchronization-deadline"
+        private const val FOREGROUND_NOTIFICATION_ID = 2
         private const val TAG = "AgentknockPush"
 
         fun enqueue(context: Context) {
@@ -355,7 +370,7 @@ internal object RequestNotifications {
         val backgroundChannel = NotificationChannel(
             BACKGROUND_CHANNEL_ID,
             context.getString(R.string.background_notification_channel),
-            NotificationManager.IMPORTANCE_MIN,
+            NotificationManager.IMPORTANCE_LOW,
         ).apply {
             description = context.getString(R.string.background_notification_channel_description)
             lockscreenVisibility = Notification.VISIBILITY_SECRET

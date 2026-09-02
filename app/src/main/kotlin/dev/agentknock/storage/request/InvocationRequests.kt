@@ -532,7 +532,7 @@ internal class InvocationRequests(
                 denialReason = InvocationDenialReason.POLICY_DENIED,
                 denialMessage = SECRET_USE_POLICY_DENIAL_MESSAGE,
                 authorization = authorization,
-            )
+            ).asCurrentPolicyDenial()
         }
         if (
             latestDescription.secrets != storedSecrets ||
@@ -852,6 +852,11 @@ internal class InvocationRequests(
                     state = InboxRequestState.COMPLETED.storedName,
                     responseOutboxFinished = true,
                     error = error,
+                    failureKind = currentRequest.failureKind ?: if (!valid) {
+                        RequestFailureKind.VERIFICATION.storedName
+                    } else {
+                        null
+                    },
                     completedAt = now,
                     exchangeEndedAt = now,
                 ),
@@ -936,6 +941,8 @@ internal class InvocationRequests(
                 currentRequest.copy(
                     state = InboxRequestState.COMPLETED.storedName,
                     error = message,
+                    failureKind = currentRequest.failureKind
+                        ?: RequestFailureKind.RELAY.storedName,
                     completedAt = now,
                     exchangeEndedAt = now,
                     responseOutboxFinished = true,

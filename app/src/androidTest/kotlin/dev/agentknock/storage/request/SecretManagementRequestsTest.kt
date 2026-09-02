@@ -18,6 +18,8 @@ import dev.agentknock.storage.crypto.GeneratedEncryptionKey
 import dev.agentknock.storage.crypto.VaultKeyManager
 import dev.agentknock.storage.device.DeviceIdentityEntity
 import dev.agentknock.storage.secret.SecretRepository
+import dev.agentknock.storage.secret.CreateSecretResult
+import dev.agentknock.storage.secret.SaveSecretResult
 import dev.agentknock.storage.secret.SshKeyAlgorithm
 import javax.crypto.SecretKey
 import javax.crypto.spec.SecretKeySpec
@@ -306,6 +308,40 @@ class SecretManagementRequestsTest {
     }
 
     @Test
+    fun changedUpdateTargetRejectsAndDiscardsThePendingUpload() = runTest {
+        val requestId = "changed-update-target"
+        val created = secrets.createEnvironmentSecret("production", "")
+        check(created is CreateSecretResult.Created)
+        assertEquals(
+            RESPONSE,
+            requests(audit).receiveSecretUpload(
+                client = client(),
+                relayRequestId = requestId,
+                requestPayload = requestPayload(requestId),
+                plaintext = environmentUploadPlaintext("UPDATE", "production"),
+                acceptedPsks = acceptedPsks(requestId),
+                sealResponse = { RESPONSE },
+            ),
+        )
+        assertEquals(
+            SaveSecretResult.SAVED,
+            secrets.saveInstructions(created.id, "New instructions"),
+        )
+
+        assertEquals(
+            SecretUploadDecisionResult.Invalidated(
+                "The target secret changed before the upload was approved.",
+            ),
+            requests(audit).approveSecretUpload(requestId, "production"),
+        )
+        assertEquals(
+            SecretUploadRequestState.REJECTED.storedName,
+            database.requestDao().getSecretUploadRequest(requestId)?.decision,
+        )
+        assertTrue(database.requestDao().getSecretUploadEnvironmentVariables(requestId).isEmpty())
+    }
+
+    @Test
     fun pendingUploadSensitivityControlsProtectedValueAccess() = runTest {
         val requestId = "upload-protected-value"
         receiveEnvironmentUpload(requestId)
@@ -496,8 +532,11 @@ class SecretManagementRequestsTest {
     private fun secretListPlaintext(): ByteArray =
         """{${clientSoftwareFields()},"method":"SecretList"}""".encodeToByteArray()
 
-    private fun environmentUploadPlaintext(): ByteArray =
-        """{${clientSoftwareFields()},"method":"SecretUpload","mode":"CREATE","secret":{"name":"uploaded-secret","type":"environment","variables":{"TOKEN":{"value":"secret-value"}}}}"""
+    private fun environmentUploadPlaintext(
+        mode: String = "CREATE",
+        name: String = "uploaded-secret",
+    ): ByteArray =
+        """{${clientSoftwareFields()},"method":"SecretUpload","mode":"$mode","secret":{"name":"$name","type":"environment","variables":{"TOKEN":{"value":"secret-value"}}}}"""
             .encodeToByteArray()
 
     private fun uploadCompletionPlaintext(): ByteArray =

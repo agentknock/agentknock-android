@@ -146,6 +146,15 @@ class SshKeyCodecTest {
     }
 
     @Test
+    fun `imports an OpenSSH private key whose private block needs no padding`() {
+        val key = codec.importOpenSshPrivateKey(withoutFinalPaddingByte(TEST_PRIVATE_KEY))
+
+        assertEquals(SshKeyAlgorithm.ED25519, key.algorithm)
+        assertEquals("test@examplex", key.comment)
+        assertEquals(TEST_PUBLIC_KEY + "x", key.publicKeyLine)
+    }
+
+    @Test
     fun `rejects RSA private material with inconsistent CRT exponents`() {
         val key = codec.importOpenSshPrivateKey(rsaFixture().privateKey)
         val privateKey = KeyFactory.getInstance("RSA").generatePrivate(
@@ -336,6 +345,23 @@ class SshKeyCodecTest {
         (value.size ushr 8).toByte(),
         value.size.toByte(),
     ) + value
+
+    private fun withoutFinalPaddingByte(pem: String): String {
+        val lines = pem.lines()
+        val encoded = Base64.getDecoder().decode(lines.drop(1).dropLast(1).joinToString(""))
+        val paddedComment = sshString("test@example".encodeToByteArray()) + byteArrayOf(1)
+        val unpaddedComment = sshString("test@examplex".encodeToByteArray())
+        assertEquals(paddedComment.size, unpaddedComment.size)
+        val commentOffset = encoded.size - paddedComment.size
+        assertArrayEquals(
+            paddedComment,
+            encoded.copyOfRange(commentOffset, encoded.size),
+        )
+        unpaddedComment.copyInto(encoded, destinationOffset = commentOffset)
+        return "-----BEGIN OPENSSH PRIVATE KEY-----\n" +
+            Base64.getMimeEncoder(70, "\n".encodeToByteArray()).encodeToString(encoded) +
+            "\n-----END OPENSSH PRIVATE KEY-----"
+    }
 
     private fun rsaFixture(): RsaFixture {
         val keyPair = KeyPairGenerator.getInstance("RSA").apply { initialize(2048) }.generateKeyPair()

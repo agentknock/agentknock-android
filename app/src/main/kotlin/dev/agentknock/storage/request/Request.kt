@@ -71,6 +71,8 @@ internal data class InboxRequestEntity(
     val responseJson: String?,
     @ColumnInfo(name = "error")
     val error: String?,
+    @ColumnInfo(name = "failure_kind")
+    val failureKind: String? = null,
     @ColumnInfo(name = "received_at")
     val receivedAt: Long,
     @ColumnInfo(name = "completed_at")
