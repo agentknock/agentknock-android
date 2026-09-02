@@ -41,6 +41,7 @@ import androidx.compose.ui.Modifier
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
 import dev.agentknock.presentation.formatPlatformName
+import dev.agentknock.presentation.formatRelativeTime
 import dev.agentknock.presentation.formatTimestamp
 import dev.agentknock.presentation.renderSoftware
 import dev.agentknock.relay.RelayClientState
@@ -50,6 +51,8 @@ import dev.agentknock.storage.secret.TemporaryAccessOperation
 import dev.agentknock.ui.components.InformationRow
 import dev.agentknock.ui.components.InformationSurface
 import dev.agentknock.ui.components.NavigationBackButton
+import dev.agentknock.ui.components.Disclosure
+import dev.agentknock.ui.components.ProseEditorScreen
 import dev.agentknock.ui.theme.agentknockColors
 
 @Composable
@@ -72,6 +75,22 @@ internal fun ClientDetail(
     }
     var confirmation by rememberSaveable(client.clientId) {
         mutableStateOf<RelayClientState?>(null)
+    }
+    if (showInstructions) {
+        ProseEditorScreen(
+            title = "Client instructions",
+            value = instructions,
+            originalValue = client.instructions,
+            supportingText =
+                "Tell the AI reviewer what this client is used for and how much it should be trusted.",
+            onValueChange = { instructions = it },
+            onSave = {
+                showInstructions = false
+                onSaveInstructions(instructions.trim())
+            },
+            onBack = { showInstructions = false },
+        )
+        return
     }
     Column(modifier) {
         TopAppBar(
@@ -106,6 +125,47 @@ internal fun ClientDetail(
                 ) {
                     ClientStateBadge(client.state, pending)
                     Text(client.state.explanation(), modifier = Modifier.weight(1f))
+                }
+                when (client.state) {
+                    RelayClientState.ACTIVE -> OutlinedButton(
+                        onClick = { onSetState(RelayClientState.SUSPENDED) },
+                        modifier = Modifier.fillMaxWidth(),
+                    ) {
+                        Icon(Icons.Outlined.PauseCircle, contentDescription = null)
+                        Spacer(Modifier.width(8.dp))
+                        Text("Suspend client")
+                    }
+                    RelayClientState.SUSPENDED -> Button(
+                        onClick = { onSetState(RelayClientState.ACTIVE) },
+                        modifier = Modifier.fillMaxWidth(),
+                    ) {
+                        Icon(Icons.Outlined.PlayCircle, contentDescription = null)
+                        Spacer(Modifier.width(8.dp))
+                        Text("Resume client")
+                    }
+                    RelayClientState.PENDING,
+                    RelayClientState.REVOKED,
+                    -> Unit
+                }
+                if (client.state != RelayClientState.REVOKED) {
+                    HorizontalDivider()
+                    Text(
+                        "Revoking is permanent. This client must be paired again to reconnect.",
+                        style = MaterialTheme.typography.bodySmall,
+                        color = MaterialTheme.colorScheme.onSurfaceVariant,
+                    )
+                    OutlinedButton(
+                        onClick = { confirmation = RelayClientState.REVOKED },
+                        modifier = Modifier.fillMaxWidth(),
+                        colors = ButtonDefaults.outlinedButtonColors(
+                            contentColor = MaterialTheme.agentknockColors.danger,
+                        ),
+                        border = BorderStroke(1.dp, MaterialTheme.agentknockColors.danger),
+                    ) {
+                        Icon(Icons.Outlined.Block, contentDescription = null)
+                        Spacer(Modifier.width(8.dp))
+                        Text("Revoke client")
+                    }
                 }
             }
 
@@ -149,11 +209,20 @@ internal fun ClientDetail(
                         ClientField("Agentknock library", renderSoftware(software.library))
                     }
                 }
-                client.pairedAt?.let { ClientField("Paired", formatTimestamp(it)) }
+                client.pairedAt?.let {
+                    ClientField("Paired", "${formatTimestamp(it)} (${formatRelativeTime(it)})")
+                }
                 ClientField(
                     "Last request",
-                    client.lastRequestAt?.let(::formatTimestamp) ?: "None yet",
+                    client.lastRequestAt?.let {
+                        "${formatTimestamp(it)} (${formatRelativeTime(it)})"
+                    } ?: "None yet",
                 )
+            }
+
+            Disclosure("Technical information") {
+                ClientField("Machine ID", client.machineId, monospace = true)
+                ClientField("Client ID", client.clientId, monospace = true)
             }
 
             if (temporaryAccessGrants.isNotEmpty()) {
@@ -199,81 +268,6 @@ internal fun ClientDetail(
                 }
             }
 
-            if (client.state == RelayClientState.ACTIVE || client.state == RelayClientState.SUSPENDED) {
-                InformationSurface {
-                    Text("Access", style = MaterialTheme.typography.titleMedium)
-                when (client.state) {
-                    RelayClientState.ACTIVE -> OutlinedButton(
-                        onClick = { onSetState(RelayClientState.SUSPENDED) },
-                        modifier = Modifier.fillMaxWidth(),
-                    ) {
-                        Icon(Icons.Outlined.PauseCircle, contentDescription = null)
-                        Spacer(Modifier.width(8.dp))
-                        Text("Suspend client")
-                    }
-                    RelayClientState.SUSPENDED -> Button(
-                        onClick = { onSetState(RelayClientState.ACTIVE) },
-                        modifier = Modifier.fillMaxWidth(),
-                    ) {
-                        Icon(Icons.Outlined.PlayCircle, contentDescription = null)
-                        Spacer(Modifier.width(8.dp))
-                        Text("Resume client")
-                    }
-                    RelayClientState.PENDING,
-                    RelayClientState.REVOKED,
-                    -> Unit
-                }
-                when (client.state) {
-                    RelayClientState.ACTIVE -> Text(
-                        "Suspending temporarily blocks this client. You can resume it later.",
-                        color = MaterialTheme.colorScheme.onSurfaceVariant,
-                    )
-                    RelayClientState.SUSPENDED -> Text(
-                        "Resuming lets this client connect and make requests again.",
-                        color = MaterialTheme.colorScheme.onSurfaceVariant,
-                    )
-                    RelayClientState.PENDING,
-                    RelayClientState.REVOKED,
-                    -> Unit
-                }
-                }
-            }
-
-            InformationSurface {
-                Text("Identifiers", style = MaterialTheme.typography.titleMedium)
-                ClientField(
-                    "Machine ID",
-                    client.machineId,
-                    monospace = true,
-                )
-                ClientField(
-                    "Client ID",
-                    client.clientId,
-                    monospace = true,
-                )
-            }
-
-            if (client.state != RelayClientState.REVOKED) {
-                InformationSurface {
-                    Text("Remove access", style = MaterialTheme.typography.titleMedium)
-                    Text(
-                        "Revoking is permanent. This client must be paired again before it can reconnect.",
-                        color = MaterialTheme.colorScheme.onSurfaceVariant,
-                    )
-                    OutlinedButton(
-                        onClick = { confirmation = RelayClientState.REVOKED },
-                        modifier = Modifier.fillMaxWidth(),
-                        colors = ButtonDefaults.outlinedButtonColors(
-                            contentColor = MaterialTheme.agentknockColors.danger,
-                        ),
-                        border = BorderStroke(1.dp, MaterialTheme.agentknockColors.danger),
-                    ) {
-                        Icon(Icons.Outlined.Block, contentDescription = null)
-                        Spacer(Modifier.width(8.dp))
-                        Text("Revoke client")
-                    }
-                }
-            }
         }
     }
 
@@ -305,43 +299,6 @@ internal fun ClientDetail(
                 ) { Text("Save") }
             },
             dismissButton = { TextButton(onClick = { showRename = false }) { Text("Cancel") } },
-        )
-    }
-
-    if (showInstructions) {
-        AlertDialog(
-            onDismissRequest = { showInstructions = false },
-            title = { Text("Client instructions") },
-            text = {
-                Column(
-                    Modifier.verticalScroll(rememberScrollState()),
-                    verticalArrangement = Arrangement.spacedBy(12.dp),
-                ) {
-                    Text(
-                        "Tell the AI reviewer what this client is used for and how much it should be trusted.",
-                    )
-                    OutlinedTextField(
-                        value = instructions,
-                        onValueChange = { instructions = it },
-                        label = { Text("Instructions") },
-                        minLines = 4,
-                        maxLines = 8,
-                        modifier = Modifier.fillMaxWidth(),
-                    )
-                }
-            },
-            confirmButton = {
-                TextButton(
-                    enabled = instructions.trim() != client.instructions,
-                    onClick = {
-                        showInstructions = false
-                        onSaveInstructions(instructions.trim())
-                    },
-                ) { Text("Save") }
-            },
-            dismissButton = {
-                TextButton(onClick = { showInstructions = false }) { Text("Cancel") }
-            },
         )
     }
 

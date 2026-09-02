@@ -102,7 +102,7 @@ internal fun planTemporaryAccess(
     val grantablePolicies = policies.filter { policy ->
         val evaluation = evaluationsById[policy.secretId]
         evaluation?.temporaryAccessExpiresAt == null && when (policy.mode) {
-            SecretApprovalMode.TEMPORARY -> evaluation?.action == ApprovalAction.ASK_ME
+            SecretApprovalMode.ASK_ME -> evaluation?.action == ApprovalAction.ASK_ME
             SecretApprovalMode.ASK_AI ->
                 evaluation?.action == ApprovalAction.ASK_AI &&
                     aiCanEscalateToTemporaryAccess

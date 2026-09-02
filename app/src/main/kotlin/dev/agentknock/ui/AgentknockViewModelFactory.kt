@@ -94,8 +94,6 @@ internal fun agentknockViewModelFactory(
         initializer {
             SettingsViewModel(
                 configuration = container.deviceConfiguration,
-                secretSummaries = container.secretSummaries,
-                clientSummaries = container.clientSummaries,
                 pushRegistration = container.pushRegistration,
                 vaultKeys = container.vaultKeyManager,
                 beginFactoryReset = container::beginFactoryReset,

@@ -3,7 +3,9 @@
 package dev.agentknock.ui.device
 
 import androidx.activity.compose.BackHandler
+import androidx.compose.foundation.Image
 import androidx.compose.foundation.layout.Arrangement
+import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.Spacer
@@ -15,24 +17,29 @@ import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.layout.width
 import androidx.compose.foundation.rememberScrollState
+import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.text.KeyboardOptions
 import androidx.compose.foundation.verticalScroll
+import androidx.compose.material.icons.Icons
+import androidx.compose.material.icons.outlined.Computer
+import androidx.compose.material.icons.outlined.PhoneAndroid
+import androidx.compose.material.icons.outlined.Settings
+import androidx.compose.material.icons.outlined.SyncAlt
 import androidx.compose.material3.AlertDialog
 import androidx.compose.material3.Button
 import androidx.compose.material3.Card
 import androidx.compose.material3.CardDefaults
 import androidx.compose.material3.CircularProgressIndicator
+import androidx.compose.material3.Icon
+import androidx.compose.material3.IconButton
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.OutlinedButton
 import androidx.compose.material3.OutlinedTextField
 import androidx.compose.material3.Scaffold
+import androidx.compose.material3.Surface
 import androidx.compose.material3.Text
 import androidx.compose.material3.TextButton
 import androidx.compose.material3.TopAppBar
-import androidx.compose.material3.Icon
-import androidx.compose.material3.IconButton
-import androidx.compose.material.icons.Icons
-import androidx.compose.material.icons.outlined.Settings
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.getValue
@@ -42,61 +49,86 @@ import androidx.compose.runtime.saveable.rememberSaveable
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.graphics.Color
+import androidx.compose.ui.res.painterResource
 import androidx.compose.ui.res.stringResource
-import androidx.compose.ui.text.font.FontFamily
 import androidx.compose.ui.text.TextRange
-import androidx.compose.ui.text.style.TextOverflow
-import androidx.compose.ui.text.input.TextFieldValue
 import androidx.compose.ui.text.input.ImeAction
 import androidx.compose.ui.text.input.KeyboardCapitalization
 import androidx.compose.ui.text.input.KeyboardType
+import androidx.compose.ui.text.input.TextFieldValue
+import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import dev.agentknock.R
 import dev.agentknock.protocol.DeviceProtocol
 import dev.agentknock.storage.device.ClaimPairingAddressResult
 import dev.agentknock.storage.device.DeviceConfiguration
-import dev.agentknock.storage.device.DeviceIdentity
-import dev.agentknock.ui.theme.agentknockColors
+import dev.agentknock.ui.auth.DeviceAuthenticationChoices
+import dev.agentknock.ui.auth.DeviceAuthenticationMode
 import dev.agentknock.ui.components.NavigationBackButton
+import dev.agentknock.ui.theme.agentknockColors
 
 @Composable
 internal fun DeviceSetupScreen(
     configuration: DeviceConfiguration,
     onDone: (() -> Unit)?,
+    authenticationMode: DeviceAuthenticationMode,
+    onAuthenticationModeChange: (DeviceAuthenticationMode) -> Unit,
     changeAddressInitially: Boolean = false,
     onOpenSettings: (() -> Unit)? = null,
     viewModel: DeviceSetupViewModel,
 ) {
     val claiming by viewModel.claiming.collectAsStateWithLifecycle()
-    val lastResult by viewModel.lastClaimResult.collectAsStateWithLifecycle()
-    var editing by rememberSaveable(changeAddressInitially) {
-        mutableStateOf(
-            changeAddressInitially ||
-                (configuration.active == null && configuration.candidate == null),
-        )
-    }
-    var address by rememberSaveable { mutableStateOf(viewModel.generateAddress()) }
-    var confirmChange by remember { mutableStateOf(false) }
+    val result by viewModel.lastClaimResult.collectAsStateWithLifecycle()
     val active = configuration.active
     val candidate = configuration.candidate
+    var welcomeComplete by rememberSaveable {
+        mutableStateOf(changeAddressInitially || active != null || candidate != null)
+    }
+    var address by rememberSaveable(active?.id, candidate?.id, changeAddressInitially) {
+        mutableStateOf(
+            candidate?.address
+                ?: active?.address?.takeIf { changeAddressInitially }
+                ?: viewModel.generateAddress(),
+        )
+    }
+    var confirmChange by remember { mutableStateOf(false) }
 
-    fun performClaim() {
-        editing = false
-        viewModel.stageAndClaim(address)
+    LaunchedEffect(candidate?.address) {
+        candidate?.address?.let { candidateAddress ->
+            if (result == null) address = candidateAddress
+        }
     }
 
-    fun claim() {
-        if (active == null) performClaim() else confirmChange = true
+    fun submit() {
+        if (active == null || address == active.address) {
+            if (candidate?.address == address) viewModel.retryClaim()
+            else viewModel.stageAndClaim(address)
+        } else {
+            confirmChange = true
+        }
     }
 
-    BackHandler(enabled = changeAddressInitially && onDone != null) {
+    fun confirmSubmit() {
+        confirmChange = false
+        if (candidate?.address == address) viewModel.retryClaim()
+        else viewModel.stageAndClaim(address)
+    }
+
+    fun leaveAddressEditor() {
+        if (candidate != null) viewModel.discardCandidate()
         onDone?.invoke()
     }
 
-    Scaffold(
-        contentWindowInsets = WindowInsets.navigationBars,
-    ) { padding ->
+    BackHandler(enabled = changeAddressInitially && onDone != null, onBack = ::leaveAddressEditor)
+
+    if (!welcomeComplete) {
+        WelcomeScreen(onContinue = { welcomeComplete = true })
+        return
+    }
+
+    Scaffold(contentWindowInsets = WindowInsets.navigationBars) { padding ->
         Column(Modifier.fillMaxSize().padding(padding)) {
             TopAppBar(
                 title = {
@@ -104,7 +136,7 @@ internal fun DeviceSetupScreen(
                         if (changeAddressInitially) {
                             stringResource(R.string.change_pairing_address)
                         } else {
-                            stringResource(R.string.device_setup)
+                            "Set up Agentknock"
                         },
                         maxLines = 1,
                         overflow = TextOverflow.Ellipsis,
@@ -112,7 +144,7 @@ internal fun DeviceSetupScreen(
                 },
                 navigationIcon = {
                     if (changeAddressInitially && onDone != null) {
-                        NavigationBackButton(onDone)
+                        NavigationBackButton(::leaveAddressEditor)
                     }
                 },
                 actions = {
@@ -124,51 +156,51 @@ internal fun DeviceSetupScreen(
                 },
             )
             Column(
-                modifier = Modifier
-                    .fillMaxSize()
-                    .verticalScroll(rememberScrollState())
-                    .padding(24.dp),
+                modifier = Modifier.fillMaxSize().verticalScroll(rememberScrollState())
+                    .padding(horizontal = 20.dp, vertical = 12.dp),
                 verticalArrangement = Arrangement.spacedBy(20.dp),
             ) {
-                if (!changeAddressInitially) {
-                    active?.let { ActiveDeviceCard(it) }
-                }
-
                 if (active != null && !active.credentialsAvailable) {
                     WarningCard(
-                        title = stringResource(R.string.device_keys_unavailable),
+                        title = stringResource(R.string.device_keys_unavailable_title),
                         message = stringResource(R.string.device_keys_unavailable_explanation),
                     )
                 }
-
-                if (candidate != null && !editing) {
-                    CandidateCard(
-                        candidate = candidate,
-                        result = lastResult,
-                        claiming = claiming,
-                        onRetry = viewModel::retryClaim,
-                        onChooseAnother = {
-                            viewModel.clearClaimResult()
-                            address = viewModel.generateAddress()
-                            editing = true
-                        },
-                        onDiscard = active?.let { viewModel::discardCandidate },
-                    )
-                } else if (editing || active == null) {
-                    AddressEditor(
-                        address = address,
-                        activeAddress = active?.address,
-                        claiming = claiming,
-                        onAddressChange = { address = it },
-                        onGenerate = { address = viewModel.generateAddress() },
-                        onClaim = ::claim,
-                        onCancel = active?.let { { editing = false } },
-                    )
-                } else {
-                    Button(onClick = { confirmChange = true }) {
-                        Text(stringResource(R.string.change_pairing_address))
+                if (active == null) {
+                    Column(verticalArrangement = Arrangement.spacedBy(8.dp)) {
+                        Text("Device authentication", style = MaterialTheme.typography.titleLarge)
+                        Text(
+                            "Choose when Agentknock asks Android to verify that it is you.",
+                            color = MaterialTheme.colorScheme.onSurfaceVariant,
+                        )
+                        Surface(
+                            color = MaterialTheme.colorScheme.surfaceContainer,
+                            shape = MaterialTheme.shapes.large,
+                        ) {
+                            DeviceAuthenticationChoices(
+                                selected = authenticationMode,
+                                enabled = !claiming,
+                                onSelect = onAuthenticationModeChange,
+                            )
+                        }
                     }
                 }
+                PairingAddressEditor(
+                    address = address,
+                    activeAddress = active?.address,
+                    candidateAddress = candidate?.address,
+                    claiming = claiming,
+                    result = result,
+                    onAddressChange = {
+                        address = it
+                        viewModel.clearClaimResult()
+                    },
+                    onGenerate = {
+                        address = viewModel.generateAddress()
+                        viewModel.clearClaimResult()
+                    },
+                    onSubmit = ::submit,
+                )
             }
         }
     }
@@ -179,22 +211,8 @@ internal fun DeviceSetupScreen(
             title = { Text(stringResource(R.string.change_pairing_address_question)) },
             text = { Text(stringResource(R.string.change_pairing_address_explanation)) },
             confirmButton = {
-                Button(
-                    onClick = {
-                        confirmChange = false
-                        if (editing) {
-                            performClaim()
-                        } else {
-                            viewModel.clearClaimResult()
-                            address = viewModel.generateAddress()
-                            editing = true
-                        }
-                    },
-                ) {
-                    Text(
-                        if (editing) stringResource(R.string.claim_pairing_address)
-                        else stringResource(R.string.continue_action),
-                    )
+                Button(onClick = ::confirmSubmit) {
+                    Text(stringResource(R.string.change_pairing_address))
                 }
             },
             dismissButton = {
@@ -207,145 +225,99 @@ internal fun DeviceSetupScreen(
 }
 
 @Composable
-private fun ActiveDeviceCard(identity: DeviceIdentity) {
-    Card(
-        colors = CardDefaults.cardColors(
-            containerColor = if (identity.credentialsAvailable) {
-                MaterialTheme.agentknockColors.successContainer
-            } else {
-                MaterialTheme.agentknockColors.dangerContainer
-            },
-            contentColor = if (identity.credentialsAvailable) {
-                MaterialTheme.agentknockColors.onSuccessContainer
-            } else {
-                MaterialTheme.agentknockColors.onDangerContainer
-            },
-        ),
-    ) {
+private fun WelcomeScreen(onContinue: () -> Unit) {
+    Scaffold(contentWindowInsets = WindowInsets.navigationBars) { padding ->
         Column(
-            Modifier.padding(20.dp),
-            verticalArrangement = Arrangement.spacedBy(6.dp),
+            modifier = Modifier.fillMaxSize().padding(padding).verticalScroll(rememberScrollState())
+                .padding(horizontal = 24.dp, vertical = 32.dp),
+            verticalArrangement = Arrangement.spacedBy(24.dp),
         ) {
-            Text(
-                if (identity.credentialsAvailable) {
-                    stringResource(R.string.pairing_ready)
-                } else {
-                    stringResource(R.string.device_keys_unavailable_title)
-                },
-                style = MaterialTheme.typography.titleMedium,
-            )
-            Text(
-                identity.address,
-                style = MaterialTheme.typography.titleLarge,
-                fontFamily = FontFamily.Monospace,
-            )
-        }
-    }
-}
-
-@Composable
-private fun WarningCard(title: String, message: String) {
-    Card(
-        colors = CardDefaults.cardColors(
-            containerColor = MaterialTheme.agentknockColors.dangerContainer,
-            contentColor = MaterialTheme.agentknockColors.onDangerContainer,
-        ),
-    ) {
-        Column(
-            Modifier.padding(20.dp),
-            verticalArrangement = Arrangement.spacedBy(6.dp),
-        ) {
-            Text(title, style = MaterialTheme.typography.titleMedium)
-            Text(message)
-        }
-    }
-}
-
-@Composable
-private fun CandidateCard(
-    candidate: DeviceIdentity,
-    result: ClaimPairingAddressResult?,
-    claiming: Boolean,
-    onRetry: () -> Unit,
-    onChooseAnother: () -> Unit,
-    onDiscard: (() -> Unit)?,
-) {
-    val unavailable = result == ClaimPairingAddressResult.AddressUnavailable
-    val title = stringResource(
-        if (unavailable) {
-            R.string.pairing_address_unavailable
-        } else {
-            R.string.pairing_address_claim_incomplete
-        },
-    )
-    val explanation = stringResource(
-        when (result) {
-            ClaimPairingAddressResult.AddressUnavailable ->
-                R.string.pairing_address_unavailable_explanation
-            ClaimPairingAddressResult.CredentialsCorrupted -> R.string.device_keys_corrupted
-            ClaimPairingAddressResult.UnsupportedEncryption -> R.string.device_keys_unsupported
-            is ClaimPairingAddressResult.RelayRejected -> R.string.device_setup_relay_rejected
-            is ClaimPairingAddressResult.RelayUnavailable -> R.string.device_setup_relay_unavailable
-            ClaimPairingAddressResult.InvalidRelayResponse ->
-                R.string.device_setup_relay_invalid_response
-            ClaimPairingAddressResult.NoCandidate -> R.string.pairing_address_claim_missing
-            ClaimPairingAddressResult.Claimed,
-            ClaimPairingAddressResult.SameAddress,
-            null,
-            -> R.string.pairing_address_claim_incomplete_explanation
-        },
-    )
-    Card {
-        Column(
-            Modifier.padding(20.dp),
-            verticalArrangement = Arrangement.spacedBy(12.dp),
-        ) {
-            Text(title, style = MaterialTheme.typography.titleMedium)
-            Text(candidate.address, fontFamily = FontFamily.Monospace)
-            Text(explanation)
-            Column(verticalArrangement = Arrangement.spacedBy(8.dp)) {
-                if (!unavailable) {
-                    Button(
-                        onClick = onRetry,
-                        enabled = !claiming,
-                        modifier = Modifier.fillMaxWidth(),
-                    ) {
-                        if (claiming) {
-                            CircularProgressIndicator(Modifier.size(18.dp), strokeWidth = 2.dp)
-                            Spacer(Modifier.width(8.dp))
-                        }
-                        Text(stringResource(R.string.retry))
-                    }
+            Column(verticalArrangement = Arrangement.spacedBy(14.dp)) {
+                Surface(color = Color.Black, shape = CircleShape, modifier = Modifier.size(88.dp)) {
+                    Image(
+                        painter = painterResource(R.drawable.ic_launcher_foreground),
+                        contentDescription = null,
+                        modifier = Modifier.padding(8.dp),
+                    )
                 }
-                OutlinedButton(
-                    onClick = onChooseAnother,
-                    enabled = !claiming,
-                    modifier = Modifier.fillMaxWidth(),
-                ) {
-                    Text(stringResource(R.string.choose_another_address))
+                Text("Welcome to Agentknock", style = MaterialTheme.typography.headlineMedium)
+                Text(
+                    "Developer secrets stay on this phone and are provided only to approved commands.",
+                    style = MaterialTheme.typography.bodyLarge,
+                    color = MaterialTheme.colorScheme.onSurfaceVariant,
+                )
+            }
+            Surface(
+                color = MaterialTheme.colorScheme.surfaceContainer,
+                shape = MaterialTheme.shapes.large,
+            ) {
+                Column(Modifier.padding(18.dp), verticalArrangement = Arrangement.spacedBy(18.dp)) {
+                    WelcomeItem(
+                        Icons.Outlined.PhoneAndroid,
+                        "This app",
+                        "Stores secrets and lets you decide when protected values or keys may be used.",
+                    )
+                    WelcomeItem(
+                        Icons.Outlined.Computer,
+                        "Command-line clients",
+                        "Request secrets for a command without storing them on the client machine.",
+                    )
+                    WelcomeItem(
+                        Icons.Outlined.SyncAlt,
+                        "Agentknock relay",
+                        "Connects clients to this phone. It cannot read secret values; optional AI review receives request metadata only.",
+                    )
                 }
-                onDiscard?.let { discard ->
-                    TextButton(onClick = discard, enabled = !claiming) {
-                        Text(stringResource(R.string.discard))
-                    }
-                }
+            }
+            Spacer(Modifier.weight(1f))
+            Button(onClick = onContinue, modifier = Modifier.fillMaxWidth()) {
+                Text("Continue")
             }
         }
     }
 }
 
 @Composable
-private fun AddressEditor(
+private fun WelcomeItem(
+    icon: androidx.compose.ui.graphics.vector.ImageVector,
+    title: String,
+    detail: String,
+) {
+    Row(horizontalArrangement = Arrangement.spacedBy(14.dp), verticalAlignment = Alignment.Top) {
+        Surface(
+            color = MaterialTheme.colorScheme.secondaryContainer,
+            contentColor = MaterialTheme.colorScheme.onSecondaryContainer,
+            shape = MaterialTheme.shapes.medium,
+            modifier = Modifier.size(42.dp),
+        ) {
+            Box(contentAlignment = Alignment.Center) {
+                Icon(icon, contentDescription = null, modifier = Modifier.size(22.dp))
+            }
+        }
+        Column(Modifier.weight(1f), verticalArrangement = Arrangement.spacedBy(2.dp)) {
+            Text(title, style = MaterialTheme.typography.titleMedium)
+            Text(
+                detail,
+                style = MaterialTheme.typography.bodyMedium,
+                color = MaterialTheme.colorScheme.onSurfaceVariant,
+            )
+        }
+    }
+}
+
+@Composable
+private fun PairingAddressEditor(
     address: String,
     activeAddress: String?,
+    candidateAddress: String?,
     claiming: Boolean,
+    result: ClaimPairingAddressResult?,
     onAddressChange: (String) -> Unit,
     onGenerate: () -> Unit,
-    onClaim: () -> Unit,
-    onCancel: (() -> Unit)?,
+    onSubmit: () -> Unit,
 ) {
     val valid = DeviceProtocol.validPairingAddress(address) && address != activeAddress
-    var fieldValue by remember {
+    var fieldValue by remember(address) {
         mutableStateOf(TextFieldValue(address, selection = TextRange(address.length)))
     }
     LaunchedEffect(address) {
@@ -354,14 +326,9 @@ private fun AddressEditor(
         }
     }
     Column(verticalArrangement = Arrangement.spacedBy(12.dp)) {
-        Text(
-            if (activeAddress == null) {
-                stringResource(R.string.choose_pairing_address)
-            } else {
-                stringResource(R.string.choose_new_pairing_address)
-            },
-            style = MaterialTheme.typography.titleLarge,
-        )
+        if (activeAddress == null) {
+            Text("Pairing address", style = MaterialTheme.typography.titleLarge)
+        }
         Text(stringResource(R.string.pairing_address_description))
         if (activeAddress != null) {
             Text(
@@ -387,6 +354,7 @@ private fun AddressEditor(
                 )
             },
             isError = address.isNotEmpty() && !valid,
+            enabled = !claiming,
             singleLine = true,
             keyboardOptions = KeyboardOptions(
                 capitalization = KeyboardCapitalization.None,
@@ -395,38 +363,68 @@ private fun AddressEditor(
                 imeAction = ImeAction.Done,
             ),
         )
-        Column(verticalArrangement = Arrangement.spacedBy(8.dp)) {
-            Button(
-                onClick = onClaim,
-                enabled = valid && !claiming,
-                modifier = Modifier.fillMaxWidth(),
-            ) {
-                if (claiming) {
-                    CircularProgressIndicator(Modifier.size(18.dp), strokeWidth = 2.dp)
-                    Spacer(Modifier.width(8.dp))
-                }
-                Text(
-                    stringResource(
-                        if (activeAddress == null) {
-                            R.string.claim_pairing_address
-                        } else {
-                            R.string.change_pairing_address
-                        },
-                    ),
-                )
+        result?.takeUnless { it == ClaimPairingAddressResult.Claimed }?.let {
+            Text(
+                it.explanation(),
+                color = if (it == ClaimPairingAddressResult.AddressUnavailable) {
+                    MaterialTheme.colorScheme.error
+                } else {
+                    MaterialTheme.colorScheme.onSurfaceVariant
+                },
+            )
+        }
+        Button(
+            onClick = onSubmit,
+            enabled = valid && !claiming,
+            modifier = Modifier.fillMaxWidth(),
+        ) {
+            if (claiming) {
+                CircularProgressIndicator(Modifier.size(18.dp), strokeWidth = 2.dp)
+                Spacer(Modifier.width(8.dp))
             }
-            OutlinedButton(
-                onClick = onGenerate,
-                enabled = !claiming,
-                modifier = Modifier.fillMaxWidth(),
-            ) {
-                Text(stringResource(R.string.another_suggestion))
-            }
-            onCancel?.let { cancel ->
-                TextButton(onClick = cancel, enabled = !claiming) {
-                    Text(stringResource(R.string.cancel))
-                }
-            }
+            Text(
+                when {
+                    claiming -> "Claiming address…"
+                    candidateAddress == address && result != null -> "Try again"
+                    activeAddress == null -> stringResource(R.string.claim_pairing_address)
+                    else -> stringResource(R.string.change_pairing_address)
+                },
+            )
+        }
+        OutlinedButton(onClick = onGenerate, enabled = !claiming, modifier = Modifier.fillMaxWidth()) {
+            Text(stringResource(R.string.another_suggestion))
         }
     }
+}
+
+@Composable
+private fun WarningCard(title: String, message: String) {
+    Card(
+        colors = CardDefaults.cardColors(
+            containerColor = MaterialTheme.agentknockColors.dangerContainer,
+            contentColor = MaterialTheme.agentknockColors.onDangerContainer,
+        ),
+    ) {
+        Column(Modifier.padding(20.dp), verticalArrangement = Arrangement.spacedBy(6.dp)) {
+            Text(title, style = MaterialTheme.typography.titleMedium)
+            Text(message)
+        }
+    }
+}
+
+private fun ClaimPairingAddressResult.explanation(): String = when (this) {
+    ClaimPairingAddressResult.Claimed -> "Pairing address claimed."
+    ClaimPairingAddressResult.AddressUnavailable ->
+        "That pairing address is already in use. Edit it or choose another suggestion."
+    ClaimPairingAddressResult.SameAddress -> "This is already your pairing address."
+    ClaimPairingAddressResult.NoCandidate -> "The claim could not be resumed. Try again."
+    ClaimPairingAddressResult.CredentialsCorrupted -> "The device credentials could not be read."
+    ClaimPairingAddressResult.UnsupportedEncryption ->
+        "The device credentials use an unsupported encryption format."
+    is ClaimPairingAddressResult.RelayRejected ->
+        message ?: "The relay rejected the claim (${code ?: status})."
+    is ClaimPairingAddressResult.RelayUnavailable ->
+        message ?: "The relay could not be reached. Try again."
+    ClaimPairingAddressResult.InvalidRelayResponse ->
+        "The relay returned an invalid response. Try again."
 }

@@ -28,9 +28,13 @@ import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.foundation.text.selection.SelectionContainer
 import androidx.compose.foundation.verticalScroll
+import androidx.compose.material.icons.Icons
+import androidx.compose.material.icons.outlined.ContentCopy
 import androidx.compose.material3.CircularProgressIndicator
 import androidx.compose.material3.FilterChip
 import androidx.compose.material3.HorizontalDivider
+import androidx.compose.material3.Icon
+import androidx.compose.material3.IconButton
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.Surface
 import androidx.compose.material3.Text
@@ -55,12 +59,17 @@ import dev.agentknock.presentation.formatTimestamp
 import dev.agentknock.storage.audit.AuditEvent
 import dev.agentknock.storage.audit.AuditOutcome
 import dev.agentknock.ui.components.AdaptiveListDetail
+import dev.agentknock.ui.components.Disclosure
 import dev.agentknock.ui.components.InformationRow
 import dev.agentknock.ui.components.InformationSurface
 import dev.agentknock.ui.theme.agentknockColors
 import java.time.Instant
 import java.time.ZoneId
 import java.time.format.DateTimeFormatter
+import kotlinx.serialization.json.JsonArray
+import kotlinx.serialization.json.JsonElement
+import kotlinx.serialization.json.JsonPrimitive
+import kotlinx.serialization.json.contentOrNull
 
 private enum class AuditFilter(val label: String) {
     ALL("All"),
@@ -387,7 +396,7 @@ private fun AuditDetail(
                 if (
                     event.subject != null || event.context != null || event.detail != null ||
                     distinctClientName != null || event.decisionSource != null ||
-                    event.expiresAt != null
+                    event.expiresAt != null || event.data.isNotEmpty()
                 ) {
                     InformationSurface {
                         event.subject?.let {
@@ -408,17 +417,19 @@ private fun AuditDetail(
                         event.expiresAt?.let {
                             InformationRow("Valid until", formatTimestamp(it))
                         }
+                        event.data.forEach { (name, value) ->
+                            InformationRow(name.auditLabel(), value.auditValue(), monospace = false)
+                        }
                     }
                 }
                 if (event.clientId != null || event.relayRequestId != null) {
-                    InformationSurface {
-                        Text("Technical information", style = MaterialTheme.typography.titleMedium)
+                    Disclosure("Technical information") {
                         event.clientId?.let {
                             InformationRow(
                                 label = "Client ID",
                                 value = it,
                                 monospace = true,
-                                trailingContent = { CopyTextButton { copy("Client ID", it) } },
+                                trailingContent = { CopyIconButton("Copy client ID") { copy("Client ID", it) } },
                             )
                         }
                         event.relayRequestId?.let {
@@ -426,7 +437,7 @@ private fun AuditDetail(
                                 label = "Request ID",
                                 value = it,
                                 monospace = true,
-                                trailingContent = { CopyTextButton { copy("Request ID", it) } },
+                                trailingContent = { CopyIconButton("Copy request ID") { copy("Request ID", it) } },
                             )
                         }
                         InformationRow("Sequence", event.id.toString(), monospace = true)
@@ -438,13 +449,20 @@ private fun AuditDetail(
 }
 
 @Composable
-private fun CopyTextButton(onClick: () -> Unit) {
-    Text(
-        "Copy",
-        style = MaterialTheme.typography.labelLarge,
-        color = MaterialTheme.colorScheme.primary,
-        modifier = Modifier.clickable(onClick = onClick).padding(8.dp),
-    )
+private fun CopyIconButton(description: String, onClick: () -> Unit) {
+    IconButton(onClick = onClick) {
+        Icon(Icons.Outlined.ContentCopy, contentDescription = description)
+    }
+}
+
+private fun String.auditLabel(): String = split('_').joinToString(" ") { word ->
+    word.replaceFirstChar(Char::uppercaseChar)
+}
+
+private fun JsonElement.auditValue(): String = when (this) {
+    is JsonPrimitive -> contentOrNull ?: toString()
+    is JsonArray -> joinToString(" · ") { item -> item.auditValue() }
+    else -> toString()
 }
 
 private fun AuditEvent.contextLine(): String? {

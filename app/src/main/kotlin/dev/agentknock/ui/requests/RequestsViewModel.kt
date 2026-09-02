@@ -25,8 +25,12 @@ import kotlinx.coroutines.flow.receiveAsFlow
 import kotlinx.coroutines.flow.stateIn
 import kotlinx.coroutines.launch
 
-private fun RequestDecisionResult.message(): String = when (this) {
-    RequestDecisionResult.Decided -> "Decision saved"
+private fun RequestDecisionResult.message(decision: RequestDecision): String = when (this) {
+    RequestDecisionResult.Decided -> when (decision) {
+        RequestDecision.APPROVE -> "Approved once"
+        RequestDecision.DENY -> "Denied"
+        RequestDecision.ALLOW_TEMPORARILY -> "Temporary access allowed"
+    }
     RequestDecisionResult.NotPending -> "This request no longer needs a decision"
     RequestDecisionResult.NotFound -> "Request is no longer available"
     RequestDecisionResult.ParentUnavailable -> "The original command request is unavailable"
@@ -126,7 +130,7 @@ internal class RequestsViewModel(
         decision: RequestDecision,
     ) {
         viewModelScope.launch {
-            messageEvents.send(actions.decideRequest(requestId, decision).message())
+            messageEvents.send(actions.decideRequest(requestId, decision).message(decision))
         }
     }
 

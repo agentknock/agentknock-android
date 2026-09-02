@@ -12,8 +12,6 @@ import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.items
-import androidx.compose.foundation.rememberScrollState
-import androidx.compose.foundation.verticalScroll
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.automirrored.outlined.NavigateNext
 import androidx.compose.material.icons.outlined.Add
@@ -24,16 +22,13 @@ import androidx.compose.material.icons.outlined.Key
 import androidx.compose.material.icons.outlined.Lock
 import androidx.compose.material.icons.outlined.Schedule
 import androidx.compose.material.icons.outlined.Settings
-import androidx.compose.material3.AlertDialog
 import androidx.compose.material3.Icon
 import androidx.compose.material3.IconButton
 import androidx.compose.material3.ListItem
 import androidx.compose.material3.ListItemDefaults
 import androidx.compose.material3.MaterialTheme
-import androidx.compose.material3.OutlinedTextField
 import androidx.compose.material3.Surface
 import androidx.compose.material3.Text
-import androidx.compose.material3.TextButton
 import androidx.compose.material3.TopAppBar
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.getValue
@@ -55,6 +50,7 @@ import dev.agentknock.storage.secret.SecretSummary
 import dev.agentknock.storage.secret.SecretType
 import dev.agentknock.ui.components.ActionListSurface
 import dev.agentknock.ui.components.TonalIcon
+import dev.agentknock.ui.components.ProseEditorScreen
 
 @Composable
 internal fun SecretList(
@@ -74,6 +70,23 @@ internal fun SecretList(
     var showGeneralInstructions by rememberSaveable { mutableStateOf(false) }
     var editedGeneralInstructions by rememberSaveable(generalInstructions) {
         mutableStateOf(generalInstructions)
+    }
+    if (showGeneralInstructions) {
+        ProseEditorScreen(
+            title = "AI review instructions",
+            value = editedGeneralInstructions,
+            originalValue = generalInstructions,
+            supportingText =
+                "These instructions apply to every AI review. Secret and client instructions " +
+                    "add more specific context.",
+            onValueChange = { editedGeneralInstructions = it },
+            onSave = {
+                showGeneralInstructions = false
+                onSaveGeneralInstructions(editedGeneralInstructions.trim())
+            },
+            onBack = { showGeneralInstructions = false },
+        )
+        return
     }
     Column(modifier) {
         TopAppBar(
@@ -214,6 +227,7 @@ internal fun SecretList(
                                                     }
                                         },
                                         style = MaterialTheme.typography.labelMedium,
+                                        color = MaterialTheme.colorScheme.primary,
                                         maxLines = 1,
                                         overflow = TextOverflow.Ellipsis,
                                     )
@@ -263,40 +277,6 @@ internal fun SecretList(
                 }
             }
         }
-    }
-    if (showGeneralInstructions) {
-        AlertDialog(
-            onDismissRequest = { showGeneralInstructions = false },
-            title = { Text("AI review instructions") },
-            text = {
-                Column(
-                    Modifier.verticalScroll(rememberScrollState()),
-                    verticalArrangement = Arrangement.spacedBy(12.dp),
-                ) {
-                    Text("These instructions apply to every AI review. Secret and client instructions add more specific context.")
-                    OutlinedTextField(
-                        value = editedGeneralInstructions,
-                        onValueChange = { editedGeneralInstructions = it },
-                        label = { Text("Instructions") },
-                        minLines = 4,
-                        maxLines = 8,
-                        modifier = Modifier.fillMaxWidth(),
-                    )
-                }
-            },
-            confirmButton = {
-                TextButton(
-                    enabled = editedGeneralInstructions.trim() != generalInstructions,
-                    onClick = {
-                        showGeneralInstructions = false
-                        onSaveGeneralInstructions(editedGeneralInstructions.trim())
-                    },
-                ) { Text("Save") }
-            },
-            dismissButton = {
-                TextButton(onClick = { showGeneralInstructions = false }) { Text("Cancel") }
-            },
-        )
     }
 }
 

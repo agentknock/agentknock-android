@@ -6,6 +6,7 @@ import dev.agentknock.storage.device.DeviceConfiguration
 import dev.agentknock.storage.request.InboxRequestKind
 import dev.agentknock.storage.request.InboxRequestSummary
 import dev.agentknock.storage.request.RequestInbox
+import dev.agentknock.ui.auth.DeviceAuthenticationMode
 import dev.agentknock.ui.auth.DeviceAuthenticationResult
 import dev.agentknock.ui.auth.ProtectedActionAuthorizer
 import kotlinx.coroutines.flow.MutableStateFlow
@@ -40,6 +41,12 @@ internal class AgentknockViewModel(
             } finally {
                 protectedActionsInFlight = false
             }
+        }
+    }
+
+    fun changeAuthenticationMode(mode: DeviceAuthenticationMode) {
+        viewModelScope.launch {
+            protectedActions.changeMode(mode)
         }
     }
 

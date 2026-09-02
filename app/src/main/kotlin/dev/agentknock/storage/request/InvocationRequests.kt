@@ -22,6 +22,7 @@ import dev.agentknock.storage.audit.AuditEventType
 import dev.agentknock.storage.audit.AuditOutcome
 import dev.agentknock.storage.audit.AuditRecord
 import dev.agentknock.storage.audit.AuditSink
+import dev.agentknock.storage.audit.auditDataOf
 import dev.agentknock.storage.device.RelayDeviceCredentialSource
 import dev.agentknock.storage.device.RelayDeviceCredentials
 import dev.agentknock.storage.device.RelayDeviceCredentialsResult
@@ -357,6 +358,7 @@ internal class InvocationRequests(
                     clientId = client.clientId,
                     clientName = client.name,
                     relayRequestId = relayRequestId,
+                    data = finalSecretUse.auditData(),
                 )
             }
             val automaticDecisionAudit = automaticDecision?.let { decision ->
@@ -387,6 +389,7 @@ internal class InvocationRequests(
                     clientId = client.clientId,
                     clientName = client.name,
                     relayRequestId = relayRequestId,
+                    data = finalSecretUse.auditData(),
                 )
             }
             val persistence = if (requestAlreadyInserted) {
@@ -904,6 +907,7 @@ internal class InvocationRequests(
                         clientId = currentRequest.clientId,
                         clientName = currentRequest.clientNameSnapshot,
                         relayRequestId = currentRequest.id,
+                        data = secretUseRequest.auditData(),
                     ),
                 ),
                 now,
@@ -959,6 +963,7 @@ internal class InvocationRequests(
                         clientId = currentRequest.clientId,
                         clientName = currentRequest.clientNameSnapshot,
                         relayRequestId = currentRequest.id,
+                        data = secretUseRequest.auditData(),
                     ),
                 ),
                 now,
@@ -1033,6 +1038,7 @@ internal class InvocationRequests(
                             clientId = request.clientId,
                             clientName = request.clientNameSnapshot,
                             relayRequestId = request.id,
+                            data = secretUseRequest.auditData(),
                         ),
                     ),
                     now,
@@ -1109,6 +1115,7 @@ internal class InvocationRequests(
                         clientId = request.clientId,
                         clientName = request.clientNameSnapshot,
                         relayRequestId = request.id,
+                        data = secretUseRequest.auditData(),
                     ),
                 ),
                 now,
@@ -1240,6 +1247,25 @@ internal class InvocationRequests(
         clientId = request.clientId,
         clientName = request.clientNameSnapshot,
         relayRequestId = request.id,
+        data = secretUseRequest.auditData(),
+    )
+
+    private fun SecretUseRequestEntity.auditData() = auditDataOf(
+        "secrets" to decodeStringList(secretsJson),
+        "command" to command,
+        "arguments" to decodeStringList(argumentsJson),
+        "working_directory" to workingDirectory,
+        "executable_path" to executablePath,
+        "executable_hash" to executableHash,
+        "executable_mode" to executableMode,
+        "stdin" to stdinKind,
+        "stdout" to stdoutKind,
+        "stderr" to stderrKind,
+        "launcher_chain" to decodeStringList(launcherChainJson),
+        "reason" to reason,
+        "hostname" to hostname,
+        "platform" to platform,
+        "architecture" to architecture,
     )
 
     private fun encodeStringList(values: List<String>): String =

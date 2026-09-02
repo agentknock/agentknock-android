@@ -170,7 +170,7 @@ internal class SecretUploads(
             createdAt = existing?.createdAt ?: now,
             updatedAt = now,
             revision = existing?.revision?.plus(1) ?: 1,
-            approvalMode = existing?.approvalMode ?: SecretApprovalMode.TEMPORARY.storedName,
+            approvalMode = existing?.approvalMode ?: SecretApprovalMode.ASK_ME.storedName,
             instructions = existing?.instructions.orEmpty(),
         )
         val existingVariables = existing?.let { secret ->
@@ -186,7 +186,6 @@ internal class SecretUploads(
                 secretId = secretId,
                 name = name,
                 sensitive = sensitive,
-                notes = current?.notes.orEmpty(),
                 encryptedValue = encrypted,
                 valueUpdatedAt = now,
             )
@@ -330,7 +329,7 @@ internal class SecretUploads(
             createdAt = existing?.createdAt ?: now,
             updatedAt = now,
             revision = existing?.revision?.plus(1) ?: 1,
-            approvalMode = existing?.approvalMode ?: SecretApprovalMode.TEMPORARY.storedName,
+            approvalMode = existing?.approvalMode ?: SecretApprovalMode.ASK_ME.storedName,
             instructions = existing?.instructions.orEmpty(),
         )
         val currentKey = existing?.let { snapshot.sshKeysBySecret[it.id] }

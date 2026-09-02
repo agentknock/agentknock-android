@@ -92,6 +92,14 @@ internal fun SettingsOverview(
                     )
                 }
             }
+            item {
+                SettingsRow(
+                    title = "Factory reset Agentknock",
+                    summary = "Erase this device's Agentknock data",
+                    destructive = true,
+                    onClick = { onOpen(SettingsPage.FACTORY_RESET) },
+                )
+            }
         }
     }
 }

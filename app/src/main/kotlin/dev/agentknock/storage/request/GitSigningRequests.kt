@@ -21,6 +21,7 @@ import dev.agentknock.storage.audit.AuditEventType
 import dev.agentknock.storage.audit.AuditOutcome
 import dev.agentknock.storage.audit.AuditRecord
 import dev.agentknock.storage.audit.AuditSink
+import dev.agentknock.storage.audit.auditDataOf
 import dev.agentknock.storage.device.RelayDeviceCredentialSource
 import dev.agentknock.storage.device.RelayDeviceCredentials
 import dev.agentknock.storage.device.RelayDeviceCredentialsResult
@@ -363,6 +364,7 @@ internal class GitSigningRequests(
                     clientId = client.clientId,
                     clientName = client.name,
                     relayRequestId = relayRequestId,
+                    data = finalGitSign.auditData(),
                 )
             }
             val persisted = if (requestAlreadyInserted) {
@@ -379,6 +381,7 @@ internal class GitSigningRequests(
                         clientId = client.clientId,
                         clientName = client.name,
                         relayRequestId = relayRequestId,
+                        data = finalGitSign.auditData(),
                     ),
                     automaticDecisionAudit = automaticDecisionAudit,
                 )
@@ -892,6 +895,7 @@ internal class GitSigningRequests(
                         clientId = currentRequest.clientId,
                         clientName = currentRequest.clientNameSnapshot,
                         relayRequestId = currentRequest.id,
+                        data = gitSign.auditData(),
                     ),
                 ),
                 now,
@@ -947,6 +951,7 @@ internal class GitSigningRequests(
                         clientId = currentRequest.clientId,
                         clientName = currentRequest.clientNameSnapshot,
                         relayRequestId = currentRequest.id,
+                        data = gitSign.auditData(),
                     ),
                 ),
                 now,
@@ -1225,6 +1230,7 @@ internal class GitSigningRequests(
             clientId = request.clientId,
             clientName = request.clientNameSnapshot,
             relayRequestId = request.id,
+            data = gitSign.auditData(),
         )
 
     private fun decisionAudit(
@@ -1244,6 +1250,13 @@ internal class GitSigningRequests(
         clientId = request.clientId,
         clientName = request.clientNameSnapshot,
         relayRequestId = request.id,
+        data = gitSign.auditData(),
+    )
+
+    private fun GitSignRequestEntity.auditData() = auditDataOf(
+        "ssh_key" to secretName,
+        "signed_object" to message.decodeToString(),
+        "repository" to repositoryJson?.let { storedJson.parseToJsonElement(it) },
     )
 
     private companion object {

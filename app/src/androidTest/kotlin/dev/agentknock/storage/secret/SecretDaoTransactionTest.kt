@@ -128,7 +128,6 @@ class SecretDaoTransactionTest {
         secretId = secretId,
         name = "TOKEN",
         sensitive = true,
-        notes = "",
         encryptedValue = encrypted(byteArrayOf(1, 2, 3)),
         valueUpdatedAt = 2,
     )

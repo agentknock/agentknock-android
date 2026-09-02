@@ -50,7 +50,6 @@ internal fun SettingsScreen(
 ) {
     var page by rememberSaveable { mutableStateOf(SettingsPage.OVERVIEW) }
     val configuration by viewModel.configuration.collectAsStateWithLifecycle()
-    val counts by viewModel.dataCounts.collectAsStateWithLifecycle()
     val pushState by viewModel.pushRegistrationState.collectAsStateWithLifecycle()
     val protection by viewModel.vaultProtection.collectAsStateWithLifecycle()
     val factoryReset by viewModel.factoryReset.collectAsStateWithLifecycle()
@@ -112,11 +111,9 @@ internal fun SettingsScreen(
                     modifier = modifier,
                 )
                 SettingsPage.SECURITY_BACKUP -> SecuritySettings(
-                    counts = counts,
                     protection = protection,
                     authenticationMode = authenticationMode,
                     onAuthenticationModeChange = viewModel::changeAuthenticationMode,
-                    onFactoryReset = { page = SettingsPage.FACTORY_RESET },
                     onBack = ::back,
                     modifier = modifier,
                 )

@@ -22,6 +22,7 @@ import dev.agentknock.storage.audit.AuditEventType
 import dev.agentknock.storage.audit.AuditOutcome
 import dev.agentknock.storage.audit.AuditRecord
 import dev.agentknock.storage.audit.AuditSink
+import dev.agentknock.storage.audit.auditDataOf
 import dev.agentknock.storage.device.RelayDeviceCredentialSource
 import dev.agentknock.storage.device.RelayDeviceCredentials
 import dev.agentknock.storage.device.RelayDeviceCredentialsResult
@@ -382,6 +383,7 @@ internal class SshAuthenticationRequests(
                     clientId = client.clientId,
                     clientName = client.name,
                     relayRequestId = relayRequestId,
+                    data = finalAuthentication.auditData(),
                 )
             }
             val persisted = if (requestAlreadyInserted) {
@@ -398,6 +400,7 @@ internal class SshAuthenticationRequests(
                         clientId = client.clientId,
                         clientName = client.name,
                         relayRequestId = relayRequestId,
+                        data = finalAuthentication.auditData(),
                     ),
                     automaticDecisionAudit = automaticDecisionAudit,
                 )
@@ -1019,6 +1022,7 @@ internal class SshAuthenticationRequests(
                         clientId = currentRequest.clientId,
                         clientName = currentRequest.clientNameSnapshot,
                         relayRequestId = currentRequest.id,
+                        data = authentication.auditData(),
                     ),
                 ),
                 now,
@@ -1065,6 +1069,7 @@ internal class SshAuthenticationRequests(
                         clientId = currentRequest.clientId,
                         clientName = currentRequest.clientNameSnapshot,
                         relayRequestId = currentRequest.id,
+                        data = authentication.auditData(),
                     ),
                 ),
                 now,
@@ -1387,6 +1392,7 @@ internal class SshAuthenticationRequests(
         clientId = request.clientId,
         clientName = request.clientNameSnapshot,
         relayRequestId = request.id,
+        data = authentication.auditData(),
     )
 
     private fun decisionAudit(
@@ -1406,6 +1412,16 @@ internal class SshAuthenticationRequests(
         clientId = request.clientId,
         clientName = request.clientNameSnapshot,
         relayRequestId = request.id,
+        data = authentication.auditData(),
+    )
+
+    private fun SshAuthenticationRequestEntity.auditData() = auditDataOf(
+        "ssh_key" to secretName,
+        "username" to username,
+        "method" to method,
+        "signature_algorithm" to algorithm,
+        "host_key_algorithm" to hostKeyAlgorithm,
+        "host_key_fingerprint" to hostKeyFingerprint,
     )
 
 }

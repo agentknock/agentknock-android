@@ -22,24 +22,16 @@ internal data class AuditEventEntity(
     val occurredAt: Long,
     @ColumnInfo(name = "event_type")
     val eventType: String,
-    @ColumnInfo(name = "subject")
-    val subject: String?,
-    @ColumnInfo(name = "context")
-    val context: String?,
-    @ColumnInfo(name = "detail")
-    val detail: String?,
     @ColumnInfo(name = "outcome")
     val outcome: String,
     @ColumnInfo(name = "decision_source")
     val decisionSource: String?,
-    @ColumnInfo(name = "expires_at")
-    val expiresAt: Long?,
     @ColumnInfo(name = "client_id")
     val clientId: String?,
-    @ColumnInfo(name = "client_name")
-    val clientName: String?,
     @ColumnInfo(name = "relay_request_id")
     val relayRequestId: String?,
+    @ColumnInfo(name = "body_json")
+    val bodyJson: String,
 )
 
 @Dao

@@ -632,7 +632,6 @@ class InvocationRequestsTest {
                 name = "TOKEN",
                 value = "sensitive-value",
                 sensitive = true,
-                notes = "",
                 nonSensitiveCreationAuthorized = true,
             ) is CreateEnvironmentVariableResult.Created,
         )

@@ -67,7 +67,8 @@ internal fun SecretEditorScreen(
         name.isNotEmpty() || description.isNotEmpty() ||
             editor.sshKeyDraft.privateKeyText.isNotEmpty() ||
             editor.sshKeyDraft.comment.isNotEmpty() ||
-            editor.sshKeyDraft.preparedKey != null
+            editor.sshKeyDraft.preparedKey != null ||
+            editor.environmentVariables != listOf(EnvironmentVariableDraft())
     } else {
         name != secret.name || description != secret.description
     }
@@ -206,6 +207,15 @@ internal fun SecretEditorScreen(
                     onPrepare = onPrepareSshKey,
                 )
             }
+            if (secret == null && editor.type == SecretType.ENVIRONMENT) {
+                EnvironmentVariableDrafts(
+                    variables = editor.environmentVariables,
+                    enabled = enabled,
+                    onChange = { variables ->
+                        onEditorChange(editor.copy(environmentVariables = variables))
+                    },
+                )
+            }
             if (
                 secret != null || editor.type != SecretType.SSH ||
                 editor.sshKeyDraft.preparedKey != null
@@ -219,7 +229,13 @@ internal fun SecretEditorScreen(
                         }
                         if (validationError == null) onSave(name, description)
                     },
-                    enabled = enabled && name.isNotBlank() && (
+                    enabled = enabled && name.isNotBlank() &&
+                        editor.environmentVariables
+                            .filter { it.name.isNotBlank() || it.value.isNotEmpty() }
+                            .let { variables ->
+                                variables.all { environmentVariableName.matches(it.name) } &&
+                                    variables.map { it.name }.distinct().size == variables.size
+                            } && (
                         secret == null ||
                             name != secret.name ||
                             description != secret.description

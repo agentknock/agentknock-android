@@ -35,6 +35,9 @@ class SshKeyCodecTest {
         assertEquals("test@example", key.comment)
         assertEquals(TEST_PUBLIC_KEY, key.publicKeyLine)
         assertTrue(key.fingerprint.startsWith("SHA256:"))
+        val publicKey = codec.publicKey(key.algorithm, key.publicKey, key.comment)
+        assertTrue(publicKey.fingerprintHex.matches(Regex("(?:[0-9A-F]{2}:){31}[0-9A-F]{2}")))
+        assertEquals(256, codec.bitLength(publicKey))
         codec.fromStored(
             key.algorithm.storedName,
             key.privateKey,
@@ -65,6 +68,9 @@ class SshKeyCodecTest {
         assertEquals("rsa@test", key.comment)
         assertEquals(fixture.publicKey, key.publicKeyLine)
         assertTrue(key.fingerprint.startsWith("SHA256:"))
+        val publicKey = codec.publicKey(key.algorithm, key.publicKey, key.comment)
+        assertTrue(publicKey.fingerprintHex.matches(Regex("(?:[0-9A-F]{2}:){31}[0-9A-F]{2}")))
+        assertEquals(2048, codec.bitLength(publicKey))
         codec.fromStored(
             key.algorithm.storedName,
             key.privateKey,

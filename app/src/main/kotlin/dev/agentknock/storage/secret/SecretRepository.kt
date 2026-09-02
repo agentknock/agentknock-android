@@ -9,6 +9,7 @@ import dev.agentknock.storage.audit.AuditDecisionSource
 import dev.agentknock.storage.audit.AuditOutcome
 import dev.agentknock.storage.audit.AuditRecord
 import dev.agentknock.storage.audit.AuditSink
+import dev.agentknock.storage.audit.auditDataOf
 import dev.agentknock.protocol.SecretUploadMode
 import dev.agentknock.protocol.SshSignatureAlgorithm
 import java.util.UUID
@@ -106,7 +107,6 @@ internal class SecretRepository(
                     secretId = variable.secretId,
                     name = variable.name,
                     sensitive = variable.sensitive,
-                    notes = variable.notes,
                     valueAvailable = availability.getValue(variable.encryptionKeyId),
                     valueUpdatedAt = variable.valueUpdatedAt,
                 )
@@ -143,8 +143,10 @@ internal class SecretRepository(
         val rendered = sshKeys.publicKey(algorithm, publicKey, comment)
         return SshKeyMetadata(
             algorithm = algorithm,
+            bits = sshKeys.bitLength(rendered),
             publicKey = rendered.line,
             fingerprint = rendered.fingerprint,
+            fingerprintHex = rendered.fingerprintHex,
             comment = rendered.comment,
             privateKeyAvailable = privateKeyAvailable,
         )
@@ -292,7 +294,7 @@ internal class SecretRepository(
         if (distinctPolicies.isEmpty()) return false
         if (distinctPolicies.any { it.temporaryAccessExpiresAt != null }) return false
         require(distinctPolicies.all { policy ->
-            policy.mode == SecretApprovalMode.TEMPORARY || policy.mode == SecretApprovalMode.ASK_AI
+            policy.mode == SecretApprovalMode.ASK_ME || policy.mode == SecretApprovalMode.ASK_AI
         }) { "Temporary access is not enabled for this client and secret" }
         return writeTransaction.execute {
             val inserted = dao.upsertTemporaryAccessGrantsIfCurrent(
@@ -369,16 +371,44 @@ internal class SecretRepository(
     suspend fun importSshKey(value: String): SshPrivateKey =
         withContext(cryptographyDispatcher) { sshKeys.importOpenSshPrivateKey(value) }
 
-    suspend fun createEnvironmentSecret(name: String, description: String): CreateSecretResult {
+    suspend fun createEnvironmentSecret(
+        name: String,
+        description: String,
+        variables: List<EnvironmentVariableInput> = emptyList(),
+    ): CreateSecretResult {
         validateSecretName(name)
+        variables.forEach { variable ->
+            validateEnvironmentVariableName(variable.name)
+            validateEnvironmentVariableValue(variable.value)
+        }
+        require(variables.map { it.name }.distinct().size == variables.size) {
+            "Environment variable names must be unique"
+        }
         val id = newId()
         val now = currentTimeMillis()
+        val encryptedVariables = variables.map { variable ->
+            val variableId = newId()
+            EnvironmentVariableEntity(
+                id = variableId,
+                secretId = id,
+                name = variable.name,
+                sensitive = variable.sensitive,
+                encryptedValue = material.encryptEnvironmentValue(
+                    variableId,
+                    id,
+                    variable.name,
+                    variable.sensitive,
+                    variable.value,
+                ),
+                valueUpdatedAt = now,
+            )
+        }
         return writeTransaction.execute {
             if (dao.secretNameInUse(name, excludingId = "")) {
                 return@execute CreateSecretResult.NameInUse
             }
-            dao.insertSecret(
-                SecretEntity(
+            dao.insertEnvironmentSecret(
+                secret = SecretEntity(
                     id = id,
                     name = name,
                     description = description,
@@ -386,12 +416,17 @@ internal class SecretRepository(
                     createdAt = now,
                     updatedAt = now,
                 ),
+                variables = encryptedVariables,
             )
             audit.record(
                 AuditRecord(
                     type = AuditEventType.SECRET_CREATED,
                     outcome = AuditOutcome.CHANGED,
                     subject = name,
+                    data = auditDataOf(
+                        "secret_type" to SecretType.ENVIRONMENT.storedName,
+                        "environment_variables" to variables.map(EnvironmentVariableInput::name),
+                    ),
                 ),
             )
             CreateSecretResult.Created(id)
@@ -427,6 +462,7 @@ internal class SecretRepository(
                     type = AuditEventType.SSH_KEY_CREATED,
                     outcome = AuditOutcome.CHANGED,
                     subject = name,
+                    data = privateKey.auditData(),
                 ),
             )
             CreateSecretResult.Created(id)
@@ -455,6 +491,7 @@ internal class SecretRepository(
                     type = AuditEventType.SSH_KEY_REPLACED,
                     outcome = AuditOutcome.CHANGED,
                     subject = secret.name,
+                    data = privateKey.auditData(),
                 ),
             )
             SaveSshSecretResult.Saved(id)
@@ -481,6 +518,7 @@ internal class SecretRepository(
                     type = AuditEventType.SSH_PUBLIC_KEY_COMMENT_UPDATED,
                     outcome = AuditOutcome.CHANGED,
                     subject = secret.name,
+                    data = auditDataOf("comment" to trimmed),
                 ),
             )
             SaveSshSecretResult.Saved(id)
@@ -529,7 +567,6 @@ internal class SecretRepository(
         name: String,
         value: String,
         sensitive: Boolean,
-        notes: String,
         nonSensitiveCreationAuthorized: Boolean,
     ): CreateEnvironmentVariableResult {
         validateEnvironmentVariableName(name)
@@ -561,7 +598,6 @@ internal class SecretRepository(
                     secretId = secretId,
                     name = name,
                     sensitive = sensitive,
-                    notes = notes,
                     encryptedValue = encrypted,
                     valueUpdatedAt = now,
                 ),
@@ -596,7 +632,6 @@ internal class SecretRepository(
         id: String,
         name: String,
         sensitive: Boolean,
-        notes: String,
         replacementValue: String?,
         sensitivityReductionAuthorized: Boolean,
     ): SaveEnvironmentVariableResult {
@@ -644,7 +679,6 @@ internal class SecretRepository(
         val updated = existing.copy(
             name = name,
             sensitive = sensitive,
-            notes = notes,
             encryptedValue = encrypted,
             valueUpdatedAt = if (replacementValue == null) existing.valueUpdatedAt else now,
         )
@@ -652,22 +686,13 @@ internal class SecretRepository(
             if (dao.environmentVariableNameInUse(existing.secretId, name, excludingId = id)) {
                 return@execute SaveEnvironmentVariableResult.NAME_IN_USE
             }
-            val rowsUpdated = if (!authenticatedFieldsChanged && replacementValue == null) {
-                dao.updateEnvironmentVariableNotes(
-                    variableId = id,
-                    secretId = existing.secretId,
-                    notes = notes,
-                    updatedAt = now,
+            val rowsUpdated = if (
+                dao.updateEnvironmentVariableIfCurrent(
+                    updated,
+                    owner.revision,
+                    secretUpdatedAt = now,
                 )
-            } else {
-                if (
-                    dao.updateEnvironmentVariableIfCurrent(
-                        updated,
-                        owner.revision,
-                        secretUpdatedAt = now,
-                    )
-                ) 1 else 0
-            }
+            ) 1 else 0
             if (rowsUpdated != 1) return@execute SaveEnvironmentVariableResult.NOT_FOUND
             audit.record(
                 AuditRecord(
@@ -813,6 +838,17 @@ internal class SecretRepository(
         const val TEMPORARY_ACCESS_REFRESH_MILLIS = 30_000L
         val ENVIRONMENT_VARIABLE_NAME = Regex("[A-Za-z_][A-Za-z0-9_]*")
     }
+
+    private fun SshPrivateKey.auditData(): Map<String, kotlinx.serialization.json.JsonElement> {
+        val public = sshKeys.publicKey(algorithm, publicKey, comment)
+        return auditDataOf(
+            "algorithm" to algorithm.storedName,
+            "bits" to sshKeys.bitLength(public),
+            "fingerprint" to public.fingerprint,
+            "fingerprint_hex" to public.fingerprintHex,
+            "comment" to comment,
+        )
+    }
 }
 
 private fun TemporaryAccessOperation.auditName(): String = when (this) {
@@ -822,9 +858,8 @@ private fun TemporaryAccessOperation.auditName(): String = when (this) {
 }
 
 private fun SecretApprovalMode.auditName(): String = when (this) {
-    SecretApprovalMode.APPROVE -> "Approve automatically"
+    SecretApprovalMode.APPROVE -> "Approve"
     SecretApprovalMode.ASK_AI -> "Ask AI"
-    SecretApprovalMode.TEMPORARY -> "Ask with 4-hour option"
-    SecretApprovalMode.ASK_ME -> "Ask every time"
-    SecretApprovalMode.DENY -> "Always deny"
+    SecretApprovalMode.ASK_ME -> "Ask me"
+    SecretApprovalMode.DENY -> "Deny"
 }

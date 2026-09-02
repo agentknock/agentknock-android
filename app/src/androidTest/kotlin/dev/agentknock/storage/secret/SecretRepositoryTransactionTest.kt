@@ -45,7 +45,8 @@ class SecretRepositoryTransactionTest {
 
     @Test
     fun secretAndAuditEventCommitTogether() = runTest {
-        val repository = repository(AuditRepository(database.auditDao(), currentTimeMillis = { 5L }))
+        val audit = AuditRepository(database.auditDao(), currentTimeMillis = { 5L })
+        val repository = repository(audit)
 
         assertEquals(
             CreateSecretResult.Created("secret-id"),
@@ -53,9 +54,9 @@ class SecretRepositoryTransactionTest {
         )
 
         assertEquals(listOf("production"), database.secretDao().getSecrets().map { it.name })
-        val events = database.auditDao().observeEvents().first()
+        val events = audit.observeEvents().first()
         assertEquals(1, events.size)
-        assertEquals(AuditEventType.SECRET_CREATED.code, events.single().eventType)
+        assertEquals(AuditEventType.SECRET_CREATED, events.single().type)
         assertEquals("production", events.single().subject)
     }
 

@@ -20,6 +20,8 @@ import java.util.Base64
 import org.bouncycastle.crypto.params.Ed25519PrivateKeyParameters
 import org.bouncycastle.crypto.signers.Ed25519Signer
 
+private const val FINGERPRINT_HEX = "0123456789ABCDEF"
+
 internal enum class SshKeyAlgorithm(
     val storedName: String,
     val publicName: String,
@@ -69,6 +71,12 @@ internal data class SshPublicKey(
             MessageDigest.getInstance("SHA-256").digest(blob()),
         )
 
+    val fingerprintHex: String
+        get() = MessageDigest.getInstance("SHA-256").digest(blob()).joinToString(":") { byte ->
+            FINGERPRINT_HEX[(byte.toInt() ushr 4) and 0xf].toString() +
+                FINGERPRINT_HEX[byte.toInt() and 0xf]
+        }
+
     fun blob(): ByteArray = ByteArrayOutputStream().use { bytes ->
         DataOutputStream(bytes).use { output ->
             val algorithmBytes = algorithm.publicName.encodeToByteArray()
@@ -89,6 +97,11 @@ internal data class SshPublicKey(
 internal class SshKeyCodec(
     private val secureRandom: SecureRandom = SecureRandom(),
 ) {
+    fun bitLength(publicKey: SshPublicKey): Int = when (publicKey.algorithm) {
+        SshKeyAlgorithm.ED25519 -> ED25519_PUBLIC_KEY_BYTES * 8
+        SshKeyAlgorithm.RSA -> parseRsaPublicKey(publicKey.publicKey).modulus.bitLength()
+    }
+
     fun generateEd25519(comment: String): SshPrivateKey {
         validateComment(comment)
         val privateKey = Ed25519PrivateKeyParameters(secureRandom)

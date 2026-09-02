@@ -330,54 +330,6 @@ class SecretRepositoryTest {
     }
 
     @Test
-    fun `saving environment notes cannot restore stale encrypted material`() = runTest {
-        val fixture = Fixture()
-        val secretId = fixture.createSecret("github")
-        val variableId = fixture.createVariable(secretId, "TOKEN", "first", true)
-        val original = fixture.dao.variables.value.single()
-        val replacement = original.copy(
-            encryptedValue = original.encryptedValue.copy(
-                keyId = "replacement-key",
-                nonce = byteArrayOf(9, 8, 7),
-                ciphertext = byteArrayOf(6, 5, 4),
-            ),
-            valueUpdatedAt = original.valueUpdatedAt + 100,
-        )
-        val revisedSecret = fixture.dao.secrets.value.single().copy(
-            revision = 9,
-            updatedAt = 9_999,
-        )
-        fixture.dao.beforeEnvironmentNotesUpdate = {
-            fixture.dao.directlyReplaceVariable(replacement)
-            fixture.dao.secrets.value = listOf(revisedSecret)
-        }
-
-        assertEquals(
-            SaveEnvironmentVariableResult.SAVED,
-            fixture.repository.saveEnvironmentVariable(
-                id = variableId,
-                name = "TOKEN",
-                sensitive = true,
-                notes = "Rotated out of band",
-                replacementValue = null,
-                sensitivityReductionAuthorized = true,
-            ),
-        )
-
-        val stored = fixture.dao.variables.value.single()
-        assertEquals(replacement.encryptedValue.keyId, stored.encryptedValue.keyId)
-        assertEquals(replacement.encryptedValue.nonce.toList(), stored.encryptedValue.nonce.toList())
-        assertEquals(
-            replacement.encryptedValue.ciphertext.toList(),
-            stored.encryptedValue.ciphertext.toList(),
-        )
-        assertEquals(replacement.valueUpdatedAt, stored.valueUpdatedAt)
-        assertEquals("Rotated out of band", stored.notes)
-        assertEquals(9L, fixture.dao.secrets.value.single().revision)
-        assertEquals(9_999L, fixture.dao.secrets.value.single().updatedAt)
-    }
-
-    @Test
     fun `binds ciphertext to its environment variable metadata`() = runTest {
         val fixture = Fixture()
         val secretId = fixture.createSecret("aws-read-only")
@@ -436,7 +388,6 @@ class SecretRepositoryTest {
                 name = "AWS_REGION",
                 value = "eu-west-1",
                 sensitive = false,
-                notes = "",
                 nonSensitiveCreationAuthorized = false,
             ),
         )
@@ -448,7 +399,6 @@ class SecretRepositoryTest {
                 name = "AWS_REGION",
                 value = "eu-west-1",
                 sensitive = false,
-                notes = "",
                 nonSensitiveCreationAuthorized = true,
             ) is CreateEnvironmentVariableResult.Created,
         )
@@ -466,7 +416,6 @@ class SecretRepositoryTest {
                 id = variableId,
                 name = "GITHUB_TOKEN",
                 sensitive = false,
-                notes = "",
                 replacementValue = null,
                 sensitivityReductionAuthorized = false,
             ),
@@ -479,7 +428,6 @@ class SecretRepositoryTest {
                 id = variableId,
                 name = "GITHUB_TOKEN",
                 sensitive = false,
-                notes = "",
                 replacementValue = null,
                 sensitivityReductionAuthorized = true,
             ),
@@ -499,7 +447,6 @@ class SecretRepositoryTest {
             id = variableId,
             name = "AWS_DEFAULT_REGION",
             sensitive = true,
-            notes = "Used by the AWS CLI",
             replacementValue = null,
             sensitivityReductionAuthorized = true,
         )
@@ -579,7 +526,6 @@ class SecretRepositoryTest {
                 id = variableId,
                 name = "CF_TOKEN",
                 sensitive = true,
-                notes = "",
                 replacementValue = "new-token",
                 sensitivityReductionAuthorized = true,
             ),
@@ -910,7 +856,7 @@ class SecretRepositoryTest {
             fixture.repository.observeSecrets().first().single().type,
         )
         assertEquals("Cloudflare production account", secret.description)
-        assertEquals(SecretApprovalMode.TEMPORARY, secret.approvalMode)
+        assertEquals(SecretApprovalMode.ASK_ME, secret.approvalMode)
         assertTrue(secret.environmentVariables.all(EnvironmentVariableMetadata::sensitive))
         assertEquals(
             EnvironmentVariableValue.Available("CF_TOKEN", "token", sensitive = true),
@@ -922,7 +868,7 @@ class SecretRepositoryTest {
     }
 
     @Test
-    fun `replace uploads preserve environment variable sensitivity and notes`() = runTest {
+    fun `replace uploads preserve environment variable sensitivity`() = runTest {
         val fixture = Fixture()
         val secretId = fixture.createSecret("aws-read-only")
         fixture.repository.saveApprovalMode(secretId, SecretApprovalMode.ASK_AI)
@@ -932,7 +878,6 @@ class SecretRepositoryTest {
             name = "AWS_REGION",
             value = "eu-west-1",
             sensitive = false,
-            notes = "Safe to display",
             nonSensitiveCreationAuthorized = true,
         )
         check(region is CreateEnvironmentVariableResult.Created)
@@ -964,7 +909,6 @@ class SecretRepositoryTest {
         assertEquals(listOf("AWS_ACCESS_KEY_ID", "AWS_REGION"), secret.environmentVariables.map { it.name })
         val updatedRegion = secret.environmentVariables.single { it.name == "AWS_REGION" }
         assertFalse(updatedRegion.sensitive)
-        assertEquals("Safe to display", updatedRegion.notes)
         assertTrue(secret.environmentVariables.single { it.name == "AWS_ACCESS_KEY_ID" }.sensitive)
         assertEquals(SecretApprovalMode.ASK_AI, secret.approvalMode)
         assertEquals("Permit read-only AWS operations.", secret.instructions)
@@ -1119,7 +1063,7 @@ class SecretRepositoryTest {
             fixture.repository.setClientApprovalOverride(
                 secretId,
                 "workstation",
-                SecretApprovalMode.TEMPORARY,
+                SecretApprovalMode.ASK_ME,
             )
 
             assertEquals(1, fixture.dao.temporaryAccessGrants.value.size)
@@ -1138,7 +1082,7 @@ class SecretRepositoryTest {
         fixture.repository.setClientApprovalOverride(
             secretId,
             "pinned-client",
-            SecretApprovalMode.TEMPORARY,
+            SecretApprovalMode.ASK_ME,
         )
         listOf("inheriting-client", "pinned-client").forEach { clientId ->
             fixture.repository.allowTemporaryAccess(
@@ -1154,7 +1098,7 @@ class SecretRepositoryTest {
         }
         val revision = checkNotNull(fixture.dao.getSecret(secretId)).revision
 
-        fixture.repository.saveApprovalMode(secretId, SecretApprovalMode.ASK_ME)
+        fixture.repository.saveApprovalMode(secretId, SecretApprovalMode.ASK_AI)
 
         assertEquals(
             listOf("pinned-client"),
@@ -1162,7 +1106,7 @@ class SecretRepositoryTest {
         )
         assertEquals(revision, checkNotNull(fixture.dao.getSecret(secretId)).revision)
         assertEquals(
-            SecretApprovalMode.ASK_ME,
+            SecretApprovalMode.ASK_AI,
             fixture.repository.approvalPoliciesForNames(
                 listOf("github"),
                 "inheriting-client",
@@ -1170,7 +1114,7 @@ class SecretRepositoryTest {
             ).single().mode,
         )
         assertEquals(
-            SecretApprovalMode.TEMPORARY,
+            SecretApprovalMode.ASK_ME,
             fixture.repository.approvalPoliciesForNames(
                 listOf("github"),
                 "pinned-client",
@@ -1254,7 +1198,7 @@ class SecretRepositoryTest {
         val fixture = Fixture()
         val secretId = fixture.createSecret("github")
         val otherSecretId = fixture.createSecret("production")
-        fixture.repository.saveApprovalMode(secretId, SecretApprovalMode.TEMPORARY)
+        fixture.repository.saveApprovalMode(secretId, SecretApprovalMode.ASK_ME)
 
         fixture.repository.allowTemporaryAccess(
             policies = fixture.repository.approvalPoliciesForNames(
@@ -1393,7 +1337,7 @@ class SecretRepositoryTest {
         val secretId = fixture.createSecret("github")
 
         assertEquals(
-            SecretApprovalMode.TEMPORARY,
+            SecretApprovalMode.ASK_ME,
             fixture.repository.observeSecret(secretId).first()?.approvalMode,
         )
     }
@@ -1413,7 +1357,6 @@ class SecretRepositoryTest {
             id = variableId,
             name = "GITHUB_TOKEN",
             sensitive = true,
-            notes = "",
             replacementValue = "new-token",
             sensitivityReductionAuthorized = true,
         )
@@ -1453,7 +1396,7 @@ class SecretRepositoryTest {
         val fixture = Fixture()
         val secretId = fixture.createSecret("github")
         val variableId = fixture.createVariable(secretId, "GITHUB_TOKEN", "token", true)
-        fixture.repository.saveApprovalMode(secretId, SecretApprovalMode.TEMPORARY)
+        fixture.repository.saveApprovalMode(secretId, SecretApprovalMode.ASK_ME)
         fixture.repository.allowTemporaryAccess(
             policies = fixture.repository.approvalPoliciesForNames(
                 listOf("github"),
@@ -1469,7 +1412,6 @@ class SecretRepositoryTest {
             id = variableId,
             name = "GITHUB_TOKEN",
             sensitive = true,
-            notes = "",
             replacementValue = "new-token",
             sensitivityReductionAuthorized = true,
         )
@@ -1494,7 +1436,7 @@ class SecretRepositoryTest {
         fixture.repository.setClientApprovalOverride(
             secretId,
             "workstation",
-            SecretApprovalMode.ASK_ME,
+            SecretApprovalMode.DENY,
         )
         assertNull(
             fixture.repository.approvalPoliciesForNames(
@@ -1713,7 +1655,6 @@ class SecretRepositoryTest {
                 name = name,
                 value = value,
                 sensitive = sensitive,
-                notes = "",
                 nonSensitiveCreationAuthorized = true,
             )
             check(result is CreateEnvironmentVariableResult.Created)
@@ -1746,7 +1687,6 @@ private class FakeSecretDao : SecretDao {
         MutableStateFlow<List<SecretClientApprovalOverrideEntity>>(emptyList())
     val temporaryAccessGrants = MutableStateFlow<List<TemporaryAccessGrantEntity>>(emptyList())
     var temporaryAccessClientAvailable = true
-    var beforeEnvironmentNotesUpdate: (() -> Unit)? = null
     var beforeSshCommentUpdate: (() -> Unit)? = null
 
     override fun observeSecrets(): Flow<List<SecretSummaryRow>> = combine(
@@ -1826,7 +1766,6 @@ private class FakeSecretDao : SecretDao {
                     secretId = variable.secretId,
                     name = variable.name,
                     sensitive = variable.sensitive,
-                    notes = variable.notes,
                     encryptionKeyId = variable.encryptedValue.keyId,
                     valueUpdatedAt = variable.valueUpdatedAt,
                 )
@@ -2115,7 +2054,6 @@ private class FakeSecretDao : SecretDao {
         secretId: String,
         name: String,
         sensitive: Boolean,
-        notes: String,
         encryptionFormat: Int,
         encryptionKeyId: String,
         nonce: ByteArray,
@@ -2129,7 +2067,6 @@ private class FakeSecretDao : SecretDao {
             current.copy(
                 name = name,
                 sensitive = sensitive,
-                notes = notes,
                 encryptedValue = current.encryptedValue.copy(
                     formatVersion = encryptionFormat,
                     keyId = encryptionKeyId,
@@ -2167,26 +2104,6 @@ private class FakeSecretDao : SecretDao {
                 valueUpdatedAt = valueUpdatedAt,
             ),
         )
-        return 1
-    }
-
-    override suspend fun updateEnvironmentVariableNotesRow(
-        variableId: String,
-        secretId: String,
-        notes: String,
-    ): Int {
-        beforeEnvironmentNotesUpdate?.also {
-            beforeEnvironmentNotesUpdate = null
-            it()
-        }
-        if (variables.value.none { it.id == variableId && it.secretId == secretId }) return 0
-        variables.value = variables.value.map { variable ->
-            if (variable.id == variableId && variable.secretId == secretId) {
-                variable.copy(notes = notes)
-            } else {
-                variable
-            }
-        }
         return 1
     }
 

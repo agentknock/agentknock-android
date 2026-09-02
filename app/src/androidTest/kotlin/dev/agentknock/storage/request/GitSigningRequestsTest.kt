@@ -828,7 +828,7 @@ class GitSigningRequestsTest {
         assertTrue(created is CreateSecretResult.Created)
         assertEquals(
             SaveSecretResult.SAVED,
-            secrets.saveApprovalMode(SECRET_ID, SecretApprovalMode.TEMPORARY),
+            secrets.saveApprovalMode(SECRET_ID, SecretApprovalMode.ASK_ME),
         )
         val description = secrets.describeRequestedSecrets(listOf(SECRET_NAME))
         insertParent(Json.encodeToString(description.secrets))

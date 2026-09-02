@@ -33,7 +33,6 @@ internal fun SshKeyAlgorithm.canonicalPrivateKeyFormat(): String = when (this) {
 internal enum class SecretApprovalMode(val storedName: String) {
     DENY("deny"),
     ASK_ME("ask_me"),
-    TEMPORARY("temporary"),
     ASK_AI("ask_ai"),
     APPROVE("approve"),
 }
@@ -105,8 +104,10 @@ internal data class SecretDetails(
 
 internal data class SshKeyMetadata(
     val algorithm: SshKeyAlgorithm,
+    val bits: Int,
     val publicKey: String,
     val fingerprint: String,
+    val fingerprintHex: String,
     val comment: String,
     val privateKeyAvailable: Boolean,
 )
@@ -116,9 +117,14 @@ internal data class EnvironmentVariableMetadata(
     val secretId: String,
     val name: String,
     val sensitive: Boolean,
-    val notes: String,
     val valueAvailable: Boolean,
     val valueUpdatedAt: Long,
+)
+
+internal data class EnvironmentVariableInput(
+    val name: String,
+    val value: String,
+    val sensitive: Boolean,
 )
 
 internal sealed interface EnvironmentVariableValue {

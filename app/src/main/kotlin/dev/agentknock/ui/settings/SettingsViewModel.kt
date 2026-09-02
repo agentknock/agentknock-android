@@ -5,8 +5,6 @@ import androidx.lifecycle.viewModelScope
 import dev.agentknock.storage.crypto.VaultProtection
 import dev.agentknock.storage.crypto.VaultKeyManager
 import dev.agentknock.storage.device.DeviceConfiguration
-import dev.agentknock.storage.request.ClientSummary
-import dev.agentknock.storage.secret.SecretSummary
 import dev.agentknock.push.PushRegistrationRepository
 import dev.agentknock.ui.auth.DeviceAuthenticationMode
 import dev.agentknock.ui.auth.DeviceAuthenticationResult
@@ -14,19 +12,11 @@ import dev.agentknock.ui.auth.ProtectedActionAuthorizer
 import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.channels.Channel
 import kotlinx.coroutines.flow.MutableStateFlow
-import kotlinx.coroutines.flow.SharingStarted
 import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.asStateFlow
-import kotlinx.coroutines.flow.combine
 import kotlinx.coroutines.flow.collect
 import kotlinx.coroutines.flow.receiveAsFlow
-import kotlinx.coroutines.flow.stateIn
 import kotlinx.coroutines.launch
-
-internal data class DataCounts(
-    val secrets: Int = 0,
-    val clients: Int = 0,
-)
 
 internal sealed interface FactoryResetUiState {
     data object Idle : FactoryResetUiState
@@ -37,8 +27,6 @@ internal sealed interface FactoryResetUiState {
 
 internal class SettingsViewModel(
     val configuration: StateFlow<DeviceConfiguration?>,
-    secretSummaries: StateFlow<List<SecretSummary>>,
-    clientSummaries: StateFlow<List<ClientSummary>>,
     pushRegistration: PushRegistrationRepository,
     private val vaultKeys: VaultKeyManager,
     private val beginFactoryReset: suspend () -> Boolean,
@@ -51,19 +39,6 @@ internal class SettingsViewModel(
     private val _factoryReset = MutableStateFlow<FactoryResetUiState>(FactoryResetUiState.Idle)
     private val messageEvents = Channel<String>(Channel.BUFFERED)
 
-    val dataCounts: StateFlow<DataCounts> = combine(
-        secretSummaries,
-        clientSummaries,
-    ) { secrets, clients ->
-        DataCounts(
-            secrets = secrets.size,
-            clients = clients.size,
-        )
-    }.stateIn(
-        viewModelScope,
-        SharingStarted.WhileSubscribed(READ_MODEL_STOP_TIMEOUT_MILLIS),
-        DataCounts(),
-    )
     val pushRegistrationState = pushRegistration.registrationState
     val vaultProtection: StateFlow<VaultProtection?> = _vaultProtection.asStateFlow()
     val factoryReset: StateFlow<FactoryResetUiState> = _factoryReset.asStateFlow()
@@ -129,7 +104,4 @@ internal class SettingsViewModel(
         _factoryReset.value = FactoryResetUiState.ClearFailed
     }
 
-    private companion object {
-        const val READ_MODEL_STOP_TIMEOUT_MILLIS = 5_000L
-    }
 }

@@ -9,6 +9,8 @@ import dev.agentknock.storage.request.SecretUploadDecisionResult
 import dev.agentknock.storage.request.SecretUploadSensitivityResult
 import dev.agentknock.storage.request.SecretUploadVariableValue
 import dev.agentknock.storage.secret.CreateEnvironmentVariableResult
+import dev.agentknock.storage.secret.CreateSecretResult
+import dev.agentknock.storage.secret.EnvironmentVariableInput
 import dev.agentknock.storage.secret.EnvironmentVariableValue
 import dev.agentknock.storage.secret.SaveEnvironmentVariableResult
 import dev.agentknock.storage.secret.SecretRepository
@@ -69,7 +71,6 @@ internal class AgentknockActions(
         name: String,
         value: String,
         sensitive: Boolean,
-        notes: String,
     ): ProtectedActionResult<CreateEnvironmentVariableResult> {
         awaitStorageReady()
         return authenticateAndRetry(
@@ -79,7 +80,6 @@ internal class AgentknockActions(
                     name,
                     value,
                     sensitive,
-                    notes,
                     nonSensitiveCreationAuthorized = authorized,
                 )
             },
@@ -93,11 +93,24 @@ internal class AgentknockActions(
         )
     }
 
+    suspend fun createEnvironmentSecret(
+        name: String,
+        description: String,
+        variables: List<EnvironmentVariableInput>,
+    ): ProtectedActionResult<CreateSecretResult> {
+        awaitStorageReady()
+        if (variables.any { !it.sensitive }) {
+            authenticate("Create a secret containing non-sensitive values")?.let { return it }
+        }
+        return ProtectedActionResult.Completed(
+            secrets.createEnvironmentSecret(name, description, variables),
+        )
+    }
+
     suspend fun saveEnvironmentVariable(
         id: String,
         name: String,
         sensitive: Boolean,
-        notes: String,
         replacementValue: String?,
     ): ProtectedActionResult<SaveEnvironmentVariableResult> {
         awaitStorageReady()
@@ -107,7 +120,6 @@ internal class AgentknockActions(
                     id,
                     name,
                     sensitive,
-                    notes,
                     replacementValue,
                     sensitivityReductionAuthorized = authorized,
                 )

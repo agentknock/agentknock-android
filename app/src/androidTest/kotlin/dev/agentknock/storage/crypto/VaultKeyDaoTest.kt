@@ -85,7 +85,6 @@ class VaultKeyDaoTest {
             secretId = secret.id,
             name = "TOKEN",
             sensitive = true,
-            notes = "",
             encryptedValue = encrypted(ENVIRONMENT_KEY),
             valueUpdatedAt = 1,
         )
@@ -135,7 +134,6 @@ class VaultKeyDaoTest {
                 secretId = environmentSecret.id,
                 name = "TOKEN",
                 sensitive = true,
-                notes = "",
                 encryptedValue = encrypted(ENVIRONMENT_KEY),
                 valueUpdatedAt = 1,
             ),

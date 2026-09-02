@@ -110,8 +110,10 @@ class SecretsEditorCommitLifecycleTest {
                 secretName = "secret",
                 currentKey = SshKeyMetadata(
                     algorithm = SshKeyAlgorithm.ED25519,
+                    bits = 256,
                     publicKey = "public-key",
                     fingerprint = "fingerprint",
+                    fingerprintHex = "fingerprint-hex",
                     comment = "",
                     privateKeyAvailable = true,
                 ),
@@ -161,7 +163,6 @@ class SecretsEditorCommitLifecycleTest {
                 value = "value",
                 valueEdited = true,
                 sensitive = true,
-                notes = "",
             ),
         ),
         SecretsEditor.SshKey(
@@ -171,8 +172,10 @@ class SecretsEditorCommitLifecycleTest {
                 secretName = "secret",
                 currentKey = SshKeyMetadata(
                     algorithm = SshKeyAlgorithm.ED25519,
+                    bits = 256,
                     publicKey = "public-key",
                     fingerprint = "fingerprint",
+                    fingerprintHex = "fingerprint-hex",
                     comment = "",
                     privateKeyAvailable = true,
                 ),

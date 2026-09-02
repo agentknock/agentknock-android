@@ -588,23 +588,20 @@ class DeviceIdentityRetentionTest {
     private fun auditEvent() = AuditEventEntity(
         occurredAt = 13,
         eventType = "secret_use",
-        subject = "Original secret",
-        context = "git status",
-        detail = "Historical audit detail",
         outcome = "approved",
         decisionSource = "manual",
-        expiresAt = null,
         clientId = CLIENT_ID,
-        clientName = "Original client",
         relayRequestId = REQUEST_ID,
+        bodyJson = "{\"subject\":\"Original secret\",\"context\":\"git status\"," +
+            "\"detail\":\"Historical audit detail\",\"client_name\":\"Original client\"}",
     )
 
     private suspend fun assertAuditSnapshotRemains() {
         val audit = database.auditDao().observeEvents().first().single()
         assertEquals(CLIENT_ID, audit.clientId)
-        assertEquals("Original client", audit.clientName)
         assertEquals(REQUEST_ID, audit.relayRequestId)
-        assertEquals("Historical audit detail", audit.detail)
+        assertTrue(audit.bodyJson.contains("Original client"))
+        assertTrue(audit.bodyJson.contains("Historical audit detail"))
     }
 
     private fun clientPsk(slot: String) = ClientPskEntity(

@@ -236,18 +236,19 @@ internal fun ClientList(
                                 }
                                 Column(verticalArrangement = Arrangement.spacedBy(2.dp)) {
                                     if (machine.isNotEmpty()) Text(machine)
-                                    client.pairedAt?.let {
+                                    val activity = listOfNotNull(
+                                        client.lastRequestAt?.let {
+                                            "Last request ${formatRelativeTime(it)}"
+                                        },
+                                        client.pairedAt?.let { "Paired ${formatRelativeTime(it)}" },
+                                    ).joinToString(" · ")
+                                    if (activity.isNotEmpty()) {
                                         Text(
-                                            "Paired ${formatRelativeTime(it)}",
+                                            activity,
                                             style = MaterialTheme.typography.bodySmall,
                                             color = MaterialTheme.colorScheme.onSurfaceVariant,
-                                        )
-                                    }
-                                    client.lastRequestAt?.let {
-                                        Text(
-                                            "Last request ${formatRelativeTime(it)}",
-                                            style = MaterialTheme.typography.bodySmall,
-                                            color = MaterialTheme.colorScheme.onSurfaceVariant,
+                                            maxLines = 1,
+                                            overflow = TextOverflow.Ellipsis,
                                         )
                                     }
                                     if (client.name in duplicateClientNames) {

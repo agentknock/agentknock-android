@@ -29,6 +29,7 @@ import androidx.compose.material3.SnackbarHostState
 import androidx.compose.material3.Text
 import androidx.compose.material3.TopAppBar
 import androidx.compose.runtime.Composable
+import androidx.compose.runtime.remember
 import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
@@ -44,6 +45,7 @@ import androidx.compose.ui.text.input.PasswordVisualTransformation
 import androidx.compose.ui.unit.dp
 import dev.agentknock.storage.secret.SshKeyAlgorithm
 import dev.agentknock.storage.secret.SshPrivateKey
+import dev.agentknock.storage.secret.SshKeyCodec
 import dev.agentknock.ui.components.InformationRow
 import dev.agentknock.ui.components.InformationSurface
 import dev.agentknock.ui.components.NavigationBackButton
@@ -198,10 +200,17 @@ internal fun SshKeyInput(
 }
 @Composable
 private fun SshKeyPreview(key: SshPrivateKey) {
+    val publicKey = remember(key) {
+        SshKeyCodec().publicKey(key.algorithm, key.publicKey, key.comment)
+    }
     InformationSurface {
         Text("Ready to save", style = MaterialTheme.typography.titleMedium)
-        InformationRow("Algorithm", key.algorithm.displayName())
-        InformationRow("Fingerprint", key.fingerprint)
+        InformationRow(
+            "Algorithm",
+            "${key.algorithm.displayName()} · ${SshKeyCodec().bitLength(publicKey)} bits",
+        )
+        InformationRow("OpenSSH fingerprint", key.fingerprint, monospace = true)
+        InformationRow("SHA-256 fingerprint (hex)", publicKey.fingerprintHex, monospace = true)
         if (key.comment.isNotBlank()) InformationRow("Comment", key.comment)
         Column(verticalArrangement = Arrangement.spacedBy(3.dp)) {
             Text(
@@ -278,7 +287,11 @@ internal fun SshKeyEditorScreen(
             ) {
             InformationSurface {
                 Text(editor.secretName, style = MaterialTheme.typography.titleMedium)
-                InformationRow("Current fingerprint", editor.currentKey.fingerprint)
+                InformationRow("Current OpenSSH fingerprint", editor.currentKey.fingerprint)
+                InformationRow(
+                    "Current SHA-256 fingerprint (hex)",
+                    editor.currentKey.fingerprintHex,
+                )
                 Text(
                     "Replacing the private key changes the public key while keeping the secret's " +
                         "name and request references.",

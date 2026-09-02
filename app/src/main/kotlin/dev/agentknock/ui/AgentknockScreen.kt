@@ -16,7 +16,6 @@ import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.outlined.Computer
 import androidx.compose.material.icons.outlined.Inbox
 import androidx.compose.material.icons.outlined.Key
-import androidx.compose.material.icons.outlined.Lock
 import androidx.compose.material3.Badge
 import androidx.compose.material3.BadgedBox
 import androidx.compose.material3.Icon
@@ -47,6 +46,7 @@ import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.res.stringResource
+import androidx.compose.ui.res.painterResource
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
@@ -54,6 +54,7 @@ import androidx.lifecycle.Lifecycle
 import androidx.lifecycle.LifecycleEventObserver
 import androidx.lifecycle.ViewModelProvider
 import androidx.lifecycle.compose.LocalLifecycleOwner
+import androidx.lifecycle.compose.LifecycleEventEffect
 import androidx.lifecycle.viewmodel.compose.viewModel
 import dev.agentknock.R
 import dev.agentknock.ExternalNavigation
@@ -340,6 +341,8 @@ internal fun AgentknockScreen(
                     configuration = current,
                     onDone = null,
                     onOpenSettings = { destination = RootDestination.SETTINGS },
+                    authenticationMode = authenticationMode,
+                    onAuthenticationModeChange = agentknockViewModel::changeAuthenticationMode,
                     viewModel = deviceSetupViewModel(),
                 )
             }
@@ -349,6 +352,8 @@ internal fun AgentknockScreen(
                     configuration = current,
                     onDone = ::closeAddressEditor,
                     changeAddressInitially = true,
+                    authenticationMode = authenticationMode,
+                    onAuthenticationModeChange = agentknockViewModel::changeAuthenticationMode,
                     viewModel = deviceSetupViewModel(),
                 )
             }
@@ -443,6 +448,8 @@ private fun AgentknockLockedScreen(
     error: String?,
     onUnlock: () -> Unit,
 ) {
+    LaunchedEffect(Unit) { onUnlock() }
+    LifecycleEventEffect(Lifecycle.Event.ON_RESUME) { onUnlock() }
     Surface(
         modifier = Modifier.fillMaxSize(),
         color = MaterialTheme.colorScheme.background,
@@ -452,12 +459,17 @@ private fun AgentknockLockedScreen(
             horizontalAlignment = Alignment.CenterHorizontally,
             verticalArrangement = Arrangement.Center,
         ) {
-            Icon(
-                Icons.Outlined.Lock,
-                contentDescription = null,
-                tint = MaterialTheme.colorScheme.primary,
-                modifier = Modifier.size(48.dp),
-            )
+            Surface(
+                color = androidx.compose.ui.graphics.Color.Black,
+                shape = androidx.compose.foundation.shape.CircleShape,
+                modifier = Modifier.size(88.dp),
+            ) {
+                androidx.compose.foundation.Image(
+                    painter = painterResource(R.drawable.ic_launcher_foreground),
+                    contentDescription = null,
+                    modifier = Modifier.padding(8.dp),
+                )
+            }
             Text(
                 "Agentknock is locked",
                 style = MaterialTheme.typography.headlineSmall,

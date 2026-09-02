@@ -39,6 +39,14 @@ internal data class SecretEditorState(
     val description: String,
     val type: SecretType,
     val sshKeyDraft: SshKeyDraft = SshKeyDraft(),
+    val environmentVariables: List<EnvironmentVariableDraft> = listOf(EnvironmentVariableDraft()),
+)
+
+internal data class EnvironmentVariableDraft(
+    val id: Long = 0,
+    val name: String = "",
+    val value: String = "",
+    val sensitive: Boolean = true,
 )
 
 internal data class SshKeyEditorState(
@@ -56,7 +64,6 @@ internal data class VariableEditorState(
     val value: String,
     val valueEdited: Boolean,
     val sensitive: Boolean,
-    val notes: String,
 )
 
 @Composable

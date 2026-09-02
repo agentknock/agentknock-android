@@ -60,7 +60,7 @@ internal fun SecretValues.toResponseSecret(): InvocationResponseSecret = when (t
 
 internal fun SecretApprovalPolicy.toRequestedSecretApproval(): RequestedSecretApproval {
     val activeTemporaryAccess = temporaryAccessExpiresAt?.takeIf {
-        mode == SecretApprovalMode.TEMPORARY || mode == SecretApprovalMode.ASK_AI
+        mode == SecretApprovalMode.ASK_ME || mode == SecretApprovalMode.ASK_AI
     }
     return RequestedSecretApproval(
         id = secretId,
@@ -69,11 +69,10 @@ internal fun SecretApprovalPolicy.toRequestedSecretApproval(): RequestedSecretAp
             activeTemporaryAccess != null -> ApprovalAction.APPROVE
             mode == SecretApprovalMode.DENY -> ApprovalAction.DENY
             mode == SecretApprovalMode.ASK_ME -> ApprovalAction.ASK_ME
-            mode == SecretApprovalMode.TEMPORARY -> ApprovalAction.ASK_ME
             mode == SecretApprovalMode.ASK_AI -> ApprovalAction.ASK_AI
             else -> ApprovalAction.APPROVE
         },
-        temporaryAccessEligible = mode == SecretApprovalMode.TEMPORARY ||
+        temporaryAccessEligible = mode == SecretApprovalMode.ASK_ME ||
             mode == SecretApprovalMode.ASK_AI,
         temporaryAccessExpiresAt = activeTemporaryAccess,
         revision = revision,

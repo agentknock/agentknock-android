@@ -17,9 +17,7 @@ import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.layout.width
 import androidx.compose.foundation.lazy.LazyColumn
-import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.text.selection.SelectionContainer
-import androidx.compose.foundation.verticalScroll
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.automirrored.outlined.NavigateNext
 import androidx.compose.material.icons.outlined.Add
@@ -38,7 +36,6 @@ import androidx.compose.material3.Icon
 import androidx.compose.material3.IconButton
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.OutlinedTextField
-import androidx.compose.material3.RadioButton
 import androidx.compose.material3.Surface
 import androidx.compose.material3.Text
 import androidx.compose.material3.TextButton
@@ -74,6 +71,7 @@ import dev.agentknock.storage.secret.TemporaryAccessOperation
 import dev.agentknock.ui.components.InformationRow
 import dev.agentknock.ui.components.InformationSurface
 import dev.agentknock.ui.components.NavigationBackButton
+import dev.agentknock.ui.components.ProseEditorScreen
 
 internal data class SecretDetailActions(
     val onBack: () -> Unit,
@@ -107,8 +105,6 @@ internal fun SecretDetail(
     var sshComment by rememberSaveable(secret.id, secret.sshKey?.comment) {
         mutableStateOf(secret.sshKey?.comment.orEmpty())
     }
-    var editingDefaultApproval by rememberSaveable(secret.id) { mutableStateOf(false) }
-    var editingClientApproval by rememberSaveable(secret.id) { mutableStateOf<String?>(null) }
     var editingInstructions by rememberSaveable(secret.id) { mutableStateOf(false) }
     var instructions by rememberSaveable(secret.id, secret.instructions) {
         mutableStateOf(secret.instructions)
@@ -117,6 +113,23 @@ internal fun SecretDetail(
     val duplicateClientNames = clients.groupingBy(ClientSummary::name).eachCount()
         .filterValues { it > 1 }
         .keys
+    if (editingInstructions) {
+        ProseEditorScreen(
+            title = "Secret instructions",
+            value = instructions,
+            originalValue = secret.instructions,
+            supportingText =
+                "Tell the AI reviewer when this secret may and may not be used. " +
+                    "Do not include secret values.",
+            onValueChange = { instructions = it },
+            onSave = {
+                editingInstructions = false
+                actions.onSaveInstructions(instructions.trim())
+            },
+            onBack = { editingInstructions = false },
+        )
+        return
+    }
     val fontScale = LocalDensity.current.fontScale
     Column(modifier) {
         TopAppBar(
@@ -127,12 +140,6 @@ internal fun SecretDetail(
                 }
             },
             actions = {
-                IconButton(onClick = actions.onEditSecret) {
-                    Icon(
-                        Icons.Outlined.Edit,
-                        contentDescription = stringResource(R.string.edit_secret),
-                    )
-                }
                 IconButton(onClick = { menuExpanded = true }) {
                     Icon(Icons.Outlined.MoreVert, contentDescription = "More options")
                 }
@@ -167,13 +174,23 @@ internal fun SecretDetail(
         ) {
             item {
                 InformationSurface {
-                    if (secret.description.isNotBlank()) {
-                        Text(
-                            secret.description,
-                            style = MaterialTheme.typography.bodyLarge,
-                        )
+                    Text(
+                        secret.description.ifBlank { "No description" },
+                        style = MaterialTheme.typography.bodyLarge,
+                        color = if (secret.description.isBlank()) {
+                            MaterialTheme.colorScheme.onSurfaceVariant
+                        } else {
+                            MaterialTheme.colorScheme.onSurface
+                        },
+                    )
+                    TextButton(
+                        onClick = actions.onEditSecret,
+                        modifier = Modifier.align(Alignment.End),
+                    ) {
+                        Icon(Icons.Outlined.Edit, contentDescription = null)
+                        Spacer(Modifier.width(6.dp))
+                        Text("Edit name and description")
                     }
-                    InformationRow(stringResource(R.string.secret_type), secret.type.displayName())
                 }
             }
             when (secret.type) {
@@ -234,7 +251,7 @@ internal fun SecretDetail(
                 SecretType.SSH -> {
                     secret.sshKey?.let { key ->
                         item {
-                            Text("Public key", style = MaterialTheme.typography.titleLarge)
+                            Text("SSH key", style = MaterialTheme.typography.titleLarge)
                         }
                         item {
                             SshPublicKeyCard(
@@ -257,35 +274,18 @@ internal fun SecretDetail(
                 }
             }
             item {
-                Text("Approval", style = MaterialTheme.typography.titleLarge)
+                Column(verticalArrangement = Arrangement.spacedBy(4.dp)) {
+                    Text("Access", style = MaterialTheme.typography.titleLarge)
+                    Text(
+                        "Ask AI can approve, deny, or pass the decision to you. " +
+                            "Temporary access is offered when you decide.",
+                        style = MaterialTheme.typography.bodySmall,
+                        color = MaterialTheme.colorScheme.onSurfaceVariant,
+                    )
+                }
             }
             item {
                 InformationSurface {
-                    Text(
-                        when (secret.type) {
-                            SecretType.ENVIRONMENT ->
-                                "Sensitive environment variable values follow these settings. " +
-                                    "Non-sensitive values are provided without approval."
-                            SecretType.SSH ->
-                                "Private key use follows these settings. " +
-                                    "The public key is provided without approval."
-                        },
-                        color = MaterialTheme.colorScheme.onSurfaceVariant,
-                    )
-                    if (secret.temporaryAccessGrants.isNotEmpty()) {
-                        SecretTemporaryApprovals(
-                            grants = secret.temporaryAccessGrants,
-                            clients = clients,
-                            onEnd = actions.onEndTemporaryAccess,
-                        )
-                        HorizontalDivider()
-                    }
-                    ApprovalSettingRow(
-                        title = "Default for all clients",
-                        value = secret.approvalMode.displayName(),
-                        onClick = { editingDefaultApproval = true },
-                    )
-                    HorizontalDivider()
                     ApprovalSettingRow(
                         title = "AI review instructions",
                         value = secret.instructions.ifBlank { "None" },
@@ -294,19 +294,35 @@ internal fun SecretDetail(
                             editingInstructions = true
                         },
                     )
-                    if (clients.isNotEmpty()) {
+                    if (secret.temporaryAccessGrants.isNotEmpty()) {
                         HorizontalDivider()
-                        Text("Client overrides", style = MaterialTheme.typography.titleMedium)
-                        clients.forEach { client ->
-                            val override = overrides[client.clientId]
-                            val configuredMode = override?.mode?.displayName()
-                                ?: "Use default · ${secret.approvalMode.displayName()}"
-                            ApprovalSettingRow(
-                                title = client.approvalLabel(duplicateClientNames),
-                                value = configuredMode,
-                                onClick = { editingClientApproval = client.clientId },
-                            )
-                        }
+                        SecretTemporaryApprovals(
+                            grants = secret.temporaryAccessGrants,
+                            clients = clients,
+                            onEnd = actions.onEndTemporaryAccess,
+                        )
+                    }
+                    HorizontalDivider()
+                    ApprovalModeRow(
+                        title = "Default for all clients",
+                        selected = secret.approvalMode,
+                        inherited = false,
+                        onSelect = actions.onSetApprovalMode,
+                    )
+                    clients.forEach { client ->
+                        HorizontalDivider()
+                        val override = overrides[client.clientId]
+                        ApprovalModeRow(
+                            title = client.approvalLabel(duplicateClientNames),
+                            selected = override?.mode ?: secret.approvalMode,
+                            inherited = override == null,
+                            onSelect = { mode ->
+                                actions.onSetClientApprovalOverride(client.clientId, mode)
+                            },
+                            onUseDefault = override?.let {
+                                { actions.onSetClientApprovalOverride(client.clientId, null) }
+                            },
+                        )
                     }
                 }
             }
@@ -340,72 +356,6 @@ internal fun SecretDetail(
                     onClick = {
                         editingSshComment = false
                         actions.onSaveSshComment(sshComment)
-                    },
-                ) { Text("Save") }
-            },
-        )
-    }
-    if (editingDefaultApproval) {
-        ApprovalModeDialog(
-            title = "Default approval for all clients",
-            selected = secret.approvalMode,
-            defaultMode = null,
-            secretType = secret.type,
-            onSelect = { mode ->
-                checkNotNull(mode)
-                editingDefaultApproval = false
-                actions.onSetApprovalMode(mode)
-            },
-            onDismiss = { editingDefaultApproval = false },
-        )
-    }
-    editingClientApproval?.let { clientId ->
-        val client = clients.firstOrNull { it.clientId == clientId }
-        if (client != null) {
-            ApprovalModeDialog(
-                title = client.approvalLabel(duplicateClientNames),
-                selected = overrides[clientId]?.mode,
-                defaultMode = secret.approvalMode,
-                secretType = secret.type,
-                onSelect = { mode ->
-                    editingClientApproval = null
-                    actions.onSetClientApprovalOverride(clientId, mode)
-                },
-                onDismiss = { editingClientApproval = null },
-            )
-        }
-    }
-    if (editingInstructions) {
-        AlertDialog(
-            onDismissRequest = { editingInstructions = false },
-            title = { Text("Secret instructions") },
-            text = {
-                Column(
-                    Modifier.verticalScroll(rememberScrollState()),
-                    verticalArrangement = Arrangement.spacedBy(12.dp),
-                ) {
-                    Text(
-                        "Tell the AI reviewer when this secret may and may not be used. Do not include secret values.",
-                    )
-                    OutlinedTextField(
-                        value = instructions,
-                        onValueChange = { instructions = it },
-                        label = { Text("Instructions") },
-                        minLines = 4,
-                        maxLines = 8,
-                        modifier = Modifier.fillMaxWidth(),
-                    )
-                }
-            },
-            dismissButton = {
-                TextButton(onClick = { editingInstructions = false }) { Text("Cancel") }
-            },
-            confirmButton = {
-                TextButton(
-                    enabled = instructions.trim() != secret.instructions,
-                    onClick = {
-                        editingInstructions = false
-                        actions.onSaveInstructions(instructions.trim())
                     },
                 ) { Text("Save") }
             },
@@ -488,80 +438,64 @@ private fun ApprovalSettingRow(
     }
 }
 
+private fun SecretApprovalMode.displayName(): String = when (this) {
+    SecretApprovalMode.APPROVE -> "Approve"
+    SecretApprovalMode.ASK_AI -> "Ask AI"
+    SecretApprovalMode.ASK_ME -> "Ask me"
+    SecretApprovalMode.DENY -> "Deny"
+}
+
 @Composable
-private fun ApprovalModeDialog(
+private fun ApprovalModeRow(
     title: String,
-    selected: SecretApprovalMode?,
-    defaultMode: SecretApprovalMode?,
-    secretType: SecretType,
-    onSelect: (SecretApprovalMode?) -> Unit,
-    onDismiss: () -> Unit,
+    selected: SecretApprovalMode,
+    inherited: Boolean,
+    onSelect: (SecretApprovalMode) -> Unit,
+    onUseDefault: (() -> Unit)? = null,
 ) {
-    val options = buildList<Pair<SecretApprovalMode?, String>> {
-        if (defaultMode != null) add(null to "Use default · ${defaultMode.displayName()}")
-        listOf(
-            SecretApprovalMode.ASK_AI,
-            SecretApprovalMode.TEMPORARY,
-            SecretApprovalMode.ASK_ME,
-            SecretApprovalMode.APPROVE,
-            SecretApprovalMode.DENY,
-        ).forEach { mode -> add(mode to mode.displayName()) }
-    }
-    AlertDialog(
-        onDismissRequest = onDismiss,
-        title = { Text(title) },
-        text = {
-            Column(Modifier.verticalScroll(rememberScrollState())) {
-                options.forEach { (mode, label) ->
-                    Row(
-                        modifier = Modifier.fillMaxWidth().clickable { onSelect(mode) }
-                            .padding(vertical = 6.dp),
-                        verticalAlignment = Alignment.CenterVertically,
-                    ) {
-                        RadioButton(selected = selected == mode, onClick = { onSelect(mode) })
-                        Column(Modifier.weight(1f)) {
-                            Text(label, style = MaterialTheme.typography.bodyLarge)
-                            mode?.let {
-                                Text(
-                                    it.description(secretType),
-                                    style = MaterialTheme.typography.bodySmall,
-                                    color = MaterialTheme.colorScheme.onSurfaceVariant,
-                                )
-                            }
-                        }
-                    }
+    Column(
+        Modifier.fillMaxWidth().padding(vertical = 10.dp),
+        verticalArrangement = Arrangement.spacedBy(8.dp),
+    ) {
+        Row(
+            modifier = Modifier.fillMaxWidth(),
+            verticalAlignment = Alignment.CenterVertically,
+        ) {
+            Column(Modifier.weight(1f)) {
+                Text(title, style = MaterialTheme.typography.titleMedium)
+                if (inherited) {
+                    Text(
+                        "Using default: ${selected.displayName()}",
+                        style = MaterialTheme.typography.bodySmall,
+                        color = MaterialTheme.colorScheme.onSurfaceVariant,
+                    )
                 }
             }
-        },
-        confirmButton = {},
-        dismissButton = { TextButton(onClick = onDismiss) { Text("Cancel") } },
-    )
-}
-
-private fun SecretApprovalMode.displayName(): String = when (this) {
-    SecretApprovalMode.APPROVE -> "Approve automatically"
-    SecretApprovalMode.ASK_AI -> "Ask AI"
-    SecretApprovalMode.TEMPORARY -> "Ask with 4-hour option"
-    SecretApprovalMode.ASK_ME -> "Ask every time"
-    SecretApprovalMode.DENY -> "Always deny"
-}
-
-private fun SecretApprovalMode.description(secretType: SecretType): String = when (this) {
-    SecretApprovalMode.APPROVE -> "Allow protected use without asking."
-    SecretApprovalMode.ASK_AI ->
-        "Requires AI review access. AI may approve, deny, or ask you to decide. " +
-            "If asked, you can also allow 4-hour access."
-    SecretApprovalMode.TEMPORARY -> when (secretType) {
-        SecretType.SSH ->
-            "When asked, you can sign once or allow that client to request Git signatures " +
-                "with this key for any repository for 4 hours."
-        SecretType.ENVIRONMENT ->
-            "When asked, you can approve once or allow that client to receive protected " +
-                "values from this secret for any command for 4 hours."
+            onUseDefault?.let { clear ->
+                TextButton(onClick = clear) { Text("Use default") }
+            }
+        }
+        FlowRow(
+            horizontalArrangement = Arrangement.spacedBy(8.dp),
+            verticalArrangement = Arrangement.spacedBy(4.dp),
+        ) {
+            approvalModes.forEach { mode ->
+                androidx.compose.material3.FilterChip(
+                    selected = selected == mode,
+                    onClick = { onSelect(mode) },
+                    label = { Text(mode.displayName()) },
+                )
+            }
+        }
     }
-    SecretApprovalMode.ASK_ME -> "Always require your decision."
-    SecretApprovalMode.DENY -> "Reject protected use without asking."
 }
+
+private val approvalModes = listOf(
+    SecretApprovalMode.DENY,
+    SecretApprovalMode.ASK_ME,
+    SecretApprovalMode.ASK_AI,
+    SecretApprovalMode.APPROVE,
+)
 
 private fun TemporaryAccessOperation.displayName(): String = when (this) {
     TemporaryAccessOperation.INVOCATION -> "Secret values for any command"
@@ -585,8 +519,9 @@ private fun SshPublicKeyCard(
             Modifier.fillMaxWidth().padding(16.dp),
             verticalArrangement = Arrangement.spacedBy(12.dp),
         ) {
-            InformationRow("Algorithm", key.algorithm.displayName())
-            InformationRow("Fingerprint", key.fingerprint)
+            InformationRow("Algorithm", "${key.algorithm.displayName()} · ${key.bits} bits")
+            InformationRow("OpenSSH fingerprint", key.fingerprint, monospace = true)
+            InformationRow("SHA-256 fingerprint (hex)", key.fingerprintHex, monospace = true)
             Row(
                 modifier = Modifier.fillMaxWidth(),
                 verticalAlignment = Alignment.CenterVertically,
@@ -781,15 +716,6 @@ private fun EnvironmentVariableCard(
                         contentDescription = "Edit ${variable.name}",
                     )
                 }
-            }
-            if (variable.notes.isNotBlank()) {
-                Text(
-                    variable.notes,
-                    style = MaterialTheme.typography.bodySmall,
-                    color = MaterialTheme.colorScheme.onSurfaceVariant,
-                    maxLines = 3,
-                    overflow = TextOverflow.Ellipsis,
-                )
             }
         }
     }

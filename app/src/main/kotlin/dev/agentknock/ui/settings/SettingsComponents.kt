@@ -161,19 +161,24 @@ internal fun SettingsValueRow(
     value: String,
     modifier: Modifier = Modifier,
     monospace: Boolean = false,
+    trailing: (@Composable () -> Unit)? = null,
 ) {
-    Column(
+    Row(
         modifier = modifier.fillMaxWidth().padding(horizontal = 20.dp, vertical = 14.dp),
-        verticalArrangement = Arrangement.spacedBy(2.dp),
+        horizontalArrangement = Arrangement.spacedBy(12.dp),
+        verticalAlignment = Alignment.CenterVertically,
     ) {
-        Text(label, style = MaterialTheme.typography.bodyLarge)
-        SelectionContainer {
-            Text(
-                value,
-                style = MaterialTheme.typography.bodyMedium,
-                color = MaterialTheme.colorScheme.onSurfaceVariant,
-                fontFamily = if (monospace) FontFamily.Monospace else FontFamily.Default,
-            )
+        Column(Modifier.weight(1f), verticalArrangement = Arrangement.spacedBy(2.dp)) {
+            Text(label, style = MaterialTheme.typography.bodyLarge)
+            SelectionContainer {
+                Text(
+                    value,
+                    style = MaterialTheme.typography.bodyMedium,
+                    color = MaterialTheme.colorScheme.onSurfaceVariant,
+                    fontFamily = if (monospace) FontFamily.Monospace else FontFamily.Default,
+                )
+            }
         }
+        trailing?.invoke()
     }
 }

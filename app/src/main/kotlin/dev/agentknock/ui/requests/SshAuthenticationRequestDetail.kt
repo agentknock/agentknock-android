@@ -20,6 +20,7 @@ import androidx.compose.ui.unit.dp
 import dev.agentknock.presentation.formatTimestamp
 import dev.agentknock.presentation.renderShellCommand
 import dev.agentknock.presentation.renderSoftware
+import dev.agentknock.protocol.relayRequestTimestamp
 import dev.agentknock.storage.approval.AiReviewDecision
 import dev.agentknock.storage.approval.ApprovalAction
 import dev.agentknock.storage.request.InboxRequestContent
@@ -53,7 +54,9 @@ internal fun SshAuthenticationRequestDetail(
 ) {
     val authentication = (request.content as InboxRequestContent.SshAuthentication).details
     val pending = authentication.state == ApprovalRequestState.APPROVAL_PENDING
-    val aiReviewInFlight = request.state == InboxRequestState.REVIEWING
+    val aiReviewRequested = authentication.approvalEvaluation?.secrets
+        ?.any { it.action == ApprovalAction.ASK_AI } == true
+    val aiReviewInFlight = request.state == InboxRequestState.REVIEWING && aiReviewRequested
     val temporarySecretNames = authentication.approvalEvaluation.temporaryGrantSecretNames(
         aiReviewInFlight,
     )
@@ -84,7 +87,9 @@ internal fun SshAuthenticationRequestDetail(
             null
         },
     ) {
+        if (!pending) SshAuthenticationOutcome(authentication)
         InformationSurface {
+            ClientIdentity(authentication.clientName)
             StatusLine(
                 if (aiReviewInFlight) {
                     "AI review in progress"
@@ -101,9 +106,11 @@ internal fun SshAuthenticationRequestDetail(
                     authentication.completionResult ==
                     ApprovalCompletionResult.ABORTED,
             )
-            ClientIdentity(authentication.clientName)
             SecretIdentities(listOf(authentication.secretName))
-            InformationRow("Received", formatTimestamp(request.receivedAt))
+            InformationRow(
+                "Requested",
+                formatTimestamp(relayRequestTimestamp(request.id) ?: request.receivedAt),
+            )
         }
 
         if (
@@ -115,8 +122,6 @@ internal fun SshAuthenticationRequestDetail(
         ) {
             AiReviewNotice(authentication.approvalEvaluation.aiReview, aiReviewInFlight)
         }
-        if (!pending) SshAuthenticationOutcome(authentication)
-
         InformationSurface {
             InformationRow("Remote account", authentication.username)
             InformationRow(
@@ -134,7 +139,7 @@ internal fun SshAuthenticationRequestDetail(
         }
 
         Surface(
-            color = MaterialTheme.colorScheme.surfaceContainerLow,
+            color = MaterialTheme.colorScheme.surfaceContainer,
             shape = MaterialTheme.shapes.large,
             modifier = Modifier.fillMaxWidth(),
         ) {

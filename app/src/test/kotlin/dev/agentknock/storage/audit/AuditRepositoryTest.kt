@@ -34,15 +34,13 @@ class AuditRepositoryTest {
                 id = 1,
                 occurredAt = 1_000_000L,
                 eventType = "temporary_access_allowed",
-                subject = "Production",
-                context = "Git signing",
-                detail = "Secret use",
                 outcome = "approved",
                 decisionSource = "user",
-                expiresAt = 2_000_000L,
                 clientId = "client-1",
-                clientName = "Workstation",
                 relayRequestId = "request-1",
+                bodyJson = "{\"subject\":\"Production\",\"context\":\"Git signing\"," +
+                    "\"detail\":\"Secret use\",\"expires_at\":2000000," +
+                    "\"client_name\":\"Workstation\"}",
             ),
             dao.events.value.single(),
         )
@@ -60,6 +58,7 @@ class AuditRepositoryTest {
                 clientId = "client-1",
                 clientName = "Workstation",
                 relayRequestId = "request-1",
+                data = kotlinx.serialization.json.JsonObject(emptyMap()),
             ),
             repository.observeEvent(1).first(),
         )
@@ -138,15 +137,11 @@ class AuditRepositoryTest {
     private fun auditEvent(occurredAt: Long) = AuditEventEntity(
         occurredAt = occurredAt,
         eventType = AuditEventType.SECRET_UPDATED.code,
-        subject = null,
-        context = null,
-        detail = null,
         outcome = AuditOutcome.CHANGED.code,
         decisionSource = null,
-        expiresAt = null,
         clientId = null,
-        clientName = null,
         relayRequestId = null,
+        bodyJson = "{}",
     )
 }
 

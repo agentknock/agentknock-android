@@ -38,7 +38,7 @@ internal data class SecretEntity(
     @ColumnInfo(name = "revision")
     val revision: Long = 1,
     @ColumnInfo(name = "approval_mode")
-    val approvalMode: String = "temporary",
+    val approvalMode: String = "ask_me",
     @ColumnInfo(name = "instructions")
     val instructions: String = "",
 )
@@ -154,8 +154,6 @@ internal data class EnvironmentVariableEntity(
     val name: String,
     @ColumnInfo(name = "sensitive")
     val sensitive: Boolean,
-    @ColumnInfo(name = "notes")
-    val notes: String,
     @Embedded
     val encryptedValue: EncryptedValue,
     @ColumnInfo(name = "value_updated_at")
@@ -230,8 +228,6 @@ internal data class EnvironmentVariableMetadataRow(
     val name: String,
     @ColumnInfo(name = "sensitive")
     val sensitive: Boolean,
-    @ColumnInfo(name = "notes")
-    val notes: String,
     @ColumnInfo(name = "encryption_key_id")
     val encryptionKeyId: String,
     @ColumnInfo(name = "value_updated_at")
@@ -318,7 +314,6 @@ internal interface SecretDao {
                secret_id,
                name,
                sensitive,
-               notes,
                encryption_key_id,
                value_updated_at
         FROM environment_variables
@@ -577,8 +572,19 @@ internal interface SecretDao {
     @Insert
     suspend fun insertEnvironmentVariableRow(variable: EnvironmentVariableEntity)
 
+    @Transaction
+    suspend fun insertEnvironmentSecret(
+        secret: SecretEntity,
+        variables: List<EnvironmentVariableEntity>,
+    ) {
+        require(secret.secretType == SecretType.ENVIRONMENT)
+        require(variables.all { it.secretId == secret.id })
+        insertSecret(secret)
+        variables.forEach { insertEnvironmentVariableRow(it) }
+    }
+
     @Query(
-        "UPDATE environment_variables SET name = :name, sensitive = :sensitive, notes = :notes, " +
+        "UPDATE environment_variables SET name = :name, sensitive = :sensitive, " +
             "encryption_format = :encryptionFormat, encryption_key_id = :encryptionKeyId, " +
             "nonce = :nonce, ciphertext = :ciphertext, " +
             "value_updated_at = :valueUpdatedAt WHERE id = :variableId AND secret_id = :secretId",
@@ -588,23 +594,11 @@ internal interface SecretDao {
         secretId: String,
         name: String,
         sensitive: Boolean,
-        notes: String,
         encryptionFormat: Int,
         encryptionKeyId: String,
         nonce: ByteArray,
         ciphertext: ByteArray,
         valueUpdatedAt: Long,
-    ): Int
-
-    @Query(
-        "UPDATE environment_variables SET notes = :notes " +
-            "WHERE id = :variableId AND secret_id = :secretId " +
-            "AND EXISTS (SELECT 1 FROM secrets WHERE id = :secretId AND type = 'environment')",
-    )
-    suspend fun updateEnvironmentVariableNotesRow(
-        variableId: String,
-        secretId: String,
-        notes: String,
     ): Int
 
     @Delete
@@ -784,7 +778,6 @@ internal interface SecretDao {
                 secretId = variable.secretId,
                 name = variable.name,
                 sensitive = variable.sensitive,
-                notes = variable.notes,
                 encryptionFormat = variable.encryptedValue.formatVersion,
                 encryptionKeyId = variable.encryptedValue.keyId,
                 nonce = variable.encryptedValue.nonce,
@@ -802,23 +795,6 @@ internal interface SecretDao {
         )
         deleteTemporaryAccessGrantsForSecret(variable.secretId)
         return true
-    }
-
-    @Transaction
-    suspend fun updateEnvironmentVariableNotes(
-        variableId: String,
-        secretId: String,
-        notes: String,
-        updatedAt: Long,
-    ): Int {
-        if (getSecret(secretId)?.secretType != SecretType.ENVIRONMENT) return 0
-        val updated = updateEnvironmentVariableNotesRow(
-            variableId = variableId,
-            secretId = secretId,
-            notes = notes,
-        )
-        if (updated == 1) touchSecret(secretId, updatedAt)
-        return updated
     }
 
     @Transaction

@@ -28,7 +28,7 @@ internal fun ActionListSurface(
         color = if (selected) {
             MaterialTheme.colorScheme.secondaryContainer
         } else {
-            MaterialTheme.colorScheme.surfaceContainerLow
+            MaterialTheme.colorScheme.surfaceContainer
         },
         shape = MaterialTheme.shapes.large,
         onClick = onClick,

@@ -50,7 +50,7 @@ internal fun InformationSurface(
     content: @Composable () -> Unit,
 ) {
     Surface(
-        color = MaterialTheme.colorScheme.surfaceContainerLow,
+        color = MaterialTheme.colorScheme.surfaceContainer,
         shape = RoundedCornerShape(20.dp),
         modifier = modifier.fillMaxWidth(),
     ) {

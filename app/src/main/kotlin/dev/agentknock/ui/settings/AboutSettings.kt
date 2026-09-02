@@ -1,11 +1,17 @@
 package dev.agentknock.ui.settings
 
+import android.content.ClipData
+import android.content.ClipboardManager
 import android.content.Intent
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.PaddingValues
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.lazy.LazyColumn
+import androidx.compose.material.icons.Icons
+import androidx.compose.material.icons.outlined.ContentCopy
+import androidx.compose.material3.Icon
+import androidx.compose.material3.IconButton
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
@@ -97,7 +103,25 @@ internal fun AboutSettings(
                     SettingsSectionLabel("This device")
                     SettingsGroup {
                         identity?.let { device ->
-                            SettingsValueRow("Device ID", device.deviceId, monospace = true)
+                            SettingsValueRow(
+                                "Device ID",
+                                device.deviceId,
+                                monospace = true,
+                                trailing = {
+                                    IconButton(onClick = {
+                                        context.getSystemService(ClipboardManager::class.java)
+                                            .setPrimaryClip(
+                                                ClipData.newPlainText("Agentknock device ID", device.deviceId),
+                                            )
+                                        report("Device ID copied")
+                                    }) {
+                                        Icon(
+                                            Icons.Outlined.ContentCopy,
+                                            contentDescription = "Copy device ID",
+                                        )
+                                    }
+                                },
+                            )
                             SettingsGroupDivider()
                         }
                         SettingsValueRow("Relay", "relay.agentknock.dev", monospace = true)

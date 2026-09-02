@@ -71,7 +71,7 @@ internal fun NotificationsSettings(
                         summary = if (appNotificationsEnabled) {
                             "Android can show Agentknock notifications."
                         } else {
-                            "Android is blocking Agentknock notifications."
+                            "Android is blocking request alerts. Background request delivery continues."
                         },
                     )
                 }
@@ -97,7 +97,7 @@ internal fun NotificationsSettings(
                         SettingsGroupDivider()
                         SettingsRow(
                             title = "Background processing",
-                            summary = "Silent status while Agentknock checks for requests",
+                            summary = "Controls only the silent status notification; request processing continues if hidden",
                             onClick = { openChannel(RequestNotifications.BACKGROUND_CHANNEL_ID) },
                             external = true,
                         )

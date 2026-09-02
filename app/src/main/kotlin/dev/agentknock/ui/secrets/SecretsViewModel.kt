@@ -20,6 +20,7 @@ import dev.agentknock.storage.request.SecretUploadSensitivityResult
 import dev.agentknock.storage.secret.CreateEnvironmentVariableResult
 import dev.agentknock.storage.secret.CreateSecretResult
 import dev.agentknock.storage.secret.EnvironmentVariableMetadata
+import dev.agentknock.storage.secret.EnvironmentVariableInput
 import dev.agentknock.storage.secret.EnvironmentVariableValue
 import dev.agentknock.storage.secret.SecretDetails
 import dev.agentknock.storage.secret.SecretSummary
@@ -302,7 +303,6 @@ internal class SecretsViewModel(
                 value = "",
                 valueEdited = false,
                 sensitive = true,
-                notes = "",
             ),
         )
     }
@@ -321,7 +321,6 @@ internal class SecretsViewModel(
                 value = currentValue.orEmpty(),
                 valueEdited = false,
                 sensitive = variable.sensitive,
-                notes = variable.notes,
             ),
         )
     }
@@ -503,17 +502,35 @@ internal class SecretsViewModel(
     ) {
         launchEditorCommit(expected) { commit ->
             val error = if (expected.state.secret == null) {
-                when (
-                    val result = when (expected.state.type) {
-                        SecretType.ENVIRONMENT ->
-                            secretRepository.createEnvironmentSecret(name, description)
-                        SecretType.SSH -> secretRepository.createSshSecret(
-                            name,
-                            description,
-                            checkNotNull(expected.state.sshKeyDraft.preparedKey),
+                val result = when (expected.state.type) {
+                    SecretType.ENVIRONMENT -> when (
+                        val action = actions.createEnvironmentSecret(
+                            name = name,
+                            description = description,
+                            variables = expected.state.environmentVariables
+                                .filter { it.name.isNotBlank() || it.value.isNotEmpty() }
+                                .map {
+                                    EnvironmentVariableInput(
+                                        name = it.name,
+                                        value = it.value,
+                                        sensitive = it.sensitive,
+                                    )
+                                },
                         )
+                    ) {
+                        is ProtectedActionResult.Completed -> action.value
+                        is ProtectedActionResult.AuthenticationFailed -> {
+                            if (editorState.failEditorCommit(commit)) publish(action.message)
+                            return@launchEditorCommit
+                        }
                     }
-                ) {
+                    SecretType.SSH -> secretRepository.createSshSecret(
+                        name,
+                        description,
+                        checkNotNull(expected.state.sshKeyDraft.preparedKey),
+                    )
+                }
+                when (result) {
                     is CreateSecretResult.Created -> {
                         if (editorState.completeEditorCommit(commit)) {
                             setSelectedTarget(SecretTarget.Stored(result.id))
@@ -655,7 +672,6 @@ internal class SecretsViewModel(
         name: String,
         value: String,
         sensitive: Boolean,
-        notes: String,
         replaceValue: Boolean,
     ) {
         launchEditorCommit(expected) { commit ->
@@ -667,7 +683,6 @@ internal class SecretsViewModel(
                         name = name,
                         value = value,
                         sensitive = sensitive,
-                        notes = notes,
                     )
                 ) {
                     is ProtectedActionResult.AuthenticationFailed -> {
@@ -693,7 +708,6 @@ internal class SecretsViewModel(
                         id = variable.id,
                         name = name,
                         sensitive = sensitive,
-                        notes = notes,
                         replacementValue = value.takeIf { replaceValue },
                     )
                 ) {

@@ -2402,7 +2402,7 @@ class RequestRepositorySlotTest {
                 ?.contains("changed during AI review") == true,
         )
         assertEquals(
-            RequestDecisionResult.TemporaryAccessUnavailable,
+            RequestDecisionResult.Decided,
             repository.decideRequest(
                 AI_INVOCATION_REQUEST_ID,
                 RequestDecision.ALLOW_TEMPORARILY,
@@ -2776,7 +2776,6 @@ class RequestRepositorySlotTest {
             name = "TOKEN",
             value = "secret-value",
             sensitive = true,
-            notes = "",
             nonSensitiveCreationAuthorized = false,
         ) as CreateEnvironmentVariableResult.Created).id
         var authentication: DeviceAuthenticationResult =
@@ -2804,7 +2803,6 @@ class RequestRepositorySlotTest {
                 id = variableId,
                 name = "TOKEN",
                 sensitive = false,
-                notes = "",
                 replacementValue = null,
             ),
         )
@@ -2820,7 +2818,6 @@ class RequestRepositorySlotTest {
                 id = variableId,
                 name = "TOKEN",
                 sensitive = false,
-                notes = "",
                 replacementValue = null,
             ),
         )
@@ -2855,7 +2852,6 @@ class RequestRepositorySlotTest {
                 name = "REGION",
                 value = "eu-north-1",
                 sensitive = false,
-                notes = "",
             ),
         )
         assertTrue(
@@ -2868,7 +2864,6 @@ class RequestRepositorySlotTest {
             name = "REGION",
             value = "eu-north-1",
             sensitive = false,
-            notes = "",
         )
         assertTrue(
             created is ProtectedActionResult.Completed &&
@@ -3668,7 +3663,7 @@ class RequestRepositorySlotTest {
 
     @Test
     fun sharedDispatcherAllowsTemporaryGitAndSshUse() = runTest {
-        val invocation = establishSigningInvocation(SecretApprovalMode.TEMPORARY)
+        val invocation = establishSigningInvocation(SecretApprovalMode.ASK_ME)
         val gitRequest = pairedRequest(
             requestId = GIT_SIGN_REQUEST_ID,
             clientPsk = invocation.clientPsk,
@@ -4155,7 +4150,6 @@ class RequestRepositorySlotTest {
                 name = "DEPLOY_TOKEN",
                 value = "secret-token",
                 sensitive = true,
-                notes = "",
                 nonSensitiveCreationAuthorized = true,
             ) is CreateEnvironmentVariableResult.Created,
         )
@@ -4184,7 +4178,6 @@ class RequestRepositorySlotTest {
                     name = name,
                     value = "value-$name",
                     sensitive = true,
-                    notes = "",
                     nonSensitiveCreationAuthorized = true,
                 ) is CreateEnvironmentVariableResult.Created,
             )
@@ -4213,7 +4206,6 @@ class RequestRepositorySlotTest {
                 name = "ADDED",
                 value = "new-sensitive-value",
                 sensitive = true,
-                notes = "",
                 nonSensitiveCreationAuthorized = true,
             ) is CreateEnvironmentVariableResult.Created,
         )

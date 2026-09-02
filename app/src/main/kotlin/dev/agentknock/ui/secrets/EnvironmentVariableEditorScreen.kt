@@ -54,7 +54,7 @@ import androidx.compose.ui.unit.dp
 import dev.agentknock.R
 import dev.agentknock.ui.components.NavigationBackButton
 
-private val environmentVariableName = Regex("[A-Za-z_][A-Za-z0-9_]*")
+internal val environmentVariableName = Regex("[A-Za-z_][A-Za-z0-9_]*")
 
 @Composable
 internal fun EnvironmentVariableEditorScreen(
@@ -67,7 +67,6 @@ internal fun EnvironmentVariableEditorScreen(
         name: String,
         value: String,
         sensitive: Boolean,
-        notes: String,
         replaceValue: Boolean,
     ) -> Unit,
     snackbar: SnackbarHostState,
@@ -78,18 +77,16 @@ internal fun EnvironmentVariableEditorScreen(
     val value = editor.value
     val valueEdited = editor.valueEdited
     val sensitive = editor.sensitive
-    val notes = editor.notes
     val editorKey = variable?.id ?: "new:${editor.secretId}"
     var showValue by remember(editorKey) { mutableStateOf(false) }
     var nameInvalid by rememberSaveable(editorKey) { mutableStateOf(false) }
     var menuExpanded by rememberSaveable(editorKey) { mutableStateOf(false) }
     var confirmDiscard by rememberSaveable(editorKey) { mutableStateOf(false) }
     val dirty = if (variable == null) {
-        name.isNotEmpty() || value.isNotEmpty() || notes.isNotEmpty() || !sensitive
+        name.isNotEmpty() || value.isNotEmpty() || !sensitive
     } else {
         name != variable.name ||
             sensitive != variable.sensitive ||
-            notes != variable.notes ||
             (currentValue != null && value != currentValue) ||
             (currentValue == null && valueEdited)
     }
@@ -275,16 +272,6 @@ internal fun EnvironmentVariableEditorScreen(
                     }
                 }
                 item {
-                    OutlinedTextField(
-                        value = notes,
-                        onValueChange = { onEditorChange(editor.copy(notes = it)) },
-                        label = { Text(stringResource(R.string.notes_optional)) },
-                        enabled = enabled,
-                        minLines = 2,
-                        modifier = Modifier.fillMaxWidth(),
-                    )
-                }
-                item {
                     Button(
                         onClick = {
                             nameInvalid = !environmentVariableName.matches(name)
@@ -294,14 +281,13 @@ internal fun EnvironmentVariableEditorScreen(
                                     currentValue != null -> value != currentValue
                                     else -> valueEdited
                                 }
-                                onSave(name, value, sensitive, notes, valueChanged)
+                                onSave(name, value, sensitive, valueChanged)
                             }
                         },
                         enabled = enabled && environmentVariableName.matches(name) && (
                             variable == null ||
                                 name != variable.name ||
                                 sensitive != variable.sensitive ||
-                                notes != variable.notes ||
                                 (currentValue != null && value != currentValue) ||
                                 (currentValue == null && valueEdited)
                             ),

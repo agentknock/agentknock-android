@@ -17,7 +17,7 @@ class RequestApprovalPlannerTest {
         val policy = policy("policy", SecretApprovalMode.APPROVE)
         val temporary = policy(
             "temporary",
-            SecretApprovalMode.TEMPORARY,
+            SecretApprovalMode.ASK_ME,
             temporaryAccessExpiresAt = 8_000L,
         )
         val ai = policy("ai", SecretApprovalMode.ASK_AI)
@@ -88,7 +88,7 @@ class RequestApprovalPlannerTest {
 
     @Test
     fun temporaryPlanCanGrantOneOrManyEligibleSecrets() {
-        val temporary = policy("temporary", SecretApprovalMode.TEMPORARY)
+        val temporary = policy("temporary", SecretApprovalMode.ASK_ME)
         val ai = policy("ai", SecretApprovalMode.ASK_AI)
         val policies = listOf(temporary, ai)
         val stored = evaluation(policies).copy(
@@ -105,7 +105,7 @@ class RequestApprovalPlannerTest {
 
     @Test
     fun temporaryPlanReportsMixedWhenOtherSecretsKeepOneTimeOrAiApproval() {
-        val temporary = policy("temporary", SecretApprovalMode.TEMPORARY)
+        val temporary = policy("temporary", SecretApprovalMode.ASK_ME)
         val ai = policy("ai", SecretApprovalMode.ASK_AI)
         val policies = listOf(temporary, ai)
         val stored = evaluation(policies).copy(
@@ -135,7 +135,7 @@ class RequestApprovalPlannerTest {
 
     @Test
     fun temporaryPlanRejectsChangedOrIneligiblePolicyState() {
-        val original = policy("secret", SecretApprovalMode.TEMPORARY)
+        val original = policy("secret", SecretApprovalMode.ASK_ME)
         val stored = evaluation(listOf(original))
         assertNull(
             planTemporaryAccess(
@@ -146,9 +146,9 @@ class RequestApprovalPlannerTest {
         )
         assertNull(
             planTemporaryAccess(
-                policies = listOf(policy("secret", SecretApprovalMode.ASK_ME)),
+                policies = listOf(policy("secret", SecretApprovalMode.APPROVE)),
                 storedEvaluation = evaluation(
-                    listOf(policy("secret", SecretApprovalMode.ASK_ME)),
+                    listOf(policy("secret", SecretApprovalMode.APPROVE)),
                 ),
                 now = 3_000L,
             ),

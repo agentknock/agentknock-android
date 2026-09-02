@@ -27,6 +27,7 @@ import dev.agentknock.presentation.renderSoftware
 import dev.agentknock.protocol.GitSignChangeStatus
 import dev.agentknock.protocol.GitSignHead
 import dev.agentknock.protocol.GitSignRepository
+import dev.agentknock.protocol.relayRequestTimestamp
 import dev.agentknock.storage.approval.AiReviewDecision
 import dev.agentknock.storage.approval.ApprovalAction
 import dev.agentknock.storage.request.ApprovalCompletionResult
@@ -62,7 +63,9 @@ internal fun GitSignRequestDetail(
     val signing = (request.content as InboxRequestContent.GitSign).details
     val pending = signing.state == ApprovalRequestState.APPROVAL_PENDING
     var confirmTemporaryAccess by remember(request.id) { mutableStateOf(false) }
-    val aiReviewInFlight = request.state == InboxRequestState.REVIEWING
+    val aiReviewRequested = signing.approvalEvaluation?.secrets
+        ?.any { it.action == ApprovalAction.ASK_AI } == true
+    val aiReviewInFlight = request.state == InboxRequestState.REVIEWING && aiReviewRequested
     val temporarySecretNames = signing.approvalEvaluation.temporaryGrantSecretNames(
         aiReviewInFlight,
     )
@@ -96,7 +99,11 @@ internal fun GitSignRequestDetail(
             null
         },
     ) {
+        if (!pending) {
+            GitSignOutcome(signing)
+        }
         InformationSurface {
+            ClientIdentity(signing.clientName)
             StatusLine(
                 if (aiReviewInFlight) "AI review in progress" else signing.statusLabel(),
                 error = signing.state == ApprovalRequestState.VERIFICATION_FAILED,
@@ -106,9 +113,11 @@ internal fun GitSignRequestDetail(
                     signing.completionResult == ApprovalCompletionResult.DENIED ||
                     signing.completionResult == ApprovalCompletionResult.ABORTED,
             )
-            ClientIdentity(signing.clientName)
             SecretIdentities(listOf(signing.secretName))
-            InformationRow("Received", formatTimestamp(request.receivedAt))
+            InformationRow(
+                "Requested",
+                formatTimestamp(relayRequestTimestamp(request.id) ?: request.receivedAt),
+            )
         }
 
         if (
@@ -121,10 +130,6 @@ internal fun GitSignRequestDetail(
             AiReviewNotice(signing.approvalEvaluation.aiReview, aiReviewInFlight)
         }
 
-        if (!pending) {
-            GitSignOutcome(signing)
-        }
-
         signing.repository?.takeIf(GitSignRepository::hasVisibleContext)?.let { repository ->
             GitRepositoryContext(repository)
         }
@@ -134,7 +139,7 @@ internal fun GitSignRequestDetail(
                 color = if (pending) {
                     MaterialTheme.agentknockColors.attentionContainer
                 } else {
-                    MaterialTheme.colorScheme.surfaceContainerLow
+                    MaterialTheme.colorScheme.surfaceContainer
                 },
                 contentColor = if (pending) {
                     MaterialTheme.agentknockColors.onAttentionContainer
@@ -160,7 +165,7 @@ internal fun GitSignRequestDetail(
         }
 
         Surface(
-            color = MaterialTheme.colorScheme.surfaceContainerLow,
+            color = MaterialTheme.colorScheme.surfaceContainer,
             shape = MaterialTheme.shapes.large,
             modifier = Modifier.fillMaxWidth(),
         ) {
@@ -248,7 +253,7 @@ internal fun GitSignRequestDetail(
 @Composable
 private fun GitRepositoryContext(repository: GitSignRepository) {
     Surface(
-        color = MaterialTheme.colorScheme.surfaceContainerLow,
+        color = MaterialTheme.colorScheme.surfaceContainer,
         shape = MaterialTheme.shapes.large,
         modifier = Modifier.fillMaxWidth(),
     ) {

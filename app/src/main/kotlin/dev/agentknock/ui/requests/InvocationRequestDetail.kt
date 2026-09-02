@@ -4,6 +4,7 @@ import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.BoxWithConstraints
 import androidx.compose.foundation.layout.Column
+import androidx.compose.foundation.layout.FlowRow
 import androidx.compose.foundation.layout.PaddingValues
 import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.fillMaxWidth
@@ -12,7 +13,7 @@ import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.text.selection.SelectionContainer
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.outlined.Key
-import androidx.compose.material.icons.outlined.Security
+import androidx.compose.material.icons.outlined.Terminal
 import androidx.compose.material3.Card
 import androidx.compose.material3.CardDefaults
 import androidx.compose.material3.HorizontalDivider
@@ -48,6 +49,7 @@ import dev.agentknock.storage.request.InboxRequestState
 import dev.agentknock.storage.request.ApprovalCompletionResult
 import dev.agentknock.storage.request.ApprovalDecision
 import dev.agentknock.storage.request.SecretUseRequestDetails
+import dev.agentknock.protocol.relayRequestTimestamp
 import dev.agentknock.storage.request.ApprovalRequestState
 import dev.agentknock.storage.secret.SecretMetadata
 import dev.agentknock.storage.secret.TemporaryAccessOperation
@@ -71,7 +73,10 @@ internal fun InvocationRequestDetail(
 ) {
     val secretUse = (request.content as InboxRequestContent.SecretUse).details
     var confirmTemporaryAccess by remember(request.id) { mutableStateOf(false) }
-    val aiReviewInFlight = request.state == InboxRequestState.REVIEWING
+    val aiReviewRequested = secretUse.approvalEvaluation
+        ?.secrets
+        ?.any { it.action == ApprovalAction.ASK_AI } == true
+    val aiReviewInFlight = request.state == InboxRequestState.REVIEWING && aiReviewRequested
     val temporarySecretNames = secretUse.approvalEvaluation.temporaryGrantSecretNames(
         aiReviewInFlight,
     )
@@ -105,59 +110,82 @@ internal fun InvocationRequestDetail(
             null
         },
     ) {
+        if (secretUse.state != ApprovalRequestState.APPROVAL_PENDING) {
+            SecretUseOutcome(secretUse)
+        }
         Surface(
-            color = MaterialTheme.colorScheme.surfaceContainerLow,
+            color = MaterialTheme.colorScheme.surfaceContainer,
             shape = MaterialTheme.shapes.large,
             modifier = Modifier.fillMaxWidth(),
         ) {
-            Row(
+            Column(
                 modifier = Modifier.padding(18.dp),
-                horizontalArrangement = Arrangement.spacedBy(16.dp),
-                verticalAlignment = Alignment.Top,
+                verticalArrangement = Arrangement.spacedBy(6.dp),
             ) {
-                Surface(
-                    color = MaterialTheme.colorScheme.secondaryContainer,
-                    contentColor = MaterialTheme.colorScheme.onSecondaryContainer,
-                    shape = androidx.compose.foundation.shape.CircleShape,
-                    modifier = Modifier.size(56.dp),
+                Text(secretUse.clientName, style = MaterialTheme.typography.titleLarge)
+                StatusLine(
+                    if (aiReviewInFlight) "AI review in progress" else secretUse.statusLabel(),
+                    secretUse.isError(),
+                    attention = secretUse.state == ApprovalRequestState.APPROVAL_PENDING &&
+                        request.userDecisionAvailable,
+                    subdued = aiReviewInFlight ||
+                        secretUse.decision == ApprovalDecision.DENIED ||
+                        secretUse.completionResult == ApprovalCompletionResult.DENIED ||
+                        secretUse.completionResult == ApprovalCompletionResult.ABORTED,
+                )
+                Text(
+                    "Requested ${formatTimestamp(relayRequestTimestamp(request.id) ?: request.receivedAt)}",
+                    style = MaterialTheme.typography.bodySmall,
+                    color = MaterialTheme.colorScheme.onSurfaceVariant,
+                )
+            }
+        }
+
+        val renderedCommand = renderShellCommand(secretUse.command, secretUse.arguments)
+        Surface(
+            color = MaterialTheme.colorScheme.primaryContainer,
+            contentColor = MaterialTheme.colorScheme.onPrimaryContainer,
+            shape = MaterialTheme.shapes.large,
+            modifier = Modifier.fillMaxWidth(),
+        ) {
+            Column(
+                Modifier.padding(16.dp),
+                verticalArrangement = Arrangement.spacedBy(8.dp),
+            ) {
+                Row(
+                    horizontalArrangement = Arrangement.spacedBy(10.dp),
+                    verticalAlignment = Alignment.CenterVertically,
                 ) {
-                    Box(contentAlignment = Alignment.Center) {
-                        Icon(
-                            Icons.Outlined.Security,
-                            contentDescription = null,
-                            modifier = Modifier.size(28.dp),
-                        )
-                    }
+                    Icon(Icons.Outlined.Terminal, contentDescription = null)
+                    Text("Command", style = MaterialTheme.typography.titleMedium)
                 }
-                Column(Modifier.weight(1f), verticalArrangement = Arrangement.spacedBy(5.dp)) {
-                    val secretCount = secretUse.secrets.size
-                    val secretLabel = if (secretCount == 1) "secret" else "secrets"
-                    val headline = when {
-                        secretUse.state == ApprovalRequestState.COMPLETED &&
-                            secretUse.completionResult == ApprovalCompletionResult.APPROVED ->
-                            "${secretUse.clientName} used $secretCount $secretLabel"
-                        secretUse.state == ApprovalRequestState.COMPLETED ->
-                            "${secretUse.clientName} requested $secretCount $secretLabel"
-                        else ->
-                            "${secretUse.clientName} requests $secretCount $secretLabel"
-                    }
-                    Text(headline, style = MaterialTheme.typography.titleLarge)
-                    StatusLine(
-                        if (aiReviewInFlight) "AI review in progress" else secretUse.statusLabel(),
-                        secretUse.isError(),
-                        attention = secretUse.state == ApprovalRequestState.APPROVAL_PENDING &&
-                            request.userDecisionAvailable,
-                        subdued = aiReviewInFlight ||
-                            secretUse.decision == ApprovalDecision.DENIED ||
-                            secretUse.completionResult == ApprovalCompletionResult.DENIED ||
-                            secretUse.completionResult == ApprovalCompletionResult.ABORTED,
-                    )
+                SelectionContainer {
                     Text(
-                        "Received ${formatTimestamp(request.receivedAt)}",
-                        style = MaterialTheme.typography.bodySmall,
-                        color = MaterialTheme.colorScheme.onSurfaceVariant,
+                        renderedCommand,
+                        fontFamily = FontFamily.Monospace,
+                        style = MaterialTheme.typography.titleLarge,
                     )
                 }
+                if (renderedCommand.any { it.code > 0x7e }) {
+                    Text(
+                        "This command contains non-ASCII characters.",
+                        style = MaterialTheme.typography.bodySmall,
+                        color = MaterialTheme.colorScheme.error,
+                    )
+                }
+            }
+        }
+
+        InformationSurface {
+            DetailValue("Working directory", secretUse.workingDirectory, true)
+            FlowRow(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+                if (secretUse.executableMode != "direct") {
+                    ContextPill(secretUse.executableMode.replaceFirstChar(Char::uppercaseChar))
+                }
+                ContextPill("stdin: ${secretUse.stdinKind}")
+            }
+            if (secretUse.launcherChain.isNotEmpty()) {
+                DetailValue("Launcher chain", secretUse.launcherChain.joinToString(" → "), true)
             }
         }
 
@@ -171,30 +199,6 @@ internal fun InvocationRequestDetail(
                         SecretSummary(secret, secretUse.environmentVariables[secret.name])
                         if (index != secretUse.secretDetails.lastIndex) HorizontalDivider()
                     }
-                }
-            }
-        }
-
-        val renderedCommand = renderShellCommand(secretUse.command, secretUse.arguments)
-        Surface(
-            color = MaterialTheme.colorScheme.surfaceContainerLow,
-            shape = MaterialTheme.shapes.large,
-            modifier = Modifier.fillMaxWidth(),
-        ) {
-            Column(
-                Modifier.padding(16.dp),
-                verticalArrangement = Arrangement.spacedBy(8.dp),
-            ) {
-                Text("Command", style = MaterialTheme.typography.labelLarge)
-                SelectionContainer {
-                    Text(renderedCommand, fontFamily = FontFamily.Monospace)
-                }
-                if (renderedCommand.any { it.code > 0x7e }) {
-                    Text(
-                        "This command contains non-ASCII characters.",
-                        style = MaterialTheme.typography.bodySmall,
-                        color = MaterialTheme.colorScheme.error,
-                    )
                 }
             }
         }
@@ -218,10 +222,6 @@ internal fun InvocationRequestDetail(
             ) {
                 AiReviewNotice(evaluation.aiReview, aiReviewInFlight)
             }
-        }
-
-        if (secretUse.state != ApprovalRequestState.APPROVAL_PENDING) {
-            SecretUseOutcome(secretUse)
         }
 
         secretUse.reason?.takeIf(String::isNotBlank)?.let { reason ->
@@ -250,16 +250,10 @@ internal fun InvocationRequestDetail(
         }
 
         Disclosure("Technical details") {
-            DetailValue("Working directory", secretUse.workingDirectory, true)
             DetailValue("Executable path", secretUse.executablePath, true)
             secretUse.executableHash?.let { DetailValue("Executable hash", it, true) }
-            DetailValue("Executable mode", secretUse.executableMode)
-            DetailValue("Standard input", secretUse.stdinKind)
             DetailValue("Standard output", secretUse.stdoutKind)
             DetailValue("Standard error", secretUse.stderrKind)
-            if (secretUse.launcherChain.isNotEmpty()) {
-                DetailValue("Launcher chain", secretUse.launcherChain.joinToString("\n"), true)
-            }
             secretUse.platform?.let {
                 DetailValue("Platform reported by client", formatPlatformName(it))
             }
@@ -296,6 +290,21 @@ internal fun InvocationRequestDetail(
                 onAllowTemporarily()
             },
             onDismiss = { confirmTemporaryAccess = false },
+        )
+    }
+}
+
+@Composable
+private fun ContextPill(text: String) {
+    Surface(
+        color = MaterialTheme.colorScheme.secondaryContainer,
+        contentColor = MaterialTheme.colorScheme.onSecondaryContainer,
+        shape = androidx.compose.foundation.shape.RoundedCornerShape(100.dp),
+    ) {
+        Text(
+            text,
+            style = MaterialTheme.typography.labelMedium,
+            modifier = Modifier.padding(horizontal = 10.dp, vertical = 6.dp),
         )
     }
 }

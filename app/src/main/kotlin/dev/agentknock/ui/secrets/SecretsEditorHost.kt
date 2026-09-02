@@ -76,13 +76,12 @@ internal fun SecretsEditorHost(
                 onDelete = variable?.let {
                     { variablePendingDeletion = PendingVariableDeletion(it, activeEditor) }
                 },
-                onSave = { name, value, sensitive, notes, replaceValue ->
+                onSave = { name, value, sensitive, replaceValue ->
                     viewModel.saveVariableEditor(
                         expected = activeEditor,
                         name = name,
                         value = value,
                         sensitive = sensitive,
-                        notes = notes,
                         replaceValue = replaceValue,
                     )
                 },

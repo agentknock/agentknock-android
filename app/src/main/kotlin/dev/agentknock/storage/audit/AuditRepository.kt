@@ -2,6 +2,13 @@ package dev.agentknock.storage.audit
 
 import kotlinx.coroutines.flow.Flow
 import kotlinx.coroutines.flow.map
+import kotlinx.serialization.json.Json
+import kotlinx.serialization.json.JsonElement
+import kotlinx.serialization.json.JsonNull
+import kotlinx.serialization.json.JsonObject
+import kotlinx.serialization.json.JsonPrimitive
+import kotlinx.serialization.json.buildJsonObject
+import kotlinx.serialization.json.jsonPrimitive
 
 internal enum class AuditEventType(val code: String) {
     CLIENT_RESUMED("client_resumed"),
@@ -116,6 +123,7 @@ internal data class AuditRecord(
     val clientId: String? = null,
     val clientName: String? = null,
     val relayRequestId: String? = null,
+    val data: Map<String, JsonElement> = emptyMap(),
 )
 
 internal data class AuditEvent(
@@ -131,7 +139,30 @@ internal data class AuditEvent(
     val clientId: String?,
     val clientName: String?,
     val relayRequestId: String?,
+    val data: JsonObject = JsonObject(emptyMap()),
 )
+
+internal fun auditDataOf(vararg values: Pair<String, Any?>): Map<String, JsonElement> =
+    values.mapNotNull { (name, value) ->
+        val json = when (value) {
+            null -> null
+            is String -> JsonPrimitive(value)
+            is Boolean -> JsonPrimitive(value)
+            is Number -> JsonPrimitive(value)
+            is List<*> -> kotlinx.serialization.json.JsonArray(value.map { item ->
+                when (item) {
+                    null -> JsonNull
+                    is String -> JsonPrimitive(item)
+                    is Boolean -> JsonPrimitive(item)
+                    is Number -> JsonPrimitive(item)
+                    else -> error("Unsupported audit field value for $name")
+                }
+            })
+            is JsonElement -> value
+            else -> error("Unsupported audit field value for $name")
+        }
+        json?.let { name to it }
+    }.toMap()
 
 internal interface AuditSink {
     suspend fun record(record: AuditRecord)
@@ -173,33 +204,68 @@ internal class AuditRepository(
     private fun AuditRecord.toEntity(occurredAt: Long) = AuditEventEntity(
         occurredAt = occurredAt,
         eventType = type.code,
-        subject = subject,
-        context = context,
-        detail = detail,
         outcome = outcome.code,
         decisionSource = decisionSource?.code,
-        expiresAt = expiresAt,
         clientId = clientId,
-        clientName = clientName,
         relayRequestId = relayRequestId,
+        bodyJson = auditJson.encodeToString(
+            JsonObject.serializer(),
+            auditBody(subject, context, detail, expiresAt, clientName, data),
+        ),
     )
 
-    private fun AuditEventEntity.toModel(): AuditEvent = AuditEvent(
-        id = id,
-        occurredAt = occurredAt,
-        type = AuditEventType.fromCode(eventType),
-        outcome = AuditOutcome.fromCode(outcome),
-        decisionSource = decisionSource?.let(AuditDecisionSource::fromCode),
-        subject = subject,
-        context = context,
-        detail = detail,
-        expiresAt = expiresAt,
-        clientId = clientId,
-        clientName = clientName,
-        relayRequestId = relayRequestId,
-    )
+    private fun AuditEventEntity.toModel(): AuditEvent {
+        val body = auditJson.decodeFromString(JsonObject.serializer(), bodyJson)
+        return AuditEvent(
+            id = id,
+            occurredAt = occurredAt,
+            type = AuditEventType.fromCode(eventType),
+            outcome = AuditOutcome.fromCode(outcome),
+            decisionSource = decisionSource?.let(AuditDecisionSource::fromCode),
+            subject = body.string("subject"),
+            context = body.string("context"),
+            detail = body.string("detail"),
+            expiresAt = body["expires_at"]?.jsonPrimitive?.content?.toLongOrNull(),
+            clientId = clientId,
+            clientName = body.string("client_name"),
+            relayRequestId = relayRequestId,
+            data = JsonObject(body.filterKeys { it !in auditDisplayFields }),
+        )
+    }
 
     private companion object {
         const val RETENTION_MILLIS = 365L * 24 * 60 * 60 * 1000
     }
 }
+
+internal val auditJson = Json { explicitNulls = false }
+
+internal fun auditBody(
+    subject: String?,
+    context: String?,
+    detail: String?,
+    expiresAt: Long?,
+    clientName: String?,
+    data: Map<String, JsonElement> = emptyMap(),
+): JsonObject = buildJsonObject {
+    subject?.let { put("subject", JsonPrimitive(it)) }
+    context?.let { put("context", JsonPrimitive(it)) }
+    detail?.let { put("detail", JsonPrimitive(it)) }
+    expiresAt?.let { put("expires_at", JsonPrimitive(it)) }
+    clientName?.let { put("client_name", JsonPrimitive(it)) }
+    data.forEach { (name, value) ->
+        require(name !in auditDisplayFields) { "Reserved audit field: $name" }
+        put(name, value)
+    }
+}
+
+private fun JsonObject.string(name: String): String? =
+    get(name)?.jsonPrimitive?.content
+
+private val auditDisplayFields = setOf(
+    "subject",
+    "context",
+    "detail",
+    "expires_at",
+    "client_name",
+)
