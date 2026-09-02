@@ -125,7 +125,7 @@ class SshAuthenticationRequestsTest {
     }
 
     @Test
-    fun incomingRequestValidatesTranscriptAndPersistsAnActionableRequest() = runTest {
+    fun incomingRequestAfterParentCompletionPersistsAnActionableRequest() = runTest {
         val key = createAuthenticationSecret(SecretApprovalMode.ASK_ME)
         val description = secrets.describeRequestedSecrets(listOf(SECRET_NAME))
         val token = ByteArray(32) { it.toByte() }
@@ -163,15 +163,6 @@ class SshAuthenticationRequestsTest {
     }
 
     @Test
-    fun incomingRequestRejectsACompletedParentInvocation() = runTest {
-        val key = createAuthenticationSecret(SecretApprovalMode.ASK_ME)
-        val token = ByteArray(32) { it.toByte() }
-        insertParent(invocationTokenHash = invocationTokenHash(token))
-        endParentInvocation()
-        assertIncomingRejected("ssh-ended-parent", token, key)
-    }
-
-    @Test
     fun incomingRequestRejectsMalformedParentSecretMetadataCleanly() = runTest {
         val key = createAuthenticationSecret(SecretApprovalMode.ASK_ME)
         val token = ByteArray(32) { it.toByte() }
@@ -194,7 +185,7 @@ class SshAuthenticationRequestsTest {
     }
 
     @Test
-    fun automaticApprovalDoesNotPersistWhenParentEndsWhileSealing() = runTest {
+    fun automaticApprovalPersistsAfterTheParentExchangeHasEnded() = runTest {
         val key = createAuthenticationSecret(SecretApprovalMode.APPROVE)
         val description = secrets.describeRequestedSecrets(listOf(SECRET_NAME))
         val token = ByteArray(32) { it.toByte() }
@@ -214,21 +205,26 @@ class SshAuthenticationRequestsTest {
             credentials = credentials(),
             sealResponse = {
                 sealed = true
-                endParentInvocation()
                 Json.parseToJsonElement(RESPONSE_JSON)
             },
             launchAiReview = { _, _, _, _ -> error("Approve mode must not launch AI review") },
         )
 
-        assertNull(processed)
+        assertEquals(ProcessedRelayMessage, processed)
         assertTrue(sealed)
-        assertNull(database.requestDao().getRequestById(requestId))
-        assertNull(database.requestDao().getSshAuthenticationRequest(requestId))
-        assertNull(database.requestDao().getRequestPsk(requestId))
+        val request = checkNotNull(database.requestDao().getRequestById(requestId))
+        val authentication = checkNotNull(
+            database.requestDao().getSshAuthenticationRequest(requestId),
+        )
+        assertEquals(InboxRequestState.WAITING.storedName, request.state)
+        assertNotNull(request.responseJson)
+        assertEquals(ApprovalDecision.APPROVED.storedName, authentication.decision)
+        assertNull(authentication.message)
+        assertNotNull(database.requestDao().getRequestPsk(requestId))
     }
 
     @Test
-    fun askAiMapsRelayVerdictsAndRevalidatesAnEndedParent() = runTest {
+    fun askAiMapsRelayVerdictsAfterTheParentExchangeHasEnded() = runTest {
         val key = createAuthenticationSecret(SecretApprovalMode.ASK_AI)
         val description = secrets.describeRequestedSecrets(listOf(SECRET_NAME))
         val token = ByteArray(32) { it.toByte() }
@@ -280,16 +276,16 @@ class SshAuthenticationRequestsTest {
         }
 
         reviewer.result = reviewed(RelayApprovalReviewDecision.APPROVE, "Approve")
-        val staleId = "ssh-ai-ended-parent"
+        val completedParentId = "ssh-ai-completed-parent"
         var pendingReview: PendingAiReview? = null
         assertEquals(
             ProcessedRelayMessage,
             target.processIncoming(
                 client = client(),
-                relayRequestId = staleId,
+                relayRequestId = completedParentId,
                 requestPayload = Json.parseToJsonElement("{}"),
                 plaintext = sshAuthenticationPlaintext(token, key),
-                acceptedPsks = acceptedPsks(staleId),
+                acceptedPsks = acceptedPsks(completedParentId),
                 credentials = credentials(),
                 sealResponse = { Json.parseToJsonElement(RESPONSE_JSON) },
                 launchAiReview = { _, _, review, complete ->
@@ -300,14 +296,15 @@ class SshAuthenticationRequestsTest {
         )
         val pending = checkNotNull(pendingReview)
         val approved = pending.review()
-        endParentInvocation()
         pending.complete(approved)
-        val stale = checkNotNull(database.requestDao().getSshAuthenticationRequest(staleId))
-        assertEquals(ApprovalDecision.DENIED.storedName, stale.decision)
-        assertEquals("The parent invocation is no longer active.", stale.completionMessage)
-        assertFalse(
+        val completedParent = checkNotNull(
+            database.requestDao().getSshAuthenticationRequest(completedParentId),
+        )
+        assertEquals(ApprovalDecision.APPROVED.storedName, completedParent.decision)
+        assertNull(completedParent.completionMessage)
+        assertTrue(
             audit.observeEvents().first().any {
-                it.relayRequestId == staleId &&
+                it.relayRequestId == completedParentId &&
                     it.type == AuditEventType.SSH_AUTHENTICATION_DECIDED &&
                     it.outcome == AuditOutcome.APPROVED
             },
@@ -320,7 +317,7 @@ class SshAuthenticationRequestsTest {
     }
 
     @Test
-    fun aiApprovalCannotPersistWhenParentEndsWhileItsResponseIsSealed() = runTest {
+    fun aiApprovalPersistsAfterTheParentExchangeHasEnded() = runTest {
         val key = createAuthenticationSecret(SecretApprovalMode.ASK_AI)
         val description = secrets.describeRequestedSecrets(listOf(SECRET_NAME))
         val token = ByteArray(32) { it.toByte() }
@@ -350,7 +347,6 @@ class SshAuthenticationRequestsTest {
                 acceptedPsks = acceptedPsks(requestId),
                 credentials = credentials(),
                 sealResponse = {
-                    endParentInvocation()
                     Json.parseToJsonElement(RESPONSE_JSON)
                 },
                 launchAiReview = { _, _, review, complete ->
@@ -366,11 +362,11 @@ class SshAuthenticationRequestsTest {
         val authentication = checkNotNull(
             database.requestDao().getSshAuthenticationRequest(requestId),
         )
-        assertEquals(InboxRequestState.ACTION_REQUIRED.storedName, request.state)
-        assertNull(request.responseJson)
-        assertNull(authentication.decision)
-        assertNotNull(authentication.message)
-        assertFalse(
+        assertEquals(InboxRequestState.WAITING.storedName, request.state)
+        assertNotNull(request.responseJson)
+        assertEquals(ApprovalDecision.APPROVED.storedName, authentication.decision)
+        assertNull(authentication.message)
+        assertTrue(
             audit.observeEvents().first().any {
                 it.relayRequestId == requestId &&
                     it.type == AuditEventType.SSH_AUTHENTICATION_DECIDED &&
@@ -380,18 +376,17 @@ class SshAuthenticationRequestsTest {
     }
 
     @Test
-    fun manualApprovalStopsAfterParentEndsButDenialStillWorks() = runTest {
+    fun manualApprovalWorksAfterTheParentExchangeHasEnded() = runTest {
         val key = createAuthenticationSecret(SecretApprovalMode.ASK_ME)
         val description = secrets.describeRequestedSecrets(listOf(SECRET_NAME))
         insertParent(Json.encodeToString(description.secrets))
-        val requestId = "ssh-manual-ended-parent"
+        val requestId = "ssh-manual-completed-parent"
         receivePending(
             requests(audit),
             requestId,
             evaluationJson = currentAuthenticationEvaluationJson(),
             message = authenticationMessage(key),
         )
-        endParentInvocation()
         var sealed = false
         val seal: suspend (InboxRequestEntity, ByteArray) -> JsonElement? = { _, _ ->
             sealed = true
@@ -399,12 +394,14 @@ class SshAuthenticationRequestsTest {
         }
 
         assertEquals(
-            RequestDecisionResult.ParentUnavailable,
+            RequestDecisionResult.Decided,
             requests(audit).approve(requestId, false, seal),
         )
-        assertFalse(sealed)
-        assertEquals(RequestDecisionResult.Decided, requests(audit).deny(requestId, seal))
         assertTrue(sealed)
+        assertEquals(
+            ApprovalDecision.APPROVED.storedName,
+            database.requestDao().getSshAuthenticationRequest(requestId)?.decision,
+        )
     }
 
     @Test
@@ -607,34 +604,25 @@ class SshAuthenticationRequestsTest {
     }
 
     @Test
-    fun receiveRequiresAnActiveParentButAiDenialCanFinishAfterItEnds() = runTest {
+    fun receiveAndAiDenialAcceptACompletedParentExchange() = runTest {
         insertParent()
         val regular = requests(audit)
-        val rejectedId = "ssh-ended-parent-receive"
-        database.requestDao().updateRequest(
-            parentRequest().copy(
-                state = InboxRequestState.COMPLETED.storedName,
-                completedAt = NOW,
-                exchangeEndedAt = NOW,
-            ),
-        )
+        val receivedId = "ssh-completed-parent-receive"
         assertEquals(
-            ConditionalRequestUpdate.UNAVAILABLE,
+            ConditionalRequestUpdate.APPLIED,
             regular.receive(
-                request = request(rejectedId),
-                authentication = authentication(rejectedId),
+                request = request(receivedId),
+                authentication = authentication(receivedId),
                 client = client(),
-                acceptedPsks = acceptedPsks(rejectedId),
+                acceptedPsks = acceptedPsks(receivedId),
                 authorization = null,
                 automaticDecisionAudit = null,
             ),
         )
-        assertNull(database.requestDao().getRequestById(rejectedId))
-        assertNull(database.requestDao().getRequestPsk(rejectedId))
-        assertTrue(audit.observeEvents().first().isEmpty())
+        assertNotNull(database.requestDao().getRequestById(receivedId))
+        assertNotNull(database.requestDao().getRequestPsk(receivedId))
 
-        database.requestDao().updateRequest(parentRequest())
-        val reviewingId = "ssh-ended-parent-review"
+        val reviewingId = "ssh-completed-parent-review"
         receivePending(
             regular,
             reviewingId,
@@ -644,13 +632,6 @@ class SshAuthenticationRequestsTest {
         val reviewing = checkNotNull(database.requestDao().getRequestById(reviewingId))
         val authentication = checkNotNull(
             database.requestDao().getSshAuthenticationRequest(reviewingId),
-        )
-        database.requestDao().updateRequest(
-            parentRequest().copy(
-                state = InboxRequestState.COMPLETED.storedName,
-                completedAt = NOW,
-                exchangeEndedAt = NOW,
-            ),
         )
         assertEquals(
             ConditionalRequestUpdate.APPLIED,
@@ -1078,18 +1059,6 @@ class SshAuthenticationRequestsTest {
         )
     }
 
-    private suspend fun endParentInvocation() {
-        val parent = checkNotNull(database.requestDao().getRequestById(PARENT_ID))
-        database.requestDao().updateRequest(
-            parent.copy(
-                state = InboxRequestState.COMPLETED.storedName,
-                completedAt = NOW,
-                exchangeEndedAt = NOW,
-                responseOutboxFinished = true,
-            ),
-        )
-    }
-
     private fun sshSecretFactsJson(): String =
         storedJson.encodeToString<Map<String, ApprovalReviewSecretFacts>>(
             mapOf(SECRET_NAME to ApprovalReviewSshSecretFacts(provides = "public_key")),
@@ -1139,15 +1108,15 @@ class SshAuthenticationRequestsTest {
         clientNameSnapshot = "Test client",
         clientSoftwareJson = SOFTWARE_JSON,
         kind = RequestKind.SECRET_USE.storedName,
-        state = InboxRequestState.WAITING.storedName,
+        state = InboxRequestState.COMPLETED.storedName,
         listed = true,
         requestJson = "{}",
         responseJson = RESPONSE_JSON,
         error = null,
         receivedAt = NOW - 1,
-        completedAt = null,
-        exchangeEndedAt = null,
-        responseOutboxFinished = false,
+        completedAt = NOW,
+        exchangeEndedAt = NOW,
+        responseOutboxFinished = true,
     )
 
     private fun request(requestId: String) = InboxRequestEntity(

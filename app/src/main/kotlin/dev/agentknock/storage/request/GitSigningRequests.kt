@@ -91,8 +91,6 @@ internal class GitSigningRequests(
         if (
             invocationRequest.clientId != client.clientId ||
             invocationRequest.deviceIdentityId != client.deviceIdentityId ||
-            invocationRequest.state != InboxRequestState.WAITING.storedName ||
-            invocationRequest.exchangeEndedAt != null ||
             invocation.decision != ApprovalDecision.APPROVED.storedName ||
             invocationRequest.clientSoftwareJson?.let(::decodeStoredClientSoftware) !=
                 contents.clientSoftware ||
@@ -180,7 +178,7 @@ internal class GitSigningRequests(
                 currentClient.deviceIdentityId != client.deviceIdentityId ||
                 currentClient.relayClientState == RelayClientState.REVOKED.wireName ||
                 currentClient.desiredRelayClientState == RelayClientState.REVOKED.wireName
-            val invocationUnavailable = !parentInvocationIsActive(initialRequest)
+            val invocationUnavailable = !parentInvocationIsAvailable(initialRequest)
             val currentDescription = if (needsAiReview) {
                 secrets.describeRequestedSecrets(listOf(contents.secret))
             } else {
@@ -250,7 +248,7 @@ internal class GitSigningRequests(
             }
             if (invocationUnavailable && denial == null) {
                 denial = InvocationDenialReason.OTHER to
-                    "The parent invocation is no longer active."
+                    "The parent invocation is no longer available."
             }
             val approvalSettingsDenied =
                 denial == null &&
@@ -460,7 +458,7 @@ internal class GitSigningRequests(
         ) {
             return RequestDecisionResult.NotPending
         }
-        val invocation = activeParentInvocation(request)
+        val invocation = approvedParentInvocation(request)
             ?: return RequestDecisionResult.ParentUnavailable
         val description = secrets.describeRequestedSecrets(listOf(gitSign.secretName))
         val policy = secrets.approvalPoliciesForNames(
@@ -506,7 +504,7 @@ internal class GitSigningRequests(
         val expectedPublicKey = invocationSecrets.singleOrNull { secret ->
             secret.name == gitSign.secretName && secret.type == SSH_SECRET_TYPE
         }?.sshPublicKey ?: return RequestDecisionResult.ParentUnavailable
-        if (!parentInvocationIsActive(request)) {
+        if (!parentInvocationIsAvailable(request)) {
             return RequestDecisionResult.ParentUnavailable
         }
         val signature = when (
@@ -627,7 +625,7 @@ internal class GitSigningRequests(
             "An automatic Git-signing decision must bind its authorization state"
         }
         return writeTransaction.execute {
-            if (!parentInvocationIsActive(request)) {
+            if (!parentInvocationIsAvailable(request)) {
                 return@execute ConditionalRequestUpdate.UNAVAILABLE
             }
             val authorized = !conditional || dao.authorizationMatches(
@@ -720,7 +718,7 @@ internal class GitSigningRequests(
             }
             if (
                 gitSign.decision == ApprovalDecision.APPROVED.storedName &&
-                !parentInvocationIsActive(currentRequest)
+                !parentInvocationIsAvailable(currentRequest)
             ) {
                 dao.updateGitSignRequest(
                     request = currentRequest.copy(
@@ -992,7 +990,7 @@ internal class GitSigningRequests(
             }
             if (
                 decision == ApprovalDecision.APPROVED &&
-                !parentInvocationIsActive(currentRequest)
+                !parentInvocationIsAvailable(currentRequest)
             ) {
                 return@execute RequestDecisionResult.ParentUnavailable
             }
@@ -1064,7 +1062,7 @@ internal class GitSigningRequests(
         if (currentGitSign.approvalEvaluationJson != gitSign.approvalEvaluationJson) {
             return@execute RequestDecisionResult.ApprovalChanged
         }
-        if (!parentInvocationIsActive(currentRequest)) {
+        if (!parentInvocationIsAvailable(currentRequest)) {
             return@execute RequestDecisionResult.ParentUnavailable
         }
         if (
@@ -1199,14 +1197,12 @@ internal class GitSigningRequests(
         }
     }
 
-    private suspend fun activeParentInvocation(
+    private suspend fun approvedParentInvocation(
         request: InboxRequestEntity,
     ): SecretUseRequestEntity? {
         val parent = request.parentRequestId?.let { dao.getRequestById(it) } ?: return null
         if (
             parent.kind != RequestKind.SECRET_USE.storedName ||
-            parent.state != InboxRequestState.WAITING.storedName ||
-            parent.exchangeEndedAt != null ||
             parent.clientId != request.clientId ||
             parent.deviceIdentityId != request.deviceIdentityId
         ) {
@@ -1217,8 +1213,8 @@ internal class GitSigningRequests(
         }
     }
 
-    private suspend fun parentInvocationIsActive(request: InboxRequestEntity): Boolean =
-        activeParentInvocation(request) != null
+    private suspend fun parentInvocationIsAvailable(request: InboxRequestEntity): Boolean =
+        approvedParentInvocation(request) != null
 
     private fun encodeClientSoftware(value: ClientSoftware): String = json.encodeToString(value)
 

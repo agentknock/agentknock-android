@@ -1,1 +1,1 @@
-Agentknock 0.2.0 improves operation handling, restored-data recovery, device setup, and AI review context.
+Fixes Git signing and SSH authentication for launched commands.

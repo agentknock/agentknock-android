@@ -100,8 +100,6 @@ internal class SshAuthenticationRequests(
         if (
             invocationRequest.clientId != client.clientId ||
             invocationRequest.deviceIdentityId != client.deviceIdentityId ||
-            invocationRequest.state != InboxRequestState.WAITING.storedName ||
-            invocationRequest.exchangeEndedAt != null ||
             invocation.decision != ApprovalDecision.APPROVED.storedName ||
             invocationRequest.clientSoftwareJson?.let(::decodeStoredClientSoftware) !=
                 contents.clientSoftware ||
@@ -202,7 +200,7 @@ internal class SshAuthenticationRequests(
                 currentClient.deviceIdentityId != client.deviceIdentityId ||
                 currentClient.relayClientState == RelayClientState.REVOKED.wireName ||
                 currentClient.desiredRelayClientState == RelayClientState.REVOKED.wireName
-            val invocationUnavailable = !parentInvocationIsActive(initialRequest)
+            val invocationUnavailable = !parentInvocationIsAvailable(initialRequest)
             val currentDescription = if (needsAiReview) {
                 secrets.describeRequestedSecrets(listOf(contents.secret))
             } else {
@@ -272,7 +270,7 @@ internal class SshAuthenticationRequests(
             }
             if (invocationUnavailable && denial == null) {
                 denial = InvocationDenialReason.OTHER to
-                    "The parent invocation is no longer active."
+                    "The parent invocation is no longer available."
             }
             val approvalSettingsDenied = denial == null &&
                 evaluation?.secrets?.any { it.action == ApprovalAction.DENY } == true
@@ -481,7 +479,7 @@ internal class SshAuthenticationRequests(
         }
         val message = authentication.message
             ?: return RequestDecisionResult.Invalid(SSH_AUTHENTICATION_INVALID_MESSAGE)
-        val invocation = activeInvocationSnapshot(request)
+        val invocation = invocationSnapshot(request)
             ?: return RequestDecisionResult.ParentUnavailable
         val description = secrets.describeRequestedSecrets(listOf(authentication.secretName))
         val policy = secrets.approvalPoliciesForNames(
@@ -718,7 +716,7 @@ internal class SshAuthenticationRequests(
             ) {
                 return@execute ConditionalRequestUpdate.UNAVAILABLE
             }
-            if (!parentInvocationIsActive(request)) {
+            if (!parentInvocationIsAvailable(request)) {
                 return@execute ConditionalRequestUpdate.UNAVAILABLE
             }
             val currentClient = dao.getClient(client.clientId)
@@ -838,7 +836,7 @@ internal class SshAuthenticationRequests(
             }
             if (
                 authentication.decision == ApprovalDecision.APPROVED.storedName &&
-                !parentInvocationIsActive(currentRequest)
+                !parentInvocationIsAvailable(currentRequest)
             ) {
                 dao.updateSshAuthenticationRequest(
                     request = currentRequest.copy(
@@ -1116,7 +1114,7 @@ internal class SshAuthenticationRequests(
             }
             if (
                 decision == ApprovalDecision.APPROVED &&
-                (invocation == null || !activeInvocationSnapshotMatches(currentRequest, invocation))
+                (invocation == null || !invocationSnapshotMatches(currentRequest, invocation))
             ) {
                 return@execute RequestDecisionResult.ParentUnavailable
             }
@@ -1195,7 +1193,7 @@ internal class SshAuthenticationRequests(
             currentAuthentication.message?.contentEquals(message) != true ||
             !currentAuthentication.hasSameRequestDetails(authentication) ||
             currentAuthentication.approvalEvaluationJson != authentication.approvalEvaluationJson ||
-            !activeInvocationSnapshotMatches(currentRequest, invocation)
+            !invocationSnapshotMatches(currentRequest, invocation)
         ) {
             return@execute RequestDecisionResult.ApprovalChanged
         }
@@ -1327,7 +1325,7 @@ internal class SshAuthenticationRequests(
             else -> null
         }
 
-    private suspend fun activeInvocationSnapshot(
+    private suspend fun invocationSnapshot(
         request: InboxRequestEntity,
     ): SshInvocationSnapshot? {
         val parentId = request.parentRequestId ?: return null
@@ -1335,8 +1333,6 @@ internal class SshAuthenticationRequests(
         val invocation = dao.getSecretUseRequest(parentId) ?: return null
         if (
             parent.kind != RequestKind.SECRET_USE.storedName ||
-            parent.state != InboxRequestState.WAITING.storedName ||
-            parent.exchangeEndedAt != null ||
             parent.clientId != request.clientId ||
             parent.deviceIdentityId != request.deviceIdentityId ||
             parent.clientSoftwareJson != request.clientSoftwareJson ||
@@ -1347,13 +1343,13 @@ internal class SshAuthenticationRequests(
         return SshInvocationSnapshot(parentId, invocation.secretDetailsJson)
     }
 
-    private suspend fun activeInvocationSnapshotMatches(
+    private suspend fun invocationSnapshotMatches(
         request: InboxRequestEntity,
         expected: SshInvocationSnapshot,
-    ): Boolean = activeInvocationSnapshot(request) == expected
+    ): Boolean = invocationSnapshot(request) == expected
 
-    private suspend fun parentInvocationIsActive(request: InboxRequestEntity): Boolean =
-        activeInvocationSnapshot(request) != null
+    private suspend fun parentInvocationIsAvailable(request: InboxRequestEntity): Boolean =
+        invocationSnapshot(request) != null
 
     private fun encodeClientSoftware(value: ClientSoftware): String = json.encodeToString(value)
 
