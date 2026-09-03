@@ -2,7 +2,6 @@ package dev.agentknock.review
 
 import kotlinx.serialization.SerialName
 import kotlinx.serialization.Serializable
-import kotlinx.serialization.json.JsonElement
 
 @Serializable
 internal data class ApprovalReviewRequest(
@@ -17,7 +16,7 @@ internal data class ApprovalReviewRequest(
 internal data class ApprovalReviewInstructions(
     val general: String,
     val client: String,
-    val secrets: Map<String, String?>,
+    val secrets: Map<String, String>,
 )
 
 @Serializable
@@ -53,40 +52,37 @@ internal sealed interface ApprovalReviewSecretFacts
 @Serializable
 @SerialName("environment")
 internal data class ApprovalReviewEnvironmentSecretFacts(
-    @SerialName("environment_variables")
-    val environmentVariables: Map<String, ApprovalReviewEnvironmentVariableFacts>,
+    val variables: Map<String, ApprovalReviewEnvironmentVariableFacts>,
 ) : ApprovalReviewSecretFacts
 
 @Serializable
 internal data class ApprovalReviewEnvironmentVariableFacts(
-    val destination: ApprovalReviewEnvironmentVariableDestination,
-    val value: JsonElement? = null,
-)
+    val delivery: ApprovalReviewEnvironmentDelivery,
+    val target: String? = null,
+    val value: String? = null,
+) {
+    init {
+        require((delivery == ApprovalReviewEnvironmentDelivery.ENVIRONMENT) == (target != null)) {
+            "Environment delivery requires exactly one target"
+        }
+    }
+}
 
 @Serializable
-internal sealed interface ApprovalReviewEnvironmentVariableDestination
+internal enum class ApprovalReviewEnvironmentDelivery {
+    @SerialName("environment")
+    ENVIRONMENT,
 
-@Serializable
-@SerialName("environment")
-internal data class ApprovalReviewEnvironmentDestination(
-    val name: String,
-) : ApprovalReviewEnvironmentVariableDestination
+    @SerialName("standard_input")
+    STANDARD_INPUT,
 
-@Serializable
-@SerialName("omitted")
-internal data object ApprovalReviewOmittedDestination :
-    ApprovalReviewEnvironmentVariableDestination
-
-@Serializable
-@SerialName("standard_input")
-internal data object ApprovalReviewStandardInputDestination :
-    ApprovalReviewEnvironmentVariableDestination
+    @SerialName("omitted")
+    OMITTED,
+}
 
 @Serializable
 @SerialName("ssh")
-internal data class ApprovalReviewSshSecretFacts(
-    val provides: String,
-) : ApprovalReviewSecretFacts
+internal data object ApprovalReviewSshSecretFacts : ApprovalReviewSecretFacts
 
 @Serializable
 internal data class ApprovalReviewEvidence(

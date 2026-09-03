@@ -644,8 +644,18 @@ class SecretRepositoryTest {
         )
         assertEquals(listOf("GH_HOST"), description.secrets.single().environmentVariableNames)
         assertEquals(
-            listOf("GH_HOST"),
+            listOf("GH_HOST", "GH_TOKEN", "UNRELATED"),
             description.reviewMetadata.single().environmentVariables.map { it.name },
+        )
+        assertEquals(
+            EnvironmentVariableReviewDestination.Environment("GH_HOST"),
+            description.reviewMetadata.single()
+                .environmentVariableDestinations.getValue("GH_HOST"),
+        )
+        assertEquals(
+            EnvironmentVariableReviewDestination.Omitted,
+            description.reviewMetadata.single()
+                .environmentVariableDestinations.getValue("GH_TOKEN"),
         )
         assertFalse(description.containsSensitiveMaterial)
 
@@ -671,6 +681,61 @@ class SecretRepositoryTest {
             (omitted.secrets.getValue("github") as SecretValues.Environment).environment,
         )
     }
+
+    @Test
+    fun `review context includes omitted non-sensitive values without making them releasable`() =
+        runTest {
+            val fixture = Fixture()
+            val secret = fixture.createSecret("database")
+            fixture.createVariable(secret, "PGPASSWORD", "secret", true)
+            val hostId = fixture.createVariable(
+                secret,
+                "PGHOST",
+                "production-db.example.com",
+                false,
+            )
+            val selection = mapOf(
+                "database" to EnvironmentVariableSelection(only = setOf("PGPASSWORD")),
+            )
+
+            val resolved = fixture.resolver.resolve(
+                listOf("database"),
+                selection,
+                includeValues = true,
+            )
+            val available = resolved.values as RequestedSecretsResult.Available
+            assertEquals(
+                mapOf("PGPASSWORD" to "secret"),
+                (available.secrets.getValue("database") as SecretValues.Environment).environment,
+            )
+            assertEquals(
+                mapOf("PGHOST" to "production-db.example.com"),
+                resolved.nonSensitiveEnvironmentValues.getValue("database"),
+            )
+            assertEquals(
+                EnvironmentVariableReviewDestination.Omitted,
+                resolved.description.reviewMetadata.single()
+                    .environmentVariableDestinations.getValue("PGHOST"),
+            )
+
+            val host = fixture.dao.variables.value.single { it.id == hostId }
+            fixture.dao.directlyReplaceVariable(
+                host.copy(
+                    encryptedValue = host.encryptedValue.copy(ciphertext = byteArrayOf(1)),
+                ),
+            )
+            val withoutOptionalContext = fixture.resolver.resolve(
+                listOf("database"),
+                selection,
+                includeValues = true,
+            )
+
+            assertTrue(withoutOptionalContext.values is RequestedSecretsResult.Available)
+            assertEquals(
+                emptyMap<String, String>(),
+                withoutOptionalContext.nonSensitiveEnvironmentValues.getValue("database"),
+            )
+        }
 
     @Test
     fun `environment selection rejects missing exact variables and SSH options`() = runTest {

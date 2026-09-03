@@ -15,19 +15,22 @@ import dev.agentknock.storage.secret.SSH_SECRET_TYPE
 import dev.agentknock.storage.secret.SecretApprovalPolicy
 import dev.agentknock.storage.secret.SecretValues
 import kotlinx.serialization.json.Json
-import kotlinx.serialization.json.JsonNull
-import kotlinx.serialization.json.JsonPrimitive
 
 internal fun approvalReviewRequest(
     client: ClientEntity,
     contents: InvocationRequestMessage,
     description: RequestedSecretDescription,
     values: Map<String, SecretValues>,
+    nonSensitiveEnvironmentValues: Map<String, Map<String, String>>,
     evaluation: ApprovalEvaluation,
     policies: List<SecretApprovalPolicy>,
     deviceInstructions: String,
 ): ApprovalReviewRequest {
-    val secrets = approvalReviewSecretFacts(description, values)
+    val secrets = approvalReviewSecretFacts(
+        description,
+        values,
+        nonSensitiveEnvironmentValues,
+    )
     return ApprovalReviewRequest(
         instructions = approvalReviewInstructions(
             client = client,
@@ -190,21 +193,15 @@ private fun approvalReviewInstructions(
     val secretInstructions = evaluation.secrets
         .filter {
             it.secretName in decisionSecretNames &&
-                (it.action == ApprovalAction.ASK_AI || it.action == ApprovalAction.APPROVE)
+                it.action == ApprovalAction.ASK_AI
         }
         .associateTo(linkedMapOf()) { secret ->
-            secret.secretName to when (secret.action) {
-                ApprovalAction.ASK_AI -> {
-                    val policy = checkNotNull(policiesById[secret.secretId]) {
-                        "Missing approval policy for ${secret.secretName}"
-                    }
-                    policy.instructions
-                }
-                ApprovalAction.APPROVE -> null
-                else -> error("Secret is outside the AI review instruction scope")
+            val policy = checkNotNull(policiesById[secret.secretId]) {
+                "Missing approval policy for ${secret.secretName}"
             }
+            secret.secretName to policy.instructions
         }
-    require(secretInstructions.values.any { it != null }) { "AI review has no secrets to review" }
+    require(secretInstructions.isNotEmpty()) { "AI review has no secrets to review" }
 
     return ApprovalReviewInstructions(
         general = deviceInstructions,
@@ -216,6 +213,7 @@ private fun approvalReviewInstructions(
 internal fun approvalReviewSecretFacts(
     description: RequestedSecretDescription,
     values: Map<String, SecretValues>,
+    nonSensitiveEnvironmentValues: Map<String, Map<String, String>>,
 ): Map<String, ApprovalReviewSecretFacts> {
     require(description.reviewMetadata.mapTo(linkedSetOf()) { it.name } == values.keys) {
         "Review metadata does not match requested secret values"
@@ -226,49 +224,45 @@ internal fun approvalReviewSecretFacts(
                 val environment = checkNotNull(values[secret.name] as? SecretValues.Environment) {
                     "Missing environment values for ${secret.name}"
                 }.environment
-                require(secret.environmentVariables.map { it.name }.toSet() == environment.keys) {
-                    "Review metadata does not match environment values for ${secret.name}"
-                }
                 val metadata = secret.environmentVariables.associateBy { it.name }
-                val destinations = secret.environmentVariableDestinations.ifEmpty {
-                    secret.environmentVariables.associate { variable ->
-                        variable.name to EnvironmentVariableReviewDestination.Environment(
-                            variable.name,
-                        )
-                    }
+                val destinations = secret.environmentVariableDestinations
+                require(metadata.keys == destinations.keys) {
+                    "Review metadata does not describe every environment variable for ${secret.name}"
                 }
-                val variables = destinations.mapValuesTo(
-                    linkedMapOf(),
-                ) { (source, destination) ->
+                val deliveredSources = destinations.mapNotNullTo(linkedSetOf()) {
+                    (source, destination) ->
+                    source.takeUnless { destination == EnvironmentVariableReviewDestination.Omitted }
+                }
+                require(environment.keys == deliveredSources) {
+                    "Review metadata does not match delivered environment values for ${secret.name}"
+                }
+                val safeValues = nonSensitiveEnvironmentValues[secret.name].orEmpty()
+                val variables = metadata.mapValuesTo(linkedMapOf()) { (source, variable) ->
+                    val destination = checkNotNull(destinations[source])
+                    val value = if (variable.sensitive) null else safeValues[source]
+                    if (
+                        !variable.sensitive &&
+                        destination != EnvironmentVariableReviewDestination.Omitted
+                    ) {
+                        require(value != null) { "Missing non-sensitive environment value $source" }
+                    }
                     when (destination) {
-                        is EnvironmentVariableReviewDestination.Environment -> {
-                            val variable = checkNotNull(metadata[source]) {
-                                "Missing review metadata for environment variable $source"
-                            }
-                            val value = checkNotNull(environment[source]) {
-                                "Missing environment variable $source"
-                            }
+                        is EnvironmentVariableReviewDestination.Environment ->
                             ApprovalReviewEnvironmentVariableFacts(
-                                destination = ApprovalReviewEnvironmentDestination(destination.name),
-                                value = if (variable.sensitive) JsonNull else JsonPrimitive(value),
+                                delivery = ApprovalReviewEnvironmentDelivery.ENVIRONMENT,
+                                target = destination.name,
+                                value = value,
                             )
-                        }
                         EnvironmentVariableReviewDestination.Omitted ->
                             ApprovalReviewEnvironmentVariableFacts(
-                                destination = ApprovalReviewOmittedDestination,
+                                delivery = ApprovalReviewEnvironmentDelivery.OMITTED,
+                                value = value,
                             )
-                        EnvironmentVariableReviewDestination.StandardInput -> {
-                            val variable = checkNotNull(metadata[source]) {
-                                "Missing review metadata for environment variable $source"
-                            }
-                            val value = checkNotNull(environment[source]) {
-                                "Missing environment variable $source"
-                            }
+                        EnvironmentVariableReviewDestination.StandardInput ->
                             ApprovalReviewEnvironmentVariableFacts(
-                                destination = ApprovalReviewStandardInputDestination,
-                                value = if (variable.sensitive) JsonNull else JsonPrimitive(value),
+                                delivery = ApprovalReviewEnvironmentDelivery.STANDARD_INPUT,
+                                value = value,
                             )
-                        }
                     }
                 }
                 ApprovalReviewEnvironmentSecretFacts(variables)
@@ -277,7 +271,7 @@ internal fun approvalReviewSecretFacts(
                 require(values[secret.name] is SecretValues.Ssh) {
                     "Missing SSH values for ${secret.name}"
                 }
-                ApprovalReviewSshSecretFacts(provides = "public_key")
+                ApprovalReviewSshSecretFacts
             }
             else -> error("Unsupported review secret type")
         }

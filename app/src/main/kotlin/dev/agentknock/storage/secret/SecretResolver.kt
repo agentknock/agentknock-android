@@ -10,6 +10,7 @@ import kotlinx.coroutines.withContext
 internal data class SecretResolution(
     val description: RequestedSecretDescription,
     val values: RequestedSecretsResult,
+    val nonSensitiveEnvironmentValues: Map<String, Map<String, String>>,
 )
 
 private data class ParsedSshKey(
@@ -74,9 +75,17 @@ internal class SecretResolver(
         val snapshot = ParsedSecretSnapshot(dao.getSecretSnapshot())
         val selection = select(snapshot, names, environmentSelections)
         val description = selection.description()
+        val values = selection.values(includeValues)
         return SecretResolution(
             description = description,
-            values = selection.values(includeValues),
+            values = values,
+            nonSensitiveEnvironmentValues = if (
+                includeValues && values is RequestedSecretsResult.Available
+            ) {
+                selection.nonSensitiveEnvironmentValues(values.secrets)
+            } else {
+                emptyMap()
+            },
         )
     }
 
@@ -323,12 +332,14 @@ internal class SecretResolver(
                     revision = revision,
                     name = name,
                     type = SecretType.ENVIRONMENT.storedName,
-                    environmentVariables = selected.sortedBy(EnvironmentVariableEntity::name).map {
-                        EnvironmentVariableReviewMetadata(
-                            name = it.name,
-                            sensitive = it.sensitive,
-                        )
-                    },
+                    environmentVariables = snapshot.variablesBySecret[id].orEmpty()
+                        .sortedBy(EnvironmentVariableEntity::name)
+                        .map {
+                            EnvironmentVariableReviewMetadata(
+                                name = it.name,
+                                sensitive = it.sensitive,
+                            )
+                        },
                     environmentVariableDestinations = snapshot.variablesBySecret[id].orEmpty()
                         .sortedBy(EnvironmentVariableEntity::name)
                         .associate { variable ->
@@ -345,6 +356,39 @@ internal class SecretResolver(
                     )
                 }
                 null -> null
+            }
+        }
+
+        suspend fun nonSensitiveEnvironmentValues(
+            available: Map<String, SecretValues>,
+        ): Map<String, Map<String, String>> = requestedNames.mapNotNull { name ->
+            val secret = secretByName[name] ?: return@mapNotNull null
+            if (snapshot.typeOf(secret) != SecretType.ENVIRONMENT) return@mapNotNull null
+            val delivered = (available[name] as? SecretValues.Environment)?.environment.orEmpty()
+            val values = snapshot.variablesBySecret[secret.id].orEmpty()
+                .filterNot(EnvironmentVariableEntity::sensitive)
+                .mapNotNull { variable ->
+                    delivered[variable.name]?.let { variable.name to it }
+                        ?: optionalEnvironmentValue(variable)?.let { variable.name to it }
+                }
+                .toMap(linkedMapOf())
+            name to values
+        }.toMap(linkedMapOf())
+
+        private suspend fun optionalEnvironmentValue(
+            variable: EnvironmentVariableEntity,
+        ): String? {
+            val decrypted = runCatchingNonCancellation {
+                material.decryptEnvironmentValue(variable)
+            }.getOrNull() ?: return null
+            return when (decrypted) {
+                is DecryptionResult.Plaintext -> runCatching {
+                    decrypted.value.decodeToString(throwOnInvalidSequence = true)
+                }.getOrNull()
+                DecryptionResult.KeyUnavailable,
+                DecryptionResult.AuthenticationFailed,
+                DecryptionResult.UnsupportedFormat,
+                -> null
             }
         }
 

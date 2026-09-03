@@ -16,7 +16,7 @@ import dev.agentknock.storage.approval.AiReviewDecision
 import dev.agentknock.storage.approval.ApprovalEvaluation
 import dev.agentknock.storage.approval.ApprovalPolicyEvaluator
 import dev.agentknock.storage.approval.isFullyApproved
-import dev.agentknock.storage.approval.requiresAiReview
+import dev.agentknock.storage.approval.requiresInvocationAiReview
 import dev.agentknock.storage.audit.AuditDecisionSource
 import dev.agentknock.storage.audit.AuditEventType
 import dev.agentknock.storage.audit.AuditOutcome
@@ -26,7 +26,6 @@ import dev.agentknock.storage.audit.auditDataOf
 import dev.agentknock.storage.device.RelayDeviceCredentialSource
 import dev.agentknock.storage.device.RelayDeviceCredentials
 import dev.agentknock.storage.device.RelayDeviceCredentialsResult
-import dev.agentknock.storage.secret.ENVIRONMENT_SECRET_TYPE
 import dev.agentknock.storage.secret.RequestedSecretDescription
 import dev.agentknock.storage.secret.RequestedSecretsResult
 import dev.agentknock.storage.secret.SecretApprovalPolicy
@@ -34,6 +33,7 @@ import dev.agentknock.storage.secret.SecretMetadata
 import dev.agentknock.storage.secret.SecretRepository
 import dev.agentknock.storage.secret.SecretValues
 import dev.agentknock.storage.secret.TemporaryAccessOperation
+import dev.agentknock.storage.secret.containsSelectedSensitiveEnvironmentValue
 import kotlinx.coroutines.NonCancellable
 import kotlinx.coroutines.withContext
 import kotlinx.serialization.builtins.ListSerializer
@@ -90,10 +90,7 @@ internal class InvocationRequests(
         val requestedSecrets = resolution.values
         val automaticDenial = automaticSecretUseDenial(requestedSecrets)
         val protectedSecretNames = description.reviewMetadata
-            .filter { secret ->
-                secret.type == ENVIRONMENT_SECRET_TYPE &&
-                    secret.environmentVariables.any { it.sensitive }
-            }
+            .filter { it.containsSelectedSensitiveEnvironmentValue() }
             .map { it.name }
         val approvalPolicies = if (automaticDenial == null) {
             secrets.approvalPoliciesForNames(
@@ -114,11 +111,17 @@ internal class InvocationRequests(
         } else {
             null
         }
-        val needsAiReview = initialApprovalEvaluation?.requiresAiReview() == true
+        val needsAiReview = initialApprovalEvaluation?.requiresInvocationAiReview() == true
         val initialAvailableSecrets =
             (requestedSecrets as? RequestedSecretsResult.Available)?.secrets
         val initialProvidedSecretsJson = initialAvailableSecrets?.let { values ->
-            json.encodeToString(approvalReviewSecretFacts(description, values))
+            json.encodeToString(
+                approvalReviewSecretFacts(
+                    description,
+                    values,
+                    resolution.nonSensitiveEnvironmentValues,
+                ),
+            )
         }
         val now = currentTimeMillis()
         val initialRequest = InboxRequestEntity(
@@ -175,13 +178,16 @@ internal class InvocationRequests(
             val availableSecrets =
                 (currentRequestedSecrets as? RequestedSecretsResult.Available)?.secrets
             val providedSecretsJson = availableSecrets?.let { values ->
-                json.encodeToString(approvalReviewSecretFacts(currentDescription, values))
+                json.encodeToString(
+                    approvalReviewSecretFacts(
+                        currentDescription,
+                        values,
+                        currentResolution.nonSensitiveEnvironmentValues,
+                    ),
+                )
             }
             val currentProtectedSecretNames = currentDescription.reviewMetadata
-                .filter { secret ->
-                    secret.type == ENVIRONMENT_SECRET_TYPE &&
-                        secret.environmentVariables.any { it.sensitive }
-                }
+                .filter { it.containsSelectedSensitiveEnvironmentValue() }
                 .map { it.name }
             val currentApprovalPolicies = if (needsAiReview) {
                 secrets.approvalPoliciesForNames(
@@ -446,6 +452,8 @@ internal class InvocationRequests(
                             contents = contents,
                             description = description,
                             values = checkNotNull(initialAvailableSecrets),
+                            nonSensitiveEnvironmentValues =
+                                resolution.nonSensitiveEnvironmentValues,
                             evaluation = initialApprovalEvaluation,
                             policies = approvalPolicies,
                             credentials = credentials,
@@ -494,10 +502,7 @@ internal class InvocationRequests(
         val latestDescription = latestResolution.description
         val storedMissingSecrets = decodeStringList(secretUseRequest.missingSecretsJson)
         val protectedNames = latestDescription.reviewMetadata
-            .filter { secret ->
-                secret.type == ENVIRONMENT_SECRET_TYPE &&
-                    secret.environmentVariables.any { it.sensitive }
-            }
+            .filter { it.containsSelectedSensitiveEnvironmentValue() }
             .map { it.name }
         val currentPolicies = secrets.approvalPoliciesForNames(
             protectedNames,
@@ -614,6 +619,7 @@ internal class InvocationRequests(
             dev.agentknock.review.approvalReviewSecretFacts(
                 latestDescription,
                 availableSecrets,
+                latestResolution.nonSensitiveEnvironmentValues,
             ),
         )
         return if (temporaryGrant == null) {
@@ -1166,6 +1172,7 @@ internal class InvocationRequests(
         contents: InvocationRequestMessage,
         description: RequestedSecretDescription,
         values: Map<String, SecretValues>,
+        nonSensitiveEnvironmentValues: Map<String, Map<String, String>>,
         evaluation: ApprovalEvaluation,
         policies: List<SecretApprovalPolicy>,
         credentials: RelayDeviceCredentials,
@@ -1175,6 +1182,7 @@ internal class InvocationRequests(
             contents = contents,
             description = description,
             values = values,
+            nonSensitiveEnvironmentValues = nonSensitiveEnvironmentValues,
             evaluation = evaluation,
             policies = policies,
             deviceInstructions = credentials.instructions,

@@ -79,6 +79,11 @@ internal fun ApprovalEvaluation.requiresAiReview(): Boolean =
     secrets.none { it.action == ApprovalAction.DENY } &&
         secrets.any { it.action == ApprovalAction.ASK_AI }
 
+internal fun ApprovalEvaluation.requiresInvocationAiReview(): Boolean =
+    secrets.none {
+        it.action == ApprovalAction.DENY || it.action == ApprovalAction.ASK_ME
+    } && secrets.any { it.action == ApprovalAction.ASK_AI }
+
 internal fun ApprovalEvaluation.isFullyApproved(aiDecision: AiReviewDecision?): Boolean =
     secrets.all { secret ->
         secret.action == ApprovalAction.APPROVE ||

@@ -30,8 +30,6 @@ import dev.agentknock.storage.secret.SecretReviewMetadata
 import dev.agentknock.storage.secret.SecretValues
 import kotlinx.serialization.encodeToString
 import kotlinx.serialization.json.Json
-import kotlinx.serialization.json.JsonNull
-import kotlinx.serialization.json.JsonPrimitive
 import kotlinx.serialization.json.jsonObject
 import kotlinx.serialization.json.jsonPrimitive
 import org.junit.Assert.assertEquals
@@ -48,7 +46,7 @@ class ApprovalReviewContextTest {
             contents = InvocationRequestMessage(
                 clientSoftware = software(),
                 invocationToken = ByteArray(32),
-                secrets = listOf("aws-read-only", "git-signing"),
+                secrets = listOf("aws-read-only", "database", "git-signing"),
                 reason = "Inspect production resources",
                 operation = InvocationExecOperation(
                     command = "aws",
@@ -78,10 +76,21 @@ class ApprovalReviewContextTest {
                     description = "private SSH description",
                     publicKey = "ssh-ed25519 public-key",
                 ),
+                "database" to SecretValues.Environment(
+                    description = "private database description",
+                    environment = mapOf("PGPASSWORD" to "sensitive-password"),
+                ),
+            ),
+            nonSensitiveEnvironmentValues = mapOf(
+                "aws-read-only" to mapOf(
+                    "AWS_PROFILE" to "production-read-only",
+                    "AWS_REGION" to "eu-north-1",
+                ),
             ),
             evaluation = ApprovalEvaluation(
                 secrets = listOf(
                     secretEvaluation("aws-id", "aws-read-only", ApprovalAction.ASK_AI),
+                    secretEvaluation("database-id", "database", ApprovalAction.ASK_AI),
                     secretEvaluation("ssh-id", "git-signing", ApprovalAction.APPROVE),
                 ),
             ),
@@ -91,6 +100,12 @@ class ApprovalReviewContextTest {
                     name = "aws-read-only",
                     mode = SecretApprovalMode.ASK_AI,
                     instructions = "Allow inspection but not changes.",
+                ),
+                policy(
+                    id = "database-id",
+                    name = "database",
+                    mode = SecretApprovalMode.ASK_AI,
+                    instructions = "",
                 ),
                 policy(
                     id = "ssh-id",
@@ -107,7 +122,7 @@ class ApprovalReviewContextTest {
         assertEquals(
             mapOf(
                 "aws-read-only" to "Allow inspection but not changes.",
-                "git-signing" to null,
+                "database" to "",
             ),
             request.instructions.secrets,
         )
@@ -115,38 +130,30 @@ class ApprovalReviewContextTest {
         assertEquals(ApprovalReviewOperation.INVOCATION, request.facts.operation)
         assertNull(request.facts.secret)
         val secrets = checkNotNull(request.facts.secrets)
-        assertEquals(setOf("aws-read-only", "git-signing"), secrets.keys)
+        assertEquals(setOf("aws-read-only", "database", "git-signing"), secrets.keys)
         assertNull(request.parentFacts)
 
         val environment = secrets.getValue("aws-read-only")
             as ApprovalReviewEnvironmentSecretFacts
-        assertEquals(JsonNull, environment.environmentVariables.getValue("AWS_ACCESS_KEY_ID").value)
-        assertEquals(JsonNull, environment.environmentVariables.getValue("AWS_SECRET_ACCESS_KEY").value)
+        assertNull(environment.variables.getValue("AWS_ACCESS_KEY_ID").value)
+        assertNull(environment.variables.getValue("AWS_SECRET_ACCESS_KEY").value)
+        assertEquals("eu-north-1", environment.variables.getValue("AWS_REGION").value)
         assertEquals(
-            JsonPrimitive("eu-north-1"),
-            environment.environmentVariables.getValue("AWS_REGION").value,
+            ApprovalReviewEnvironmentDelivery.ENVIRONMENT,
+            environment.variables.getValue("AWS_REGION").delivery,
         )
+        assertEquals("AWS_DEFAULT_REGION", environment.variables.getValue("AWS_REGION").target)
         assertEquals(
-            ApprovalReviewEnvironmentDestination("AWS_DEFAULT_REGION"),
-            environment.environmentVariables.getValue("AWS_REGION").destination,
+            ApprovalReviewEnvironmentDelivery.OMITTED,
+            environment.variables.getValue("AWS_PROFILE").delivery,
         )
+        assertEquals("production-read-only", environment.variables.getValue("AWS_PROFILE").value)
         assertEquals(
-            ApprovalReviewOmittedDestination,
-            environment.environmentVariables.getValue("AWS_PROFILE").destination,
+            ApprovalReviewEnvironmentDelivery.STANDARD_INPUT,
+            environment.variables.getValue("AWS_SESSION_TOKEN").delivery,
         )
-        assertNull(environment.environmentVariables.getValue("AWS_PROFILE").value)
-        assertEquals(
-            ApprovalReviewStandardInputDestination,
-            environment.environmentVariables.getValue("AWS_SESSION_TOKEN").destination,
-        )
-        assertEquals(
-            JsonNull,
-            environment.environmentVariables.getValue("AWS_SESSION_TOKEN").value,
-        )
-        assertEquals(
-            ApprovalReviewSshSecretFacts(provides = "public_key"),
-            secrets.getValue("git-signing"),
-        )
+        assertNull(environment.variables.getValue("AWS_SESSION_TOKEN").value)
+        assertEquals(ApprovalReviewSshSecretFacts, secrets.getValue("git-signing"))
         assertEquals(listOf("aws", "s3", "ls"), request.evidence.command?.argv)
         assertEquals(
             "/nix/store/aws/bin/aws",
@@ -159,10 +166,15 @@ class ApprovalReviewContextTest {
         val payload = Json.parseToJsonElement(wire).jsonObject
         assertEquals(setOf("instructions", "facts", "evidence"), payload.keys)
         assertEquals(
-            JsonNull,
+            setOf("aws-read-only", "database"),
+            payload.getValue("instructions").jsonObject
+                .getValue("secrets").jsonObject.keys,
+        )
+        assertEquals(
+            "",
             payload.getValue("instructions").jsonObject
                 .getValue("secrets").jsonObject
-                .getValue("git-signing"),
+                .getValue("database").jsonPrimitive.content,
         )
         assertEquals(
             setOf("client", "operation", "secrets"),
@@ -172,10 +184,51 @@ class ApprovalReviewContextTest {
             setOf("reason", "command"),
             payload.getValue("evidence").jsonObject.keys,
         )
+        assertEquals(
+            setOf("type"),
+            payload.getValue("facts").jsonObject.getValue("secrets").jsonObject
+                .getValue("git-signing").jsonObject.keys,
+        )
+        val wireVariables = payload.getValue("facts").jsonObject
+            .getValue("secrets").jsonObject
+            .getValue("aws-read-only").jsonObject
+            .getValue("variables").jsonObject
+        assertEquals(
+            setOf("delivery", "target"),
+            wireVariables.getValue("AWS_ACCESS_KEY_ID").jsonObject.keys,
+        )
+        assertEquals(
+            "environment",
+            wireVariables.getValue("AWS_ACCESS_KEY_ID").jsonObject
+                .getValue("delivery").jsonPrimitive.content,
+        )
+        assertEquals(
+            setOf("delivery", "value"),
+            wireVariables.getValue("AWS_PROFILE").jsonObject.keys,
+        )
+        assertEquals(
+            "omitted",
+            wireVariables.getValue("AWS_PROFILE").jsonObject
+                .getValue("delivery").jsonPrimitive.content,
+        )
+        assertEquals(
+            setOf("delivery", "target", "value"),
+            wireVariables.getValue("AWS_REGION").jsonObject.keys,
+        )
+        assertEquals(
+            setOf("delivery"),
+            wireVariables.getValue("AWS_SESSION_TOKEN").jsonObject.keys,
+        )
+        assertEquals(
+            "standard_input",
+            wireVariables.getValue("AWS_SESSION_TOKEN").jsonObject
+                .getValue("delivery").jsonPrimitive.content,
+        )
         assertTrue(wire.contains("\"AWS_ACCESS_KEY_ID\":{"))
-        assertTrue(wire.contains("\"value\":null"))
+        assertFalse(wire.contains("\"value\":null"))
         assertFalse(wire.contains("sensitive-access-key"))
         assertFalse(wire.contains("sensitive-secret-key"))
+        assertFalse(wire.contains("sensitive-password"))
         assertFalse(wire.contains("private vault description"))
         assertFalse(wire.contains("not-useful-to-the-reviewer"))
         assertFalse(wire.contains("inactive instruction"))
@@ -206,13 +259,13 @@ class ApprovalReviewContextTest {
             invocation = storedInvocation(),
             invocationSecrets = linkedMapOf(
                 "aws-read-only" to ApprovalReviewEnvironmentSecretFacts(
-                    environmentVariables = linkedMapOf(
+                    variables = linkedMapOf(
                         "AWS_ACCESS_KEY_ID" to environmentFact(null),
                         "AWS_REGION" to environmentFact("eu-north-1"),
                         "AWS_SECRET_ACCESS_KEY" to environmentFact(null),
                     ),
                 ),
-                "git-signing" to ApprovalReviewSshSecretFacts(provides = "public_key"),
+                "git-signing" to ApprovalReviewSshSecretFacts,
             ),
             parentElapsedSeconds = 12,
             evaluation = ApprovalEvaluation(
@@ -324,7 +377,7 @@ class ApprovalReviewContextTest {
             ),
             invocation = storedInvocation(),
             invocationSecrets = linkedMapOf(
-                "production-ssh" to ApprovalReviewSshSecretFacts(provides = "public_key"),
+                "production-ssh" to ApprovalReviewSshSecretFacts,
             ),
             parentElapsedSeconds = 37,
             evaluation = ApprovalEvaluation(
@@ -378,6 +431,7 @@ class ApprovalReviewContextTest {
                 type = ENVIRONMENT_SECRET_TYPE,
                 environmentVariables = listOf(
                     variable("AWS_ACCESS_KEY_ID", sensitive = true),
+                    variable("AWS_PROFILE", sensitive = false),
                     variable("AWS_REGION", sensitive = false),
                     variable("AWS_SECRET_ACCESS_KEY", sensitive = true),
                     variable("AWS_SESSION_TOKEN", sensitive = true),
@@ -399,6 +453,17 @@ class ApprovalReviewContextTest {
                 ),
             ),
             SecretReviewMetadata(
+                id = "database-id",
+                name = "database",
+                type = ENVIRONMENT_SECRET_TYPE,
+                environmentVariables = listOf(variable("PGPASSWORD", sensitive = true)),
+                environmentVariableDestinations = mapOf(
+                    "PGPASSWORD" to EnvironmentVariableReviewDestination.Environment(
+                        "PGPASSWORD",
+                    ),
+                ),
+            ),
+            SecretReviewMetadata(
                 id = "ssh-id",
                 name = "git-signing",
                 type = SSH_SECRET_TYPE,
@@ -416,8 +481,9 @@ class ApprovalReviewContextTest {
         )
 
     private fun environmentFact(value: String?) = ApprovalReviewEnvironmentVariableFacts(
-        destination = ApprovalReviewEnvironmentDestination("unchanged"),
-        value = value?.let(::JsonPrimitive) ?: JsonNull,
+        delivery = ApprovalReviewEnvironmentDelivery.ENVIRONMENT,
+        target = "unchanged",
+        value = value,
     )
 
     private fun policy(

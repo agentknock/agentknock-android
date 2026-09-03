@@ -1,1 +1,1 @@
-Fixes Git signing and SSH authentication for launched commands.
+Corrects AI review authorization and provides complete resolved environment-delivery context.

@@ -272,6 +272,13 @@ internal data class RequestedSecretDescription(
     val containsSensitiveMaterial: Boolean,
 )
 
+internal fun SecretReviewMetadata.containsSelectedSensitiveEnvironmentValue(): Boolean =
+    type == ENVIRONMENT_SECRET_TYPE && environmentVariables.any { variable ->
+        variable.sensitive &&
+            environmentVariableDestinations[variable.name] !=
+            EnvironmentVariableReviewDestination.Omitted
+    }
+
 internal data class SecretReviewMetadata(
     val id: String,
     val revision: Long = 1,

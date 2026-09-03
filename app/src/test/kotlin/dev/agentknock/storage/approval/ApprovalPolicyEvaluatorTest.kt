@@ -20,7 +20,7 @@ class ApprovalPolicyEvaluatorTest {
     }
 
     @Test
-    fun `manual scope does not suppress AI review for another secret`() {
+    fun `manual approval suppresses invocation AI review for every target`() {
         val evaluation = ApprovalPolicyEvaluator.evaluate(
             listOf(
                 secret("manual", ApprovalAction.ASK_ME),
@@ -28,7 +28,7 @@ class ApprovalPolicyEvaluatorTest {
             ),
         )
 
-        assertEquals(true, evaluation.requiresAiReview())
+        assertEquals(false, evaluation.requiresInvocationAiReview())
         assertEquals(false, evaluation.isFullyApproved(AiReviewDecision.APPROVE))
     }
 
@@ -41,8 +41,20 @@ class ApprovalPolicyEvaluatorTest {
             ),
         )
 
-        assertEquals(false, evaluation.requiresAiReview())
+        assertEquals(false, evaluation.requiresInvocationAiReview())
         assertEquals(false, evaluation.isFullyApproved(AiReviewDecision.APPROVE))
+    }
+
+    @Test
+    fun `invocation AI review accepts approve and AI targets together`() {
+        val evaluation = ApprovalPolicyEvaluator.evaluate(
+            listOf(
+                secret("automatic", ApprovalAction.APPROVE),
+                secret("reviewed", ApprovalAction.ASK_AI),
+            ),
+        )
+
+        assertEquals(true, evaluation.requiresInvocationAiReview())
     }
 
     @Test

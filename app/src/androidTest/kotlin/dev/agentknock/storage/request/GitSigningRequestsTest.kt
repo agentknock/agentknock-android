@@ -986,7 +986,7 @@ class GitSigningRequestsTest {
 
     private fun sshSecretFactsJson(): String =
         storedJson.encodeToString<Map<String, ApprovalReviewSecretFacts>>(
-            mapOf(SECRET_NAME to ApprovalReviewSshSecretFacts(provides = "public_key")),
+            mapOf(SECRET_NAME to ApprovalReviewSshSecretFacts),
         )
 
     private suspend fun receivePending(

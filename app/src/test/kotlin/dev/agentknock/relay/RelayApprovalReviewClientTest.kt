@@ -1,7 +1,7 @@
 package dev.agentknock.relay
 
 import dev.agentknock.review.ApprovalReviewCommandEvidence
-import dev.agentknock.review.ApprovalReviewEnvironmentDestination
+import dev.agentknock.review.ApprovalReviewEnvironmentDelivery
 import dev.agentknock.review.ApprovalReviewEnvironmentSecretFacts
 import dev.agentknock.review.ApprovalReviewEnvironmentVariableFacts
 import dev.agentknock.review.ApprovalReviewEvidence
@@ -12,8 +12,6 @@ import dev.agentknock.review.ApprovalReviewRequest
 import dev.agentknock.review.ApprovalReviewSshSecretFacts
 import kotlinx.coroutines.test.runTest
 import kotlinx.serialization.json.Json
-import kotlinx.serialization.json.JsonNull
-import kotlinx.serialization.json.JsonPrimitive
 import kotlinx.serialization.json.jsonArray
 import kotlinx.serialization.json.jsonObject
 import kotlinx.serialization.json.jsonPrimitive
@@ -70,21 +68,18 @@ class RelayApprovalReviewClientTest {
                 instructions.getValue("secrets").jsonObject
                     .getValue("github").jsonPrimitive.content,
             )
-            assertEquals(
-                JsonNull,
-                instructions.getValue("secrets").jsonObject
-                    .getValue("git-signing"),
-            )
+            assertEquals(setOf("github"), instructions.getValue("secrets").jsonObject.keys)
             val facts = body.getValue("facts").jsonObject
             assertEquals("git", facts.getValue("client").jsonPrimitive.content)
             assertEquals("invocation", facts.getValue("operation").jsonPrimitive.content)
             val secrets = facts.getValue("secrets").jsonObject
             val github = secrets.getValue("github").jsonObject
             assertEquals("environment", github.getValue("type").jsonPrimitive.content)
-            val variables = github.getValue("environment_variables").jsonObject
+            assertEquals(setOf("type"), secrets.getValue("git-signing").jsonObject.keys)
+            val variables = github.getValue("variables").jsonObject
             assertEquals(
-                JsonNull,
-                variables.getValue("GITHUB_TOKEN").jsonObject.getValue("value"),
+                setOf("delivery", "target"),
+                variables.getValue("GITHUB_TOKEN").jsonObject.keys,
             )
             assertEquals(
                 "https://api.github.com",
@@ -94,8 +89,7 @@ class RelayApprovalReviewClientTest {
             assertEquals(
                 "GITHUB_API_URL",
                 variables.getValue("GITHUB_API_URL").jsonObject
-                    .getValue("destination").jsonObject
-                    .getValue("name").jsonPrimitive.content,
+                    .getValue("target").jsonPrimitive.content,
             )
             val evidence = body.getValue("evidence").jsonObject
             assertEquals(setOf("reason", "command"), evidence.keys)
@@ -212,7 +206,6 @@ class RelayApprovalReviewClientTest {
             client = "Use only for work on this repository.",
             secrets = mapOf(
                 "github" to "Allow reading issues but not publishing releases.",
-                "git-signing" to null,
             ),
         ),
         facts = ApprovalReviewFacts(
@@ -220,7 +213,7 @@ class RelayApprovalReviewClientTest {
             operation = ApprovalReviewOperation.INVOCATION,
             secrets = linkedMapOf(
                 "github" to ApprovalReviewEnvironmentSecretFacts(
-                    environmentVariables = linkedMapOf(
+                    variables = linkedMapOf(
                         "GITHUB_TOKEN" to environmentFact("GITHUB_TOKEN", null),
                         "GITHUB_API_URL" to environmentFact(
                             "GITHUB_API_URL",
@@ -228,9 +221,7 @@ class RelayApprovalReviewClientTest {
                         ),
                     ),
                 ),
-                "git-signing" to ApprovalReviewSshSecretFacts(
-                    provides = "public_key",
-                ),
+                "git-signing" to ApprovalReviewSshSecretFacts,
             ),
         ),
         evidence = ApprovalReviewEvidence(
@@ -246,8 +237,9 @@ class RelayApprovalReviewClientTest {
 
     private fun environmentFact(name: String, value: String?) =
         ApprovalReviewEnvironmentVariableFacts(
-            destination = ApprovalReviewEnvironmentDestination(name),
-            value = value?.let(::JsonPrimitive) ?: JsonNull,
+            delivery = ApprovalReviewEnvironmentDelivery.ENVIRONMENT,
+            target = name,
+            value = value,
         )
 
     private companion object {

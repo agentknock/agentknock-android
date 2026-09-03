@@ -2,6 +2,7 @@ package dev.agentknock.storage.request
 
 import dev.agentknock.protocol.ClientSoftware
 import dev.agentknock.protocol.GitSignRepository
+import dev.agentknock.review.ApprovalReviewEnvironmentDelivery
 import dev.agentknock.review.ApprovalReviewEnvironmentSecretFacts
 import dev.agentknock.storage.approval.ApprovalEvaluation
 import dev.agentknock.storage.secret.SecretMetadata
@@ -42,13 +43,14 @@ class StoredJsonTest {
     @Test
     fun `stored approval facts ignore obsolete fields`() {
         val decoded = decodeStoredApprovalReviewSecretFacts(
-            """{"Deployment":{"type":"environment","environment_variables":{},"future":true}}""",
+            """{"Deployment":{"type":"environment","environment_variables":{"TOKEN":{"destination":{"type":"environment","name":"API_TOKEN"},"value":null}},"future":true}}""",
         )
 
         assertNotNull(decoded)
-        assertTrue(
-            (decoded?.get("Deployment") as ApprovalReviewEnvironmentSecretFacts)
-                .environmentVariables.isEmpty(),
-        )
+        val variable = (decoded?.get("Deployment") as ApprovalReviewEnvironmentSecretFacts)
+            .variables.getValue("TOKEN")
+        assertEquals(ApprovalReviewEnvironmentDelivery.ENVIRONMENT, variable.delivery)
+        assertEquals("API_TOKEN", variable.target)
+        assertEquals(null, variable.value)
     }
 }

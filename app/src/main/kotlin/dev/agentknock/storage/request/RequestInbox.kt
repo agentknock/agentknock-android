@@ -9,9 +9,8 @@ import dev.agentknock.protocol.PairingProtocol
 import dev.agentknock.protocol.SecretUploadMode
 import dev.agentknock.protocol.SshAuthenticationMethod
 import dev.agentknock.protocol.SshSignatureAlgorithm
-import dev.agentknock.review.ApprovalReviewEnvironmentDestination
+import dev.agentknock.review.ApprovalReviewEnvironmentDelivery
 import dev.agentknock.review.ApprovalReviewEnvironmentSecretFacts
-import dev.agentknock.review.ApprovalReviewStandardInputDestination
 import dev.agentknock.storage.approval.ApprovalEvaluation
 import dev.agentknock.storage.secret.ENVIRONMENT_SECRET_TYPE
 import dev.agentknock.storage.secret.SSH_SECRET_TYPE
@@ -22,8 +21,6 @@ import kotlinx.coroutines.flow.map
 import kotlinx.serialization.builtins.ListSerializer
 import kotlinx.serialization.builtins.serializer
 import kotlinx.serialization.decodeFromString
-import kotlinx.serialization.json.JsonNull
-import kotlinx.serialization.json.jsonPrimitive
 
 internal enum class InboxRequestState(val storedName: String) {
     REVIEWING("reviewing"),
@@ -961,18 +958,16 @@ internal class RequestInbox(
             ?.mapNotNull { (secretName, facts) ->
                 (facts as? ApprovalReviewEnvironmentSecretFacts)
                     ?.let { environment ->
-                        secretName to environment.environmentVariables.mapNotNull {
+                        secretName to environment.variables.mapNotNull {
                                 (source, variable) ->
-                            val displayName = when (val destination = variable.destination) {
-                                is ApprovalReviewEnvironmentDestination -> destination.name
-                                ApprovalReviewStandardInputDestination -> source
-                                else -> return@mapNotNull null
+                            val displayName = when (variable.delivery) {
+                                ApprovalReviewEnvironmentDelivery.ENVIRONMENT ->
+                                    checkNotNull(variable.target)
+                                ApprovalReviewEnvironmentDelivery.STANDARD_INPUT -> source
+                                ApprovalReviewEnvironmentDelivery.OMITTED ->
+                                    return@mapNotNull null
                             }
-                            val factValue = variable.value
-                            displayName to when (factValue) {
-                                null, JsonNull -> null
-                                else -> factValue.jsonPrimitive.content
-                            }
+                            displayName to variable.value
                         }.toMap()
                     }
             }
