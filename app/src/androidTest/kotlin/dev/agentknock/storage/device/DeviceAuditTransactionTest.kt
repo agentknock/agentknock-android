@@ -224,11 +224,16 @@ class DeviceAuditTransactionTest {
     }
 
     private class SuccessfulClaimClient : RelayClaimClient {
-        override suspend fun claim(
+        override suspend fun claimAndSetAddress(
             deviceId: String,
             addressId: String,
             deviceToken: String,
-            provideAttestation: Boolean,
+        ): RelayClaimResult = RelayEndpointResult.Success(RelayClaimOutcome.CLAIMED)
+
+        override suspend fun setAddress(
+            deviceId: String,
+            addressId: String,
+            deviceToken: String,
         ): RelayClaimResult = RelayEndpointResult.Success(RelayClaimOutcome.CLAIMED)
     }
 

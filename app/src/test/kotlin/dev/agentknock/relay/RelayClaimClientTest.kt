@@ -18,7 +18,7 @@ import org.junit.Test
 @OptIn(ExperimentalCoroutinesApi::class)
 class RelayClaimClientTest {
     @Test
-    fun `sends the device claim contract`() = runTest {
+    fun `claims a new device and sets its address`() = runTest {
         MockWebServer().use { server ->
             server.start()
             server.enqueue(
@@ -39,11 +39,10 @@ class RelayClaimClientTest {
                 attestationProvider = attestationProvider(),
             )
 
-            val result = client.claim(
+            val result = client.claimAndSetAddress(
                 DEVICE_ID,
                 ADDRESS_ID,
                 DEVICE_TOKEN,
-                provideAttestation = true,
             )
 
             assertEquals(
@@ -105,11 +104,10 @@ class RelayClaimClientTest {
 
             assertEquals(
                 RelayEndpointResult.Success(RelayClaimOutcome.ADDRESS_UNAVAILABLE),
-                client.claim(
+                client.claimAndSetAddress(
                     DEVICE_ID,
                     ADDRESS_ID,
                     DEVICE_TOKEN,
-                    provideAttestation = true,
                 ),
             )
         }
@@ -139,26 +137,19 @@ class RelayClaimClientTest {
 
             assertEquals(
                 RelayEndpointResult.InvalidResponse,
-                client.claim(
+                client.claimAndSetAddress(
                     DEVICE_ID,
                     ADDRESS_ID,
                     DEVICE_TOKEN,
-                    provideAttestation = true,
                 ),
             )
         }
     }
 
     @Test
-    fun `omits attestation when it is not needed for an existing device`() = runTest {
+    fun `sets an existing device address without claiming it`() = runTest {
         MockWebServer().use { server ->
             server.start()
-            server.enqueue(
-                MockResponse.Builder()
-                    .code(200)
-                    .body("{\"claimed\":true,\"device_id\":\"$DEVICE_ID\"}")
-                    .build(),
-            )
             server.enqueue(
                 MockResponse.Builder()
                     .code(200)
@@ -175,18 +166,20 @@ class RelayClaimClientTest {
 
             assertEquals(
                 RelayEndpointResult.Success(RelayClaimOutcome.CLAIMED),
-                client.claim(
+                client.setAddress(
                     DEVICE_ID,
                     ADDRESS_ID,
                     DEVICE_TOKEN,
-                    provideAttestation = false,
                 ),
             )
 
-            val body = Json.parseToJsonElement(
-                checkNotNull(server.takeRequest().body).utf8(),
-            ).jsonObject
-            assertFalse("attestation" in body)
+            val request = server.takeRequest()
+            assertEquals("POST", request.method)
+            assertEquals("/v1/device/$DEVICE_ID/address", request.target)
+            assertEquals("Bearer $DEVICE_TOKEN", request.headers["Authorization"])
+            val body = Json.parseToJsonElement(checkNotNull(request.body).utf8()).jsonObject
+            assertEquals(ADDRESS_ID, body.getValue("address_id").jsonPrimitive.content)
+            assertEquals(1, server.requestCount)
         }
     }
 

@@ -15,11 +15,16 @@ internal enum class RelayClaimOutcome {
 internal typealias RelayClaimResult = RelayEndpointResult<RelayClaimOutcome>
 
 internal interface RelayClaimClient {
-    suspend fun claim(
+    suspend fun claimAndSetAddress(
         deviceId: String,
         addressId: String,
         deviceToken: String,
-        provideAttestation: Boolean,
+    ): RelayClaimResult
+
+    suspend fun setAddress(
+        deviceId: String,
+        addressId: String,
+        deviceToken: String,
     ): RelayClaimResult
 }
 
@@ -29,21 +34,16 @@ internal class HttpRelayClaimClient(
     private val dispatcher: CoroutineDispatcher = Dispatchers.IO,
     private val attestationProvider: DeviceAttestationProvider = AndroidKeyAttestationProvider(),
 ) : RelayClaimClient {
-    override suspend fun claim(
+    override suspend fun claimAndSetAddress(
         deviceId: String,
         addressId: String,
         deviceToken: String,
-        provideAttestation: Boolean,
     ): RelayClaimResult = withContext(dispatcher) {
         val claimBody = json.encodeToString(
             DeviceClaimRequest.serializer(),
             DeviceClaimRequest(
                 deviceToken = deviceToken,
-                attestation = if (provideAttestation) {
-                    attestationProvider.attest(deviceId, deviceToken)
-                } else {
-                    null
-                },
+                attestation = attestationProvider.attest(deviceId, deviceToken),
             ),
         )
         when (
@@ -62,6 +62,14 @@ internal class HttpRelayClaimClient(
                 return@withContext RelayEndpointResult.InvalidResponse
         }
 
+        setAddress(deviceId, addressId, deviceToken)
+    }
+
+    override suspend fun setAddress(
+        deviceId: String,
+        addressId: String,
+        deviceToken: String,
+    ): RelayClaimResult = withContext(dispatcher) {
         val addressBody = json.encodeToString(DeviceAddressRequest(addressId))
         val addressResult = transport.post(
             path = "v1/device/$deviceId/address",

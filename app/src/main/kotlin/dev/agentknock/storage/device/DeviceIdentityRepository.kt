@@ -290,7 +290,8 @@ internal class DeviceIdentityRepository(
                 replacement
             }
         }
-        if (candidate.claimAttemptedAt == null) {
+        val deviceMustBeClaimed = previous?.deviceId != candidate.deviceId
+        if (deviceMustBeClaimed && candidate.claimAttemptedAt == null) {
             val attemptedAt = currentTimeMillis()
             if (
                 dao.markCandidateClaimAttempted(
@@ -304,14 +305,21 @@ internal class DeviceIdentityRepository(
             candidate = candidate.copy(claimAttemptedAt = attemptedAt)
         }
 
-        return when (
-            val result = relay.claim(
+        val deviceToken = DeviceProtocol.encodeDeviceToken(material.deviceToken)
+        val result = if (deviceMustBeClaimed) {
+            relay.claimAndSetAddress(
                 deviceId = candidate.deviceId,
                 addressId = DeviceProtocol.addressId(candidate.address),
-                deviceToken = DeviceProtocol.encodeDeviceToken(material.deviceToken),
-                provideAttestation = previous?.deviceId != candidate.deviceId,
+                deviceToken = deviceToken,
             )
-        ) {
+        } else {
+            relay.setAddress(
+                deviceId = candidate.deviceId,
+                addressId = DeviceProtocol.addressId(candidate.address),
+                deviceToken = deviceToken,
+            )
+        }
+        return when (result) {
             is RelayEndpointResult.Success -> when (result.value) {
                 RelayClaimOutcome.CLAIMED -> {
                     writeTransaction.execute {

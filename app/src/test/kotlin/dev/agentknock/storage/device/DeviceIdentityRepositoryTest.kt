@@ -1,5 +1,6 @@
 package dev.agentknock.storage.device
 
+import dev.agentknock.protocol.DeviceProtocol
 import dev.agentknock.relay.RelayClaimClient
 import dev.agentknock.relay.RelayClaimOutcome
 import dev.agentknock.relay.RelayClaimResult
@@ -61,7 +62,7 @@ class DeviceIdentityRepositoryTest {
             fixture.relay.claims.single().addressId,
         )
         assertTrue(fixture.relay.claims.single().deviceToken.matches(Regex("[A-Za-z0-9_-]{43}")))
-        assertTrue(fixture.relay.claims.single().providedAttestation)
+        assertTrue(fixture.relay.addressChanges.isEmpty())
     }
 
     @Test
@@ -231,7 +232,7 @@ class DeviceIdentityRepositoryTest {
     }
 
     @Test
-    fun `an unavailable replacement leaves the active device identity intact`() = runTest {
+    fun `an unavailable address change leaves the active device identity intact`() = runTest {
         val fixture = Fixture(UnconfinedTestDispatcher(testScheduler))
         assertEquals(
             ClaimPairingAddressResult.Claimed,
@@ -261,6 +262,8 @@ class DeviceIdentityRepositoryTest {
             dev.agentknock.protocol.DeviceProtocol.addressId(candidate.address),
         )
         assertEquals(active.deviceId, candidate.deviceId)
+        assertEquals(1, fixture.relay.claims.size)
+        assertEquals(1, fixture.relay.addressChanges.size)
     }
 
     @Test
@@ -292,11 +295,14 @@ class DeviceIdentityRepositoryTest {
         assertArrayEquals(before.devicePublicKey, after.devicePublicKey)
         assertEquals(before.deviceToken, after.deviceToken)
         assertEquals(1, fixture.dao.identities.value.size)
-        assertEquals(fixture.relay.claims[0].deviceId, fixture.relay.claims[1].deviceId)
+        assertEquals(1, fixture.relay.claims.size)
+        assertEquals(1, fixture.relay.addressChanges.size)
+        assertEquals(before.deviceId, fixture.relay.addressChanges.single().deviceId)
         assertEquals(
-            listOf(true, false),
-            fixture.relay.claims.map(RecordedClaim::providedAttestation),
+            DeviceProtocol.addressId("silent-forest-cloud"),
+            fixture.relay.addressChanges.single().addressId,
         )
+        assertEquals(before.deviceToken, fixture.relay.addressChanges.single().deviceToken)
     }
 
     @Test
@@ -399,7 +405,7 @@ class DeviceIdentityRepositoryTest {
             ),
             retired,
         )
-        assertTrue(fixture.relay.claims.last().providedAttestation)
+        assertEquals(replacement.deviceId, fixture.relay.claims.last().deviceId)
         assertEquals(
             setOf("device_token", "device_private_key"),
             fixture.dao.credentials.value.map { it.kind }.toSet(),
@@ -490,20 +496,32 @@ private data class RecordedClaim(
     val deviceId: String,
     val addressId: String,
     val deviceToken: String,
-    val providedAttestation: Boolean,
 )
 
 private class FakeRelayClaimClient : RelayClaimClient {
     val claims = mutableListOf<RecordedClaim>()
+    val addressChanges = mutableListOf<RecordedClaim>()
     val results = ArrayDeque<RelayClaimResult>()
 
-    override suspend fun claim(
+    override suspend fun claimAndSetAddress(
         deviceId: String,
         addressId: String,
         deviceToken: String,
-        provideAttestation: Boolean,
     ): RelayClaimResult {
-        claims += RecordedClaim(deviceId, addressId, deviceToken, provideAttestation)
+        claims += RecordedClaim(deviceId, addressId, deviceToken)
+        return nextResult()
+    }
+
+    override suspend fun setAddress(
+        deviceId: String,
+        addressId: String,
+        deviceToken: String,
+    ): RelayClaimResult {
+        addressChanges += RecordedClaim(deviceId, addressId, deviceToken)
+        return nextResult()
+    }
+
+    private fun nextResult(): RelayClaimResult {
         return if (results.isEmpty()) {
             RelayEndpointResult.Success(RelayClaimOutcome.CLAIMED)
         } else {
