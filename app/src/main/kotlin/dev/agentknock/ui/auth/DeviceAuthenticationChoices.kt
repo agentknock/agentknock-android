@@ -1,6 +1,7 @@
 package dev.agentknock.ui.auth
 
-import androidx.compose.foundation.clickable
+import androidx.compose.foundation.selection.selectable
+import androidx.compose.foundation.selection.selectableGroup
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.Row
@@ -12,6 +13,7 @@ import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.semantics.Role
 import androidx.compose.ui.unit.dp
 
 @Composable
@@ -20,12 +22,17 @@ internal fun DeviceAuthenticationChoices(
     enabled: Boolean = true,
     onSelect: (DeviceAuthenticationMode) -> Unit,
 ) {
-    Column {
+    Column(Modifier.selectableGroup()) {
         DeviceAuthenticationMode.entries.forEach { mode ->
             Row(
                 modifier = Modifier
                     .fillMaxWidth()
-                    .clickable(enabled = enabled && mode != selected) { onSelect(mode) }
+                    .selectable(
+                        selected = mode == selected,
+                        enabled = enabled,
+                        role = Role.RadioButton,
+                        onClick = { if (mode != selected) onSelect(mode) },
+                    )
                     .padding(horizontal = 16.dp, vertical = 10.dp),
                 horizontalArrangement = Arrangement.spacedBy(10.dp),
                 verticalAlignment = Alignment.Top,
@@ -61,7 +68,7 @@ internal fun DeviceAuthenticationMode.explanation(): String = when (this) {
     DeviceAuthenticationMode.DEVICE_LOCK ->
         "No extra prompts. Android's screen lock protects access to the app."
     DeviceAuthenticationMode.SENSITIVE_VALUES_AND_PAIRING ->
-        "Authenticate before revealing or changing protected values and accepting a new client."
+        "Authenticate before viewing, copying or changing sensitive values, and accepting a new client."
     DeviceAuthenticationMode.APP_LOCK ->
         "Authenticate whenever Agentknock is opened after leaving the app."
 }

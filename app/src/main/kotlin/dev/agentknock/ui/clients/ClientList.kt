@@ -21,8 +21,6 @@ import androidx.compose.material.icons.automirrored.outlined.NavigateNext
 import androidx.compose.material.icons.outlined.Computer
 import androidx.compose.material.icons.outlined.ContentCopy
 import androidx.compose.material.icons.outlined.Edit
-import androidx.compose.material.icons.outlined.PauseCircle
-import androidx.compose.material.icons.outlined.PlayCircle
 import androidx.compose.material.icons.outlined.Schedule
 import androidx.compose.material.icons.outlined.Settings
 import androidx.compose.material3.Icon
@@ -32,6 +30,7 @@ import androidx.compose.material3.ListItemDefaults
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.Surface
 import androidx.compose.material3.Text
+import androidx.compose.material3.TextButton
 import androidx.compose.material3.TopAppBar
 import androidx.compose.runtime.Composable
 import androidx.compose.ui.Alignment
@@ -229,19 +228,16 @@ internal fun ClientList(
                                     client.architecture,
                                 ).joinToString(" · ").ifBlank { null }
                                 val machine = when {
-                                    hostname != null && platform != null -> "$platform on $hostname"
+                                    hostname != null && platform != null -> "$hostname · $platform"
                                     hostname != null -> hostname
                                     platform != null -> platform
                                     else -> ""
                                 }
                                 Column(verticalArrangement = Arrangement.spacedBy(2.dp)) {
                                     if (machine.isNotEmpty()) Text(machine)
-                                    val activity = listOfNotNull(
-                                        client.lastRequestAt?.let {
-                                            "Last request ${formatRelativeTime(it)}"
-                                        },
-                                        client.pairedAt?.let { "Paired ${formatRelativeTime(it)}" },
-                                    ).joinToString(" · ")
+                                    val activity = client.lastRequestAt?.let {
+                                        "Last request ${formatRelativeTime(it)}"
+                                    } ?: client.pairedAt?.let { "Paired ${formatRelativeTime(it)}" }.orEmpty()
                                     if (activity.isNotEmpty()) {
                                         Text(
                                             activity,
@@ -337,7 +333,7 @@ private fun PairingControls(
                     if (identity.pairingEnabled) {
                         "Pairing address"
                     } else {
-                        "Pairing address · paused"
+                        "New pairings paused"
                     },
                     style = MaterialTheme.typography.labelMedium,
                     color = MaterialTheme.colorScheme.onSurfaceVariant,
@@ -354,20 +350,6 @@ private fun PairingControls(
                 IconButton(onClick = onChangePairingAddress) {
                     Icon(Icons.Outlined.Edit, contentDescription = "Change pairing address")
                 }
-                IconButton(onClick = { onSetPairingEnabled(!identity.pairingEnabled) }) {
-                    Icon(
-                        if (identity.pairingEnabled) {
-                            Icons.Outlined.PauseCircle
-                        } else {
-                            Icons.Outlined.PlayCircle
-                        },
-                        contentDescription = if (identity.pairingEnabled) {
-                            "Pause new pairings"
-                        } else {
-                            "Resume new pairings"
-                        },
-                    )
-                }
             }
             Text(
                 identity.address,
@@ -375,6 +357,9 @@ private fun PairingControls(
                 fontFamily = FontFamily.Monospace,
                 modifier = Modifier.padding(end = 12.dp),
             )
+            TextButton(onClick = { onSetPairingEnabled(!identity.pairingEnabled) }) {
+                Text(if (identity.pairingEnabled) "Pause new pairings" else "Resume new pairings")
+            }
         }
     }
 }

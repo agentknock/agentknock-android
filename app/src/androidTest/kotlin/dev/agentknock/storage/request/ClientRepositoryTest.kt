@@ -68,6 +68,8 @@ class ClientRepositoryTest {
         )
         val repository = repository(audit)
 
+        grants.value += grants.value.single().copy(operation = TemporaryAccessOperation.GIT_SIGN)
+
         val summary = repository.observeClients().first().single()
         assertEquals(CLIENT_ID, summary.clientId)
         assertEquals("Workstation", summary.name)

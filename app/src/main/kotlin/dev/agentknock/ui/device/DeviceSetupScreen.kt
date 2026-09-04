@@ -14,6 +14,8 @@ import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.navigationBars
 import androidx.compose.foundation.layout.padding
+import androidx.compose.foundation.layout.consumeWindowInsets
+import androidx.compose.foundation.layout.imePadding
 import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.layout.width
 import androidx.compose.foundation.rememberScrollState
@@ -25,7 +27,6 @@ import androidx.compose.material.icons.outlined.Computer
 import androidx.compose.material.icons.outlined.PhoneAndroid
 import androidx.compose.material.icons.outlined.Settings
 import androidx.compose.material.icons.outlined.SyncAlt
-import androidx.compose.material3.AlertDialog
 import androidx.compose.material3.Button
 import androidx.compose.material3.Card
 import androidx.compose.material3.CardDefaults
@@ -38,7 +39,6 @@ import androidx.compose.material3.OutlinedTextField
 import androidx.compose.material3.Scaffold
 import androidx.compose.material3.Surface
 import androidx.compose.material3.Text
-import androidx.compose.material3.TextButton
 import androidx.compose.material3.TopAppBar
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.LaunchedEffect
@@ -93,8 +93,6 @@ internal fun DeviceSetupScreen(
                 ?: viewModel.generateAddress(),
         )
     }
-    var confirmChange by remember { mutableStateOf(false) }
-
     LaunchedEffect(candidate?.address) {
         candidate?.address?.let { candidateAddress ->
             if (result == null) address = candidateAddress
@@ -102,16 +100,6 @@ internal fun DeviceSetupScreen(
     }
 
     fun submit() {
-        if (active == null || address == active.address) {
-            if (candidate?.address == address) viewModel.retryClaim()
-            else viewModel.stageAndClaim(address)
-        } else {
-            confirmChange = true
-        }
-    }
-
-    fun confirmSubmit() {
-        confirmChange = false
         if (candidate?.address == address) viewModel.retryClaim()
         else viewModel.stageAndClaim(address)
     }
@@ -148,7 +136,7 @@ internal fun DeviceSetupScreen(
                     }
                 },
                 actions = {
-                    onOpenSettings?.let { openSettings ->
+                    onOpenSettings?.takeIf { active != null }?.let { openSettings ->
                         IconButton(onClick = openSettings) {
                             Icon(Icons.Outlined.Settings, contentDescription = "Settings")
                         }
@@ -156,7 +144,8 @@ internal fun DeviceSetupScreen(
                 },
             )
             Column(
-                modifier = Modifier.fillMaxSize().verticalScroll(rememberScrollState())
+                modifier = Modifier.fillMaxSize().consumeWindowInsets(padding).imePadding()
+                    .verticalScroll(rememberScrollState())
                     .padding(horizontal = 20.dp, vertical = 12.dp),
                 verticalArrangement = Arrangement.spacedBy(20.dp),
             ) {
@@ -165,25 +154,6 @@ internal fun DeviceSetupScreen(
                         title = stringResource(R.string.device_keys_unavailable_title),
                         message = stringResource(R.string.device_keys_unavailable_explanation),
                     )
-                }
-                if (active == null) {
-                    Column(verticalArrangement = Arrangement.spacedBy(8.dp)) {
-                        Text("Device authentication", style = MaterialTheme.typography.titleLarge)
-                        Text(
-                            "Choose when Agentknock asks Android to verify that it is you.",
-                            color = MaterialTheme.colorScheme.onSurfaceVariant,
-                        )
-                        Surface(
-                            color = MaterialTheme.colorScheme.surfaceContainer,
-                            shape = MaterialTheme.shapes.large,
-                        ) {
-                            DeviceAuthenticationChoices(
-                                selected = authenticationMode,
-                                enabled = !claiming,
-                                onSelect = onAuthenticationModeChange,
-                            )
-                        }
-                    }
                 }
                 PairingAddressEditor(
                     address = address,
@@ -200,28 +170,27 @@ internal fun DeviceSetupScreen(
                         viewModel.clearClaimResult()
                     },
                     onSubmit = ::submit,
+                    beforeSubmit = {
+                        if (active == null) {
+                            Text("Device authentication", style = MaterialTheme.typography.titleLarge,
+                                modifier = Modifier.padding(top = 8.dp))
+                            Surface(
+                                color = MaterialTheme.colorScheme.surfaceContainer,
+                                shape = MaterialTheme.shapes.large,
+                            ) {
+                                DeviceAuthenticationChoices(
+                                    selected = authenticationMode,
+                                    enabled = !claiming,
+                                    onSelect = onAuthenticationModeChange,
+                                )
+                            }
+                        }
+                    },
                 )
             }
         }
     }
 
-    if (confirmChange) {
-        AlertDialog(
-            onDismissRequest = { confirmChange = false },
-            title = { Text(stringResource(R.string.change_pairing_address_question)) },
-            text = { Text(stringResource(R.string.change_pairing_address_explanation)) },
-            confirmButton = {
-                Button(onClick = ::confirmSubmit) {
-                    Text(stringResource(R.string.change_pairing_address))
-                }
-            },
-            dismissButton = {
-                TextButton(onClick = { confirmChange = false }) {
-                    Text(stringResource(R.string.cancel))
-                }
-            },
-        )
-    }
 }
 
 @Composable
@@ -254,18 +223,19 @@ private fun WelcomeScreen(onContinue: () -> Unit) {
                 Column(Modifier.padding(18.dp), verticalArrangement = Arrangement.spacedBy(18.dp)) {
                     WelcomeItem(
                         Icons.Outlined.PhoneAndroid,
-                        "This app",
-                        "Stores secrets and lets you decide when protected values or keys may be used.",
+                        "Add your secrets",
+                        "Create secrets on this phone or upload them from your computer.",
                     )
                     WelcomeItem(
                         Icons.Outlined.Computer,
-                        "Command-line clients",
-                        "Request secrets for a command without storing them on the client machine.",
+                        "Pair your computer",
+                        "Connect the Agentknock command-line client and compare the pairing code.",
                     )
                     WelcomeItem(
                         Icons.Outlined.SyncAlt,
-                        "Agentknock relay",
-                        "Connects clients to this phone. It cannot read secret values; optional AI review receives request metadata only.",
+                        "Approve their use",
+                        "Review requests on your phone. Optional paid AI review can decide for you, " +
+                            "using your instructions without receiving sensitive values or private keys.",
                     )
                 }
             }
@@ -306,7 +276,7 @@ private fun WelcomeItem(
 }
 
 @Composable
-private fun PairingAddressEditor(
+internal fun PairingAddressEditor(
     address: String,
     activeAddress: String?,
     candidateAddress: String?,
@@ -315,9 +285,10 @@ private fun PairingAddressEditor(
     onAddressChange: (String) -> Unit,
     onGenerate: () -> Unit,
     onSubmit: () -> Unit,
+    beforeSubmit: @Composable () -> Unit,
 ) {
     val valid = DeviceProtocol.validPairingAddress(address) && address != activeAddress
-    var fieldValue by remember(address) {
+    var fieldValue by remember {
         mutableStateOf(TextFieldValue(address, selection = TextRange(address.length)))
     }
     LaunchedEffect(address) {
@@ -353,7 +324,7 @@ private fun PairingAddressEditor(
                     },
                 )
             },
-            isError = address.isNotEmpty() && !valid,
+            isError = address.isNotEmpty() && !DeviceProtocol.validPairingAddress(address),
             enabled = !claiming,
             singleLine = true,
             keyboardOptions = KeyboardOptions(
@@ -373,6 +344,10 @@ private fun PairingAddressEditor(
                 },
             )
         }
+        OutlinedButton(onClick = onGenerate, enabled = !claiming, modifier = Modifier.fillMaxWidth()) {
+            Text(stringResource(R.string.another_suggestion))
+        }
+        beforeSubmit()
         Button(
             onClick = onSubmit,
             enabled = valid && !claiming,
@@ -384,15 +359,12 @@ private fun PairingAddressEditor(
             }
             Text(
                 when {
-                    claiming -> "Claiming address…"
+                    claiming -> if (activeAddress == null) "Claiming address…" else "Changing address…"
                     candidateAddress == address && result != null -> "Try again"
                     activeAddress == null -> stringResource(R.string.claim_pairing_address)
                     else -> stringResource(R.string.change_pairing_address)
                 },
             )
-        }
-        OutlinedButton(onClick = onGenerate, enabled = !claiming, modifier = Modifier.fillMaxWidth()) {
-            Text(stringResource(R.string.another_suggestion))
         }
     }
 }

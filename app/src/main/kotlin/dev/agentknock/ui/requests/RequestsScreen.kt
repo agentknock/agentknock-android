@@ -32,6 +32,7 @@ import kotlinx.coroutines.launch
 
 @Composable
 internal fun RequestsScreen(
+    onPairClient: (() -> Unit)?,
     onOpenSettings: () -> Unit,
     notificationsEnabled: Boolean,
     onTopLevelChanged: (Boolean) -> Unit,
@@ -64,6 +65,7 @@ internal fun RequestsScreen(
             modifier = Modifier.fillMaxSize().padding(padding),
             list = { listModifier ->
                 RequestList(
+                    onPairClient = onPairClient,
                     requests = requests,
                     selectedRequestId = selection.requestId,
                     syncing = syncing,

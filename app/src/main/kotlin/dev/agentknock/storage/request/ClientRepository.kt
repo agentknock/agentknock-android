@@ -60,7 +60,8 @@ internal class ClientRepository(
         dao.observeClients(),
         temporaryAccessGrants,
     ) { clients, grants ->
-        val grantCounts = grants.groupingBy { it.clientId }.eachCount()
+        val grantCounts = grants.distinctBy { it.clientId to it.secretId }
+            .groupingBy { it.clientId }.eachCount()
         clients
             .mapNotNull { client ->
                 val state = client.relayClientState.toRelayClientState()

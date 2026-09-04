@@ -89,8 +89,6 @@
     <string name="claim_pairing_address">Claim pairing address</string>
     <string name="another_suggestion">Another suggestion</string>
     <string name="change_pairing_address">Change pairing address</string>
-    <string name="change_pairing_address_question">Change the pairing address?</string>
-    <string name="change_pairing_address_explanation">The new address will be used for future pairings. Existing clients, secrets, and history are unaffected. The current address remains active if the claim fails.</string>
     <string name="change_pairing_address_existing_clients">Only future pairings use the new address. Existing clients, secrets, and history are unaffected.</string>
     <string name="requests">Requests</string>
 </resources>

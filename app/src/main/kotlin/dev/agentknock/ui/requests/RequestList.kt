@@ -73,6 +73,7 @@ import dev.agentknock.ui.theme.agentknockColors
 
 @Composable
 internal fun RequestList(
+    onPairClient: (() -> Unit)?,
     requests: List<InboxRequestSummary>,
     selectedRequestId: String?,
     syncing: Boolean,
@@ -150,9 +151,16 @@ internal fun RequestList(
                 ) {
                     Text("No requests yet", style = MaterialTheme.typography.titleLarge)
                     Text(
-                        "Secret use, Git signing, and SSH authentication requests will appear here.",
+                        if (onPairClient != null) {
+                            "Pair your computer to start using secrets with commands."
+                        } else {
+                            "Secret use, Git signing, and SSH authentication requests will appear here."
+                        },
                         color = MaterialTheme.colorScheme.onSurfaceVariant,
                     )
+                    onPairClient?.let { pair ->
+                        androidx.compose.material3.Button(onClick = pair) { Text("Pair a client") }
+                    }
                 }
             }
         } else {

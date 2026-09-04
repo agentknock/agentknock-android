@@ -2,7 +2,6 @@
 
 package dev.agentknock.ui.clients
 
-import androidx.compose.foundation.BorderStroke
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.Row
@@ -10,22 +9,15 @@ import androidx.compose.foundation.layout.Spacer
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.padding
-import androidx.compose.foundation.layout.width
 import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.verticalScroll
 import androidx.compose.material.icons.Icons
-import androidx.compose.material.icons.outlined.Block
 import androidx.compose.material.icons.outlined.Edit
-import androidx.compose.material.icons.outlined.PauseCircle
-import androidx.compose.material.icons.outlined.PlayCircle
 import androidx.compose.material3.AlertDialog
-import androidx.compose.material3.Button
-import androidx.compose.material3.ButtonDefaults
 import androidx.compose.material3.HorizontalDivider
 import androidx.compose.material3.Icon
 import androidx.compose.material3.IconButton
 import androidx.compose.material3.MaterialTheme
-import androidx.compose.material3.OutlinedButton
 import androidx.compose.material3.OutlinedTextField
 import androidx.compose.material3.Surface
 import androidx.compose.material3.Text
@@ -125,73 +117,19 @@ internal fun ClientDetail(
                     verticalAlignment = Alignment.CenterVertically,
                 ) {
                     ClientStateBadge(client.state, pending)
-                    Text(client.state.explanation(), modifier = Modifier.weight(1f))
-                }
-                when (client.state) {
-                    RelayClientState.ACTIVE -> OutlinedButton(
-                        onClick = { onSetState(RelayClientState.SUSPENDED) },
-                        modifier = Modifier.fillMaxWidth(),
-                    ) {
-                        Icon(Icons.Outlined.PauseCircle, contentDescription = null)
-                        Spacer(Modifier.width(8.dp))
-                        Text("Suspend client")
-                    }
-                    RelayClientState.SUSPENDED -> Button(
-                        onClick = { onSetState(RelayClientState.ACTIVE) },
-                        modifier = Modifier.fillMaxWidth(),
-                    ) {
-                        Icon(Icons.Outlined.PlayCircle, contentDescription = null)
-                        Spacer(Modifier.width(8.dp))
-                        Text("Resume client")
-                    }
-                    RelayClientState.PENDING,
-                    RelayClientState.REVOKED,
-                    -> Unit
-                }
-                if (client.state != RelayClientState.REVOKED) {
-                    HorizontalDivider()
-                    Text(
-                        "Revoking is permanent. This client must be paired again to reconnect.",
-                        style = MaterialTheme.typography.bodySmall,
-                        color = MaterialTheme.colorScheme.onSurfaceVariant,
-                    )
-                    OutlinedButton(
-                        onClick = { confirmation = RelayClientState.REVOKED },
-                        modifier = Modifier.fillMaxWidth(),
-                        colors = ButtonDefaults.outlinedButtonColors(
-                            contentColor = MaterialTheme.agentknockColors.danger,
-                        ),
-                        border = BorderStroke(1.dp, MaterialTheme.agentknockColors.danger),
-                    ) {
-                        Icon(Icons.Outlined.Block, contentDescription = null)
-                        Spacer(Modifier.width(8.dp))
-                        Text("Revoke client")
+                    Spacer(Modifier.weight(1f))
+                    when (client.state) {
+                        RelayClientState.ACTIVE -> TextButton(
+                            onClick = { onSetState(RelayClientState.SUSPENDED) },
+                        ) { Text("Suspend client") }
+                        RelayClientState.SUSPENDED -> TextButton(
+                            onClick = { onSetState(RelayClientState.ACTIVE) },
+                        ) { Text("Resume client") }
+                        else -> Unit
                     }
                 }
-            }
-
-            InformationSurface {
-                Row(
-                    modifier = Modifier.fillMaxWidth(),
-                    verticalAlignment = Alignment.CenterVertically,
-                ) {
-                    Column(Modifier.weight(1f), verticalArrangement = Arrangement.spacedBy(3.dp)) {
-                        Text("AI review instructions", style = MaterialTheme.typography.titleMedium)
-                        Text(
-                            client.instructions.ifBlank { "No instructions for this client." },
-                            color = if (client.instructions.isBlank()) {
-                                MaterialTheme.colorScheme.onSurfaceVariant
-                            } else {
-                                MaterialTheme.colorScheme.onSurface
-                            },
-                        )
-                    }
-                    IconButton(onClick = {
-                        instructions = client.instructions
-                        showInstructions = true
-                    }) {
-                        Icon(Icons.Outlined.Edit, contentDescription = "Edit instructions")
-                    }
+                if (client.state != RelayClientState.ACTIVE) {
+                    Text(client.state.explanation(), color = MaterialTheme.colorScheme.onSurfaceVariant)
                 }
             }
 
@@ -199,31 +137,15 @@ internal fun ClientDetail(
                 Text("Client information", style = MaterialTheme.typography.titleMedium)
                 ClientField("Hostname", client.hostname)
                 ClientField(
-                    "Platform",
-                    listOfNotNull(client.platform?.let(::formatPlatformName), client.architecture)
-                        .joinToString(" · ").ifBlank { null },
+                    "Operating system",
+                    client.osVersion ?: client.platform?.let(::formatPlatformName),
                 )
-                ClientField("Operating system", client.osVersion)
-                client.clientSoftware?.let { software ->
-                    ClientField("Last seen client software", renderSoftware(software.application))
-                    if (software.library != software.application) {
-                        ClientField("Agentknock library", renderSoftware(software.library))
-                    }
-                }
-                client.pairedAt?.let {
-                    ClientField("Paired", "${formatTimestamp(it)} (${formatRelativeTime(it)})")
-                }
                 ClientField(
                     "Last request",
                     client.lastRequestAt?.let {
                         "${formatTimestamp(it)} (${formatRelativeTime(it)})"
                     } ?: "None yet",
                 )
-            }
-
-            Disclosure("Technical information") {
-                ClientField("Machine ID", client.machineId, monospace = true)
-                ClientField("Client ID", client.clientId, monospace = true)
             }
 
             if (temporaryAccessGrants.isNotEmpty()) {
@@ -234,11 +156,11 @@ internal fun ClientDetail(
                     )
                     Text(
                         if (temporaryAccessPaused) {
-                            "They are paused until this client is active. They resume if that " +
+                            "These uses are paused until this client is active. They resume if that " +
                                 "happens before their end time."
                         } else {
-                            "These uses are already approved and will not ask you or AI again " +
-                                "before they end."
+                            "These uses skip manual and AI review until they end. " +
+                                "A secret's Deny setting still blocks access."
                         },
                         color = MaterialTheme.colorScheme.onSurfaceVariant,
                     )
@@ -269,6 +191,54 @@ internal fun ClientDetail(
                 }
             }
 
+            InformationSurface {
+                Row(
+                    modifier = Modifier.fillMaxWidth(),
+                    verticalAlignment = Alignment.CenterVertically,
+                ) {
+                    Column(Modifier.weight(1f), verticalArrangement = Arrangement.spacedBy(3.dp)) {
+                        Text("AI review instructions", style = MaterialTheme.typography.titleMedium)
+                        Text(
+                            client.instructions.ifBlank { "No instructions for this client." },
+                            color = if (client.instructions.isBlank()) {
+                                MaterialTheme.colorScheme.onSurfaceVariant
+                            } else {
+                                MaterialTheme.colorScheme.onSurface
+                            },
+                        )
+                    }
+                    IconButton(onClick = {
+                        instructions = client.instructions
+                        showInstructions = true
+                    }) {
+                        Icon(Icons.Outlined.Edit, contentDescription = "Edit instructions")
+                    }
+                }
+            }
+
+            InformationSurface {
+                ClientField("Architecture", client.architecture)
+                client.clientSoftware?.let { software ->
+                    ClientField("Client software", renderSoftware(software.application))
+                    if (software.library != software.application) {
+                        ClientField("Agentknock library", renderSoftware(software.library))
+                    }
+                }
+                client.pairedAt?.let {
+                    ClientField("Paired", "${formatTimestamp(it)} (${formatRelativeTime(it)})")
+                }
+            }
+
+            Disclosure("Technical identifiers") {
+                ClientField("Machine ID", client.machineId, monospace = true)
+                ClientField("Client ID", client.clientId, monospace = true)
+            }
+
+            if (client.state != RelayClientState.REVOKED) {
+                TextButton(onClick = { confirmation = RelayClientState.REVOKED }) {
+                    Text("Revoke client…", color = MaterialTheme.agentknockColors.danger)
+                }
+            }
         }
     }
 
@@ -309,7 +279,8 @@ internal fun ClientDetail(
             title = { Text("${target.actionLabel()} ${client.name}?") },
             text = {
                 Text(
-                    "This is permanent. The client must pair again.",
+                    "This permanently blocks future requests from this client. It must pair again " +
+                        "to reconnect. Values already received cannot be recalled.",
                 )
             },
             confirmButton = {

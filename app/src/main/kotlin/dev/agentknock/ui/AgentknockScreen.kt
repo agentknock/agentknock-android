@@ -397,6 +397,7 @@ internal fun AgentknockScreen(
             ) {
                 MainContent(
                     section = section,
+                    onOpenClients = { section = MainSection.CLIENTS },
                     onOpenSettings = { destination = RootDestination.SETTINGS },
                     onChangePairingAddress = ::openAddressEditor,
                     notificationsEnabled = notificationsEnabled,
@@ -428,7 +429,8 @@ internal fun AgentknockScreen(
             title = { Text("Stay informed about requests?") },
             text = {
                 Text(
-                    "Agentknock can notify you when a pairing, secret upload, secret use, or Git signature needs attention. You control notification privacy in Android settings.",
+                    "Get notified when a request needs your decision, even when the app is closed. " +
+                        "Your computer may be waiting for your response. Android controls lock-screen privacy.",
                 )
             },
             confirmButton = {
@@ -481,7 +483,7 @@ private fun AgentknockLockedScreen(
             error?.let {
                 Text(
                     it,
-                    color = MaterialTheme.colorScheme.error,
+                    color = MaterialTheme.colorScheme.onSurfaceVariant,
                     modifier = Modifier.padding(top = 8.dp),
                 )
             }
@@ -498,6 +500,7 @@ private fun AgentknockLockedScreen(
 @Composable
 private fun MainContent(
     section: MainSection,
+    onOpenClients: () -> Unit,
     onOpenSettings: () -> Unit,
     onChangePairingAddress: () -> Unit,
     notificationsEnabled: Boolean,
@@ -508,9 +511,11 @@ private fun MainContent(
     clientsViewModel: ClientsViewModel,
     modifier: Modifier = Modifier,
 ) {
+    val clients by clientsViewModel.clients.collectAsStateWithLifecycle()
     Box(modifier) {
         when (section) {
             MainSection.REQUESTS -> RequestsScreen(
+                onPairClient = onOpenClients.takeIf { clients.isEmpty() },
                 onOpenSettings = onOpenSettings,
                 notificationsEnabled = notificationsEnabled,
                 viewModel = requestsViewModel,

@@ -1,7 +1,16 @@
 package dev.agentknock.ui.clients
 
+import android.content.ClipData
+import android.content.ClipboardManager
 import androidx.compose.foundation.BorderStroke
 import androidx.compose.foundation.layout.fillMaxWidth
+import androidx.compose.foundation.layout.Row
+import androidx.compose.foundation.layout.padding
+import androidx.compose.foundation.text.selection.SelectionContainer
+import androidx.compose.material.icons.Icons
+import androidx.compose.material.icons.outlined.ContentCopy
+import androidx.compose.material3.Icon
+import androidx.compose.material3.IconButton
 import androidx.compose.material3.ButtonDefaults
 import androidx.compose.material3.FilledTonalButton
 import androidx.compose.material3.MaterialTheme
@@ -9,6 +18,8 @@ import androidx.compose.material3.OutlinedButton
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.Alignment
+import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.text.font.FontFamily
 import androidx.compose.ui.unit.dp
 import dev.agentknock.presentation.formatPlatformName
@@ -39,6 +50,7 @@ internal fun PairingRequestDetail(
     modifier: Modifier,
 ) {
     val pairing = (request.content as InboxRequestContent.Pairing).details
+    val context = LocalContext.current
     DetailPage(
         title = "Pairing",
         onBack = onBack,
@@ -57,7 +69,6 @@ internal fun PairingRequestDetail(
             val reported = listOfNotNull(
                 pairing.hostname,
                 pairing.platform?.let(::formatPlatformName),
-                pairing.architecture,
             ).joinToString(" · ")
             if (reported.isNotEmpty()) {
                 InformationRow("Machine", reported)
@@ -93,7 +104,9 @@ internal fun PairingRequestDetail(
                         onClick = { onChooseSas(index) },
                         modifier = Modifier.fillMaxWidth(),
                     ) {
-                        Text(sas, fontFamily = FontFamily.Monospace)
+                        Text(sas, fontFamily = FontFamily.Monospace,
+                            style = MaterialTheme.typography.headlineSmall,
+                            modifier = Modifier.padding(vertical = 4.dp))
                     }
                 }
                 OutlinedButton(
@@ -107,11 +120,24 @@ internal fun PairingRequestDetail(
                     Text("None of the above")
                 }
             }
-            PairingState.WAITING_FOR_FINISH -> Notice(
-                "Code verified; waiting for the client",
-                "The client must run agentknock pairing finish to activate this pairing.",
-                NoticeTone.SUCCESS,
-            )
+            PairingState.WAITING_FOR_FINISH -> {
+                Text("Code verified", style = MaterialTheme.typography.titleMedium)
+                Text("Run this command on the client to finish pairing:")
+                val command = "agentknock pairing finish"
+                InformationSurface {
+                    Row(verticalAlignment = Alignment.CenterVertically) {
+                        SelectionContainer(Modifier.weight(1f)) {
+                            Text(command, fontFamily = FontFamily.Monospace)
+                        }
+                        IconButton(onClick = {
+                            context.getSystemService(ClipboardManager::class.java)
+                                .setPrimaryClip(ClipData.newPlainText("Pairing command", command))
+                        }) {
+                            Icon(Icons.Outlined.ContentCopy, contentDescription = "Copy pairing finish command")
+                        }
+                    }
+                }
+            }
             PairingState.COMPLETED -> Notice(
                 "Pairing completed",
                 "Access was granted to this client.",
@@ -122,10 +148,9 @@ internal fun PairingRequestDetail(
                 "No access was granted.",
                 NoticeTone.SUBDUED,
             )
-            PairingState.EXCHANGE_PENDING -> Notice(
-                "Waiting for secure exchange",
-                "The client is completing the secure pairing exchange.",
-                NoticeTone.ATTENTION,
+            PairingState.EXCHANGE_PENDING -> Text(
+                "Waiting for the client's secure exchange before a code can be shown. " +
+                    "Reject this attempt to allow another pairing.",
             )
             PairingState.EXCHANGE_FAILED -> Notice(
                 "Pairing could not continue",
@@ -152,6 +177,7 @@ internal fun PairingRequestDetail(
         Disclosure("Technical details") {
             DetailValue("Pairing address", pairing.pairingAddress, true)
             pairing.osVersion?.let { DetailValue("OS version", it) }
+            pairing.architecture?.let { DetailValue("Architecture", it) }
             pairing.clientSoftware?.let { software ->
                 DetailValue("Client software", renderSoftware(software.application))
                 if (software.library != software.application) {
