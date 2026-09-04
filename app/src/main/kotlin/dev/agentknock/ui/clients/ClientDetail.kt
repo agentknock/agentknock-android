@@ -79,6 +79,7 @@ internal fun ClientDetail(
     if (showInstructions) {
         ProseEditorScreen(
             title = "Client instructions",
+            owner = client.name,
             value = instructions,
             originalValue = client.instructions,
             supportingText =

@@ -15,7 +15,7 @@
     <string name="no_secrets_description">Create a secret for an account, role, or key you want a client to use.</string>
     <string name="select_secret">Select a secret</string>
     <string name="select_secret_description">Choose a secret to view its details.</string>
-    <string name="edit_secret">Edit secret</string>
+    <string name="edit_secret">Name and description</string>
     <string name="delete_secret">Delete secret</string>
     <string name="no_variables">No environment variables yet</string>
     <string name="no_variables_description">Add the names and values this secret should provide.</string>
@@ -58,8 +58,8 @@
     <string name="variable_value">Value</string>
     <string name="sensitive_explanation">Sensitive values follow this secret’s approval settings and are hidden by default on this device.</string>
     <string name="replace_unavailable_value">The stored value cannot be decrypted on this device. Enter a replacement to use this environment variable again.</string>
-    <string name="save_variable">Save environment variable</string>
-    <string name="create_variable">Create environment variable</string>
+    <string name="save_variable">Save</string>
+    <string name="create_variable">Add</string>
     <string name="variable_name_invalid">Use a portable environment variable name, such as AWS_REGION</string>
     <string name="variable_name_in_use">That environment variable name is already used in this secret</string>
     <string name="variable_not_found">That environment variable no longer exists</string>

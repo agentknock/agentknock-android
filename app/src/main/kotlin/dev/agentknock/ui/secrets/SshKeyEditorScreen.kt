@@ -7,17 +7,18 @@ import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.FlowRow
-import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.fillMaxHeight
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.padding
+import androidx.compose.foundation.layout.consumeWindowInsets
+import androidx.compose.foundation.layout.imePadding
 import androidx.compose.foundation.layout.widthIn
 import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.text.KeyboardOptions
-import androidx.compose.foundation.text.selection.SelectionContainer
 import androidx.compose.foundation.verticalScroll
 import androidx.compose.material3.Button
+import androidx.compose.material3.TextButton
 import androidx.compose.material3.FilledTonalButton
 import androidx.compose.material3.FilterChip
 import androidx.compose.material3.LinearProgressIndicator
@@ -48,6 +49,7 @@ import dev.agentknock.storage.secret.SshPrivateKey
 import dev.agentknock.storage.secret.SshKeyCodec
 import dev.agentknock.ui.components.InformationRow
 import dev.agentknock.ui.components.InformationSurface
+import dev.agentknock.ui.components.ExactText
 import dev.agentknock.ui.components.NavigationBackButton
 
 @Composable
@@ -59,10 +61,10 @@ internal fun SshKeyInput(
 ) {
     val sourceEnabled = enabled && !draft.preparing
     Column(verticalArrangement = Arrangement.spacedBy(12.dp)) {
-        Text("Key material", style = MaterialTheme.typography.titleMedium)
+        Text("Private key", style = MaterialTheme.typography.titleMedium)
         if (draft.preparedKey != null) {
             SshKeyPreview(draft.preparedKey)
-            FilledTonalButton(
+            TextButton(
                 onClick = {
                     onDraftChange(
                         draft.withoutPreparation().copy(privateKeyText = ""),
@@ -75,7 +77,7 @@ internal fun SshKeyInput(
             }
             return@Column
         }
-        Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+        FlowRow(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
             FilterChip(
                 selected = draft.inputMode == SshKeyInputMode.GENERATE,
                 enabled = sourceEnabled,
@@ -84,7 +86,7 @@ internal fun SshKeyInput(
                         draft.copy(inputMode = SshKeyInputMode.GENERATE).withoutPreparation(),
                     )
                 },
-                label = { Text("Generate") },
+                label = { Text("Generate new key") },
             )
             FilterChip(
                 selected = draft.inputMode == SshKeyInputMode.IMPORT,
@@ -94,7 +96,7 @@ internal fun SshKeyInput(
                         draft.copy(inputMode = SshKeyInputMode.IMPORT).withoutPreparation(),
                     )
                 },
-                label = { Text("Import") },
+                label = { Text("Paste existing key") },
             )
         }
         if (draft.inputMode == SshKeyInputMode.GENERATE) {
@@ -218,13 +220,7 @@ private fun SshKeyPreview(key: SshPrivateKey) {
                 style = MaterialTheme.typography.labelMedium,
                 color = MaterialTheme.colorScheme.onSurfaceVariant,
             )
-            SelectionContainer {
-                Text(
-                    key.publicKeyLine,
-                    style = MaterialTheme.typography.bodySmall,
-                    fontFamily = FontFamily.Monospace,
-                )
-            }
+            ExactText(key.publicKeyLine)
         }
     }
 }
@@ -275,7 +271,7 @@ internal fun SshKeyEditorScreen(
         },
         snackbarHost = { SnackbarHost(snackbar) },
     ) { padding ->
-        Box(Modifier.fillMaxSize().padding(padding)) {
+        Box(Modifier.fillMaxSize().padding(padding).consumeWindowInsets(padding).imePadding()) {
             Column(
                 Modifier
                     .fillMaxHeight()
@@ -285,19 +281,12 @@ internal fun SshKeyEditorScreen(
                     .padding(20.dp),
                 verticalArrangement = Arrangement.spacedBy(18.dp),
             ) {
-            InformationSurface {
-                Text(editor.secretName, style = MaterialTheme.typography.titleMedium)
-                InformationRow("Current OpenSSH fingerprint", editor.currentKey.fingerprint)
-                InformationRow(
-                    "Current SHA-256 fingerprint (hex)",
-                    editor.currentKey.fingerprintHex,
-                )
-                Text(
-                    "Replacing the private key changes the public key while keeping the secret's " +
-                        "name and request references.",
-                    color = MaterialTheme.colorScheme.onSurfaceVariant,
-                )
-            }
+            Text(editor.secretName, style = MaterialTheme.typography.titleMedium)
+            Text(
+                "This replaces the stored private key. Register the new public key with any " +
+                    "services that need it; the old public key is not revoked there.",
+                color = MaterialTheme.colorScheme.onSurfaceVariant,
+            )
             SshKeyInput(
                 draft = draft,
                 enabled = enabled,

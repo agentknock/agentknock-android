@@ -59,7 +59,7 @@ internal class SecretRepository(
         dao.observeSecrets(),
         observeTemporaryAccessGrants(),
     ) { rows, grants ->
-        val grantCounts = grants.groupingBy(TemporaryAccessGrant::secretId).eachCount()
+        val grantsBySecret = grants.groupBy(TemporaryAccessGrant::secretId)
         rows.mapNotNull { row ->
             val type = SecretType.fromStoredNameOrNull(row.type) ?: return@mapNotNull null
             SecretSummary(
@@ -82,7 +82,7 @@ internal class SecretRepository(
                 },
                 createdAt = row.createdAt,
                 updatedAt = row.updatedAt,
-                temporaryAccessCount = grantCounts[row.id] ?: 0,
+                temporaryAccessGrants = grantsBySecret[row.id].orEmpty(),
             )
         }
     }

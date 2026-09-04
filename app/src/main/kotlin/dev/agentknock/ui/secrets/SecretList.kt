@@ -19,7 +19,6 @@ import androidx.compose.material.icons.outlined.AutoAwesome
 import androidx.compose.material.icons.outlined.DataObject
 import androidx.compose.material.icons.outlined.Edit
 import androidx.compose.material.icons.outlined.Key
-import androidx.compose.material.icons.outlined.Lock
 import androidx.compose.material.icons.outlined.Schedule
 import androidx.compose.material.icons.outlined.Settings
 import androidx.compose.material3.Icon
@@ -31,10 +30,6 @@ import androidx.compose.material3.Surface
 import androidx.compose.material3.Text
 import androidx.compose.material3.TopAppBar
 import androidx.compose.runtime.Composable
-import androidx.compose.runtime.getValue
-import androidx.compose.runtime.mutableStateOf
-import androidx.compose.runtime.saveable.rememberSaveable
-import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.res.stringResource
@@ -46,15 +41,16 @@ import dev.agentknock.R
 import dev.agentknock.presentation.formatTimestamp
 import dev.agentknock.storage.request.InboxRequestState
 import dev.agentknock.storage.request.InboxRequestSummary
+import dev.agentknock.storage.request.ClientSummary
 import dev.agentknock.storage.secret.SecretSummary
 import dev.agentknock.storage.secret.SecretType
 import dev.agentknock.ui.components.ActionListSurface
 import dev.agentknock.ui.components.TonalIcon
-import dev.agentknock.ui.components.ProseEditorScreen
 
 @Composable
 internal fun SecretList(
     secrets: List<SecretSummary>,
+    clients: List<ClientSummary>,
     pendingUploads: List<InboxRequestSummary>,
     selectedSecretId: String?,
     selectedUploadRequestId: String?,
@@ -63,31 +59,10 @@ internal fun SecretList(
     onCreate: () -> Unit,
     generalInstructions: String,
     aiReviewActive: Boolean,
-    onSaveGeneralInstructions: (String) -> Unit,
+    onEditGeneralInstructions: () -> Unit,
     onOpenSettings: () -> Unit,
     modifier: Modifier = Modifier,
 ) {
-    var showGeneralInstructions by rememberSaveable { mutableStateOf(false) }
-    var editedGeneralInstructions by rememberSaveable(generalInstructions) {
-        mutableStateOf(generalInstructions)
-    }
-    if (showGeneralInstructions) {
-        ProseEditorScreen(
-            title = "AI review instructions",
-            value = editedGeneralInstructions,
-            originalValue = generalInstructions,
-            supportingText =
-                "These instructions apply to every AI review. Secret and client instructions " +
-                    "add more specific context.",
-            onValueChange = { editedGeneralInstructions = it },
-            onSave = {
-                showGeneralInstructions = false
-                onSaveGeneralInstructions(editedGeneralInstructions.trim())
-            },
-            onBack = { showGeneralInstructions = false },
-        )
-        return
-    }
     Column(modifier) {
         TopAppBar(
             title = { Text(stringResource(R.string.secrets)) },
@@ -115,15 +90,30 @@ internal fun SecretList(
                 contentPadding = PaddingValues(start = 16.dp, end = 16.dp, top = 4.dp, bottom = 16.dp),
                 verticalArrangement = Arrangement.spacedBy(8.dp),
             ) {
+                if (pendingUploads.isNotEmpty()) {
+                    item(key = "incoming_uploads_heading") {
+                        SecretListSectionHeading(
+                            title = "Incoming uploads",
+                            count = pendingUploads.size,
+                        )
+                    }
+                    items(
+                        pendingUploads,
+                        key = { request -> "upload_${request.id}" },
+                    ) { request ->
+                        PendingSecretUploadRow(
+                            request = request,
+                            selected = request.id == selectedUploadRequestId,
+                            onClick = { onSelectUpload(request.id) },
+                        )
+                    }
+                }
                 if (aiReviewActive) {
                     item(key = "ai_review_instructions") {
                         Surface(
                             color = MaterialTheme.colorScheme.surfaceContainer,
                             shape = MaterialTheme.shapes.large,
-                            onClick = {
-                                editedGeneralInstructions = generalInstructions
-                                showGeneralInstructions = true
-                            },
+                            onClick = onEditGeneralInstructions,
                             modifier = Modifier.fillMaxWidth(),
                         ) {
                             Row(
@@ -150,22 +140,6 @@ internal fun SecretList(
                     }
                 }
                 if (pendingUploads.isNotEmpty()) {
-                    item(key = "incoming_uploads_heading") {
-                        SecretListSectionHeading(
-                            title = "Incoming uploads",
-                            count = pendingUploads.size,
-                        )
-                    }
-                    items(
-                        pendingUploads,
-                        key = { request -> "upload_${request.id}" },
-                    ) { request ->
-                        PendingSecretUploadRow(
-                            request = request,
-                            selected = request.id == selectedUploadRequestId,
-                            onClick = { onSelectUpload(request.id) },
-                        )
-                    }
                     item(key = "stored_secrets_heading") {
                         SecretListSectionHeading(
                             title = "Stored secrets",
@@ -215,8 +189,8 @@ internal fun SecretList(
                                     Text(
                                         when (secret.type) {
                                             SecretType.SSH ->
-                                                secret.sshKey?.fingerprint?.let {
-                                                    "SSH key · $it"
+                                                secret.sshKey?.let {
+                                                    "SSH key · ${it.algorithm.displayName()}"
                                                 } ?: "SSH key unavailable"
                                             SecretType.ENVIRONMENT ->
                                                 "${secret.environmentVariableCount} environment " +
@@ -226,12 +200,16 @@ internal fun SecretList(
                                                         "variables"
                                                     }
                                         },
-                                        style = MaterialTheme.typography.labelMedium,
-                                        color = MaterialTheme.colorScheme.primary,
+                                        style = MaterialTheme.typography.bodyMedium,
+                                        color = MaterialTheme.colorScheme.onSurfaceVariant,
                                         maxLines = 1,
                                         overflow = TextOverflow.Ellipsis,
                                     )
-                                    if (secret.temporaryAccessCount > 0) {
+                                    if (secret.temporaryAccessGrants.isNotEmpty()) {
+                                        val clientIds = secret.temporaryAccessGrants.map { it.clientId }.distinct()
+                                        val singleClient = clientIds.singleOrNull()?.let { id ->
+                                            clients.firstOrNull { it.clientId == id }?.name
+                                        }
                                         Row(
                                             horizontalArrangement = Arrangement.spacedBy(6.dp),
                                             verticalAlignment = Alignment.CenterVertically,
@@ -242,17 +220,18 @@ internal fun SecretList(
                                                 modifier = Modifier.size(14.dp),
                                             )
                                             Text(
-                                                "Temporary access for " +
-                                                    "${secret.temporaryAccessCount} " +
-                                                    if (secret.temporaryAccessCount == 1) {
-                                                        "client"
-                                                    } else {
-                                                        "clients"
-                                                    },
+                                                singleClient?.let { "Temporary access: $it" }
+                                                    ?: "Temporary access for ${clientIds.size} clients",
                                                 style = MaterialTheme.typography.labelMedium,
                                                 color = MaterialTheme.colorScheme.primary,
                                             )
                                         }
+                                        Text(
+                                            (if (secret.temporaryAccessGrants.size == 1) "Ends " else "Next expiry ") +
+                                                formatTimestamp(secret.temporaryAccessGrants.minOf { it.expiresAt }),
+                                            style = MaterialTheme.typography.bodySmall,
+                                            color = MaterialTheme.colorScheme.onSurfaceVariant,
+                                        )
                                     }
                                 }
                             },
@@ -304,7 +283,7 @@ private fun PendingSecretUploadRow(
                         listOfNotNull(request.title, request.listSummary)
                             .filter(String::isNotBlank)
                             .joinToString(" · "),
-                        maxLines = 1,
+                        maxLines = 2,
                         overflow = TextOverflow.Ellipsis,
                     )
                     Text(
@@ -315,7 +294,13 @@ private fun PendingSecretUploadRow(
                     )
                 }
             },
-            leadingContent = { TonalIcon(Icons.Outlined.Lock, contentDescription = null) },
+            leadingContent = {
+                TonalIcon(
+                    if (request.uploadSecretType == SecretType.SSH.storedName) Icons.Outlined.Key
+                    else Icons.Outlined.DataObject,
+                    contentDescription = null,
+                )
+            },
             trailingContent = {
                 Icon(Icons.AutoMirrored.Outlined.NavigateNext, contentDescription = null)
             },

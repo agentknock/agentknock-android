@@ -12,6 +12,8 @@ import androidx.compose.foundation.layout.fillMaxHeight
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.padding
+import androidx.compose.foundation.layout.consumeWindowInsets
+import androidx.compose.foundation.layout.imePadding
 import androidx.compose.foundation.layout.width
 import androidx.compose.foundation.layout.widthIn
 import androidx.compose.foundation.lazy.LazyColumn
@@ -45,6 +47,7 @@ import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.res.stringResource
 import androidx.compose.ui.semantics.Role
+import androidx.compose.ui.text.font.FontFamily
 import androidx.compose.ui.text.input.ImeAction
 import androidx.compose.ui.text.input.KeyboardCapitalization
 import androidx.compose.ui.text.input.KeyboardType
@@ -151,7 +154,7 @@ internal fun EnvironmentVariableEditorScreen(
         },
         snackbarHost = { SnackbarHost(snackbar) },
     ) { padding ->
-        Box(Modifier.fillMaxSize().padding(padding)) {
+        Box(Modifier.fillMaxSize().padding(padding).consumeWindowInsets(padding).imePadding()) {
             LazyColumn(
                 modifier = Modifier
                     .fillMaxHeight()
@@ -160,6 +163,9 @@ internal fun EnvironmentVariableEditorScreen(
                 contentPadding = androidx.compose.foundation.layout.PaddingValues(20.dp),
                 verticalArrangement = Arrangement.spacedBy(16.dp),
             ) {
+                item {
+                    Text(editor.secretName, style = MaterialTheme.typography.titleMedium)
+                }
                 item {
                     OutlinedTextField(
                         value = name,
@@ -183,6 +189,7 @@ internal fun EnvironmentVariableEditorScreen(
                             imeAction = ImeAction.Next,
                         ),
                         modifier = Modifier.fillMaxWidth(),
+                        textStyle = MaterialTheme.typography.bodyLarge.copy(fontFamily = FontFamily.Monospace),
                     )
                 }
                 if (variable != null && currentValue == null) {
@@ -216,6 +223,7 @@ internal fun EnvironmentVariableEditorScreen(
                         ),
                         minLines = 1,
                         maxLines = 6,
+                        textStyle = MaterialTheme.typography.bodyLarge.copy(fontFamily = FontFamily.Monospace),
                         trailingIcon = if (sensitive) {
                             {
                                 IconButton(
@@ -258,7 +266,7 @@ internal fun EnvironmentVariableEditorScreen(
                         Column(Modifier.weight(1f)) {
                             Text(stringResource(R.string.sensitive))
                             Text(
-                                stringResource(R.string.sensitive_explanation),
+                                sensitivityDescription(sensitive),
                                 style = MaterialTheme.typography.bodySmall,
                                 color = MaterialTheme.colorScheme.onSurfaceVariant,
                             )

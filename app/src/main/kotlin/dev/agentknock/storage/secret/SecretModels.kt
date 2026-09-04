@@ -84,7 +84,7 @@ internal data class SecretSummary(
     val sshKey: SshKeyMetadata?,
     val createdAt: Long,
     val updatedAt: Long,
-    val temporaryAccessCount: Int = 0,
+    val temporaryAccessGrants: List<TemporaryAccessGrant> = emptyList(),
 )
 
 internal data class SecretDetails(

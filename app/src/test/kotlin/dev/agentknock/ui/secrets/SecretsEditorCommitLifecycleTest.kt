@@ -157,6 +157,7 @@ class SecretsEditorCommitLifecycleTest {
             session = SESSION,
             state = VariableEditorState(
                 secretId = "secret-id",
+                secretName = "secret",
                 variable = null,
                 currentValue = null,
                 name = "VARIABLE",

@@ -58,6 +58,7 @@ internal data class SshKeyEditorState(
 
 internal data class VariableEditorState(
     val secretId: String,
+    val secretName: String,
     val variable: EnvironmentVariableMetadata?,
     val currentValue: String?,
     val name: String,

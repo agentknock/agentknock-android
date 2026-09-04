@@ -11,6 +11,8 @@ import androidx.compose.foundation.layout.fillMaxHeight
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.padding
+import androidx.compose.foundation.layout.consumeWindowInsets
+import androidx.compose.foundation.layout.imePadding
 import androidx.compose.foundation.layout.widthIn
 import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.text.KeyboardOptions
@@ -42,8 +44,6 @@ import androidx.compose.ui.text.input.KeyboardType
 import androidx.compose.ui.unit.dp
 import dev.agentknock.R
 import dev.agentknock.storage.secret.SecretType
-import dev.agentknock.ui.components.InformationRow
-import dev.agentknock.ui.components.InformationSurface
 import dev.agentknock.ui.components.NavigationBackButton
 
 @Composable
@@ -113,7 +113,7 @@ internal fun SecretEditorScreen(
         },
         snackbarHost = { SnackbarHost(snackbar) },
     ) { padding ->
-        Box(Modifier.fillMaxSize().padding(padding)) {
+        Box(Modifier.fillMaxSize().padding(padding).consumeWindowInsets(padding).imePadding()) {
             Column(
                 Modifier
                     .fillMaxHeight()
@@ -164,9 +164,7 @@ internal fun SecretEditorScreen(
                     )
                 }
             } else {
-                InformationSurface {
-                    InformationRow("Type", editor.type.displayName())
-                }
+                Text(editor.type.displayName(), color = MaterialTheme.colorScheme.onSurfaceVariant)
             }
             OutlinedTextField(
                 value = name,
@@ -189,6 +187,11 @@ internal fun SecretEditorScreen(
                 ),
                 modifier = Modifier.fillMaxWidth(),
             )
+            if (secret != null) {
+                Text("Commands that request this secret by name must use the new name after renaming.",
+                    style = MaterialTheme.typography.bodySmall,
+                    color = MaterialTheme.colorScheme.onSurfaceVariant)
+            }
             OutlinedTextField(
                 value = description,
                 onValueChange = { onEditorChange(editor.copy(description = it)) },

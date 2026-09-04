@@ -167,6 +167,7 @@ internal data class InboxRequestSummary(
     val completedAt: Long?,
     val userDecisionAvailable: Boolean = true,
     val decisionSummary: String? = null,
+    val uploadSecretType: String? = null,
     val repository: String? = null,
 )
 
@@ -521,6 +522,7 @@ internal class RequestInbox(
                             clientName = request.clientNameSnapshot,
                             secretNames = listOf(upload.uploadedName),
                             listSummary = upload.listSummary(),
+                            uploadSecretType = upload.secretType,
                             command = null,
                             arguments = emptyList(),
                             receivedAt = request.receivedAt,
@@ -942,15 +944,15 @@ internal class RequestInbox(
 
     private fun SecretUploadRequestEntity.listSummary(): String {
         val summary = decodeUploadSummary(summaryJson)
-        if (secretType == SSH_SECRET_TYPE) return summary.fingerprint ?: "SSH key"
+        if (secretType == SSH_SECRET_TYPE) return "SSH key"
         if (mode == SecretUploadMode.UPDATE.wireName) {
             return buildList {
                 summary.addedVariables.size.takeIf { it > 0 }?.let { add("$it added") }
-                summary.changedVariables.size.takeIf { it > 0 }?.let { add("$it updated") }
+                summary.changedVariables.size.takeIf { it > 0 }?.let { add("$it to update") }
                 summary.removedVariables.size.takeIf { it > 0 }?.let { add("$it removed") }
             }.ifEmpty {
                 listOf("No environment variable changes")
-            }.joinToString(" · ")
+            }.joinToString(" · ").let { "Environment variables · $it" }
         }
         val count = summary.variableNames.size
         return "$count ${if (count == 1) "environment variable" else "environment variables"}"

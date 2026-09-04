@@ -3,6 +3,7 @@ package dev.agentknock.ui.secrets
 import androidx.compose.foundation.BorderStroke
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Column
+import androidx.compose.foundation.layout.FlowRow
 import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.Spacer
 import androidx.compose.foundation.layout.fillMaxWidth
@@ -29,6 +30,8 @@ import androidx.compose.material3.Switch
 import androidx.compose.material3.Text
 import androidx.compose.material3.TextButton
 import androidx.compose.runtime.Composable
+import androidx.compose.runtime.LaunchedEffect
+import androidx.compose.runtime.remember
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.saveable.rememberSaveable
@@ -49,11 +52,12 @@ import dev.agentknock.storage.request.InboxRequestDetails
 import dev.agentknock.storage.request.SecretUploadRequestDetails
 import dev.agentknock.storage.request.SecretUploadRequestState
 import dev.agentknock.storage.request.SecretUploadVariableDetails
+import dev.agentknock.storage.secret.SshKeyCodec
 import dev.agentknock.ui.components.ClientIdentity
 import dev.agentknock.ui.components.DetailPage
 import dev.agentknock.ui.components.DetailValue
 import dev.agentknock.ui.components.Disclosure
-import dev.agentknock.ui.components.InformationRow
+import dev.agentknock.ui.components.ExactText
 import dev.agentknock.ui.components.InformationSurface
 import dev.agentknock.ui.components.Notice
 import dev.agentknock.ui.components.NoticeTone
@@ -125,44 +129,51 @@ internal fun SecretUploadRequestDetail(
         },
     ) {
         InformationSurface {
-            StatusLine(
-                upload.state.label(),
-                upload.state == SecretUploadRequestState.VERIFICATION_FAILED,
-                attention = upload.state == SecretUploadRequestState.REVIEW_PENDING,
-                subdued = upload.state == SecretUploadRequestState.REJECTED ||
-                    upload.state == SecretUploadRequestState.ENDED,
-            )
-            Row(verticalAlignment = Alignment.CenterVertically) {
-                Text(
-                    approvedName,
-                    style = MaterialTheme.typography.titleLarge,
-                    modifier = Modifier.weight(1f),
-                    maxLines = 2,
-                    overflow = TextOverflow.Ellipsis,
-                )
-                if (
-                    upload.mode == SecretUploadMode.CREATE &&
-                    upload.state == SecretUploadRequestState.REVIEW_PENDING
-                ) {
-                    IconButton(onClick = { editingName = true }) {
-                        Icon(Icons.Outlined.Edit, contentDescription = "Rename secret")
+            Column(verticalArrangement = Arrangement.spacedBy(8.dp)) {
+                Row(verticalAlignment = Alignment.CenterVertically) {
+                    Text(
+                        approvedName,
+                        style = MaterialTheme.typography.titleLarge,
+                        modifier = Modifier.weight(1f),
+                        maxLines = 2,
+                        overflow = TextOverflow.Ellipsis,
+                    )
+                    if (
+                        upload.mode == SecretUploadMode.CREATE &&
+                        upload.state == SecretUploadRequestState.REVIEW_PENDING
+                    ) {
+                        IconButton(onClick = { editingName = true }) {
+                            Icon(Icons.Outlined.Edit, contentDescription = "Rename secret")
+                        }
                     }
                 }
-            }
-            InformationRow(
-                "Type",
-                if (upload.secretType == "ssh") "SSH key" else "Environment variables",
-            )
-            ClientIdentity(upload.clientName)
-            InformationRow("Received", formatTimestamp(request.receivedAt))
-            upload.description?.takeIf(String::isNotBlank)?.let {
-                Column(verticalArrangement = Arrangement.spacedBy(2.dp)) {
-                    Text(
-                        "Description",
-                        style = MaterialTheme.typography.labelMedium,
-                        color = MaterialTheme.colorScheme.onSurfaceVariant,
-                    )
+                Text(
+                    (if (upload.secretType == "ssh") "SSH key" else "Environment variables") +
+                        " · " + when (upload.mode) {
+                            SecretUploadMode.CREATE -> "New secret"
+                            SecretUploadMode.UPDATE -> "Update"
+                            SecretUploadMode.REPLACE -> "Replace"
+                        },
+                    color = MaterialTheme.colorScheme.onSurfaceVariant,
+                )
+                ClientIdentity(upload.clientName)
+                upload.description?.takeIf(String::isNotBlank)?.let {
                     Text(it)
+                }
+                FlowRow(
+                    horizontalArrangement = Arrangement.spacedBy(12.dp),
+                    verticalArrangement = Arrangement.spacedBy(8.dp),
+                    itemVerticalAlignment = Alignment.CenterVertically,
+                ) {
+                    StatusLine(
+                        upload.state.label(),
+                        upload.state == SecretUploadRequestState.VERIFICATION_FAILED,
+                        attention = upload.state == SecretUploadRequestState.REVIEW_PENDING,
+                        subdued = upload.state == SecretUploadRequestState.REJECTED ||
+                            upload.state == SecretUploadRequestState.ENDED,
+                    )
+                    Text(formatTimestamp(request.receivedAt), style = MaterialTheme.typography.bodySmall,
+                        color = MaterialTheme.colorScheme.onSurfaceVariant)
                 }
             }
         }
@@ -270,27 +281,11 @@ private fun EnvironmentVariableUploadDetails(
     onReveal: (SecretUploadVariableDetails) -> Unit,
     onSensitivityChange: (SecretUploadVariableDetails, Boolean) -> Unit,
 ) {
-    if (upload.mode != SecretUploadMode.CREATE) {
-        Card(
-            colors = CardDefaults.cardColors(
-                containerColor = MaterialTheme.colorScheme.surfaceContainer,
-            ),
-        ) {
-            Column(
-                Modifier.fillMaxWidth().padding(16.dp),
-                verticalArrangement = Arrangement.spacedBy(10.dp),
-            ) {
-                Text(
-                    "Changes to the existing secret",
-                    style = MaterialTheme.typography.titleMedium,
-                )
-                ChangeGroup("New", upload.addedVariables)
-                ChangeGroup("Updated", upload.changedVariables)
-                ChangeGroup("Removed", upload.removedVariables)
-                ChangeGroup("Unchanged", upload.unchangedVariables, subdued = true)
-            }
-        }
-    }
+    ChangeGroup(
+        if (upload.state == SecretUploadRequestState.APPROVED) "Removed" else "Proposed removals",
+        upload.removedVariables,
+    )
+    ChangeGroup("Not changed", upload.unchangedVariables - upload.variableNames.toSet(), subdued = true)
 
     Text(
         if (upload.state == SecretUploadRequestState.REVIEW_PENDING) {
@@ -302,8 +297,7 @@ private fun EnvironmentVariableUploadDetails(
     )
     if (upload.state == SecretUploadRequestState.REVIEW_PENDING) {
         Text(
-            "Values are hidden by default. Reveal any value you want to inspect, and " +
-                "choose which values remain sensitive after saving.",
+            "Choose which values remain sensitive after saving. Revealing them is optional.",
             style = MaterialTheme.typography.bodyMedium,
             color = MaterialTheme.colorScheme.onSurfaceVariant,
         )
@@ -321,6 +315,9 @@ private fun EnvironmentVariableUploadDetails(
     }
     if (upload.state == SecretUploadRequestState.REVIEW_PENDING) {
         upload.variables.forEach { variable ->
+            LaunchedEffect(variable.id, variable.sensitive, variable.id in revealedValues) {
+                if (!variable.sensitive && variable.id !in revealedValues) onReveal(variable)
+            }
             Surface(
                 color = MaterialTheme.colorScheme.surfaceContainerLow,
                 shape = MaterialTheme.shapes.medium,
@@ -331,9 +328,10 @@ private fun EnvironmentVariableUploadDetails(
                 ) {
                     val value = revealedValues[variable.id]
                     val changeLabel = when {
+                        upload.mode == SecretUploadMode.CREATE -> null
                         variable.name in upload.addedVariables -> "New"
-                        variable.name in upload.changedVariables -> "Updated"
-                        else -> null
+                        variable.name in upload.changedVariables -> "Will update"
+                        else -> "Unchanged"
                     }
                     Row(
                         modifier = Modifier.fillMaxWidth(),
@@ -370,11 +368,7 @@ private fun EnvironmentVariableUploadDetails(
                         ) {
                             Text("Sensitive", style = MaterialTheme.typography.labelMedium)
                             Text(
-                                if (variable.sensitive) {
-                                    "Protected by approval settings"
-                                } else {
-                                    "Provided without approval"
-                                },
+                                sensitivityDescription(variable.sensitive),
                                 style = MaterialTheme.typography.bodySmall,
                                 color = MaterialTheme.colorScheme.onSurfaceVariant,
                             )
@@ -391,14 +385,20 @@ private fun EnvironmentVariableUploadDetails(
                             },
                         )
                     }
-                    OutlinedTextField(
-                        value = value ?: "••••••••",
-                        onValueChange = {},
-                        readOnly = true,
-                        label = { Text("Uploaded value") },
-                        minLines = 1,
-                        maxLines = 6,
-                        trailingIcon = {
+                    Row(
+                        modifier = Modifier.fillMaxWidth(),
+                        verticalAlignment = Alignment.CenterVertically,
+                    ) {
+                        Column(Modifier.weight(1f)) {
+                            Text("Uploaded value", style = MaterialTheme.typography.labelMedium,
+                                color = MaterialTheme.colorScheme.onSurfaceVariant)
+                            SelectionContainer {
+                                Text(value ?: if (variable.sensitive) "••••••••" else "Value unavailable",
+                                    fontFamily = FontFamily.Monospace,
+                                    style = MaterialTheme.typography.bodyLarge)
+                            }
+                        }
+                        if (variable.sensitive) {
                             IconButton(
                                 onClick = {
                                     onReveal(variable)
@@ -417,12 +417,8 @@ private fun EnvironmentVariableUploadDetails(
                                     },
                                 )
                             }
-                        },
-                        textStyle = MaterialTheme.typography.bodyLarge.copy(
-                            fontFamily = FontFamily.Monospace,
-                        ),
-                        modifier = Modifier.fillMaxWidth(),
-                    )
+                        }
+                    }
                 }
             }
         }
@@ -465,6 +461,7 @@ private fun SshKeyUploadDetails(upload: SecretUploadRequestDetails) {
         }
     }
     upload.publicKey?.let { publicKey ->
+        val key = remember(publicKey) { SshKeyCodec().importOpenSshPublicKey(publicKey) }
         Surface(
             color = MaterialTheme.colorScheme.surfaceContainerLow,
             shape = MaterialTheme.shapes.medium,
@@ -474,35 +471,25 @@ private fun SshKeyUploadDetails(upload: SecretUploadRequestDetails) {
                 verticalArrangement = Arrangement.spacedBy(10.dp),
             ) {
                 Text(
-                    if (upload.keyChanged || upload.mode == SecretUploadMode.CREATE) {
-                        "Incoming public key"
-                    } else {
-                        "Public key"
-                    },
+                    "Uploaded SSH key",
                     style = MaterialTheme.typography.titleMedium,
                 )
+                Text("Public identity of the uploaded private key.",
+                    color = MaterialTheme.colorScheme.onSurfaceVariant)
                 DetailValue(
                     "Algorithm",
-                    when (publicKey.substringBefore(' ')) {
-                        "ssh-ed25519" -> "Ed25519"
-                        "ssh-rsa" -> "RSA"
-                        else -> publicKey.substringBefore(' ')
-                    },
+                    "${key.algorithm.displayName()} · ${SshKeyCodec().bitLength(key)} bits",
                 )
-                upload.fingerprint?.let { DetailValue("Fingerprint", it, true) }
+                if (key.comment.isNotBlank()) DetailValue("Comment", key.comment)
+                DetailValue("OpenSSH fingerprint", key.fingerprint, true)
+                DetailValue("SHA-256 fingerprint (hex)", key.fingerprintHex, true)
                 Column(verticalArrangement = Arrangement.spacedBy(3.dp)) {
                     Text(
                         "OpenSSH public key",
                         style = MaterialTheme.typography.labelMedium,
                         color = MaterialTheme.colorScheme.onSurfaceVariant,
                     )
-                    SelectionContainer {
-                        Text(
-                            publicKey,
-                            fontFamily = FontFamily.Monospace,
-                            style = MaterialTheme.typography.bodySmall,
-                        )
-                    }
+                    ExactText(publicKey)
                 }
             }
         }

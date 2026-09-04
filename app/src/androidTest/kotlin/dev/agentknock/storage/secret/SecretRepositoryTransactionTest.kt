@@ -172,6 +172,14 @@ class SecretRepositoryTransactionTest {
                 now = 5L,
             ).size,
         )
+        val summaries = repository(audit).observeSecrets().first()
+        assertEquals(2, summaries.size)
+        summaries.forEach { secret ->
+            val grant = secret.temporaryAccessGrants.single()
+            assertEquals(secret.id, grant.secretId)
+            assertEquals("workstation", grant.clientId)
+            assertEquals(1_000L, grant.expiresAt)
+        }
         assertEquals(
             listOf(
                 AuditEventType.TEMPORARY_ACCESS_ALLOWED,

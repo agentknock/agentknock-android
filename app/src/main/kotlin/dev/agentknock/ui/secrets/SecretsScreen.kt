@@ -28,6 +28,7 @@ import androidx.compose.runtime.key
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
 import androidx.compose.runtime.rememberCoroutineScope
+import androidx.compose.runtime.saveable.rememberSaveable
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
@@ -43,6 +44,7 @@ import dev.agentknock.storage.secret.SecretDetails
 import dev.agentknock.storage.secret.SecretType
 import dev.agentknock.storage.secret.SshKeyAlgorithm
 import dev.agentknock.ui.components.AdaptiveListDetail
+import dev.agentknock.ui.components.ProseEditorScreen
 import kotlinx.coroutines.flow.collectLatest
 import kotlinx.coroutines.launch
 import java.util.UUID
@@ -68,6 +70,8 @@ internal fun SecretsScreen(
     val context = LocalContext.current
     val resources = LocalResources.current
     var secretPendingDeletion by remember { mutableStateOf<SecretDetails?>(null) }
+    var editingGeneralInstructions by rememberSaveable { mutableStateOf(false) }
+    var generalInstructions by rememberSaveable { mutableStateOf("") }
 
     val target = when (val selected = content) {
         SecretsContent.List -> null
@@ -110,6 +114,23 @@ internal fun SecretsScreen(
         )
     }
 
+    if (editingGeneralInstructions) {
+        LaunchedEffect(Unit) { onTopLevelChanged(false) }
+        ProseEditorScreen(
+            title = "AI review instructions",
+            value = generalInstructions,
+            originalValue = configuration?.active?.instructions.orEmpty(),
+            supportingText = "These instructions apply to every AI review. Secret and client " +
+                "instructions add more specific context.",
+            onValueChange = { generalInstructions = it },
+            onSave = {
+                viewModel.saveGeneralInstructions(generalInstructions.trim())
+                editingGeneralInstructions = false
+            },
+            onBack = { editingGeneralInstructions = false },
+        )
+        return
+    }
     if (editor !is SecretsEditor.None) {
         LaunchedEffect(Unit) { onTopLevelChanged(false) }
         SecretsEditorHost(
@@ -163,7 +184,7 @@ internal fun SecretsScreen(
         onBack = onBack,
         onEditSecret = { viewModel.startEditingSecret(secret) },
         onDeleteSecret = { secretPendingDeletion = secret },
-        onAddVariable = { viewModel.startNewEnvironmentVariable(secret.id) },
+        onAddVariable = { viewModel.startNewEnvironmentVariable(secret) },
         onReplaceSshKey = { viewModel.startReplacingSshKey(secret) },
         onSaveSshComment = { comment -> viewModel.saveSshComment(secret.id, comment) },
         onCopyPublicKey = { copyPublicKey(secret) },
@@ -182,10 +203,6 @@ internal fun SecretsScreen(
             viewModel.endTemporaryAccess(secret.id, grant.clientId, grant.operation)
         },
     )
-
-    fun saveGeneralInstructions(instructions: String) {
-        viewModel.saveGeneralInstructions(instructions)
-    }
 
     fun clearSelection() {
         when (target) {
@@ -208,6 +225,7 @@ internal fun SecretsScreen(
             list = { listModifier ->
                 SecretList(
                     secrets = secrets,
+                    clients = clients,
                     pendingUploads = pendingUploads,
                     selectedSecretId = (target as? SecretTarget.Stored)?.id,
                     selectedUploadRequestId = (target as? SecretTarget.Upload)?.requestId,
@@ -216,7 +234,10 @@ internal fun SecretsScreen(
                     onCreate = viewModel::startNewSecret,
                     generalInstructions = configuration?.active?.instructions.orEmpty(),
                     aiReviewActive = aiReviewActive,
-                    onSaveGeneralInstructions = ::saveGeneralInstructions,
+                    onEditGeneralInstructions = {
+                        generalInstructions = configuration?.active?.instructions.orEmpty()
+                        editingGeneralInstructions = true
+                    },
                     onOpenSettings = onOpenSettings,
                     modifier = listModifier,
                 )
@@ -257,7 +278,13 @@ internal fun SecretsScreen(
     secretPendingDeletion?.let { secret ->
         DeleteDialog(
             title = stringResource(R.string.delete_secret_question, secret.name),
-            explanation = stringResource(R.string.delete_secret_explanation),
+            explanation = if (secret.type == SecretType.SSH) {
+                "This deletes the private key from Agentknock. It does not remove its public key " +
+                    "from servers or services where you have registered it."
+            } else {
+                "This permanently deletes the stored environment values. It does not revoke " +
+                    "credentials at the services that issued them."
+            },
             onDismiss = { secretPendingDeletion = null },
             onDelete = {
                 secretPendingDeletion = null

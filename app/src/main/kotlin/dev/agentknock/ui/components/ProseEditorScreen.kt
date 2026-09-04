@@ -8,12 +8,21 @@ import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.padding
+import androidx.compose.foundation.layout.consumeWindowInsets
+import androidx.compose.foundation.layout.imePadding
 import androidx.compose.material3.Button
+import androidx.compose.material3.AlertDialog
+import androidx.compose.material3.MaterialTheme
+import androidx.compose.material3.TextButton
 import androidx.compose.material3.OutlinedTextField
 import androidx.compose.material3.Scaffold
 import androidx.compose.material3.Text
 import androidx.compose.material3.TopAppBar
 import androidx.compose.runtime.Composable
+import androidx.compose.runtime.getValue
+import androidx.compose.runtime.mutableStateOf
+import androidx.compose.runtime.saveable.rememberSaveable
+import androidx.compose.runtime.setValue
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.unit.dp
 
@@ -26,35 +35,54 @@ internal fun ProseEditorScreen(
     onValueChange: (String) -> Unit,
     onSave: () -> Unit,
     onBack: () -> Unit,
+    owner: String? = null,
 ) {
-    BackHandler(onBack = onBack)
+    var confirmDiscard by rememberSaveable { mutableStateOf(false) }
+    val dirty = value.trim() != originalValue
+    fun requestBack() {
+        if (dirty) confirmDiscard = true else onBack()
+    }
+    BackHandler(onBack = ::requestBack)
     Scaffold(
         topBar = {
             TopAppBar(
                 title = { Text(title) },
-                navigationIcon = { NavigationBackButton(onBack) },
+                navigationIcon = { NavigationBackButton(::requestBack) },
             )
         },
     ) { padding ->
         Column(
-            Modifier.fillMaxSize().padding(padding).padding(20.dp),
+            Modifier.fillMaxSize().padding(padding).consumeWindowInsets(padding)
+                .imePadding().padding(20.dp),
             verticalArrangement = Arrangement.spacedBy(16.dp),
         ) {
-            Text(supportingText)
+            owner?.let { Text(it, style = MaterialTheme.typography.titleMedium) }
+            Text(supportingText, color = MaterialTheme.colorScheme.onSurfaceVariant)
             OutlinedTextField(
                 value = value,
                 onValueChange = onValueChange,
                 label = { Text("Instructions") },
-                minLines = 8,
+                minLines = 3,
                 modifier = Modifier.fillMaxWidth().weight(1f),
             )
             Button(
                 onClick = onSave,
-                enabled = value.trim() != originalValue,
+                enabled = dirty,
                 modifier = Modifier.fillMaxWidth(),
             ) {
                 Text("Save")
             }
         }
+    }
+    if (confirmDiscard) {
+        AlertDialog(
+            onDismissRequest = { confirmDiscard = false },
+            title = { Text("Discard changes?") },
+            text = { Text("Your unsaved instructions will be lost.") },
+            confirmButton = { TextButton(onClick = onBack) { Text("Discard") } },
+            dismissButton = {
+                TextButton(onClick = { confirmDiscard = false }) { Text("Keep editing") }
+            },
+        )
     }
 }

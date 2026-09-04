@@ -30,6 +30,7 @@ import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.semantics.Role
+import androidx.compose.ui.text.font.FontFamily
 import androidx.compose.ui.text.input.KeyboardCapitalization
 import androidx.compose.ui.text.input.KeyboardType
 import androidx.compose.ui.text.input.PasswordVisualTransformation
@@ -80,25 +81,21 @@ internal fun EnvironmentVariableDrafts(
                     Modifier.fillMaxWidth().padding(14.dp),
                     verticalArrangement = Arrangement.spacedBy(10.dp),
                 ) {
-                    Row(verticalAlignment = Alignment.CenterVertically) {
-                        Text(
-                            variable.name.ifBlank { "New environment variable" },
-                            style = MaterialTheme.typography.titleMedium,
-                            modifier = Modifier.weight(1f),
-                        )
-                        IconButton(
-                            onClick = { onChange(variables.filterNot { it.id == variable.id }) },
-                            enabled = enabled,
-                        ) {
-                            Icon(Icons.Outlined.Delete, contentDescription = "Remove variable")
-                        }
-                    }
                     OutlinedTextField(
                         value = variable.name,
                         onValueChange = { name ->
                             onChange(variables.replace(variable.id) { it.copy(name = name) })
                         },
-                        label = { Text("Name") },
+                        label = { Text("Environment variable name") },
+                        trailingIcon = {
+                            IconButton(
+                                onClick = { onChange(variables.filterNot { it.id == variable.id }) },
+                                enabled = enabled,
+                            ) {
+                                Icon(Icons.Outlined.Delete, contentDescription = "Remove environment variable")
+                            }
+                        },
+                        textStyle = MaterialTheme.typography.bodyLarge.copy(fontFamily = FontFamily.Monospace),
                         singleLine = true,
                         enabled = enabled,
                         isError = invalidName || variable.name in duplicateNames,
@@ -137,7 +134,7 @@ internal fun EnvironmentVariableDrafts(
                         Column(Modifier.weight(1f)) {
                             Text("Sensitive")
                             Text(
-                                "Protected values require approval before use.",
+                                sensitivityDescription(variable.sensitive),
                                 style = MaterialTheme.typography.bodySmall,
                                 color = MaterialTheme.colorScheme.onSurfaceVariant,
                             )
@@ -166,6 +163,7 @@ private fun EnvironmentVariableDraftValue(
         value = variable.value,
         onValueChange = { onChange(variable.copy(value = it)) },
         label = { Text("Value") },
+        textStyle = MaterialTheme.typography.bodyLarge.copy(fontFamily = FontFamily.Monospace),
         enabled = enabled,
         minLines = 1,
         maxLines = 6,
@@ -198,3 +196,9 @@ private fun List<EnvironmentVariableDraft>.replace(
     id: Long,
     transform: (EnvironmentVariableDraft) -> EnvironmentVariableDraft,
 ): List<EnvironmentVariableDraft> = map { if (it.id == id) transform(it) else it }
+
+internal fun sensitivityDescription(sensitive: Boolean): String = if (sensitive) {
+    "Follows approval settings. Hidden on this device until revealed."
+} else {
+    "Visible and provided without approval; may be shared with AI."
+}

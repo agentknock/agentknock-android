@@ -23,6 +23,7 @@ import androidx.compose.material.icons.automirrored.outlined.NavigateNext
 import androidx.compose.material.icons.outlined.Add
 import androidx.compose.material.icons.outlined.ContentCopy
 import androidx.compose.material.icons.outlined.Edit
+import androidx.compose.material.icons.outlined.Check
 import androidx.compose.material.icons.outlined.Lock
 import androidx.compose.material.icons.outlined.MoreVert
 import androidx.compose.material.icons.outlined.Visibility
@@ -72,6 +73,7 @@ import dev.agentknock.ui.components.InformationRow
 import dev.agentknock.ui.components.InformationSurface
 import dev.agentknock.ui.components.NavigationBackButton
 import dev.agentknock.ui.components.ProseEditorScreen
+import dev.agentknock.ui.components.ExactText
 
 internal data class SecretDetailActions(
     val onBack: () -> Unit,
@@ -116,6 +118,7 @@ internal fun SecretDetail(
     if (editingInstructions) {
         ProseEditorScreen(
             title = "Secret instructions",
+            owner = secret.name,
             value = instructions,
             originalValue = secret.instructions,
             supportingText =
@@ -174,22 +177,20 @@ internal fun SecretDetail(
         ) {
             item {
                 InformationSurface {
-                    Text(
-                        secret.description.ifBlank { "No description" },
-                        style = MaterialTheme.typography.bodyLarge,
-                        color = if (secret.description.isBlank()) {
-                            MaterialTheme.colorScheme.onSurfaceVariant
-                        } else {
-                            MaterialTheme.colorScheme.onSurface
-                        },
-                    )
-                    TextButton(
-                        onClick = actions.onEditSecret,
-                        modifier = Modifier.align(Alignment.End),
-                    ) {
-                        Icon(Icons.Outlined.Edit, contentDescription = null)
-                        Spacer(Modifier.width(6.dp))
-                        Text("Edit name and description")
+                    Row(verticalAlignment = Alignment.CenterVertically) {
+                        Text(
+                            secret.description.ifBlank { "No description" },
+                            modifier = Modifier.weight(1f),
+                            style = MaterialTheme.typography.bodyLarge,
+                            color = if (secret.description.isBlank()) {
+                                MaterialTheme.colorScheme.onSurfaceVariant
+                            } else {
+                                MaterialTheme.colorScheme.onSurface
+                            },
+                        )
+                        IconButton(onClick = actions.onEditSecret) {
+                            Icon(Icons.Outlined.Edit, contentDescription = "Edit name and description")
+                        }
                     }
                 }
             }
@@ -277,8 +278,13 @@ internal fun SecretDetail(
                 Column(verticalArrangement = Arrangement.spacedBy(4.dp)) {
                     Text("Access", style = MaterialTheme.typography.titleLarge)
                     Text(
-                        "Ask AI can approve, deny, or pass the decision to you. " +
-                            "Temporary access is offered when you decide.",
+                        if (secret.type == SecretType.SSH) {
+                            "These settings control Git signing and SSH authentication. " +
+                                "Reading the public key needs no approval."
+                        } else {
+                            "These settings control disclosure of sensitive values. " +
+                                "Non-sensitive values need no approval."
+                        },
                         style = MaterialTheme.typography.bodySmall,
                         color = MaterialTheme.colorScheme.onSurfaceVariant,
                     )
@@ -286,25 +292,16 @@ internal fun SecretDetail(
             }
             item {
                 InformationSurface {
-                    ApprovalSettingRow(
-                        title = "AI review instructions",
-                        value = secret.instructions.ifBlank { "None" },
-                        onClick = {
-                            instructions = secret.instructions
-                            editingInstructions = true
-                        },
-                    )
                     if (secret.temporaryAccessGrants.isNotEmpty()) {
-                        HorizontalDivider()
                         SecretTemporaryApprovals(
                             grants = secret.temporaryAccessGrants,
                             clients = clients,
                             onEnd = actions.onEndTemporaryAccess,
                         )
+                        HorizontalDivider()
                     }
-                    HorizontalDivider()
                     ApprovalModeRow(
-                        title = "Default for all clients",
+                        title = "Default for future uses",
                         selected = secret.approvalMode,
                         inherited = false,
                         onSelect = actions.onSetApprovalMode,
@@ -324,6 +321,15 @@ internal fun SecretDetail(
                             },
                         )
                     }
+                    HorizontalDivider()
+                    ApprovalSettingRow(
+                        title = "AI review instructions",
+                        value = secret.instructions.ifBlank { "None" },
+                        onClick = {
+                            instructions = secret.instructions
+                            editingInstructions = true
+                        },
+                    )
                 }
             }
             item {
@@ -372,7 +378,8 @@ private fun SecretTemporaryApprovals(
     Column(verticalArrangement = Arrangement.spacedBy(10.dp)) {
         Text("Temporary access", style = MaterialTheme.typography.titleMedium)
         Text(
-            "These uses are already approved and will not ask you or AI again before they end.",
+            "These uses skip manual and AI review until they end. The saved settings below " +
+                "apply again afterwards; Deny still blocks access.",
             color = MaterialTheme.colorScheme.onSurfaceVariant,
         )
         grants.forEachIndexed { index, grant ->
@@ -469,6 +476,9 @@ private fun ApprovalModeRow(
                         style = MaterialTheme.typography.bodySmall,
                         color = MaterialTheme.colorScheme.onSurfaceVariant,
                     )
+                } else if (onUseDefault != null) {
+                    Text("Custom setting", style = MaterialTheme.typography.bodySmall,
+                        color = MaterialTheme.colorScheme.onSurfaceVariant)
                 }
             }
             onUseDefault?.let { clear ->
@@ -478,12 +488,17 @@ private fun ApprovalModeRow(
         FlowRow(
             horizontalArrangement = Arrangement.spacedBy(8.dp),
             verticalArrangement = Arrangement.spacedBy(4.dp),
+            maxItemsInEachRow = 2,
         ) {
             approvalModes.forEach { mode ->
                 androidx.compose.material3.FilterChip(
                     selected = selected == mode,
                     onClick = { onSelect(mode) },
                     label = { Text(mode.displayName()) },
+                    modifier = Modifier.weight(1f),
+                    leadingIcon = if (selected == mode) {
+                        { Icon(Icons.Outlined.Check, contentDescription = null, modifier = Modifier.size(18.dp)) }
+                    } else null,
                 )
             }
         }
@@ -544,13 +559,7 @@ private fun SshPublicKeyCard(
                     style = MaterialTheme.typography.labelMedium,
                     color = MaterialTheme.colorScheme.onSurfaceVariant,
                 )
-                SelectionContainer {
-                    Text(
-                        key.publicKey,
-                        fontFamily = FontFamily.Monospace,
-                        style = MaterialTheme.typography.bodySmall,
-                    )
-                }
+                ExactText(key.publicKey)
             }
             if (!key.privateKeyAvailable) {
                 Text(

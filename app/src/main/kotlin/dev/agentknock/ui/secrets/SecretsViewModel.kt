@@ -292,11 +292,12 @@ internal class SecretsViewModel(
         }
     }
 
-    fun startNewEnvironmentVariable(secretId: String) {
+    fun startNewEnvironmentVariable(secret: SecretDetails) {
         editorState.value = SecretsEditor.Variable(
             session = newEditorSession(),
             state = VariableEditorState(
-                secretId = secretId,
+                secretId = secret.id,
+                secretName = secret.name,
                 variable = null,
                 currentValue = null,
                 name = "",
@@ -311,10 +312,13 @@ internal class SecretsViewModel(
         variable: EnvironmentVariableMetadata,
         currentValue: String?,
     ) {
+        val secret = (content.value as? SecretsContent.Stored)?.details
+            ?.takeIf { it.id == variable.secretId } ?: return
         editorState.value = SecretsEditor.Variable(
             session = newEditorSession(),
             state = VariableEditorState(
                 secretId = variable.secretId,
+                secretName = secret.name,
                 variable = variable,
                 currentValue = currentValue,
                 name = variable.name,
@@ -900,7 +904,9 @@ internal class SecretsViewModel(
             ) {
                 is ProtectedActionResult.AuthenticationFailed -> publish(result.message)
                 is ProtectedActionResult.Completed -> when (result.value) {
-                    SecretUploadSensitivityResult.Changed -> Unit
+                    SecretUploadSensitivityResult.Changed -> {
+                        if (sensitive) revealedUploadValuesState.update { it - variable.id }
+                    }
                     SecretUploadSensitivityResult.NotFound ->
                         publish(R.string.sensitivity_update_failed)
                     is SecretUploadSensitivityResult.AuthenticationRequired ->
