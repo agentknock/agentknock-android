@@ -88,8 +88,8 @@ internal class SshAuthenticationRequests(
         launchAiReview: (
             requestId: String,
             requestJson: String,
-            review: suspend () -> AiReview,
-            complete: suspend (AiReview) -> Unit,
+            review: suspend () -> AiReviewAttempt,
+            complete: suspend (AiReviewAttempt) -> Unit,
         ) -> Boolean,
     ): ProcessedRelayMessage? {
         val now = currentTimeMillis()
@@ -192,7 +192,7 @@ internal class SshAuthenticationRequests(
         )
 
         suspend fun finishReview(
-            reviewResult: AiReview?,
+            reviewResult: AiReviewAttempt?,
             requestAlreadyInserted: Boolean,
         ): ProcessedRelayMessage? {
             val currentClient = if (needsAiReview) dao.getClient(client.clientId) else client
@@ -244,7 +244,7 @@ internal class SshAuthenticationRequests(
                     explanation = "The client, SSH key, instructions, or approval settings changed during AI review.",
                 )
             } else {
-                reviewResult
+                reviewResult?.review
             }
             val evaluation = (if (aiInputsChanged) currentEvaluation else initialEvaluation)
                 ?.copy(aiReview = aiReview)
@@ -381,7 +381,9 @@ internal class SshAuthenticationRequests(
                     clientId = client.clientId,
                     clientName = client.name,
                     relayRequestId = relayRequestId,
-                    data = finalAuthentication.auditData(),
+                    data = finalRequest.requestAuditData() + finalAuthentication.auditData() +
+                        (reviewResult?.auditData(checkNotNull(aiReview))
+                            ?: (aiReview?.auditData() ?: emptyMap())),
                 )
             }
             val persisted = if (requestAlreadyInserted) {
@@ -398,7 +400,8 @@ internal class SshAuthenticationRequests(
                         clientId = client.clientId,
                         clientName = client.name,
                         relayRequestId = relayRequestId,
-                        data = finalAuthentication.auditData(),
+                        data = finalRequest.requestAuditData() + finalAuthentication.auditData() +
+                            (reviewResult?.auditData(aiReview) ?: aiReview.auditData()),
                     ),
                     automaticDecisionAudit = automaticDecisionAudit,
                 )
@@ -1020,7 +1023,32 @@ internal class SshAuthenticationRequests(
                         clientId = currentRequest.clientId,
                         clientName = currentRequest.clientNameSnapshot,
                         relayRequestId = currentRequest.id,
-                        data = authentication.auditData(),
+                        data = currentRequest.requestAuditData() + authentication.auditData() +
+                            auditDataOf(
+                                "completion_valid" to valid,
+                                "completion_result" to when (completionResult) {
+                                    is SshAuthenticationCompletion.Approved ->
+                                        ApprovalCompletionResult.APPROVED.storedName
+                                    is SshAuthenticationCompletion.Denied ->
+                                        ApprovalCompletionResult.DENIED.storedName
+                                    is SshAuthenticationCompletion.Aborted ->
+                                        ApprovalCompletionResult.ABORTED.storedName
+                                    null -> null
+                                },
+                                "completion_reason" to when (completionResult) {
+                                    is SshAuthenticationCompletion.Denied -> completionResult.reason
+                                    is SshAuthenticationCompletion.Aborted -> completionResult.reason
+                                    else -> null
+                                },
+                                "completion_message" to when (completionResult) {
+                                    is SshAuthenticationCompletion.Denied -> completionResult.message
+                                    is SshAuthenticationCompletion.Aborted -> completionResult.message
+                                    else -> null
+                                },
+                                "returned_client_software" to completionResult?.clientSoftware?.let {
+                                    json.parseToJsonElement(json.encodeToString(it))
+                                },
+                            ),
                     ),
                 ),
                 now,
@@ -1067,7 +1095,11 @@ internal class SshAuthenticationRequests(
                         clientId = currentRequest.clientId,
                         clientName = currentRequest.clientNameSnapshot,
                         relayRequestId = currentRequest.id,
-                        data = authentication.auditData(),
+                        data = currentRequest.requestAuditData() + authentication.auditData() +
+                            auditDataOf(
+                                "completion_valid" to false,
+                                "transport_error" to message,
+                            ),
                     ),
                 ),
                 now,
@@ -1294,16 +1326,22 @@ internal class SshAuthenticationRequests(
         evaluation: ApprovalEvaluation,
         policies: List<SecretApprovalPolicy>,
         credentials: RelayDeviceCredentials,
-    ): AiReview {
-        val elapsedSeconds = parentElapsedSeconds ?: return AiReview(
-            decision = AiReviewDecision.ASK_USER,
-            explanation = "The relative timing of the parent invocation is unavailable.",
+    ): AiReviewAttempt {
+        val elapsedSeconds = parentElapsedSeconds ?: return AiReviewAttempt(
+            review = AiReview(
+                decision = AiReviewDecision.ASK_USER,
+                explanation = "The relative timing of the parent invocation is unavailable.",
+            ),
+            request = null,
         )
         val invocationSecrets = invocation.providedSecretsJson?.let {
             decodeStoredApprovalReviewSecretFacts(it)
-        } ?: return AiReview(
-            decision = AiReviewDecision.ASK_USER,
-            explanation = "The parent invocation context is unavailable.",
+        } ?: return AiReviewAttempt(
+            review = AiReview(
+                decision = AiReviewDecision.ASK_USER,
+                explanation = "The parent invocation context is unavailable.",
+            ),
+            request = null,
         )
         val request = approvalReviewSshAuthenticationRequest(
             client = client,
@@ -1316,7 +1354,10 @@ internal class SshAuthenticationRequests(
             policies = policies,
             deviceInstructions = credentials.instructions,
         )
-        return performAiReview(approvalReviewer, credentials, request)
+        return AiReviewAttempt(
+            review = performAiReview(approvalReviewer, credentials, request),
+            request = request,
+        )
     }
 
     private suspend fun credentialsForClient(client: ClientEntity): RelayDeviceCredentials? =
@@ -1388,7 +1429,7 @@ internal class SshAuthenticationRequests(
         clientId = request.clientId,
         clientName = request.clientNameSnapshot,
         relayRequestId = request.id,
-        data = authentication.auditData(),
+        data = request.requestAuditData() + authentication.auditData(),
     )
 
     private fun decisionAudit(
@@ -1408,7 +1449,9 @@ internal class SshAuthenticationRequests(
         clientId = request.clientId,
         clientName = request.clientNameSnapshot,
         relayRequestId = request.id,
-        data = authentication.auditData(),
+        data = request.requestAuditData() + authentication.copy(
+            decision = decision.storedName,
+        ).auditData(),
     )
 
     private fun SshAuthenticationRequestEntity.auditData() = auditDataOf(
@@ -1418,6 +1461,12 @@ internal class SshAuthenticationRequests(
         "signature_algorithm" to algorithm,
         "host_key_algorithm" to hostKeyAlgorithm,
         "host_key_fingerprint" to hostKeyFingerprint,
+        "approval_evaluation" to approvalEvaluationJson?.let(storedJson::parseToJsonElement),
+        "decision" to decision,
+        "completion_result" to completionResult,
+        "completion_reason" to completionReason,
+        "completion_message" to completionMessage,
+        "decided_at" to decidedAt,
     )
 
 }

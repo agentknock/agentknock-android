@@ -16,6 +16,7 @@ import dev.agentknock.storage.audit.AuditEventType
 import dev.agentknock.storage.audit.AuditOutcome
 import dev.agentknock.storage.audit.AuditRecord
 import dev.agentknock.storage.audit.AuditSink
+import dev.agentknock.storage.audit.auditDataOf
 import java.util.UUID
 import kotlinx.coroutines.CoroutineDispatcher
 import kotlinx.coroutines.Dispatchers
@@ -341,6 +342,21 @@ internal class DeviceIdentityRepository(
                                     },
                                     outcome = AuditOutcome.CHANGED,
                                     subject = candidate.address,
+                                    data = auditDataOf(
+                                        "device_identity_id" to candidate.id,
+                                        "device_id" to candidate.deviceId,
+                                        "pairing_address" to candidate.address,
+                                        "previous_device_identity_id" to previous?.id,
+                                        "previous_device_id" to previous?.deviceId,
+                                        "previous_pairing_address" to previous?.address,
+                                        "previous_pairing_enabled" to previous?.pairingEnabled,
+                                        "previous_instructions" to previous?.instructions,
+                                        "identity_role" to DeviceIdentityRole.ACTIVE.storedName,
+                                        "pairing_enabled" to candidate.pairingEnabled,
+                                        "instructions" to candidate.instructions,
+                                        "created_at" to candidate.createdAt,
+                                        "claim_attempted_at" to candidate.claimAttemptedAt,
+                                    ),
                                 ),
                             )
                             ClaimPairingAddressResult.Claimed
@@ -371,6 +387,8 @@ internal class DeviceIdentityRepository(
     suspend fun saveInstructions(instructions: String): Boolean {
         val normalized = instructions.trim()
         return writeTransaction.execute {
+            val active = dao.getIdentity(DeviceIdentityRole.ACTIVE.storedName)
+                ?: return@execute false
             val updated = dao.updateActiveInstructions(
                 activeRole = DeviceIdentityRole.ACTIVE.storedName,
                 instructions = normalized,
@@ -380,6 +398,13 @@ internal class DeviceIdentityRepository(
                     AuditRecord(
                         type = AuditEventType.GENERAL_AI_REVIEW_INSTRUCTIONS_CHANGED,
                         outcome = AuditOutcome.CHANGED,
+                        data = auditDataOf(
+                            "device_identity_id" to active.id,
+                            "device_id" to active.deviceId,
+                            "pairing_address" to active.address,
+                            "previous_instructions" to active.instructions,
+                            "instructions" to normalized,
+                        ),
                     ),
                 )
             }

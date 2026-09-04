@@ -8,6 +8,7 @@ import dev.agentknock.storage.audit.AuditEventType
 import dev.agentknock.storage.audit.AuditOutcome
 import dev.agentknock.storage.audit.AuditRecord
 import dev.agentknock.storage.audit.AuditSink
+import dev.agentknock.storage.audit.auditDataOf
 import kotlinx.serialization.decodeFromString
 import kotlinx.serialization.encodeToString
 import kotlinx.serialization.json.Json
@@ -110,6 +111,12 @@ internal class ClientRemovalRequests(
                         clientId = current.clientId,
                         clientName = current.clientNameSnapshot,
                         relayRequestId = current.id,
+                        data = current.requestAuditData() + auditDataOf(
+                            "completion_valid" to valid,
+                            "returned_client_software" to decoded?.let {
+                                storedJson.parseToJsonElement(storedJson.encodeToString(it))
+                            },
+                        ),
                     ),
                 ),
                 occurredAt = now,
@@ -145,6 +152,10 @@ internal class ClientRemovalRequests(
                             clientId = current.clientId,
                             clientName = current.clientNameSnapshot,
                             relayRequestId = current.id,
+                            data = current.requestAuditData() + auditDataOf(
+                                "transport_error" to message,
+                                "completion_confirmed" to false,
+                            ),
                         ),
                     ),
                     occurredAt = now,

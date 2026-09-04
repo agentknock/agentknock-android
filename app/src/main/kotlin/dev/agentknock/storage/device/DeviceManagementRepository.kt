@@ -8,6 +8,7 @@ import dev.agentknock.storage.audit.AuditEventType
 import dev.agentknock.storage.audit.AuditOutcome
 import dev.agentknock.storage.audit.AuditRecord
 import dev.agentknock.storage.audit.AuditSink
+import dev.agentknock.storage.audit.auditDataOf
 
 internal sealed interface DeviceManagementResult {
     data object Changed : DeviceManagementResult
@@ -47,6 +48,9 @@ internal class DeviceManagementRepository(
             )
         ) {
             is RelayEndpointResult.Success -> writeTransaction.execute {
+                val identity = checkNotNull(
+                    deviceIdentityDao.getIdentityById(active.deviceIdentityId),
+                )
                 check(
                     deviceIdentityDao.updatePairingEnabled(
                         identityId = active.deviceIdentityId,
@@ -62,6 +66,13 @@ internal class DeviceManagementRepository(
                             AuditEventType.NEW_PAIRINGS_PAUSED
                         },
                         outcome = AuditOutcome.CHANGED,
+                        data = auditDataOf(
+                            "device_identity_id" to active.deviceIdentityId,
+                            "device_id" to active.deviceId,
+                            "pairing_address" to identity.address,
+                            "previous_pairing_enabled" to identity.pairingEnabled,
+                            "pairing_enabled" to enabled,
+                        ),
                     ),
                 )
                 DeviceManagementResult.Changed

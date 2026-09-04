@@ -16,7 +16,6 @@ import dev.agentknock.storage.AgentknockDatabase
 import dev.agentknock.storage.RoomWriteTransaction
 import dev.agentknock.storage.approval.ApprovalAction
 import dev.agentknock.storage.approval.ApprovalEvaluation
-import dev.agentknock.storage.approval.AiReview
 import dev.agentknock.storage.approval.AiReviewDecision
 import dev.agentknock.storage.approval.SecretApprovalEvaluation
 import dev.agentknock.storage.audit.AuditDecisionSource
@@ -267,7 +266,7 @@ class SshAuthenticationRequestsTest {
             )
             val pending = checkNotNull(pendingReview)
             val mapped = pending.review()
-            assertEquals(relayDecision.toAiDecision(), mapped.decision)
+            assertEquals(relayDecision.toAiDecision(), mapped.review.decision)
             pending.complete(mapped)
             val stored = checkNotNull(
                 database.requestDao().getSshAuthenticationRequest(requestId),
@@ -1401,8 +1400,8 @@ class SshAuthenticationRequestsTest {
     }
 
     private data class PendingAiReview(
-        val review: suspend () -> AiReview,
-        val complete: suspend (AiReview) -> Unit,
+        val review: suspend () -> AiReviewAttempt,
+        val complete: suspend (AiReviewAttempt) -> Unit,
     )
 
     private fun reviewed(

@@ -77,8 +77,8 @@ internal class InvocationRequests(
         launchAiReview: (
             requestId: String,
             requestJson: String,
-            review: suspend () -> AiReview,
-            complete: suspend (AiReview) -> Unit,
+            review: suspend () -> AiReviewAttempt,
+            complete: suspend (AiReviewAttempt) -> Unit,
         ) -> Boolean,
     ): ProcessedRelayMessage? {
         val contents = runCatching {
@@ -159,7 +159,7 @@ internal class InvocationRequests(
             providedSecretsJson = initialProvidedSecretsJson,
         )
         suspend fun finishReview(
-            reviewResult: AiReview?,
+            reviewResult: AiReviewAttempt?,
             requestAlreadyInserted: Boolean,
         ): ProcessedRelayMessage? {
             val currentClient = if (needsAiReview) dao.getClient(client.clientId) else client
@@ -227,7 +227,7 @@ internal class InvocationRequests(
                     explanation = "The client, secret, instructions, or approval settings changed during AI review.",
                 )
             } else {
-                reviewResult
+                reviewResult?.review
             }
             val approvalEvaluation = (if (aiInputsChanged) {
                 currentApprovalEvaluation
@@ -364,7 +364,8 @@ internal class InvocationRequests(
                     clientId = client.clientId,
                     clientName = client.name,
                     relayRequestId = relayRequestId,
-                    data = finalSecretUse.auditData(),
+                    data = finalRequest.requestAuditData() + finalSecretUse.auditData() +
+                        (reviewResult?.auditData(reviewed) ?: reviewed.auditData()),
                 )
             }
             val automaticDecisionAudit = automaticDecision?.let { decision ->
@@ -395,7 +396,9 @@ internal class InvocationRequests(
                     clientId = client.clientId,
                     clientName = client.name,
                     relayRequestId = relayRequestId,
-                    data = finalSecretUse.auditData(),
+                    data = finalRequest.requestAuditData() + finalSecretUse.auditData() +
+                        (reviewResult?.auditData(checkNotNull(aiReview))
+                            ?: (aiReview?.auditData() ?: emptyMap())),
                 )
             }
             val persistence = if (requestAlreadyInserted) {
@@ -913,7 +916,32 @@ internal class InvocationRequests(
                         clientId = currentRequest.clientId,
                         clientName = currentRequest.clientNameSnapshot,
                         relayRequestId = currentRequest.id,
-                        data = secretUseRequest.auditData(),
+                        data = currentRequest.requestAuditData() + secretUseRequest.auditData() +
+                            auditDataOf(
+                                "completion_valid" to valid,
+                                "completion_result" to when (completionResult) {
+                                    is InvocationCompletion.Approved ->
+                                        ApprovalCompletionResult.APPROVED.storedName
+                                    is InvocationCompletion.Denied ->
+                                        ApprovalCompletionResult.DENIED.storedName
+                                    is InvocationCompletion.Aborted ->
+                                        ApprovalCompletionResult.ABORTED.storedName
+                                    null -> null
+                                },
+                                "completion_reason" to when (completionResult) {
+                                    is InvocationCompletion.Denied -> completionResult.reason
+                                    is InvocationCompletion.Aborted -> completionResult.reason
+                                    else -> null
+                                },
+                                "completion_message" to when (completionResult) {
+                                    is InvocationCompletion.Denied -> completionResult.message
+                                    is InvocationCompletion.Aborted -> completionResult.message
+                                    else -> null
+                                },
+                                "returned_client_software" to completionResult?.clientSoftware?.let {
+                                    json.parseToJsonElement(json.encodeToString(it))
+                                },
+                            ),
                     ),
                 ),
                 now,
@@ -969,7 +997,11 @@ internal class InvocationRequests(
                         clientId = currentRequest.clientId,
                         clientName = currentRequest.clientNameSnapshot,
                         relayRequestId = currentRequest.id,
-                        data = secretUseRequest.auditData(),
+                        data = currentRequest.requestAuditData() + secretUseRequest.auditData() +
+                            auditDataOf(
+                                "completion_valid" to false,
+                                "transport_error" to message,
+                            ),
                     ),
                 ),
                 now,
@@ -1044,7 +1076,7 @@ internal class InvocationRequests(
                             clientId = request.clientId,
                             clientName = request.clientNameSnapshot,
                             relayRequestId = request.id,
-                            data = secretUseRequest.auditData(),
+                            data = updatedRequest.requestAuditData() + updatedSecretUse.auditData(),
                         ),
                     ),
                     now,
@@ -1121,7 +1153,19 @@ internal class InvocationRequests(
                         clientId = request.clientId,
                         clientName = request.clientNameSnapshot,
                         relayRequestId = request.id,
-                        data = secretUseRequest.auditData(),
+                        data = request.requestAuditData() + secretUseRequest.copy(
+                            decision = ApprovalDecision.APPROVED.storedName,
+                            decisionSource = decisionSource,
+                            providedSecretsJson = providedSecretsJson,
+                            approvalEvaluationJson = if (temporaryAccessStarted) {
+                                evaluationJson
+                            } else {
+                                secretUseRequest.approvalEvaluationJson
+                            },
+                            completionReason = null,
+                            completionMessage = null,
+                            decidedAt = now,
+                        ).auditData(),
                     ),
                 ),
                 now,
@@ -1176,7 +1220,7 @@ internal class InvocationRequests(
         evaluation: ApprovalEvaluation,
         policies: List<SecretApprovalPolicy>,
         credentials: RelayDeviceCredentials,
-    ): AiReview {
+    ): AiReviewAttempt {
         val request = approvalReviewRequest(
             client = client,
             contents = contents,
@@ -1187,7 +1231,10 @@ internal class InvocationRequests(
             policies = policies,
             deviceInstructions = credentials.instructions,
         )
-        return performAiReview(approvalReviewer, credentials, request)
+        return AiReviewAttempt(
+            review = performAiReview(approvalReviewer, credentials, request),
+            request = request,
+        )
     }
 
     private fun secretUseRequestEntity(
@@ -1255,7 +1302,7 @@ internal class InvocationRequests(
         clientId = request.clientId,
         clientName = request.clientNameSnapshot,
         relayRequestId = request.id,
-        data = secretUseRequest.auditData(),
+        data = request.requestAuditData() + secretUseRequest.auditData(),
     )
 
     private fun SecretUseRequestEntity.auditData() = auditDataOf(
@@ -1274,6 +1321,19 @@ internal class InvocationRequests(
         "hostname" to hostname,
         "platform" to platform,
         "architecture" to architecture,
+        "machine_id" to machineId,
+        "os_version" to osVersion,
+        "contains_sensitive_material" to containsSensitiveMaterial,
+        "secret_details" to storedJson.parseToJsonElement(secretDetailsJson),
+        "provided_secrets" to providedSecretsJson?.let(storedJson::parseToJsonElement),
+        "missing_secrets" to storedJson.parseToJsonElement(missingSecretsJson),
+        "decision" to decision,
+        "decision_source" to decisionSource,
+        "approval_evaluation" to approvalEvaluationJson?.let(storedJson::parseToJsonElement),
+        "completion_result" to completionResult,
+        "completion_reason" to completionReason,
+        "completion_message" to completionMessage,
+        "decided_at" to decidedAt,
     )
 
     private fun encodeStringList(values: List<String>): String =

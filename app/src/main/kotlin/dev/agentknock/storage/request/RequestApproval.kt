@@ -14,6 +14,7 @@ import dev.agentknock.storage.approval.ApprovalEvaluation
 import dev.agentknock.storage.approval.RequestedSecretApproval
 import dev.agentknock.storage.audit.AuditDecisionSource
 import dev.agentknock.storage.audit.AuditOutcome
+import dev.agentknock.storage.audit.auditDataOf
 import dev.agentknock.storage.device.RelayDeviceCredentials
 import dev.agentknock.storage.secret.EnvironmentVariableSelection
 import dev.agentknock.storage.secret.RequestedSecretDescription
@@ -22,6 +23,7 @@ import dev.agentknock.storage.secret.SecretApprovalPolicy
 import dev.agentknock.storage.secret.SecretValues
 import java.security.MessageDigest
 import kotlinx.serialization.decodeFromString
+import kotlinx.serialization.encodeToString
 
 internal const val DECISION_SOURCE_USER = "user"
 internal const val DECISION_SOURCE_POLICY = "policy"
@@ -31,6 +33,11 @@ internal const val DECISION_SOURCE_TEMPORARY_ACCESS = "temporary_access"
 internal const val DECISION_SOURCE_MIXED = "mixed"
 internal const val DECISION_SOURCE_VALIDATION = "validation"
 internal const val TEMPORARY_ACCESS_DURATION_MILLIS = 4 * 60 * 60 * 1_000L
+
+internal data class AiReviewAttempt(
+    val review: AiReview,
+    val request: ApprovalReviewRequest?,
+)
 
 internal fun reviewedRequestState(responseAvailable: Boolean): InboxRequestState =
     if (responseAvailable) InboxRequestState.WAITING else InboxRequestState.ACTION_REQUIRED
@@ -169,3 +176,28 @@ internal fun AiReview.auditOutcome(): AuditOutcome = when {
     decision == AiReviewDecision.ASK_USER -> AuditOutcome.DEFERRED
     else -> AuditOutcome.FAILED
 }
+
+internal fun AiReview.auditData() = auditDataOf(
+    "ai_decision" to decision?.name?.lowercase(),
+    "ai_explanation" to explanation,
+    "ai_failure" to failure?.name?.lowercase(),
+    "ai_http_status" to httpStatus,
+    "ai_error_code" to errorCode,
+)
+
+internal fun AiReviewAttempt.auditRequestData() = auditDataOf(
+    "ai_review_request" to request?.let {
+        storedJson.parseToJsonElement(
+            storedJson.encodeToString(ApprovalReviewRequest.serializer(), it),
+        )
+    },
+)
+
+internal fun AiReviewAttempt.auditData(appliedReview: AiReview) =
+    review.auditData() + auditRequestData() + auditDataOf(
+        "ai_review_service_called" to (request != null),
+        "ai_result_applied" to (review == appliedReview),
+        "resulting_review_decision" to appliedReview.decision?.name?.lowercase(),
+        "resulting_review_explanation" to appliedReview.explanation,
+        "resulting_review_failure" to appliedReview.failure?.name?.lowercase(),
+    )

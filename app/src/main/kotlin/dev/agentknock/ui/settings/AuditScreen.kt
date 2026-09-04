@@ -66,10 +66,6 @@ import dev.agentknock.ui.theme.agentknockColors
 import java.time.Instant
 import java.time.ZoneId
 import java.time.format.DateTimeFormatter
-import kotlinx.serialization.json.JsonArray
-import kotlinx.serialization.json.JsonElement
-import kotlinx.serialization.json.JsonPrimitive
-import kotlinx.serialization.json.contentOrNull
 
 private enum class AuditFilter(val label: String) {
     ALL("All"),
@@ -350,6 +346,8 @@ private fun AuditDetail(
 ) {
     val context = LocalContext.current
     val presentation = event.presentation()
+    val relevantFields = event.relevantDetailFields()
+    val technicalJson = event.technicalJson()
     fun copy(label: String, value: String) {
         context.getSystemService(ClipboardManager::class.java).setPrimaryClip(
             ClipData.newPlainText(label, value),
@@ -396,11 +394,16 @@ private fun AuditDetail(
                 if (
                     event.subject != null || event.context != null || event.detail != null ||
                     distinctClientName != null || event.decisionSource != null ||
-                    event.expiresAt != null || event.data.isNotEmpty()
+                    event.expiresAt != null || relevantFields.isNotEmpty()
                 ) {
                     InformationSurface {
                         event.subject?.let {
-                            InformationRow(presentation.subjectLabel ?: "Subject", it)
+                            InformationRow(
+                                presentation.subjectLabel ?: "Subject",
+                                it,
+                                monospace = presentation.subjectLabel == "Pairing address" ||
+                                    presentation.subjectLabel == "Environment variable",
+                            )
                         }
                         event.context?.let {
                             InformationRow(presentation.contextLabel ?: "Context", it)
@@ -417,30 +420,34 @@ private fun AuditDetail(
                         event.expiresAt?.let {
                             InformationRow("Valid until", formatTimestamp(it))
                         }
-                        event.data.forEach { (name, value) ->
-                            InformationRow(name.auditLabel(), value.auditValue(), monospace = false)
+                        relevantFields.forEach { field ->
+                            InformationRow(field.label, field.value, monospace = field.monospace)
                         }
                     }
                 }
-                if (event.clientId != null || event.relayRequestId != null) {
-                    Disclosure("Technical information") {
-                        event.clientId?.let {
-                            InformationRow(
-                                label = "Client ID",
-                                value = it,
-                                monospace = true,
-                                trailingContent = { CopyIconButton("Copy client ID") { copy("Client ID", it) } },
-                            )
-                        }
-                        event.relayRequestId?.let {
-                            InformationRow(
-                                label = "Request ID",
-                                value = it,
-                                monospace = true,
-                                trailingContent = { CopyIconButton("Copy request ID") { copy("Request ID", it) } },
-                            )
-                        }
-                        InformationRow("Sequence", event.id.toString(), monospace = true)
+                Disclosure("Technical information") {
+                    Row(
+                        modifier = Modifier.fillMaxWidth(),
+                        horizontalArrangement = Arrangement.SpaceBetween,
+                        verticalAlignment = Alignment.CenterVertically,
+                    ) {
+                        Text(
+                            "Event JSON",
+                            style = MaterialTheme.typography.labelMedium,
+                            color = MaterialTheme.colorScheme.onSurfaceVariant,
+                        )
+                        CopyIconButton("Copy event JSON") { copy("Event JSON", technicalJson) }
+                    }
+                    Surface(
+                        color = MaterialTheme.colorScheme.surfaceContainerHighest,
+                        shape = MaterialTheme.shapes.medium,
+                    ) {
+                        Text(
+                            technicalJson,
+                            modifier = Modifier.fillMaxWidth().padding(12.dp),
+                            style = MaterialTheme.typography.bodySmall,
+                            fontFamily = FontFamily.Monospace,
+                        )
                     }
                 }
             }
@@ -453,16 +460,6 @@ private fun CopyIconButton(description: String, onClick: () -> Unit) {
     IconButton(onClick = onClick) {
         Icon(Icons.Outlined.ContentCopy, contentDescription = description)
     }
-}
-
-private fun String.auditLabel(): String = split('_').joinToString(" ") { word ->
-    word.replaceFirstChar(Char::uppercaseChar)
-}
-
-private fun JsonElement.auditValue(): String = when (this) {
-    is JsonPrimitive -> contentOrNull ?: toString()
-    is JsonArray -> joinToString(" · ") { item -> item.auditValue() }
-    else -> toString()
 }
 
 private fun AuditEvent.contextLine(): String? {

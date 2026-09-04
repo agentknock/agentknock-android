@@ -19,6 +19,7 @@ import kotlinx.coroutines.flow.combine
 import kotlinx.coroutines.flow.first
 import kotlinx.coroutines.flow.map
 import kotlinx.coroutines.test.runTest
+import kotlinx.serialization.json.JsonPrimitive
 import org.junit.Assert.assertEquals
 import org.junit.Assert.assertFalse
 import org.junit.Assert.assertNotEquals
@@ -27,6 +28,34 @@ import org.junit.Assert.assertTrue
 import org.junit.Test
 
 class SecretRepositoryTest {
+    @Test
+    fun `environment secret audit records metadata but never values`() = runTest {
+        val audit = RecordingAuditSink()
+        val fixture = Fixture(audit = audit)
+
+        val result = fixture.repository.createEnvironmentSecret(
+            name = "production-database",
+            description = "Production database access",
+            variables = listOf(
+                EnvironmentVariableInput("PGUSER", "analytics", sensitive = false),
+                EnvironmentVariableInput("PGPASSWORD", "do-not-log", sensitive = true),
+            ),
+        )
+        check(result is CreateSecretResult.Created)
+
+        val record = audit.records.single()
+        assertEquals(AuditEventType.SECRET_CREATED, record.type)
+        assertEquals(JsonPrimitive(result.id), record.data["secret_id"])
+        assertEquals(JsonPrimitive("production-database"), record.data["secret_name"])
+        assertEquals(JsonPrimitive("environment"), record.data["secret_type"])
+        val variables = record.data.getValue("environment_variables").toString()
+        assertTrue(variables.contains("PGUSER"))
+        assertTrue(variables.contains("PGPASSWORD"))
+        assertTrue(variables.contains("sensitive"))
+        assertFalse(record.data.toString().contains("analytics"))
+        assertFalse(record.data.toString().contains("do-not-log"))
+    }
+
     @Test
     fun `stores an SSH private key encrypted and returns only its public key`() = runTest {
         val fixture = Fixture()
@@ -1872,6 +1901,14 @@ private class FakeSecretDao : SecretDao {
     ): List<TemporaryAccessGrantEntity> = temporaryAccessGrants.value.filter {
         it.clientId == clientId && it.secretId in secretIds &&
             it.operation == operation && it.expiresAt > now
+    }
+
+    override suspend fun getTemporaryAccessGrant(
+        secretId: String,
+        clientId: String,
+        operation: String,
+    ): TemporaryAccessGrantEntity? = temporaryAccessGrants.value.find {
+        it.secretId == secretId && it.clientId == clientId && it.operation == operation
     }
 
     override suspend fun clientCanReceiveTemporaryAccess(clientId: String): Boolean =

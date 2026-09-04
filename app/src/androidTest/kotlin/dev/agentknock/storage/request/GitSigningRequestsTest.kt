@@ -16,7 +16,6 @@ import dev.agentknock.storage.AgentknockDatabase
 import dev.agentknock.storage.RoomWriteTransaction
 import dev.agentknock.storage.approval.ApprovalAction
 import dev.agentknock.storage.approval.ApprovalEvaluation
-import dev.agentknock.storage.approval.AiReview
 import dev.agentknock.storage.approval.AiReviewDecision
 import dev.agentknock.storage.approval.SecretApprovalEvaluation
 import dev.agentknock.storage.audit.AuditDecisionSource
@@ -422,7 +421,7 @@ class GitSigningRequestsTest {
             )
             val pending = checkNotNull(pendingReview)
             val mappedReview = pending.review()
-            assertEquals(relayDecision.toAiDecision(), mappedReview.decision)
+            assertEquals(relayDecision.toAiDecision(), mappedReview.review.decision)
             pending.complete(mappedReview)
 
             val storedRequest = checkNotNull(database.requestDao().getRequestById(requestId))
@@ -490,7 +489,7 @@ class GitSigningRequestsTest {
         )
         val pending = checkNotNull(pendingReview)
         val approved = pending.review()
-        assertEquals(AiReviewDecision.APPROVE, approved.decision)
+        assertEquals(AiReviewDecision.APPROVE, approved.review.decision)
         pending.complete(approved)
 
         val storedRequest = checkNotNull(database.requestDao().getRequestById(requestId))
@@ -1281,8 +1280,8 @@ class GitSigningRequestsTest {
     }
 
     private data class PendingAiReview(
-        val review: suspend () -> AiReview,
-        val complete: suspend (AiReview) -> Unit,
+        val review: suspend () -> AiReviewAttempt,
+        val complete: suspend (AiReviewAttempt) -> Unit,
     )
 
     private fun reviewed(

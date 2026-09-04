@@ -22,12 +22,12 @@ import dev.agentknock.relay.RelayExchangeState
 import dev.agentknock.relay.RelayMessageKind
 import dev.agentknock.relay.RelayMessageState
 import dev.agentknock.relay.RelayPushRegistrationState
-import dev.agentknock.storage.approval.AiReview
 import dev.agentknock.storage.audit.AuditEventType
 import dev.agentknock.storage.audit.AuditDecisionSource
 import dev.agentknock.storage.audit.AuditOutcome
 import dev.agentknock.storage.audit.AuditRecord
 import dev.agentknock.storage.audit.AuditSink
+import dev.agentknock.storage.audit.auditDataOf
 import dev.agentknock.storage.crypto.DecryptionResult
 import dev.agentknock.storage.device.RelayDeviceCredentials
 import dev.agentknock.storage.device.RelayDeviceCredentialsResult
@@ -340,8 +340,8 @@ internal class RequestRepository(
     private fun launchAiReview(
         requestId: String,
         requestJson: String,
-        review: suspend () -> AiReview,
-        complete: suspend (AiReview) -> Unit,
+        review: suspend () -> AiReviewAttempt,
+        complete: suspend (AiReviewAttempt) -> Unit,
     ): Boolean = aiReviews.launch(requestId) {
         try {
             val result = review()
@@ -1504,10 +1504,10 @@ internal class RequestRepository(
                 audit.append(
                     records = listOf(
                         rejectedRequestAudit(
-                            clientId = client.clientId,
-                            clientName = client.auditClientName(),
+                            client = client,
                             relayRequestId = relayRequestId,
                             code = code,
+                            receivedAt = now,
                         ),
                     ),
                     occurredAt = now,
@@ -1553,18 +1553,27 @@ internal class RequestRepository(
     }
 
     private fun rejectedRequestAudit(
-        clientId: String,
-        clientName: String,
+        client: ClientEntity,
         relayRequestId: String,
         code: PairedRequestErrorCode,
+        receivedAt: Long,
     ) = AuditRecord(
         type = AuditEventType.REQUEST_REJECTED,
         outcome = AuditOutcome.REJECTED,
         decisionSource = AuditDecisionSource.VALIDATION,
         detail = code.message,
-        clientId = clientId,
-        clientName = clientName,
+        clientId = client.clientId,
+        clientName = client.auditClientName(),
         relayRequestId = relayRequestId,
+        data = auditDataOf(
+            "device_identity_id" to client.deviceIdentityId,
+            "request_kind" to RequestKind.UNKNOWN.storedName,
+            "client_software" to client.clientSoftwareJson?.let {
+                storedJson.parseToJsonElement(it)
+            },
+            "rejection_code" to code.wireName,
+            "received_at" to receivedAt,
+        ),
     )
 
     private suspend fun startPairing(

@@ -15,6 +15,7 @@ import dev.agentknock.storage.audit.AuditEventType
 import dev.agentknock.storage.audit.AuditOutcome
 import dev.agentknock.storage.audit.AuditRecord
 import dev.agentknock.storage.audit.AuditSink
+import dev.agentknock.storage.audit.auditDataOf
 import dev.agentknock.storage.secret.ApplyEnvironmentSecretUploadResult
 import dev.agentknock.storage.secret.ApplySshSecretUploadResult
 import dev.agentknock.storage.secret.ENVIRONMENT_SECRET_TYPE
@@ -26,7 +27,9 @@ import dev.agentknock.storage.secret.PreparedSshSecretUpload
 import dev.agentknock.storage.secret.SSH_SECRET_TYPE
 import dev.agentknock.storage.secret.SecretRepository
 import dev.agentknock.storage.secret.SecretUploadTarget
+import dev.agentknock.storage.secret.SshKeyAlgorithm
 import dev.agentknock.storage.secret.SshKeyCodec
+import dev.agentknock.storage.secret.SshPublicKey
 import dev.agentknock.storage.secret.SshSecretUpload
 import dev.agentknock.storage.secret.SshSecretUploadPreparation
 import dev.agentknock.storage.secret.SshSecretUploadResult
@@ -38,6 +41,9 @@ import kotlinx.serialization.decodeFromString
 import kotlinx.serialization.encodeToString
 import kotlinx.serialization.json.Json
 import kotlinx.serialization.json.JsonElement
+import kotlinx.serialization.json.buildJsonArray
+import kotlinx.serialization.json.buildJsonObject
+import kotlinx.serialization.json.put
 
 private const val SECRET_LIST_COMPLETION_VERIFICATION_ERROR =
     "Secret list completion could not be verified."
@@ -196,6 +202,16 @@ internal class SecretManagementRequests(
                         clientId = client.clientId,
                         clientName = client.name,
                         relayRequestId = relayRequestId,
+                        data = auditDataOf(
+                            "device_identity_id" to client.deviceIdentityId,
+                            "request_kind" to RequestKind.SECRET_LIST.storedName,
+                            "client_software" to json.parseToJsonElement(software),
+                            "received_at" to now,
+                            "secret_count" to secretMetadata.size,
+                            "secrets" to json.parseToJsonElement(
+                                json.encodeToString(secretMetadata),
+                            ),
+                        ),
                     ),
                 ),
                 now,
@@ -327,6 +343,26 @@ internal class SecretManagementRequests(
                         clientId = client.clientId,
                         clientName = client.name,
                         relayRequestId = relayRequestId,
+                        data = auditDataOf(
+                            "device_identity_id" to client.deviceIdentityId,
+                            "request_kind" to RequestKind.SECRET_UPLOAD.storedName,
+                            "client_software" to json.parseToJsonElement(software),
+                            "received_at" to now,
+                        ) + SecretUploadRequestEntity(
+                            requestId = relayRequestId,
+                            decision = initialDecision,
+                            mode = contents.mode.wireName,
+                            uploadedName = contents.name,
+                            approvedName = null,
+                            descriptionProvided = contents.descriptionProvided,
+                            description = contents.description,
+                            secretType = prepared.type,
+                            targetSecretId = prepared.target?.secretId,
+                            targetSecretRevision = prepared.target?.revision,
+                            summaryJson = json.encodeToString(prepared.summary),
+                            intakeError = prepared.error,
+                            decidedAt = if (prepared.error != null) now else null,
+                        ).auditData() + prepared.auditMaterialData(),
                     ),
                 ),
                 now,
@@ -386,6 +422,7 @@ internal class SecretManagementRequests(
             transportFinished = request.exchangeEndedAt != null,
         )
         return writeTransaction.execute {
+            val materialAudit = pendingUploadMaterialAudit(request.id)
             val secretId = when (preparedUpload) {
                 is PreparedSecretUploadApproval.Environment -> when (
                     val applied = secrets.applyPreparedEnvironmentSecretUpload(preparedUpload.upload)
@@ -428,6 +465,13 @@ internal class SecretManagementRequests(
                         clientId = request.clientId,
                         clientName = request.clientNameSnapshot,
                         relayRequestId = request.id,
+                        data = request.requestAuditData() + uploadRequest.copy(
+                            decision = SecretUploadRequestState.APPROVED.storedName,
+                            approvedName = finalName,
+                            decidedAt = now,
+                        ).auditData() + materialAudit + auditDataOf(
+                            "applied_secret_id" to secretId,
+                        ),
                     ),
                 ),
                 now,
@@ -528,6 +572,7 @@ internal class SecretManagementRequests(
     ) {
         writeTransaction.execute {
             val now = currentTimeMillis()
+            val materialAudit = pendingUploadMaterialAudit(request.id)
             val lifecycle = secretUploadLifecycle(
                 SecretUploadRequestState.REJECTED.storedName,
                 transportFinished = request.exchangeEndedAt != null,
@@ -555,6 +600,10 @@ internal class SecretManagementRequests(
                         clientId = request.clientId,
                         clientName = request.clientNameSnapshot,
                         relayRequestId = request.id,
+                        data = request.requestAuditData() + upload.copy(
+                            decision = SecretUploadRequestState.REJECTED.storedName,
+                            decidedAt = now,
+                        ).auditData() + materialAudit,
                     ),
                 ),
                 now,
@@ -581,6 +630,23 @@ internal class SecretManagementRequests(
                 ),
             )
             dao.deleteEndedRequestPsk(request.id)
+            audit.append(
+                listOf(
+                    AuditRecord(
+                        type = AuditEventType.SECRET_LIST_COMPLETED,
+                        outcome = AuditOutcome.FAILED,
+                        subject = "Secret list",
+                        detail = message,
+                        clientId = current.clientId,
+                        clientName = current.clientNameSnapshot,
+                        relayRequestId = current.id,
+                        data = current.requestAuditData() + auditDataOf(
+                            "transport_error" to message,
+                        ),
+                    ),
+                ),
+                now,
+            )
         }
     }
 
@@ -606,6 +672,23 @@ internal class SecretManagementRequests(
                 upload,
             )
             dao.deleteEndedRequestPsk(request.id)
+            audit.append(
+                listOf(
+                    AuditRecord(
+                        type = AuditEventType.SECRET_UPLOAD_COMPLETED,
+                        outcome = AuditOutcome.FAILED,
+                        subject = upload.uploadedName,
+                        detail = message,
+                        clientId = current.clientId,
+                        clientName = current.clientNameSnapshot,
+                        relayRequestId = current.id,
+                        data = current.requestAuditData() + upload.auditData() + auditDataOf(
+                            "transport_error" to message,
+                        ),
+                    ),
+                ),
+                now,
+            )
         }
     }
 
@@ -656,6 +739,12 @@ internal class SecretManagementRequests(
                         clientId = request.clientId,
                         clientName = request.clientNameSnapshot,
                         relayRequestId = request.id,
+                        data = current.requestAuditData() + auditDataOf(
+                            "completion_valid" to valid,
+                            "returned_client_software" to decoded?.let {
+                                json.parseToJsonElement(json.encodeToString(it))
+                            },
+                        ),
                     ),
                 ),
                 now,
@@ -721,6 +810,11 @@ internal class SecretManagementRequests(
                         clientId = request.clientId,
                         clientName = request.clientNameSnapshot,
                         relayRequestId = request.id,
+                        data = current.requestAuditData() + upload.auditData() + auditDataOf(
+                            "completion_valid" to valid,
+                            "completion_result" to result?.result,
+                            "completion_message" to result?.message,
+                        ),
                     ),
                 ),
                 now,
@@ -790,6 +884,57 @@ internal class SecretManagementRequests(
             )
         }
     }
+
+    private suspend fun pendingUploadMaterialAudit(
+        requestId: String,
+    ): Map<String, JsonElement> = auditDataOf(
+        "environment_variables" to dao.getSecretUploadEnvironmentVariables(requestId)
+            .auditData(),
+        "ssh_key" to dao.getSecretUploadSshKey(requestId)?.auditData(),
+    )
+
+    private fun PreparedSecretUpload.auditMaterialData(): Map<String, JsonElement> = auditDataOf(
+        "environment_variables" to environmentVariables.auditData(),
+        "ssh_key" to sshKey?.auditData(),
+    )
+
+    private fun List<SecretUploadEnvironmentVariableEntity>.auditData() = buildJsonArray {
+        sortedBy(SecretUploadEnvironmentVariableEntity::name).forEach { variable ->
+            add(
+                buildJsonObject {
+                    put("variable_id", variable.id)
+                    put("name", variable.name)
+                    put("sensitive", variable.sensitive)
+                },
+            )
+        }
+    }
+
+    private fun SecretUploadSshKeyEntity.auditData() = buildJsonObject {
+        val algorithm = checkNotNull(SshKeyAlgorithm.fromStoredName(algorithm))
+        val publicKey = SshPublicKey(algorithm, publicKey, comment)
+        put("algorithm", algorithm.storedName)
+        put("bits", sshKeys.bitLength(publicKey))
+        put("public_key", publicKey.line)
+        put("fingerprint", publicKey.fingerprint)
+        put("fingerprint_hex", publicKey.fingerprintHex)
+        put("comment", comment)
+    }
+
+    private fun SecretUploadRequestEntity.auditData() = auditDataOf(
+        "upload_mode" to mode,
+        "uploaded_name" to uploadedName,
+        "approved_name" to approvedName,
+        "description_provided" to descriptionProvided,
+        "description" to description,
+        "secret_type" to secretType,
+        "target_secret_id" to targetSecretId,
+        "target_secret_revision" to targetSecretRevision,
+        "summary" to json.parseToJsonElement(summaryJson),
+        "intake_error" to intakeError,
+        "decision" to decision,
+        "decided_at" to decidedAt,
+    )
 
     private suspend fun prepareEnvironmentApproval(
         request: InboxRequestEntity,

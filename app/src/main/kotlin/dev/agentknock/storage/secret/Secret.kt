@@ -378,6 +378,16 @@ internal interface SecretDao {
     ): List<TemporaryAccessGrantEntity>
 
     @Query(
+        "SELECT * FROM temporary_access_grants WHERE secret_id = :secretId " +
+            "AND client_id = :clientId AND operation = :operation",
+    )
+    suspend fun getTemporaryAccessGrant(
+        secretId: String,
+        clientId: String,
+        operation: String,
+    ): TemporaryAccessGrantEntity?
+
+    @Query(
         """
         SELECT EXISTS(
             SELECT 1 FROM clients

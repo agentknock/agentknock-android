@@ -149,6 +149,7 @@ internal fun auditDataOf(vararg values: Pair<String, Any?>): Map<String, JsonEle
             is String -> JsonPrimitive(value)
             is Boolean -> JsonPrimitive(value)
             is Number -> JsonPrimitive(value)
+            is JsonElement -> value
             is List<*> -> kotlinx.serialization.json.JsonArray(value.map { item ->
                 when (item) {
                     null -> JsonNull
@@ -158,7 +159,6 @@ internal fun auditDataOf(vararg values: Pair<String, Any?>): Map<String, JsonEle
                     else -> error("Unsupported audit field value for $name")
                 }
             })
-            is JsonElement -> value
             else -> error("Unsupported audit field value for $name")
         }
         json?.let { name to it }

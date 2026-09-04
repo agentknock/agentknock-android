@@ -1,17 +1,69 @@
 package dev.agentknock.storage.request
 
+import dev.agentknock.review.ApprovalReviewEvidence
+import dev.agentknock.review.ApprovalReviewFacts
+import dev.agentknock.review.ApprovalReviewInstructions
+import dev.agentknock.review.ApprovalReviewOperation
+import dev.agentknock.review.ApprovalReviewRequest
 import dev.agentknock.storage.approval.AiReview
 import dev.agentknock.storage.approval.AiReviewDecision
 import dev.agentknock.storage.approval.AiReviewFailure
 import dev.agentknock.storage.approval.ApprovalPolicyEvaluator
 import dev.agentknock.storage.secret.SecretApprovalMode
 import dev.agentknock.storage.secret.SecretApprovalPolicy
+import kotlinx.serialization.json.JsonPrimitive
 import org.junit.Assert.assertEquals
 import org.junit.Assert.assertNull
 import org.junit.Assert.assertTrue
 import org.junit.Test
 
 class RequestApprovalPlannerTest {
+    @Test
+    fun aiAuditDataRetainsTheExactVerdictAndExplanation() {
+        val review = AiReview(
+            decision = AiReviewDecision.ASK_USER,
+            explanation = "The repository does not match the permitted scope.",
+        )
+
+        assertEquals(JsonPrimitive("ask_user"), review.auditData()["ai_decision"])
+        assertEquals(
+            JsonPrimitive("The repository does not match the permitted scope."),
+            review.auditData()["ai_explanation"],
+        )
+    }
+
+    @Test
+    fun aiAttemptAuditDistinguishesTheServiceVerdictFromTheAppliedFallback() {
+        val serviceReview = AiReview(
+            decision = AiReviewDecision.APPROVE,
+            explanation = "The operation is allowed by the instructions.",
+        )
+        val appliedReview = AiReview(
+            decision = AiReviewDecision.ASK_USER,
+            explanation = "Approval settings changed while the review was running.",
+        )
+
+        val request = ApprovalReviewRequest(
+            instructions = ApprovalReviewInstructions("", "", emptyMap()),
+            facts = ApprovalReviewFacts(
+                client = "workstation",
+                operation = ApprovalReviewOperation.INVOCATION,
+                secrets = emptyMap(),
+            ),
+            evidence = ApprovalReviewEvidence(),
+        )
+        val data = AiReviewAttempt(serviceReview, request).auditData(appliedReview)
+
+        assertEquals(JsonPrimitive("approve"), data["ai_decision"])
+        assertEquals(
+            JsonPrimitive("The operation is allowed by the instructions."),
+            data["ai_explanation"],
+        )
+        assertEquals(JsonPrimitive(true), data["ai_review_service_called"])
+        assertEquals(JsonPrimitive(false), data["ai_result_applied"])
+        assertEquals(JsonPrimitive("ask_user"), data["resulting_review_decision"])
+    }
+
     @Test
     fun approvedSourceDistinguishesPolicyTemporaryAiMixedAndNonSensitive() {
         val policy = policy("policy", SecretApprovalMode.APPROVE)

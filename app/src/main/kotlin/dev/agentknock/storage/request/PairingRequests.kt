@@ -9,6 +9,7 @@ import dev.agentknock.storage.audit.AuditEventType
 import dev.agentknock.storage.audit.AuditOutcome
 import dev.agentknock.storage.audit.AuditRecord
 import dev.agentknock.storage.audit.AuditSink
+import dev.agentknock.storage.audit.auditDataOf
 import dev.agentknock.storage.device.RelayDeviceCredentials
 import kotlinx.coroutines.CancellationException
 import kotlinx.serialization.encodeToString
@@ -127,6 +128,19 @@ internal class PairingRequests(
                         detail = rejection?.message,
                         clientId = requestId,
                         relayRequestId = requestId,
+                        data = auditDataOf(
+                            "device_identity_id" to credentials.deviceIdentityId,
+                            "device_id" to credentials.deviceId,
+                            "pairing_address" to credentials.address,
+                            "request_kind" to RequestKind.PAIRING.storedName,
+                            "pairing_state" to if (accepted) {
+                                PairingState.EXCHANGE_PENDING.storedName
+                            } else {
+                                PairingState.REJECTED.storedName
+                            },
+                            "rejection_code" to rejection?.wireName,
+                            "received_at" to now,
+                        ),
                     ),
                 ),
                 occurredAt = now,
@@ -275,7 +289,14 @@ internal class PairingRequests(
                 )
             }
             audit.append(
-                records = listOf(attempt.decisionAudit(request.id, verified)),
+                records = listOf(
+                    attempt.decisionAudit(
+                        request = request,
+                        verified = verified,
+                        action = "select_sas",
+                        selectedIndex = selectedIndex,
+                    ),
+                ),
                 occurredAt = now,
             )
             if (verified) PairingDecisionResult.VERIFIED else PairingDecisionResult.REJECTED
@@ -322,7 +343,13 @@ internal class PairingRequests(
             ),
         )
         audit.append(
-            records = listOf(attempt.decisionAudit(request.id, verified = false)),
+            records = listOf(
+                attempt.decisionAudit(
+                    request = request,
+                    verified = false,
+                    action = "reject",
+                ),
+            ),
             occurredAt = now,
         )
         PairingDecisionResult.REJECTED
@@ -488,6 +515,14 @@ internal class PairingRequests(
                                 clientId = attempt.clientId,
                                 clientName = clientName,
                                 relayRequestId = rootRequest.id,
+                                data = rootRequest.requestAuditData() + attempt.auditData() +
+                                    auditDataOf(
+                                        "resulting_pairing_state" to
+                                            PairingState.COMPLETED.storedName,
+                                        "paired_client_name" to client.name,
+                                        "paired_at" to client.pairedAt,
+                                        "client_relay_state" to client.relayClientState,
+                                    ),
                             ),
                         ),
                         occurredAt = now,
@@ -554,6 +589,10 @@ internal class PairingRequests(
                         clientId = rootRequest.clientId,
                         clientName = clientName,
                         relayRequestId = relayRequestId,
+                        data = rootRequest.requestAuditData() + attempt.auditData() + auditDataOf(
+                            "rejection_code" to code.wireName,
+                            "rejected_request_id" to relayRequestId,
+                        ),
                     ),
                 ),
                 occurredAt = now,
@@ -580,6 +619,7 @@ internal class PairingRequests(
             val request = dao.getRequestById(requestId) ?: return@execute false
             if (request.kind != RequestKind.PAIRING_FINISH.storedName) return@execute false
             if (request.exchangeEndedAt != null) return@execute true
+            val attempt = request.parentRequestId?.let { dao.getPairingAttempt(it) }
 
             val detail = request.error ?: when (accepted) {
                 true -> null
@@ -608,6 +648,11 @@ internal class PairingRequests(
                         clientId = request.clientId,
                         clientName = request.clientNameSnapshot,
                         relayRequestId = request.id,
+                        data = request.requestAuditData() + (attempt?.auditData() ?: emptyMap()) +
+                            auditDataOf(
+                                "completion_accepted" to accepted,
+                                "completion_valid" to valid,
+                            ),
                     ),
                 ),
                 occurredAt = now,
@@ -679,8 +724,10 @@ internal class PairingRequests(
     }
 
     private fun PairingAttemptEntity.decisionAudit(
-        requestId: String,
+        request: InboxRequestEntity,
         verified: Boolean,
+        action: String,
+        selectedIndex: Int? = null,
     ) = AuditRecord(
         type = AuditEventType.PAIRING_DECIDED,
         outcome = if (verified) AuditOutcome.APPROVED else AuditOutcome.REJECTED,
@@ -688,7 +735,31 @@ internal class PairingRequests(
         subject = auditClientName(),
         clientId = clientId,
         clientName = auditClientName(),
-        relayRequestId = requestId,
+        relayRequestId = request.id,
+        data = request.requestAuditData() + auditData() + auditDataOf(
+            "action" to action,
+            "selected_sas_option" to selectedIndex,
+            "sas_matched" to verified,
+            "resulting_pairing_state" to if (verified) {
+                PairingState.WAITING_FOR_FINISH.storedName
+            } else {
+                PairingState.REJECTED.storedName
+            },
+        ),
+    )
+
+    private fun PairingAttemptEntity.auditData() = auditDataOf(
+        "pairing_address" to pairingAddress,
+        "friendly_name" to friendlyName,
+        "pairing_state" to state,
+        "relay_client_state" to relayClientState,
+        "desired_relay_client_state" to desiredRelayClientState,
+        "hostname" to hostname,
+        "platform" to platform,
+        "architecture" to architecture,
+        "machine_id" to machineId,
+        "os_version" to osVersion,
+        "decided_at" to decidedAt,
     )
 
     private fun InboxRequestEntity.matchesPendingPairing(

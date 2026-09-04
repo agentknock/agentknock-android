@@ -21,6 +21,10 @@ import kotlinx.coroutines.flow.combine
 import kotlinx.coroutines.flow.flow
 import kotlinx.coroutines.flow.map
 import kotlinx.coroutines.withContext
+import kotlinx.serialization.json.JsonElement
+import kotlinx.serialization.json.buildJsonArray
+import kotlinx.serialization.json.buildJsonObject
+import kotlinx.serialization.json.put
 
 internal class SecretRepository(
     private val dao: SecretDao,
@@ -210,7 +214,8 @@ internal class SecretRepository(
         return writeTransaction.execute {
             val secret = dao.getSecret(id) ?: return@execute SaveSecretResult.NOT_FOUND
             if (secret.approvalMode == mode.storedName) return@execute SaveSecretResult.SAVED
-            if (!dao.setSecretApprovalMode(id, mode.storedName, currentTimeMillis())) {
+            val now = currentTimeMillis()
+            if (!dao.setSecretApprovalMode(id, mode.storedName, now)) {
                 return@execute SaveSecretResult.NOT_FOUND
             }
             audit.record(
@@ -219,6 +224,12 @@ internal class SecretRepository(
                     outcome = AuditOutcome.CHANGED,
                     subject = secret.name,
                     detail = mode.auditName(),
+                    data = secret.copy(
+                        approvalMode = mode.storedName,
+                        updatedAt = now,
+                    ).auditData() + auditDataOf(
+                        "previous_approval_mode" to secret.approvalMode,
+                    ),
                 ),
             )
             SaveSecretResult.SAVED
@@ -230,7 +241,8 @@ internal class SecretRepository(
         return writeTransaction.execute {
             val secret = dao.getSecret(id) ?: return@execute SaveSecretResult.NOT_FOUND
             if (secret.instructions == normalized) return@execute SaveSecretResult.SAVED
-            if (!dao.setSecretInstructions(id, normalized, currentTimeMillis())) {
+            val now = currentTimeMillis()
+            if (!dao.setSecretInstructions(id, normalized, now)) {
                 return@execute SaveSecretResult.NOT_FOUND
             }
             audit.record(
@@ -238,6 +250,13 @@ internal class SecretRepository(
                     type = AuditEventType.SECRET_INSTRUCTIONS_CHANGED,
                     outcome = AuditOutcome.CHANGED,
                     subject = secret.name,
+                    data = secret.copy(
+                        instructions = normalized,
+                        updatedAt = now,
+                        revision = secret.revision + 1,
+                    ).auditData() + auditDataOf(
+                        "previous_instructions" to secret.instructions,
+                    ),
                 ),
             )
             SaveSecretResult.SAVED
@@ -276,6 +295,13 @@ internal class SecretRepository(
                     subject = secret.name,
                     detail = mode?.auditName() ?: "Use default",
                     clientId = clientId,
+                    data = secret.auditData() + auditDataOf(
+                        "previous_client_approval_mode" to currentOverride?.approvalMode,
+                        "client_approval_mode" to mode?.storedName,
+                        "previous_effective_approval_mode" to
+                            (currentOverride?.approvalMode ?: defaultMode.storedName),
+                        "effective_approval_mode" to (mode ?: defaultMode).storedName,
+                    ),
                 ),
             )
             SaveSecretResult.SAVED
@@ -323,6 +349,13 @@ internal class SecretRepository(
                         detail = operation.auditName(),
                         expiresAt = expiresAt,
                         clientId = clientId,
+                        data = auditDataOf(
+                            "secret_id" to policy.secretId,
+                            "secret_name" to policy.secretName,
+                            "approval_mode" to policy.mode.storedName,
+                            "secret_revision" to policy.revision,
+                            "operation" to operation.storedName,
+                        ),
                     )
                 },
                 occurredAt = now,
@@ -338,6 +371,7 @@ internal class SecretRepository(
     ): Boolean {
         return writeTransaction.execute {
             val secret = dao.getSecret(secretId)
+            val grant = dao.getTemporaryAccessGrant(secretId, clientId, operation.storedName)
             val deleted = dao.deleteTemporaryAccessGrant(
                 secretId,
                 clientId,
@@ -351,6 +385,14 @@ internal class SecretRepository(
                         subject = secret?.name,
                         detail = operation.auditName(),
                         clientId = clientId,
+                        expiresAt = grant?.expiresAt,
+                        data = auditDataOf(
+                            "secret_id" to secretId,
+                            "secret_name" to secret?.name,
+                            "secret_type" to secret?.type,
+                            "operation" to operation.storedName,
+                            "scheduled_expiration" to grant?.expiresAt,
+                        ),
                     ),
                 )
             }
@@ -407,15 +449,16 @@ internal class SecretRepository(
             if (dao.secretNameInUse(name, excludingId = "")) {
                 return@execute CreateSecretResult.NameInUse
             }
+            val secret = SecretEntity(
+                id = id,
+                name = name,
+                description = description,
+                type = ENVIRONMENT_SECRET_TYPE,
+                createdAt = now,
+                updatedAt = now,
+            )
             dao.insertEnvironmentSecret(
-                secret = SecretEntity(
-                    id = id,
-                    name = name,
-                    description = description,
-                    type = ENVIRONMENT_SECRET_TYPE,
-                    createdAt = now,
-                    updatedAt = now,
-                ),
+                secret = secret,
                 variables = encryptedVariables,
             )
             audit.record(
@@ -423,9 +466,8 @@ internal class SecretRepository(
                     type = AuditEventType.SECRET_CREATED,
                     outcome = AuditOutcome.CHANGED,
                     subject = name,
-                    data = auditDataOf(
-                        "secret_type" to SecretType.ENVIRONMENT.storedName,
-                        "environment_variables" to variables.map(EnvironmentVariableInput::name),
+                    data = secret.auditData() + auditDataOf(
+                        "environment_variables" to encryptedVariables.auditData(),
                     ),
                 ),
             )
@@ -462,7 +504,7 @@ internal class SecretRepository(
                     type = AuditEventType.SSH_KEY_CREATED,
                     outcome = AuditOutcome.CHANGED,
                     subject = name,
-                    data = privateKey.auditData(),
+                    data = secret.auditData() + privateKey.auditData(),
                 ),
             )
             CreateSecretResult.Created(id)
@@ -475,7 +517,7 @@ internal class SecretRepository(
         if (SecretType.fromStoredNameOrNull(secret.type) != SecretType.SSH) {
             return SaveSshSecretResult.WrongType
         }
-        dao.getSshKey(id) ?: return SaveSshSecretResult.NotFound
+        val previousKey = dao.getSshKey(id) ?: return SaveSshSecretResult.NotFound
         val now = currentTimeMillis()
         val encryptedKey = material.encryptedSshKey(id, privateKey)
         return writeTransaction.execute {
@@ -491,7 +533,10 @@ internal class SecretRepository(
                     type = AuditEventType.SSH_KEY_REPLACED,
                     outcome = AuditOutcome.CHANGED,
                     subject = secret.name,
-                    data = privateKey.auditData(),
+                    data = secret.copy(
+                        updatedAt = now,
+                        revision = secret.revision + 1,
+                    ).auditData() + privateKey.auditData() + previousKey.auditData("previous_"),
                 ),
             )
             SaveSshSecretResult.Saved(id)
@@ -518,7 +563,11 @@ internal class SecretRepository(
                     type = AuditEventType.SSH_PUBLIC_KEY_COMMENT_UPDATED,
                     outcome = AuditOutcome.CHANGED,
                     subject = secret.name,
-                    data = auditDataOf("comment" to trimmed),
+                    data = secret.copy(updatedAt = now).auditData() +
+                        key.auditData() + auditDataOf(
+                            "previous_comment" to key.comment,
+                            "comment" to trimmed,
+                        ),
                 ),
             )
             SaveSshSecretResult.Saved(id)
@@ -532,7 +581,8 @@ internal class SecretRepository(
             if (dao.secretNameInUse(name, excludingId = id)) {
                 return@execute SaveSecretResult.NAME_IN_USE
             }
-            if (!dao.updateSecretMetadata(id, name, description, currentTimeMillis())) {
+            val now = currentTimeMillis()
+            if (!dao.updateSecretMetadata(id, name, description, now)) {
                 return@execute SaveSecretResult.NOT_FOUND
             }
             audit.record(
@@ -541,6 +591,15 @@ internal class SecretRepository(
                     outcome = AuditOutcome.CHANGED,
                     subject = name,
                     detail = existing.name.takeUnless { it == name },
+                    data = existing.copy(
+                        name = name,
+                        description = description,
+                        updatedAt = now,
+                        revision = existing.revision + if (existing.name == name) 0 else 1,
+                    ).auditData() + auditDataOf(
+                        "previous_name" to existing.name,
+                        "previous_description" to existing.description,
+                    ),
                 ),
             )
             SaveSecretResult.SAVED
@@ -550,12 +609,18 @@ internal class SecretRepository(
     suspend fun deleteSecret(id: String): Boolean {
         return writeTransaction.execute {
             val secret = dao.getSecret(id) ?: return@execute false
+            val variables = dao.getEnvironmentVariables().filter { it.secretId == id }
+            val sshKey = dao.getSshKey(id)
             dao.deleteSecret(secret)
             audit.record(
                 AuditRecord(
                     type = AuditEventType.SECRET_DELETED,
                     outcome = AuditOutcome.CHANGED,
                     subject = secret.name,
+                    data = secret.auditData() + auditDataOf(
+                        "environment_variables" to variables.auditData(),
+                        "ssh_key" to sshKey?.auditDataObject(),
+                    ),
                 ),
             )
             true
@@ -611,6 +676,17 @@ internal class SecretRepository(
                     outcome = AuditOutcome.CHANGED,
                     subject = name,
                     detail = owner.name,
+                    data = owner.copy(
+                        updatedAt = now,
+                        revision = owner.revision + 1,
+                    ).auditData() + EnvironmentVariableEntity(
+                        id = id,
+                        secretId = secretId,
+                        name = name,
+                        sensitive = sensitive,
+                        encryptedValue = encrypted,
+                        valueUpdatedAt = now,
+                    ).auditData(),
                 ),
             )
             CreateEnvironmentVariableResult.Created(id)
@@ -700,6 +776,15 @@ internal class SecretRepository(
                     outcome = AuditOutcome.CHANGED,
                     subject = name,
                     detail = owner.name,
+                    data = owner.copy(
+                        updatedAt = now,
+                        revision = owner.revision + 1,
+                    ).auditData() + updated.auditData() + auditDataOf(
+                        "previous_name" to existing.name,
+                        "previous_sensitive" to existing.sensitive,
+                        "previous_value_updated_at" to existing.valueUpdatedAt,
+                        "value_replaced" to (replacementValue != null),
+                    ),
                 ),
             )
             SaveEnvironmentVariableResult.SAVED
@@ -710,11 +795,12 @@ internal class SecretRepository(
         return writeTransaction.execute {
             val variable = dao.getEnvironmentVariable(id) ?: return@execute false
             val owner = dao.getSecret(variable.secretId) ?: return@execute false
+            val now = currentTimeMillis()
             if (
                 !dao.deleteEnvironmentVariableIfCurrent(
                     variable,
                     expectedSecretRevision = owner.revision,
-                    secretUpdatedAt = currentTimeMillis(),
+                    secretUpdatedAt = now,
                 )
             ) return@execute false
             audit.record(
@@ -723,6 +809,10 @@ internal class SecretRepository(
                     outcome = AuditOutcome.CHANGED,
                     subject = variable.name,
                     detail = owner.name,
+                    data = owner.copy(
+                        updatedAt = now,
+                        revision = owner.revision + 1,
+                    ).auditData() + variable.auditData(),
                 ),
             )
             true
@@ -839,11 +929,59 @@ internal class SecretRepository(
         val ENVIRONMENT_VARIABLE_NAME = Regex("[A-Za-z_][A-Za-z0-9_]*")
     }
 
-    private fun SshPrivateKey.auditData(): Map<String, kotlinx.serialization.json.JsonElement> {
+    private fun SecretEntity.auditData(): Map<String, JsonElement> = auditDataOf(
+        "secret_id" to id,
+        "secret_name" to name,
+        "description" to description,
+        "secret_type" to type,
+        "approval_mode" to approvalMode,
+        "instructions" to instructions,
+        "revision" to revision,
+        "created_at" to createdAt,
+        "updated_at" to updatedAt,
+    )
+
+    private fun EnvironmentVariableEntity.auditData(): Map<String, JsonElement> = auditDataOf(
+        "variable_id" to id,
+        "secret_id" to secretId,
+        "variable_name" to name,
+        "sensitive" to sensitive,
+        "value_updated_at" to valueUpdatedAt,
+    )
+
+    private fun List<EnvironmentVariableEntity>.auditData() = buildJsonArray {
+        sortedBy(EnvironmentVariableEntity::name).forEach { variable ->
+            add(
+                buildJsonObject {
+                    variable.auditData().forEach(::put)
+                },
+            )
+        }
+    }
+
+    private fun SshKeyEntity.auditData(prefix: String = ""): Map<String, JsonElement> {
+        val algorithm = checkNotNull(SshKeyAlgorithm.fromStoredName(algorithm))
+        val public = sshKeys.publicKey(algorithm, publicKey, comment)
+        return auditDataOf(
+            "${prefix}algorithm" to algorithm.storedName,
+            "${prefix}bits" to sshKeys.bitLength(public),
+            "${prefix}public_key" to public.line,
+            "${prefix}fingerprint" to public.fingerprint,
+            "${prefix}fingerprint_hex" to public.fingerprintHex,
+            "${prefix}comment" to comment,
+        )
+    }
+
+    private fun SshKeyEntity.auditDataObject() = buildJsonObject {
+        auditData().forEach(::put)
+    }
+
+    private fun SshPrivateKey.auditData(): Map<String, JsonElement> {
         val public = sshKeys.publicKey(algorithm, publicKey, comment)
         return auditDataOf(
             "algorithm" to algorithm.storedName,
             "bits" to sshKeys.bitLength(public),
+            "public_key" to public.line,
             "fingerprint" to public.fingerprint,
             "fingerprint_hex" to public.fingerprintHex,
             "comment" to comment,

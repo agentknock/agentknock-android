@@ -7,11 +7,13 @@ import dev.agentknock.storage.audit.AuditEventType
 import dev.agentknock.storage.audit.AuditOutcome
 import dev.agentknock.storage.audit.AuditRecord
 import dev.agentknock.storage.audit.AuditSink
+import dev.agentknock.storage.audit.auditDataOf
 import dev.agentknock.storage.secret.TemporaryAccessGrant
 import kotlinx.coroutines.flow.Flow
 import kotlinx.coroutines.flow.combine
 import kotlinx.coroutines.flow.map
 import kotlinx.serialization.decodeFromString
+import kotlinx.serialization.json.JsonElement
 
 internal data class ClientSummary(
     val clientId: String,
@@ -122,6 +124,9 @@ internal class ClientRepository(
                     detail = client.name.takeUnless { it == trimmed },
                     clientId = clientId,
                     clientName = trimmed,
+                    data = client.copy(name = trimmed).auditData() + auditDataOf(
+                        "previous_name" to client.name,
+                    ),
                 ),
             )
             ClientChangeResult.CHANGED
@@ -144,6 +149,9 @@ internal class ClientRepository(
                 subject = client.name,
                 clientId = clientId,
                 clientName = client.name,
+                data = client.copy(instructions = normalized).auditData() + auditDataOf(
+                    "previous_instructions" to client.instructions,
+                ),
             ),
         )
         ClientChangeResult.CHANGED
@@ -199,6 +207,11 @@ internal class ClientRepository(
                 )
             }
             if (client.relayClientState != state.wireName) {
+                val applied = client.copy(
+                    relayClientState = state.wireName,
+                    desiredRelayClientState = client.desiredRelayClientState
+                        ?.takeUnless { it == state.wireName },
+                )
                 audit.record(
                     AuditRecord(
                         type = when (state) {
@@ -211,6 +224,10 @@ internal class ClientRepository(
                         subject = client.name,
                         clientId = client.clientId,
                         clientName = client.name,
+                        data = applied.auditData() + auditDataOf(
+                            "previous_relay_state" to client.relayClientState,
+                            "previous_desired_relay_state" to client.desiredRelayClientState,
+                        ),
                     ),
                 )
             }
@@ -219,5 +236,23 @@ internal class ClientRepository(
 
     private fun String.toRelayClientState(): RelayClientState =
         checkNotNull(RelayClientState.entries.find { it.wireName == this })
+
+    private fun ClientEntity.auditData(): Map<String, JsonElement> = auditDataOf(
+        "device_identity_id" to deviceIdentityId,
+        "name" to name,
+        "instructions" to instructions,
+        "hostname" to hostname,
+        "platform" to platform,
+        "architecture" to architecture,
+        "os_version" to osVersion,
+        "machine_id" to machineId,
+        "client_software" to clientSoftwareJson?.let { encoded ->
+            runCatching { storedJson.parseToJsonElement(encoded) }.getOrNull()
+        },
+        "relay_state" to relayClientState,
+        "desired_relay_state" to desiredRelayClientState,
+        "paired_at" to pairedAt,
+        "last_seen_at" to lastSeenAt,
+    )
 
 }

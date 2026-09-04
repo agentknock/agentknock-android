@@ -77,8 +77,8 @@ internal class GitSigningRequests(
         launchAiReview: (
             requestId: String,
             requestJson: String,
-            review: suspend () -> AiReview,
-            complete: suspend (AiReview) -> Unit,
+            review: suspend () -> AiReviewAttempt,
+            complete: suspend (AiReviewAttempt) -> Unit,
         ) -> Boolean,
     ): ProcessedRelayMessage? {
         val now = currentTimeMillis()
@@ -170,7 +170,7 @@ internal class GitSigningRequests(
             decidedAt = null,
         )
         suspend fun finishReview(
-            reviewResult: AiReview?,
+            reviewResult: AiReviewAttempt?,
             requestAlreadyInserted: Boolean,
         ): ProcessedRelayMessage? {
             val currentClient = if (needsAiReview) dao.getClient(client.clientId) else client
@@ -222,7 +222,7 @@ internal class GitSigningRequests(
                     explanation = "The client, SSH key, instructions, or approval settings changed during AI review.",
                 )
             } else {
-                reviewResult
+                reviewResult?.review
             }
             val evaluation = (if (aiInputsChanged) currentEvaluation else initialEvaluation)
                 ?.copy(aiReview = aiReview)
@@ -362,7 +362,9 @@ internal class GitSigningRequests(
                     clientId = client.clientId,
                     clientName = client.name,
                     relayRequestId = relayRequestId,
-                    data = finalGitSign.auditData(),
+                    data = finalRequest.requestAuditData() + finalGitSign.auditData() +
+                        (reviewResult?.auditData(checkNotNull(aiReview))
+                            ?: (aiReview?.auditData() ?: emptyMap())),
                 )
             }
             val persisted = if (requestAlreadyInserted) {
@@ -379,7 +381,8 @@ internal class GitSigningRequests(
                         clientId = client.clientId,
                         clientName = client.name,
                         relayRequestId = relayRequestId,
-                        data = finalGitSign.auditData(),
+                        data = finalRequest.requestAuditData() + finalGitSign.auditData() +
+                            (reviewResult?.auditData(aiReview) ?: aiReview.auditData()),
                     ),
                     automaticDecisionAudit = automaticDecisionAudit,
                 )
@@ -893,7 +896,32 @@ internal class GitSigningRequests(
                         clientId = currentRequest.clientId,
                         clientName = currentRequest.clientNameSnapshot,
                         relayRequestId = currentRequest.id,
-                        data = gitSign.auditData(),
+                        data = currentRequest.requestAuditData() + gitSign.auditData() +
+                            auditDataOf(
+                                "completion_valid" to valid,
+                                "completion_result" to when (completionResult) {
+                                    is GitSignCompletion.Approved ->
+                                        ApprovalCompletionResult.APPROVED.storedName
+                                    is GitSignCompletion.Denied ->
+                                        ApprovalCompletionResult.DENIED.storedName
+                                    is GitSignCompletion.Aborted ->
+                                        ApprovalCompletionResult.ABORTED.storedName
+                                    null -> null
+                                },
+                                "completion_reason" to when (completionResult) {
+                                    is GitSignCompletion.Denied -> completionResult.reason
+                                    is GitSignCompletion.Aborted -> completionResult.reason
+                                    else -> null
+                                },
+                                "completion_message" to when (completionResult) {
+                                    is GitSignCompletion.Denied -> completionResult.message
+                                    is GitSignCompletion.Aborted -> completionResult.message
+                                    else -> null
+                                },
+                                "returned_client_software" to completionResult?.clientSoftware?.let {
+                                    json.parseToJsonElement(json.encodeToString(it))
+                                },
+                            ),
                     ),
                 ),
                 now,
@@ -949,7 +977,11 @@ internal class GitSigningRequests(
                         clientId = currentRequest.clientId,
                         clientName = currentRequest.clientNameSnapshot,
                         relayRequestId = currentRequest.id,
-                        data = gitSign.auditData(),
+                        data = currentRequest.requestAuditData() + gitSign.auditData() +
+                            auditDataOf(
+                                "completion_valid" to false,
+                                "transport_error" to message,
+                            ),
                     ),
                 ),
                 now,
@@ -1151,28 +1183,40 @@ internal class GitSigningRequests(
         evaluation: ApprovalEvaluation,
         policies: List<SecretApprovalPolicy>,
         credentials: RelayDeviceCredentials,
-    ): AiReview {
-        val elapsedSeconds = parentElapsedSeconds ?: return AiReview(
-            decision = AiReviewDecision.ASK_USER,
-            explanation = "The relative timing of the parent invocation is unavailable.",
+    ): AiReviewAttempt {
+        val elapsedSeconds = parentElapsedSeconds ?: return AiReviewAttempt(
+            review = AiReview(
+                decision = AiReviewDecision.ASK_USER,
+                explanation = "The relative timing of the parent invocation is unavailable.",
+            ),
+            request = null,
         )
         if (contents.message.size > MAX_AI_REVIEW_GIT_CONTENT_BYTES) {
-            return AiReview(
-                decision = AiReviewDecision.ASK_USER,
-                explanation = "The exact Git signing content is too large for AI review.",
+            return AiReviewAttempt(
+                review = AiReview(
+                    decision = AiReviewDecision.ASK_USER,
+                    explanation = "The exact Git signing content is too large for AI review.",
+                ),
+                request = null,
             )
         }
         val signedContent = runCatching {
             contents.message.decodeToString(throwOnInvalidSequence = true)
-        }.getOrNull() ?: return AiReview(
-            decision = AiReviewDecision.ASK_USER,
-            explanation = "The exact Git signing content is not valid UTF-8.",
+        }.getOrNull() ?: return AiReviewAttempt(
+            review = AiReview(
+                decision = AiReviewDecision.ASK_USER,
+                explanation = "The exact Git signing content is not valid UTF-8.",
+            ),
+            request = null,
         )
         val invocationSecrets = invocation.providedSecretsJson?.let { stored ->
             decodeStoredApprovalReviewSecretFacts(stored)
-        } ?: return AiReview(
-            decision = AiReviewDecision.ASK_USER,
-            explanation = "The parent invocation context is unavailable.",
+        } ?: return AiReviewAttempt(
+            review = AiReview(
+                decision = AiReviewDecision.ASK_USER,
+                explanation = "The parent invocation context is unavailable.",
+            ),
+            request = null,
         )
         val request = approvalReviewGitSignRequest(
             client = client,
@@ -1185,7 +1229,10 @@ internal class GitSigningRequests(
             policies = policies,
             deviceInstructions = credentials.instructions,
         )
-        return performAiReview(approvalReviewer, credentials, request)
+        return AiReviewAttempt(
+            review = performAiReview(approvalReviewer, credentials, request),
+            request = request,
+        )
     }
 
     private suspend fun credentialsForClient(client: ClientEntity): RelayDeviceCredentials? {
@@ -1226,7 +1273,7 @@ internal class GitSigningRequests(
             clientId = request.clientId,
             clientName = request.clientNameSnapshot,
             relayRequestId = request.id,
-            data = gitSign.auditData(),
+            data = request.requestAuditData() + gitSign.auditData(),
         )
 
     private fun decisionAudit(
@@ -1246,13 +1293,21 @@ internal class GitSigningRequests(
         clientId = request.clientId,
         clientName = request.clientNameSnapshot,
         relayRequestId = request.id,
-        data = gitSign.auditData(),
+        data = request.requestAuditData() + gitSign.copy(
+            decision = decision.storedName,
+        ).auditData(),
     )
 
     private fun GitSignRequestEntity.auditData() = auditDataOf(
         "ssh_key" to secretName,
         "signed_object" to message.decodeToString(),
         "repository" to repositoryJson?.let { storedJson.parseToJsonElement(it) },
+        "approval_evaluation" to approvalEvaluationJson?.let(storedJson::parseToJsonElement),
+        "decision" to decision,
+        "completion_result" to completionResult,
+        "completion_reason" to completionReason,
+        "completion_message" to completionMessage,
+        "decided_at" to decidedAt,
     )
 
     private companion object {
