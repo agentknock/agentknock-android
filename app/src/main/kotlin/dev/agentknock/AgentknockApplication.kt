@@ -42,6 +42,7 @@ import dev.agentknock.storage.device.DeviceIdentityRepository
 import dev.agentknock.storage.device.DeviceManagementRepository
 import dev.agentknock.storage.device.DeviceSettingsCoordinator
 import dev.agentknock.protocol.PairingProtocol
+import dev.agentknock.subscription.GooglePlaySubscriptionBilling
 import dev.agentknock.subscription.SubscriptionRepository
 import dev.agentknock.ui.auth.AuthenticationSession
 import dev.agentknock.ui.auth.DeviceAuthenticationCoordinator
@@ -140,6 +141,7 @@ internal class ApplicationContainer(private val application: Application) {
         deviceAuthorization = deviceIdentity,
         relay = HttpRelaySubscriptionClient(relayHttp),
     )
+    val playSubscriptionBilling = GooglePlaySubscriptionBilling(application)
     val deviceManagement = DeviceManagementRepository(
         deviceIdentityDao = database.deviceIdentityDao(),
         deviceAuthorization = deviceIdentity,

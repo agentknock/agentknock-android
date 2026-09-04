@@ -41,6 +41,11 @@ internal class SubscriptionRepository(
             relay.redeem(deviceId, deviceToken, redemptionToken)
         }
 
+    suspend fun updateFromGooglePlay(purchaseToken: String): SubscriptionResult =
+        withAuthorization { deviceId, deviceToken ->
+            relay.updateFromGooglePlay(deviceId, deviceToken, purchaseToken)
+        }
+
     private suspend fun withAuthorization(
         operation: suspend (deviceId: String, deviceToken: String) -> RelaySubscriptionResult,
     ): SubscriptionResult = when (val result = deviceAuthorization.activeDeviceAuthorization()) {

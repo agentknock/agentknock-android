@@ -13,10 +13,12 @@ import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.verticalScroll
 import androidx.compose.material.icons.Icons
+import androidx.compose.material.icons.automirrored.outlined.OpenInNew
 import androidx.compose.material.icons.outlined.AutoAwesome
 import androidx.compose.material.icons.outlined.Check
 import androidx.compose.material.icons.outlined.CheckCircle
 import androidx.compose.material.icons.outlined.CloudOff
+import androidx.compose.material.icons.outlined.HourglassTop
 import androidx.compose.material.icons.outlined.Refresh
 import androidx.compose.material.icons.outlined.WorkspacePremium
 import androidx.compose.material3.Button
@@ -32,6 +34,8 @@ import androidx.compose.ui.Modifier
 import androidx.compose.ui.semantics.heading
 import androidx.compose.ui.semantics.semantics
 import androidx.compose.ui.unit.dp
+import dev.agentknock.subscription.PlaySubscriptionOffer
+import dev.agentknock.subscription.PlaySubscriptionOfferId
 import dev.agentknock.ui.theme.agentknockColors
 
 @Composable
@@ -39,9 +43,12 @@ internal fun SubscriptionAndBillingScreen(
     state: SubscriptionUiState,
     onBack: () -> Unit,
     onRefresh: () -> Unit,
+    onSubscribe: (PlaySubscriptionOfferId) -> Unit,
+    onManageSubscription: (String) -> Unit,
     modifier: Modifier = Modifier,
 ) {
     val active = state.access == SubscriptionAccess.ACTIVE
+    val busy = state.refreshing || state.redeeming || state.purchasing
     Column(modifier) {
         PageTopBar("Plan and billing", onBack)
         Column(
@@ -70,6 +77,7 @@ internal fun SubscriptionAndBillingScreen(
                 status = when (state.access) {
                     SubscriptionAccess.ACTIVE -> "Active"
                     SubscriptionAccess.CHECKING -> "Checking"
+                    SubscriptionAccess.SETUP_REQUIRED -> "Finish device setup"
                     SubscriptionAccess.FREE -> "Not active"
                     SubscriptionAccess.UNAVAILABLE -> "Status unavailable"
                 },
@@ -83,22 +91,62 @@ internal fun SubscriptionAndBillingScreen(
                 )
             }
 
-            if (!active) {
-                Button(onClick = {}, enabled = false, modifier = Modifier.fillMaxWidth()) {
-                    Icon(Icons.Outlined.WorkspacePremium, contentDescription = null)
-                    Spacer(Modifier.size(8.dp))
-                    Text("Subscribe with Google Play")
+            when {
+                state.googlePlayPurchase == GooglePlayPurchaseState.PENDING ->
+                    PurchaseStatusCard(
+                        title = "Payment pending",
+                        body = "AI review will activate after Google Play confirms the payment.",
+                        icon = { Icon(Icons.Outlined.HourglassTop, contentDescription = null) },
+                    )
+                active -> state.googlePlayProductId?.let { productId ->
+                    ManageSubscriptionButton(
+                        onClick = { onManageSubscription(productId) },
+                        enabled = !busy,
+                    )
                 }
-                Text(
-                    "Google Play subscriptions are not available yet.",
-                    style = MaterialTheme.typography.bodySmall,
-                    color = MaterialTheme.colorScheme.onSurfaceVariant,
-                )
+                state.googlePlayPurchase == GooglePlayPurchaseState.PURCHASED -> {
+                    PurchaseStatusCard(
+                        title = "Subscription needs attention",
+                        body = "Google Play reports a subscription, but AI review access is not active.",
+                        icon = { Icon(Icons.Outlined.CloudOff, contentDescription = null) },
+                    )
+                    state.googlePlayProductId?.let { productId ->
+                        ManageSubscriptionButton(
+                            onClick = { onManageSubscription(productId) },
+                            enabled = !busy,
+                        )
+                    }
+                }
+                state.access == SubscriptionAccess.SETUP_REQUIRED ->
+                    StoreStatus("Finish device setup before subscribing.")
+                state.playStore == PlayStoreAvailability.CHECKING ->
+                    StoreStatus("Loading Google Play plans…", showProgress = true)
+                state.playStore == PlayStoreAvailability.UNAVAILABLE ->
+                    StoreStatus("Google Play subscriptions are unavailable on this installation.")
+                state.offers.isEmpty() ->
+                    StoreStatus("No subscription plan is currently available in Google Play.")
+                else -> {
+                    if (state.offers.size > 1) {
+                        Text(
+                            "Choose a plan",
+                            style = MaterialTheme.typography.titleMedium,
+                            modifier = Modifier.semantics { heading() },
+                        )
+                    }
+                    state.offers.forEach { offer ->
+                        SubscriptionOffer(
+                            offer = offer,
+                            purchasing = state.purchasing,
+                            enabled = !busy,
+                            onSubscribe = { onSubscribe(offer.id) },
+                        )
+                    }
+                }
             }
 
             OutlinedButton(
                 onClick = onRefresh,
-                enabled = !state.refreshing && !state.redeeming,
+                enabled = !busy,
                 modifier = Modifier.fillMaxWidth(),
             ) {
                 if (state.refreshing || state.redeeming) {
@@ -110,6 +158,109 @@ internal fun SubscriptionAndBillingScreen(
                 Text(if (state.redeeming) "Activating…" else "Refresh subscription status")
             }
         }
+    }
+}
+
+@Composable
+private fun SubscriptionOffer(
+    offer: PlaySubscriptionOffer,
+    purchasing: Boolean,
+    enabled: Boolean,
+    onSubscribe: () -> Unit,
+) {
+    Surface(
+        color = MaterialTheme.colorScheme.surfaceContainerLow,
+        shape = MaterialTheme.shapes.large,
+        modifier = Modifier.fillMaxWidth(),
+    ) {
+        Column(
+            Modifier.padding(18.dp),
+            verticalArrangement = Arrangement.spacedBy(12.dp),
+        ) {
+            Row(
+                horizontalArrangement = Arrangement.spacedBy(12.dp),
+                verticalAlignment = Alignment.CenterVertically,
+            ) {
+                Icon(Icons.Outlined.WorkspacePremium, contentDescription = null)
+                Column(Modifier.weight(1f)) {
+                    Text("AI review subscription", style = MaterialTheme.typography.titleMedium)
+                    Text(offer.price, style = MaterialTheme.typography.titleLarge)
+                }
+            }
+            Text(
+                offer.terms,
+                style = MaterialTheme.typography.bodySmall,
+                color = MaterialTheme.colorScheme.onSurfaceVariant,
+            )
+            Button(
+                onClick = onSubscribe,
+                enabled = enabled,
+                modifier = Modifier.fillMaxWidth(),
+            ) {
+                if (purchasing) {
+                    CircularProgressIndicator(Modifier.size(20.dp), strokeWidth = 2.dp)
+                    Spacer(Modifier.size(8.dp))
+                    Text("Opening Google Play…")
+                } else {
+                    Text(if (offer.autoRenewing) "Subscribe" else "Buy plan")
+                }
+            }
+        }
+    }
+}
+
+@Composable
+private fun PurchaseStatusCard(
+    title: String,
+    body: String,
+    icon: @Composable () -> Unit,
+) {
+    Surface(
+        color = MaterialTheme.agentknockColors.attentionContainer,
+        contentColor = MaterialTheme.agentknockColors.onAttentionContainer,
+        shape = MaterialTheme.shapes.large,
+        modifier = Modifier.fillMaxWidth(),
+    ) {
+        Row(
+            Modifier.padding(18.dp),
+            horizontalArrangement = Arrangement.spacedBy(12.dp),
+            verticalAlignment = Alignment.Top,
+        ) {
+            icon()
+            Column(verticalArrangement = Arrangement.spacedBy(4.dp)) {
+                Text(title, style = MaterialTheme.typography.titleMedium)
+                Text(body, style = MaterialTheme.typography.bodyMedium)
+            }
+        }
+    }
+}
+
+@Composable
+private fun ManageSubscriptionButton(onClick: () -> Unit, enabled: Boolean) {
+    OutlinedButton(onClick = onClick, enabled = enabled, modifier = Modifier.fillMaxWidth()) {
+        Icon(Icons.AutoMirrored.Outlined.OpenInNew, contentDescription = null)
+        Spacer(Modifier.size(8.dp))
+        Text("Manage in Google Play")
+    }
+}
+
+@Composable
+private fun StoreStatus(text: String, showProgress: Boolean = false) {
+    Row(
+        Modifier.fillMaxWidth().padding(vertical = 8.dp),
+        horizontalArrangement = Arrangement.spacedBy(12.dp),
+        verticalAlignment = Alignment.CenterVertically,
+    ) {
+        if (showProgress) {
+            CircularProgressIndicator(Modifier.size(20.dp), strokeWidth = 2.dp)
+        } else {
+            Icon(Icons.Outlined.CloudOff, contentDescription = null)
+        }
+        Text(
+            text,
+            style = MaterialTheme.typography.bodyMedium,
+            color = MaterialTheme.colorScheme.onSurfaceVariant,
+        )
     }
 }
 

@@ -1,1 +1,1 @@
-Corrects AI review authorization and provides complete resolved environment-delivery context.
+Adds Google Play subscription purchasing, restoration, and management for AI review.

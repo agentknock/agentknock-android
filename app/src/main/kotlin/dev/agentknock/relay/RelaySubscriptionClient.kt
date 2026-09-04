@@ -19,6 +19,12 @@ internal interface RelaySubscriptionClient {
         deviceToken: String,
         redemptionToken: String,
     ): RelaySubscriptionResult
+
+    suspend fun updateFromGooglePlay(
+        deviceId: String,
+        deviceToken: String,
+        purchaseToken: String,
+    ): RelaySubscriptionResult
 }
 
 internal class HttpRelaySubscriptionClient(
@@ -49,6 +55,21 @@ internal class HttpRelaySubscriptionClient(
         ),
     )
 
+    override suspend fun updateFromGooglePlay(
+        deviceId: String,
+        deviceToken: String,
+        purchaseToken: String,
+    ): RelaySubscriptionResult = post(
+        path = "v1/device/$deviceId/subscription/update",
+        deviceToken = deviceToken,
+        body = json.encodeToString(
+            GooglePlaySubscriptionRequest(
+                source = "google_play",
+                purchaseToken = purchaseToken,
+            ),
+        ),
+    )
+
     private suspend fun post(
         path: String,
         deviceToken: String,
@@ -65,6 +86,12 @@ internal class HttpRelaySubscriptionClient(
 private data class SubscriptionRedemptionRequest(
     val source: String,
     @SerialName("redemption_token") val redemptionToken: String,
+)
+
+@Serializable
+private data class GooglePlaySubscriptionRequest(
+    val source: String,
+    @SerialName("purchase_token") val purchaseToken: String,
 )
 
 @Serializable

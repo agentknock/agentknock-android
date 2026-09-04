@@ -200,7 +200,10 @@ internal fun AgentknockScreen(
     }
 
     LaunchedEffect(current?.active?.deviceId, subscriptionViewModel) {
-        if (current?.active?.credentialsAvailable == true) subscriptionViewModel.refresh()
+        if (current != null) subscriptionViewModel.refresh()
+    }
+    LifecycleEventEffect(Lifecycle.Event.ON_RESUME) {
+        if (current != null) subscriptionViewModel.refresh()
     }
 
     LaunchedEffect(current) {

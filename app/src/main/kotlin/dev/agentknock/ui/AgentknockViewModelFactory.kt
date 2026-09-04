@@ -82,6 +82,7 @@ internal fun agentknockViewModelFactory(
         initializer {
             SubscriptionViewModel(
                 repository = container.subscription,
+                billing = container.playSubscriptionBilling,
                 awaitStorageReady = awaitStorageReady,
             )
         }

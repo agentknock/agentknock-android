@@ -38,6 +38,20 @@ class SubscriptionRepositoryTest {
     }
 
     @Test
+    fun `submits a Google Play purchase with active device credentials`() = runTest {
+        val relay = FakeRelay(
+            googlePlayResult = RelayEndpointResult.Success(RelaySubscriptionStatus(active = true)),
+        )
+        val repository = SubscriptionRepository(availableAuthorization, relay)
+
+        assertEquals(
+            SubscriptionResult.Status(active = true),
+            repository.updateFromGooglePlay(PURCHASE_TOKEN),
+        )
+        assertEquals(Triple(DEVICE_ID, DEVICE_TOKEN, PURCHASE_TOKEN), relay.googlePlayPurchase)
+    }
+
+    @Test
     fun `does not contact relay without an active device`() = runTest {
         val relay = FakeRelay()
         val authorization = RelayDeviceAuthorizationSource {
@@ -64,9 +78,12 @@ class SubscriptionRepositoryTest {
             RelayEndpointResult.Success(RelaySubscriptionStatus(active = false)),
         private val redeemResult: RelaySubscriptionResult =
             RelayEndpointResult.Success(RelaySubscriptionStatus(active = false)),
+        private val googlePlayResult: RelaySubscriptionResult =
+            RelayEndpointResult.Success(RelaySubscriptionStatus(active = false)),
     ) : RelaySubscriptionClient {
         var statusCredentials: Pair<String, String>? = null
         var redemption: Triple<String, String, String>? = null
+        var googlePlayPurchase: Triple<String, String, String>? = null
 
         override suspend fun status(
             deviceId: String,
@@ -84,11 +101,22 @@ class SubscriptionRepositoryTest {
             redemption = Triple(deviceId, deviceToken, redemptionToken)
             return redeemResult
         }
+
+
+        override suspend fun updateFromGooglePlay(
+            deviceId: String,
+            deviceToken: String,
+            purchaseToken: String,
+        ): RelaySubscriptionResult {
+            googlePlayPurchase = Triple(deviceId, deviceToken, purchaseToken)
+            return googlePlayResult
+        }
     }
 
     private companion object {
         const val DEVICE_ID = "01K2ENXDTW1P3XAR4J7V7C9D0H"
         const val DEVICE_TOKEN = "AAECAwQFBgcICQoLDA0ODxAREhMUFRYXGBkaGxwdHh8"
         const val REDEMPTION_TOKEN = "DDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDI"
+        const val PURCHASE_TOKEN = "google-play-purchase-token"
     }
 }
