@@ -1,1 +1,1 @@
-Adds Google Play subscription purchasing, restoration, and management for AI review.
+Clearer request decisions, Git and SSH signing context, secret uploads, and approval settings. Improved secret editors, pairing and setup, security and backup information, subscription screens, notifications, and audit history.
