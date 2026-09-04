@@ -60,6 +60,7 @@ import dev.agentknock.storage.audit.AuditEvent
 import dev.agentknock.storage.audit.AuditOutcome
 import dev.agentknock.ui.components.AdaptiveListDetail
 import dev.agentknock.ui.components.Disclosure
+import dev.agentknock.ui.components.ExactText
 import dev.agentknock.ui.components.InformationRow
 import dev.agentknock.ui.components.InformationSurface
 import dev.agentknock.ui.theme.agentknockColors
@@ -207,9 +208,10 @@ private fun AuditList(
                 contentPadding = PaddingValues(start = 16.dp, end = 16.dp, bottom = 24.dp),
             ) {
                 dayGroups.forEach { (day, dayEvents) ->
-                    item(key = "day_$day") {
+                    stickyHeader(key = "day_$day") {
                         Row(
-                            Modifier.fillMaxWidth().padding(horizontal = 8.dp, vertical = 8.dp),
+                            Modifier.fillMaxWidth().background(MaterialTheme.colorScheme.background)
+                                .padding(horizontal = 8.dp, vertical = 8.dp),
                             horizontalArrangement = Arrangement.SpaceBetween,
                             verticalAlignment = Alignment.CenterVertically,
                         ) {
@@ -255,7 +257,7 @@ private fun AuditTimelineRow(
     lastInDay: Boolean,
     onClick: () -> Unit,
 ) {
-    val context = event.contextLine()
+    val fields = event.summaryFields()
     val presentation = event.presentation()
     val accent = event.outcome.accentColor()
     val timeline = MaterialTheme.colorScheme.outlineVariant
@@ -303,13 +305,16 @@ private fun AuditTimelineRow(
                 maxLines = 2,
                 overflow = TextOverflow.Ellipsis,
             )
-            Text(
-                context ?: presentation.category.displayName,
-                style = MaterialTheme.typography.bodySmall,
-                color = MaterialTheme.colorScheme.onSurfaceVariant,
-                maxLines = 2,
-                overflow = TextOverflow.Ellipsis,
-            )
+            fields.forEach { field ->
+                Text(
+                    if (field.label == "Command") field.value else "${field.label}: ${field.value}",
+                    style = MaterialTheme.typography.bodySmall,
+                    fontFamily = if (field.monospace) FontFamily.Monospace else FontFamily.Default,
+                    color = MaterialTheme.colorScheme.onSurfaceVariant,
+                    maxLines = if (field.label == "Command") 2 else 1,
+                    overflow = TextOverflow.Ellipsis,
+                )
+            }
         }
     }
 }
@@ -346,7 +351,7 @@ private fun AuditDetail(
 ) {
     val context = LocalContext.current
     val presentation = event.presentation()
-    val relevantFields = event.relevantDetailFields()
+    val fields = event.displayDetailFields()
     val technicalJson = event.technicalJson()
     fun copy(label: String, value: String) {
         context.getSystemService(ClipboardManager::class.java).setPrimaryClip(
@@ -388,67 +393,17 @@ private fun AuditDetail(
                     }
                     Text(presentation.title, style = MaterialTheme.typography.headlineSmall)
                 }
-                val distinctClientName = event.clientName
-                    ?.takeIf(String::isNotBlank)
-                    ?.takeUnless { it == event.subject }
-                if (
-                    event.subject != null || event.context != null || event.detail != null ||
-                    distinctClientName != null || event.decisionSource != null ||
-                    event.expiresAt != null || relevantFields.isNotEmpty()
-                ) {
+                if (fields.isNotEmpty()) {
                     InformationSurface {
-                        event.subject?.let {
-                            InformationRow(
-                                presentation.subjectLabel ?: "Subject",
-                                it,
-                                monospace = presentation.subjectLabel == "Pairing address" ||
-                                    presentation.subjectLabel == "Environment variable",
-                            )
-                        }
-                        event.context?.let {
-                            InformationRow(presentation.contextLabel ?: "Context", it)
-                        }
-                        event.detail?.let {
-                            InformationRow(presentation.detailLabel ?: "Details", it)
-                        }
-                        distinctClientName?.let {
-                            InformationRow("Client", it)
-                        }
-                        event.decisionSource?.let {
-                            InformationRow("Decision source", it.displayName())
-                        }
-                        event.expiresAt?.let {
-                            InformationRow("Valid until", formatTimestamp(it))
-                        }
-                        relevantFields.forEach { field ->
+                        fields.forEach { field ->
                             InformationRow(field.label, field.value, monospace = field.monospace)
                         }
                     }
                 }
-                Disclosure("Technical information") {
-                    Row(
-                        modifier = Modifier.fillMaxWidth(),
-                        horizontalArrangement = Arrangement.SpaceBetween,
-                        verticalAlignment = Alignment.CenterVertically,
-                    ) {
-                        Text(
-                            "Event JSON",
-                            style = MaterialTheme.typography.labelMedium,
-                            color = MaterialTheme.colorScheme.onSurfaceVariant,
-                        )
+                Disclosure("Technical information · JSON") {
+                    ExactText(technicalJson, trailingAction = {
                         CopyIconButton("Copy event JSON") { copy("Event JSON", technicalJson) }
-                    }
-                    Surface(
-                        color = MaterialTheme.colorScheme.surfaceContainerHighest,
-                        shape = MaterialTheme.shapes.medium,
-                    ) {
-                        Text(
-                            technicalJson,
-                            modifier = Modifier.fillMaxWidth().padding(12.dp),
-                            style = MaterialTheme.typography.bodySmall,
-                            fontFamily = FontFamily.Monospace,
-                        )
-                    }
+                    })
                 }
             }
         }
@@ -462,21 +417,6 @@ private fun CopyIconButton(description: String, onClick: () -> Unit) {
     }
 }
 
-private fun AuditEvent.contextLine(): String? {
-    val presentation = presentation()
-    val subjectContext = subject?.let { value ->
-        presentation.subjectLabel?.let { label -> "$label: $value" } ?: value
-    }
-    val eventContext = context?.let { value ->
-        presentation.contextLabel?.let { label -> "$label: $value" } ?: value
-    }
-    val displayedClient = clientName?.takeIf(String::isNotBlank)
-        ?: clientId?.let { id -> if (id.length > 8) "…${id.takeLast(6)}" else id }
-    val clientContext = displayedClient?.takeUnless { it == subject }?.let { "Client: $it" }
-    return listOfNotNull(subjectContext, eventContext, clientContext)
-        .joinToString(" · ")
-        .ifBlank { null }
-}
 
 private fun AuditOutcome.displayName(): String = when (this) {
     AuditOutcome.RECEIVED -> "Received"
@@ -494,7 +434,6 @@ private fun AuditOutcome.displayName(): String = when (this) {
 private fun AuditOutcome.accentColor(): Color = when (this) {
     AuditOutcome.APPROVED,
     AuditOutcome.COMPLETED,
-    AuditOutcome.CHANGED,
     -> MaterialTheme.agentknockColors.success
     AuditOutcome.FAILED -> MaterialTheme.agentknockColors.danger
     else -> MaterialTheme.colorScheme.onSurfaceVariant

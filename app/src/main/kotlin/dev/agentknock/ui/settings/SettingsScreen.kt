@@ -43,6 +43,7 @@ internal enum class SettingsPage {
 @Composable
 internal fun SettingsScreen(
     onClose: () -> Unit,
+    onOpenSecrets: () -> Unit,
     authenticationMode: DeviceAuthenticationMode,
     notificationStateGeneration: Long,
     requestNotificationPermission: () -> Unit,
@@ -80,11 +81,11 @@ internal fun SettingsScreen(
                 FactoryResetUiState.Working -> Unit
                 FactoryResetUiState.ConfirmLocalClear -> {
                     viewModel.cancelLocalClear()
-                    page = SettingsPage.SECURITY_BACKUP
+                    page = SettingsPage.OVERVIEW
                 }
                 FactoryResetUiState.Idle,
                 FactoryResetUiState.ClearFailed,
-                -> page = SettingsPage.SECURITY_BACKUP
+                -> page = SettingsPage.OVERVIEW
             }
             SettingsPage.SUBSCRIPTION -> {
                 subscriptionViewModel.dismissNotice()
@@ -139,6 +140,10 @@ internal fun SettingsScreen(
                     },
                     onSubscribe = { offerId ->
                         activity?.let { subscriptionViewModel.subscribe(it, offerId) }
+                    },
+                    onOpenSecrets = {
+                        subscriptionViewModel.dismissNotice()
+                        onOpenSecrets()
                     },
                     onManageSubscription = { productId ->
                         val uri = "https://play.google.com/store/account/subscriptions".toUri()

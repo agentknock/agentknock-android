@@ -18,7 +18,6 @@ import androidx.compose.ui.unit.dp
 import dev.agentknock.BuildConfig
 import dev.agentknock.push.RequestNotifications
 import dev.agentknock.relay.RelayPushRegistrationState
-import dev.agentknock.storage.crypto.EncryptionKeyBacking
 import dev.agentknock.storage.crypto.VaultProtection
 import dev.agentknock.ui.auth.DeviceAuthenticationMode
 
@@ -59,7 +58,7 @@ internal fun SettingsOverview(
                             !requestsEnabled -> "Requests needing action are muted"
                             pushState != null && pushState != RelayPushRegistrationState.REGISTERED ->
                                 "Delivery needs attention"
-                            else -> "Requests needing action can alert you"
+                            else -> "Request alerts enabled"
                         },
                         onClick = { onOpen(SettingsPage.NOTIFICATIONS) },
                     )
@@ -108,12 +107,7 @@ private fun VaultProtection?.overviewDescription(): String = when (this) {
     null -> "Checking encryption"
     else -> when {
         unavailableStoredData.isNotEmpty() -> "Stored data unavailable"
-        this is VaultProtection.ActiveKeysAvailable ->
-            if (backings.values.all(EncryptionKeyBacking::isHardwareBacked)) {
-                "Hardware-backed encryption"
-            } else {
-                "Android Keystore encryption"
-            }
+        this is VaultProtection.ActiveKeysAvailable -> "Backup information"
         this is VaultProtection.ActiveKeysUnavailable -> "Current encryption key unavailable"
         else -> "Encryption status unknown"
     }
@@ -121,6 +115,6 @@ private fun VaultProtection?.overviewDescription(): String = when (this) {
 
 private fun DeviceAuthenticationMode.overviewLabel(): String = when (this) {
     DeviceAuthenticationMode.DEVICE_LOCK -> "Device lock"
-    DeviceAuthenticationMode.SENSITIVE_VALUES_AND_PAIRING -> "Protected values and pairing"
+    DeviceAuthenticationMode.SENSITIVE_VALUES_AND_PAIRING -> "Protect sensitive actions"
     DeviceAuthenticationMode.APP_LOCK -> "App lock"
 }

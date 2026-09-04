@@ -73,7 +73,7 @@ internal fun AuditEvent.presentation(): AuditPresentation = when (type) {
     AuditEventType.SECRET_USE_RECEIVED -> secretUseEvent("Secret use requested")
     AuditEventType.SECRET_USE_AI_REVIEWED -> secretUseEvent(
         title = aiReviewTitle("secret use"),
-        detailLabel = "AI review",
+        detailLabel = "AI explanation",
     )
     AuditEventType.SECRET_USE_DECIDED -> secretUseEvent(
         title = decisionTitle("Secret use", nonSensitiveTitle = "Non-sensitive data provided automatically"),
@@ -94,7 +94,7 @@ internal fun AuditEvent.presentation(): AuditPresentation = when (type) {
     AuditEventType.GIT_SIGN_RECEIVED -> gitSignEvent("Git signature requested")
     AuditEventType.GIT_SIGN_AI_REVIEWED -> gitSignEvent(
         title = aiReviewTitle("Git signing"),
-        detailLabel = "AI review",
+        detailLabel = "AI explanation",
     )
     AuditEventType.GIT_SIGN_DECIDED -> gitSignEvent(
         title = decisionTitle("Git signature"),
@@ -115,7 +115,7 @@ internal fun AuditEvent.presentation(): AuditPresentation = when (type) {
         sshAuthenticationEvent("SSH authentication requested")
     AuditEventType.SSH_AUTHENTICATION_AI_REVIEWED -> sshAuthenticationEvent(
         title = aiReviewTitle("SSH authentication"),
-        detailLabel = "AI review",
+        detailLabel = "AI explanation",
     )
     AuditEventType.SSH_AUTHENTICATION_DECIDED -> sshAuthenticationEvent(
         title = decisionTitle("SSH authentication"),
@@ -258,6 +258,7 @@ private fun AuditEvent.secretUseEvent(
     title = title,
     category = AuditCategory.SECRET_USE,
     subjectLabel = subjectLabel,
+    contextLabel = "Command",
     detailLabel = detailLabel,
     sensitiveUse = sensitiveUse,
 )
@@ -357,7 +358,7 @@ private fun AuditEvent.completionTitle(
 }
 
 private fun AuditEvent.decisionDetailLabel(): String? = when {
-    decisionSource == AuditDecisionSource.AI_REVIEW -> "AI review"
+    decisionSource == AuditDecisionSource.AI_REVIEW -> "AI explanation"
     outcome == AuditOutcome.DENIED || outcome == AuditOutcome.REJECTED ||
         outcome == AuditOutcome.FAILED -> "Reason"
     else -> null

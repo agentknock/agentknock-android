@@ -261,6 +261,9 @@ internal data class SecretSnapshot(
 
 @Dao
 internal interface SecretDao {
+    @Query("SELECT name FROM clients WHERE client_id = :clientId")
+    suspend fun getClientName(clientId: String): String?
+
     @Query(
         """
         SELECT secrets.id,

@@ -187,6 +187,18 @@ class SecretRepositoryTransactionTest {
             ),
             audit.observeEvents().first().map { it.type },
         )
+        assertTrue(audit.observeEvents().first().all { it.clientName == "Workstation" })
+        assertEquals("Workstation", database.secretDao().getClientName("workstation"))
+        assertEquals(
+            SaveSecretResult.SAVED,
+            repository(audit).setClientApprovalOverride("first", "workstation", SecretApprovalMode.ASK_AI),
+        )
+        assertEquals("Workstation", audit.observeEvents().first().first().clientName)
+        assertTrue(repository(audit).endTemporaryAccess("second", "workstation", TemporaryAccessOperation.INVOCATION))
+        assertEquals("Workstation", audit.observeEvents().first().first().clientName)
+        val client = checkNotNull(database.requestDao().getClient("workstation"))
+        database.requestDao().updateClient(client.copy(name = "Renamed workstation"))
+        assertTrue(audit.observeEvents().first().all { it.clientName == "Workstation" })
     }
 
     private fun repository(audit: AuditSink) = SecretRepository(

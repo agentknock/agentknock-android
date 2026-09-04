@@ -43,6 +43,12 @@ internal fun NotificationsSettings(
     val appNotificationsEnabled = remember(refreshGeneration) {
         RequestNotifications.appNotificationsEnabled(context)
     }
+    val requestsEnabled = remember(refreshGeneration) {
+        RequestNotifications.actionNotificationsEnabled(context)
+    }
+    val backgroundEnabled = remember(refreshGeneration) {
+        RequestNotifications.channelNotificationsEnabled(context, RequestNotifications.BACKGROUND_CHANNEL_ID)
+    }
 
     fun openChannel(channelId: String) {
         context.startActivity(
@@ -90,14 +96,15 @@ internal fun NotificationsSettings(
                     SettingsGroup {
                         SettingsRow(
                             title = "Requests needing action",
-                            summary = "Alerts for requests that need your attention",
+                            summary = if (requestsEnabled) "Enabled" else "Blocked by Android settings",
                             onClick = { openChannel(RequestNotifications.ACTION_CHANNEL_ID) },
                             external = true,
                         )
                         SettingsGroupDivider()
                         SettingsRow(
                             title = "Background processing",
-                            summary = "Controls only the silent status notification; request processing continues if hidden",
+                            summary = (if (backgroundEnabled) "Enabled" else "Hidden") +
+                                " · Hiding this silent notification does not stop request processing",
                             onClick = { openChannel(RequestNotifications.BACKGROUND_CHANNEL_ID) },
                             external = true,
                         )

@@ -15,8 +15,6 @@ import androidx.compose.foundation.verticalScroll
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.automirrored.outlined.OpenInNew
 import androidx.compose.material.icons.outlined.AutoAwesome
-import androidx.compose.material.icons.outlined.Check
-import androidx.compose.material.icons.outlined.CheckCircle
 import androidx.compose.material.icons.outlined.CloudOff
 import androidx.compose.material.icons.outlined.HourglassTop
 import androidx.compose.material.icons.outlined.Refresh
@@ -28,6 +26,8 @@ import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.OutlinedButton
 import androidx.compose.material3.Surface
 import androidx.compose.material3.Text
+import androidx.compose.material3.TextButton
+import androidx.compose.material3.LocalContentColor
 import androidx.compose.runtime.Composable
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
@@ -45,6 +45,7 @@ internal fun SubscriptionAndBillingScreen(
     onRefresh: () -> Unit,
     onSubscribe: (PlaySubscriptionOfferId) -> Unit,
     onManageSubscription: (String) -> Unit,
+    onOpenSecrets: () -> Unit,
     modifier: Modifier = Modifier,
 ) {
     val active = state.access == SubscriptionAccess.ACTIVE
@@ -56,21 +57,6 @@ internal fun SubscriptionAndBillingScreen(
             verticalArrangement = Arrangement.spacedBy(16.dp),
         ) {
             state.notice?.let { SubscriptionNoticeSurface(it) }
-
-            Text(
-                "Agentknock's core features are free. A subscription adds AI review to the approval choices already available on your device.",
-                color = MaterialTheme.colorScheme.onSurfaceVariant,
-            )
-
-            AccessCard(
-                title = "Included for everyone",
-                status = "Always free",
-                highlighted = false,
-            ) {
-                IncludedFeature("Store and release secrets")
-                IncludedFeature("Manual approvals")
-                IncludedFeature("Temporary access")
-            }
 
             AccessCard(
                 title = "AI review",
@@ -85,17 +71,40 @@ internal fun SubscriptionAndBillingScreen(
                 warning = state.access == SubscriptionAccess.UNAVAILABLE,
             ) {
                 Text(
-                    "Ask AI can approve, deny, or leave a request for you to decide. Secret values and private keys are never sent for review.",
+                    if (active) {
+                        "AI review is available for secrets set to Ask AI. " +
+                            "Other approval settings still apply."
+                    } else {
+                        "Fewer interruptions, with decisions based on your instructions. " +
+                            "Ask AI can approve, deny, or leave a request for you to decide."
+                    },
                     style = MaterialTheme.typography.bodyMedium,
-                    color = MaterialTheme.colorScheme.onSurfaceVariant,
                 )
+                Text(
+                    "Sensitive values and private keys are never sent for review.",
+                    style = MaterialTheme.typography.bodyMedium,
+                    color = LocalContentColor.current.copy(alpha = 0.85f),
+                )
+                if (state.googlePlayPurchase == GooglePlayPurchaseState.PURCHASED) {
+                    Text("Google Play subscription", style = MaterialTheme.typography.labelLarge)
+                }
+            }
+
+            if (active) {
+                Button(onClick = onOpenSecrets, modifier = Modifier.fillMaxWidth()) {
+                    Text("Choose secrets for AI review")
+                }
             }
 
             when {
                 state.googlePlayPurchase == GooglePlayPurchaseState.PENDING ->
                     PurchaseStatusCard(
                         title = "Payment pending",
-                        body = "AI review will activate after Google Play confirms the payment.",
+                        body = if (active) {
+                            "Google Play has not confirmed the payment. Your existing AI access is still active."
+                        } else {
+                            "AI review will activate after Google Play confirms the payment."
+                        },
                         icon = { Icon(Icons.Outlined.HourglassTop, contentDescription = null) },
                     )
                 active -> state.googlePlayProductId?.let { productId ->
@@ -122,7 +131,7 @@ internal fun SubscriptionAndBillingScreen(
                 state.playStore == PlayStoreAvailability.CHECKING ->
                     StoreStatus("Loading Google Play plans…", showProgress = true)
                 state.playStore == PlayStoreAvailability.UNAVAILABLE ->
-                    StoreStatus("Google Play subscriptions are unavailable on this installation.")
+                    StoreStatus("Google Play billing is unavailable right now. Subscribing requires a signed-in Play Store and a Play-installed copy of Agentknock. Existing AI access can still be refreshed.")
                 state.offers.isEmpty() ->
                     StoreStatus("No subscription plan is currently available in Google Play.")
                 else -> {
@@ -144,7 +153,13 @@ internal fun SubscriptionAndBillingScreen(
                 }
             }
 
-            OutlinedButton(
+            Text(
+                "Secret storage, manual approvals and temporary access are free for everyone.",
+                style = MaterialTheme.typography.bodyMedium,
+                color = MaterialTheme.colorScheme.onSurfaceVariant,
+            )
+
+            TextButton(
                 onClick = onRefresh,
                 enabled = !busy,
                 modifier = Modifier.fillMaxWidth(),
@@ -155,7 +170,7 @@ internal fun SubscriptionAndBillingScreen(
                     Icon(Icons.Outlined.Refresh, contentDescription = null)
                 }
                 Spacer(Modifier.size(8.dp))
-                Text(if (state.redeeming) "Activating…" else "Refresh subscription status")
+                Text(if (state.redeeming) "Activating…" else "Refresh status")
             }
         }
     }
@@ -297,7 +312,7 @@ private fun AccessCard(
                 verticalAlignment = Alignment.CenterVertically,
             ) {
                 Icon(
-                    if (title == "AI review") Icons.Outlined.AutoAwesome else Icons.Outlined.CheckCircle,
+                    Icons.Outlined.AutoAwesome,
                     contentDescription = null,
                 )
                 Column(Modifier.weight(1f)) {
@@ -312,14 +327,6 @@ private fun AccessCard(
             }
             content()
         }
-    }
-}
-
-@Composable
-private fun IncludedFeature(text: String) {
-    Row(horizontalArrangement = Arrangement.spacedBy(10.dp), verticalAlignment = Alignment.CenterVertically) {
-        Icon(Icons.Outlined.Check, contentDescription = null, modifier = Modifier.size(18.dp))
-        Text(text, style = MaterialTheme.typography.bodyMedium)
     }
 }
 

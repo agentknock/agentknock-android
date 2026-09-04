@@ -48,8 +48,8 @@ internal fun AboutSettings(
                     Text("Agentknock", style = MaterialTheme.typography.headlineMedium)
                     Text(
                         "Developer secrets on your phone, provided only to approved commands. " +
-                            "Agentknock can supply environment variables or sign Git objects " +
-                            "without exposing SSH private keys.",
+                            "Supply environment variables, sign Git commits and tags, or authenticate " +
+                            "SSH connections without exposing private keys.",
                         color = MaterialTheme.colorScheme.onSurfaceVariant,
                     )
                 }
@@ -92,7 +92,12 @@ internal fun AboutSettings(
                             "${BuildConfig.VERSION_NAME} (${BuildConfig.VERSION_CODE})",
                         )
                         SettingsGroupDivider()
-                        SettingsValueRow("Source revision", BuildConfig.SOURCE_REVISION, monospace = true)
+                        SettingsValueRow(
+                            "Source revision",
+                            if (BuildConfig.SOURCE_REVISION == "unverified") "Not recorded in this build"
+                            else BuildConfig.SOURCE_REVISION,
+                            monospace = BuildConfig.SOURCE_REVISION != "unverified",
+                        )
                         SettingsGroupDivider()
                         SettingsValueRow("Developer", "Full Disclosure")
                     }

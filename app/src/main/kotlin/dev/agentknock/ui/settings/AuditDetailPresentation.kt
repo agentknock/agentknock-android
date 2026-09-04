@@ -1,7 +1,9 @@
 package dev.agentknock.ui.settings
 
 import dev.agentknock.presentation.formatPlatformName
+import dev.agentknock.presentation.formatTimestamp
 import dev.agentknock.presentation.renderShellCommand
+import dev.agentknock.storage.audit.AuditDecisionSource
 import dev.agentknock.storage.audit.AuditEvent
 import dev.agentknock.storage.audit.AuditEventType
 import kotlinx.serialization.encodeToString
@@ -19,6 +21,69 @@ internal data class AuditDetailField(
     val value: String,
     val monospace: Boolean = false,
 )
+
+/** Recorded participants and command, never identities looked up from today's vault. */
+internal fun AuditEvent.summaryFields(): List<AuditDetailField> = buildList {
+    val presentation = presentation()
+    commandField()?.let(::add)
+    subject?.let { add(AuditDetailField(presentation.subjectLabel ?: "Subject", it)) }
+    clientField(abbreviateId = true)?.let(::add)
+    if (context != null && presentation.contextLabel != "Command") {
+        add(AuditDetailField(presentation.contextLabel ?: "Context", context))
+    }
+    if (type in setOf(
+            AuditEventType.SECRET_APPROVAL_MODE_CHANGED,
+            AuditEventType.CLIENT_APPROVAL_OVERRIDE_CHANGED,
+            AuditEventType.TEMPORARY_ACCESS_ALLOWED,
+            AuditEventType.TEMPORARY_ACCESS_ENDED,
+        )) {
+        detail?.let { add(AuditDetailField(presentation.detailLabel ?: "Change", it)) }
+    }
+}
+
+internal fun AuditEvent.displayDetailFields(): List<AuditDetailField> = buildList {
+    val presentation = presentation()
+    val relevant = relevantDetailFields().toMutableList()
+    clientField(abbreviateId = false)?.let(::add)
+    subject?.let {
+        add(AuditDetailField(presentation.subjectLabel ?: "Subject", it,
+            presentation.subjectLabel in setOf("Pairing address", "Environment variable")))
+    }
+    commandField()?.let { command ->
+        add(command)
+        relevant.removeAll { it.label == "Command" }
+    }
+    if (context != null && presentation.contextLabel != "Command") {
+        add(AuditDetailField(presentation.contextLabel ?: "Context", context))
+    }
+    val (reviewFields, otherFields) = relevant.partition {
+        it.label in setOf("AI decision", "AI explanation", "AI review problem", "Applied decision", "Applied explanation")
+    }
+    addAll(reviewFields)
+    detail?.let { add(AuditDetailField(presentation.detailLabel ?: "Details", it)) }
+    decisionSource?.takeUnless { it == AuditDecisionSource.AI_REVIEW }?.let {
+        add(AuditDetailField("Decision source", it.displayName()))
+    }
+    expiresAt?.let { add(AuditDetailField("Valid until", formatTimestamp(it))) }
+    addAll(otherFields)
+}
+
+private fun AuditEvent.commandField(): AuditDetailField? {
+    if (presentation().contextLabel != "Command") return null
+    val command = data.text("command")?.let { renderShellCommand(it, data.stringArray("arguments")) }
+        ?: context ?: return null
+    return AuditDetailField("Command", command, monospace = true)
+}
+
+private fun AuditEvent.clientField(abbreviateId: Boolean): AuditDetailField? {
+    clientName?.takeIf(String::isNotBlank)?.let {
+        if (it == subject && presentation().subjectLabel == "Client") return null
+        return AuditDetailField("Client", it)
+    }
+    val id = clientId ?: return null
+    return AuditDetailField("Client ID", if (abbreviateId && id.length > 8) "…${id.takeLast(6)}" else id,
+        monospace = true)
+}
 
 internal fun AuditEvent.relevantDetailFields(): List<AuditDetailField> = buildList {
     when (type) {

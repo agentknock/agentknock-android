@@ -295,6 +295,7 @@ internal class SecretRepository(
                     subject = secret.name,
                     detail = mode?.auditName() ?: "Use default",
                     clientId = clientId,
+                    clientName = dao.getClientName(clientId),
                     data = secret.auditData() + auditDataOf(
                         "previous_client_approval_mode" to currentOverride?.approvalMode,
                         "client_approval_mode" to mode?.storedName,
@@ -339,6 +340,7 @@ internal class SecretRepository(
                 now = now,
             )
             if (!inserted) return@execute false
+            val clientName = dao.getClientName(clientId)
             audit.append(
                 records = distinctPolicies.map { policy ->
                     AuditRecord(
@@ -349,6 +351,7 @@ internal class SecretRepository(
                         detail = operation.auditName(),
                         expiresAt = expiresAt,
                         clientId = clientId,
+                        clientName = clientName,
                         data = auditDataOf(
                             "secret_id" to policy.secretId,
                             "secret_name" to policy.secretName,
@@ -385,6 +388,7 @@ internal class SecretRepository(
                         subject = secret?.name,
                         detail = operation.auditName(),
                         clientId = clientId,
+                        clientName = dao.getClientName(clientId),
                         expiresAt = grant?.expiresAt,
                         data = auditDataOf(
                             "secret_id" to secretId,

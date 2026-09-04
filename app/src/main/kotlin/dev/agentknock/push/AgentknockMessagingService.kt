@@ -385,10 +385,13 @@ internal object RequestNotifications {
     fun appNotificationsEnabled(context: Context): Boolean =
         context.getSystemService(NotificationManager::class.java).areNotificationsEnabled()
 
-    fun actionNotificationsEnabled(context: Context): Boolean {
+    fun actionNotificationsEnabled(context: Context): Boolean =
+        channelNotificationsEnabled(context, ACTION_CHANNEL_ID)
+
+    fun channelNotificationsEnabled(context: Context, channelId: String): Boolean {
         val manager = context.getSystemService(NotificationManager::class.java)
         return manager.areNotificationsEnabled() &&
-            manager.getNotificationChannel(ACTION_CHANNEL_ID)?.importance != NotificationManager.IMPORTANCE_NONE
+            manager.getNotificationChannel(channelId)?.importance != NotificationManager.IMPORTANCE_NONE
     }
 
     fun showWake(context: Context) {

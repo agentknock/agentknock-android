@@ -324,6 +324,10 @@ internal fun AgentknockScreen(
         ) {
             SettingsScreen(
                 onClose = ::closeSettings,
+                onOpenSecrets = {
+                    closeSettings()
+                    section = MainSection.SECRETS
+                },
                 authenticationMode = authenticationMode,
                 notificationStateGeneration = notificationRefreshGeneration,
                 requestNotificationPermission = requestNotificationPermission,

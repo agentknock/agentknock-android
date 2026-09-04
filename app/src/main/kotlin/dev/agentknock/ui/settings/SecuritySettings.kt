@@ -2,24 +2,11 @@ package dev.agentknock.ui.settings
 
 import android.app.KeyguardManager
 import androidx.compose.foundation.layout.Arrangement
-import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.PaddingValues
-import androidx.compose.foundation.layout.Row
-import androidx.compose.foundation.layout.fillMaxWidth
-import androidx.compose.foundation.layout.padding
-import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.lazy.LazyColumn
-import androidx.compose.material.icons.Icons
-import androidx.compose.material.icons.outlined.Security
-import androidx.compose.material3.Icon
-import androidx.compose.material3.MaterialTheme
-import androidx.compose.material3.Surface
-import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
-import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
-import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.unit.dp
 import dev.agentknock.storage.crypto.EncryptionKeyBacking
@@ -27,7 +14,6 @@ import dev.agentknock.storage.crypto.VaultKeyPurpose
 import dev.agentknock.storage.crypto.VaultProtection
 import dev.agentknock.ui.auth.DeviceAuthenticationMode
 import dev.agentknock.ui.auth.DeviceAuthenticationChoices
-import dev.agentknock.ui.theme.agentknockColors
 
 @Composable
 internal fun SecuritySettings(
@@ -53,26 +39,25 @@ internal fun SecuritySettings(
                             selected = authenticationMode,
                             onSelect = onAuthenticationModeChange,
                         )
+                        SettingsGroupDivider()
+                        SettingsValueRow(
+                            "Android screen lock",
+                            if (deviceSecure) "Configured" else "Not configured",
+                        )
                     }
                 }
             }
-            item { EncryptionStatus(protection) }
             item {
                 Column {
                     SettingsSectionLabel("Encryption")
                     SettingsGroup {
-                        SettingsValueRow("Encryption", "AES-128-GCM")
+                        SettingsValueRow("Algorithm", "AES-128-GCM")
                         SettingsGroupDivider()
                         SettingsValueRow("Current key storage", protection.keyStorageDescription())
                         SettingsGroupDivider()
                         SettingsValueRow(
                             "Stored encrypted data",
                             protection.storedDataDescription(),
-                        )
-                        SettingsGroupDivider()
-                        SettingsValueRow(
-                            "Device screen lock",
-                            if (deviceSecure) "Configured" else "Not configured",
                         )
                     }
                 }
@@ -83,103 +68,18 @@ internal fun SecuritySettings(
                     SettingsGroup {
                         SettingsValueRow(
                             label = "Android backup",
-                            value = "Eligible for Android backup. Metadata and encrypted values can be restored, but device-bound encryption keys cannot.",
+                            value = "Metadata, history and encrypted values are eligible for Android backup. Encryption keys stay on this installation and are not backed up.",
+                        )
+                        SettingsGroupDivider()
+                        SettingsValueRow(
+                            label = "After a restore",
+                            value = "Metadata and history can return, but secret values cannot be recovered with this backup. You must replace those values and pair your clients again.",
                         )
                     }
                 }
             }
         }
     }
-}
-
-@Composable
-private fun EncryptionStatus(protection: VaultProtection?) {
-    val hardwareBacked = protection is VaultProtection.ActiveKeysAvailable &&
-        protection.backings.values.all(EncryptionKeyBacking::isHardwareBacked)
-    val softwareBacked = protection is VaultProtection.ActiveKeysAvailable &&
-        protection.backings.values.any { it == EncryptionKeyBacking.SOFTWARE }
-    val style = when {
-        protection != null && protection.unavailableStoredData.isNotEmpty() -> StatusStyle(
-            "Stored data unavailable",
-            protection.unavailableStoredData.explanation(),
-            MaterialTheme.agentknockColors.dangerContainer,
-            MaterialTheme.agentknockColors.onDangerContainer,
-        )
-        hardwareBacked -> StatusStyle(
-            "Hardware-backed encryption",
-            "Current encryption keys are protected by secure hardware, and all stored encrypted data is available.",
-            MaterialTheme.agentknockColors.successContainer,
-            MaterialTheme.agentknockColors.onSuccessContainer,
-        )
-        softwareBacked -> StatusStyle(
-            "Android Keystore encryption",
-            "Current encryption keys are held by Android Keystore, and all stored encrypted data is available.",
-            MaterialTheme.colorScheme.surfaceContainerHigh,
-            MaterialTheme.colorScheme.onSurface,
-        )
-        protection is VaultProtection.ActiveKeysUnavailable -> StatusStyle(
-            "Current encryption key unavailable",
-            "Agentknock cannot encrypt new secret or device data on this device.",
-            MaterialTheme.agentknockColors.dangerContainer,
-            MaterialTheme.agentknockColors.onDangerContainer,
-        )
-        protection == null -> StatusStyle(
-            "Checking encryption",
-            "Reading this device's key protection.",
-            MaterialTheme.colorScheme.surfaceContainerHigh,
-            MaterialTheme.colorScheme.onSurface,
-        )
-        else -> StatusStyle(
-            "Stored values are encrypted",
-            "Android did not report the exact hardware protection for the encryption keys.",
-            MaterialTheme.colorScheme.surfaceContainerHigh,
-            MaterialTheme.colorScheme.onSurface,
-        )
-    }
-    Surface(
-        color = style.container,
-        contentColor = style.content,
-        shape = MaterialTheme.shapes.large,
-        modifier = Modifier.fillMaxWidth(),
-    ) {
-        Row(
-            modifier = Modifier.padding(horizontal = 20.dp, vertical = 18.dp),
-            horizontalArrangement = Arrangement.spacedBy(16.dp),
-            verticalAlignment = Alignment.CenterVertically,
-        ) {
-            Surface(
-                color = style.content.copy(alpha = 0.14f),
-                contentColor = style.content,
-                shape = androidx.compose.foundation.shape.CircleShape,
-                modifier = Modifier.size(44.dp),
-            ) {
-                Box(contentAlignment = Alignment.Center) {
-                    Icon(Icons.Outlined.Security, contentDescription = null)
-                }
-            }
-            Column(verticalArrangement = Arrangement.spacedBy(2.dp)) {
-                Text(style.title, style = MaterialTheme.typography.titleLarge)
-                Text(style.detail, style = MaterialTheme.typography.bodyMedium)
-            }
-        }
-    }
-}
-
-private data class StatusStyle(
-    val title: String,
-    val detail: String,
-    val container: Color,
-    val content: Color,
-)
-
-internal fun EncryptionKeyBacking.isHardwareBacked(): Boolean = when (this) {
-    EncryptionKeyBacking.STRONGBOX,
-    EncryptionKeyBacking.TRUSTED_ENVIRONMENT,
-    EncryptionKeyBacking.UNKNOWN_SECURE,
-    -> true
-    EncryptionKeyBacking.SOFTWARE,
-    EncryptionKeyBacking.UNKNOWN,
-    -> false
 }
 
 private fun VaultProtection?.keyStorageDescription(): String = when (this) {

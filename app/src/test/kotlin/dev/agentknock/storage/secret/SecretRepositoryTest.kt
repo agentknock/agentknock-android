@@ -1774,6 +1774,8 @@ private class RecordingAuditSink : AuditSink {
 }
 
 private class FakeSecretDao : SecretDao {
+    override suspend fun getClientName(clientId: String): String? = null
+
     val secrets = MutableStateFlow<List<SecretEntity>>(emptyList())
     val variables = MutableStateFlow<List<EnvironmentVariableEntity>>(emptyList())
     val sshKeys = MutableStateFlow<List<SshKeyEntity>>(emptyList())

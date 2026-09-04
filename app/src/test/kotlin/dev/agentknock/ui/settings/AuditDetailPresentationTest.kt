@@ -18,6 +18,41 @@ import org.junit.Test
 
 class AuditDetailPresentationTest {
     @Test
+    fun `display groups recorded participants and command before AI result and process details`() {
+        val event = auditEvent(
+            type = AuditEventType.SECRET_USE_AI_REVIEWED,
+            detail = "Expected use.",
+            data = buildJsonObject {
+                put("command", "psql")
+                put("arguments", buildJsonArray { add(JsonPrimitive("production database")) })
+                put("working_directory", "/work")
+                put("ai_decision", "approve")
+                put("ai_explanation", "Expected use.")
+            },
+        ).copy(context = "psql 'production database'")
+
+        assertEquals(
+            listOf("Client", "Secrets", "Command", "AI decision", "AI explanation", "Working directory"),
+            event.displayDetailFields().map { it.label },
+        )
+        val summary = event.summaryFields()
+        assertEquals("psql 'production database'", summary.first().value)
+        assertTrue(summary.first().monospace)
+        assertEquals("Workstation", summary.single { it.label == "Client" }.value)
+    }
+
+    @Test
+    fun `configuration summaries retain the resulting mode without a generic category subtitle`() {
+        val event = auditEvent(AuditEventType.CLIENT_APPROVAL_OVERRIDE_CHANGED,
+            detail = "Ask AI", data = buildJsonObject {}).copy(clientName = null)
+        assertEquals("Ask AI", event.summaryFields().single { it.label == "Approval" }.value)
+        assertTrue(event.summaryFields().any { it.label == "Client ID" })
+        assertTrue(auditEvent(AuditEventType.GENERAL_AI_REVIEW_INSTRUCTIONS_CHANGED,
+            data = buildJsonObject {}).copy(subject = null, clientId = null, clientName = null)
+            .summaryFields().isEmpty())
+    }
+
+    @Test
     fun `invocation detail renders command and resolved secret delivery`() {
         val event = auditEvent(
             type = AuditEventType.SECRET_USE_DECIDED,

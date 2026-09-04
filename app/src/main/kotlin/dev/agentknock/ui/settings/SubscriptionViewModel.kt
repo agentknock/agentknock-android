@@ -137,9 +137,9 @@ internal class SubscriptionViewModel(
                             redeeming = false,
                             notice = SubscriptionNotice(
                                 message = if (result.active) {
-                                    "Subscription access activated"
+                                    "AI access activated with a code"
                                 } else {
-                                    "The subscription is not active"
+                                    "AI access is not active"
                                 },
                                 successful = result.active,
                             ),

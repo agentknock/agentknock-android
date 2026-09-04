@@ -32,7 +32,7 @@ class AuditPresentationTest {
         ).presentation()
 
         assertEquals("Secret use approved by AI review", presentation.title)
-        assertEquals("AI review", presentation.detailLabel)
+        assertEquals("AI explanation", presentation.detailLabel)
         assertTrue(presentation.sensitiveUse)
     }
 
@@ -89,7 +89,7 @@ class AuditPresentationTest {
 
         assertEquals("SSH key", decision.subjectLabel)
         assertEquals("Username", decision.contextLabel)
-        assertEquals("AI review", decision.detailLabel)
+        assertEquals("AI explanation", decision.detailLabel)
         assertEquals("SSH key", completion.subjectLabel)
         assertEquals("Username", completion.contextLabel)
         assertEquals(null, completion.detailLabel)

@@ -83,8 +83,7 @@ internal fun FactoryResetSettings(
                 color = MaterialTheme.colorScheme.error,
                 modifier = Modifier.semantics { heading() },
             )
-            Text("Agentknock will ask the relay to delete this device registration and its live relay state.")
-            Text("It will then permanently erase:")
+            Text("Permanently erase all Agentknock data on this device:")
             Column(verticalArrangement = Arrangement.spacedBy(6.dp)) {
                 Text("• Device identity and encryption keys")
                 Text("• Secrets and their stored values")
@@ -92,8 +91,9 @@ internal fun FactoryResetSettings(
                 Text("• Audit log and settings")
             }
             Text("Setup starts again with a new device identity and pairing address. Every client must pair again.")
+            Text("This does not cancel a Google Play subscription. Manage subscriptions in Google Play.")
             Text(
-                "If relay deletion cannot be confirmed, you will be asked again before any app data is cleared. Factory reset does not fix temporary connection problems.",
+                "Agentknock also asks the relay to delete this device registration. If deletion cannot be confirmed, you will be asked again before clearing app data. Factory reset does not fix temporary connection problems.",
                 color = MaterialTheme.colorScheme.onSurfaceVariant,
             )
             Text("Type RESET AGENTKNOCK to confirm.", style = MaterialTheme.typography.titleMedium)
