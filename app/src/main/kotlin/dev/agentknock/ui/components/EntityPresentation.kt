@@ -51,13 +51,14 @@ internal fun SecretIdentities(
     names: List<String>,
     modifier: Modifier = Modifier,
     unavailable: Boolean = false,
+    subdued: Boolean = false,
 ) {
     FlowRow(
         modifier = modifier,
         horizontalArrangement = Arrangement.spacedBy(6.dp),
         verticalArrangement = Arrangement.spacedBy(6.dp),
     ) {
-        names.forEach { name -> SecretIdentity(name, unavailable = unavailable) }
+        names.forEach { name -> SecretIdentity(name, unavailable = unavailable, subdued = subdued) }
     }
 }
 
@@ -66,6 +67,7 @@ internal fun SecretIdentity(
     name: String,
     modifier: Modifier = Modifier,
     unavailable: Boolean = false,
+    subdued: Boolean = false,
 ) {
     Surface(
         modifier = modifier.clearAndSetSemantics {
@@ -73,11 +75,15 @@ internal fun SecretIdentity(
         },
         color = if (unavailable) {
             MaterialTheme.agentknockColors.dangerContainer
+        } else if (subdued) {
+            MaterialTheme.colorScheme.surfaceContainerHighest
         } else {
             MaterialTheme.colorScheme.tertiaryContainer
         },
         contentColor = if (unavailable) {
             MaterialTheme.agentknockColors.onDangerContainer
+        } else if (subdued) {
+            MaterialTheme.colorScheme.onSurfaceVariant
         } else {
             MaterialTheme.colorScheme.onTertiaryContainer
         },

@@ -7,7 +7,6 @@ import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.width
 import androidx.compose.foundation.text.selection.SelectionContainer
-import androidx.compose.material3.HorizontalDivider
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.Surface
 import androidx.compose.material3.Text
@@ -22,6 +21,7 @@ import androidx.compose.ui.text.font.FontFamily
 import androidx.compose.ui.unit.dp
 import dev.agentknock.presentation.describeGitSigningContent
 import dev.agentknock.presentation.formatTimestamp
+import dev.agentknock.presentation.formatParentRequestAge
 import dev.agentknock.presentation.renderShellCommand
 import dev.agentknock.presentation.renderSoftware
 import dev.agentknock.protocol.GitSignChangeStatus
@@ -38,17 +38,13 @@ import dev.agentknock.storage.request.InboxRequestDetails
 import dev.agentknock.storage.request.InboxRequestState
 import dev.agentknock.storage.request.ApprovalDecision
 import dev.agentknock.storage.secret.TemporaryAccessOperation
-import dev.agentknock.ui.components.ClientIdentity
 import dev.agentknock.ui.components.DetailPage
 import dev.agentknock.ui.components.DetailValue
+import dev.agentknock.ui.components.ExactText
 import dev.agentknock.ui.components.Disclosure
-import dev.agentknock.ui.components.InformationRow
-import dev.agentknock.ui.components.InformationSurface
 import dev.agentknock.ui.components.Notice
 import dev.agentknock.ui.components.NoticeTone
-import dev.agentknock.ui.components.SecretIdentities
 import dev.agentknock.ui.components.StatusLine
-import dev.agentknock.ui.theme.agentknockColors
 
 @Composable
 internal fun GitSignRequestDetail(
@@ -99,12 +95,12 @@ internal fun GitSignRequestDetail(
             null
         },
     ) {
-        if (!pending) {
-            GitSignOutcome(signing)
-        }
-        InformationSurface {
-            ClientIdentity(signing.clientName)
-            StatusLine(
+        RequestIdentity(
+            signing.clientName,
+            listOf(signing.secretName),
+            relayRequestTimestamp(request.id) ?: request.receivedAt,
+        ) {
+            if (pending) StatusLine(
                 if (aiReviewInFlight) "AI review in progress" else signing.statusLabel(),
                 error = signing.state == ApprovalRequestState.VERIFICATION_FAILED,
                 attention = pending && request.userDecisionAvailable,
@@ -113,11 +109,9 @@ internal fun GitSignRequestDetail(
                     signing.completionResult == ApprovalCompletionResult.DENIED ||
                     signing.completionResult == ApprovalCompletionResult.ABORTED,
             )
-            SecretIdentities(listOf(signing.secretName))
-            InformationRow(
-                "Requested",
-                formatTimestamp(relayRequestTimestamp(request.id) ?: request.receivedAt),
-            )
+        }
+        if (!pending) {
+            GitSignOutcome(signing)
         }
 
         if (
@@ -130,22 +124,10 @@ internal fun GitSignRequestDetail(
             AiReviewNotice(signing.approvalEvaluation.aiReview, aiReviewInFlight)
         }
 
-        signing.repository?.takeIf(GitSignRepository::hasVisibleContext)?.let { repository ->
-            GitRepositoryContext(repository)
-        }
-
         gitMessage?.let { message ->
             Surface(
-                color = if (pending) {
-                    MaterialTheme.agentknockColors.attentionContainer
-                } else {
-                    MaterialTheme.colorScheme.surfaceContainer
-                },
-                contentColor = if (pending) {
-                    MaterialTheme.agentknockColors.onAttentionContainer
-                } else {
-                    MaterialTheme.colorScheme.onSurface
-                },
+                color = MaterialTheme.colorScheme.surfaceContainer,
+                contentColor = MaterialTheme.colorScheme.onSurface,
                 shape = MaterialTheme.shapes.large,
                 modifier = Modifier.fillMaxWidth(),
             ) {
@@ -153,13 +135,30 @@ internal fun GitSignRequestDetail(
                     Modifier.padding(16.dp),
                     verticalArrangement = Arrangement.spacedBy(8.dp),
                 ) {
+                    (signing.repository?.remote ?: signing.repository?.worktree)?.let {
+                        Text(
+                            "Repository reported by client: $it",
+                            style = MaterialTheme.typography.bodySmall,
+                            color = MaterialTheme.colorScheme.onSurfaceVariant,
+                        )
+                    }
                     Text(
                         checkNotNull(signingContent.messageLabel),
                         style = MaterialTheme.typography.labelLarge,
                     )
                     SelectionContainer {
-                        Text(message, style = MaterialTheme.typography.titleMedium)
+                        Column(verticalArrangement = Arrangement.spacedBy(8.dp)) {
+                            Text(message.substringBefore('\n'), style = MaterialTheme.typography.titleMedium)
+                            message.substringAfter('\n', "").trimStart('\n')
+                                .takeIf(String::isNotEmpty)?.let {
+                                    Text(it, style = MaterialTheme.typography.bodyLarge)
+                                }
+                        }
                     }
+                    signingContent.identities.groupBy({ it.second }, { it.first })
+                        .forEach { (identity, labels) ->
+                            DetailValue(labels.joinToString(" / "), identity)
+                        }
                 }
             }
         }
@@ -173,27 +172,24 @@ internal fun GitSignRequestDetail(
                 Modifier.padding(16.dp),
                 verticalArrangement = Arrangement.spacedBy(8.dp),
             ) {
-                Text("Triggered by", style = MaterialTheme.typography.labelLarge)
+                Text("Command reported by client", style = MaterialTheme.typography.labelLarge)
                 SelectionContainer {
                     Text(
                         renderShellCommand(signing.command, signing.arguments),
                         fontFamily = FontFamily.Monospace,
+                        style = MaterialTheme.typography.bodyMedium,
                     )
                 }
-                signing.reason?.takeIf(String::isNotBlank)?.let {
-                    HorizontalDivider()
-                    Text(
-                        "Why this command says it needs a signature",
-                        style = MaterialTheme.typography.labelLarge,
-                    )
-                    Text(it, style = MaterialTheme.typography.bodyMedium)
-                    Text(
-                        "Reported by the requesting client; not verified by Agentknock.",
-                        style = MaterialTheme.typography.bodySmall,
-                        color = MaterialTheme.colorScheme.onSurfaceVariant,
-                    )
-                }
+                Text(
+                    formatParentRequestAge(signing.invocationReceivedAt, request.receivedAt),
+                    style = MaterialTheme.typography.bodySmall,
+                    color = MaterialTheme.colorScheme.onSurfaceVariant,
+                )
             }
+        }
+        ClientReason(signing.reason)
+        signing.repository?.takeIf(GitSignRepository::hasVisibleContext)?.let { repository ->
+            GitRepositoryContext(repository)
         }
 
         Disclosure(
@@ -207,9 +203,7 @@ internal fun GitSignRequestDetail(
                     color = MaterialTheme.colorScheme.onSurfaceVariant,
                 )
             }
-            SelectionContainer {
-                Text(exactContent, fontFamily = FontFamily.Monospace)
-            }
+            ExactText(exactContent)
         }
 
         if (pending) {
@@ -261,7 +255,7 @@ private fun GitRepositoryContext(repository: GitSignRepository) {
             Modifier.padding(16.dp),
             verticalArrangement = Arrangement.spacedBy(8.dp),
         ) {
-            Text("Repository", style = MaterialTheme.typography.labelLarge)
+            Text("Repository reported by client", style = MaterialTheme.typography.labelLarge)
             (repository.remote ?: repository.worktree)?.let {
                 SelectionContainer {
                     Text(it, style = MaterialTheme.typography.titleMedium)

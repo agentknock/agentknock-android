@@ -6,6 +6,7 @@ import androidx.room3.useWriterConnection
 import androidx.test.ext.junit.runners.AndroidJUnit4
 import androidx.test.platform.app.InstrumentationRegistry
 import dev.agentknock.storage.AgentknockDatabase
+import dev.agentknock.review.ApprovalReviewEnvironmentDelivery
 import dev.agentknock.storage.crypto.AesGcmEncryption
 import dev.agentknock.storage.crypto.DecryptionResult
 import dev.agentknock.storage.crypto.EncryptionKeySource
@@ -149,6 +150,49 @@ class RequestDaoTransactionTest {
             assertEquals(visibleKind, inbox.findRequestKind("retained-$index"))
         }
         assertNull(inbox.findRequestKind("missing"))
+    }
+
+    @Test
+    fun requestPresentationKeepsAiEscalationAndSnapshotDeliveryFacts() = runTest {
+        val requestId = "review-presentation"
+        dao.insertRequest(rootRequest().copy(
+            id = requestId,
+            kind = "secret_use",
+            state = "action_required",
+            clientNameSnapshot = "Alex’s MacBook",
+        ))
+        dao.insertSecretUseRequestRow(secretUseRequest(requestId).copy(
+            command = "/opt/tools/psql",
+            argumentsJson = "[\"-c\",\"select 1\"]",
+            reason = "Check the service",
+            approvalEvaluationJson = """{"secrets":[],"aiReview":{"decision":"ASK_USER","explanation":"Confirm production access."}}""",
+            providedSecretsJson = """{
+                "github":{"type":"environment","variables":{
+                    "TOKEN":{"delivery":"environment","target":"DATABASE_TOKEN"},
+                    "SQL":{"delivery":"standard_input"},
+                    "HOST":{"delivery":"omitted","value":"db.example.com"}
+                }}
+            }""".trimIndent(),
+        ))
+        val inbox = RequestInbox(dao)
+        val summary = inbox.observeRequests().first().single()
+        assertEquals("AI asked you to decide", summary.decisionSummary)
+        val notification = inbox.observePendingNotifications().first().single()
+        assertTrue(notification.summary.startsWith("AI asked you to decide · Alex’s MacBook"))
+        assertTrue(notification.summary.contains("/opt/tools/psql -c 'select 1'"))
+        assertTrue(notification.details.contains(RequestNotificationDetail(
+            "AI asked you to decide", "Confirm production access.",
+        )))
+        assertTrue(notification.details.contains(RequestNotificationDetail("Client reason", "Check the service")))
+        assertEquals(listOf("Client", "Secrets", "Command"), notification.details.take(3).map { it.label })
+        assertTrue(notification.decisionAvailable)
+        val details = (checkNotNull(inbox.observeRequest(requestId).first()).content as InboxRequestContent.SecretUse).details
+        val variables = checkNotNull(details.environmentVariables["github"]).variables
+        assertEquals("DATABASE_TOKEN", variables.getValue("TOKEN").target)
+        assertNull(variables.getValue("TOKEN").value)
+        assertEquals(ApprovalReviewEnvironmentDelivery.STANDARD_INPUT, variables.getValue("SQL").delivery)
+        assertEquals(ApprovalReviewEnvironmentDelivery.OMITTED, variables.getValue("HOST").delivery)
+        assertEquals("db.example.com", variables.getValue("HOST").value)
     }
 
     @Test

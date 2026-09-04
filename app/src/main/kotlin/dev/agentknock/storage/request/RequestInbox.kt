@@ -1,6 +1,8 @@
 package dev.agentknock.storage.request
 
 import dev.agentknock.presentation.describeGitSigningContent
+import dev.agentknock.presentation.aiReviewLabel
+import dev.agentknock.presentation.approvalSummary
 import dev.agentknock.presentation.renderShellCommand
 import dev.agentknock.presentation.renderSingleLineText
 import dev.agentknock.protocol.ClientSoftware
@@ -9,7 +11,6 @@ import dev.agentknock.protocol.PairingProtocol
 import dev.agentknock.protocol.SecretUploadMode
 import dev.agentknock.protocol.SshAuthenticationMethod
 import dev.agentknock.protocol.SshSignatureAlgorithm
-import dev.agentknock.review.ApprovalReviewEnvironmentDelivery
 import dev.agentknock.review.ApprovalReviewEnvironmentSecretFacts
 import dev.agentknock.storage.approval.ApprovalEvaluation
 import dev.agentknock.storage.secret.ENVIRONMENT_SECRET_TYPE
@@ -165,6 +166,8 @@ internal data class InboxRequestSummary(
     val receivedAt: Long,
     val completedAt: Long?,
     val userDecisionAvailable: Boolean = true,
+    val decisionSummary: String? = null,
+    val repository: String? = null,
 )
 
 internal sealed interface InboxRequestStatus {
@@ -230,6 +233,7 @@ internal data class SshAuthenticationRequestDetails(
     val hostKeyFingerprint: String?,
     val approvalEvaluation: ApprovalEvaluation?,
     val invocationRequestId: String,
+    val invocationReceivedAt: Long,
     val command: String,
     val arguments: List<String>,
     val reason: String?,
@@ -251,6 +255,7 @@ internal data class GitSignRequestDetails(
     val repository: GitSignRepository?,
     val approvalEvaluation: ApprovalEvaluation?,
     val invocationRequestId: String,
+    val invocationReceivedAt: Long,
     val command: String,
     val arguments: List<String>,
     val reason: String?,
@@ -271,7 +276,7 @@ internal data class SecretUseRequestDetails(
     val completionMessage: String?,
     val secrets: List<String>,
     val secretDetails: List<SecretMetadata>,
-    val environmentVariables: Map<String, Map<String, String?>>,
+    val environmentVariables: Map<String, ApprovalReviewEnvironmentSecretFacts>,
     val missingSecrets: List<String>,
     val reason: String?,
     val command: String,
@@ -427,6 +432,11 @@ internal class RequestInbox(
                             secretNames = requestedSecrets,
                             listSummary = null,
                             command = secretUse.command,
+                            decisionSummary = approvalSummary(
+                                secretUse.approvalEvaluationJson?.let(::decodeApprovalEvaluation)?.aiReview,
+                                secretUse.decision?.toApprovalDecision(),
+                                secretUse.decisionSource,
+                            ),
                             arguments = decodeStringList(secretUse.argumentsJson),
                             receivedAt = request.receivedAt,
                             completedAt = request.completedAt,
@@ -451,7 +461,13 @@ internal class RequestInbox(
                             title = signingContent.requestTitle,
                             clientName = request.clientNameSnapshot,
                             secretNames = listOf(gitSign.secretName),
-                            listSummary = signingContent.message,
+                            listSummary = signingContent.message?.substringBefore('\n'),
+                            repository = gitSign.repositoryJson?.let {
+                                runCatching { storedJson.decodeFromString<GitSignRepository>(it) }
+                                    .getOrNull()?.let { repository -> repository.remote ?: repository.worktree }
+                            },
+                            decisionSummary = gitSign.approvalEvaluationJson
+                                ?.let(::decodeApprovalEvaluation)?.aiReview?.let(::aiReviewLabel),
                             command = invocation.command,
                             arguments = decodeStringList(invocation.argumentsJson),
                             receivedAt = request.receivedAt,
@@ -477,7 +493,9 @@ internal class RequestInbox(
                             title = "SSH authentication",
                             clientName = request.clientNameSnapshot,
                             secretNames = listOf(authentication.secretName),
-                            listSummary = "${authentication.username} · ${authentication.algorithm}",
+                            listSummary = "Remote account: ${authentication.username}",
+                            decisionSummary = authentication.approvalEvaluationJson
+                                ?.let(::decodeApprovalEvaluation)?.aiReview?.let(::aiReviewLabel),
                             command = invocation.command,
                             arguments = decodeStringList(invocation.argumentsJson),
                             receivedAt = request.receivedAt,
@@ -668,6 +686,7 @@ internal class RequestInbox(
                             approvalEvaluation = gitSign.approvalEvaluationJson
                                 ?.let(::decodeApprovalEvaluation),
                             invocationRequestId = invocationRequest.id,
+                            invocationReceivedAt = invocationRequest.receivedAt,
                             command = invocation.command,
                             arguments = decodeStringList(invocation.argumentsJson),
                             reason = invocation.reason,
@@ -705,6 +724,7 @@ internal class RequestInbox(
                             approvalEvaluation = authentication.approvalEvaluationJson
                                 ?.let(::decodeApprovalEvaluation),
                             invocationRequestId = invocationRequest.id,
+                            invocationReceivedAt = invocationRequest.receivedAt,
                             command = invocation.command,
                             arguments = decodeStringList(invocation.argumentsJson),
                             reason = invocation.reason,
@@ -751,20 +771,23 @@ internal class RequestInbox(
                     )
                     val clientName = renderSingleLineText(request.clientNameSnapshot)
                     val secretNames = secrets.joinToString(transform = ::renderSingleLineText)
+                    val aiDetail = aiNotificationDetail(secretUse.approvalEvaluationJson)
                     RequestNotification(
                         requestId = request.id,
                         title = "Secret use requested",
-                        summary = "$clientName requests $secretNames",
+                        summary = listOfNotNull(aiDetail?.label, clientName, command, secretNames)
+                            .joinToString(" · "),
                         details = listOfNotNull(
                             RequestNotificationDetail("Client", clientName),
+                            RequestNotificationDetail("Secrets", secretNames),
+                            RequestNotificationDetail("Command", command),
+                            aiDetail,
                             secretUse.reason?.takeIf(String::isNotBlank)?.let {
                                 RequestNotificationDetail(
-                                    "Reason reported by client",
+                                    "Client reason",
                                     renderSingleLineText(it),
                                 )
                             },
-                            RequestNotificationDetail("Command", command),
-                            RequestNotificationDetail("Secrets", secretNames),
                         ),
                         decisionAvailable = true,
                     )
@@ -780,21 +803,28 @@ internal class RequestInbox(
                         decodeStringList(invocation.argumentsJson),
                     )
                     val clientName = renderSingleLineText(parentRequest.clientNameSnapshot)
+                    val content = describeGitSigningContent(gitSign.message)
+                    val aiDetail = aiNotificationDetail(gitSign.approvalEvaluationJson)
                     RequestNotification(
                         requestId = request.id,
                         title = "Git signature requested",
-                        summary = "$clientName requests a signature",
-                        details = listOf(
+                        summary = listOfNotNull(
+                            aiDetail?.label,
+                            clientName,
+                            renderSingleLineText(content.message?.substringBefore('\n') ?: command),
+                        ).joinToString(" · "),
+                        details = listOfNotNull(
                             RequestNotificationDetail("Client", clientName),
-                            RequestNotificationDetail("Command", command),
                             RequestNotificationDetail(
                                 "SSH key",
                                 renderSingleLineText(gitSign.secretName),
                             ),
+                            RequestNotificationDetail("Command", command),
+                            aiDetail,
                             RequestNotificationDetail(
-                                "Content",
+                                content.messageLabel ?: "Content",
                                 renderSingleLineText(
-                                    gitSign.message.decodeToString(throwOnInvalidSequence = false),
+                                    content.message ?: gitSign.message.decodeToString(throwOnInvalidSequence = false),
                                 ),
                             ),
                         ),
@@ -813,18 +843,19 @@ internal class RequestInbox(
                         decodeStringList(invocation.argumentsJson),
                     )
                     val clientName = renderSingleLineText(parentRequest.clientNameSnapshot)
+                    val aiDetail = aiNotificationDetail(authentication.approvalEvaluationJson)
                     RequestNotification(
                         requestId = request.id,
                         title = "SSH authentication requested",
-                        summary = "$clientName requests authentication as " +
-                            renderSingleLineText(authentication.username),
-                        details = listOf(
+                        summary = listOfNotNull(aiDetail?.label, clientName, command).joinToString(" · "),
+                        details = listOfNotNull(
                             RequestNotificationDetail("Client", clientName),
-                            RequestNotificationDetail("Command", command),
                             RequestNotificationDetail(
                                 "SSH key",
                                 renderSingleLineText(authentication.secretName),
                             ),
+                            RequestNotificationDetail("Command", command),
+                            aiDetail,
                             RequestNotificationDetail(
                                 "Remote user",
                                 renderSingleLineText(authentication.username),
@@ -948,28 +979,25 @@ internal class RequestInbox(
     private fun decodeStringList(value: String): List<String> =
         storedJson.decodeFromString(STRING_LIST_SERIALIZER, value)
 
+    private fun aiNotificationDetail(evaluationJson: String?): RequestNotificationDetail? =
+        evaluationJson?.let(::decodeApprovalEvaluation)?.aiReview?.let { review ->
+            RequestNotificationDetail(
+                aiReviewLabel(review),
+                review.explanation?.takeIf(String::isNotBlank)?.let(::renderSingleLineText)
+                    ?: "Decide this request in Agentknock.",
+            )
+        }
+
     private fun decodeUploadSummary(value: String): SecretUploadSummarySnapshot =
         storedJson.decodeFromString(value)
 
     private fun decodeEnvironmentReviewFacts(
         value: String?,
-    ): Map<String, Map<String, String?>> = value?.let { encoded ->
+    ): Map<String, ApprovalReviewEnvironmentSecretFacts> = value?.let { encoded ->
         decodeStoredApprovalReviewSecretFacts(encoded)
             ?.mapNotNull { (secretName, facts) ->
                 (facts as? ApprovalReviewEnvironmentSecretFacts)
-                    ?.let { environment ->
-                        secretName to environment.variables.mapNotNull {
-                                (source, variable) ->
-                            val displayName = when (variable.delivery) {
-                                ApprovalReviewEnvironmentDelivery.ENVIRONMENT ->
-                                    checkNotNull(variable.target)
-                                ApprovalReviewEnvironmentDelivery.STANDARD_INPUT -> source
-                                ApprovalReviewEnvironmentDelivery.OMITTED ->
-                                    return@mapNotNull null
-                            }
-                            displayName to variable.value
-                        }.toMap()
-                    }
+                    ?.let { environment -> secretName to environment }
             }
             ?.toMap()
     }.orEmpty()

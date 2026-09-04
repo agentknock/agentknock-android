@@ -360,6 +360,15 @@ private fun RequestRowContent(
                         overflow = TextOverflow.Ellipsis,
                     )
                 }
+                request.repository?.let {
+                    Text(
+                        "Repository: $it",
+                        style = MaterialTheme.typography.bodySmall,
+                        color = MaterialTheme.colorScheme.onSurfaceVariant,
+                        maxLines = 1,
+                        overflow = TextOverflow.Ellipsis,
+                    )
+                }
                 if (
                     (request.kind == InboxRequestKind.GIT_SIGN ||
                         request.kind == InboxRequestKind.SSH_AUTHENTICATE) &&
@@ -370,8 +379,15 @@ private fun RequestRowContent(
                         style = MaterialTheme.typography.bodySmall,
                         color = MaterialTheme.colorScheme.onSurfaceVariant,
                         fontFamily = FontFamily.Monospace,
-                        maxLines = 1,
+                        maxLines = 2,
                         overflow = TextOverflow.Ellipsis,
+                    )
+                }
+                request.decisionSummary?.let {
+                    Text(
+                        it,
+                        style = MaterialTheme.typography.labelMedium,
+                        color = MaterialTheme.colorScheme.onSurfaceVariant,
                     )
                 }
                 FlowRow(
@@ -384,6 +400,7 @@ private fun RequestRowContent(
                         SecretIdentities(
                             request.secretNames,
                             unavailable = false,
+                            subdued = subdued,
                         )
                     }
                 }

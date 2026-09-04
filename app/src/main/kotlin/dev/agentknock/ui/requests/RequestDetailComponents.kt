@@ -5,6 +5,7 @@ package dev.agentknock.ui.requests
 import androidx.compose.foundation.BorderStroke
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Column
+import androidx.compose.foundation.layout.FlowRow
 import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.Spacer
 import androidx.compose.foundation.layout.fillMaxWidth
@@ -27,6 +28,7 @@ import androidx.compose.material3.Text
 import androidx.compose.material3.TextButton
 import androidx.compose.runtime.Composable
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.Alignment
 import androidx.compose.ui.unit.dp
 import dev.agentknock.storage.approval.AiReview
 import dev.agentknock.storage.approval.AiReviewDecision
@@ -40,6 +42,10 @@ import dev.agentknock.storage.secret.TemporaryAccessOperation
 import dev.agentknock.ui.components.DetailPage
 import dev.agentknock.ui.components.Notice
 import dev.agentknock.ui.components.NoticeTone
+import dev.agentknock.ui.components.InformationSurface
+import dev.agentknock.ui.components.ClientIdentity
+import dev.agentknock.ui.components.SecretIdentities
+import dev.agentknock.presentation.formatTimestamp
 import dev.agentknock.ui.theme.agentknockColors
 
 @Composable
@@ -70,6 +76,41 @@ internal fun AiReviewNotice(review: AiReview?, reviewInFlight: Boolean) {
             "AI review was interrupted",
             "Decide this request yourself.",
             NoticeTone.ATTENTION,
+        )
+    }
+}
+
+@Composable
+internal fun ClientReason(reason: String?) {
+    reason?.takeIf(String::isNotBlank)?.let {
+        InformationSurface {
+            Text("Reason reported by client", style = MaterialTheme.typography.labelLarge)
+            Text(it, style = MaterialTheme.typography.bodyLarge)
+        }
+    }
+}
+
+@Composable
+internal fun RequestIdentity(
+    clientName: String,
+    secretNames: List<String>,
+    requestedAt: Long,
+    status: @Composable () -> Unit,
+) {
+    InformationSurface {
+        FlowRow(
+            horizontalArrangement = Arrangement.spacedBy(8.dp),
+            verticalArrangement = Arrangement.spacedBy(6.dp),
+            itemVerticalAlignment = Alignment.CenterVertically,
+        ) {
+            ClientIdentity(clientName)
+            SecretIdentities(secretNames)
+        }
+        status()
+        Text(
+            "Requested ${formatTimestamp(requestedAt)}",
+            style = MaterialTheme.typography.bodySmall,
+            color = MaterialTheme.colorScheme.onSurfaceVariant,
         )
     }
 }
@@ -120,7 +161,7 @@ internal fun RequestDecisionButtons(
             ) {
                 Icon(Icons.Outlined.Schedule, contentDescription = null)
                 Spacer(Modifier.width(8.dp))
-                Text("Allow for 4 hours")
+                Text("Temporary access…")
             }
         }
     }
@@ -137,7 +178,7 @@ internal fun TemporaryAccessConfirmation(
 ) {
     AlertDialog(
         onDismissRequest = onDismiss,
-        title = { Text("Allow $clientName for 4 hours?") },
+        title = { Text("Allow temporary secret access?") },
         text = {
             Column(
                 Modifier.verticalScroll(rememberScrollState()),
@@ -162,7 +203,8 @@ internal fun TemporaryAccessConfirmation(
                     }
                 }
                 Text(
-                    "Agentknock will not ask you or AI about these uses for the next 4 hours.",
+                    "Agentknock will not ask you or AI about these uses for the next 4 hours. " +
+                        "You can end temporary access in the secret’s settings.",
                     color = MaterialTheme.colorScheme.onSurfaceVariant,
                 )
                 if (approvesOtherUsesOnce) {

@@ -23,6 +23,14 @@ class DisplayFormattingTest {
     }
 
     @Test
+    fun parentAge_usesRelativeReceiptTimeRatherThanTheCurrentClock() {
+        assertEquals("Parent request received less than a minute earlier", formatParentRequestAge(1_000, 30_000))
+        assertEquals("Parent request received 1 minute earlier", formatParentRequestAge(1_000, 61_000))
+        assertEquals("Parent request received 4 hours earlier", formatParentRequestAge(1_000, 14_401_000))
+        assertEquals("Parent request received 2 days earlier", formatParentRequestAge(1_000, 172_801_000))
+    }
+
+    @Test
     fun command_preservesItsExactNameAndShowsArgumentsAsShellWords() {
         assertEquals(
             "/opt/custom/git commit -m 'Keep the command path' '' 'it'\"'\"'s exact'",
@@ -63,6 +71,7 @@ class DisplayFormattingTest {
                 requestTitle = "Git commit signature",
                 messageLabel = "Commit message",
                 message = "Explain the change\n\nWith useful detail",
+                identities = listOf("Author" to "Example"),
             ),
             describeGitSigningContent(
                 "tree abc\nauthor Example\n\nExplain the change\n\nWith useful detail\n"
@@ -78,6 +87,7 @@ class DisplayFormattingTest {
                 requestTitle = "Git tag signature",
                 messageLabel = "Tag message",
                 message = "Release 1.0",
+                identities = listOf("Tagger" to "Example"),
             ),
             describeGitSigningContent(
                 "object abc\ntype commit\ntag v1.0\ntagger Example\n\nRelease 1.0\n".encodeToByteArray(),
@@ -91,5 +101,20 @@ class DisplayFormattingTest {
             GitSigningContent("Git signature", null, null),
             describeGitSigningContent(byteArrayOf(0, 1, 2)),
         )
+    }
+
+    @Test
+    fun gitIdentities_comeFromSignedHeadersAndKeepDifferentAuthorAndCommitter() {
+        val content = (
+            "tree abc\n" +
+                "author Alex Example <alex@example.com> 1780000000 +0300\n" +
+                "committer CI <build@example.com> 1780000010 +0000\n" +
+                "\nFix checks\n\nauthor Not a header"
+            ).encodeToByteArray()
+        assertEquals(
+            listOf("Author" to "Alex Example <alex@example.com>", "Committer" to "CI <build@example.com>"),
+            describeGitSigningContent(content).identities,
+        )
+        assertEquals("Fix checks\n\nauthor Not a header", describeGitSigningContent(content).message)
     }
 }

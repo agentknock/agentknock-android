@@ -30,6 +30,17 @@ internal fun formatRelativeTime(timestamp: Long, now: Long = System.currentTimeM
 private fun Long.relativeUnit(unit: String): String =
     "$this $unit${if (this == 1L) "" else "s"} ago"
 
+internal fun formatParentRequestAge(parentReceivedAt: Long, receivedAt: Long): String {
+    val elapsed = Duration.ofMillis((receivedAt - parentReceivedAt).coerceAtLeast(0))
+    val (count, unit) = when {
+        elapsed.toMinutes() < 1 -> return "Parent request received less than a minute earlier"
+        elapsed.toHours() < 1 -> elapsed.toMinutes() to "minute"
+        elapsed.toDays() < 1 -> elapsed.toHours() to "hour"
+        else -> elapsed.toDays() to "day"
+    }
+    return "Parent request received $count $unit${if (count == 1L) "" else "s"} earlier"
+}
+
 internal fun renderShellCommand(command: String, arguments: List<String>): String =
     (listOf(command) + arguments).joinToString(" ", transform = ::renderShellWord)
 
@@ -67,6 +78,7 @@ internal data class GitSigningContent(
     val requestTitle: String,
     val messageLabel: String?,
     val message: String?,
+    val identities: List<Pair<String, String>> = emptyList(),
 )
 
 internal fun describeGitSigningContent(content: ByteArray): GitSigningContent {
@@ -84,13 +96,26 @@ internal fun describeGitSigningContent(content: ByteArray): GitSigningContent {
         .trimEnd()
         .takeIf(String::isNotEmpty)
     val headerLines = header.lineSequence().toList()
+    // These identities come from the bytes to sign, not the client's repository metadata.
+    val identities = headerLines.mapNotNull { line ->
+        val label = when (line.substringBefore(' ')) {
+            "author" -> "Author"
+            "committer" -> "Committer"
+            "tagger" -> "Tagger"
+            else -> return@mapNotNull null
+        }
+        val value = line.substringAfter(' ')
+        val identity = Regex("^(.* <.*>) -?[0-9]+ [+-][0-9]{4}$")
+            .matchEntire(value)?.groupValues?.get(1) ?: value
+        label to identity
+    }
     return when {
         headerLines.firstOrNull()?.startsWith("tree ") == true ->
-            GitSigningContent("Git commit signature", "Commit message", message)
+            GitSigningContent("Git commit signature", "Commit message", message, identities)
         headerLines.firstOrNull()?.startsWith("object ") == true &&
             headerLines.any { it.startsWith("type ") } &&
             headerLines.any { it.startsWith("tag ") } ->
-            GitSigningContent("Git tag signature", "Tag message", message)
+            GitSigningContent("Git tag signature", "Tag message", message, identities)
         else -> GitSigningContent("Git signature", null, null)
     }
 }

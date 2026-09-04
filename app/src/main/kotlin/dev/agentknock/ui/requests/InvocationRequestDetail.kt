@@ -4,7 +4,6 @@ import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.BoxWithConstraints
 import androidx.compose.foundation.layout.Column
-import androidx.compose.foundation.layout.FlowRow
 import androidx.compose.foundation.layout.PaddingValues
 import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.fillMaxWidth
@@ -14,8 +13,6 @@ import androidx.compose.foundation.text.selection.SelectionContainer
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.outlined.Key
 import androidx.compose.material.icons.outlined.Terminal
-import androidx.compose.material3.Card
-import androidx.compose.material3.CardDefaults
 import androidx.compose.material3.HorizontalDivider
 import androidx.compose.material3.Icon
 import androidx.compose.material3.MaterialTheme
@@ -37,9 +34,12 @@ import androidx.compose.ui.text.rememberTextMeasurer
 import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.unit.dp
 import dev.agentknock.presentation.formatPlatformName
+import dev.agentknock.presentation.approvalSummary
 import dev.agentknock.presentation.formatTimestamp
 import dev.agentknock.presentation.renderShellCommand
 import dev.agentknock.presentation.renderSoftware
+import dev.agentknock.review.ApprovalReviewEnvironmentDelivery
+import dev.agentknock.review.ApprovalReviewEnvironmentSecretFacts
 import dev.agentknock.storage.approval.AiReview
 import dev.agentknock.storage.approval.ApprovalAction
 import dev.agentknock.storage.approval.ApprovalEvaluation
@@ -110,19 +110,12 @@ internal fun InvocationRequestDetail(
             null
         },
     ) {
-        if (secretUse.state != ApprovalRequestState.APPROVAL_PENDING) {
-            SecretUseOutcome(secretUse)
-        }
-        Surface(
-            color = MaterialTheme.colorScheme.surfaceContainer,
-            shape = MaterialTheme.shapes.large,
-            modifier = Modifier.fillMaxWidth(),
+        RequestIdentity(
+            secretUse.clientName,
+            secretUse.secrets,
+            relayRequestTimestamp(request.id) ?: request.receivedAt,
         ) {
-            Column(
-                modifier = Modifier.padding(18.dp),
-                verticalArrangement = Arrangement.spacedBy(6.dp),
-            ) {
-                Text(secretUse.clientName, style = MaterialTheme.typography.titleLarge)
+            if (secretUse.state == ApprovalRequestState.APPROVAL_PENDING) {
                 StatusLine(
                     if (aiReviewInFlight) "AI review in progress" else secretUse.statusLabel(),
                     secretUse.isError(),
@@ -133,18 +126,15 @@ internal fun InvocationRequestDetail(
                         secretUse.completionResult == ApprovalCompletionResult.DENIED ||
                         secretUse.completionResult == ApprovalCompletionResult.ABORTED,
                 )
-                Text(
-                    "Requested ${formatTimestamp(relayRequestTimestamp(request.id) ?: request.receivedAt)}",
-                    style = MaterialTheme.typography.bodySmall,
-                    color = MaterialTheme.colorScheme.onSurfaceVariant,
-                )
+            } else {
+                SecretUseOutcome(secretUse)
             }
         }
 
         val renderedCommand = renderShellCommand(secretUse.command, secretUse.arguments)
         Surface(
-            color = MaterialTheme.colorScheme.primaryContainer,
-            contentColor = MaterialTheme.colorScheme.onPrimaryContainer,
+            color = MaterialTheme.colorScheme.surfaceContainer,
+            contentColor = MaterialTheme.colorScheme.onSurface,
             shape = MaterialTheme.shapes.large,
             modifier = Modifier.fillMaxWidth(),
         ) {
@@ -163,7 +153,7 @@ internal fun InvocationRequestDetail(
                     Text(
                         renderedCommand,
                         fontFamily = FontFamily.Monospace,
-                        style = MaterialTheme.typography.titleLarge,
+                        style = MaterialTheme.typography.bodyLarge,
                     )
                 }
                 if (renderedCommand.any { it.code > 0x7e }) {
@@ -176,18 +166,25 @@ internal fun InvocationRequestDetail(
             }
         }
 
-        InformationSurface {
-            DetailValue("Working directory", secretUse.workingDirectory, true)
-            FlowRow(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
-                if (secretUse.executableMode != "direct") {
-                    ContextPill(secretUse.executableMode.replaceFirstChar(Char::uppercaseChar))
-                }
-                ContextPill("stdin: ${secretUse.stdinKind}")
+        if (secretUse.state == ApprovalRequestState.APPROVAL_PENDING) {
+            val evaluation = secretUse.approvalEvaluation
+            if (evaluation?.aiReview != null || aiReviewRequested) {
+                AiReviewNotice(evaluation.aiReview, aiReviewInFlight)
             }
-            if (secretUse.launcherChain.isNotEmpty()) {
-                DetailValue("Launcher chain", secretUse.launcherChain.joinToString(" → "), true)
-            }
+        } else if (
+            shouldShowDecisionHistory(
+                verificationFailed = secretUse.state == ApprovalRequestState.VERIFICATION_FAILED,
+                completionReason = secretUse.completionReason,
+            )
+        ) {
+            ApprovalDecisionHistory(
+                decision = secretUse.decision,
+                decisionSource = secretUse.decisionSource,
+                aiReview = secretUse.approvalEvaluation?.aiReview,
+                temporaryAccessScopes = secretUse.approvalEvaluation.temporaryAccessHistory(),
+            )
         }
+        ClientReason(secretUse.reason)
 
         if (secretUse.secretDetails.isNotEmpty()) {
             Column(verticalArrangement = Arrangement.spacedBy(8.dp)) {
@@ -214,42 +211,17 @@ internal fun InvocationRequestDetail(
             )
         }
 
-        if (secretUse.state == ApprovalRequestState.APPROVAL_PENDING) {
-            val evaluation = secretUse.approvalEvaluation
-            if (
-                evaluation?.aiReview != null ||
-                evaluation?.secrets?.any { it.action == ApprovalAction.ASK_AI } == true
-            ) {
-                AiReviewNotice(evaluation.aiReview, aiReviewInFlight)
-            }
-        }
-
-        secretUse.reason?.takeIf(String::isNotBlank)?.let { reason ->
-            Card(
-                colors = CardDefaults.cardColors(
-                    containerColor = MaterialTheme.colorScheme.surfaceContainerLow,
-                ),
-                shape = MaterialTheme.shapes.large,
-            ) {
-                Column(
-                    Modifier.padding(16.dp),
-                    verticalArrangement = Arrangement.spacedBy(5.dp),
-                ) {
-                    Text(
-                        "Why this command says it needs access",
-                        style = MaterialTheme.typography.labelLarge,
-                    )
-                    Text(reason, style = MaterialTheme.typography.bodyLarge)
-                    Text(
-                        "Reported by the requesting client; not verified by Agentknock.",
-                        style = MaterialTheme.typography.bodySmall,
-                        color = MaterialTheme.colorScheme.onSurfaceVariant,
-                    )
-                }
-            }
-        }
-
         Disclosure("Technical details") {
+            Text(
+                "Process information reported by the client",
+                style = MaterialTheme.typography.labelLarge,
+            )
+            DetailValue("Working directory", secretUse.workingDirectory, true)
+            DetailValue("Execution mode", secretUse.executableMode)
+            DetailValue("Standard input", secretUse.stdinKind)
+            if (secretUse.launcherChain.isNotEmpty()) {
+                DetailValue("Launcher chain", secretUse.launcherChain.joinToString(" → "), true)
+            }
             DetailValue("Executable path", secretUse.executablePath, true)
             secretUse.executableHash?.let { DetailValue("Executable hash", it, true) }
             DetailValue("Standard output", secretUse.stdoutKind)
@@ -270,8 +242,11 @@ internal fun InvocationRequestDetail(
             secretUse.machineId?.let {
                 DetailValue("Machine ID reported by client", it, true)
             }
+            HorizontalDivider()
             DetailValue("Client ID", secretUse.clientId, true)
             DetailValue("Request ID", request.id, true)
+            secretUse.decidedAt?.let { DetailValue("Decided", formatTimestamp(it)) }
+            request.completedAt?.let { DetailValue("Completed", formatTimestamp(it)) }
         }
     }
     if (confirmTemporaryAccess) {
@@ -295,24 +270,7 @@ internal fun InvocationRequestDetail(
 }
 
 @Composable
-private fun ContextPill(text: String) {
-    Surface(
-        color = MaterialTheme.colorScheme.secondaryContainer,
-        contentColor = MaterialTheme.colorScheme.onSecondaryContainer,
-        shape = androidx.compose.foundation.shape.RoundedCornerShape(100.dp),
-    ) {
-        Text(
-            text,
-            style = MaterialTheme.typography.labelMedium,
-            modifier = Modifier.padding(horizontal = 10.dp, vertical = 6.dp),
-        )
-    }
-}
-
-@Composable
 private fun SecretUseOutcome(secretUse: SecretUseRequestDetails) {
-    val temporaryAccessScopes = secretUse.approvalEvaluation.temporaryAccessHistory()
-    val aiReview = secretUse.approvalEvaluation?.aiReview
     val outcome = when (secretUse.state) {
         ApprovalRequestState.WAITING_FOR_COMPLETION -> OutcomeNotice(
             title = if (secretUse.decision == ApprovalDecision.APPROVED) {
@@ -330,7 +288,7 @@ private fun SecretUseOutcome(secretUse: SecretUseRequestDetails) {
         ApprovalRequestState.COMPLETED -> when (secretUse.completionResult) {
             ApprovalCompletionResult.APPROVED -> OutcomeNotice(
                 "Delivered",
-                "The client received the secret values.",
+                "The client received the requested data.",
                 NoticeTone.SUCCESS,
             )
             ApprovalCompletionResult.DENIED -> if (
@@ -366,20 +324,12 @@ private fun SecretUseOutcome(secretUse: SecretUseRequestDetails) {
         )
         ApprovalRequestState.APPROVAL_PENDING -> return
     }
-    Notice(outcome.title, outcome.detail, outcome.tone)
-    if (
-        shouldShowDecisionHistory(
-            verificationFailed = secretUse.state == ApprovalRequestState.VERIFICATION_FAILED,
-            completionReason = secretUse.completionReason,
-        )
-    ) {
-        ApprovalDecisionHistory(
-            decision = secretUse.decision,
-            decisionSource = secretUse.decisionSource,
-            aiReview = aiReview,
-            temporaryAccessScopes = temporaryAccessScopes,
-        )
-    }
+    StatusLine(
+        outcome.title,
+        error = outcome.tone == NoticeTone.DANGER,
+        subdued = outcome.tone == NoticeTone.SUBDUED || outcome.tone == NoticeTone.NEUTRAL,
+    )
+    Text(outcome.detail, style = MaterialTheme.typography.bodyMedium)
 }
 
 @Composable
@@ -389,18 +339,7 @@ private fun ApprovalDecisionHistory(
     aiReview: AiReview?,
     temporaryAccessScopes: String,
 ) {
-    val approved = decision == ApprovalDecision.APPROVED
     when (decisionSource) {
-        "rule" -> Notice(
-            if (approved) "Approved by previous access" else "Denied by previous access",
-            "A previously saved approval made this decision.",
-            if (approved) NoticeTone.SUCCESS else NoticeTone.SUBDUED,
-        )
-        "policy" -> Notice(
-            if (approved) "Approved automatically" else "Denied automatically",
-            "Approval settings made this decision.",
-            if (approved) NoticeTone.SUCCESS else NoticeTone.SUBDUED,
-        )
         "ai" -> HistoricalAiReview(aiReview, decision)
         "temporary_access" -> {
             Notice(
@@ -426,12 +365,12 @@ private fun ApprovalDecisionHistory(
             )
             HistoricalAiReview(aiReview, decision)
         }
-        "non_sensitive" -> Notice(
-            "No approval needed",
-            "This request used only non-sensitive data.",
-            NoticeTone.NEUTRAL,
-        )
-        else -> HistoricalAiReview(aiReview, decision)
+        else -> {
+            approvalSummary(null, decision, decisionSource)?.let {
+                Text(it, style = MaterialTheme.typography.labelLarge)
+            }
+            HistoricalAiReview(aiReview, decision)
+        }
     }
 }
 
@@ -453,7 +392,7 @@ private data class OutcomeNotice(
 @Composable
 private fun SecretSummary(
     secret: SecretMetadata,
-    environmentVariables: Map<String, String?>?,
+    environmentVariables: ApprovalReviewEnvironmentSecretFacts?,
 ) {
     Column(
         Modifier.padding(vertical = 8.dp),
@@ -500,17 +439,37 @@ private fun SecretSummary(
                 style = MaterialTheme.typography.bodySmall,
                 color = MaterialTheme.colorScheme.onSurfaceVariant,
             )
+        } else if (environmentVariables != null) {
+            environmentVariables.variables.forEach { (source, variable) ->
+                val label = when (variable.delivery) {
+                    ApprovalReviewEnvironmentDelivery.ENVIRONMENT ->
+                        if (variable.target == source) source else "$source → ${variable.target}"
+                    ApprovalReviewEnvironmentDelivery.STANDARD_INPUT -> "$source → standard input"
+                    ApprovalReviewEnvironmentDelivery.OMITTED -> "$source · Not provided"
+                }
+                EnvironmentVariableFact(
+                    name = label,
+                    value = variable.value,
+                    omitted = variable.delivery == ApprovalReviewEnvironmentDelivery.OMITTED,
+                )
+            }
         } else {
+            Text(
+                "Values were not recorded for this request.",
+                style = MaterialTheme.typography.bodySmall,
+                color = MaterialTheme.colorScheme.onSurfaceVariant,
+            )
             secret.environmentVariableNames.forEach { name ->
                 val deliveredName = secret.environmentVariableRename[name] ?: name
                 val sentToStdin = secret.environmentVariableStdin == name
-                EnvironmentVariableFact(
-                    name = when {
+                Text(
+                    text = when {
                         sentToStdin -> "$name → standard input"
                         deliveredName != name -> "$name → $deliveredName"
                         else -> name
                     },
-                    value = environmentVariables?.get(if (sentToStdin) name else deliveredName),
+                    style = MaterialTheme.typography.bodyMedium,
+                    fontFamily = FontFamily.Monospace,
                 )
             }
         }
@@ -518,7 +477,7 @@ private fun SecretSummary(
 }
 
 @Composable
-private fun EnvironmentVariableFact(name: String, value: String?) {
+private fun EnvironmentVariableFact(name: String, value: String?, omitted: Boolean = false) {
     val style = MaterialTheme.typography.bodyMedium.copy(fontFamily = FontFamily.Monospace)
     val textMeasurer = rememberTextMeasurer()
     val density = LocalDensity.current
@@ -539,15 +498,14 @@ private fun EnvironmentVariableFact(name: String, value: String?) {
             ) {
                 Text(name, style = style, modifier = Modifier.weight(1f))
                 if (value != null) {
-                    SelectionContainer(Modifier.weight(1f)) {
+                    SelectionContainer {
                         Text(
                             value,
                             style = style,
                             textAlign = TextAlign.End,
-                            modifier = Modifier.fillMaxWidth(),
                         )
                     }
-                } else {
+                } else if (!omitted) {
                     HiddenSensitiveValue(style)
                 }
             }

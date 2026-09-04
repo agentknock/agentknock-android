@@ -5,7 +5,6 @@ import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.text.selection.SelectionContainer
-import androidx.compose.material3.HorizontalDivider
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.Surface
 import androidx.compose.material3.Text
@@ -18,6 +17,7 @@ import androidx.compose.ui.Modifier
 import androidx.compose.ui.text.font.FontFamily
 import androidx.compose.ui.unit.dp
 import dev.agentknock.presentation.formatTimestamp
+import dev.agentknock.presentation.formatParentRequestAge
 import dev.agentknock.presentation.renderShellCommand
 import dev.agentknock.presentation.renderSoftware
 import dev.agentknock.protocol.relayRequestTimestamp
@@ -31,7 +31,6 @@ import dev.agentknock.storage.request.ApprovalCompletionResult
 import dev.agentknock.storage.request.SshAuthenticationRequestDetails
 import dev.agentknock.storage.request.ApprovalRequestState
 import dev.agentknock.storage.secret.TemporaryAccessOperation
-import dev.agentknock.ui.components.ClientIdentity
 import dev.agentknock.ui.components.DetailPage
 import dev.agentknock.ui.components.DetailValue
 import dev.agentknock.ui.components.Disclosure
@@ -39,7 +38,6 @@ import dev.agentknock.ui.components.InformationRow
 import dev.agentknock.ui.components.InformationSurface
 import dev.agentknock.ui.components.Notice
 import dev.agentknock.ui.components.NoticeTone
-import dev.agentknock.ui.components.SecretIdentities
 import dev.agentknock.ui.components.StatusLine
 
 @Composable
@@ -87,10 +85,12 @@ internal fun SshAuthenticationRequestDetail(
             null
         },
     ) {
-        if (!pending) SshAuthenticationOutcome(authentication)
-        InformationSurface {
-            ClientIdentity(authentication.clientName)
-            StatusLine(
+        RequestIdentity(
+            authentication.clientName,
+            listOf(authentication.secretName),
+            relayRequestTimestamp(request.id) ?: request.receivedAt,
+        ) {
+            if (pending) StatusLine(
                 if (aiReviewInFlight) {
                     "AI review in progress"
                 } else {
@@ -106,12 +106,8 @@ internal fun SshAuthenticationRequestDetail(
                     authentication.completionResult ==
                     ApprovalCompletionResult.ABORTED,
             )
-            SecretIdentities(listOf(authentication.secretName))
-            InformationRow(
-                "Requested",
-                formatTimestamp(relayRequestTimestamp(request.id) ?: request.receivedAt),
-            )
         }
+        if (!pending) SshAuthenticationOutcome(authentication)
 
         if (
             pending && (
@@ -122,22 +118,6 @@ internal fun SshAuthenticationRequestDetail(
         ) {
             AiReviewNotice(authentication.approvalEvaluation.aiReview, aiReviewInFlight)
         }
-        InformationSurface {
-            InformationRow("Remote account", authentication.username)
-            InformationRow(
-                "Method",
-                when (authentication.method.wireName) {
-                    "publickey" -> "Public-key authentication"
-                    else -> "Host-bound public-key authentication"
-                },
-            )
-            InformationRow("Signature", authentication.algorithm.wireName)
-            authentication.hostKeyAlgorithm?.let { InformationRow("Host key", it) }
-            authentication.hostKeyFingerprint?.let {
-                InformationRow("Host fingerprint", it, monospace = true)
-            }
-        }
-
         Surface(
             color = MaterialTheme.colorScheme.surfaceContainer,
             shape = MaterialTheme.shapes.large,
@@ -147,26 +127,35 @@ internal fun SshAuthenticationRequestDetail(
                 Modifier.padding(16.dp),
                 verticalArrangement = Arrangement.spacedBy(8.dp),
             ) {
-                Text("Triggered by", style = MaterialTheme.typography.labelLarge)
+                InformationRow("Remote account", authentication.username)
+                Text("Command reported by client", style = MaterialTheme.typography.labelLarge)
                 SelectionContainer {
                     Text(
                         renderShellCommand(authentication.command, authentication.arguments),
                         fontFamily = FontFamily.Monospace,
+                        style = MaterialTheme.typography.bodyMedium,
                     )
                 }
-                authentication.reason?.takeIf(String::isNotBlank)?.let {
-                    HorizontalDivider()
-                    Text(
-                        "Why this command says it needs the key",
-                        style = MaterialTheme.typography.labelLarge,
-                    )
-                    Text(it, style = MaterialTheme.typography.bodyMedium)
-                    Text(
-                        "Reported by the requesting client; not verified by Agentknock.",
-                        style = MaterialTheme.typography.bodySmall,
-                        color = MaterialTheme.colorScheme.onSurfaceVariant,
-                    )
-                }
+                Text(
+                    formatParentRequestAge(authentication.invocationReceivedAt, request.receivedAt),
+                    style = MaterialTheme.typography.bodySmall,
+                    color = MaterialTheme.colorScheme.onSurfaceVariant,
+                )
+            }
+        }
+        ClientReason(authentication.reason)
+        InformationSurface {
+            InformationRow(
+                "Authentication method",
+                when (authentication.method.wireName) {
+                    "publickey" -> "Public-key authentication"
+                    else -> "Host-bound public-key authentication"
+                },
+            )
+            InformationRow("Signature algorithm", authentication.algorithm.wireName)
+            authentication.hostKeyAlgorithm?.let { InformationRow("Host-key algorithm", it) }
+            authentication.hostKeyFingerprint?.let {
+                InformationRow("Host-key fingerprint", it, monospace = true)
             }
         }
 
