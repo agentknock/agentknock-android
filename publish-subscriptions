@@ -1,0 +1,14 @@
+#!/usr/bin/env bash
+set -euo pipefail
+
+agentknock_project_dir="$(cd -- "$(dirname -- "${BASH_SOURCE[0]}")" && pwd)"
+agentknock_data_home="${XDG_DATA_HOME:-${HOME}/.local/share}"
+export AGENTKNOCK_PLAY_CREDENTIALS_FILE="${agentknock_data_home}/agentknock-android/play-publisher.json"
+
+if [[ ! -f "${AGENTKNOCK_PLAY_CREDENTIALS_FILE}" ]]; then
+    echo "Missing Play publishing credential: ${AGENTKNOCK_PLAY_CREDENTIALS_FILE}" >&2
+    exit 1
+fi
+
+cd "${agentknock_project_dir}"
+exec nix develop --command ./gradlew publishSubscriptions --rerun-tasks "$@"

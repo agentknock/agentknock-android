@@ -39,3 +39,21 @@ The release name is derived from the application version and version code.
 Room schema 1 is the compatibility baseline for releases using the current
 app-signing key. Every subsequently published schema is retained permanently,
 and published builds must never use a destructive migration fallback.
+
+## Subscription catalog
+
+Google Play subscription definitions are stored in `app/src/main/play/subscriptions/`.
+Edit `agentknock_subscription.json` to change the listing, base plan settings, or
+the prices and availability in `basePlans[].regionalConfigs`. Its companion
+`.metadata.json` records the Google Play regions version used by those prices.
+
+Run `./publish-subscriptions` to upload the catalog through Gradle Play Publisher.
+It uses the existing `play-publisher.json` credential and requires no signing key
+or keystore password. It uploads the files on every invocation, even if Gradle
+previously published the same local files. Use `./publish-subscriptions --dry-run`
+to inspect the Gradle task graph without uploading.
+
+Catalog changes apply to the app across all release tracks. Existing subscribers
+retain their current prices unless separately migrated. Base plan activation and
+offers are managed separately. The output-only `state` field is omitted from
+the local catalog because uploading it cannot activate or deactivate a plan.
