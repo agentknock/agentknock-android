@@ -24,8 +24,10 @@ The debug APK is written to `app/build/outputs/apk/debug/`.
 ## Internal releases
 
 Play publishing credentials and the upload keystore live outside the repository
-under `~/.local/share/agentknock-android/`. To publish a completed release to the
-internal testing track:
+under `~/.local/share/agentknock-android/`. The keystore password is stored in
+Agentknock as `agentknock-android-upload-passphrase`, in the `KEYSTORE_PASSWORD`
+environment variable. `publish-internal` requests it through the paired CLI.
+To publish a completed release to the internal testing track:
 
 1. Increment `agentknockVersionCode` in `app/build.gradle.kts`.
 2. Update `app/src/main/play/release-notes/en-US/internal.txt`.

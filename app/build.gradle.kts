@@ -13,14 +13,12 @@ plugins {
 val agentknockVersionCode = 41
 val agentknockVersionName = "0.2.0"
 val uploadStoreFile = providers.environmentVariable("AGENTKNOCK_UPLOAD_STORE_FILE")
-val uploadStorePassword = providers.environmentVariable("AGENTKNOCK_UPLOAD_STORE_PASSWORD")
+val uploadPassword = providers.environmentVariable("KEYSTORE_PASSWORD")
 val uploadKeyAlias = providers.environmentVariable("AGENTKNOCK_UPLOAD_KEY_ALIAS")
-val uploadKeyPassword = providers.environmentVariable("AGENTKNOCK_UPLOAD_KEY_PASSWORD")
 val uploadSigningValues = listOf(
     uploadStoreFile,
-    uploadStorePassword,
+    uploadPassword,
     uploadKeyAlias,
-    uploadKeyPassword,
 )
 val uploadSigningConfigured = uploadSigningValues.all { it.isPresent }
 val playCredentialsFile = providers.environmentVariable("AGENTKNOCK_PLAY_CREDENTIALS_FILE")
@@ -54,9 +52,9 @@ android {
         if (uploadSigningConfigured) {
             create("upload") {
                 storeFile = file(uploadStoreFile.get())
-                storePassword = uploadStorePassword.get()
+                storePassword = uploadPassword.get()
                 keyAlias = uploadKeyAlias.get()
-                keyPassword = uploadKeyPassword.get()
+                keyPassword = uploadPassword.get()
             }
         }
     }

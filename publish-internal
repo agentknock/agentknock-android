@@ -4,7 +4,6 @@ set -euo pipefail
 agentknock_project_dir="$(cd -- "$(dirname -- "${BASH_SOURCE[0]}")" && pwd)"
 agentknock_data_home="${XDG_DATA_HOME:-${HOME}/.local/share}"
 agentknock_credentials_dir="${agentknock_data_home}/agentknock-android"
-agentknock_password_file="${agentknock_credentials_dir}/upload-keystore.password"
 
 if [[ -n "$(git -C "${agentknock_project_dir}" status --porcelain --untracked-files=all -- app build.gradle.kts settings.gradle.kts gradle.properties gradle gradlew flake.nix flake.lock publish-internal)" ]]; then
     echo "Refusing to publish with uncommitted build inputs." >&2
@@ -18,8 +17,7 @@ export AGENTKNOCK_SOURCE_REVISION="$(git -C "${agentknock_project_dir}" rev-pars
 
 for agentknock_required_file in \
     "${AGENTKNOCK_PLAY_CREDENTIALS_FILE}" \
-    "${AGENTKNOCK_UPLOAD_STORE_FILE}" \
-    "${agentknock_password_file}"
+    "${AGENTKNOCK_UPLOAD_STORE_FILE}"
 do
     if [[ ! -f "${agentknock_required_file}" ]]; then
         echo "Missing release credential: ${agentknock_required_file}" >&2
@@ -27,9 +25,7 @@ do
     fi
 done
 
-IFS= read -r AGENTKNOCK_UPLOAD_STORE_PASSWORD < "${agentknock_password_file}"
-export AGENTKNOCK_UPLOAD_STORE_PASSWORD
-export AGENTKNOCK_UPLOAD_KEY_PASSWORD="${AGENTKNOCK_UPLOAD_STORE_PASSWORD}"
-
 cd "${agentknock_project_dir}"
-exec nix develop --command ./gradlew publishReleaseBundle "$@"
+exec agentknock --secret agentknock-android-upload-passphrase \
+    --reason "Sign and upload an Agentknock Android release to Google Play internal testing." \
+    -- nix develop --command ./gradlew publishReleaseBundle "$@"
