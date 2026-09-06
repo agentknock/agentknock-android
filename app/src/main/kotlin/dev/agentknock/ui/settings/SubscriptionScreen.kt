@@ -2,6 +2,7 @@
 
 package dev.agentknock.ui.settings
 
+import dev.agentknock.subscription.AiReviewAccess
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.Row
@@ -48,9 +49,8 @@ internal fun SubscriptionAndBillingScreen(
     onOpenSecrets: () -> Unit,
     modifier: Modifier = Modifier,
 ) {
-    val active = state.access == SubscriptionAccess.ACTIVE
-    val activating = !active && state.refreshing &&
-        state.googlePlayPurchase == GooglePlayPurchaseState.PURCHASED
+    val active = state.access == AiReviewAccess.ACTIVE
+    val activating = state.aiReviewAccess == AiReviewAccess.ACTIVATING
     val busy = state.refreshing || state.redeeming || state.purchasing
     Column(modifier) {
         PageTopBar("Plan and billing", onBack)
@@ -63,14 +63,15 @@ internal fun SubscriptionAndBillingScreen(
             AccessCard(
                 title = "AI review",
                 status = if (activating) "Activating" else when (state.access) {
-                    SubscriptionAccess.ACTIVE -> "Active"
-                    SubscriptionAccess.CHECKING -> "Checking"
-                    SubscriptionAccess.SETUP_REQUIRED -> "Finish device setup"
-                    SubscriptionAccess.FREE -> "Not active"
-                    SubscriptionAccess.UNAVAILABLE -> "Status unavailable"
+                    AiReviewAccess.ACTIVE -> "Active"
+                    AiReviewAccess.CHECKING -> "Checking"
+                    AiReviewAccess.ACTIVATING -> "Activating"
+                    AiReviewAccess.SETUP_REQUIRED -> "Finish device setup"
+                    AiReviewAccess.INACTIVE -> "Not active"
+                    AiReviewAccess.UNAVAILABLE -> "Status unavailable"
                 },
                 highlighted = active,
-                warning = state.access == SubscriptionAccess.UNAVAILABLE && !activating,
+                warning = state.access == AiReviewAccess.UNAVAILABLE && !activating,
             ) {
                 Text(
                     if (active) {
@@ -87,6 +88,13 @@ internal fun SubscriptionAndBillingScreen(
                     style = MaterialTheme.typography.bodyMedium,
                     color = LocalContentColor.current.copy(alpha = 0.85f),
                 )
+                if (state.access == AiReviewAccess.INACTIVE && !activating) {
+                    Text(
+                        "Secrets set to Ask AI will ask you instead. Your settings and instructions " +
+                            "are kept, and AI review resumes for new requests when access is active.",
+                        style = MaterialTheme.typography.bodyMedium,
+                    )
+                }
                 if (state.googlePlayPurchase == GooglePlayPurchaseState.PURCHASED) {
                     Text("Google Play subscription", style = MaterialTheme.typography.labelLarge)
                 }
@@ -100,6 +108,10 @@ internal fun SubscriptionAndBillingScreen(
 
             when {
                 activating -> StoreStatus("Activating AI review…", showProgress = true)
+                state.access == AiReviewAccess.CHECKING ->
+                    StoreStatus("Checking AI access…", showProgress = true)
+                state.statusUnavailable || state.access == AiReviewAccess.UNAVAILABLE ->
+                    StoreStatus("AI access couldn’t be checked. You can still decide requests yourself.")
                 state.googlePlayPurchase == GooglePlayPurchaseState.PENDING ->
                     PurchaseStatusCard(
                         title = "Payment pending",
@@ -129,7 +141,7 @@ internal fun SubscriptionAndBillingScreen(
                         )
                     }
                 }
-                state.access == SubscriptionAccess.SETUP_REQUIRED ->
+                state.access == AiReviewAccess.SETUP_REQUIRED ->
                     StoreStatus("Finish device setup before subscribing.")
                 state.playStore == PlayStoreAvailability.CHECKING ->
                     StoreStatus("Loading Google Play plans…", showProgress = true)

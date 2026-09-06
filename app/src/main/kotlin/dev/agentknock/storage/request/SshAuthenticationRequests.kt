@@ -6,6 +6,7 @@ import dev.agentknock.protocol.SshAuthenticationCompletion
 import dev.agentknock.protocol.SshAuthenticationMessageDetails
 import dev.agentknock.protocol.SshAuthenticationProtocol
 import dev.agentknock.protocol.SshAuthenticationRequestMessage
+import dev.agentknock.subscription.SubscriptionRepository
 import dev.agentknock.relay.RelayApprovalReviewClient
 import dev.agentknock.relay.RelayClientState
 import dev.agentknock.review.approvalReviewSshAuthenticationRequest
@@ -70,6 +71,7 @@ internal class SshAuthenticationRequests(
     private val secrets: SecretRepository,
     private val deviceCredentials: RelayDeviceCredentialSource,
     private val approvalReviewer: RelayApprovalReviewClient,
+    private val subscription: SubscriptionRepository,
     private val audit: AuditSink,
     private val writeTransaction: WriteTransaction,
     private val sshKeys: SshKeyCodec = SshKeyCodec(),
@@ -386,23 +388,26 @@ internal class SshAuthenticationRequests(
                             ?: (aiReview?.auditData() ?: emptyMap())),
                 )
             }
+            val aiReviewAudit = aiReview?.let { reviewed ->
+                AuditRecord(
+                    type = AuditEventType.SSH_AUTHENTICATION_AI_REVIEWED,
+                    outcome = reviewed.auditOutcome(),
+                    decisionSource = AuditDecisionSource.AI_REVIEW,
+                    subject = contents.secret,
+                    detail = reviewed.auditFailureDetail(),
+                    clientId = client.clientId,
+                    clientName = client.name,
+                    relayRequestId = relayRequestId,
+                    data = finalRequest.requestAuditData() + finalAuthentication.auditData() +
+                        (reviewResult?.auditData(reviewed) ?: reviewed.auditData()),
+                )
+            }
             val persisted = if (requestAlreadyInserted) {
                 finishAiReview(
                     request = finalRequest,
                     authentication = finalAuthentication,
                     authorization = authorization,
-                    aiReviewAudit = AuditRecord(
-                        type = AuditEventType.SSH_AUTHENTICATION_AI_REVIEWED,
-                        outcome = checkNotNull(aiReview).auditOutcome(),
-                        decisionSource = AuditDecisionSource.AI_REVIEW,
-                        subject = contents.secret,
-                        detail = aiReview.auditFailureDetail(),
-                        clientId = client.clientId,
-                        clientName = client.name,
-                        relayRequestId = relayRequestId,
-                        data = finalRequest.requestAuditData() + finalAuthentication.auditData() +
-                            (reviewResult?.auditData(aiReview) ?: aiReview.auditData()),
-                    ),
+                    aiReviewAudit = checkNotNull(aiReviewAudit),
                     automaticDecisionAudit = automaticDecisionAudit,
                 )
             } else {
@@ -416,6 +421,7 @@ internal class SshAuthenticationRequests(
                     acceptedPsks = acceptedPsks,
                     authorization = authorization.takeIf { automaticDecision != null },
                     automaticDecisionAudit = automaticDecisionAudit,
+                    aiReviewAudit = aiReviewAudit,
                 )
             }
             return when (persisted) {
@@ -426,6 +432,9 @@ internal class SshAuthenticationRequests(
         }
 
         if (!needsAiReview) return finishReview(null, requestAlreadyInserted = false)
+        subscription.reviewFallback(credentials.deviceId)?.let { fallback ->
+            return finishReview(fallback, requestAlreadyInserted = false)
+        }
 
         withContext(NonCancellable) {
             check(
@@ -684,6 +693,7 @@ internal class SshAuthenticationRequests(
         acceptedPsks: AcceptedRequestPsks,
         authorization: AuthorizationCommitment?,
         automaticDecisionAudit: AuditRecord?,
+        aiReviewAudit: AuditRecord? = null,
     ): ConditionalRequestUpdate {
         val conditional = authentication.decision != null
         require(
@@ -777,6 +787,7 @@ internal class SshAuthenticationRequests(
             audit.append(
                 buildList {
                     add(receivedAudit(storedRequest, storedAuthentication))
+                    aiReviewAudit?.let(::add)
                     if (authorized) automaticDecisionAudit?.let(::add)
                 },
                 request.receivedAt,
@@ -1355,7 +1366,7 @@ internal class SshAuthenticationRequests(
             deviceInstructions = credentials.instructions,
         )
         return AiReviewAttempt(
-            review = performAiReview(approvalReviewer, credentials, request),
+            review = performAiReview(approvalReviewer, subscription, credentials, request),
             request = request,
         )
     }

@@ -22,6 +22,7 @@ import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.unit.dp
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
+import dev.agentknock.subscription.AiReviewAccess
 import dev.agentknock.relay.RelayClientState
 import dev.agentknock.storage.request.InboxRequestContent
 import dev.agentknock.storage.request.InboxRequestDetails
@@ -32,6 +33,7 @@ import kotlinx.coroutines.launch
 
 @Composable
 internal fun ClientsScreen(
+    aiReviewAccess: AiReviewAccess,
     onOpenSettings: () -> Unit,
     onChangePairingAddress: () -> Unit,
     onTopLevelChanged: (Boolean) -> Unit,
@@ -85,6 +87,7 @@ internal fun ClientsScreen(
             emptyDetail = { detailModifier -> EmptyClientSelection(detailModifier) },
             detail = { showBack, detailModifier ->
                 ClientSelectionPane(
+                    aiReviewAccess = aiReviewAccess,
                     pane = pane,
                     onChooseSas = ::chooseSas,
                     onRejectPairing = viewModel::rejectPairing,
@@ -109,6 +112,7 @@ internal fun ClientsScreen(
 
 @Composable
 private fun ClientSelectionPane(
+    aiReviewAccess: AiReviewAccess,
     pane: ClientPaneState,
     onChooseSas: (InboxRequestDetails, Int?) -> Unit,
     onRejectPairing: (String) -> Unit,
@@ -127,6 +131,7 @@ private fun ClientSelectionPane(
         -> Box(modifier, contentAlignment = Alignment.Center) { CircularProgressIndicator() }
         is ClientPaneState.Client -> key(pane.details.clientId) {
             ClientDetail(
+                aiReviewAccess = aiReviewAccess,
                 client = pane.details,
                 temporaryAccessGrants = pane.temporaryAccess,
                 onRename = { name -> onRenameClient(pane.details.clientId, name) },

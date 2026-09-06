@@ -105,6 +105,7 @@ import org.junit.runner.RunWith
 
 @RunWith(AndroidJUnit4::class)
 class RequestRepositorySlotTest {
+    private val subscription = FakeSubscription(DEVICE_ID)
     private lateinit var database: AgentknockDatabase
     private lateinit var relay: QueuedRelayDeviceClient
     private lateinit var repository: RequestRepository
@@ -201,6 +202,7 @@ class RequestRepositorySlotTest {
             secrets = secrets,
             deviceCredentials = credentialSource,
             approvalReviewer = approvalReviewer,
+            subscription = subscription.repository,
             audit = audit,
             writeTransaction = RoomWriteTransaction(database),
             currentTimeMillis = { now },
@@ -210,6 +212,7 @@ class RequestRepositorySlotTest {
             secrets = secrets,
             deviceCredentials = credentialSource,
             approvalReviewer = approvalReviewer,
+            subscription = subscription.repository,
             audit = audit,
             writeTransaction = RoomWriteTransaction(database),
             currentTimeMillis = { now },
@@ -219,6 +222,7 @@ class RequestRepositorySlotTest {
             secrets = secrets,
             deviceCredentials = credentialSource,
             approvalReviewer = approvalReviewer,
+            subscription = subscription.repository,
             audit = audit,
             writeTransaction = RoomWriteTransaction(database),
             currentTimeMillis = { now },
@@ -2306,6 +2310,82 @@ class RequestRepositorySlotTest {
             RequestDecisionResult.Decided,
             repository.decideRequest(AI_INVOCATION_REQUEST_ID, RequestDecision.APPROVE),
         )
+    }
+
+    @Test
+    fun inactiveAiRequestsStayManualAfterRenewalWhileNewRequestsResumeAi() = runTest {
+        val clientPsk = establishActivePairing()
+        val secretId = createAiEnvironmentSecret()
+        subscription.active = false
+        val request = pairedRequest(
+            requestId = AI_INVOCATION_REQUEST_ID,
+            clientPsk = clientPsk,
+            plaintext = aiInvocationPlaintext(ByteArray(32) { (0x22 + it).toByte() }),
+        )
+        connect(requestEvent(AI_INVOCATION_REQUEST_ID, request), RelayDeviceEvent.CaughtUp,
+            relayState(AI_INVOCATION_REQUEST_ID))
+        assertEquals(RequestSyncResult.Success, repository.sync())
+        assertEquals(0, approvalReviewer.callCount)
+        val manual = checkNotNull(inbox.observeRequest(AI_INVOCATION_REQUEST_ID).first())
+        assertEquals(InboxRequestState.ACTION_REQUIRED, manual.state)
+        assertEquals(AiReviewFailure.SUBSCRIPTION_REQUIRED,
+            manual.secretUse?.approvalEvaluation?.aiReview?.failure)
+        assertEquals(SecretApprovalMode.ASK_AI, secrets.observeSecret(secretId).first()?.approvalMode)
+        assertEquals(AuditOutcome.DEFERRED,
+            AuditRepository(database.auditDao()).observeEvents().first()
+                .single { it.relayRequestId == AI_INVOCATION_REQUEST_ID &&
+                    it.type == AuditEventType.SECRET_USE_AI_REVIEWED }.outcome)
+
+        subscription.active = true
+        val nextRequest = pairedRequest(
+            requestId = INVOCATION_REQUEST_ID,
+            clientPsk = clientPsk,
+            plaintext = aiInvocationPlaintext(ByteArray(32) { (0x33 + it).toByte() }),
+        )
+        connect(
+            requestEvent(AI_INVOCATION_REQUEST_ID, request),
+            requestEvent(INVOCATION_REQUEST_ID, nextRequest),
+            RelayDeviceEvent.CaughtUp,
+            relayState(AI_INVOCATION_REQUEST_ID), relayState(INVOCATION_REQUEST_ID),
+        )
+        assertEquals(RequestSyncResult.Success, repository.sync())
+        assertEquals(1, approvalReviewer.callCount)
+        assertEquals(2, subscription.statusCalls)
+        assertEquals(InboxRequestState.ACTION_REQUIRED.storedName,
+            database.requestDao().getRequestById(AI_INVOCATION_REQUEST_ID)?.state)
+        assertEquals(InboxRequestState.REVIEWING.storedName,
+            database.requestDao().getRequestById(INVOCATION_REQUEST_ID)?.state)
+        assertEquals(RequestDecisionResult.Decided,
+            repository.decideRequest(AI_INVOCATION_REQUEST_ID, RequestDecision.APPROVE))
+    }
+
+    @Test
+    fun expiryDuringReviewUpdatesSharedAccessAndLeavesTheRequestManual() = runTest {
+        val clientPsk = establishActivePairing()
+        createAiEnvironmentSecret()
+        val request = pairedRequest(
+            requestId = AI_INVOCATION_REQUEST_ID,
+            clientPsk = clientPsk,
+            plaintext = aiInvocationPlaintext(ByteArray(32) { (0x22 + it).toByte() }),
+        )
+        connect(requestEvent(AI_INVOCATION_REQUEST_ID, request), RelayDeviceEvent.CaughtUp,
+            relayState(AI_INVOCATION_REQUEST_ID))
+        assertEquals(RequestSyncResult.Success, repository.sync())
+        approvalReviewer.complete(
+            RelayEndpointResult.Rejected(402, "SUBSCRIPTION_REQUIRED", "Subscription expired"),
+        )
+        val manual = awaitAsynchronousWork {
+            inbox.observeRequest(AI_INVOCATION_REQUEST_ID).filterNotNull()
+                .filter {
+                    it.state == InboxRequestState.ACTION_REQUIRED &&
+                        it.secretUse?.approvalEvaluation?.aiReview != null
+                }.first()
+        }
+        assertEquals(AiReviewFailure.SUBSCRIPTION_REQUIRED,
+            manual.secretUse?.approvalEvaluation?.aiReview?.failure)
+        assertEquals(dev.agentknock.subscription.AiReviewAccess.INACTIVE, subscription.repository.access.value)
+        assertEquals(RequestDecisionResult.Decided,
+            repository.decideRequest(AI_INVOCATION_REQUEST_ID, RequestDecision.DENY))
     }
 
     @Test

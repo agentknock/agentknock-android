@@ -1,5 +1,6 @@
 package dev.agentknock.ui.settings
 
+import dev.agentknock.subscription.AiReviewAccess
 import android.content.Intent
 import androidx.activity.compose.BackHandler
 import androidx.activity.compose.LocalActivity
@@ -48,6 +49,7 @@ internal fun SettingsScreen(
     notificationStateGeneration: Long,
     requestNotificationPermission: () -> Unit,
     openPlanInitially: Boolean,
+    returnToCaller: Boolean,
     onPlanOpened: () -> Unit,
     subscriptionViewModel: SubscriptionViewModel,
     auditViewModel: AuditViewModel,
@@ -73,6 +75,11 @@ internal fun SettingsScreen(
             onPlanOpened()
         }
     }
+    LaunchedEffect(returnToCaller, subscription.aiReviewAccess) {
+        if (returnToCaller && subscription.aiReviewAccess == AiReviewAccess.ACTIVE) {
+            onClose()
+        }
+    }
 
     fun back() {
         when (page) {
@@ -89,7 +96,7 @@ internal fun SettingsScreen(
             }
             SettingsPage.SUBSCRIPTION -> {
                 subscriptionViewModel.dismissNotice()
-                page = SettingsPage.OVERVIEW
+                if (returnToCaller) onClose() else page = SettingsPage.OVERVIEW
             }
             else -> page = SettingsPage.OVERVIEW
         }

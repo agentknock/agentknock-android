@@ -37,6 +37,7 @@ import androidx.compose.ui.platform.LocalResources
 import androidx.compose.ui.res.stringResource
 import androidx.compose.ui.unit.dp
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
+import dev.agentknock.subscription.AiReviewAccess
 import dev.agentknock.R
 import dev.agentknock.storage.secret.EnvironmentVariableMetadata
 import dev.agentknock.storage.secret.EnvironmentVariableValue
@@ -53,7 +54,8 @@ import java.util.UUID
 internal fun SecretsScreen(
     onOpenSettings: () -> Unit,
     onTopLevelChanged: (Boolean) -> Unit,
-    aiReviewActive: Boolean,
+    aiReviewAccess: AiReviewAccess,
+    onOpenPlan: () -> Unit,
     viewModel: SecretsViewModel,
 ) {
     val secrets by viewModel.secrets.collectAsStateWithLifecycle()
@@ -121,7 +123,7 @@ internal fun SecretsScreen(
             value = generalInstructions,
             originalValue = configuration?.active?.instructions.orEmpty(),
             supportingText = "These instructions apply to every AI review. Secret and client " +
-                "instructions add more specific context.",
+                "instructions add more specific context. Used when AI review is active.",
             onValueChange = { generalInstructions = it },
             onSave = {
                 viewModel.saveGeneralInstructions(generalInstructions.trim())
@@ -233,7 +235,7 @@ internal fun SecretsScreen(
                     onSelectUpload = { requestId -> viewModel.selectUpload(requestId) },
                     onCreate = viewModel::startNewSecret,
                     generalInstructions = configuration?.active?.instructions.orEmpty(),
-                    aiReviewActive = aiReviewActive,
+                    aiReviewAccess = aiReviewAccess,
                     onEditGeneralInstructions = {
                         generalInstructions = configuration?.active?.instructions.orEmpty()
                         editingGeneralInstructions = true
@@ -259,6 +261,8 @@ internal fun SecretsScreen(
                     }
                     is SecretsContent.Stored -> key(selected.details.id) {
                         SecretDetail(
+                            aiReviewAccess = aiReviewAccess,
+                            onOpenPlan = onOpenPlan,
                             secret = selected.details,
                             clients = clients,
                             revealedValues = revealedValues,

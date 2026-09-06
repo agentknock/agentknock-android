@@ -19,11 +19,9 @@ import androidx.compose.foundation.layout.width
 import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.text.selection.SelectionContainer
 import androidx.compose.material.icons.Icons
-import androidx.compose.material.icons.automirrored.outlined.NavigateNext
 import androidx.compose.material.icons.outlined.Add
 import androidx.compose.material.icons.outlined.ContentCopy
 import androidx.compose.material.icons.outlined.Edit
-import androidx.compose.material.icons.outlined.Check
 import androidx.compose.material.icons.outlined.Lock
 import androidx.compose.material.icons.outlined.MoreVert
 import androidx.compose.material.icons.outlined.Visibility
@@ -58,6 +56,8 @@ import androidx.compose.ui.semantics.semantics
 import androidx.compose.ui.text.font.FontFamily
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
+import dev.agentknock.subscription.AiReviewAccess
+import dev.agentknock.ui.components.AiReviewInstructions
 import dev.agentknock.R
 import dev.agentknock.presentation.formatTimestamp
 import dev.agentknock.relay.RelayClientState
@@ -100,6 +100,8 @@ internal fun SecretDetail(
     revealedValues: Map<String, String>,
     showBack: Boolean,
     actions: SecretDetailActions,
+    aiReviewAccess: AiReviewAccess,
+    onOpenPlan: () -> Unit,
     modifier: Modifier = Modifier,
 ) {
     var menuExpanded by remember(secret.id) { mutableStateOf(false) }
@@ -123,7 +125,7 @@ internal fun SecretDetail(
             originalValue = secret.instructions,
             supportingText =
                 "Tell the AI reviewer when this secret may and may not be used. " +
-                    "Do not include secret values.",
+                    "Do not include secret values. Used when AI review is active.",
             onValueChange = { instructions = it },
             onSave = {
                 editingInstructions = false
@@ -303,6 +305,9 @@ internal fun SecretDetail(
                     ApprovalModeRow(
                         title = "Default for future uses",
                         selected = secret.approvalMode,
+                        defaultMode = secret.approvalMode,
+                        aiReviewAccess = aiReviewAccess,
+                        onOpenPlan = onOpenPlan,
                         inherited = false,
                         onSelect = actions.onSetApprovalMode,
                     )
@@ -312,6 +317,9 @@ internal fun SecretDetail(
                         ApprovalModeRow(
                             title = client.approvalLabel(duplicateClientNames),
                             selected = override?.mode ?: secret.approvalMode,
+                            defaultMode = secret.approvalMode,
+                            aiReviewAccess = aiReviewAccess,
+                            onOpenPlan = onOpenPlan,
                             inherited = override == null,
                             onSelect = { mode ->
                                 actions.onSetClientApprovalOverride(client.clientId, mode)
@@ -321,16 +329,17 @@ internal fun SecretDetail(
                             },
                         )
                     }
-                    HorizontalDivider()
-                    ApprovalSettingRow(
-                        title = "AI review instructions",
-                        value = secret.instructions.ifBlank { "None" },
-                        onClick = {
-                            instructions = secret.instructions
-                            editingInstructions = true
-                        },
-                    )
                 }
+            }
+            item {
+                AiReviewInstructions(
+                    value = secret.instructions,
+                    access = aiReviewAccess,
+                    onEdit = {
+                        instructions = secret.instructions
+                        editingInstructions = true
+                    },
+                )
             }
             item {
                 InformationSurface(modifier = Modifier.padding(top = 8.dp)) {
@@ -418,99 +427,6 @@ private fun SecretTemporaryApprovals(
 
 private fun ClientSummary.approvalLabel(duplicateNames: Set<String>): String =
     if (name in duplicateNames) "$name · ${clientId.takeLast(6)}" else name
-
-@Composable
-private fun ApprovalSettingRow(
-    title: String,
-    value: String,
-    onClick: () -> Unit,
-) {
-    Row(
-        modifier = Modifier.fillMaxWidth().clickable(onClick = onClick)
-            .padding(vertical = 8.dp),
-        horizontalArrangement = Arrangement.spacedBy(12.dp),
-        verticalAlignment = Alignment.CenterVertically,
-    ) {
-        Column(Modifier.weight(1f), verticalArrangement = Arrangement.spacedBy(2.dp)) {
-            Text(title, style = MaterialTheme.typography.bodyLarge)
-            Text(
-                value,
-                style = MaterialTheme.typography.bodyMedium,
-                color = MaterialTheme.colorScheme.onSurfaceVariant,
-                maxLines = 2,
-                overflow = TextOverflow.Ellipsis,
-            )
-        }
-        Icon(Icons.AutoMirrored.Outlined.NavigateNext, contentDescription = null)
-    }
-}
-
-private fun SecretApprovalMode.displayName(): String = when (this) {
-    SecretApprovalMode.APPROVE -> "Approve"
-    SecretApprovalMode.ASK_AI -> "Ask AI"
-    SecretApprovalMode.ASK_ME -> "Ask me"
-    SecretApprovalMode.DENY -> "Deny"
-}
-
-@Composable
-private fun ApprovalModeRow(
-    title: String,
-    selected: SecretApprovalMode,
-    inherited: Boolean,
-    onSelect: (SecretApprovalMode) -> Unit,
-    onUseDefault: (() -> Unit)? = null,
-) {
-    Column(
-        Modifier.fillMaxWidth().padding(vertical = 10.dp),
-        verticalArrangement = Arrangement.spacedBy(8.dp),
-    ) {
-        Row(
-            modifier = Modifier.fillMaxWidth(),
-            verticalAlignment = Alignment.CenterVertically,
-        ) {
-            Column(Modifier.weight(1f)) {
-                Text(title, style = MaterialTheme.typography.titleMedium)
-                if (inherited) {
-                    Text(
-                        "Using default: ${selected.displayName()}",
-                        style = MaterialTheme.typography.bodySmall,
-                        color = MaterialTheme.colorScheme.onSurfaceVariant,
-                    )
-                } else if (onUseDefault != null) {
-                    Text("Custom setting", style = MaterialTheme.typography.bodySmall,
-                        color = MaterialTheme.colorScheme.onSurfaceVariant)
-                }
-            }
-            onUseDefault?.let { clear ->
-                TextButton(onClick = clear) { Text("Use default") }
-            }
-        }
-        FlowRow(
-            horizontalArrangement = Arrangement.spacedBy(8.dp),
-            verticalArrangement = Arrangement.spacedBy(4.dp),
-            maxItemsInEachRow = 2,
-        ) {
-            approvalModes.forEach { mode ->
-                androidx.compose.material3.FilterChip(
-                    selected = selected == mode,
-                    onClick = { onSelect(mode) },
-                    label = { Text(mode.displayName()) },
-                    modifier = Modifier.weight(1f),
-                    leadingIcon = if (selected == mode) {
-                        { Icon(Icons.Outlined.Check, contentDescription = null, modifier = Modifier.size(18.dp)) }
-                    } else null,
-                )
-            }
-        }
-    }
-}
-
-private val approvalModes = listOf(
-    SecretApprovalMode.DENY,
-    SecretApprovalMode.ASK_ME,
-    SecretApprovalMode.ASK_AI,
-    SecretApprovalMode.APPROVE,
-)
 
 private fun TemporaryAccessOperation.displayName(): String = when (this) {
     TemporaryAccessOperation.INVOCATION -> "Secret values for any command"

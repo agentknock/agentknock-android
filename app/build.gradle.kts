@@ -10,7 +10,7 @@ plugins {
     alias(libs.plugins.room3)
 }
 
-val agentknockVersionCode = 41
+val agentknockVersionCode = 42
 val agentknockVersionName = "0.2.0"
 val uploadStoreFile = providers.environmentVariable("AGENTKNOCK_UPLOAD_STORE_FILE")
 val uploadPassword = providers.environmentVariable("KEYSTORE_PASSWORD")

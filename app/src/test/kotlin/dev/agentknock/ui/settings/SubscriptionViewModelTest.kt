@@ -1,5 +1,6 @@
 package dev.agentknock.ui.settings
 
+import dev.agentknock.subscription.AiReviewAccess
 import android.app.Activity
 import androidx.lifecycle.viewModelScope
 import dev.agentknock.relay.RelayEndpointResult
@@ -34,6 +35,37 @@ import org.junit.Assert.assertEquals
 import org.junit.Test
 
 class SubscriptionViewModelTest {
+    @Test
+    fun `code redemption shows activation without hiding existing access`() {
+        assertEquals(AiReviewAccess.ACTIVATING,
+            SubscriptionUiState(access = AiReviewAccess.INACTIVE, redeeming = true).aiReviewAccess)
+        assertEquals(AiReviewAccess.ACTIVE,
+            SubscriptionUiState(access = AiReviewAccess.ACTIVE, redeeming = true).aiReviewAccess)
+    }
+
+    @OptIn(ExperimentalCoroutinesApi::class)
+    @Test
+    fun `failed refresh preserves active controls and reports unavailable status separately`() = runTest {
+        val fixture = Fixture(UnconfinedTestDispatcher(testScheduler))
+        try {
+            fixture.relay.statusResult = RelayEndpointResult.Success(RelaySubscriptionStatus(active = true))
+            fixture.viewModel.refresh()
+            runCurrent()
+            fixture.relay.statusResult = RelayEndpointResult.InvalidResponse
+            fixture.viewModel.refresh()
+            runCurrent()
+            assertEquals(AiReviewAccess.ACTIVE, fixture.viewModel.state.value.aiReviewAccess)
+            assertEquals(true, fixture.viewModel.state.value.statusUnavailable)
+            fixture.relay.statusResult = RelayEndpointResult.Success(RelaySubscriptionStatus(active = false))
+            fixture.viewModel.refresh()
+            runCurrent()
+            assertEquals(AiReviewAccess.INACTIVE, fixture.viewModel.state.value.aiReviewAccess)
+            assertEquals(false, fixture.viewModel.state.value.statusUnavailable)
+        } finally {
+            fixture.close()
+        }
+    }
+
     @OptIn(ExperimentalCoroutinesApi::class)
     @Test
     fun `restores a purchased subscription through the relay`() = runTest {
@@ -48,7 +80,7 @@ class SubscriptionViewModelTest {
 
             assertEquals(PURCHASE_TOKEN, fixture.relay.googlePlayPurchase)
             assertEquals(0, fixture.relay.statusCalls)
-            assertEquals(SubscriptionAccess.ACTIVE, fixture.viewModel.state.value.access)
+            assertEquals(AiReviewAccess.ACTIVE, fixture.viewModel.state.value.access)
             assertEquals(
                 GooglePlayPurchaseState.PURCHASED,
                 fixture.viewModel.state.value.googlePlayPurchase,
@@ -74,7 +106,7 @@ class SubscriptionViewModelTest {
 
             assertEquals(PURCHASE_TOKEN, fixture.relay.googlePlayPurchase)
             assertEquals(1, fixture.relay.statusCalls)
-            assertEquals(SubscriptionAccess.ACTIVE, fixture.viewModel.state.value.access)
+            assertEquals(AiReviewAccess.ACTIVE, fixture.viewModel.state.value.access)
         } finally {
             fixture.close()
         }
@@ -92,7 +124,7 @@ class SubscriptionViewModelTest {
 
             assertEquals(null, fixture.relay.googlePlayPurchase)
             assertEquals(1, fixture.relay.statusCalls)
-            assertEquals(SubscriptionAccess.FREE, fixture.viewModel.state.value.access)
+            assertEquals(AiReviewAccess.INACTIVE, fixture.viewModel.state.value.access)
             assertEquals(
                 GooglePlayPurchaseState.PENDING,
                 fixture.viewModel.state.value.googlePlayPurchase,
@@ -114,7 +146,7 @@ class SubscriptionViewModelTest {
             fixture.viewModel.refresh()
             runCurrent()
 
-            assertEquals(SubscriptionAccess.ACTIVE, fixture.viewModel.state.value.access)
+            assertEquals(AiReviewAccess.ACTIVE, fixture.viewModel.state.value.access)
             assertEquals(
                 PlayStoreAvailability.UNAVAILABLE,
                 fixture.viewModel.state.value.playStore,

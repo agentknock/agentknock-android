@@ -6,6 +6,7 @@ import dev.agentknock.protocol.InvocationDenialReason
 import dev.agentknock.protocol.InvocationProtocol
 import dev.agentknock.protocol.InvocationRequestMessage
 import dev.agentknock.relay.RelayClientState
+import dev.agentknock.subscription.SubscriptionRepository
 import dev.agentknock.relay.RelayApprovalReviewClient
 import dev.agentknock.review.approvalReviewRequest
 import dev.agentknock.review.approvalReviewSecretFacts
@@ -60,6 +61,7 @@ internal class InvocationRequests(
     private val secrets: SecretRepository,
     private val deviceCredentials: RelayDeviceCredentialSource,
     private val approvalReviewer: RelayApprovalReviewClient,
+    private val subscription: SubscriptionRepository,
     private val audit: AuditSink,
     private val writeTransaction: WriteTransaction,
     private val invocationProtocol: InvocationProtocol = InvocationProtocol(),
@@ -420,6 +422,7 @@ internal class InvocationRequests(
                     acceptedPsks = acceptedPsks,
                     authorization = authorization.takeIf { automaticDecision != null },
                     automaticDecisionAudit = automaticDecisionAudit,
+                    aiReviewAudit = aiReviewAudit,
                 )
             }
             when (persistence) {
@@ -431,6 +434,9 @@ internal class InvocationRequests(
         }
 
         if (!needsAiReview) return finishReview(null, requestAlreadyInserted = false)
+        subscription.reviewFallback(credentials.deviceId)?.let { fallback ->
+            return finishReview(fallback, requestAlreadyInserted = false)
+        }
 
         withContext(NonCancellable) {
             val received = receive(
@@ -686,6 +692,7 @@ internal class InvocationRequests(
         acceptedPsks: AcceptedRequestPsks,
         authorization: AuthorizationCommitment?,
         automaticDecisionAudit: AuditRecord?,
+        aiReviewAudit: AuditRecord? = null,
     ): ConditionalRequestUpdate {
         val conditional = secretUseRequest.decision != null
         require(conditional == (automaticDecisionAudit != null)) {
@@ -745,6 +752,7 @@ internal class InvocationRequests(
             )
             val records = buildList {
                 add(receivedAudit(storedRequest, storedSecretUse))
+                aiReviewAudit?.let(::add)
                 if (authorized) automaticDecisionAudit?.let(::add)
             }
             audit.append(records, request.receivedAt)
@@ -1232,7 +1240,7 @@ internal class InvocationRequests(
             deviceInstructions = credentials.instructions,
         )
         return AiReviewAttempt(
-            review = performAiReview(approvalReviewer, credentials, request),
+            review = performAiReview(approvalReviewer, subscription, credentials, request),
             request = request,
         )
     }

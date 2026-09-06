@@ -210,6 +210,7 @@ internal class ApplicationContainer(private val application: Application) {
         secrets = secrets,
         deviceCredentials = deviceIdentity,
         approvalReviewer = approvalReviewer,
+        subscription = subscription,
         audit = audit,
         writeTransaction = writeTransaction,
     )
@@ -218,6 +219,7 @@ internal class ApplicationContainer(private val application: Application) {
         secrets = secrets,
         deviceCredentials = deviceIdentity,
         approvalReviewer = approvalReviewer,
+        subscription = subscription,
         audit = audit,
         writeTransaction = writeTransaction,
     )
@@ -226,6 +228,7 @@ internal class ApplicationContainer(private val application: Application) {
         secrets = secrets,
         deviceCredentials = deviceIdentity,
         approvalReviewer = approvalReviewer,
+        subscription = subscription,
         audit = audit,
         writeTransaction = writeTransaction,
     )

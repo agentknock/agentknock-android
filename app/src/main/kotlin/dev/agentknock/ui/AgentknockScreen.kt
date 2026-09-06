@@ -69,7 +69,8 @@ import dev.agentknock.ui.settings.AuditViewModel
 import dev.agentknock.ui.settings.SettingsScreen
 import dev.agentknock.ui.settings.SettingsViewModel
 import dev.agentknock.ui.settings.SubscriptionViewModel
-import dev.agentknock.ui.settings.SubscriptionAccess
+import dev.agentknock.subscription.AiReviewAccess
+import dev.agentknock.ui.settings.aiReviewAccess
 import dev.agentknock.ui.device.DeviceSetupScreen
 import dev.agentknock.ui.device.DeviceSetupViewModel
 import dev.agentknock.ui.auth.AuthenticationSession
@@ -112,6 +113,7 @@ internal fun AgentknockScreen(
     val configuration by agentknockViewModel.configuration.collectAsStateWithLifecycle()
     var section by rememberSaveable { mutableStateOf(MainSection.REQUESTS) }
     var destination by rememberSaveable { mutableStateOf(RootDestination.MAIN) }
+    var planReturnsToCaller by rememberSaveable { mutableStateOf(false) }
     var addressEditorIdentityId by rememberSaveable { mutableStateOf<String?>(null) }
     var addressEditorOriginalAddress by rememberSaveable { mutableStateOf<String?>(null) }
     var waitingForInitialClaim by rememberSaveable { mutableStateOf(false) }
@@ -195,6 +197,7 @@ internal fun AgentknockScreen(
     }
 
     fun closeSettings() {
+        planReturnsToCaller = false
         destination = RootDestination.MAIN
         rootStateHolder.removeState(SETTINGS_STATE_KEY)
     }
@@ -297,11 +300,13 @@ internal fun AgentknockScreen(
                 consumeExternalNavigation(target)
             }
             is ExternalNavigation.SubscriptionRedemption -> {
+                planReturnsToCaller = false
                 subscriptionViewModel.redeem(target.token)
                 destination = RootDestination.PLAN
                 consumeExternalNavigation(target)
             }
             ExternalNavigation.InvalidSubscriptionLink -> {
+                planReturnsToCaller = false
                 subscriptionViewModel.reportInvalidLink()
                 destination = RootDestination.PLAN
                 consumeExternalNavigation(target)
@@ -332,6 +337,7 @@ internal fun AgentknockScreen(
                 notificationStateGeneration = notificationRefreshGeneration,
                 requestNotificationPermission = requestNotificationPermission,
                 openPlanInitially = destination == RootDestination.PLAN,
+                returnToCaller = planReturnsToCaller,
                 onPlanOpened = {
                     if (destination == RootDestination.PLAN) {
                         destination = RootDestination.SETTINGS
@@ -405,7 +411,11 @@ internal fun AgentknockScreen(
                     onOpenSettings = { destination = RootDestination.SETTINGS },
                     onChangePairingAddress = ::openAddressEditor,
                     notificationsEnabled = notificationsEnabled,
-                    aiReviewActive = subscription.access == SubscriptionAccess.ACTIVE,
+                    aiReviewAccess = subscription.aiReviewAccess,
+                    onOpenPlan = {
+                        planReturnsToCaller = true
+                        destination = RootDestination.PLAN
+                    },
                     onTopLevelChanged = { showNavigation = it },
                     requestsViewModel = requestsViewModel,
                     secretsViewModel = secretsViewModel,
@@ -508,7 +518,8 @@ private fun MainContent(
     onOpenSettings: () -> Unit,
     onChangePairingAddress: () -> Unit,
     notificationsEnabled: Boolean,
-    aiReviewActive: Boolean,
+    aiReviewAccess: AiReviewAccess,
+    onOpenPlan: () -> Unit,
     onTopLevelChanged: (Boolean) -> Unit,
     requestsViewModel: RequestsViewModel,
     secretsViewModel: SecretsViewModel,
@@ -528,10 +539,12 @@ private fun MainContent(
             MainSection.SECRETS -> SecretsScreen(
                 onOpenSettings = onOpenSettings,
                 onTopLevelChanged = onTopLevelChanged,
-                aiReviewActive = aiReviewActive,
+                aiReviewAccess = aiReviewAccess,
+                onOpenPlan = onOpenPlan,
                 viewModel = secretsViewModel,
             )
             MainSection.CLIENTS -> ClientsScreen(
+                aiReviewAccess = aiReviewAccess,
                 onOpenSettings = onOpenSettings,
                 onChangePairingAddress = onChangePairingAddress,
                 onTopLevelChanged = onTopLevelChanged,

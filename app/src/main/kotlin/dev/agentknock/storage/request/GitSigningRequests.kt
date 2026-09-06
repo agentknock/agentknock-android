@@ -5,6 +5,7 @@ import dev.agentknock.protocol.GitSignCompletion
 import dev.agentknock.protocol.GitSignProtocol
 import dev.agentknock.protocol.GitSignRequestMessage
 import dev.agentknock.protocol.InvocationDenialReason
+import dev.agentknock.subscription.SubscriptionRepository
 import dev.agentknock.relay.RelayApprovalReviewClient
 import dev.agentknock.relay.RelayClientState
 import dev.agentknock.review.approvalReviewGitSignRequest
@@ -60,6 +61,7 @@ internal class GitSigningRequests(
     private val secrets: SecretRepository,
     private val deviceCredentials: RelayDeviceCredentialSource,
     private val approvalReviewer: RelayApprovalReviewClient,
+    private val subscription: SubscriptionRepository,
     private val audit: AuditSink,
     private val writeTransaction: WriteTransaction,
     private val gitSignProtocol: GitSignProtocol = GitSignProtocol(),
@@ -367,23 +369,26 @@ internal class GitSigningRequests(
                             ?: (aiReview?.auditData() ?: emptyMap())),
                 )
             }
+            val aiReviewAudit = aiReview?.let { reviewed ->
+                AuditRecord(
+                    type = AuditEventType.GIT_SIGN_AI_REVIEWED,
+                    outcome = reviewed.auditOutcome(),
+                    decisionSource = AuditDecisionSource.AI_REVIEW,
+                    subject = contents.secret,
+                    detail = reviewed.auditFailureDetail(),
+                    clientId = client.clientId,
+                    clientName = client.name,
+                    relayRequestId = relayRequestId,
+                    data = finalRequest.requestAuditData() + finalGitSign.auditData() +
+                        (reviewResult?.auditData(reviewed) ?: reviewed.auditData()),
+                )
+            }
             val persisted = if (requestAlreadyInserted) {
                 finishAiReview(
                     request = finalRequest,
                     gitSign = finalGitSign,
                     authorization = authorization,
-                    aiReviewAudit = AuditRecord(
-                        type = AuditEventType.GIT_SIGN_AI_REVIEWED,
-                        outcome = checkNotNull(aiReview).auditOutcome(),
-                        decisionSource = AuditDecisionSource.AI_REVIEW,
-                        subject = contents.secret,
-                        detail = aiReview.auditFailureDetail(),
-                        clientId = client.clientId,
-                        clientName = client.name,
-                        relayRequestId = relayRequestId,
-                        data = finalRequest.requestAuditData() + finalGitSign.auditData() +
-                            (reviewResult?.auditData(aiReview) ?: aiReview.auditData()),
-                    ),
+                    aiReviewAudit = checkNotNull(aiReviewAudit),
                     automaticDecisionAudit = automaticDecisionAudit,
                 )
             } else {
@@ -397,6 +402,7 @@ internal class GitSigningRequests(
                     acceptedPsks = acceptedPsks,
                     authorization = authorization.takeIf { automaticDecision != null },
                     automaticDecisionAudit = automaticDecisionAudit,
+                    aiReviewAudit = aiReviewAudit,
                 )
             }
             return when (persisted) {
@@ -407,6 +413,9 @@ internal class GitSigningRequests(
         }
 
         if (!needsAiReview) return finishReview(null, requestAlreadyInserted = false)
+        subscription.reviewFallback(credentials.deviceId)?.let { fallback ->
+            return finishReview(fallback, requestAlreadyInserted = false)
+        }
 
         withContext(NonCancellable) {
             check(
@@ -615,6 +624,7 @@ internal class GitSigningRequests(
         acceptedPsks: AcceptedRequestPsks,
         authorization: AuthorizationCommitment?,
         automaticDecisionAudit: AuditRecord?,
+        aiReviewAudit: AuditRecord? = null,
     ): ConditionalRequestUpdate {
         val conditional = gitSign.decision != null
         require(conditional == (automaticDecisionAudit != null)) {
@@ -677,6 +687,7 @@ internal class GitSigningRequests(
             audit.append(
                 buildList {
                     add(receivedAudit(storedRequest, storedGitSign))
+                    aiReviewAudit?.let(::add)
                     if (authorized) automaticDecisionAudit?.let(::add)
                 },
                 request.receivedAt,
@@ -1230,7 +1241,7 @@ internal class GitSigningRequests(
             deviceInstructions = credentials.instructions,
         )
         return AiReviewAttempt(
-            review = performAiReview(approvalReviewer, credentials, request),
+            review = performAiReview(approvalReviewer, subscription, credentials, request),
             request = request,
         )
     }

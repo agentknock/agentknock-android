@@ -1,5 +1,6 @@
 package dev.agentknock.ui.settings
 
+import dev.agentknock.subscription.AiReviewAccess
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.ui.test.assertIsDisplayed
 import androidx.compose.ui.test.junit4.v2.createComposeRule
@@ -17,10 +18,28 @@ import org.junit.Test
 class SubscriptionScreenTest {
     @get:Rule val compose = createComposeRule()
 
+    @Test fun anUnavailableStatusDoesNotClaimTheSubscriptionNeedsAttentionOrOfferAnotherPurchase() {
+        compose.setContent {
+            AgentknockTheme {
+                SubscriptionAndBillingScreen(
+                    state = SubscriptionUiState(
+                        access = AiReviewAccess.UNAVAILABLE,
+                        googlePlayPurchase = GooglePlayPurchaseState.PURCHASED,
+                    ),
+                    onBack = {}, onRefresh = {}, onSubscribe = {}, onManageSubscription = {},
+                    onOpenSecrets = {},
+                )
+            }
+        }
+        compose.onNodeWithText("Status unavailable").assertIsDisplayed()
+        compose.onNodeWithText("Subscription needs attention").assertDoesNotExist()
+        compose.onNodeWithText("Subscribe").assertDoesNotExist()
+    }
+
     @Test fun purchaseActivationShowsProgressUntilAccessIsConfirmed() {
         val state = mutableStateOf(
             SubscriptionUiState(
-                access = SubscriptionAccess.FREE,
+                access = AiReviewAccess.INACTIVE,
                 googlePlayPurchase = GooglePlayPurchaseState.PURCHASED,
                 refreshing = true,
             ),
@@ -40,7 +59,7 @@ class SubscriptionScreenTest {
         compose.onNodeWithText("Not active").assertDoesNotExist()
 
         compose.runOnIdle {
-            state.value = state.value.copy(access = SubscriptionAccess.ACTIVE, refreshing = false)
+            state.value = state.value.copy(access = AiReviewAccess.ACTIVE, refreshing = false)
         }
         compose.onNodeWithText("Active").assertIsDisplayed()
         compose.onNodeWithText("Activating AI review…").assertDoesNotExist()
@@ -50,7 +69,7 @@ class SubscriptionScreenTest {
     @Test fun purchaseWithoutAccessShowsAttentionOnlyAfterCheckingFinishes() {
         val state = mutableStateOf(
             SubscriptionUiState(
-                access = SubscriptionAccess.UNAVAILABLE,
+                access = AiReviewAccess.UNAVAILABLE,
                 googlePlayPurchase = GooglePlayPurchaseState.PURCHASED,
                 refreshing = true,
             ),
@@ -68,7 +87,9 @@ class SubscriptionScreenTest {
         compose.onNodeWithText("Subscription needs attention").assertDoesNotExist()
         compose.onNodeWithText("Status unavailable").assertDoesNotExist()
 
-        compose.runOnIdle { state.value = state.value.copy(refreshing = false) }
+        compose.runOnIdle {
+            state.value = state.value.copy(access = AiReviewAccess.INACTIVE, refreshing = false)
+        }
         compose.onNodeWithText("Subscription needs attention").assertIsDisplayed()
         compose.onNodeWithText("Activating AI review…").assertDoesNotExist()
     }
@@ -78,7 +99,7 @@ class SubscriptionScreenTest {
         compose.setContent {
             AgentknockTheme {
                 SubscriptionAndBillingScreen(
-                    state = SubscriptionUiState(access = SubscriptionAccess.ACTIVE),
+                    state = SubscriptionUiState(access = AiReviewAccess.ACTIVE),
                     onBack = {}, onRefresh = {}, onSubscribe = {}, onManageSubscription = {},
                     onOpenSecrets = { opened++ },
                 )
@@ -96,7 +117,7 @@ class SubscriptionScreenTest {
         compose.setContent {
             AgentknockTheme {
                 SubscriptionAndBillingScreen(
-                    state = SubscriptionUiState(access = SubscriptionAccess.FREE,
+                    state = SubscriptionUiState(access = AiReviewAccess.INACTIVE,
                         playStore = PlayStoreAvailability.AVAILABLE,
                         offers = listOf(PlaySubscriptionOffer(id, "€4.99/month",
                             "Renews automatically until canceled. Manage or cancel in Google Play.", true))),

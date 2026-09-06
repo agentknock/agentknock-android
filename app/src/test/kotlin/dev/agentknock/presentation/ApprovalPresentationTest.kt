@@ -19,7 +19,7 @@ class ApprovalPresentationTest {
     @Test fun aiResultsAndFailures_remainDistinct() {
         assertEquals("AI approved", aiReviewLabel(AiReview(AiReviewDecision.APPROVE)))
         assertEquals("AI denied", aiReviewLabel(AiReview(AiReviewDecision.DENY)))
-        assertEquals("AI subscription required", aiReviewLabel(AiReview(failure = AiReviewFailure.SUBSCRIPTION_REQUIRED)))
+        assertEquals("AI review inactive · Ask me", aiReviewLabel(AiReview(failure = AiReviewFailure.SUBSCRIPTION_REQUIRED)))
         assertEquals("AI review unavailable", aiReviewLabel(AiReview(failure = AiReviewFailure.UNAVAILABLE)))
         assertNull(approvalSummary(null, null, null))
     }

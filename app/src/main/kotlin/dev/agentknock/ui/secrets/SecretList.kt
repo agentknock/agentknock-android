@@ -15,9 +15,7 @@ import androidx.compose.foundation.lazy.items
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.automirrored.outlined.NavigateNext
 import androidx.compose.material.icons.outlined.Add
-import androidx.compose.material.icons.outlined.AutoAwesome
 import androidx.compose.material.icons.outlined.DataObject
-import androidx.compose.material.icons.outlined.Edit
 import androidx.compose.material.icons.outlined.Key
 import androidx.compose.material.icons.outlined.Schedule
 import androidx.compose.material.icons.outlined.Settings
@@ -37,6 +35,8 @@ import androidx.compose.ui.semantics.selected
 import androidx.compose.ui.semantics.semantics
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
+import dev.agentknock.subscription.AiReviewAccess
+import dev.agentknock.ui.components.AiReviewInstructions
 import dev.agentknock.R
 import dev.agentknock.presentation.formatTimestamp
 import dev.agentknock.storage.request.InboxRequestState
@@ -58,7 +58,7 @@ internal fun SecretList(
     onSelectUpload: (String) -> Unit,
     onCreate: () -> Unit,
     generalInstructions: String,
-    aiReviewActive: Boolean,
+    aiReviewAccess: AiReviewAccess,
     onEditGeneralInstructions: () -> Unit,
     onOpenSettings: () -> Unit,
     modifier: Modifier = Modifier,
@@ -108,36 +108,12 @@ internal fun SecretList(
                         )
                     }
                 }
-                if (aiReviewActive) {
-                    item(key = "ai_review_instructions") {
-                        Surface(
-                            color = MaterialTheme.colorScheme.surfaceContainer,
-                            shape = MaterialTheme.shapes.large,
-                            onClick = onEditGeneralInstructions,
-                            modifier = Modifier.fillMaxWidth(),
-                        ) {
-                            Row(
-                                modifier = Modifier.padding(horizontal = 16.dp, vertical = 13.dp),
-                                horizontalArrangement = Arrangement.spacedBy(12.dp),
-                                verticalAlignment = Alignment.CenterVertically,
-                            ) {
-                                TonalIcon(Icons.Outlined.AutoAwesome, contentDescription = null)
-                                Column(Modifier.weight(1f)) {
-                                    Text("AI review instructions", style = MaterialTheme.typography.bodyLarge)
-                                    Text(
-                                        if (generalInstructions.isBlank()) {
-                                            "No general instructions"
-                                        } else {
-                                            "Applied to every AI review"
-                                        },
-                                        style = MaterialTheme.typography.bodyMedium,
-                                        color = MaterialTheme.colorScheme.onSurfaceVariant,
-                                    )
-                                }
-                                Icon(Icons.Outlined.Edit, contentDescription = "Edit AI review instructions")
-                            }
-                        }
-                    }
+                item(key = "ai_review_instructions") {
+                    AiReviewInstructions(
+                        value = generalInstructions,
+                        access = aiReviewAccess,
+                        onEdit = onEditGeneralInstructions,
+                    )
                 }
                 if (pendingUploads.isNotEmpty()) {
                     item(key = "stored_secrets_heading") {

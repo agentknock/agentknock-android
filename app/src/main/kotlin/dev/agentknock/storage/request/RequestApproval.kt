@@ -20,6 +20,8 @@ import dev.agentknock.storage.secret.EnvironmentVariableSelection
 import dev.agentknock.storage.secret.RequestedSecretDescription
 import dev.agentknock.storage.secret.SecretApprovalMode
 import dev.agentknock.storage.secret.SecretApprovalPolicy
+import dev.agentknock.subscription.AiReviewAccess
+import dev.agentknock.subscription.SubscriptionRepository
 import dev.agentknock.storage.secret.SecretValues
 import java.security.MessageDigest
 import kotlinx.serialization.decodeFromString
@@ -122,8 +124,24 @@ internal fun String.toAuditDecisionSource(): AuditDecisionSource = when (this) {
     else -> error("Unknown decision source: $this")
 }
 
+internal suspend fun SubscriptionRepository.reviewFallback(deviceId: String): AiReviewAttempt? {
+    val access = accessForReview(deviceId)
+    if (access == AiReviewAccess.ACTIVE) return null
+    return AiReviewAttempt(
+        review = AiReview(
+            failure = if (access == AiReviewAccess.INACTIVE) {
+                AiReviewFailure.SUBSCRIPTION_REQUIRED
+            } else {
+                AiReviewFailure.UNAVAILABLE
+            },
+        ),
+        request = null,
+    )
+}
+
 internal suspend fun performAiReview(
     reviewer: RelayApprovalReviewClient,
+    subscription: SubscriptionRepository,
     credentials: RelayDeviceCredentials,
     request: ApprovalReviewRequest,
 ): AiReview {
@@ -134,7 +152,7 @@ internal suspend fun performAiReview(
     } catch (_: Exception) {
         return AiReview(failure = AiReviewFailure.UNAVAILABLE)
     }
-    return when (result) {
+    val review = when (result) {
         is RelayEndpointResult.Success -> AiReview(
             decision = when (result.value.decision) {
                 RelayApprovalReviewDecision.APPROVE -> AiReviewDecision.APPROVE
@@ -159,10 +177,14 @@ internal suspend fun performAiReview(
         RelayEndpointResult.InvalidResponse ->
             AiReview(failure = AiReviewFailure.INVALID_RESPONSE)
     }
+    if (review.failure == AiReviewFailure.SUBSCRIPTION_REQUIRED) {
+        subscription.recordInactiveReviewAccess(credentials.deviceId)
+    }
+    return review
 }
 
 internal fun AiReview.auditFailureDetail(): String? = when (failure) {
-    AiReviewFailure.SUBSCRIPTION_REQUIRED -> "AI review requires a subscription."
+    AiReviewFailure.SUBSCRIPTION_REQUIRED -> "AI review is inactive."
     AiReviewFailure.RELAY_REJECTED -> "The relay rejected AI review."
     AiReviewFailure.UNAVAILABLE -> "AI review was unavailable."
     AiReviewFailure.INVALID_RESPONSE -> "AI review returned an invalid response."
@@ -170,6 +192,7 @@ internal fun AiReview.auditFailureDetail(): String? = when (failure) {
 }
 
 internal fun AiReview.auditOutcome(): AuditOutcome = when {
+    failure == AiReviewFailure.SUBSCRIPTION_REQUIRED -> AuditOutcome.DEFERRED
     failure != null -> AuditOutcome.FAILED
     decision == AiReviewDecision.APPROVE -> AuditOutcome.APPROVED
     decision == AiReviewDecision.DENY -> AuditOutcome.DENIED

@@ -9,7 +9,7 @@ internal fun aiReviewLabel(review: AiReview): String = when {
     review.decision == AiReviewDecision.ASK_USER -> "AI asked you to decide"
     review.decision == AiReviewDecision.APPROVE -> "AI approved"
     review.decision == AiReviewDecision.DENY -> "AI denied"
-    review.failure == AiReviewFailure.SUBSCRIPTION_REQUIRED -> "AI subscription required"
+    review.failure == AiReviewFailure.SUBSCRIPTION_REQUIRED -> "AI review inactive · Ask me"
     else -> "AI review unavailable"
 }
 

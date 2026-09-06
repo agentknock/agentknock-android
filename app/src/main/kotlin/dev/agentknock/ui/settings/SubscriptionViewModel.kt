@@ -1,5 +1,6 @@
 package dev.agentknock.ui.settings
 
+import dev.agentknock.subscription.AiReviewAccess
 import android.app.Activity
 import androidx.lifecycle.ViewModel
 import androidx.lifecycle.viewModelScope
@@ -23,13 +24,6 @@ import kotlinx.coroutines.launch
 import kotlinx.coroutines.sync.Mutex
 import kotlinx.coroutines.sync.withLock
 
-internal enum class SubscriptionAccess {
-    CHECKING,
-    SETUP_REQUIRED,
-    FREE,
-    ACTIVE,
-    UNAVAILABLE,
-}
 
 internal enum class PlayStoreAvailability {
     CHECKING,
@@ -49,7 +43,7 @@ internal data class SubscriptionNotice(
 )
 
 internal data class SubscriptionUiState(
-    val access: SubscriptionAccess = SubscriptionAccess.CHECKING,
+    val access: AiReviewAccess = AiReviewAccess.CHECKING,
     val playStore: PlayStoreAvailability = PlayStoreAvailability.CHECKING,
     val offers: List<PlaySubscriptionOffer> = emptyList(),
     val googlePlayPurchase: GooglePlayPurchaseState = GooglePlayPurchaseState.NONE,
@@ -57,8 +51,15 @@ internal data class SubscriptionUiState(
     val refreshing: Boolean = false,
     val redeeming: Boolean = false,
     val purchasing: Boolean = false,
+    val statusUnavailable: Boolean = false,
     val notice: SubscriptionNotice? = null,
 )
+
+internal val SubscriptionUiState.aiReviewAccess: AiReviewAccess
+    get() = if (
+        access != AiReviewAccess.ACTIVE && (redeeming ||
+            (refreshing && googlePlayPurchase == GooglePlayPurchaseState.PURCHASED))
+    ) AiReviewAccess.ACTIVATING else access
 
 internal class SubscriptionViewModel(
     private val repository: SubscriptionRepository,
@@ -71,6 +72,11 @@ internal class SubscriptionViewModel(
     val state: StateFlow<SubscriptionUiState> = _state.asStateFlow()
 
     init {
+        viewModelScope.launch {
+            repository.access.collect { access ->
+                _state.update { it.copy(access = access) }
+            }
+        }
         viewModelScope.launch {
             billing.updates.collect { update ->
                 when (update) {
@@ -129,11 +135,8 @@ internal class SubscriptionViewModel(
                 _state.update { current ->
                     when (result) {
                         is SubscriptionResult.Status -> current.copy(
-                            access = if (result.active) {
-                                SubscriptionAccess.ACTIVE
-                            } else {
-                                SubscriptionAccess.FREE
-                            },
+                            access = repository.access.value,
+                            statusUnavailable = false,
                             redeeming = false,
                             notice = SubscriptionNotice(
                                 message = if (result.active) {
@@ -145,11 +148,7 @@ internal class SubscriptionViewModel(
                             ),
                         )
                         else -> current.copy(
-                            access = if (current.access == SubscriptionAccess.CHECKING) {
-                                SubscriptionAccess.UNAVAILABLE
-                            } else {
-                                current.access
-                            },
+                            access = repository.access.value,
                             redeeming = false,
                             notice = SubscriptionNotice(
                                 message = result.redemptionFailureMessage(),
@@ -204,7 +203,9 @@ internal class SubscriptionViewModel(
         val activationFailed = purchased != null && activation !is SubscriptionResult.Status
         _state.update { current ->
             current.copy(
-                access = result.toAccess(),
+                access = repository.access.value,
+                statusUnavailable = result !is SubscriptionResult.Status &&
+                    result != SubscriptionResult.NoDevice,
                 refreshing = false,
                 notice = when {
                     activationFailed && result !is SubscriptionResult.Status ->
@@ -259,17 +260,12 @@ private fun SubscriptionUiState.withPlaySnapshot(
 }
 
 internal fun SubscriptionUiState.overviewLabel(): String = when (access) {
-    SubscriptionAccess.CHECKING -> "Checking…"
-    SubscriptionAccess.SETUP_REQUIRED -> "Finish device setup"
-    SubscriptionAccess.FREE -> "Free · AI review requires a subscription"
-    SubscriptionAccess.ACTIVE -> "AI review active"
-    SubscriptionAccess.UNAVAILABLE -> "Status unavailable"
-}
-
-private fun SubscriptionResult?.toAccess(): SubscriptionAccess = when (this) {
-    is SubscriptionResult.Status -> if (active) SubscriptionAccess.ACTIVE else SubscriptionAccess.FREE
-    SubscriptionResult.NoDevice -> SubscriptionAccess.SETUP_REQUIRED
-    else -> SubscriptionAccess.UNAVAILABLE
+    AiReviewAccess.CHECKING -> "Checking…"
+    AiReviewAccess.ACTIVATING -> "Activating…"
+    AiReviewAccess.SETUP_REQUIRED -> "Finish device setup"
+    AiReviewAccess.INACTIVE -> "Free"
+    AiReviewAccess.ACTIVE -> "AI review active"
+    AiReviewAccess.UNAVAILABLE -> "Status unavailable"
 }
 
 private fun SubscriptionResult?.redemptionFailureMessage(): String = when (this) {

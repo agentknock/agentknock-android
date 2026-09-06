@@ -13,6 +13,64 @@ import org.junit.Test
 
 class SubscriptionRepositoryTest {
     @Test
+    fun `inactive access is rechecked so future reviews resume after renewal`() = runTest {
+        val relay = FakeRelay()
+        val repository = SubscriptionRepository(availableAuthorization, relay)
+
+        assertEquals(AiReviewAccess.INACTIVE, repository.accessForReview(DEVICE_ID))
+        assertEquals(AiReviewAccess.INACTIVE, repository.access.value)
+        relay.statusResult = RelayEndpointResult.Success(RelaySubscriptionStatus(active = true))
+        assertEquals(AiReviewAccess.ACTIVE, repository.accessForReview(DEVICE_ID))
+        assertEquals(AiReviewAccess.ACTIVE, repository.access.value)
+    }
+
+    @Test
+    fun `transient failure preserves known access without assuming new access`() = runTest {
+        val relay = FakeRelay()
+        val repository = SubscriptionRepository(availableAuthorization, relay)
+        repository.status()
+        relay.statusResult = RelayEndpointResult.InvalidResponse
+
+        assertEquals(AiReviewAccess.UNAVAILABLE, repository.accessForReview(DEVICE_ID))
+        assertEquals(AiReviewAccess.INACTIVE, repository.access.value)
+        relay.statusResult = RelayEndpointResult.Success(RelaySubscriptionStatus(active = true))
+        repository.status()
+        relay.statusResult = RelayEndpointResult.InvalidResponse
+        repository.status()
+        assertEquals(AiReviewAccess.ACTIVE, repository.access.value)
+    }
+
+    @Test
+    fun `review rejection deactivates access but an old device cannot change the current one`() = runTest {
+        val relay = FakeRelay(
+            statusResult = RelayEndpointResult.Success(RelaySubscriptionStatus(active = true)),
+        )
+        val repository = SubscriptionRepository(availableAuthorization, relay)
+        repository.status()
+        repository.recordInactiveReviewAccess("old-device")
+        assertEquals(AiReviewAccess.ACTIVE, repository.access.value)
+        repository.recordInactiveReviewAccess(DEVICE_ID)
+        assertEquals(AiReviewAccess.INACTIVE, repository.access.value)
+    }
+
+    @Test
+    fun `switching devices discards the previous entitlement even when status fails`() = runTest {
+        var authorization = RelayDeviceAuthorization("identity", DEVICE_ID, DEVICE_TOKEN)
+        val relay = FakeRelay(
+            statusResult = RelayEndpointResult.Success(RelaySubscriptionStatus(active = true)),
+        )
+        val repository = SubscriptionRepository(
+            RelayDeviceAuthorizationSource { RelayDeviceAuthorizationResult.Available(authorization) },
+            relay,
+        )
+        repository.status()
+        authorization = RelayDeviceAuthorization("new-identity", "new-device", "new-token")
+        relay.statusResult = RelayEndpointResult.InvalidResponse
+        assertEquals(AiReviewAccess.UNAVAILABLE, repository.accessForReview("new-device"))
+        assertEquals(AiReviewAccess.UNAVAILABLE, repository.access.value)
+    }
+
+    @Test
     fun `gets status with active device credentials`() = runTest {
         val relay = FakeRelay(
             statusResult = RelayEndpointResult.Success(RelaySubscriptionStatus(active = true)),
@@ -74,7 +132,7 @@ class SubscriptionRepositoryTest {
     }
 
     private class FakeRelay(
-        private val statusResult: RelaySubscriptionResult =
+        var statusResult: RelaySubscriptionResult =
             RelayEndpointResult.Success(RelaySubscriptionStatus(active = false)),
         private val redeemResult: RelaySubscriptionResult =
             RelayEndpointResult.Success(RelaySubscriptionStatus(active = false)),

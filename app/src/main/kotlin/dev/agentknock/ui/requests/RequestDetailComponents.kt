@@ -62,14 +62,14 @@ internal fun AiReviewNotice(review: AiReview?, reviewInFlight: Boolean) {
             NoticeTone.ATTENTION,
         )
         review?.failure == AiReviewFailure.SUBSCRIPTION_REQUIRED -> Notice(
-            "AI review requires a subscription",
-            "Decide this request yourself, or activate AI review in Plan and billing.",
-            NoticeTone.ATTENTION,
+            "AI review is inactive",
+            "This request needs your decision.",
+            NoticeTone.NEUTRAL,
         )
         review?.failure != null -> Notice(
-            "AI review unavailable",
-            "The request was left for you to decide.",
-            NoticeTone.ATTENTION,
+            "AI review couldn’t complete",
+            "Please decide this request.",
+            NoticeTone.NEUTRAL,
         )
         reviewInFlight -> Unit
         else -> Notice(
@@ -281,7 +281,11 @@ internal fun HistoricalAiReview(
         }
         null -> if (review.failure != null) {
             Notice(
-                "AI review unavailable",
+                if (review.failure == AiReviewFailure.SUBSCRIPTION_REQUIRED) {
+                    "AI review was inactive"
+                } else {
+                    "AI review couldn’t complete"
+                },
                 humanResolution ?: "You made the final decision.",
                 NoticeTone.NEUTRAL,
             )

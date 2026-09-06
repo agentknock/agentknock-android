@@ -32,6 +32,8 @@ import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
+import dev.agentknock.subscription.AiReviewAccess
+import dev.agentknock.ui.components.AiReviewInstructions
 import dev.agentknock.presentation.formatPlatformName
 import dev.agentknock.presentation.formatRelativeTime
 import dev.agentknock.presentation.formatTimestamp
@@ -51,6 +53,7 @@ import dev.agentknock.ui.theme.agentknockColors
 internal fun ClientDetail(
     client: ClientDetails,
     temporaryAccessGrants: List<TemporaryAccessGrant>,
+    aiReviewAccess: AiReviewAccess,
     onBack: () -> Unit,
     showBack: Boolean,
     onRename: (String) -> Unit,
@@ -75,7 +78,8 @@ internal fun ClientDetail(
             value = instructions,
             originalValue = client.instructions,
             supportingText =
-                "Tell the AI reviewer what this client is used for and how much it should be trusted.",
+                "Tell the AI reviewer what this client is used for and how much it should be trusted. " +
+                    "Used when AI review is active.",
             onValueChange = { instructions = it },
             onSave = {
                 showInstructions = false
@@ -191,30 +195,14 @@ internal fun ClientDetail(
                 }
             }
 
-            InformationSurface {
-                Row(
-                    modifier = Modifier.fillMaxWidth(),
-                    verticalAlignment = Alignment.CenterVertically,
-                ) {
-                    Column(Modifier.weight(1f), verticalArrangement = Arrangement.spacedBy(3.dp)) {
-                        Text("AI review instructions", style = MaterialTheme.typography.titleMedium)
-                        Text(
-                            client.instructions.ifBlank { "No instructions for this client." },
-                            color = if (client.instructions.isBlank()) {
-                                MaterialTheme.colorScheme.onSurfaceVariant
-                            } else {
-                                MaterialTheme.colorScheme.onSurface
-                            },
-                        )
-                    }
-                    IconButton(onClick = {
-                        instructions = client.instructions
-                        showInstructions = true
-                    }) {
-                        Icon(Icons.Outlined.Edit, contentDescription = "Edit instructions")
-                    }
-                }
-            }
+            AiReviewInstructions(
+                value = client.instructions,
+                access = aiReviewAccess,
+                onEdit = {
+                    instructions = client.instructions
+                    showInstructions = true
+                },
+            )
 
             InformationSurface {
                 ClientField("Architecture", client.architecture)

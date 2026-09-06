@@ -16,6 +16,7 @@ import dev.agentknock.storage.AgentknockDatabase
 import dev.agentknock.storage.RoomWriteTransaction
 import dev.agentknock.storage.approval.ApprovalAction
 import dev.agentknock.storage.approval.ApprovalEvaluation
+import dev.agentknock.storage.approval.AiReviewFailure
 import dev.agentknock.storage.approval.AiReviewDecision
 import dev.agentknock.storage.approval.SecretApprovalEvaluation
 import dev.agentknock.storage.audit.AuditDecisionSource
@@ -65,6 +66,7 @@ import org.junit.runner.RunWith
 
 @RunWith(AndroidJUnit4::class)
 class GitSigningRequestsTest {
+    private val subscription = FakeSubscription(DEVICE_ID)
     private lateinit var database: AgentknockDatabase
     private lateinit var audit: AuditRepository
     private lateinit var secrets: SecretRepository
@@ -119,6 +121,38 @@ class GitSigningRequestsTest {
     @After
     fun tearDown() {
         database.close()
+    }
+
+    @Test
+    fun inactiveAiAccessFallsBackWithoutLaunchingReviewOrChangingThePolicy() = runTest {
+        val metadata = createSigningSecret(SecretApprovalMode.ASK_AI)
+        val token = ByteArray(32) { it.toByte() }
+        insertParent(
+            secretDetailsJson = Json.encodeToString(metadata),
+            invocationTokenHash = invocationTokenHash(token),
+            providedSecretsJson = sshSecretFactsJson(),
+        )
+        subscription.active = false
+        val requestId = "inactive-ai"
+        val target = requests(audit, StaticCredentialSource(credentials()))
+        assertEquals(ProcessedRelayMessage, target.processIncoming(
+            client = client(), relayRequestId = requestId,
+            requestPayload = Json.parseToJsonElement("{}"), plaintext = gitSignPlaintext(token),
+            acceptedPsks = acceptedPsks(requestId), credentials = credentials(),
+            sealResponse = { error("Manual requests must not produce an automatic response") },
+            launchAiReview = { _, _, _, _ -> error("Inactive access must not launch AI review") },
+        ))
+        assertEquals(InboxRequestState.ACTION_REQUIRED.storedName,
+            database.requestDao().getRequestById(requestId)?.state)
+        val stored = checkNotNull(database.requestDao().getGitSignRequest(requestId))
+        assertNull(stored.decision)
+        val evaluation = Json.decodeFromString<ApprovalEvaluation>(checkNotNull(stored.approvalEvaluationJson))
+        assertEquals(AiReviewFailure.SUBSCRIPTION_REQUIRED, evaluation.aiReview?.failure)
+        assertEquals(SecretApprovalMode.ASK_AI, secrets.observeSecret(SECRET_ID).first()?.approvalMode)
+        assertEquals(AuditOutcome.DEFERRED,
+            audit.observeEvents().first().single {
+                it.relayRequestId == requestId && it.type == AuditEventType.GIT_SIGN_AI_REVIEWED
+            }.outcome)
     }
 
     @Test
@@ -1016,6 +1050,7 @@ class GitSigningRequestsTest {
         secrets = secrets,
         deviceCredentials = credentialSource,
         approvalReviewer = reviewer,
+        subscription = subscription.repository,
         audit = auditSink,
         writeTransaction = RoomWriteTransaction(database),
         currentTimeMillis = { NOW },

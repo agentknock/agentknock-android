@@ -59,6 +59,7 @@ import org.junit.runner.RunWith
 
 @RunWith(AndroidJUnit4::class)
 class InvocationRequestsTest {
+    private val subscription = FakeSubscription(DEVICE_ID)
     private lateinit var database: AgentknockDatabase
     private lateinit var audit: AuditRepository
     private lateinit var secrets: SecretRepository
@@ -681,6 +682,7 @@ class InvocationRequestsTest {
         secrets = secrets,
         deviceCredentials = MissingDeviceCredentials,
         approvalReviewer = UnexpectedApprovalReviewer,
+        subscription = subscription.repository,
         audit = auditSink,
         writeTransaction = RoomWriteTransaction(database),
         currentTimeMillis = { NOW },

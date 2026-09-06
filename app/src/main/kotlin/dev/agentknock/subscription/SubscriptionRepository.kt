@@ -5,6 +5,11 @@ import dev.agentknock.relay.RelaySubscriptionClient
 import dev.agentknock.relay.RelaySubscriptionResult
 import dev.agentknock.storage.device.RelayDeviceAuthorizationResult
 import dev.agentknock.storage.device.RelayDeviceAuthorizationSource
+import kotlinx.coroutines.CancellationException
+import kotlinx.coroutines.flow.MutableStateFlow
+import kotlinx.coroutines.flow.asStateFlow
+import kotlinx.coroutines.sync.Mutex
+import kotlinx.coroutines.sync.withLock
 
 internal sealed interface SubscriptionResult {
     data class Status(val active: Boolean) : SubscriptionResult
@@ -32,34 +37,82 @@ internal class SubscriptionRepository(
     private val deviceAuthorization: RelayDeviceAuthorizationSource,
     private val relay: RelaySubscriptionClient,
 ) {
+    private val operations = Mutex()
+    private var accessDeviceId: String? = null
+    private val _access = MutableStateFlow(AiReviewAccess.CHECKING)
+    val access = _access.asStateFlow()
+
     suspend fun status(): SubscriptionResult = withAuthorization { deviceId, deviceToken ->
-        relay.status(deviceId, deviceToken)
+        relay.status(deviceId, deviceToken).toSubscriptionResult()
     }
 
     suspend fun redeem(redemptionToken: String): SubscriptionResult =
         withAuthorization { deviceId, deviceToken ->
-            relay.redeem(deviceId, deviceToken, redemptionToken)
+            relay.redeem(deviceId, deviceToken, redemptionToken).toSubscriptionResult()
         }
 
     suspend fun updateFromGooglePlay(purchaseToken: String): SubscriptionResult =
         withAuthorization { deviceId, deviceToken ->
-            relay.updateFromGooglePlay(deviceId, deviceToken, purchaseToken)
+            relay.updateFromGooglePlay(deviceId, deviceToken, purchaseToken).toSubscriptionResult()
         }
 
+    suspend fun accessForReview(deviceId: String): AiReviewAccess {
+        val result = withAuthorization { activeDeviceId, deviceToken ->
+            if (activeDeviceId != deviceId) {
+                SubscriptionResult.InvalidRelayResponse
+            } else if (_access.value == AiReviewAccess.ACTIVE) {
+                // The review endpoint checks entitlement again before running AI.
+                SubscriptionResult.Status(active = true)
+            } else {
+                // Recheck inactive access so renewal also works while the app is in the background.
+                relay.status(activeDeviceId, deviceToken).toSubscriptionResult()
+            }
+        }
+        return when (result) {
+            is SubscriptionResult.Status ->
+                if (result.active) AiReviewAccess.ACTIVE else AiReviewAccess.INACTIVE
+            else -> AiReviewAccess.UNAVAILABLE
+        }
+    }
+
+    suspend fun recordInactiveReviewAccess(deviceId: String) = operations.withLock {
+        if (deviceId == accessDeviceId) {
+            _access.value = AiReviewAccess.INACTIVE
+        }
+    }
+
     private suspend fun withAuthorization(
-        operation: suspend (deviceId: String, deviceToken: String) -> RelaySubscriptionResult,
-    ): SubscriptionResult = when (val result = deviceAuthorization.activeDeviceAuthorization()) {
-        is RelayDeviceAuthorizationResult.Available -> operation(
-            result.authorization.deviceId,
-            result.authorization.deviceToken,
-        ).toSubscriptionResult()
-        RelayDeviceAuthorizationResult.Missing -> SubscriptionResult.NoDevice
-        RelayDeviceAuthorizationResult.Unavailable ->
-            SubscriptionResult.DeviceCredentialsUnavailable
-        RelayDeviceAuthorizationResult.Corrupted ->
-            SubscriptionResult.DeviceCredentialsCorrupted
-        RelayDeviceAuthorizationResult.UnsupportedEncryption ->
-            SubscriptionResult.UnsupportedEncryption
+        operation: suspend (deviceId: String, deviceToken: String) -> SubscriptionResult,
+    ): SubscriptionResult = operations.withLock {
+        val authorization = deviceAuthorization.activeDeviceAuthorization()
+        val deviceId = (authorization as? RelayDeviceAuthorizationResult.Available)?.authorization?.deviceId
+        if (deviceId != accessDeviceId) {
+            accessDeviceId = deviceId
+            _access.value = AiReviewAccess.CHECKING
+        }
+        val result = when (authorization) {
+            is RelayDeviceAuthorizationResult.Available -> try {
+                operation(authorization.authorization.deviceId, authorization.authorization.deviceToken)
+            } catch (cancelled: CancellationException) {
+                throw cancelled
+            } catch (failure: Exception) {
+                SubscriptionResult.Unavailable(failure.message)
+            }
+            RelayDeviceAuthorizationResult.Missing -> SubscriptionResult.NoDevice
+            RelayDeviceAuthorizationResult.Unavailable -> SubscriptionResult.DeviceCredentialsUnavailable
+            RelayDeviceAuthorizationResult.Corrupted -> SubscriptionResult.DeviceCredentialsCorrupted
+            RelayDeviceAuthorizationResult.UnsupportedEncryption -> SubscriptionResult.UnsupportedEncryption
+        }
+        _access.value = when (result) {
+            is SubscriptionResult.Status ->
+                if (result.active) AiReviewAccess.ACTIVE else AiReviewAccess.INACTIVE
+            SubscriptionResult.NoDevice -> AiReviewAccess.SETUP_REQUIRED
+            else -> when (_access.value) {
+                AiReviewAccess.ACTIVE, AiReviewAccess.INACTIVE -> _access.value
+                else -> AiReviewAccess.UNAVAILABLE
+            }
+        }
+        result
     }
 }
 
