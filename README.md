@@ -26,14 +26,21 @@ The debug APK is written to `app/build/outputs/apk/debug/`.
 Play publishing credentials and the upload keystore live outside the repository
 under `~/.local/share/agentknock-android/`. The keystore password is stored in
 Agentknock as `agentknock-android-upload-passphrase`, in the `KEYSTORE_PASSWORD`
-environment variable. `publish-internal` requests it through the paired CLI.
+environment variable. `publish-internal` builds an unsigned bundle, requests the
+password through the paired CLI for a direct JDK `jarsigner` invocation, verifies
+the signed bundle, and uploads it. Gradle never receives the password. The signed
+bundle is kept in a temporary directory that is removed when the command exits;
+its SHA-256 is printed before uploading.
 To publish a completed release to the internal testing track:
 
 1. Increment `agentknockVersionCode` in `app/build.gradle.kts`.
 2. Update `app/src/main/play/release-notes/en-US/internal.txt`.
 3. If the Room schema changed, add the next linear migration and its migration
    test before publishing.
-4. Run `./publish-internal`.
+4. Commit the release changes.
+5. Run `./publish-internal`.
+
+Release builds made directly with Gradle are unsigned.
 
 The release name is derived from the application version and version code.
 Room schema 1 is the compatibility baseline for releases using the current

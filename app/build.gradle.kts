@@ -12,22 +12,9 @@ plugins {
 
 val agentknockVersionCode = 42
 val agentknockVersionName = "0.2.0"
-val uploadStoreFile = providers.environmentVariable("AGENTKNOCK_UPLOAD_STORE_FILE")
-val uploadPassword = providers.environmentVariable("KEYSTORE_PASSWORD")
-val uploadKeyAlias = providers.environmentVariable("AGENTKNOCK_UPLOAD_KEY_ALIAS")
-val uploadSigningValues = listOf(
-    uploadStoreFile,
-    uploadPassword,
-    uploadKeyAlias,
-)
-val uploadSigningConfigured = uploadSigningValues.all { it.isPresent }
 val playCredentialsFile = providers.environmentVariable("AGENTKNOCK_PLAY_CREDENTIALS_FILE")
 val sourceRevision = providers.environmentVariable("AGENTKNOCK_SOURCE_REVISION")
     .orElse("unverified")
-
-require(uploadSigningValues.none { it.isPresent } || uploadSigningConfigured) {
-    "Set all Agentknock upload-signing environment variables or none of them"
-}
 
 android {
     namespace = "dev.agentknock"
@@ -48,23 +35,11 @@ android {
         targetCompatibility = JavaVersion.VERSION_17
     }
 
-    signingConfigs {
-        if (uploadSigningConfigured) {
-            create("upload") {
-                storeFile = file(uploadStoreFile.get())
-                storePassword = uploadPassword.get()
-                keyAlias = uploadKeyAlias.get()
-                keyPassword = uploadPassword.get()
-            }
-        }
-    }
-
     buildTypes {
         release {
             isMinifyEnabled = true
             isShrinkResources = true
             proguardFiles(getDefaultProguardFile("proguard-android-optimize.txt"))
-            signingConfig = signingConfigs.findByName("upload")
         }
     }
 
@@ -127,18 +102,6 @@ dependencies {
     androidTestImplementation(libs.androidx.test.ext.junit)
     androidTestImplementation(libs.androidx.test.runner)
     androidTestImplementation(libs.kotlinx.coroutines.test)
-}
-
-val requireReleaseSigning = tasks.register("requireReleaseSigning") {
-    doLast {
-        check(uploadSigningConfigured) {
-            "Release builds require the Agentknock upload-signing environment variables"
-        }
-    }
-}
-
-tasks.matching { it.name == "bundleRelease" || it.name == "packageRelease" }.configureEach {
-    dependsOn(requireReleaseSigning)
 }
 
 val requirePlayCredentials = tasks.register("requirePlayCredentials") {

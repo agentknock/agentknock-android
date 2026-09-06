@@ -4,20 +4,25 @@ set -euo pipefail
 agentknock_project_dir="$(cd -- "$(dirname -- "${BASH_SOURCE[0]}")" && pwd)"
 agentknock_data_home="${XDG_DATA_HOME:-${HOME}/.local/share}"
 agentknock_credentials_dir="${agentknock_data_home}/agentknock-android"
+agentknock_upload_store="${agentknock_credentials_dir}/upload-keystore.p12"
 
-if [[ -n "$(git -C "${agentknock_project_dir}" status --porcelain --untracked-files=all -- app build.gradle.kts settings.gradle.kts gradle.properties gradle gradlew flake.nix flake.lock publish-internal)" ]]; then
+# Only the signing process receives the password. Prevent inherited JVM options
+# from loading extra code into that process.
+unset KEYSTORE_PASSWORD JAVA_TOOL_OPTIONS JDK_JAVA_OPTIONS _JAVA_OPTIONS
+
+agentknock_build_changes="$(git -C "${agentknock_project_dir}" status --porcelain --untracked-files=all -- app build.gradle.kts settings.gradle.kts gradle.properties gradle gradlew flake.nix flake.lock publish-internal)"
+if [[ -n "${agentknock_build_changes}" ]]; then
     echo "Refusing to publish with uncommitted build inputs." >&2
     exit 1
 fi
 
 export AGENTKNOCK_PLAY_CREDENTIALS_FILE="${agentknock_credentials_dir}/play-publisher.json"
-export AGENTKNOCK_UPLOAD_STORE_FILE="${agentknock_credentials_dir}/upload-keystore.p12"
-export AGENTKNOCK_UPLOAD_KEY_ALIAS="agentknock-upload"
-export AGENTKNOCK_SOURCE_REVISION="$(git -C "${agentknock_project_dir}" rev-parse --short=12 HEAD)"
+AGENTKNOCK_SOURCE_REVISION="$(git -C "${agentknock_project_dir}" rev-parse --short=12 HEAD)"
+export AGENTKNOCK_SOURCE_REVISION
 
 for agentknock_required_file in \
     "${AGENTKNOCK_PLAY_CREDENTIALS_FILE}" \
-    "${AGENTKNOCK_UPLOAD_STORE_FILE}"
+    "${agentknock_upload_store}"
 do
     if [[ ! -f "${agentknock_required_file}" ]]; then
         echo "Missing release credential: ${agentknock_required_file}" >&2
@@ -26,6 +31,25 @@ do
 done
 
 cd "${agentknock_project_dir}"
-exec agentknock --secret agentknock-android-upload-passphrase \
-    --reason "Sign and upload an Agentknock Android release to Google Play internal testing." \
-    -- nix develop --command ./gradlew publishReleaseBundle "$@"
+nix develop --command ./gradlew bundleRelease
+
+agentknock_jarsigner="$(nix develop --command printenv JAVA_HOME)/bin/jarsigner"
+agentknock_signed_dir="$(mktemp -d "${agentknock_project_dir}/app/build/publish-internal.XXXXXX")"
+trap 'rm -rf -- "${agentknock_signed_dir}"' EXIT
+agentknock_signed_bundle="${agentknock_signed_dir}/app-release.aab"
+
+agentknock --secret agentknock-android-upload-passphrase \
+    --reason "Sign the Agentknock Android app bundle with its Google Play upload key." \
+    -- "${agentknock_jarsigner}" \
+    -keystore "${agentknock_upload_store}" \
+    -storetype PKCS12 \
+    -storepass:env KEYSTORE_PASSWORD \
+    -keypass:env KEYSTORE_PASSWORD \
+    -signedjar "${agentknock_signed_bundle}" \
+    "${agentknock_project_dir}/app/build/outputs/bundle/release/app-release.aab" \
+    agentknock-upload
+
+"${agentknock_jarsigner}" -verify "${agentknock_signed_bundle}"
+sha256sum "${agentknock_signed_bundle}"
+nix develop --command ./gradlew publishReleaseBundle \
+    --artifact-dir "${agentknock_signed_dir}" "$@"
