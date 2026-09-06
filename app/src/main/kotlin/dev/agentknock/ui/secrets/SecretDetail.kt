@@ -278,7 +278,10 @@ internal fun SecretDetail(
             }
             item {
                 Column(verticalArrangement = Arrangement.spacedBy(4.dp)) {
-                    Text("Access", style = MaterialTheme.typography.titleLarge)
+                    Row(Modifier.fillMaxWidth(), verticalAlignment = Alignment.CenterVertically) {
+                        Text("Access", Modifier.weight(1f), style = MaterialTheme.typography.titleLarge)
+                        ApprovalModeHelp()
+                    }
                     Text(
                         if (secret.type == SecretType.SSH) {
                             "These settings control Git signing and SSH authentication. " +
@@ -293,41 +296,43 @@ internal fun SecretDetail(
                 }
             }
             item {
-                InformationSurface {
-                    if (secret.temporaryAccessGrants.isNotEmpty()) {
-                        SecretTemporaryApprovals(
-                            grants = secret.temporaryAccessGrants,
-                            clients = clients,
-                            onEnd = actions.onEndTemporaryAccess,
-                        )
-                        HorizontalDivider()
-                    }
-                    ApprovalModeRow(
-                        title = "Default for future uses",
-                        selected = secret.approvalMode,
-                        defaultMode = secret.approvalMode,
-                        aiReviewAccess = aiReviewAccess,
-                        onOpenPlan = onOpenPlan,
-                        inherited = false,
-                        onSelect = actions.onSetApprovalMode,
-                    )
-                    clients.forEach { client ->
-                        HorizontalDivider()
-                        val override = overrides[client.clientId]
+                InformationSurface(contentPadding = PaddingValues(horizontal = 16.dp, vertical = 4.dp)) {
+                    Column {
+                        if (secret.temporaryAccessGrants.isNotEmpty()) {
+                            SecretTemporaryApprovals(
+                                grants = secret.temporaryAccessGrants,
+                                clients = clients,
+                                onEnd = actions.onEndTemporaryAccess,
+                            )
+                            HorizontalDivider()
+                        }
                         ApprovalModeRow(
-                            title = client.approvalLabel(duplicateClientNames),
-                            selected = override?.mode ?: secret.approvalMode,
+                            title = "Default for all clients",
+                            selected = secret.approvalMode,
                             defaultMode = secret.approvalMode,
                             aiReviewAccess = aiReviewAccess,
                             onOpenPlan = onOpenPlan,
-                            inherited = override == null,
-                            onSelect = { mode ->
-                                actions.onSetClientApprovalOverride(client.clientId, mode)
-                            },
-                            onUseDefault = override?.let {
-                                { actions.onSetClientApprovalOverride(client.clientId, null) }
-                            },
+                            inherited = false,
+                            onSelect = actions.onSetApprovalMode,
                         )
+                        clients.forEach { client ->
+                            val override = overrides[client.clientId]
+                            ApprovalModeRow(
+                                title = client.approvalLabel(duplicateClientNames),
+                                isClient = true,
+                                selected = override?.mode ?: secret.approvalMode,
+                                defaultMode = secret.approvalMode,
+                                aiReviewAccess = aiReviewAccess,
+                                onOpenPlan = onOpenPlan,
+                                inherited = override == null,
+                                onSelect = { mode ->
+                                    actions.onSetClientApprovalOverride(client.clientId, mode)
+                                },
+                                onUseDefault = override?.let {
+                                    { actions.onSetClientApprovalOverride(client.clientId, null) }
+                                },
+                            )
+                        }
                     }
                 }
             }
@@ -384,7 +389,7 @@ private fun SecretTemporaryApprovals(
     clients: List<ClientSummary>,
     onEnd: (TemporaryAccessGrant) -> Unit,
 ) {
-    Column(verticalArrangement = Arrangement.spacedBy(10.dp)) {
+    Column(Modifier.padding(vertical = 8.dp), verticalArrangement = Arrangement.spacedBy(10.dp)) {
         Text("Temporary access", style = MaterialTheme.typography.titleMedium)
         Text(
             "These uses skip manual and AI review until they end. The saved settings below " +

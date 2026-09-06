@@ -1,1 +1,1 @@
-AI denials now return the reviewer's exact explanation to the requesting client for secret use, Git signing, and SSH authentication. Sensitive values in new environment-secret drafts are cleared when the app is backgrounded. Simplified secret editing and approval handling.
+Redesigned secret access settings with compact Deny, Ask, AI, and Allow controls. Client icons and muted inherited settings make overrides easier to see. Added access-option help and refined spacing and alignment.
