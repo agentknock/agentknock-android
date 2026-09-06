@@ -17,6 +17,10 @@ internal enum class SshKeyInputMode { GENERATE, IMPORT }
 
 internal enum class EditorPhase { EDITING, COMMITTING }
 
+internal sealed interface SecretsEditorDraft {
+    val containsSensitiveData: Boolean
+}
+
 internal data class SshKeyDraft(
     val inputMode: SshKeyInputMode = SshKeyInputMode.GENERATE,
     val algorithm: SshKeyAlgorithm = SshKeyAlgorithm.ED25519,
@@ -26,6 +30,9 @@ internal data class SshKeyDraft(
     val preparing: Boolean = false,
     val error: String? = null,
 ) {
+    val containsPrivateKeyMaterial: Boolean
+        get() = privateKeyText.isNotEmpty() || preparedKey != null
+
     fun withoutPreparation(): SshKeyDraft = copy(
         preparedKey = null,
         preparing = false,
@@ -40,7 +47,11 @@ internal data class SecretEditorState(
     val type: SecretType,
     val sshKeyDraft: SshKeyDraft = SshKeyDraft(),
     val environmentVariables: List<EnvironmentVariableDraft> = listOf(EnvironmentVariableDraft()),
-)
+) : SecretsEditorDraft {
+    override val containsSensitiveData: Boolean
+        get() = sshKeyDraft.containsPrivateKeyMaterial ||
+            (secret == null && environmentVariables.any { it.sensitive && it.value.isNotEmpty() })
+}
 
 internal data class EnvironmentVariableDraft(
     val id: Long = 0,
@@ -54,7 +65,10 @@ internal data class SshKeyEditorState(
     val secretName: String,
     val currentKey: SshKeyMetadata,
     val sshKeyDraft: SshKeyDraft,
-)
+) : SecretsEditorDraft {
+    override val containsSensitiveData: Boolean
+        get() = sshKeyDraft.containsPrivateKeyMaterial
+}
 
 internal data class VariableEditorState(
     val secretId: String,
@@ -65,7 +79,17 @@ internal data class VariableEditorState(
     val value: String,
     val valueEdited: Boolean,
     val sensitive: Boolean,
-)
+) : SecretsEditorDraft {
+    override val containsSensitiveData: Boolean
+        get() = variable?.sensitive == true || sensitive
+
+    val valueChanged: Boolean
+        get() = when {
+            variable == null -> true
+            currentValue != null -> value != currentValue
+            else -> valueEdited
+        }
+}
 
 @Composable
 internal fun DiscardChangesDialog(

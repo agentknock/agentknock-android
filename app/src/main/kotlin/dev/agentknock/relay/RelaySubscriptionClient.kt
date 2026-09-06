@@ -4,6 +4,7 @@ import kotlinx.serialization.SerialName
 import kotlinx.serialization.Serializable
 import kotlinx.serialization.json.Json
 
+@Serializable
 internal data class RelaySubscriptionStatus(val active: Boolean)
 
 internal typealias RelaySubscriptionResult = RelayEndpointResult<RelaySubscriptionStatus>
@@ -76,9 +77,7 @@ internal class HttpRelaySubscriptionClient(
         body: String,
     ): RelaySubscriptionResult = transport.post(path, body, bearerToken = deviceToken)
         .decodeSuccess { encoded ->
-            RelaySubscriptionStatus(
-                active = json.decodeFromString<SubscriptionStatusResponse>(encoded).active,
-            )
+            json.decodeFromString<RelaySubscriptionStatus>(encoded)
         }
 }
 
@@ -93,6 +92,3 @@ private data class GooglePlaySubscriptionRequest(
     val source: String,
     @SerialName("purchase_token") val purchaseToken: String,
 )
-
-@Serializable
-private data class SubscriptionStatusResponse(val active: Boolean)

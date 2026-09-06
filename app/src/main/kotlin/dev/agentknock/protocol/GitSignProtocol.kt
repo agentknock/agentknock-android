@@ -60,24 +60,6 @@ internal enum class GitSignChangeStatus {
     TYPE_CHANGED,
 }
 
-internal sealed interface GitSignCompletion {
-    val clientSoftware: ClientSoftware
-
-    data class Approved(override val clientSoftware: ClientSoftware) : GitSignCompletion
-
-    data class Denied(
-        override val clientSoftware: ClientSoftware,
-        val reason: String,
-        val message: String,
-    ) : GitSignCompletion
-
-    data class Aborted(
-        override val clientSoftware: ClientSoftware,
-        val reason: String,
-        val message: String,
-    ) : GitSignCompletion
-}
-
 internal class GitSignProtocol(
     private val json: Json = Json { ignoreUnknownKeys = true },
 ) {
@@ -116,7 +98,7 @@ internal class GitSignProtocol(
             ),
         ).encodeToByteArray()
 
-    fun decodeCompletion(plaintext: ByteArray): GitSignCompletion {
+    fun decodeCompletion(plaintext: ByteArray): ApprovalCompletion {
         val clientSoftware = json.decodeClientSoftware(plaintext)
         val completion = json.decodeFromString<GitSignResultWire>(plaintext.decodeToString())
         return when (completion.result) {
@@ -126,16 +108,16 @@ internal class GitSignProtocol(
                         "Approved Git signing completion contains a signature",
                     )
                 }
-                GitSignCompletion.Approved(clientSoftware)
+                ApprovalCompletion.Approved(clientSoftware)
             }
-            RESULT_DENIED -> GitSignCompletion.Denied(
+            RESULT_DENIED -> ApprovalCompletion.Denied(
                 clientSoftware = clientSoftware,
                 reason = completion.reason
                     ?: throw SerializationException("Denied completion has no reason"),
                 message = completion.message
                     ?: throw SerializationException("Denied completion has no message"),
             )
-            RESULT_ABORTED -> GitSignCompletion.Aborted(
+            RESULT_ABORTED -> ApprovalCompletion.Aborted(
                 clientSoftware = clientSoftware,
                 reason = completion.reason
                     ?: throw SerializationException("Aborted completion has no reason"),

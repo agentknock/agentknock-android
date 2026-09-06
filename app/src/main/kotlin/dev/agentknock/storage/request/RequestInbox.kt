@@ -165,7 +165,6 @@ internal data class InboxRequestSummary(
     val arguments: List<String>,
     val receivedAt: Long,
     val completedAt: Long?,
-    val userDecisionAvailable: Boolean = true,
     val decisionSummary: String? = null,
     val uploadSecretType: String? = null,
     val repository: String? = null,
@@ -209,7 +208,6 @@ internal data class InboxRequestDetails(
     val receivedAt: Long,
     val completedAt: Long?,
     val content: InboxRequestContent,
-    val userDecisionAvailable: Boolean = true,
 )
 
 internal sealed interface InboxRequestContent {
@@ -532,12 +530,6 @@ internal class RequestInbox(
                     else -> null
                 }
             }
-        }.map { requests ->
-            requests.map { request ->
-                request.copy(
-                    userDecisionAvailable = request.state == InboxRequestState.ACTION_REQUIRED,
-                )
-            }
         }
     }
 
@@ -749,8 +741,6 @@ internal class RequestInbox(
                 receivedAt = request.receivedAt,
                 completedAt = request.completedAt,
                 content = content,
-                userDecisionAvailable = content is InboxRequestContent.Pairing ||
-                    state == InboxRequestState.ACTION_REQUIRED,
             )
         }
     }

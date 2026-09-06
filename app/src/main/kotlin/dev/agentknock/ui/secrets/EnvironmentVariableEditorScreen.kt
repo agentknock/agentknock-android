@@ -6,23 +6,17 @@ import androidx.activity.compose.BackHandler
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
-import androidx.compose.foundation.layout.Row
-import androidx.compose.foundation.layout.Spacer
 import androidx.compose.foundation.layout.fillMaxHeight
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.consumeWindowInsets
 import androidx.compose.foundation.layout.imePadding
-import androidx.compose.foundation.layout.width
 import androidx.compose.foundation.layout.widthIn
 import androidx.compose.foundation.lazy.LazyColumn
-import androidx.compose.foundation.selection.toggleable
 import androidx.compose.foundation.text.KeyboardOptions
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.outlined.MoreVert
-import androidx.compose.material.icons.outlined.Visibility
-import androidx.compose.material.icons.outlined.VisibilityOff
 import androidx.compose.material3.Button
 import androidx.compose.material3.DropdownMenu
 import androidx.compose.material3.DropdownMenuItem
@@ -34,7 +28,6 @@ import androidx.compose.material3.OutlinedTextField
 import androidx.compose.material3.Scaffold
 import androidx.compose.material3.SnackbarHost
 import androidx.compose.material3.SnackbarHostState
-import androidx.compose.material3.Switch
 import androidx.compose.material3.Text
 import androidx.compose.material3.TopAppBar
 import androidx.compose.runtime.Composable
@@ -46,13 +39,10 @@ import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.res.stringResource
-import androidx.compose.ui.semantics.Role
 import androidx.compose.ui.text.font.FontFamily
 import androidx.compose.ui.text.input.ImeAction
 import androidx.compose.ui.text.input.KeyboardCapitalization
 import androidx.compose.ui.text.input.KeyboardType
-import androidx.compose.ui.text.input.PasswordVisualTransformation
-import androidx.compose.ui.text.input.VisualTransformation
 import androidx.compose.ui.unit.dp
 import dev.agentknock.R
 import dev.agentknock.ui.components.NavigationBackButton
@@ -66,19 +56,13 @@ internal fun EnvironmentVariableEditorScreen(
     onEditorChange: (VariableEditorState) -> Unit,
     onDismiss: () -> Unit,
     onDelete: (() -> Unit)?,
-    onSave: (
-        name: String,
-        value: String,
-        sensitive: Boolean,
-        replaceValue: Boolean,
-    ) -> Unit,
+    onSave: () -> Unit,
     snackbar: SnackbarHostState,
 ) {
     val variable = editor.variable
     val currentValue = editor.currentValue
     val name = editor.name
     val value = editor.value
-    val valueEdited = editor.valueEdited
     val sensitive = editor.sensitive
     val editorKey = variable?.id ?: "new:${editor.secretId}"
     var showValue by remember(editorKey) { mutableStateOf(false) }
@@ -90,8 +74,7 @@ internal fun EnvironmentVariableEditorScreen(
     } else {
         name != variable.name ||
             sensitive != variable.sensitive ||
-            (currentValue != null && value != currentValue) ||
-            (currentValue == null && valueEdited)
+            editor.valueChanged
     }
     fun requestDismiss() {
         if (!enabled) return
@@ -201,104 +184,32 @@ internal fun EnvironmentVariableEditorScreen(
                     }
                 }
                 item {
-                    OutlinedTextField(
+                    EnvironmentVariableValueField(
                         value = value,
+                        sensitive = sensitive,
+                        visible = showValue,
+                        onVisibilityChange = { showValue = it },
                         onValueChange = {
                             onEditorChange(editor.copy(value = it, valueEdited = true))
                         },
-                        label = { Text(stringResource(R.string.variable_value)) },
                         enabled = enabled,
-                        visualTransformation = if (sensitive && !showValue) {
-                            PasswordVisualTransformation()
-                        } else {
-                            VisualTransformation.None
-                        },
-                        keyboardOptions = KeyboardOptions(
-                            autoCorrectEnabled = false,
-                            keyboardType = if (sensitive) {
-                                KeyboardType.Password
-                            } else {
-                                KeyboardType.Text
-                            },
-                        ),
-                        minLines = 1,
-                        maxLines = 6,
-                        textStyle = MaterialTheme.typography.bodyLarge.copy(fontFamily = FontFamily.Monospace),
-                        trailingIcon = if (sensitive) {
-                            {
-                                IconButton(
-                                    onClick = { showValue = !showValue },
-                                    enabled = enabled,
-                                ) {
-                                    Icon(
-                                        if (showValue) {
-                                            Icons.Outlined.VisibilityOff
-                                        } else {
-                                            Icons.Outlined.Visibility
-                                        },
-                                        contentDescription = stringResource(
-                                            if (showValue) R.string.hide else R.string.show,
-                                        ),
-                                    )
-                                }
-                            }
-                        } else {
-                            null
-                        },
-                        modifier = Modifier.fillMaxWidth(),
                     )
                 }
                 item {
-                    Row(
-                        modifier = Modifier
-                            .fillMaxWidth()
-                            .toggleable(
-                                value = sensitive,
-                                enabled = enabled,
-                                role = Role.Switch,
-                                onValueChange = {
-                                    onEditorChange(editor.copy(sensitive = it))
-                                },
-                            ),
-                        horizontalArrangement = Arrangement.SpaceBetween,
-                        verticalAlignment = Alignment.CenterVertically,
-                    ) {
-                        Column(Modifier.weight(1f)) {
-                            Text(stringResource(R.string.sensitive))
-                            Text(
-                                sensitivityDescription(sensitive),
-                                style = MaterialTheme.typography.bodySmall,
-                                color = MaterialTheme.colorScheme.onSurfaceVariant,
-                            )
-                        }
-                        Spacer(Modifier.width(12.dp))
-                        Switch(
-                            checked = sensitive,
-                            onCheckedChange = null,
-                            enabled = enabled,
-                        )
-                    }
+                    EnvironmentVariableSensitivity(
+                        sensitive = sensitive,
+                        enabled = enabled,
+                        onChange = { onEditorChange(editor.copy(sensitive = it)) },
+                    )
                 }
                 item {
                     Button(
                         onClick = {
                             nameInvalid = !environmentVariableName.matches(name)
-                            if (!nameInvalid) {
-                                val valueChanged = when {
-                                    variable == null -> true
-                                    currentValue != null -> value != currentValue
-                                    else -> valueEdited
-                                }
-                                onSave(name, value, sensitive, valueChanged)
-                            }
+                            if (!nameInvalid) onSave()
                         },
-                        enabled = enabled && environmentVariableName.matches(name) && (
-                            variable == null ||
-                                name != variable.name ||
-                                sensitive != variable.sensitive ||
-                                (currentValue != null && value != currentValue) ||
-                                (currentValue == null && valueEdited)
-                            ),
+                        enabled = enabled && environmentVariableName.matches(name) &&
+                            (variable == null || dirty),
                         modifier = Modifier.fillMaxWidth(),
                     ) {
                         Text(

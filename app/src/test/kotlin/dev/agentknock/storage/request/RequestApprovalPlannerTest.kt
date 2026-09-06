@@ -8,7 +8,9 @@ import dev.agentknock.review.ApprovalReviewRequest
 import dev.agentknock.storage.approval.AiReview
 import dev.agentknock.storage.approval.AiReviewDecision
 import dev.agentknock.storage.approval.AiReviewFailure
-import dev.agentknock.storage.approval.ApprovalPolicyEvaluator
+import dev.agentknock.storage.approval.ApprovalEvaluation
+import dev.agentknock.storage.approval.ApprovalAction
+import dev.agentknock.storage.approval.SecretApprovalEvaluation
 import dev.agentknock.storage.secret.SecretApprovalMode
 import dev.agentknock.storage.secret.SecretApprovalPolicy
 import kotlinx.serialization.json.JsonPrimitive
@@ -18,6 +20,37 @@ import org.junit.Assert.assertTrue
 import org.junit.Test
 
 class RequestApprovalPlannerTest {
+    @Test
+    fun policyEvaluationRetainsIdentityRevisionAndEffectiveMode() {
+        val actions = listOf(
+            SecretApprovalMode.DENY to ApprovalAction.DENY,
+            SecretApprovalMode.ASK_ME to ApprovalAction.ASK_ME,
+            SecretApprovalMode.ASK_AI to ApprovalAction.ASK_AI,
+            SecretApprovalMode.APPROVE to ApprovalAction.APPROVE,
+        )
+        for ((mode, action) in actions) {
+            val policy = policy("secret", mode).copy(secretName = "display-name", revision = 42L)
+            val eligible = mode == SecretApprovalMode.ASK_ME || mode == SecretApprovalMode.ASK_AI
+            assertEquals(
+                SecretApprovalEvaluation(
+                    secretId = "secret",
+                    secretName = "display-name",
+                    action = action,
+                    temporaryAccessEligible = eligible,
+                    revision = 42L,
+                ),
+                policy.evaluate(),
+            )
+            assertEquals(
+                policy.evaluate().copy(
+                    action = if (eligible) ApprovalAction.APPROVE else action,
+                    temporaryAccessExpiresAt = 1234L.takeIf { eligible },
+                ),
+                policy.copy(temporaryAccessExpiresAt = 1234L).evaluate(),
+            )
+        }
+    }
+
     @Test
     fun aiAuditDataRetainsTheExactVerdictAndExplanation() {
         val review = AiReview(
@@ -217,7 +250,7 @@ class RequestApprovalPlannerTest {
     )
 
     private fun evaluation(policies: List<SecretApprovalPolicy>) =
-        ApprovalPolicyEvaluator.evaluate(policies.map { it.toRequestedSecretApproval() })
+        ApprovalEvaluation(policies.map(SecretApprovalPolicy::evaluate))
 
     private fun policy(
         id: String,

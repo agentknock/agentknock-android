@@ -1,7 +1,7 @@
 package dev.agentknock.storage.request
 
 import dev.agentknock.protocol.ClientSoftware
-import dev.agentknock.protocol.InvocationCompletion
+import dev.agentknock.protocol.ApprovalCompletion
 import dev.agentknock.protocol.InvocationDenialReason
 import dev.agentknock.protocol.InvocationProtocol
 import dev.agentknock.protocol.InvocationRequestMessage
@@ -15,7 +15,6 @@ import dev.agentknock.storage.approval.ApprovalAction
 import dev.agentknock.storage.approval.AiReview
 import dev.agentknock.storage.approval.AiReviewDecision
 import dev.agentknock.storage.approval.ApprovalEvaluation
-import dev.agentknock.storage.approval.ApprovalPolicyEvaluator
 import dev.agentknock.storage.approval.isFullyApproved
 import dev.agentknock.storage.approval.requiresInvocationAiReview
 import dev.agentknock.storage.audit.AuditDecisionSource
@@ -26,7 +25,7 @@ import dev.agentknock.storage.audit.AuditSink
 import dev.agentknock.storage.audit.auditDataOf
 import dev.agentknock.storage.device.RelayDeviceCredentialSource
 import dev.agentknock.storage.device.RelayDeviceCredentials
-import dev.agentknock.storage.device.RelayDeviceCredentialsResult
+import dev.agentknock.storage.device.DeviceCredentialResult
 import dev.agentknock.storage.secret.RequestedSecretDescription
 import dev.agentknock.storage.secret.RequestedSecretsResult
 import dev.agentknock.storage.secret.SecretApprovalPolicy
@@ -41,6 +40,7 @@ import kotlinx.serialization.builtins.ListSerializer
 import kotlinx.serialization.builtins.serializer
 import kotlinx.serialization.decodeFromString
 import kotlinx.serialization.encodeToString
+import kotlinx.serialization.json.encodeToJsonElement
 import kotlinx.serialization.json.Json
 import kotlinx.serialization.json.JsonElement
 
@@ -104,9 +104,8 @@ internal class InvocationRequests(
             emptyList()
         }
         val initialApprovalEvaluation = if (automaticDenial == null && protectedSecretNames.isNotEmpty()) {
-            val approvals = approvalPolicies.map { it.toRequestedSecretApproval() }
-            if (approvals.size == protectedSecretNames.distinct().size) {
-                ApprovalPolicyEvaluator.evaluate(approvals)
+            if (approvalPolicies.size == protectedSecretNames.distinct().size) {
+                ApprovalEvaluation(approvalPolicies.map(SecretApprovalPolicy::evaluate))
             } else {
                 null
             }
@@ -201,9 +200,7 @@ internal class InvocationRequests(
                 approvalPolicies
             }
             val currentApprovalEvaluation = if (needsAiReview) {
-                ApprovalPolicyEvaluator.evaluate(
-                    currentApprovalPolicies.map { it.toRequestedSecretApproval() },
-                )
+                ApprovalEvaluation(currentApprovalPolicies.map(SecretApprovalPolicy::evaluate))
             } else {
                 initialApprovalEvaluation
             }
@@ -519,9 +516,7 @@ internal class InvocationRequests(
             TemporaryAccessOperation.INVOCATION,
         )
         val currentEvaluation = protectedNames.takeIf { it.isNotEmpty() }?.let {
-            ApprovalPolicyEvaluator.evaluate(
-                currentPolicies.map { policy -> policy.toRequestedSecretApproval() },
-            )
+            ApprovalEvaluation(currentPolicies.map(SecretApprovalPolicy::evaluate))
         }
         val storedEvaluation = secretUseRequest.approvalEvaluationJson
             ?.let(::decodeApprovalEvaluation)
@@ -631,26 +626,16 @@ internal class InvocationRequests(
                 latestResolution.nonSensitiveEnvironmentValues,
             ),
         )
-        return if (temporaryGrant == null) {
-            persistDecision(
-                request = request,
-                secretUseRequest = secretUseRequest,
-                decision = ApprovalDecision.APPROVED,
-                response = response,
-                providedSecretsJson = providedSecretsJson,
-                decisionSource = DECISION_SOURCE_USER,
-                authorization = authorization,
-            )
-        } else {
-            persistTemporaryDecision(
-                request = request,
-                secretUseRequest = secretUseRequest,
-                response = response,
-                providedSecretsJson = providedSecretsJson,
-                authorization = authorization,
-                grant = temporaryGrant,
-            )
-        }
+        return persistDecision(
+            request = request,
+            secretUseRequest = secretUseRequest,
+            decision = ApprovalDecision.APPROVED,
+            response = response,
+            providedSecretsJson = providedSecretsJson,
+            decisionSource = DECISION_SOURCE_USER,
+            authorization = authorization,
+            grant = temporaryGrant,
+        )
     }
 
     suspend fun deny(
@@ -834,10 +819,10 @@ internal class InvocationRequests(
             val softwareMatches = completionResult?.clientSoftware ==
                 currentRequest.clientSoftwareJson?.let(::decodeStoredClientSoftware)
             val valid = priorError == null && softwareMatches && when (completionResult) {
-                is InvocationCompletion.Approved -> {
+                is ApprovalCompletion.Approved -> {
                     secretUseRequest.decision == ApprovalDecision.APPROVED.storedName
                 }
-                is InvocationCompletion.Denied -> {
+                is ApprovalCompletion.Denied -> {
                     if (secretUseRequest.decision != ApprovalDecision.DENIED.storedName) {
                         false
                     } else {
@@ -849,7 +834,7 @@ internal class InvocationRequests(
                             completionResult.message == expectedMessage
                     }
                 }
-                is InvocationCompletion.Aborted -> true
+                is ApprovalCompletion.Aborted -> true
                 null -> false
             }
             val error = priorError ?: if (valid) {
@@ -860,9 +845,9 @@ internal class InvocationRequests(
             val auditDetail = when {
                 priorError != null -> priorError
                 !valid -> SECRET_USE_COMPLETION_VERIFICATION_ERROR
-                completionResult is InvocationCompletion.Denied ->
+                completionResult is ApprovalCompletion.Denied ->
                     secretUseRequest.completionMessage ?: SECRET_USE_DENIAL_MESSAGE
-                completionResult is InvocationCompletion.Aborted ->
+                completionResult is ApprovalCompletion.Aborted ->
                     "Secret use was aborted by the client."
                 else -> null
             }
@@ -881,31 +866,9 @@ internal class InvocationRequests(
                     exchangeEndedAt = now,
                 ),
                 secretUseRequest = secretUseRequest.copy(
-                    completionResult = when {
-                        !valid -> null
-                        completionResult is InvocationCompletion.Approved -> {
-                            ApprovalCompletionResult.APPROVED.storedName
-                        }
-                        completionResult is InvocationCompletion.Denied -> {
-                            ApprovalCompletionResult.DENIED.storedName
-                        }
-                        completionResult is InvocationCompletion.Aborted -> {
-                            ApprovalCompletionResult.ABORTED.storedName
-                        }
-                        else -> null
-                    },
-                    completionReason = when {
-                        !valid -> null
-                        completionResult is InvocationCompletion.Denied -> completionResult.reason
-                        completionResult is InvocationCompletion.Aborted -> completionResult.reason
-                        else -> null
-                    },
-                    completionMessage = when {
-                        !valid -> null
-                        completionResult is InvocationCompletion.Denied -> completionResult.message
-                        completionResult is InvocationCompletion.Aborted -> completionResult.message
-                        else -> null
-                    },
+                    completionResult = if (valid) completionResult?.storedResult else null,
+                    completionReason = if (valid) completionResult?.reason else null,
+                    completionMessage = if (valid) completionResult?.message else null,
                 ),
             )
             audit.append(
@@ -914,9 +877,9 @@ internal class InvocationRequests(
                         type = AuditEventType.SECRET_USE_COMPLETED,
                         outcome = when {
                             !valid -> AuditOutcome.FAILED
-                            completionResult is InvocationCompletion.Approved ->
+                            completionResult is ApprovalCompletion.Approved ->
                                 AuditOutcome.COMPLETED
-                            completionResult is InvocationCompletion.Denied -> AuditOutcome.DENIED
+                            completionResult is ApprovalCompletion.Denied -> AuditOutcome.DENIED
                             else -> AuditOutcome.ABORTED
                         },
                         subject = decodeStringList(secretUseRequest.secretsJson).joinToString(),
@@ -927,27 +890,11 @@ internal class InvocationRequests(
                         data = currentRequest.requestAuditData() + secretUseRequest.auditData() +
                             auditDataOf(
                                 "completion_valid" to valid,
-                                "completion_result" to when (completionResult) {
-                                    is InvocationCompletion.Approved ->
-                                        ApprovalCompletionResult.APPROVED.storedName
-                                    is InvocationCompletion.Denied ->
-                                        ApprovalCompletionResult.DENIED.storedName
-                                    is InvocationCompletion.Aborted ->
-                                        ApprovalCompletionResult.ABORTED.storedName
-                                    null -> null
-                                },
-                                "completion_reason" to when (completionResult) {
-                                    is InvocationCompletion.Denied -> completionResult.reason
-                                    is InvocationCompletion.Aborted -> completionResult.reason
-                                    else -> null
-                                },
-                                "completion_message" to when (completionResult) {
-                                    is InvocationCompletion.Denied -> completionResult.message
-                                    is InvocationCompletion.Aborted -> completionResult.message
-                                    else -> null
-                                },
+                                "completion_result" to completionResult?.storedResult,
+                                "completion_reason" to completionResult?.reason,
+                                "completion_message" to completionResult?.message,
                                 "returned_client_software" to completionResult?.clientSoftware?.let {
-                                    json.parseToJsonElement(json.encodeToString(it))
+                                    json.encodeToJsonElement(it)
                                 },
                             ),
                     ),
@@ -1028,6 +975,7 @@ internal class InvocationRequests(
         denialReason: InvocationDenialReason? = null,
         denialMessage: String? = null,
         authorization: AuthorizationCommitment? = null,
+        grant: TemporaryAccessPlan? = null,
     ): RequestDecisionResult {
         require(decision != ApprovalDecision.APPROVED || providedSecretsJson != null) {
             "An approved invocation must record its provided secrets"
@@ -1041,8 +989,30 @@ internal class InvocationRequests(
         require(decision != ApprovalDecision.DENIED || denialMessage != null) {
             "A denied invocation must record its message"
         }
+        require(grant == null || decision == ApprovalDecision.APPROVED) {
+            "Only an approved invocation can grant temporary access"
+        }
         return writeTransaction.execute {
             val now = currentTimeMillis()
+            if (
+                grant != null && !dao.authorizationMatches(
+                    checkNotNull(authorization),
+                    request.clientId,
+                    TemporaryAccessOperation.INVOCATION.storedName,
+                    now,
+                )
+            ) {
+                return@execute RequestDecisionResult.SecretChanged
+            }
+            val grantedAccess = grant?.takeIf {
+                secrets.allowTemporaryAccess(
+                    policies = it.policies,
+                    clientId = request.clientId,
+                    operation = TemporaryAccessOperation.INVOCATION,
+                    expiresAt = it.expiresAt,
+                )
+            }
+            val appliedDecisionSource = grantedAccess?.decisionSource ?: decisionSource
             val updatedRequest = request.copy(
                 state = InboxRequestState.WAITING.storedName,
                 responseJson = response.toString(),
@@ -1050,13 +1020,16 @@ internal class InvocationRequests(
             )
             val updatedSecretUse = secretUseRequest.copy(
                 decision = decision.storedName,
-                decisionSource = decisionSource,
+                decisionSource = appliedDecisionSource,
                 providedSecretsJson = providedSecretsJson,
+                approvalEvaluationJson = grantedAccess?.let { json.encodeToString(it.evaluation) }
+                    ?: secretUseRequest.approvalEvaluationJson,
                 completionReason = denialReason?.wireName,
                 completionMessage = denialMessage,
                 decidedAt = now,
             )
-            val result = if (authorization != null) {
+            // A grant changes the authorization state we just checked in this transaction.
+            val result = if (grant == null && authorization != null) {
                 dao.updateSecretUseRequestIfAuthorized(
                     request = updatedRequest,
                     secretUseRequest = updatedSecretUse,
@@ -1079,7 +1052,7 @@ internal class InvocationRequests(
                             } else {
                                 AuditOutcome.DENIED
                             },
-                            decisionSource = decisionSource.toAuditDecisionSource(),
+                            decisionSource = appliedDecisionSource.toAuditDecisionSource(),
                             subject = decodeStringList(secretUseRequest.secretsJson).joinToString(),
                             clientId = request.clientId,
                             clientName = request.clientNameSnapshot,
@@ -1091,97 +1064,14 @@ internal class InvocationRequests(
                 )
             }
             when (result) {
-                ConditionalRequestUpdate.APPLIED -> RequestDecisionResult.Decided
+                ConditionalRequestUpdate.APPLIED -> if (grant != null && grantedAccess == null) {
+                    RequestDecisionResult.TemporaryAccessNotStarted
+                } else {
+                    RequestDecisionResult.Decided
+                }
                 ConditionalRequestUpdate.ACTION_REQUIRED,
                 ConditionalRequestUpdate.UNAVAILABLE,
                 -> RequestDecisionResult.SecretChanged
-            }
-        }
-    }
-
-    private suspend fun persistTemporaryDecision(
-        request: InboxRequestEntity,
-        secretUseRequest: SecretUseRequestEntity,
-        response: JsonElement,
-        providedSecretsJson: String,
-        authorization: AuthorizationCommitment,
-        grant: TemporaryAccessPlan,
-    ): RequestDecisionResult {
-        val evaluationJson = json.encodeToString(grant.evaluation)
-        return writeTransaction.execute {
-            val now = currentTimeMillis()
-            if (
-                !dao.authorizationMatches(
-                    authorization,
-                    request.clientId,
-                    TemporaryAccessOperation.INVOCATION.storedName,
-                    now,
-                )
-            ) {
-                return@execute RequestDecisionResult.SecretChanged
-            }
-            val temporaryAccessStarted = secrets.allowTemporaryAccess(
-                policies = grant.policies,
-                clientId = request.clientId,
-                operation = TemporaryAccessOperation.INVOCATION,
-                expiresAt = grant.expiresAt,
-            )
-            val decisionSource = if (temporaryAccessStarted) {
-                grant.decisionSource
-            } else {
-                DECISION_SOURCE_USER
-            }
-            dao.updateSecretUseRequest(
-                request.copy(
-                    state = InboxRequestState.WAITING.storedName,
-                    responseJson = response.toString(),
-                    responseOutboxFinished = false,
-                ),
-                secretUseRequest.copy(
-                    decision = ApprovalDecision.APPROVED.storedName,
-                    decisionSource = decisionSource,
-                    providedSecretsJson = providedSecretsJson,
-                    approvalEvaluationJson = if (temporaryAccessStarted) {
-                        evaluationJson
-                    } else {
-                        secretUseRequest.approvalEvaluationJson
-                    },
-                    completionReason = null,
-                    completionMessage = null,
-                    decidedAt = now,
-                ),
-            )
-            audit.append(
-                listOf(
-                    AuditRecord(
-                        type = AuditEventType.SECRET_USE_DECIDED,
-                        outcome = AuditOutcome.APPROVED,
-                        decisionSource = decisionSource.toAuditDecisionSource(),
-                        subject = decodeStringList(secretUseRequest.secretsJson).joinToString(),
-                        clientId = request.clientId,
-                        clientName = request.clientNameSnapshot,
-                        relayRequestId = request.id,
-                        data = request.requestAuditData() + secretUseRequest.copy(
-                            decision = ApprovalDecision.APPROVED.storedName,
-                            decisionSource = decisionSource,
-                            providedSecretsJson = providedSecretsJson,
-                            approvalEvaluationJson = if (temporaryAccessStarted) {
-                                evaluationJson
-                            } else {
-                                secretUseRequest.approvalEvaluationJson
-                            },
-                            completionReason = null,
-                            completionMessage = null,
-                            decidedAt = now,
-                        ).auditData(),
-                    ),
-                ),
-                now,
-            )
-            if (temporaryAccessStarted) {
-                RequestDecisionResult.Decided
-            } else {
-                RequestDecisionResult.TemporaryAccessNotStarted
             }
         }
     }
@@ -1288,7 +1178,7 @@ internal class InvocationRequests(
         return when (
             val result = deviceCredentials.deviceCredentials(client.deviceIdentityId)
         ) {
-            is RelayDeviceCredentialsResult.Available -> result.credentials
+            is DeviceCredentialResult.Available -> result.value
             else -> null
         }
     }

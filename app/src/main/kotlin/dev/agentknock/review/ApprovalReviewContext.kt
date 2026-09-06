@@ -225,20 +225,17 @@ internal fun approvalReviewSecretFacts(
                     "Missing environment values for ${secret.name}"
                 }.environment
                 val metadata = secret.environmentVariables.associateBy { it.name }
-                val destinations = secret.environmentVariableDestinations
-                require(metadata.keys == destinations.keys) {
-                    "Review metadata does not describe every environment variable for ${secret.name}"
-                }
-                val deliveredSources = destinations.mapNotNullTo(linkedSetOf()) {
-                    (source, destination) ->
-                    source.takeUnless { destination == EnvironmentVariableReviewDestination.Omitted }
+                val deliveredSources = metadata.mapNotNullTo(linkedSetOf()) { (source, variable) ->
+                    source.takeUnless {
+                        variable.destination == EnvironmentVariableReviewDestination.Omitted
+                    }
                 }
                 require(environment.keys == deliveredSources) {
                     "Review metadata does not match delivered environment values for ${secret.name}"
                 }
                 val safeValues = nonSensitiveEnvironmentValues[secret.name].orEmpty()
                 val variables = metadata.mapValuesTo(linkedMapOf()) { (source, variable) ->
-                    val destination = checkNotNull(destinations[source])
+                    val destination = variable.destination
                     val value = if (variable.sensitive) null else safeValues[source]
                     if (
                         !variable.sensitive &&

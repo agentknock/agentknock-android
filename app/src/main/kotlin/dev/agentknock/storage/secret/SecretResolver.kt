@@ -93,23 +93,8 @@ internal class SecretResolver(
         secretName: String,
         expectedPublicKey: String,
         message: ByteArray,
-    ): GitSignatureResult {
-        val loaded = loadSigningKey(secretName, expectedPublicKey)
-        val key = when (loaded) {
-            is SigningKeyLoadResult.Available -> loaded.key
-            SigningKeyLoadResult.NotFound -> return GitSignatureResult.NotFound
-            SigningKeyLoadResult.WrongType -> return GitSignatureResult.WrongType
-            SigningKeyLoadResult.KeyChanged -> return GitSignatureResult.KeyChanged
-            SigningKeyLoadResult.Unavailable -> return GitSignatureResult.SecretUnavailable
-            SigningKeyLoadResult.Corrupted -> return GitSignatureResult.SecretCorrupted
-            SigningKeyLoadResult.UnsupportedEncryption -> {
-                return GitSignatureResult.UnsupportedEncryption
-            }
-        }
-        val signature = runCatchingNonCancellation {
-            withContext(cryptographyDispatcher) { sshKeys.signGitSignature(key, message) }
-        }.getOrElse { return GitSignatureResult.SecretCorrupted }
-        return GitSignatureResult.Signed(signature)
+    ): SignatureResult<String> = sign(secretName, expectedPublicKey) { key ->
+        sshKeys.signGitSignature(key, message)
     }
 
     suspend fun signSshAuthentication(
@@ -117,61 +102,43 @@ internal class SecretResolver(
         expectedPublicKey: String,
         message: ByteArray,
         algorithm: SshSignatureAlgorithm,
-    ): SshAuthenticationSignatureResult {
-        val loaded = loadSigningKey(secretName, expectedPublicKey)
-        val key = when (loaded) {
-            is SigningKeyLoadResult.Available -> loaded.key
-            SigningKeyLoadResult.NotFound -> return SshAuthenticationSignatureResult.NotFound
-            SigningKeyLoadResult.WrongType -> return SshAuthenticationSignatureResult.WrongType
-            SigningKeyLoadResult.KeyChanged -> return SshAuthenticationSignatureResult.KeyChanged
-            SigningKeyLoadResult.Unavailable -> {
-                return SshAuthenticationSignatureResult.SecretUnavailable
-            }
-            SigningKeyLoadResult.Corrupted -> {
-                return SshAuthenticationSignatureResult.SecretCorrupted
-            }
-            SigningKeyLoadResult.UnsupportedEncryption -> {
-                return SshAuthenticationSignatureResult.UnsupportedEncryption
-            }
-        }
-        val signature = runCatchingNonCancellation {
-            withContext(cryptographyDispatcher) {
-                sshKeys.signSshAuthentication(key, message, algorithm)
-            }
-        }.getOrElse { return SshAuthenticationSignatureResult.SecretCorrupted }
-        return SshAuthenticationSignatureResult.Signed(signature)
+    ): SignatureResult<ByteArray> = sign(secretName, expectedPublicKey) { key ->
+        sshKeys.signSshAuthentication(key, message, algorithm)
     }
 
-    private suspend fun loadSigningKey(
+    private suspend fun <T> sign(
         secretName: String,
         expectedPublicKey: String,
-    ): SigningKeyLoadResult {
+        signature: (SshPrivateKey) -> T,
+    ): SignatureResult<T> {
         val snapshot = ParsedSecretSnapshot(dao.getSecretSnapshot())
-        val secret = snapshot.secretsByName[secretName] ?: return SigningKeyLoadResult.NotFound
+        val secret = snapshot.secretsByName[secretName] ?: return SignatureResult.NotFound
         if (snapshot.typeOf(secret) != SecretType.SSH) {
-            return SigningKeyLoadResult.WrongType
+            return SignatureResult.WrongType
         }
-        val key = snapshot.sshKeysBySecret[secret.id] ?: return SigningKeyLoadResult.Corrupted
+        val key = snapshot.sshKeysBySecret[secret.id] ?: return SignatureResult.SecretCorrupted
         val currentPublic = runCatching { material.publicKey(key.entity, key.algorithm) }
-            .getOrElse { return SigningKeyLoadResult.Corrupted }
+            .getOrElse { return SignatureResult.SecretCorrupted }
         val expectedPublic = runCatching { sshKeys.importOpenSshPublicKey(expectedPublicKey) }
-            .getOrElse { return SigningKeyLoadResult.Corrupted }
+            .getOrElse { return SignatureResult.SecretCorrupted }
         if (!MessageDigest.isEqual(currentPublic.blob(), expectedPublic.blob())) {
-            return SigningKeyLoadResult.KeyChanged
+            return SignatureResult.KeyChanged
         }
         val plaintext = when (val decrypted = material.decryptSshKey(key.entity, key.algorithm)) {
             is DecryptionResult.Plaintext -> decrypted.value
-            DecryptionResult.KeyUnavailable -> return SigningKeyLoadResult.Unavailable
-            DecryptionResult.AuthenticationFailed -> return SigningKeyLoadResult.Corrupted
+            DecryptionResult.KeyUnavailable -> return SignatureResult.SecretUnavailable
+            DecryptionResult.AuthenticationFailed -> return SignatureResult.SecretCorrupted
             DecryptionResult.UnsupportedFormat -> {
-                return SigningKeyLoadResult.UnsupportedEncryption
+                return SignatureResult.UnsupportedEncryption
             }
         }
         val privateKey = runCatching {
             material.storedPrivateKey(key.entity, key.algorithm, plaintext)
         }
-            .getOrElse { return SigningKeyLoadResult.Corrupted }
-        return SigningKeyLoadResult.Available(privateKey)
+            .getOrElse { return SignatureResult.SecretCorrupted }
+        return runCatchingNonCancellation {
+            withContext(cryptographyDispatcher) { SignatureResult.Signed(signature(privateKey)) }
+        }.getOrElse { SignatureResult.SecretCorrupted }
     }
 
     private fun select(
@@ -338,12 +305,8 @@ internal class SecretResolver(
                             EnvironmentVariableReviewMetadata(
                                 name = it.name,
                                 sensitive = it.sensitive,
+                                destination = destination(it, it.name in selectedNames),
                             )
-                        },
-                    environmentVariableDestinations = snapshot.variablesBySecret[id].orEmpty()
-                        .sortedBy(EnvironmentVariableEntity::name)
-                        .associate { variable ->
-                            variable.name to destination(variable, variable.name in selectedNames)
                         },
                 )
                 SecretType.SSH -> snapshot.sshKeysBySecret[id]?.let {
@@ -404,15 +367,5 @@ internal class SecretResolver(
                 selections[name]?.rename?.get(variable.name) ?: variable.name,
             )
         }
-    }
-
-    private sealed interface SigningKeyLoadResult {
-        data class Available(val key: SshPrivateKey) : SigningKeyLoadResult
-        data object NotFound : SigningKeyLoadResult
-        data object WrongType : SigningKeyLoadResult
-        data object KeyChanged : SigningKeyLoadResult
-        data object Unavailable : SigningKeyLoadResult
-        data object Corrupted : SigningKeyLoadResult
-        data object UnsupportedEncryption : SigningKeyLoadResult
     }
 }

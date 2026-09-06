@@ -11,6 +11,7 @@ import dev.agentknock.storage.audit.AuditSink
 import dev.agentknock.storage.audit.auditDataOf
 import kotlinx.serialization.decodeFromString
 import kotlinx.serialization.encodeToString
+import kotlinx.serialization.json.encodeToJsonElement
 import kotlinx.serialization.json.Json
 import kotlinx.serialization.json.JsonElement
 
@@ -114,7 +115,7 @@ internal class ClientRemovalRequests(
                         data = current.requestAuditData() + auditDataOf(
                             "completion_valid" to valid,
                             "returned_client_software" to decoded?.let {
-                                storedJson.parseToJsonElement(storedJson.encodeToString(it))
+                                storedJson.encodeToJsonElement(it)
                             },
                         ),
                     ),

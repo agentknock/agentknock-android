@@ -41,8 +41,8 @@ internal inline fun <T> RelayEndpointResult<String>.decodeSuccess(
     } catch (_: Exception) {
         RelayEndpointResult.InvalidResponse
     }
-    is RelayEndpointResult.Rejected -> RelayEndpointResult.Rejected(status, code, message)
-    is RelayEndpointResult.Unavailable -> RelayEndpointResult.Unavailable(cause)
+    is RelayEndpointResult.Rejected -> this
+    is RelayEndpointResult.Unavailable -> this
     RelayEndpointResult.InvalidResponse -> RelayEndpointResult.InvalidResponse
 }
 

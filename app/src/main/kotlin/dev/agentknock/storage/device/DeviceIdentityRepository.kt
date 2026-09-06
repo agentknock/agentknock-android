@@ -56,29 +56,17 @@ internal data class RelayDeviceAuthorization(
     val deviceToken: String,
 )
 
-internal sealed interface RelayDeviceAuthorizationResult {
-    data class Available(val authorization: RelayDeviceAuthorization) :
-        RelayDeviceAuthorizationResult
+/** Credential access for an existing identity. Source lookups return null for an absent identity. */
+internal sealed interface DeviceCredentialResult<out T> {
+    data class Available<T>(val value: T) : DeviceCredentialResult<T>
 
-    data object Missing : RelayDeviceAuthorizationResult
+    sealed interface Failure : DeviceCredentialResult<Nothing>
 
-    data object Unavailable : RelayDeviceAuthorizationResult
+    data object Unavailable : Failure
 
-    data object Corrupted : RelayDeviceAuthorizationResult
+    data object Corrupted : Failure
 
-    data object UnsupportedEncryption : RelayDeviceAuthorizationResult
-}
-
-internal sealed interface RelayDeviceCredentialsResult {
-    data class Available(val credentials: RelayDeviceCredentials) : RelayDeviceCredentialsResult
-
-    data object Missing : RelayDeviceCredentialsResult
-
-    data object CredentialsUnavailable : RelayDeviceCredentialsResult
-
-    data object CredentialsCorrupted : RelayDeviceCredentialsResult
-
-    data object UnsupportedEncryption : RelayDeviceCredentialsResult
+    data object UnsupportedEncryption : Failure
 }
 
 internal sealed interface ClaimPairingAddressResult {
@@ -106,13 +94,15 @@ internal sealed interface ClaimPairingAddressResult {
 }
 
 internal interface RelayDeviceCredentialSource {
-    suspend fun activeDeviceCredentials(): RelayDeviceCredentialsResult
+    suspend fun activeDeviceCredentials(): DeviceCredentialResult<RelayDeviceCredentials>?
 
-    suspend fun deviceCredentials(deviceIdentityId: String): RelayDeviceCredentialsResult
+    suspend fun deviceCredentials(
+        deviceIdentityId: String,
+    ): DeviceCredentialResult<RelayDeviceCredentials>?
 }
 
 internal fun interface RelayDeviceAuthorizationSource {
-    suspend fun activeDeviceAuthorization(): RelayDeviceAuthorizationResult
+    suspend fun activeDeviceAuthorization(): DeviceCredentialResult<RelayDeviceAuthorization>?
 }
 
 internal class DeviceIdentityRepository(
@@ -187,10 +177,10 @@ internal class DeviceIdentityRepository(
             newDeviceMaterial()
         } else {
             when (val result = deviceMaterial(active)) {
-                is DeviceMaterialResult.Available -> result.value
-                DeviceMaterialResult.Unavailable -> newDeviceMaterial()
-                DeviceMaterialResult.Corrupted -> return ClaimPairingAddressResult.CredentialsCorrupted
-                DeviceMaterialResult.Unsupported -> {
+                is DeviceCredentialResult.Available -> result.value
+                DeviceCredentialResult.Unavailable -> newDeviceMaterial()
+                DeviceCredentialResult.Corrupted -> return ClaimPairingAddressResult.CredentialsCorrupted
+                DeviceCredentialResult.UnsupportedEncryption -> {
                     return ClaimPairingAddressResult.UnsupportedEncryption
                 }
             }
@@ -261,24 +251,24 @@ internal class DeviceIdentityRepository(
             )
         }
         val material = when (val result = deviceMaterial(candidate)) {
-            is DeviceMaterialResult.Available -> result.value
-            DeviceMaterialResult.Corrupted -> {
+            is DeviceCredentialResult.Available -> result.value
+            DeviceCredentialResult.Corrupted -> {
                 return ClaimPairingAddressResult.CredentialsCorrupted
             }
-            DeviceMaterialResult.Unsupported -> {
+            DeviceCredentialResult.UnsupportedEncryption -> {
                 return ClaimPairingAddressResult.UnsupportedEncryption
             }
-            DeviceMaterialResult.Unavailable -> {
+            DeviceCredentialResult.Unavailable -> {
                 val (replacement, replacementSettings) = if (previous == null) {
                     newDeviceMaterial() to candidate
                 } else {
                     when (val activeMaterial = deviceMaterial(previous)) {
-                        is DeviceMaterialResult.Available -> activeMaterial.value to previous
-                        DeviceMaterialResult.Unavailable -> newDeviceMaterial() to candidate
-                        DeviceMaterialResult.Corrupted -> {
+                        is DeviceCredentialResult.Available -> activeMaterial.value to previous
+                        DeviceCredentialResult.Unavailable -> newDeviceMaterial() to candidate
+                        DeviceCredentialResult.Corrupted -> {
                             return ClaimPairingAddressResult.CredentialsCorrupted
                         }
-                        DeviceMaterialResult.Unsupported -> {
+                        DeviceCredentialResult.UnsupportedEncryption -> {
                             return ClaimPairingAddressResult.UnsupportedEncryption
                         }
                     }
@@ -412,31 +402,25 @@ internal class DeviceIdentityRepository(
         }
     }
 
-    override suspend fun activeDeviceCredentials(): RelayDeviceCredentialsResult {
+    override suspend fun activeDeviceCredentials(): DeviceCredentialResult<RelayDeviceCredentials>? {
         val identity = dao.getIdentity(DeviceIdentityRole.ACTIVE.storedName)
-            ?: return RelayDeviceCredentialsResult.Missing
+            ?: return null
         return deviceCredentials(identity)
     }
 
-    override suspend fun activeDeviceAuthorization(): RelayDeviceAuthorizationResult {
+    override suspend fun activeDeviceAuthorization(): DeviceCredentialResult<RelayDeviceAuthorization>? {
         val identity = dao.getIdentity(DeviceIdentityRole.ACTIVE.storedName)
-            ?: return RelayDeviceAuthorizationResult.Missing
+            ?: return null
         val deviceToken = when (
             val result = decryptCredential(identity, DeviceCredentialKind.DEVICE_TOKEN)
         ) {
-            is SecretResult.Available -> result.value
-            SecretResult.Unavailable -> return RelayDeviceAuthorizationResult.Unavailable
-            SecretResult.Corrupted, SecretResult.Missing -> {
-                return RelayDeviceAuthorizationResult.Corrupted
-            }
-            SecretResult.Unsupported -> {
-                return RelayDeviceAuthorizationResult.UnsupportedEncryption
-            }
+            is DeviceCredentialResult.Available -> result.value
+            is DeviceCredentialResult.Failure -> return result
         }
         if (deviceToken.size != DEVICE_TOKEN_BYTES) {
-            return RelayDeviceAuthorizationResult.Corrupted
+            return DeviceCredentialResult.Corrupted
         }
-        return RelayDeviceAuthorizationResult.Available(
+        return DeviceCredentialResult.Available(
             RelayDeviceAuthorization(
                 deviceIdentityId = identity.id,
                 deviceId = identity.deviceId,
@@ -447,59 +431,28 @@ internal class DeviceIdentityRepository(
 
     override suspend fun deviceCredentials(
         deviceIdentityId: String,
-    ): RelayDeviceCredentialsResult {
+    ): DeviceCredentialResult<RelayDeviceCredentials>? {
         val identity = dao.getIdentityById(deviceIdentityId)
-            ?: return RelayDeviceCredentialsResult.Missing
+            ?: return null
         return deviceCredentials(identity)
     }
 
     private suspend fun deviceCredentials(
         identity: DeviceIdentityEntity,
-    ): RelayDeviceCredentialsResult {
-        val credentials = dao.getCredentials(identity.id)
-        val privateKey = when (
-            val result = decryptCredential(
-                identity,
-                credentials,
-                DeviceCredentialKind.DEVICE_PRIVATE_KEY,
-            )
-        ) {
-            is SecretResult.Available -> result.value
-            SecretResult.Unavailable -> return RelayDeviceCredentialsResult.CredentialsUnavailable
-            SecretResult.Corrupted, SecretResult.Missing -> {
-                return RelayDeviceCredentialsResult.CredentialsCorrupted
-            }
-            SecretResult.Unsupported -> return RelayDeviceCredentialsResult.UnsupportedEncryption
+    ): DeviceCredentialResult<RelayDeviceCredentials> {
+        val material = when (val result = deviceMaterial(identity)) {
+            is DeviceCredentialResult.Available -> result.value
+            is DeviceCredentialResult.Failure -> return result
         }
-        val deviceToken = when (
-            val result = decryptCredential(
-                identity,
-                credentials,
-                DeviceCredentialKind.DEVICE_TOKEN,
-            )
-        ) {
-            is SecretResult.Available -> result.value
-            SecretResult.Unavailable -> return RelayDeviceCredentialsResult.CredentialsUnavailable
-            SecretResult.Corrupted, SecretResult.Missing -> {
-                return RelayDeviceCredentialsResult.CredentialsCorrupted
-            }
-            SecretResult.Unsupported -> return RelayDeviceCredentialsResult.UnsupportedEncryption
-        }
-        if (
-            privateKey.size != DEVICE_PRIVATE_KEY_BYTES ||
-            deviceToken.size != DEVICE_TOKEN_BYTES
-        ) {
-            return RelayDeviceCredentialsResult.CredentialsCorrupted
-        }
-        return RelayDeviceCredentialsResult.Available(
+        return DeviceCredentialResult.Available(
             RelayDeviceCredentials(
                 deviceIdentityId = identity.id,
                 address = identity.address,
                 addressId = DeviceProtocol.addressId(identity.address),
                 deviceId = identity.deviceId,
-                devicePublicKey = DeviceProtocol.deriveDevicePublicKey(privateKey),
-                devicePrivateKey = privateKey,
-                deviceToken = DeviceProtocol.encodeDeviceToken(deviceToken),
+                devicePublicKey = material.keyPair.publicKey,
+                devicePrivateKey = material.keyPair.privateKey,
+                deviceToken = DeviceProtocol.encodeDeviceToken(material.deviceToken),
                 instructions = identity.instructions,
             ),
         )
@@ -533,7 +486,9 @@ internal class DeviceIdentityRepository(
         deviceToken = DeviceProtocol.generateDeviceToken(),
     )
 
-    private suspend fun deviceMaterial(identity: DeviceIdentityEntity): DeviceMaterialResult {
+    private suspend fun deviceMaterial(
+        identity: DeviceIdentityEntity,
+    ): DeviceCredentialResult<DeviceMaterial> {
         val credentials = dao.getCredentials(identity.id)
         val privateKey = when (
             val result = decryptCredential(
@@ -542,12 +497,8 @@ internal class DeviceIdentityRepository(
                 DeviceCredentialKind.DEVICE_PRIVATE_KEY,
             )
         ) {
-            is SecretResult.Available -> result.value
-            SecretResult.Unavailable -> return DeviceMaterialResult.Unavailable
-            SecretResult.Unsupported -> return DeviceMaterialResult.Unsupported
-            SecretResult.Corrupted, SecretResult.Missing -> {
-                return DeviceMaterialResult.Corrupted
-            }
+            is DeviceCredentialResult.Available -> result.value
+            is DeviceCredentialResult.Failure -> return result
         }
         val deviceToken = when (
             val result = decryptCredential(
@@ -556,20 +507,16 @@ internal class DeviceIdentityRepository(
                 DeviceCredentialKind.DEVICE_TOKEN,
             )
         ) {
-            is SecretResult.Available -> result.value
-            SecretResult.Unavailable -> return DeviceMaterialResult.Unavailable
-            SecretResult.Unsupported -> return DeviceMaterialResult.Unsupported
-            SecretResult.Corrupted, SecretResult.Missing -> {
-                return DeviceMaterialResult.Corrupted
-            }
+            is DeviceCredentialResult.Available -> result.value
+            is DeviceCredentialResult.Failure -> return result
         }
         if (
             privateKey.size != DEVICE_PRIVATE_KEY_BYTES ||
             deviceToken.size != DEVICE_TOKEN_BYTES
         ) {
-            return DeviceMaterialResult.Corrupted
+            return DeviceCredentialResult.Corrupted
         }
-        return DeviceMaterialResult.Available(
+        return DeviceCredentialResult.Available(
             DeviceMaterial(
                 deviceId = identity.deviceId,
                 keyPair = dev.agentknock.protocol.DeviceKeyPair(
@@ -585,7 +532,7 @@ internal class DeviceIdentityRepository(
         identity: DeviceIdentityEntity,
         credentials: List<DeviceCredentialEntity>,
         kind: DeviceCredentialKind,
-    ): SecretResult = decryptCredential(
+    ): DeviceCredentialResult<ByteArray> = decryptCredential(
         identity = identity,
         credential = credentials.singleOrNull { it.kind == kind.storedName },
         kind = kind,
@@ -594,7 +541,7 @@ internal class DeviceIdentityRepository(
     private suspend fun decryptCredential(
         identity: DeviceIdentityEntity,
         kind: DeviceCredentialKind,
-    ): SecretResult = decryptCredential(
+    ): DeviceCredentialResult<ByteArray> = decryptCredential(
         identity = identity,
         credential = dao.getCredential(identity.id, kind.storedName),
         kind = kind,
@@ -604,8 +551,8 @@ internal class DeviceIdentityRepository(
         identity: DeviceIdentityEntity,
         credential: DeviceCredentialEntity?,
         kind: DeviceCredentialKind,
-    ): SecretResult {
-        credential ?: return SecretResult.Missing
+    ): DeviceCredentialResult<ByteArray> {
+        credential ?: return DeviceCredentialResult.Corrupted
         val result = withContext(cryptographyDispatcher) {
             encryption.decrypt(
                 encrypted = credential.encryptedValue,
@@ -613,10 +560,10 @@ internal class DeviceIdentityRepository(
             )
         }
         return when (result) {
-            is DecryptionResult.Plaintext -> SecretResult.Available(result.value)
-            DecryptionResult.KeyUnavailable -> SecretResult.Unavailable
-            DecryptionResult.AuthenticationFailed -> SecretResult.Corrupted
-            DecryptionResult.UnsupportedFormat -> SecretResult.Unsupported
+            is DecryptionResult.Plaintext -> DeviceCredentialResult.Available(result.value)
+            DecryptionResult.KeyUnavailable -> DeviceCredentialResult.Unavailable
+            DecryptionResult.AuthenticationFailed -> DeviceCredentialResult.Corrupted
+            DecryptionResult.UnsupportedFormat -> DeviceCredentialResult.UnsupportedEncryption
         }
     }
 
@@ -641,28 +588,6 @@ internal class DeviceIdentityRepository(
         pairingEnabled = pairingEnabled,
         instructions = instructions,
     )
-
-    private sealed interface SecretResult {
-        data class Available(val value: ByteArray) : SecretResult
-
-        data object Unavailable : SecretResult
-
-        data object Corrupted : SecretResult
-
-        data object Unsupported : SecretResult
-
-        data object Missing : SecretResult
-    }
-
-    private sealed interface DeviceMaterialResult {
-        data class Available(val value: DeviceMaterial) : DeviceMaterialResult
-
-        data object Unavailable : DeviceMaterialResult
-
-        data object Corrupted : DeviceMaterialResult
-
-        data object Unsupported : DeviceMaterialResult
-    }
 
     private companion object {
         const val DEVICE_TOKEN_BYTES = 32

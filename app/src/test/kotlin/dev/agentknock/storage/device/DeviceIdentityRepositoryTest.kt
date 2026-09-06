@@ -275,8 +275,8 @@ class DeviceIdentityRepositoryTest {
         )
         val before = (
             fixture.repository.activeDeviceCredentials() as
-                RelayDeviceCredentialsResult.Available
-            ).credentials
+                DeviceCredentialResult.Available<RelayDeviceCredentials>
+            ).value
 
         assertEquals(
             ClaimPairingAddressResult.Claimed,
@@ -284,8 +284,8 @@ class DeviceIdentityRepositoryTest {
         )
         val after = (
             fixture.repository.activeDeviceCredentials() as
-                RelayDeviceCredentialsResult.Available
-            ).credentials
+                DeviceCredentialResult.Available<RelayDeviceCredentials>
+            ).value
 
         assertEquals(before.deviceIdentityId, after.deviceIdentityId)
         assertEquals(before.deviceId, after.deviceId)
@@ -315,9 +315,9 @@ class DeviceIdentityRepositoryTest {
 
         val authorization = fixture.repository.activeDeviceAuthorization()
 
-        assertTrue(authorization is RelayDeviceAuthorizationResult.Available)
+        assertTrue(authorization is DeviceCredentialResult.Available)
         assertEquals(
-            RelayDeviceCredentialsResult.CredentialsCorrupted,
+            DeviceCredentialResult.Corrupted,
             fixture.repository.activeDeviceCredentials(),
         )
     }

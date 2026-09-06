@@ -195,7 +195,7 @@ internal class RequestConnectionManager(
                     return OneShotSynchronizationResult.Deferred(retryDelayMillis)
                 activeSession != null -> return OneShotSynchronizationResult.Covered
                 else -> {
-                    val session = ActiveSession.OneShot(callerJob)
+                    val session = ActiveSession(callerJob)
                     activeSession = session
                     session
                 }
@@ -214,12 +214,9 @@ internal class RequestConnectionManager(
         }
 
         while (true) {
-            val sessions = sessionLock.withLock {
-                activeSession?.let(::listOf).orEmpty()
-            }
-            if (sessions.isEmpty()) break
-            sessions.forEach { session -> session.ownerJob.cancel() }
-            sessions.forEach { session -> session.released.await() }
+            val session = sessionLock.withLock { activeSession } ?: break
+            session.ownerJob.cancel()
+            session.released.await()
         }
         _syncing.value = false
     }
@@ -241,7 +238,7 @@ internal class RequestConnectionManager(
     }
 
     private suspend fun runOneShot(
-        session: ActiveSession.OneShot,
+        session: ActiveSession,
     ): OneShotSynchronizationResult {
         try {
             _syncing.value = true
@@ -263,13 +260,7 @@ internal class RequestConnectionManager(
             }
             return OneShotSynchronizationResult.Completed(result)
         } finally {
-            withContext(NonCancellable) {
-                sessionLock.withLock {
-                    if (activeSession === session) activeSession = null
-                    if (activeSession == null) _syncing.value = false
-                    session.released.complete(Unit)
-                }
-            }
+            releaseSession(session)
         }
     }
 
@@ -341,13 +332,15 @@ internal class RequestConnectionManager(
                 if (caughtUp) reconnectDelay = reconnectDelayMillis
             }
         } finally {
-            withContext(NonCancellable) {
-                sessionLock.withLock {
-                    if (activeSession === session) activeSession = null
-                    if (activeSession == null) _syncing.value = false
-                    session.released.complete(Unit)
-                }
-            }
+            releaseSession(session)
+        }
+    }
+
+    private suspend fun releaseSession(session: ActiveSession) = withContext(NonCancellable) {
+        sessionLock.withLock {
+            if (activeSession === session) activeSession = null
+            if (activeSession == null) _syncing.value = false
+            session.released.complete(Unit)
         }
     }
 
@@ -389,7 +382,7 @@ internal class RequestConnectionManager(
         return if (delayMillis > Long.MAX_VALUE - now) Long.MAX_VALUE else now + delayMillis
     }
 
-    private suspend fun reserveForegroundSession(): ActiveSession.Foreground? {
+    private suspend fun reserveForegroundSession(): ActiveSession? {
         val foregroundJob = checkNotNull(currentCoroutineContext()[Job])
         while (currentCoroutineContext().isActive && !demand.value.paused) {
             val existingSessionRelease = sessionLock.withLock {
@@ -397,7 +390,7 @@ internal class RequestConnectionManager(
                     return null
                 }
                 activeSession?.released ?: run {
-                    val session = ActiveSession.Foreground(foregroundJob)
+                    val session = ActiveSession(foregroundJob)
                     activeSession = session
                     return session
                 }
@@ -433,19 +426,8 @@ internal class RequestConnectionManager(
         },
     )
 
-    private sealed interface ActiveSession {
-        val ownerJob: Job
-        val released: CompletableDeferred<Unit>
-
-        class Foreground(
-            override val ownerJob: Job,
-            override val released: CompletableDeferred<Unit> = CompletableDeferred(),
-        ) : ActiveSession
-
-        class OneShot(
-            override val ownerJob: Job,
-            override val released: CompletableDeferred<Unit> = CompletableDeferred(),
-        ) : ActiveSession
+    private class ActiveSession(val ownerJob: Job) {
+        val released = CompletableDeferred<Unit>()
     }
 
     private data class ConnectionDemand(

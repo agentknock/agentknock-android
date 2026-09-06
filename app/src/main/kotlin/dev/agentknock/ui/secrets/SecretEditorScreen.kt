@@ -53,7 +53,7 @@ internal fun SecretEditorScreen(
     onEditorChange: (SecretEditorState) -> Unit,
     onDismiss: () -> Unit,
     onPrepareSshKey: () -> Unit,
-    onSave: (name: String, description: String) -> Unit,
+    onSave: () -> Unit,
     snackbar: SnackbarHostState,
 ) {
     val secret = editor.secret
@@ -230,7 +230,7 @@ internal fun SecretEditorScreen(
                             name != name.trim() -> R.string.secret_name_whitespace
                             else -> null
                         }
-                        if (validationError == null) onSave(name, description)
+                        if (validationError == null) onSave()
                     },
                     enabled = enabled && name.isNotBlank() &&
                         editor.environmentVariables

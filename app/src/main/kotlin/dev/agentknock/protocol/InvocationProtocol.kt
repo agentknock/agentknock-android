@@ -96,24 +96,6 @@ internal enum class InvocationDenialReason(val wireName: String) {
     OTHER("OTHER"),
 }
 
-internal sealed interface InvocationCompletion {
-    val clientSoftware: ClientSoftware
-
-    data class Approved(override val clientSoftware: ClientSoftware) : InvocationCompletion
-
-    data class Denied(
-        override val clientSoftware: ClientSoftware,
-        val reason: String,
-        val message: String,
-    ) : InvocationCompletion
-
-    data class Aborted(
-        override val clientSoftware: ClientSoftware,
-        val reason: String,
-        val message: String,
-    ) : InvocationCompletion
-}
-
 internal class InvocationProtocol(
     private val json: Json = Json { ignoreUnknownKeys = true },
 ) {
@@ -190,21 +172,21 @@ internal class InvocationProtocol(
             ),
         ).encodeToByteArray()
 
-    fun decodeCompletion(plaintext: ByteArray): InvocationCompletion {
+    fun decodeCompletion(plaintext: ByteArray): ApprovalCompletion {
         val clientSoftware = json.decodeClientSoftware(plaintext)
         val completion = json.decodeFromString<InvocationCompletionWire>(
             plaintext.decodeToString(),
         )
         return when (completion.result) {
-            RESULT_APPROVED -> InvocationCompletion.Approved(clientSoftware)
-            RESULT_DENIED -> InvocationCompletion.Denied(
+            RESULT_APPROVED -> ApprovalCompletion.Approved(clientSoftware)
+            RESULT_DENIED -> ApprovalCompletion.Denied(
                 clientSoftware = clientSoftware,
                 reason = completion.reason
                     ?: throw SerializationException("Denied completion has no reason"),
                 message = completion.message
                     ?: throw SerializationException("Denied completion has no message"),
             )
-            RESULT_ABORTED -> InvocationCompletion.Aborted(
+            RESULT_ABORTED -> ApprovalCompletion.Aborted(
                 clientSoftware = clientSoftware,
                 reason = completion.reason
                     ?: throw SerializationException("Aborted completion has no reason"),

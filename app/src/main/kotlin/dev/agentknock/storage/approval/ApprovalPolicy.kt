@@ -10,15 +10,6 @@ internal enum class ApprovalAction {
     APPROVE,
 }
 
-internal data class RequestedSecretApproval(
-    val id: String,
-    val name: String,
-    val defaultAction: ApprovalAction,
-    val temporaryAccessEligible: Boolean = false,
-    val temporaryAccessExpiresAt: Long? = null,
-    val revision: Long? = null,
-)
-
 @Serializable
 internal data class SecretApprovalEvaluation(
     val secretId: String,
@@ -58,22 +49,6 @@ internal data class ApprovalEvaluation(
     val secrets: List<SecretApprovalEvaluation>,
     val aiReview: AiReview? = null,
 )
-
-internal object ApprovalPolicyEvaluator {
-    fun evaluate(secrets: List<RequestedSecretApproval>): ApprovalEvaluation {
-        val secretEvaluations = secrets.map { secret ->
-            SecretApprovalEvaluation(
-                secretId = secret.id,
-                secretName = secret.name,
-                action = secret.defaultAction,
-                temporaryAccessEligible = secret.temporaryAccessEligible,
-                temporaryAccessExpiresAt = secret.temporaryAccessExpiresAt,
-                revision = secret.revision,
-            )
-        }
-        return ApprovalEvaluation(secrets = secretEvaluations)
-    }
-}
 
 internal fun ApprovalEvaluation.requiresAiReview(): Boolean =
     secrets.none { it.action == ApprovalAction.DENY } &&

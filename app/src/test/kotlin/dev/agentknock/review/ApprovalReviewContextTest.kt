@@ -431,25 +431,19 @@ class ApprovalReviewContextTest {
                 type = ENVIRONMENT_SECRET_TYPE,
                 environmentVariables = listOf(
                     variable("AWS_ACCESS_KEY_ID", sensitive = true),
-                    variable("AWS_PROFILE", sensitive = false),
-                    variable("AWS_REGION", sensitive = false),
+                    variable(
+                        "AWS_PROFILE", sensitive = false,
+                        destination = EnvironmentVariableReviewDestination.Omitted,
+                    ),
+                    variable(
+                        "AWS_REGION", sensitive = false,
+                        destination = EnvironmentVariableReviewDestination.Environment("AWS_DEFAULT_REGION"),
+                    ),
                     variable("AWS_SECRET_ACCESS_KEY", sensitive = true),
-                    variable("AWS_SESSION_TOKEN", sensitive = true),
-                ),
-                environmentVariableDestinations = linkedMapOf(
-                    "AWS_ACCESS_KEY_ID" to EnvironmentVariableReviewDestination.Environment(
-                        "AWS_ACCESS_KEY_ID",
+                    variable(
+                        "AWS_SESSION_TOKEN", sensitive = true,
+                        destination = EnvironmentVariableReviewDestination.StandardInput,
                     ),
-                    "AWS_PROFILE" to EnvironmentVariableReviewDestination.Omitted,
-                    "AWS_REGION" to EnvironmentVariableReviewDestination.Environment(
-                        "AWS_DEFAULT_REGION",
-                    ),
-                    "AWS_SECRET_ACCESS_KEY" to
-                        EnvironmentVariableReviewDestination.Environment(
-                            "AWS_SECRET_ACCESS_KEY",
-                        ),
-                    "AWS_SESSION_TOKEN" to
-                        EnvironmentVariableReviewDestination.StandardInput,
                 ),
             ),
             SecretReviewMetadata(
@@ -457,11 +451,6 @@ class ApprovalReviewContextTest {
                 name = "database",
                 type = ENVIRONMENT_SECRET_TYPE,
                 environmentVariables = listOf(variable("PGPASSWORD", sensitive = true)),
-                environmentVariableDestinations = mapOf(
-                    "PGPASSWORD" to EnvironmentVariableReviewDestination.Environment(
-                        "PGPASSWORD",
-                    ),
-                ),
             ),
             SecretReviewMetadata(
                 id = "ssh-id",
@@ -474,10 +463,16 @@ class ApprovalReviewContextTest {
         containsSensitiveMaterial = true,
     )
 
-    private fun variable(name: String, sensitive: Boolean) =
+    private fun variable(
+        name: String,
+        sensitive: Boolean,
+        destination: EnvironmentVariableReviewDestination =
+            EnvironmentVariableReviewDestination.Environment(name),
+    ) =
         EnvironmentVariableReviewMetadata(
             name = name,
             sensitive = sensitive,
+            destination = destination,
         )
 
     private fun environmentFact(value: String?) = ApprovalReviewEnvironmentVariableFacts(

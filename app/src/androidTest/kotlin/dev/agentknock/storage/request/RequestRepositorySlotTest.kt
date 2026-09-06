@@ -55,7 +55,7 @@ import dev.agentknock.storage.secret.SshPrivateKey
 import dev.agentknock.storage.secret.TemporaryAccessOperation
 import dev.agentknock.storage.device.RelayDeviceCredentialSource
 import dev.agentknock.storage.device.RelayDeviceCredentials
-import dev.agentknock.storage.device.RelayDeviceCredentialsResult
+import dev.agentknock.storage.device.DeviceCredentialResult
 import dev.agentknock.storage.device.DeviceIdentityEntity
 import dev.agentknock.ui.auth.DeviceAuthenticationResult
 import java.io.ByteArrayOutputStream
@@ -4777,10 +4777,10 @@ private class StaticCredentialSource(
     var credentials: RelayDeviceCredentials,
 ) : RelayDeviceCredentialSource {
     override suspend fun activeDeviceCredentials() =
-        RelayDeviceCredentialsResult.Available(credentials)
+        DeviceCredentialResult.Available(credentials)
 
     override suspend fun deviceCredentials(deviceIdentityId: String) =
-        RelayDeviceCredentialsResult.Available(credentials)
+        DeviceCredentialResult.Available(credentials)
 }
 
 private class QueuedRelayDeviceClient : RelayDeviceClient {

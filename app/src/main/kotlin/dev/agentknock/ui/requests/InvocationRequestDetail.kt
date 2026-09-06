@@ -86,10 +86,7 @@ internal fun InvocationRequestDetail(
         modifier = modifier,
         showBack = showBack,
         scrollResetKey = secretUse.state to secretUse.completionResult,
-        bottomContent = if (
-            secretUse.state == ApprovalRequestState.APPROVAL_PENDING &&
-            request.userDecisionAvailable
-        ) {
+        bottomContent = if (request.state == InboxRequestState.ACTION_REQUIRED) {
             {
                 Surface(
                     color = MaterialTheme.colorScheme.surfaceContainerLow,
@@ -119,8 +116,7 @@ internal fun InvocationRequestDetail(
                 StatusLine(
                     if (aiReviewInFlight) "AI review in progress" else secretUse.statusLabel(),
                     secretUse.isError(),
-                    attention = secretUse.state == ApprovalRequestState.APPROVAL_PENDING &&
-                        request.userDecisionAvailable,
+                    attention = request.state == InboxRequestState.ACTION_REQUIRED,
                     subdued = aiReviewInFlight ||
                         secretUse.decision == ApprovalDecision.DENIED ||
                         secretUse.completionResult == ApprovalCompletionResult.DENIED ||

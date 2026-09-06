@@ -21,6 +21,8 @@ import kotlinx.coroutines.test.resetMain
 import kotlinx.coroutines.test.runTest
 import kotlinx.coroutines.test.setMain
 import org.junit.Assert.assertEquals
+import org.junit.Assert.assertNotNull
+import org.junit.Assert.assertNull
 import org.junit.Test
 
 class AuditViewModelTest {
@@ -71,7 +73,7 @@ class AuditViewModelTest {
             ).also { viewModelToClose = it }
 
             assertEquals(AuditHistoryState.Loading, viewModel.history.value)
-            assertEquals(AuditDetailState.None, viewModel.detail.value)
+            assertNull(viewModel.detail.value)
             assertEquals(0, dao.historyCollectors)
             assertEquals(0, dao.detailCollectors)
 
@@ -92,11 +94,12 @@ class AuditViewModelTest {
 
             viewModel.selectEvent(7)
             assertEquals(7L, viewModel.selectedEventId.value)
-            assertEquals(AuditDetailState.Loading(7), viewModel.detail.value)
+            assertNull(viewModel.detailForSelection())
             assertEquals(1, dao.detailCollectors)
 
-            dao.emitDetail(event)
-            val loadedDetail = viewModel.detail.value as AuditDetailState.Loaded
+            dao.emitDetail(7, event)
+            val loadedDetail = checkNotNull(viewModel.detailForSelection())
+            assertEquals(7L, loadedDetail.eventId)
             assertEquals(7L, loadedDetail.event?.id)
 
             historyCollection.cancelAndJoin()
@@ -107,20 +110,18 @@ class AuditViewModelTest {
             assertEquals(loadedDetail, viewModel.detail.value)
 
             var replayedHistory: AuditHistoryState? = null
-            var replayedDetail: AuditDetailState? = null
+            val replayedDetails = mutableListOf<AuditDetailResult?>()
             val recreatedHistoryCollection = backgroundScope.launch(dispatcher) {
                 viewModel.history.collect { state ->
                     if (replayedHistory == null) replayedHistory = state
                 }
             }
             val recreatedDetailCollection = backgroundScope.launch(dispatcher) {
-                viewModel.detail.collect { state ->
-                    if (replayedDetail == null) replayedDetail = state
-                }
+                viewModel.detail.collect { replayedDetails += it }
             }
 
             assertEquals(loadedHistory, replayedHistory)
-            assertEquals(loadedDetail, replayedDetail)
+            assertEquals(listOf(loadedDetail), replayedDetails)
             assertEquals(7L, viewModel.selectedEventId.value)
             assertEquals(1, dao.historyCollectors)
             assertEquals(1, dao.detailCollectors)
@@ -133,7 +134,7 @@ class AuditViewModelTest {
             advanceTimeBy(5_001)
             runCurrent()
             assertEquals(AuditHistoryState.Loading, viewModel.history.value)
-            assertEquals(AuditDetailState.None, viewModel.detail.value)
+            assertNull(viewModel.detail.value)
             assertEquals(7L, viewModel.selectedEventId.value)
         } finally {
             viewModelToClose?.viewModelScope?.cancel()
@@ -141,20 +142,107 @@ class AuditViewModelTest {
             Dispatchers.resetMain()
         }
     }
+
+    @OptIn(ExperimentalCoroutinesApi::class)
+    @Test
+    fun `selection changes hide the previous result until the selected query finishes`() = runTest {
+        val dispatcher = UnconfinedTestDispatcher(testScheduler)
+        Dispatchers.setMain(dispatcher)
+        val dao = TrackingAuditDao()
+        val viewModel = AuditViewModel(AuditRepository(dao), SavedStateHandle())
+        try {
+            backgroundScope.launch(dispatcher) { viewModel.detail.collect {} }
+            viewModel.selectEvent(7)
+            dao.emitDetail(7, auditEvent(7))
+
+            viewModel.selectEvent(8)
+
+            assertEquals(8L, viewModel.selectedEventId.value)
+            assertEquals(7L, viewModel.detail.value?.eventId)
+            assertNull(viewModel.detailForSelection())
+            assertEquals(setOf(8L), dao.observedEventIds)
+
+            dao.emitDetail(7, auditEvent(7))
+            assertNull(viewModel.detailForSelection())
+
+            dao.emitDetail(8, null)
+            val missing = viewModel.detailForSelection()
+            assertNotNull(missing)
+            assertEquals(8L, missing?.eventId)
+            assertNull(missing?.event)
+
+            viewModel.selectEvent(null)
+            assertNull(viewModel.selectedEventId.value)
+            assertNull(viewModel.detail.value)
+            assertEquals(0, dao.detailCollectors)
+        } finally {
+            viewModel.viewModelScope.cancel()
+            runCurrent()
+            Dispatchers.resetMain()
+        }
+    }
+
+    @OptIn(ExperimentalCoroutinesApi::class)
+    @Test
+    fun `off-screen selection changes cannot display the retained result on resubscribe`() = runTest {
+        val dispatcher = UnconfinedTestDispatcher(testScheduler)
+        Dispatchers.setMain(dispatcher)
+        val dao = TrackingAuditDao()
+        val viewModel = AuditViewModel(AuditRepository(dao), SavedStateHandle())
+        try {
+            val originalCollection = backgroundScope.launch(dispatcher) {
+                viewModel.detail.collect {}
+            }
+            viewModel.selectEvent(7)
+            dao.emitDetail(7, auditEvent(7))
+            originalCollection.cancelAndJoin()
+
+            viewModel.selectEvent(8)
+            assertEquals(7L, viewModel.detail.value?.eventId)
+            assertNull(viewModel.detailForSelection())
+            assertEquals(0, dao.detailCollectors)
+
+            val displayed = mutableListOf<AuditDetailResult?>()
+            val resumedCollection = backgroundScope.launch(dispatcher) {
+                viewModel.detail.collect { displayed += viewModel.detailForSelection() }
+            }
+            assertEquals(listOf<AuditDetailResult?>(null), displayed)
+            assertEquals(setOf(8L), dao.observedEventIds)
+
+            dao.emitDetail(8, auditEvent(8))
+            assertEquals(8L, displayed.last()?.eventId)
+            assertEquals(8L, displayed.last()?.event?.id)
+
+            resumedCollection.cancelAndJoin()
+            viewModel.selectEvent(null)
+            assertNull(viewModel.detailForSelection())
+            backgroundScope.launch(dispatcher) { viewModel.detail.collect {} }
+            assertNull(viewModel.detail.value)
+            assertEquals(0, dao.detailCollectors)
+        } finally {
+            viewModel.viewModelScope.cancel()
+            runCurrent()
+            Dispatchers.resetMain()
+        }
+    }
 }
+
+private fun AuditViewModel.detailForSelection(): AuditDetailResult? =
+    detail.value?.takeIf { it.eventId == selectedEventId.value }
 
 private class TrackingAuditDao : AuditDao {
     private val history = MutableSharedFlow<List<AuditEventEntity>>()
-    private val detail = MutableSharedFlow<AuditEventEntity?>()
+    private val details = mutableMapOf<Long, MutableSharedFlow<AuditEventEntity?>>()
     var historyCollectors = 0
     var detailCollectors = 0
+    val observedEventIds = mutableSetOf<Long>()
 
     suspend fun emitHistory(events: List<AuditEventEntity>) {
         history.emit(events)
     }
 
-    suspend fun emitDetail(event: AuditEventEntity?) {
-        detail.emit(event)
+    suspend fun emitDetail(eventId: Long, event: AuditEventEntity?) {
+        details.getOrPut(eventId) { MutableSharedFlow() }.emit(event)
     }
 
     override fun observeEvents(): Flow<List<AuditEventEntity>> = flow {
@@ -168,10 +256,12 @@ private class TrackingAuditDao : AuditDao {
 
     override fun observeEvent(id: Long): Flow<AuditEventEntity?> = flow {
         detailCollectors++
+        observedEventIds += id
         try {
-            emitAll(detail)
+            emitAll(details.getOrPut(id) { MutableSharedFlow() })
         } finally {
             detailCollectors--
+            observedEventIds -= id
         }
     }
 

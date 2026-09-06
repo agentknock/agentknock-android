@@ -5,7 +5,7 @@ import dev.agentknock.relay.RelaySubscriptionClient
 import dev.agentknock.relay.RelaySubscriptionResult
 import dev.agentknock.relay.RelaySubscriptionStatus
 import dev.agentknock.storage.device.RelayDeviceAuthorization
-import dev.agentknock.storage.device.RelayDeviceAuthorizationResult
+import dev.agentknock.storage.device.DeviceCredentialResult
 import dev.agentknock.storage.device.RelayDeviceAuthorizationSource
 import kotlinx.coroutines.test.runTest
 import org.junit.Assert.assertEquals
@@ -60,7 +60,7 @@ class SubscriptionRepositoryTest {
             statusResult = RelayEndpointResult.Success(RelaySubscriptionStatus(active = true)),
         )
         val repository = SubscriptionRepository(
-            RelayDeviceAuthorizationSource { RelayDeviceAuthorizationResult.Available(authorization) },
+            RelayDeviceAuthorizationSource { DeviceCredentialResult.Available(authorization) },
             relay,
         )
         repository.status()
@@ -113,7 +113,7 @@ class SubscriptionRepositoryTest {
     fun `does not contact relay without an active device`() = runTest {
         val relay = FakeRelay()
         val authorization = RelayDeviceAuthorizationSource {
-            RelayDeviceAuthorizationResult.Missing
+            null
         }
         val repository = SubscriptionRepository(authorization, relay)
 
@@ -122,7 +122,7 @@ class SubscriptionRepositoryTest {
     }
 
     private val availableAuthorization = RelayDeviceAuthorizationSource {
-        RelayDeviceAuthorizationResult.Available(
+        DeviceCredentialResult.Available(
             RelayDeviceAuthorization(
                 deviceIdentityId = "identity",
                 deviceId = DEVICE_ID,

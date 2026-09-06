@@ -36,7 +36,7 @@ import dev.agentknock.storage.crypto.VaultKeyPurpose
 import dev.agentknock.storage.device.DeviceIdentityEntity
 import dev.agentknock.storage.device.RelayDeviceCredentialSource
 import dev.agentknock.storage.device.RelayDeviceCredentials
-import dev.agentknock.storage.device.RelayDeviceCredentialsResult
+import dev.agentknock.storage.device.DeviceCredentialResult
 import dev.agentknock.storage.secret.CreateSecretResult
 import dev.agentknock.storage.secret.SaveSecretResult
 import dev.agentknock.storage.secret.SecretApprovalMode
@@ -809,30 +809,37 @@ class SshAuthenticationRequestsTest {
         assertEquals(eventCount, audit.observeEvents().first().size)
 
         val parentDetails = Json.encodeToString(description.secrets)
-        assertEquals(
-            RequestDecisionResult.ApprovalChanged,
-            requests(audit).approve(
-                requestId,
-                allowTemporaryAccess = true,
-                sealResponse = { _, _ ->
-                    assertEquals(
-                        1,
-                        database.requestDao().updateSecretUseRequestRow(parentInvocation("[]")),
-                    )
-                    Json.parseToJsonElement(RESPONSE_JSON)
+        for (allowTemporaryAccess in listOf(false, true)) {
+            assertEquals(
+                if (allowTemporaryAccess) {
+                    RequestDecisionResult.ApprovalChanged
+                } else {
+                    RequestDecisionResult.ParentUnavailable
                 },
-            ),
-        )
-        assertNull(database.requestDao().getSshAuthenticationRequest(requestId)?.decision)
-        assertTrue(
-            database.requestDao().getSshAuthenticationRequest(requestId)?.message
-                .contentEquals(message),
-        )
-        assertTrue(secrets.observeTemporaryAccessGrants().first().isEmpty())
-        assertEquals(
-            1,
-            database.requestDao().updateSecretUseRequestRow(parentInvocation(parentDetails)),
-        )
+                requests(audit).approve(
+                    requestId,
+                    allowTemporaryAccess,
+                    sealResponse = { _, _ ->
+                        assertEquals(
+                            1,
+                            database.requestDao().updateSecretUseRequestRow(parentInvocation("[]")),
+                        )
+                        Json.parseToJsonElement(RESPONSE_JSON)
+                    },
+                ),
+            )
+            assertNull(database.requestDao().getSshAuthenticationRequest(requestId)?.decision)
+            assertTrue(
+                database.requestDao().getSshAuthenticationRequest(requestId)?.message
+                    .contentEquals(message),
+            )
+            assertTrue(secrets.observeTemporaryAccessGrants().first().isEmpty())
+            assertEquals(eventCount, audit.observeEvents().first().size)
+            assertEquals(
+                1,
+                database.requestDao().updateSecretUseRequestRow(parentInvocation(parentDetails)),
+            )
+        }
 
         assertEquals(
             RequestDecisionResult.Decided,
@@ -1087,9 +1094,7 @@ class SshAuthenticationRequestsTest {
             TemporaryAccessOperation.SSH_AUTHENTICATE,
         ).single()
         return Json.encodeToString(
-            dev.agentknock.storage.approval.ApprovalPolicyEvaluator.evaluate(
-                listOf(policy.toRequestedSecretApproval()),
-            ),
+            dev.agentknock.storage.approval.ApprovalEvaluation(listOf(policy.evaluate())),
         )
     }
 
@@ -1384,12 +1389,12 @@ class SshAuthenticationRequestsTest {
     }
 
     private object UnavailableCredentialSource : RelayDeviceCredentialSource {
-        override suspend fun activeDeviceCredentials(): RelayDeviceCredentialsResult =
-            RelayDeviceCredentialsResult.Missing
+        override suspend fun activeDeviceCredentials(): DeviceCredentialResult<RelayDeviceCredentials>? =
+            null
 
         override suspend fun deviceCredentials(
             deviceIdentityId: String,
-        ): RelayDeviceCredentialsResult = RelayDeviceCredentialsResult.Missing
+        ): DeviceCredentialResult<RelayDeviceCredentials>? = null
     }
 
     private object FailingApprovalReviewer : RelayApprovalReviewClient {
@@ -1403,15 +1408,15 @@ class SshAuthenticationRequestsTest {
     private class StaticCredentialSource(
         private val credentials: RelayDeviceCredentials,
     ) : RelayDeviceCredentialSource {
-        override suspend fun activeDeviceCredentials(): RelayDeviceCredentialsResult =
-            RelayDeviceCredentialsResult.Available(credentials)
+        override suspend fun activeDeviceCredentials(): DeviceCredentialResult<RelayDeviceCredentials>? =
+            DeviceCredentialResult.Available(credentials)
 
         override suspend fun deviceCredentials(
             deviceIdentityId: String,
-        ): RelayDeviceCredentialsResult = if (deviceIdentityId == credentials.deviceIdentityId) {
-            RelayDeviceCredentialsResult.Available(credentials)
+        ): DeviceCredentialResult<RelayDeviceCredentials>? = if (deviceIdentityId == credentials.deviceIdentityId) {
+            DeviceCredentialResult.Available(credentials)
         } else {
-            RelayDeviceCredentialsResult.Missing
+            null
         }
     }
 

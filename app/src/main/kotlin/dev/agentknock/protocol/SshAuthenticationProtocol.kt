@@ -37,25 +37,6 @@ internal enum class SshSignatureAlgorithm(val wireName: String) {
     RSA_SHA512("rsa-sha2-512"),
 }
 
-internal sealed interface SshAuthenticationCompletion {
-    val clientSoftware: ClientSoftware
-
-    data class Approved(override val clientSoftware: ClientSoftware) :
-        SshAuthenticationCompletion
-
-    data class Denied(
-        override val clientSoftware: ClientSoftware,
-        val reason: String,
-        val message: String,
-    ) : SshAuthenticationCompletion
-
-    data class Aborted(
-        override val clientSoftware: ClientSoftware,
-        val reason: String,
-        val message: String,
-    ) : SshAuthenticationCompletion
-}
-
 internal class SshAuthenticationProtocol(
     private val json: Json = Json { ignoreUnknownKeys = true },
 ) {
@@ -151,7 +132,7 @@ internal class SshAuthenticationProtocol(
             ),
         ).encodeToByteArray()
 
-    fun decodeCompletion(plaintext: ByteArray): SshAuthenticationCompletion {
+    fun decodeCompletion(plaintext: ByteArray): ApprovalCompletion {
         val clientSoftware = json.decodeClientSoftware(plaintext)
         val completion = json.decodeFromString<SshAuthenticationResultWire>(
             plaintext.decodeToString(),
@@ -163,16 +144,16 @@ internal class SshAuthenticationProtocol(
                         "Approved SSH authentication completion contains a signature",
                     )
                 }
-                SshAuthenticationCompletion.Approved(clientSoftware)
+                ApprovalCompletion.Approved(clientSoftware)
             }
-            RESULT_DENIED -> SshAuthenticationCompletion.Denied(
+            RESULT_DENIED -> ApprovalCompletion.Denied(
                 clientSoftware = clientSoftware,
                 reason = completion.reason
                     ?: throw SerializationException("Denied completion has no reason"),
                 message = completion.message
                     ?: throw SerializationException("Denied completion has no message"),
             )
-            RESULT_ABORTED -> SshAuthenticationCompletion.Aborted(
+            RESULT_ABORTED -> ApprovalCompletion.Aborted(
                 clientSoftware = clientSoftware,
                 reason = completion.reason
                     ?: throw SerializationException("Aborted completion has no reason"),

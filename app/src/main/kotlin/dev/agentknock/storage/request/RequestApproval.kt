@@ -1,5 +1,6 @@
 package dev.agentknock.storage.request
 
+import dev.agentknock.protocol.ApprovalCompletion
 import dev.agentknock.protocol.InvocationRequestMessage
 import dev.agentknock.protocol.InvocationResponseSecret
 import dev.agentknock.relay.RelayApprovalReviewClient
@@ -11,7 +12,7 @@ import dev.agentknock.storage.approval.AiReview
 import dev.agentknock.storage.approval.AiReviewDecision
 import dev.agentknock.storage.approval.AiReviewFailure
 import dev.agentknock.storage.approval.ApprovalEvaluation
-import dev.agentknock.storage.approval.RequestedSecretApproval
+import dev.agentknock.storage.approval.SecretApprovalEvaluation
 import dev.agentknock.storage.audit.AuditDecisionSource
 import dev.agentknock.storage.audit.AuditOutcome
 import dev.agentknock.storage.audit.auditDataOf
@@ -20,12 +21,12 @@ import dev.agentknock.storage.secret.EnvironmentVariableSelection
 import dev.agentknock.storage.secret.RequestedSecretDescription
 import dev.agentknock.storage.secret.SecretApprovalMode
 import dev.agentknock.storage.secret.SecretApprovalPolicy
+import dev.agentknock.storage.secret.SecretValues
 import dev.agentknock.subscription.AiReviewAccess
 import dev.agentknock.subscription.SubscriptionRepository
-import dev.agentknock.storage.secret.SecretValues
 import java.security.MessageDigest
 import kotlinx.serialization.decodeFromString
-import kotlinx.serialization.encodeToString
+import kotlinx.serialization.json.encodeToJsonElement
 
 internal const val DECISION_SOURCE_USER = "user"
 internal const val DECISION_SOURCE_POLICY = "policy"
@@ -35,6 +36,13 @@ internal const val DECISION_SOURCE_TEMPORARY_ACCESS = "temporary_access"
 internal const val DECISION_SOURCE_MIXED = "mixed"
 internal const val DECISION_SOURCE_VALIDATION = "validation"
 internal const val TEMPORARY_ACCESS_DURATION_MILLIS = 4 * 60 * 60 * 1_000L
+
+internal val ApprovalCompletion.storedResult: String
+    get() = when (this) {
+        is ApprovalCompletion.Approved -> ApprovalCompletionResult.APPROVED
+        is ApprovalCompletion.Denied -> ApprovalCompletionResult.DENIED
+        is ApprovalCompletion.Aborted -> ApprovalCompletionResult.ABORTED
+    }.storedName
 
 internal data class AiReviewAttempt(
     val review: AiReview,
@@ -67,14 +75,14 @@ internal fun SecretValues.toResponseSecret(): InvocationResponseSecret = when (t
     is SecretValues.Ssh -> InvocationResponseSecret.Ssh(description, publicKey)
 }
 
-internal fun SecretApprovalPolicy.toRequestedSecretApproval(): RequestedSecretApproval {
+internal fun SecretApprovalPolicy.evaluate(): SecretApprovalEvaluation {
     val activeTemporaryAccess = temporaryAccessExpiresAt?.takeIf {
         mode == SecretApprovalMode.ASK_ME || mode == SecretApprovalMode.ASK_AI
     }
-    return RequestedSecretApproval(
-        id = secretId,
-        name = secretName,
-        defaultAction = when {
+    return SecretApprovalEvaluation(
+        secretId = secretId,
+        secretName = secretName,
+        action = when {
             activeTemporaryAccess != null -> ApprovalAction.APPROVE
             mode == SecretApprovalMode.DENY -> ApprovalAction.DENY
             mode == SecretApprovalMode.ASK_ME -> ApprovalAction.ASK_ME
@@ -210,9 +218,7 @@ internal fun AiReview.auditData() = auditDataOf(
 
 internal fun AiReviewAttempt.auditRequestData() = auditDataOf(
     "ai_review_request" to request?.let {
-        storedJson.parseToJsonElement(
-            storedJson.encodeToString(ApprovalReviewRequest.serializer(), it),
-        )
+        storedJson.encodeToJsonElement(it)
     },
 )
 

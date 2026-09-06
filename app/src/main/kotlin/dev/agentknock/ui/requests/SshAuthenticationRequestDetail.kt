@@ -51,6 +51,7 @@ internal fun SshAuthenticationRequestDetail(
     modifier: Modifier,
 ) {
     val authentication = (request.content as InboxRequestContent.SshAuthentication).details
+    val actionRequired = request.state == InboxRequestState.ACTION_REQUIRED
     val pending = authentication.state == ApprovalRequestState.APPROVAL_PENDING
     val aiReviewRequested = authentication.approvalEvaluation?.secrets
         ?.any { it.action == ApprovalAction.ASK_AI } == true
@@ -65,7 +66,7 @@ internal fun SshAuthenticationRequestDetail(
         modifier = modifier,
         showBack = showBack,
         scrollResetKey = authentication.state to authentication.completionResult,
-        bottomContent = if (pending && request.userDecisionAvailable) {
+        bottomContent = if (actionRequired) {
             {
                 Surface(
                     color = MaterialTheme.colorScheme.surfaceContainerLow,
@@ -98,7 +99,7 @@ internal fun SshAuthenticationRequestDetail(
                 },
                 error = authentication.state ==
                     ApprovalRequestState.VERIFICATION_FAILED,
-                attention = pending && request.userDecisionAvailable,
+                attention = actionRequired,
                 subdued = aiReviewInFlight ||
                     authentication.decision == ApprovalDecision.DENIED ||
                     authentication.completionResult ==

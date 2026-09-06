@@ -18,7 +18,7 @@ import dev.agentknock.storage.secret.EnvironmentVariableMetadata
 
 private data class PendingVariableDeletion(
     val variable: EnvironmentVariableMetadata,
-    val editor: SecretsEditor.Variable,
+    val editor: SecretsEditor.Active,
 )
 
 @Composable
@@ -27,46 +27,35 @@ internal fun SecretsEditorHost(
     viewModel: SecretsViewModel,
     snackbar: SnackbarHostState,
 ) {
-    val editorSession = when (editor) {
-        SecretsEditor.None -> null
-        is SecretsEditor.Secret -> editor.session
-        is SecretsEditor.SshKey -> editor.session
-        is SecretsEditor.Variable -> editor.session
-    }
-    var variablePendingDeletion by remember(editorSession) {
+    val activeEditor = editor as? SecretsEditor.Active ?: return
+    var variablePendingDeletion by remember(activeEditor.session) {
         mutableStateOf<PendingVariableDeletion?>(null)
     }
 
-    when (val activeEditor = editor) {
-        SecretsEditor.None -> Unit
-        is SecretsEditor.Secret -> {
-            val editorState = activeEditor.state
+    when (val editorState = activeEditor.draft) {
+        is SecretEditorState -> {
             SecretEditorScreen(
                 editor = editorState,
                 enabled = activeEditor.phase == EditorPhase.EDITING,
                 onEditorChange = { viewModel.updateSecretEditor(activeEditor.session, it) },
                 onDismiss = { viewModel.closeEditor(activeEditor.session) },
-                onPrepareSshKey = viewModel::prepareSecretSshKey,
-                onSave = { name, description ->
-                    viewModel.saveSecretEditor(activeEditor, name, description)
-                },
+                onPrepareSshKey = { viewModel.prepareSshKey(activeEditor) },
+                onSave = { viewModel.saveSecretEditor(activeEditor) },
                 snackbar = snackbar,
             )
         }
-        is SecretsEditor.SshKey -> {
-            val editorState = activeEditor.state
+        is SshKeyEditorState -> {
             SshKeyEditorScreen(
                 editor = editorState,
                 enabled = activeEditor.phase == EditorPhase.EDITING,
                 onEditorChange = { viewModel.updateSshKeyEditor(activeEditor.session, it) },
                 onDismiss = { viewModel.closeEditor(activeEditor.session) },
-                onPrepare = viewModel::prepareReplacementSshKey,
+                onPrepare = { viewModel.prepareSshKey(activeEditor) },
                 onReplace = { viewModel.replaceSshKey(activeEditor) },
                 snackbar = snackbar,
             )
         }
-        is SecretsEditor.Variable -> {
-            val editorState = activeEditor.state
+        is VariableEditorState -> {
             val variable = editorState.variable
             EnvironmentVariableEditorScreen(
                 editor = editorState,
@@ -76,15 +65,7 @@ internal fun SecretsEditorHost(
                 onDelete = variable?.let {
                     { variablePendingDeletion = PendingVariableDeletion(it, activeEditor) }
                 },
-                onSave = { name, value, sensitive, replaceValue ->
-                    viewModel.saveVariableEditor(
-                        expected = activeEditor,
-                        name = name,
-                        value = value,
-                        sensitive = sensitive,
-                        replaceValue = replaceValue,
-                    )
-                },
+                onSave = { viewModel.saveVariableEditor(activeEditor) },
                 snackbar = snackbar,
             )
         }

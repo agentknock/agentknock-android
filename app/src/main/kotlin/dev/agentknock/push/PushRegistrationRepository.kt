@@ -5,7 +5,7 @@ import dev.agentknock.relay.RelayPushRegistrationClient
 import dev.agentknock.relay.RelayPushRegistrationResult
 import dev.agentknock.relay.RelayPushRegistrationState
 import dev.agentknock.relay.isTransientRelayStatus
-import dev.agentknock.storage.device.RelayDeviceAuthorizationResult
+import dev.agentknock.storage.device.DeviceCredentialResult
 import dev.agentknock.storage.device.RelayDeviceAuthorizationSource
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.StateFlow
@@ -53,15 +53,15 @@ internal class PushRegistrationRepository(
 
     suspend fun register(firebaseInstallationId: String): PushRegistrationResult {
         val authorization = when (val result = deviceAuthorization.activeDeviceAuthorization()) {
-            is RelayDeviceAuthorizationResult.Available -> result.authorization
-            RelayDeviceAuthorizationResult.Missing -> return PushRegistrationResult.NoDevice
-            RelayDeviceAuthorizationResult.Unavailable -> {
+            is DeviceCredentialResult.Available -> result.value
+            null -> return PushRegistrationResult.NoDevice
+            DeviceCredentialResult.Unavailable -> {
                 return PushRegistrationResult.DeviceCredentialsUnavailable
             }
-            RelayDeviceAuthorizationResult.Corrupted -> {
+            DeviceCredentialResult.Corrupted -> {
                 return PushRegistrationResult.DeviceCredentialsCorrupted
             }
-            RelayDeviceAuthorizationResult.UnsupportedEncryption -> {
+            DeviceCredentialResult.UnsupportedEncryption -> {
                 return PushRegistrationResult.UnsupportedDeviceCredentialEncryption
             }
         }

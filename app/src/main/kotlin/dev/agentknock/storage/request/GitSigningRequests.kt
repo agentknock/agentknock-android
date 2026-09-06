@@ -1,7 +1,7 @@
 package dev.agentknock.storage.request
 
 import dev.agentknock.protocol.ClientSoftware
-import dev.agentknock.protocol.GitSignCompletion
+import dev.agentknock.protocol.ApprovalCompletion
 import dev.agentknock.protocol.GitSignProtocol
 import dev.agentknock.protocol.GitSignRequestMessage
 import dev.agentknock.protocol.InvocationDenialReason
@@ -14,7 +14,6 @@ import dev.agentknock.storage.approval.ApprovalAction
 import dev.agentknock.storage.approval.AiReview
 import dev.agentknock.storage.approval.AiReviewDecision
 import dev.agentknock.storage.approval.ApprovalEvaluation
-import dev.agentknock.storage.approval.ApprovalPolicyEvaluator
 import dev.agentknock.storage.approval.isFullyApproved
 import dev.agentknock.storage.approval.requiresAiReview
 import dev.agentknock.storage.audit.AuditDecisionSource
@@ -25,8 +24,8 @@ import dev.agentknock.storage.audit.AuditSink
 import dev.agentknock.storage.audit.auditDataOf
 import dev.agentknock.storage.device.RelayDeviceCredentialSource
 import dev.agentknock.storage.device.RelayDeviceCredentials
-import dev.agentknock.storage.device.RelayDeviceCredentialsResult
-import dev.agentknock.storage.secret.GitSignatureResult
+import dev.agentknock.storage.device.DeviceCredentialResult
+import dev.agentknock.storage.secret.SignatureResult
 import dev.agentknock.storage.secret.SSH_SECRET_TYPE
 import dev.agentknock.storage.secret.SecretApprovalPolicy
 import dev.agentknock.storage.secret.SecretMetadata
@@ -37,6 +36,7 @@ import kotlinx.coroutines.NonCancellable
 import kotlinx.coroutines.withContext
 import kotlinx.serialization.decodeFromString
 import kotlinx.serialization.encodeToString
+import kotlinx.serialization.json.encodeToJsonElement
 import kotlinx.serialization.json.Json
 import kotlinx.serialization.json.JsonElement
 
@@ -130,9 +130,7 @@ internal class GitSigningRequests(
             null
         }
         val initialEvaluation = if (denial == null) {
-            ApprovalPolicyEvaluator.evaluate(
-                listOf(checkNotNull(policy).toRequestedSecretApproval()),
-            )
+            ApprovalEvaluation(listOf(checkNotNull(policy).evaluate()))
         } else {
             null
         }
@@ -197,9 +195,7 @@ internal class GitSigningRequests(
             }
             val currentEvaluation = if (needsAiReview) {
                 currentPolicies.singleOrNull()?.let { currentPolicy ->
-                    ApprovalPolicyEvaluator.evaluate(
-                        listOf(currentPolicy.toRequestedSecretApproval()),
-                    )
+                    ApprovalEvaluation(listOf(currentPolicy.evaluate()))
                 }
             } else {
                 initialEvaluation
@@ -275,19 +271,19 @@ internal class GitSigningRequests(
                         message = contents.message,
                     )
                 ) {
-                    is GitSignatureResult.Signed -> signature = result.signature
-                    GitSignatureResult.NotFound,
-                    GitSignatureResult.WrongType,
-                    GitSignatureResult.KeyChanged,
+                    is SignatureResult.Signed -> signature = result.signature
+                    SignatureResult.NotFound,
+                    SignatureResult.WrongType,
+                    SignatureResult.KeyChanged,
                     -> denial = InvocationDenialReason.INVALID_REQUEST to
                         "The SSH key changed after the invocation began."
-                    GitSignatureResult.SecretUnavailable ->
+                    SignatureResult.SecretUnavailable ->
                         denial = InvocationDenialReason.OTHER to
                             "The SSH private key is unavailable on this device."
-                    GitSignatureResult.SecretCorrupted ->
+                    SignatureResult.SecretCorrupted ->
                         denial = InvocationDenialReason.OTHER to
                             "The SSH private key could not be authenticated."
-                    GitSignatureResult.UnsupportedEncryption ->
+                    SignatureResult.UnsupportedEncryption ->
                         denial = InvocationDenialReason.OTHER to
                             "The SSH private key uses an unsupported encryption format."
                 }
@@ -477,10 +473,8 @@ internal class GitSigningRequests(
             listOf(gitSign.secretName),
             request.clientId,
             TemporaryAccessOperation.GIT_SIGN,
-        ).singleOrNull() ?: return rejectChangedSecret(request, sealResponse)
-        val currentEvaluation = ApprovalPolicyEvaluator.evaluate(
-            listOf(policy.toRequestedSecretApproval()),
-        )
+        ).singleOrNull() ?: return rejectChangedSecret(request, gitSign, sealResponse)
+        val currentEvaluation = ApprovalEvaluation(listOf(policy.evaluate()))
         val authorization = description.authorizationCommitment(listOf(policy))
         if (currentEvaluation.secrets.single().action == ApprovalAction.DENY) {
             val response = sealResponse(
@@ -492,6 +486,7 @@ internal class GitSigningRequests(
             ) ?: return RequestDecisionResult.ClientUnavailable
             return persistDecision(
                 request = request,
+                gitSign = gitSign,
                 decision = ApprovalDecision.DENIED,
                 response = response,
                 decisionSource = DECISION_SOURCE_POLICY,
@@ -526,14 +521,14 @@ internal class GitSigningRequests(
                 message = gitSign.message,
             )
         ) {
-            is GitSignatureResult.Signed -> result.signature
-            GitSignatureResult.NotFound,
-            GitSignatureResult.WrongType,
-            GitSignatureResult.KeyChanged,
-            -> return rejectChangedSecret(request, sealResponse)
-            GitSignatureResult.SecretUnavailable -> return RequestDecisionResult.SecretUnavailable
-            GitSignatureResult.SecretCorrupted -> return RequestDecisionResult.SecretCorrupted
-            GitSignatureResult.UnsupportedEncryption -> {
+            is SignatureResult.Signed -> result.signature
+            SignatureResult.NotFound,
+            SignatureResult.WrongType,
+            SignatureResult.KeyChanged,
+            -> return rejectChangedSecret(request, gitSign, sealResponse)
+            SignatureResult.SecretUnavailable -> return RequestDecisionResult.SecretUnavailable
+            SignatureResult.SecretCorrupted -> return RequestDecisionResult.SecretCorrupted
+            SignatureResult.UnsupportedEncryption -> {
                 return RequestDecisionResult.UnsupportedEncryption
             }
         }
@@ -551,21 +546,20 @@ internal class GitSigningRequests(
             request,
             gitSignProtocol.approvedResponse(signature),
         ) ?: return RequestDecisionResult.ClientUnavailable
-        return if (grant == null) {
-            persistDecision(
-                request = request,
-                decision = ApprovalDecision.APPROVED,
-                response = response,
-                decisionSource = DECISION_SOURCE_USER,
-                authorization = authorization,
-            )
-        } else {
-            persistTemporaryDecision(request, gitSign, response, authorization, grant)
-        }
+        return persistDecision(
+            request = request,
+            gitSign = gitSign,
+            decision = ApprovalDecision.APPROVED,
+            response = response,
+            decisionSource = DECISION_SOURCE_USER,
+            authorization = authorization,
+            grant = grant,
+        )
     }
 
     private suspend fun rejectChangedSecret(
         request: InboxRequestEntity,
+        gitSign: GitSignRequestEntity,
         sealResponse: suspend (InboxRequestEntity, ByteArray) -> JsonElement?,
     ): RequestDecisionResult {
         val response = sealResponse(
@@ -577,6 +571,7 @@ internal class GitSigningRequests(
         ) ?: return RequestDecisionResult.ClientUnavailable
         return persistDecision(
             request = request,
+            gitSign = gitSign,
             decision = ApprovalDecision.DENIED,
             response = response,
             decisionSource = DECISION_SOURCE_VALIDATION,
@@ -609,6 +604,7 @@ internal class GitSigningRequests(
         ) ?: return RequestDecisionResult.ClientUnavailable
         return persistDecision(
             request = request,
+            gitSign = gitSign,
             decision = ApprovalDecision.DENIED,
             response = response,
             decisionSource = DECISION_SOURCE_USER,
@@ -817,10 +813,10 @@ internal class GitSigningRequests(
             val softwareMatches = completionResult?.clientSoftware ==
                 currentRequest.clientSoftwareJson?.let(::decodeStoredClientSoftware)
             val valid = priorError == null && softwareMatches && when (completionResult) {
-                is GitSignCompletion.Approved -> {
+                is ApprovalCompletion.Approved -> {
                     gitSign.decision == ApprovalDecision.APPROVED.storedName
                 }
-                is GitSignCompletion.Denied -> {
+                is ApprovalCompletion.Denied -> {
                     gitSign.decision == ApprovalDecision.DENIED.storedName &&
                         completionResult.reason == (
                             gitSign.completionReason ?:
@@ -829,7 +825,7 @@ internal class GitSigningRequests(
                             gitSign.completionMessage ?: GIT_SIGN_DENIAL_MESSAGE
                         )
                 }
-                is GitSignCompletion.Aborted -> true
+                is ApprovalCompletion.Aborted -> true
                 null -> false
             }
             val error = priorError ?: if (valid) {
@@ -852,28 +848,16 @@ internal class GitSigningRequests(
                     exchangeEndedAt = now,
                 ),
                 gitSignRequest = gitSign.copy(
-                    completionResult = when {
-                        !valid -> null
-                        completionResult is GitSignCompletion.Approved -> {
-                            ApprovalCompletionResult.APPROVED.storedName
-                        }
-                        completionResult is GitSignCompletion.Denied -> {
-                            ApprovalCompletionResult.DENIED.storedName
-                        }
-                        completionResult is GitSignCompletion.Aborted -> {
-                            ApprovalCompletionResult.ABORTED.storedName
-                        }
-                        else -> null
-                    },
+                    completionResult = if (valid) completionResult?.storedResult else null,
                     completionReason = if (
-                        valid && completionResult is GitSignCompletion.Denied
+                        valid && completionResult is ApprovalCompletion.Denied
                     ) {
                         gitSign.completionReason ?: InvocationDenialReason.USER_DENIED.wireName
                     } else {
                         null
                     },
                     completionMessage = if (
-                        valid && completionResult is GitSignCompletion.Denied
+                        valid && completionResult is ApprovalCompletion.Denied
                     ) {
                         gitSign.completionMessage ?: GIT_SIGN_DENIAL_MESSAGE
                     } else {
@@ -887,19 +871,19 @@ internal class GitSigningRequests(
                         type = AuditEventType.GIT_SIGN_COMPLETED,
                         outcome = when {
                             !valid -> AuditOutcome.FAILED
-                            completionResult is GitSignCompletion.Approved -> {
+                            completionResult is ApprovalCompletion.Approved -> {
                                 AuditOutcome.COMPLETED
                             }
-                            completionResult is GitSignCompletion.Denied -> AuditOutcome.DENIED
+                            completionResult is ApprovalCompletion.Denied -> AuditOutcome.DENIED
                             else -> AuditOutcome.ABORTED
                         },
                         subject = gitSign.secretName,
                         detail = when {
                             !valid -> GIT_SIGN_COMPLETION_VERIFICATION_ERROR
-                            completionResult is GitSignCompletion.Denied -> {
+                            completionResult is ApprovalCompletion.Denied -> {
                                 gitSign.completionMessage ?: GIT_SIGN_DENIAL_MESSAGE
                             }
-                            completionResult is GitSignCompletion.Aborted -> {
+                            completionResult is ApprovalCompletion.Aborted -> {
                                 GIT_SIGN_COMPLETION_ABORTED_DETAIL
                             }
                             else -> null
@@ -910,27 +894,11 @@ internal class GitSigningRequests(
                         data = currentRequest.requestAuditData() + gitSign.auditData() +
                             auditDataOf(
                                 "completion_valid" to valid,
-                                "completion_result" to when (completionResult) {
-                                    is GitSignCompletion.Approved ->
-                                        ApprovalCompletionResult.APPROVED.storedName
-                                    is GitSignCompletion.Denied ->
-                                        ApprovalCompletionResult.DENIED.storedName
-                                    is GitSignCompletion.Aborted ->
-                                        ApprovalCompletionResult.ABORTED.storedName
-                                    null -> null
-                                },
-                                "completion_reason" to when (completionResult) {
-                                    is GitSignCompletion.Denied -> completionResult.reason
-                                    is GitSignCompletion.Aborted -> completionResult.reason
-                                    else -> null
-                                },
-                                "completion_message" to when (completionResult) {
-                                    is GitSignCompletion.Denied -> completionResult.message
-                                    is GitSignCompletion.Aborted -> completionResult.message
-                                    else -> null
-                                },
+                                "completion_result" to completionResult?.storedResult,
+                                "completion_reason" to completionResult?.reason,
+                                "completion_message" to completionResult?.message,
                                 "returned_client_software" to completionResult?.clientSoftware?.let {
-                                    json.parseToJsonElement(json.encodeToString(it))
+                                    json.encodeToJsonElement(it)
                                 },
                             ),
                     ),
@@ -1003,12 +971,14 @@ internal class GitSigningRequests(
 
     private suspend fun persistDecision(
         request: InboxRequestEntity,
+        gitSign: GitSignRequestEntity,
         decision: ApprovalDecision,
         response: JsonElement,
         decisionSource: String,
         denialReason: InvocationDenialReason? = null,
         denialMessage: String? = null,
         authorization: AuthorizationCommitment? = null,
+        grant: TemporaryAccessPlan? = null,
     ): RequestDecisionResult {
         require(decision != ApprovalDecision.APPROVED || authorization != null) {
             "An approved Git signature must bind its authorization state"
@@ -1018,6 +988,9 @@ internal class GitSigningRequests(
         }
         require(decision != ApprovalDecision.DENIED || denialMessage != null) {
             "A denied Git signature must record its message"
+        }
+        require(grant == null || decision == ApprovalDecision.APPROVED) {
+            "Only an approved Git signature can grant temporary access"
         }
         return writeTransaction.execute {
             val now = currentTimeMillis()
@@ -1032,23 +1005,51 @@ internal class GitSigningRequests(
                 return@execute RequestDecisionResult.NotPending
             }
             if (
+                grant != null &&
+                currentGitSign.approvalEvaluationJson != gitSign.approvalEvaluationJson
+            ) {
+                return@execute RequestDecisionResult.ApprovalChanged
+            }
+            if (
                 decision == ApprovalDecision.APPROVED &&
                 !parentInvocationIsAvailable(currentRequest)
             ) {
                 return@execute RequestDecisionResult.ParentUnavailable
             }
+            if (
+                grant != null && !dao.authorizationMatches(
+                    checkNotNull(authorization),
+                    currentRequest.clientId,
+                    TemporaryAccessOperation.GIT_SIGN.storedName,
+                    now,
+                )
+            ) {
+                return@execute RequestDecisionResult.ApprovalChanged
+            }
+            val grantedAccess = grant?.takeIf {
+                secrets.allowTemporaryAccess(
+                    policies = it.policies,
+                    clientId = currentRequest.clientId,
+                    operation = TemporaryAccessOperation.GIT_SIGN,
+                    expiresAt = it.expiresAt,
+                )
+            }
+            val appliedDecisionSource = grantedAccess?.decisionSource ?: decisionSource
             val updatedRequest = currentRequest.copy(
                 state = InboxRequestState.WAITING.storedName,
                 responseJson = response.toString(),
                 responseOutboxFinished = false,
             )
             val updatedGitSign = currentGitSign.copy(
+                approvalEvaluationJson = grantedAccess?.let { json.encodeToString(it.evaluation) }
+                    ?: currentGitSign.approvalEvaluationJson,
                 decision = decision.storedName,
                 completionReason = denialReason?.wireName,
                 completionMessage = denialMessage,
                 decidedAt = now,
             )
-            val result = if (authorization == null) {
+            // A grant changes the authorization state we just checked in this transaction.
+            val result = if (grant != null || authorization == null) {
                 dao.updateGitSignRequest(updatedRequest, updatedGitSign)
                 ConditionalRequestUpdate.APPLIED
             } else {
@@ -1069,99 +1070,22 @@ internal class GitSigningRequests(
                             currentRequest,
                             currentGitSign,
                             decision,
-                            decisionSource,
+                            appliedDecisionSource,
                         ),
                     ),
                     now,
                 )
             }
             when (result) {
-                ConditionalRequestUpdate.APPLIED -> RequestDecisionResult.Decided
+                ConditionalRequestUpdate.APPLIED -> if (grant != null && grantedAccess == null) {
+                    RequestDecisionResult.TemporaryAccessNotStarted
+                } else {
+                    RequestDecisionResult.Decided
+                }
                 ConditionalRequestUpdate.ACTION_REQUIRED,
                 ConditionalRequestUpdate.UNAVAILABLE,
                 -> RequestDecisionResult.ApprovalChanged
             }
-        }
-    }
-
-    private suspend fun persistTemporaryDecision(
-        request: InboxRequestEntity,
-        gitSign: GitSignRequestEntity,
-        response: JsonElement,
-        authorization: AuthorizationCommitment,
-        grant: TemporaryAccessPlan,
-    ): RequestDecisionResult = writeTransaction.execute {
-        val now = currentTimeMillis()
-        val currentRequest = dao.getRequestById(request.id)
-            ?: return@execute RequestDecisionResult.NotFound
-        val currentGitSign = dao.getGitSignRequest(request.id)
-            ?: return@execute RequestDecisionResult.NotFound
-        if (
-            currentRequest.state != InboxRequestState.ACTION_REQUIRED.storedName ||
-            currentGitSign.decision != null
-        ) {
-            return@execute RequestDecisionResult.NotPending
-        }
-        if (currentGitSign.approvalEvaluationJson != gitSign.approvalEvaluationJson) {
-            return@execute RequestDecisionResult.ApprovalChanged
-        }
-        if (!parentInvocationIsAvailable(currentRequest)) {
-            return@execute RequestDecisionResult.ParentUnavailable
-        }
-        if (
-            !dao.authorizationMatches(
-                authorization,
-                currentRequest.clientId,
-                TemporaryAccessOperation.GIT_SIGN.storedName,
-                now,
-            )
-        ) {
-            return@execute RequestDecisionResult.ApprovalChanged
-        }
-        val temporaryAccessStarted = secrets.allowTemporaryAccess(
-            policies = grant.policies,
-            clientId = currentRequest.clientId,
-            operation = TemporaryAccessOperation.GIT_SIGN,
-            expiresAt = grant.expiresAt,
-        )
-        val decisionSource = if (temporaryAccessStarted) {
-            grant.decisionSource
-        } else {
-            DECISION_SOURCE_USER
-        }
-        dao.updateGitSignRequest(
-            currentRequest.copy(
-                state = InboxRequestState.WAITING.storedName,
-                responseJson = response.toString(),
-                responseOutboxFinished = false,
-            ),
-            currentGitSign.copy(
-                approvalEvaluationJson = if (temporaryAccessStarted) {
-                    json.encodeToString(grant.evaluation)
-                } else {
-                    currentGitSign.approvalEvaluationJson
-                },
-                decision = ApprovalDecision.APPROVED.storedName,
-                completionReason = null,
-                completionMessage = null,
-                decidedAt = now,
-            ),
-        )
-        audit.append(
-            listOf(
-                decisionAudit(
-                    currentRequest,
-                    currentGitSign,
-                    ApprovalDecision.APPROVED,
-                    decisionSource,
-                ),
-            ),
-            now,
-        )
-        if (temporaryAccessStarted) {
-            RequestDecisionResult.Decided
-        } else {
-            RequestDecisionResult.TemporaryAccessNotStarted
         }
     }
 
@@ -1250,7 +1174,7 @@ internal class GitSigningRequests(
         return when (
             val result = deviceCredentials.deviceCredentials(client.deviceIdentityId)
         ) {
-            is RelayDeviceCredentialsResult.Available -> result.credentials
+            is DeviceCredentialResult.Available -> result.value
             else -> null
         }
     }

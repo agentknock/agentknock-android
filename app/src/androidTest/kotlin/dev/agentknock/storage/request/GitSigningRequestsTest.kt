@@ -36,7 +36,7 @@ import dev.agentknock.storage.crypto.VaultKeyPurpose
 import dev.agentknock.storage.device.DeviceIdentityEntity
 import dev.agentknock.storage.device.RelayDeviceCredentialSource
 import dev.agentknock.storage.device.RelayDeviceCredentials
-import dev.agentknock.storage.device.RelayDeviceCredentialsResult
+import dev.agentknock.storage.device.DeviceCredentialResult
 import dev.agentknock.storage.secret.CreateSecretResult
 import dev.agentknock.storage.secret.SaveSecretResult
 import dev.agentknock.storage.secret.SaveSshSecretResult
@@ -887,6 +887,34 @@ class GitSigningRequestsTest {
     }
 
     @Test
+    fun approvalAndTemporaryApprovalRejectAClientRevokedWhileSealing() = runTest {
+        insertParent(Json.encodeToString(createSigningSecret(SecretApprovalMode.ASK_ME)))
+        val requestId = "git-client-race"
+        receivePending(
+            requests(audit),
+            requestId,
+            evaluationJson = Json.encodeToString(currentGitSignEvaluation()),
+        )
+        val eventCount = audit.observeEvents().first().size
+        for (allowTemporaryAccess in listOf(false, true)) {
+            assertEquals(
+                RequestDecisionResult.ApprovalChanged,
+                requests(audit).approve(requestId, allowTemporaryAccess) { _, _ ->
+                    database.requestDao().updateClient(
+                        client().copy(desiredRelayClientState = "revoked"),
+                    )
+                    Json.parseToJsonElement(RESPONSE_JSON)
+                },
+            )
+            assertNull(database.requestDao().getRequestById(requestId)?.responseJson)
+            assertNull(database.requestDao().getGitSignRequest(requestId)?.decision)
+            assertTrue(secrets.observeTemporaryAccessGrants().first().isEmpty())
+            assertEquals(eventCount, audit.observeEvents().first().size)
+            database.requestDao().updateClient(client())
+        }
+    }
+
+    @Test
     fun completionIsSanitizedAtomicAndEveryTerminalReplayIsAcknowledged() = runTest {
         insertParent()
         val requestId = "git-completion"
@@ -1012,9 +1040,7 @@ class GitSigningRequestsTest {
             CLIENT_ID,
             TemporaryAccessOperation.GIT_SIGN,
         ).single()
-        return dev.agentknock.storage.approval.ApprovalPolicyEvaluator.evaluate(
-            listOf(policy.toRequestedSecretApproval()),
-        )
+        return dev.agentknock.storage.approval.ApprovalEvaluation(listOf(policy.evaluate()))
     }
 
     private fun sshSecretFactsJson(): String =
@@ -1263,12 +1289,12 @@ class GitSigningRequestsTest {
     }
 
     private object UnavailableCredentialSource : RelayDeviceCredentialSource {
-        override suspend fun activeDeviceCredentials(): RelayDeviceCredentialsResult =
-            RelayDeviceCredentialsResult.Missing
+        override suspend fun activeDeviceCredentials(): DeviceCredentialResult<RelayDeviceCredentials>? =
+            null
 
         override suspend fun deviceCredentials(
             deviceIdentityId: String,
-        ): RelayDeviceCredentialsResult = RelayDeviceCredentialsResult.Missing
+        ): DeviceCredentialResult<RelayDeviceCredentials>? = null
     }
 
     private object FailingApprovalReviewer : RelayApprovalReviewClient {
@@ -1282,15 +1308,15 @@ class GitSigningRequestsTest {
     private class StaticCredentialSource(
         private val credentials: RelayDeviceCredentials,
     ) : RelayDeviceCredentialSource {
-        override suspend fun activeDeviceCredentials(): RelayDeviceCredentialsResult =
-            RelayDeviceCredentialsResult.Available(credentials)
+        override suspend fun activeDeviceCredentials(): DeviceCredentialResult<RelayDeviceCredentials>? =
+            DeviceCredentialResult.Available(credentials)
 
         override suspend fun deviceCredentials(
             deviceIdentityId: String,
-        ): RelayDeviceCredentialsResult = if (deviceIdentityId == credentials.deviceIdentityId) {
-            RelayDeviceCredentialsResult.Available(credentials)
+        ): DeviceCredentialResult<RelayDeviceCredentials>? = if (deviceIdentityId == credentials.deviceIdentityId) {
+            DeviceCredentialResult.Available(credentials)
         } else {
-            RelayDeviceCredentialsResult.Missing
+            null
         }
     }
 

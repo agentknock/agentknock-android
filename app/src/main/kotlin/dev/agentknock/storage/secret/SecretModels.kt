@@ -220,9 +220,9 @@ internal sealed interface EnvironmentSecretUploadResult {
     ) : EnvironmentSecretUploadResult
 }
 
-internal sealed interface ApplyEnvironmentSecretUploadResult {
-    data class Applied(val secretId: String) : ApplyEnvironmentSecretUploadResult
-    data class Invalid(val message: String) : ApplyEnvironmentSecretUploadResult
+internal sealed interface ApplySecretUploadResult {
+    data class Applied(val secretId: String) : ApplySecretUploadResult
+    data class Invalid(val message: String) : ApplySecretUploadResult
 }
 
 internal data class SshSecretUploadSummary(
@@ -241,12 +241,6 @@ internal sealed interface SshSecretUploadResult {
         val message: String,
         val target: SecretUploadTarget? = null,
     ) : SshSecretUploadResult
-}
-
-internal sealed interface ApplySshSecretUploadResult {
-    data class Applied(val secretId: String) : ApplySshSecretUploadResult
-
-    data class Invalid(val message: String) : ApplySshSecretUploadResult
 }
 
 internal data class SecretUploadTarget(
@@ -275,8 +269,7 @@ internal data class RequestedSecretDescription(
 internal fun SecretReviewMetadata.containsSelectedSensitiveEnvironmentValue(): Boolean =
     type == ENVIRONMENT_SECRET_TYPE && environmentVariables.any { variable ->
         variable.sensitive &&
-            environmentVariableDestinations[variable.name] !=
-            EnvironmentVariableReviewDestination.Omitted
+            variable.destination != EnvironmentVariableReviewDestination.Omitted
     }
 
 internal data class SecretReviewMetadata(
@@ -285,8 +278,6 @@ internal data class SecretReviewMetadata(
     val name: String,
     val type: String,
     val environmentVariables: List<EnvironmentVariableReviewMetadata>,
-    val environmentVariableDestinations: Map<String, EnvironmentVariableReviewDestination> =
-        emptyMap(),
 )
 
 internal sealed interface EnvironmentVariableReviewDestination {
@@ -300,6 +291,7 @@ internal sealed interface EnvironmentVariableReviewDestination {
 internal data class EnvironmentVariableReviewMetadata(
     val name: String,
     val sensitive: Boolean,
+    val destination: EnvironmentVariableReviewDestination,
 )
 
 internal data class EnvironmentVariableSelection(
@@ -348,29 +340,18 @@ internal sealed interface RequestedSecretsResult {
     data object UnsupportedEncryption : RequestedSecretsResult
 }
 
-internal sealed interface GitSignatureResult {
-    data class Signed(val signature: String) : GitSignatureResult
+internal sealed interface SignatureResult<out T> {
+    data class Signed<T>(val signature: T) : SignatureResult<T>
 
-    data object NotFound : GitSignatureResult
+    data object NotFound : SignatureResult<Nothing>
 
-    data object WrongType : GitSignatureResult
+    data object WrongType : SignatureResult<Nothing>
 
-    data object KeyChanged : GitSignatureResult
+    data object KeyChanged : SignatureResult<Nothing>
 
-    data object SecretUnavailable : GitSignatureResult
+    data object SecretUnavailable : SignatureResult<Nothing>
 
-    data object SecretCorrupted : GitSignatureResult
+    data object SecretCorrupted : SignatureResult<Nothing>
 
-    data object UnsupportedEncryption : GitSignatureResult
-}
-
-internal sealed interface SshAuthenticationSignatureResult {
-    data class Signed(val signature: ByteArray) : SshAuthenticationSignatureResult
-
-    data object NotFound : SshAuthenticationSignatureResult
-    data object WrongType : SshAuthenticationSignatureResult
-    data object KeyChanged : SshAuthenticationSignatureResult
-    data object SecretUnavailable : SshAuthenticationSignatureResult
-    data object SecretCorrupted : SshAuthenticationSignatureResult
-    data object UnsupportedEncryption : SshAuthenticationSignatureResult
+    data object UnsupportedEncryption : SignatureResult<Nothing>
 }

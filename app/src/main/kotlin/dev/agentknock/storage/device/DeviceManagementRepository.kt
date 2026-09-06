@@ -31,13 +31,13 @@ internal class DeviceManagementRepository(
 ) {
     suspend fun setPairingEnabled(enabled: Boolean): DeviceManagementResult {
         val active = when (val authorization = deviceAuthorization.activeDeviceAuthorization()) {
-            is RelayDeviceAuthorizationResult.Available -> authorization.authorization
-            RelayDeviceAuthorizationResult.Missing -> return DeviceManagementResult.NoDevice
-            RelayDeviceAuthorizationResult.Unavailable ->
+            is DeviceCredentialResult.Available -> authorization.value
+            null -> return DeviceManagementResult.NoDevice
+            DeviceCredentialResult.Unavailable ->
                 return DeviceManagementResult.CredentialsUnavailable
-            RelayDeviceAuthorizationResult.Corrupted ->
+            DeviceCredentialResult.Corrupted ->
                 return DeviceManagementResult.CredentialsCorrupted
-            RelayDeviceAuthorizationResult.UnsupportedEncryption ->
+            DeviceCredentialResult.UnsupportedEncryption ->
                 return DeviceManagementResult.UnsupportedEncryption
         }
         return when (
@@ -92,8 +92,8 @@ internal class DeviceManagementRepository(
     suspend fun deleteRemoteDevice(): Boolean {
         val active = (
             deviceAuthorization.activeDeviceAuthorization()
-                as? RelayDeviceAuthorizationResult.Available
-            )?.authorization ?: return false
+                as? DeviceCredentialResult.Available<RelayDeviceAuthorization>
+            )?.value ?: return false
         return relay.deleteDevice(active.deviceId, active.deviceToken) is RelayEndpointResult.Success
     }
 }

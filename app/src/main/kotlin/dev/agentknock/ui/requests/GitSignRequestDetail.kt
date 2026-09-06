@@ -57,6 +57,7 @@ internal fun GitSignRequestDetail(
     modifier: Modifier,
 ) {
     val signing = (request.content as InboxRequestContent.GitSign).details
+    val actionRequired = request.state == InboxRequestState.ACTION_REQUIRED
     val pending = signing.state == ApprovalRequestState.APPROVAL_PENDING
     var confirmTemporaryAccess by remember(request.id) { mutableStateOf(false) }
     val aiReviewRequested = signing.approvalEvaluation?.secrets
@@ -75,7 +76,7 @@ internal fun GitSignRequestDetail(
         modifier = modifier,
         showBack = showBack,
         scrollResetKey = signing.state to signing.completionResult,
-        bottomContent = if (pending && request.userDecisionAvailable) {
+        bottomContent = if (actionRequired) {
             {
                 Surface(
                     color = MaterialTheme.colorScheme.surfaceContainerLow,
@@ -103,7 +104,7 @@ internal fun GitSignRequestDetail(
             if (pending) StatusLine(
                 if (aiReviewInFlight) "AI review in progress" else signing.statusLabel(),
                 error = signing.state == ApprovalRequestState.VERIFICATION_FAILED,
-                attention = pending && request.userDecisionAvailable,
+                attention = actionRequired,
                 subdued = aiReviewInFlight ||
                     signing.decision == ApprovalDecision.DENIED ||
                     signing.completionResult == ApprovalCompletionResult.DENIED ||

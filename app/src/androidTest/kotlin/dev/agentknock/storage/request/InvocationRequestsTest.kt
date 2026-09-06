@@ -30,7 +30,8 @@ import dev.agentknock.storage.crypto.VaultKeyManager
 import dev.agentknock.storage.crypto.VaultKeyPurpose
 import dev.agentknock.storage.device.DeviceIdentityEntity
 import dev.agentknock.storage.device.RelayDeviceCredentialSource
-import dev.agentknock.storage.device.RelayDeviceCredentialsResult
+import dev.agentknock.storage.device.RelayDeviceCredentials
+import dev.agentknock.storage.device.DeviceCredentialResult
 import dev.agentknock.storage.secret.CreateEnvironmentVariableResult
 import dev.agentknock.storage.secret.CreateSecretResult
 import dev.agentknock.storage.secret.SaveSecretResult
@@ -287,6 +288,34 @@ class InvocationRequestsTest {
             ),
             appendedTypes,
         )
+    }
+
+    @Test
+    fun approvalAndTemporaryApprovalRejectAClientRevokedWhileSealing() = runTest {
+        val requestId = "invocation-client-race"
+        val pending = receivePendingEnvironmentInvocation(requestId)
+        val eventCount = audit.observeEvents().first().size
+        for (allowTemporaryAccess in listOf(false, true)) {
+            assertEquals(
+                RequestDecisionResult.SecretChanged,
+                requests(audit).approve(
+                    requestId,
+                    allowTemporaryAccess,
+                    openRequest = { pending.plaintext },
+                    sealResponse = { _, _ ->
+                        database.requestDao().updateClient(
+                            client().copy(desiredRelayClientState = "revoked"),
+                        )
+                        Json.parseToJsonElement(RESPONSE_JSON)
+                    },
+                ),
+            )
+            assertNull(database.requestDao().getRequestById(requestId)?.responseJson)
+            assertNull(database.requestDao().getSecretUseRequest(requestId)?.decision)
+            assertTrue(secrets.observeTemporaryAccessGrants().first().isEmpty())
+            assertEquals(eventCount, audit.observeEvents().first().size)
+            database.requestDao().updateClient(client())
+        }
     }
 
     @Test
@@ -876,12 +905,12 @@ class InvocationRequestsTest {
 }
 
 private data object MissingDeviceCredentials : RelayDeviceCredentialSource {
-    override suspend fun activeDeviceCredentials(): RelayDeviceCredentialsResult =
-        RelayDeviceCredentialsResult.Missing
+    override suspend fun activeDeviceCredentials(): DeviceCredentialResult<RelayDeviceCredentials>? =
+        null
 
     override suspend fun deviceCredentials(
         deviceIdentityId: String,
-    ): RelayDeviceCredentialsResult = RelayDeviceCredentialsResult.Missing
+    ): DeviceCredentialResult<RelayDeviceCredentials>? = null
 }
 
 private data object UnexpectedApprovalReviewer : RelayApprovalReviewClient {

@@ -135,7 +135,7 @@ class DeviceAuditTransactionTest {
         val repository = DeviceManagementRepository(
             deviceIdentityDao = database.deviceIdentityDao(),
             deviceAuthorization = RelayDeviceAuthorizationSource {
-                RelayDeviceAuthorizationResult.Available(authorization)
+                DeviceCredentialResult.Available(authorization)
             },
             relay = relay,
             audit = InsertThenFailAuditSink(audit),
@@ -157,7 +157,7 @@ class DeviceAuditTransactionTest {
         val successfulRepository = DeviceManagementRepository(
             deviceIdentityDao = database.deviceIdentityDao(),
             deviceAuthorization = RelayDeviceAuthorizationSource {
-                RelayDeviceAuthorizationResult.Available(authorization)
+                DeviceCredentialResult.Available(authorization)
             },
             relay = relay,
             audit = audit,

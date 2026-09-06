@@ -8,7 +8,7 @@ import dev.agentknock.relay.RelaySubscriptionClient
 import dev.agentknock.relay.RelaySubscriptionResult
 import dev.agentknock.relay.RelaySubscriptionStatus
 import dev.agentknock.storage.device.RelayDeviceAuthorization
-import dev.agentknock.storage.device.RelayDeviceAuthorizationResult
+import dev.agentknock.storage.device.DeviceCredentialResult
 import dev.agentknock.storage.device.RelayDeviceAuthorizationSource
 import dev.agentknock.subscription.GOOGLE_PLAY_SUBSCRIPTION_PRODUCT_ID
 import dev.agentknock.subscription.PlayPurchaseState
@@ -180,7 +180,7 @@ class SubscriptionViewModelTest {
         init {
             Dispatchers.setMain(dispatcher)
             val authorization = RelayDeviceAuthorizationSource {
-                RelayDeviceAuthorizationResult.Available(
+                DeviceCredentialResult.Available(
                     RelayDeviceAuthorization(
                         deviceIdentityId = "identity",
                         deviceId = "device",

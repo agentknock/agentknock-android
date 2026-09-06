@@ -22,9 +22,8 @@ import kotlinx.coroutines.flow.flow
 import kotlinx.coroutines.flow.map
 import kotlinx.coroutines.withContext
 import kotlinx.serialization.json.JsonElement
+import kotlinx.serialization.json.JsonObject
 import kotlinx.serialization.json.buildJsonArray
-import kotlinx.serialization.json.buildJsonObject
-import kotlinx.serialization.json.put
 
 internal class SecretRepository(
     private val dao: SecretDao,
@@ -841,7 +840,7 @@ internal class SecretRepository(
 
     suspend fun applyPreparedEnvironmentSecretUpload(
         upload: PreparedEnvironmentSecretUpload,
-    ): ApplyEnvironmentSecretUploadResult =
+    ): ApplySecretUploadResult =
         uploads.applyPreparedEnvironmentSecretUpload(upload)
 
     suspend fun describeSshSecretUpload(upload: SshSecretUpload): SshSecretUploadResult =
@@ -855,7 +854,7 @@ internal class SecretRepository(
 
     suspend fun applyPreparedSshSecretUpload(
         upload: PreparedSshSecretUpload,
-    ): ApplySshSecretUploadResult = uploads.applyPreparedSshSecretUpload(upload)
+    ): ApplySecretUploadResult = uploads.applyPreparedSshSecretUpload(upload)
 
     suspend fun listSecretsForClient(): List<SecretMetadata> =
         resolver.listSecretsForClient()
@@ -875,14 +874,14 @@ internal class SecretRepository(
         secretName: String,
         expectedPublicKey: String,
         message: ByteArray,
-    ): GitSignatureResult = resolver.signGitMessage(secretName, expectedPublicKey, message)
+    ): SignatureResult<String> = resolver.signGitMessage(secretName, expectedPublicKey, message)
 
     suspend fun signSshAuthentication(
         secretName: String,
         expectedPublicKey: String,
         message: ByteArray,
         algorithm: SshSignatureAlgorithm,
-    ): SshAuthenticationSignatureResult = resolver.signSshAuthentication(
+    ): SignatureResult<ByteArray> = resolver.signSshAuthentication(
         secretName,
         expectedPublicKey,
         message,
@@ -955,42 +954,30 @@ internal class SecretRepository(
 
     private fun List<EnvironmentVariableEntity>.auditData() = buildJsonArray {
         sortedBy(EnvironmentVariableEntity::name).forEach { variable ->
-            add(
-                buildJsonObject {
-                    variable.auditData().forEach(::put)
-                },
-            )
+            add(JsonObject(variable.auditData()))
         }
     }
 
     private fun SshKeyEntity.auditData(prefix: String = ""): Map<String, JsonElement> {
         val algorithm = checkNotNull(SshKeyAlgorithm.fromStoredName(algorithm))
         val public = sshKeys.publicKey(algorithm, publicKey, comment)
-        return auditDataOf(
+        return public.auditData(prefix)
+    }
+
+    private fun SshKeyEntity.auditDataObject() = JsonObject(auditData())
+
+    private fun SshPrivateKey.auditData(): Map<String, JsonElement> =
+        sshKeys.publicKey(algorithm, publicKey, comment).auditData()
+
+    private fun SshPublicKey.auditData(prefix: String = ""): Map<String, JsonElement> =
+        auditDataOf(
             "${prefix}algorithm" to algorithm.storedName,
-            "${prefix}bits" to sshKeys.bitLength(public),
-            "${prefix}public_key" to public.line,
-            "${prefix}fingerprint" to public.fingerprint,
-            "${prefix}fingerprint_hex" to public.fingerprintHex,
+            "${prefix}bits" to sshKeys.bitLength(this),
+            "${prefix}public_key" to line,
+            "${prefix}fingerprint" to fingerprint,
+            "${prefix}fingerprint_hex" to fingerprintHex,
             "${prefix}comment" to comment,
         )
-    }
-
-    private fun SshKeyEntity.auditDataObject() = buildJsonObject {
-        auditData().forEach(::put)
-    }
-
-    private fun SshPrivateKey.auditData(): Map<String, JsonElement> {
-        val public = sshKeys.publicKey(algorithm, publicKey, comment)
-        return auditDataOf(
-            "algorithm" to algorithm.storedName,
-            "bits" to sshKeys.bitLength(public),
-            "public_key" to public.line,
-            "fingerprint" to public.fingerprint,
-            "fingerprint_hex" to public.fingerprintHex,
-            "comment" to comment,
-        )
-    }
 }
 
 private fun TemporaryAccessOperation.auditName(): String = when (this) {

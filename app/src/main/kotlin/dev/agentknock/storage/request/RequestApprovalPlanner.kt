@@ -3,7 +3,6 @@ package dev.agentknock.storage.request
 import dev.agentknock.storage.approval.ApprovalAction
 import dev.agentknock.storage.approval.AiReviewDecision
 import dev.agentknock.storage.approval.ApprovalEvaluation
-import dev.agentknock.storage.approval.ApprovalPolicyEvaluator
 import dev.agentknock.storage.secret.SecretApprovalMode
 import dev.agentknock.storage.secret.SecretApprovalPolicy
 
@@ -89,9 +88,7 @@ internal fun planTemporaryAccess(
     storedEvaluation: ApprovalEvaluation,
     now: Long,
 ): TemporaryAccessPlan? {
-    val currentEvaluation = ApprovalPolicyEvaluator.evaluate(
-        policies.map(SecretApprovalPolicy::toRequestedSecretApproval),
-    )
+    val currentEvaluation = ApprovalEvaluation(policies.map(SecretApprovalPolicy::evaluate))
     if (!storedEvaluation.hasSameSecretPolicies(currentEvaluation)) return null
 
     val evaluationsById = storedEvaluation.secrets.associateBy { it.secretId }

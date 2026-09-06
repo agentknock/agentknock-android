@@ -16,8 +16,7 @@ import dev.agentknock.storage.audit.AuditOutcome
 import dev.agentknock.storage.audit.AuditRecord
 import dev.agentknock.storage.audit.AuditSink
 import dev.agentknock.storage.audit.auditDataOf
-import dev.agentknock.storage.secret.ApplyEnvironmentSecretUploadResult
-import dev.agentknock.storage.secret.ApplySshSecretUploadResult
+import dev.agentknock.storage.secret.ApplySecretUploadResult
 import dev.agentknock.storage.secret.ENVIRONMENT_SECRET_TYPE
 import dev.agentknock.storage.secret.EnvironmentSecretUpload
 import dev.agentknock.storage.secret.EnvironmentSecretUploadPreparation
@@ -39,6 +38,7 @@ import kotlinx.coroutines.withContext
 import kotlinx.serialization.Serializable
 import kotlinx.serialization.decodeFromString
 import kotlinx.serialization.encodeToString
+import kotlinx.serialization.json.encodeToJsonElement
 import kotlinx.serialization.json.Json
 import kotlinx.serialization.json.JsonElement
 import kotlinx.serialization.json.buildJsonArray
@@ -208,9 +208,7 @@ internal class SecretManagementRequests(
                             "client_software" to json.parseToJsonElement(software),
                             "received_at" to now,
                             "secret_count" to secretMetadata.size,
-                            "secrets" to json.parseToJsonElement(
-                                json.encodeToString(secretMetadata),
-                            ),
+                            "secrets" to json.encodeToJsonElement(secretMetadata),
                         ),
                     ),
                 ),
@@ -423,22 +421,16 @@ internal class SecretManagementRequests(
         )
         return writeTransaction.execute {
             val materialAudit = pendingUploadMaterialAudit(request.id)
-            val secretId = when (preparedUpload) {
-                is PreparedSecretUploadApproval.Environment -> when (
-                    val applied = secrets.applyPreparedEnvironmentSecretUpload(preparedUpload.upload)
-                ) {
-                    is ApplyEnvironmentSecretUploadResult.Applied -> applied.secretId
-                    is ApplyEnvironmentSecretUploadResult.Invalid -> {
-                        return@execute SecretUploadDecisionResult.Invalid(applied.message)
-                    }
-                }
-                is PreparedSecretUploadApproval.Ssh -> when (
-                    val applied = secrets.applyPreparedSshSecretUpload(preparedUpload.upload)
-                ) {
-                    is ApplySshSecretUploadResult.Applied -> applied.secretId
-                    is ApplySshSecretUploadResult.Invalid -> {
-                        return@execute SecretUploadDecisionResult.Invalid(applied.message)
-                    }
+            val applied = when (preparedUpload) {
+                is PreparedSecretUploadApproval.Environment ->
+                    secrets.applyPreparedEnvironmentSecretUpload(preparedUpload.upload)
+                is PreparedSecretUploadApproval.Ssh ->
+                    secrets.applyPreparedSshSecretUpload(preparedUpload.upload)
+            }
+            val secretId = when (applied) {
+                is ApplySecretUploadResult.Applied -> applied.secretId
+                is ApplySecretUploadResult.Invalid -> {
+                    return@execute SecretUploadDecisionResult.Invalid(applied.message)
                 }
             }
             dao.updateSecretUploadRequest(
@@ -742,7 +734,7 @@ internal class SecretManagementRequests(
                         data = current.requestAuditData() + auditDataOf(
                             "completion_valid" to valid,
                             "returned_client_software" to decoded?.let {
-                                json.parseToJsonElement(json.encodeToString(it))
+                                json.encodeToJsonElement(it)
                             },
                         ),
                     ),

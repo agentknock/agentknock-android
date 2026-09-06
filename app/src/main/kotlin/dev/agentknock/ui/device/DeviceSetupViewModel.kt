@@ -23,21 +23,18 @@ internal class DeviceSetupViewModel(
     fun generateAddress(): String = addressGenerator.generate()
 
     fun stageAndClaim(address: String) {
-        if (!_claiming.compareAndSet(expect = false, update = true)) return
-        viewModelScope.launch {
-            try {
-                handleClaimResult(settings.stageAndClaim(address))
-            } finally {
-                _claiming.value = false
-            }
-        }
+        claim { settings.stageAndClaim(address) }
     }
 
     fun retryClaim() {
+        claim { settings.retryClaim() }
+    }
+
+    private fun claim(operation: suspend () -> ClaimPairingAddressResult) {
         if (!_claiming.compareAndSet(expect = false, update = true)) return
         viewModelScope.launch {
             try {
-                handleClaimResult(settings.retryClaim())
+                _lastClaimResult.value = operation()
             } finally {
                 _claiming.value = false
             }
@@ -53,9 +50,5 @@ internal class DeviceSetupViewModel(
 
     fun clearClaimResult() {
         _lastClaimResult.value = null
-    }
-
-    private fun handleClaimResult(result: ClaimPairingAddressResult) {
-        _lastClaimResult.value = result
     }
 }

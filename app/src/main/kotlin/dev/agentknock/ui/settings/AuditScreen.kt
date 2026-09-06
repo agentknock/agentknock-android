@@ -87,8 +87,7 @@ internal fun AuditSettings(
     val selectedEventId by viewModel.selectedEventId.collectAsStateWithLifecycle()
     val detail by viewModel.detail.collectAsStateWithLifecycle()
     val events = (history as? AuditHistoryState.Loaded)?.events
-    val loadedDetail = (detail as? AuditDetailState.Loaded)
-        ?.takeIf { it.eventId == selectedEventId }
+    val loadedDetail = detail?.takeIf { it.eventId == selectedEventId }
     val selected = loadedDetail?.event
     val back = {
         if (selectedEventId == null) onBack() else viewModel.selectEvent(null)

@@ -187,7 +187,7 @@ class SecretRepositoryTest {
         )
 
         assertEquals(
-            GitSignatureResult.SecretCorrupted,
+            SignatureResult.SecretCorrupted,
             algorithmFixture.repository.signGitMessage(
                 "algorithm-bound",
                 rsa.publicKeyLine,
@@ -211,7 +211,7 @@ class SecretRepositoryTest {
         )
 
         assertEquals(
-            GitSignatureResult.SecretCorrupted,
+            SignatureResult.SecretCorrupted,
             recordFixture.repository.signGitMessage(
                 "first",
                 first.publicKeyLine,
@@ -272,7 +272,11 @@ class SecretRepositoryTest {
         )
         check(createPreparation is SshSecretUploadPreparation.Ready)
         val created = fixture.uploads.applyPreparedSshSecretUpload(createPreparation.upload)
-        check(created is ApplySshSecretUploadResult.Applied)
+        check(created is ApplySecretUploadResult.Applied)
+        assertEquals(
+            ApplySecretUploadResult.Invalid("A secret named production-ssh already exists."),
+            fixture.uploads.applyPreparedSshSecretUpload(createPreparation.upload),
+        )
 
         val before = fixture.dao.sshKeys.value.single()
         val secondKey = fixture.repository.generateSshKey(SshKeyAlgorithm.ED25519, "second@example")
@@ -292,7 +296,11 @@ class SecretRepositoryTest {
         )
         check(replacePreparation is SshSecretUploadPreparation.Ready)
         val replace = fixture.uploads.applyPreparedSshSecretUpload(replacePreparation.upload)
-        check(replace is ApplySshSecretUploadResult.Applied)
+        check(replace is ApplySecretUploadResult.Applied)
+        assertEquals(
+            ApplySecretUploadResult.Invalid("The target secret changed before the upload was approved."),
+            fixture.uploads.applyPreparedSshSecretUpload(replacePreparation.upload),
+        )
 
         assertEquals(created.secretId, replace.secretId)
         assertEquals(created.secretId, fixture.dao.secrets.value.single().id)
@@ -679,12 +687,12 @@ class SecretRepositoryTest {
         assertEquals(
             EnvironmentVariableReviewDestination.Environment("GH_HOST"),
             description.reviewMetadata.single()
-                .environmentVariableDestinations.getValue("GH_HOST"),
+                .environmentVariables.single { it.name == "GH_HOST" }.destination,
         )
         assertEquals(
             EnvironmentVariableReviewDestination.Omitted,
             description.reviewMetadata.single()
-                .environmentVariableDestinations.getValue("GH_TOKEN"),
+                .environmentVariables.single { it.name == "GH_TOKEN" }.destination,
         )
         assertFalse(description.containsSensitiveMaterial)
 
@@ -744,7 +752,7 @@ class SecretRepositoryTest {
             assertEquals(
                 EnvironmentVariableReviewDestination.Omitted,
                 resolved.description.reviewMetadata.single()
-                    .environmentVariableDestinations.getValue("PGHOST"),
+                    .environmentVariables.single { it.name == "PGHOST" }.destination,
             )
 
             val host = fixture.dao.variables.value.single { it.id == hostId }
@@ -851,7 +859,7 @@ class SecretRepositoryTest {
         assertEquals(
             EnvironmentVariableReviewDestination.StandardInput,
             description.reviewMetadata.single()
-                .environmentVariableDestinations.getValue("TOKEN"),
+                .environmentVariables.single { it.name == "TOKEN" }.destination,
         )
         val requested = fixture.resolver.resolve(
             listOf("input", "environment"),
@@ -909,12 +917,12 @@ class SecretRepositoryTest {
             expectedPublicKey = first.publicKeyLine,
             message = "commit object".encodeToByteArray(),
         )
-        assertTrue(signed is GitSignatureResult.Signed)
+        assertTrue(signed is SignatureResult.Signed)
 
         val second = fixture.repository.generateSshKey(SshKeyAlgorithm.ED25519, "second@example")
         fixture.repository.replaceSshKey(created.id, second)
         assertEquals(
-            GitSignatureResult.KeyChanged,
+            SignatureResult.KeyChanged,
             fixture.repository.signGitMessage(
                 secretName = "git-signing",
                 expectedPublicKey = first.publicKeyLine,
@@ -930,7 +938,7 @@ class SecretRepositoryTest {
         val preparation = fixture.uploads.prepareEnvironmentSecretUpload(
             EnvironmentSecretUpload(
                 mode = SecretUploadMode.CREATE,
-                name = "cloudflare-read-only",
+                name = "client-suggested-name",
                 descriptionProvided = true,
                 description = "Cloudflare production account",
                 variables = mapOf("CF_ACCOUNT_ID" to "account", "CF_TOKEN" to "token"),
@@ -941,9 +949,14 @@ class SecretRepositoryTest {
         check(preparation is EnvironmentSecretUploadPreparation.Ready)
         val result = fixture.uploads.applyPreparedEnvironmentSecretUpload(preparation.upload)
 
-        check(result is ApplyEnvironmentSecretUploadResult.Applied)
+        check(result is ApplySecretUploadResult.Applied)
+        assertEquals(
+            ApplySecretUploadResult.Invalid("A secret named cloudflare-read-only already exists."),
+            fixture.uploads.applyPreparedEnvironmentSecretUpload(preparation.upload),
+        )
         val secret = fixture.repository.observeSecret(result.secretId).first()
         checkNotNull(secret)
+        assertEquals("cloudflare-read-only", secret.name)
         assertEquals(SecretType.ENVIRONMENT, secret.type)
         assertEquals(
             SecretType.ENVIRONMENT,
@@ -997,7 +1010,7 @@ class SecretRepositoryTest {
         check(preparation is EnvironmentSecretUploadPreparation.Ready)
         val result = fixture.uploads.applyPreparedEnvironmentSecretUpload(preparation.upload)
 
-        assertTrue(result is ApplyEnvironmentSecretUploadResult.Applied)
+        assertTrue(result is ApplySecretUploadResult.Applied)
         val secret = fixture.repository.observeSecret(secretId).first()
         checkNotNull(secret)
         assertEquals(listOf("AWS_ACCESS_KEY_ID", "AWS_REGION"), secret.environmentVariables.map { it.name })
@@ -1567,7 +1580,7 @@ class SecretRepositoryTest {
         check(preparation is EnvironmentSecretUploadPreparation.Ready)
         val result = fixture.uploads.applyPreparedEnvironmentSecretUpload(preparation.upload)
 
-        assertTrue(result is ApplyEnvironmentSecretUploadResult.Applied)
+        assertTrue(result is ApplySecretUploadResult.Applied)
         val secret = fixture.repository.observeSecret(secretId).first()
         checkNotNull(secret)
         assertEquals(listOf("AWS_REGION", "AWS_TOKEN"), secret.environmentVariables.map { it.name })
@@ -1607,7 +1620,7 @@ class SecretRepositoryTest {
         check(preparation is EnvironmentSecretUploadPreparation.Ready)
         val result = fixture.uploads.applyPreparedEnvironmentSecretUpload(preparation.upload)
 
-        assertTrue(result is ApplyEnvironmentSecretUploadResult.Applied)
+        assertTrue(result is ApplySecretUploadResult.Applied)
         assertEquals(
             "Edited on the phone",
             fixture.repository.observeSecret(secretId).first()?.description,
@@ -1641,7 +1654,10 @@ class SecretRepositoryTest {
 
         val result = fixture.uploads.applyPreparedEnvironmentSecretUpload(preparation.upload)
 
-        assertTrue(result is ApplyEnvironmentSecretUploadResult.Invalid)
+        assertEquals(
+            ApplySecretUploadResult.Invalid("The target secret changed before the upload was approved."),
+            result,
+        )
         assertEquals(
             EnvironmentVariableValue.Available("TOKEN", "old", sensitive = true),
             fixture.repository.readEnvironmentVariableValue(
@@ -1682,7 +1698,10 @@ class SecretRepositoryTest {
 
         val result = fixture.uploads.applyPreparedEnvironmentSecretUpload(preparation.upload)
 
-        assertTrue(result is ApplyEnvironmentSecretUploadResult.Invalid)
+        assertEquals(
+            ApplySecretUploadResult.Invalid("The target secret changed before the upload was approved."),
+            result,
+        )
     }
 
     private class Fixture(

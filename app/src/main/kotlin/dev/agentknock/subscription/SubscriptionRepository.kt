@@ -3,7 +3,7 @@ package dev.agentknock.subscription
 import dev.agentknock.relay.RelayEndpointResult
 import dev.agentknock.relay.RelaySubscriptionClient
 import dev.agentknock.relay.RelaySubscriptionResult
-import dev.agentknock.storage.device.RelayDeviceAuthorizationResult
+import dev.agentknock.storage.device.DeviceCredentialResult
 import dev.agentknock.storage.device.RelayDeviceAuthorizationSource
 import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.flow.MutableStateFlow
@@ -85,23 +85,23 @@ internal class SubscriptionRepository(
         operation: suspend (deviceId: String, deviceToken: String) -> SubscriptionResult,
     ): SubscriptionResult = operations.withLock {
         val authorization = deviceAuthorization.activeDeviceAuthorization()
-        val deviceId = (authorization as? RelayDeviceAuthorizationResult.Available)?.authorization?.deviceId
+        val deviceId = (authorization as? DeviceCredentialResult.Available)?.value?.deviceId
         if (deviceId != accessDeviceId) {
             accessDeviceId = deviceId
             _access.value = AiReviewAccess.CHECKING
         }
         val result = when (authorization) {
-            is RelayDeviceAuthorizationResult.Available -> try {
-                operation(authorization.authorization.deviceId, authorization.authorization.deviceToken)
+            is DeviceCredentialResult.Available -> try {
+                operation(authorization.value.deviceId, authorization.value.deviceToken)
             } catch (cancelled: CancellationException) {
                 throw cancelled
             } catch (failure: Exception) {
                 SubscriptionResult.Unavailable(failure.message)
             }
-            RelayDeviceAuthorizationResult.Missing -> SubscriptionResult.NoDevice
-            RelayDeviceAuthorizationResult.Unavailable -> SubscriptionResult.DeviceCredentialsUnavailable
-            RelayDeviceAuthorizationResult.Corrupted -> SubscriptionResult.DeviceCredentialsCorrupted
-            RelayDeviceAuthorizationResult.UnsupportedEncryption -> SubscriptionResult.UnsupportedEncryption
+            null -> SubscriptionResult.NoDevice
+            DeviceCredentialResult.Unavailable -> SubscriptionResult.DeviceCredentialsUnavailable
+            DeviceCredentialResult.Corrupted -> SubscriptionResult.DeviceCredentialsCorrupted
+            DeviceCredentialResult.UnsupportedEncryption -> SubscriptionResult.UnsupportedEncryption
         }
         _access.value = when (result) {
             is SubscriptionResult.Status ->

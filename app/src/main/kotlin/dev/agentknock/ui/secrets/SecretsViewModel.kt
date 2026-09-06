@@ -28,7 +28,6 @@ import dev.agentknock.storage.secret.SecretType
 import dev.agentknock.storage.secret.SecretApprovalMode
 import dev.agentknock.storage.secret.TemporaryAccessOperation
 import dev.agentknock.storage.secret.SshPrivateKey
-import dev.agentknock.storage.secret.SshKeyAlgorithm
 import dev.agentknock.storage.secret.SaveSshSecretResult
 import dev.agentknock.storage.secret.SaveEnvironmentVariableResult
 import dev.agentknock.storage.secret.SaveSecretResult
@@ -87,21 +86,9 @@ internal sealed interface SecretsContent {
 internal sealed interface SecretsEditor {
     data object None : SecretsEditor
 
-    data class Secret(
+    data class Active(
         val session: Long,
-        val state: SecretEditorState,
-        val phase: EditorPhase = EditorPhase.EDITING,
-    ) : SecretsEditor
-
-    data class Variable(
-        val session: Long,
-        val state: VariableEditorState,
-        val phase: EditorPhase = EditorPhase.EDITING,
-    ) : SecretsEditor
-
-    data class SshKey(
-        val session: Long,
-        val state: SshKeyEditorState,
+        val draft: SecretsEditorDraft,
         val phase: EditorPhase = EditorPhase.EDITING,
     ) : SecretsEditor
 }
@@ -217,9 +204,9 @@ internal class SecretsViewModel(
 
     fun startNewSecret() {
         if (selectedTarget.value is SecretTarget.Upload) setSelectedTarget(null)
-        editorState.value = SecretsEditor.Secret(
+        editorState.value = SecretsEditor.Active(
             session = newEditorSession(),
-            state = SecretEditorState(
+            draft = SecretEditorState(
                 secret = null,
                 name = "",
                 description = "",
@@ -229,9 +216,9 @@ internal class SecretsViewModel(
     }
 
     fun startEditingSecret(secret: SecretDetails) {
-        editorState.value = SecretsEditor.Secret(
+        editorState.value = SecretsEditor.Active(
             session = newEditorSession(),
-            state = SecretEditorState(
+            draft = SecretEditorState(
                 secret = secret,
                 name = secret.name,
                 description = secret.description,
@@ -242,26 +229,23 @@ internal class SecretsViewModel(
 
     fun updateSecretEditor(session: Long, state: SecretEditorState) {
         editorState.mutateEditing(session) { editor ->
-            when (editor) {
-                !is SecretsEditor.Secret -> null
-                else -> editor.copy(
-                    state = state.copy(
-                        sshKeyDraft = if (state.type == SecretType.SSH) {
-                            state.sshKeyDraft
-                        } else {
-                            state.sshKeyDraft.copy(privateKeyText = "").withoutPreparation()
-                        },
-                    ),
-                )
-            }
+            editor.takeIf { it.draft is SecretEditorState }?.copy(
+                draft = state.copy(
+                    sshKeyDraft = if (state.type == SecretType.SSH) {
+                        state.sshKeyDraft
+                    } else {
+                        state.sshKeyDraft.copy(privateKeyText = "").withoutPreparation()
+                    },
+                ),
+            )
         }
     }
 
     fun startReplacingSshKey(secret: SecretDetails) {
         val key = checkNotNull(secret.sshKey)
-        editorState.value = SecretsEditor.SshKey(
+        editorState.value = SecretsEditor.Active(
             session = newEditorSession(),
-            state = SshKeyEditorState(
+            draft = SshKeyEditorState(
                 secretId = secret.id,
                 secretName = secret.name,
                 currentKey = key,
@@ -275,27 +259,24 @@ internal class SecretsViewModel(
 
     fun updateSshKeyEditor(session: Long, state: SshKeyEditorState) {
         editorState.mutateEditing(session) { editor ->
-            when (editor) {
-                !is SecretsEditor.SshKey -> null
-                else -> editor.copy(
-                    state = state.copy(
-                        sshKeyDraft = if (
-                            state.sshKeyDraft.inputMode == SshKeyInputMode.GENERATE
-                        ) {
-                            state.sshKeyDraft.copy(privateKeyText = "")
-                        } else {
-                            state.sshKeyDraft
-                        },
-                    ),
-                )
-            }
+            editor.takeIf { it.draft is SshKeyEditorState }?.copy(
+                draft = state.copy(
+                    sshKeyDraft = if (
+                        state.sshKeyDraft.inputMode == SshKeyInputMode.GENERATE
+                    ) {
+                        state.sshKeyDraft.copy(privateKeyText = "")
+                    } else {
+                        state.sshKeyDraft
+                    },
+                ),
+            )
         }
     }
 
     fun startNewEnvironmentVariable(secret: SecretDetails) {
-        editorState.value = SecretsEditor.Variable(
+        editorState.value = SecretsEditor.Active(
             session = newEditorSession(),
-            state = VariableEditorState(
+            draft = VariableEditorState(
                 secretId = secret.id,
                 secretName = secret.name,
                 variable = null,
@@ -314,9 +295,9 @@ internal class SecretsViewModel(
     ) {
         val secret = (content.value as? SecretsContent.Stored)?.details
             ?.takeIf { it.id == variable.secretId } ?: return
-        editorState.value = SecretsEditor.Variable(
+        editorState.value = SecretsEditor.Active(
             session = newEditorSession(),
-            state = VariableEditorState(
+            draft = VariableEditorState(
                 secretId = variable.secretId,
                 secretName = secret.name,
                 variable = variable,
@@ -331,104 +312,40 @@ internal class SecretsViewModel(
 
     fun updateVariableEditor(session: Long, state: VariableEditorState) {
         editorState.mutateEditing(session) { editor ->
-            (editor as? SecretsEditor.Variable)?.copy(state = state)
+            editor.takeIf { it.draft is VariableEditorState }?.copy(draft = state)
         }
     }
 
     fun closeEditor(session: Long): Boolean =
         editorState.mutateEditing(session) { SecretsEditor.None }
 
-    fun prepareSecretSshKey() {
-        val current = editorState.value as? SecretsEditor.Secret ?: return
-        if (current.phase != EditorPhase.EDITING) return
-        val source = current.state
-        if (source.type != SecretType.SSH) return
-        val sourceDraft = source.sshKeyDraft
+    fun prepareSshKey(expected: SecretsEditor.Active) {
+        if (expected.phase != EditorPhase.EDITING) return
+        val sourceDraft = expected.draft.sshKeyDraftOrNull() ?: return
         if (sourceDraft.preparing) return
-        val editor = current.copy(
-            session = newEditorSession(),
-            state = source.copy(
-                sshKeyDraft = sourceDraft.withoutPreparation().copy(preparing = true),
+        val session = newEditorSession()
+        val editor = expected.copy(
+            session = session,
+            draft = expected.draft.withSshKeyDraft(
+                sourceDraft.withoutPreparation().copy(preparing = true),
             ),
         )
-        if (!editorState.compareAndSet(current, editor)) return
+        if (!editorState.compareAndSet(expected, editor)) return
         viewModelScope.launch {
-            val preparation = prepareSshKey(sourceDraft)
-            editorState.update { current ->
-                if (
-                    current !is SecretsEditor.Secret ||
-                    current.session != editor.session ||
-                    current.state.type != source.type ||
-                    !current.state.sshKeyDraft.hasSameSourceAs(sourceDraft)
-                ) {
-                    current
-                } else {
-                    current.copy(
-                        state = current.state.copy(
-                            sshKeyDraft = current.state.sshKeyDraft.copy(
-                                privateKeyText = if (preparation.key == null) {
-                                    current.state.sshKeyDraft.privateKeyText
-                                } else {
-                                    ""
-                                },
-                                preparedKey = preparation.key,
-                                preparing = false,
-                                error = preparation.error,
-                            ),
-                        ),
+            val result = runCatchingNonCancellation {
+                when (sourceDraft.inputMode) {
+                    SshKeyInputMode.GENERATE -> secretRepository.generateSshKey(
+                        sourceDraft.algorithm, sourceDraft.comment,
                     )
+                    SshKeyInputMode.IMPORT -> secretRepository.importSshKey(sourceDraft.privateKeyText)
                 }
             }
-        }
-    }
-
-    fun prepareReplacementSshKey() {
-        val current = editorState.value as? SecretsEditor.SshKey ?: return
-        if (current.phase != EditorPhase.EDITING) return
-        val source = current.state
-        val sourceDraft = source.sshKeyDraft
-        if (sourceDraft.preparing) return
-        val editor = current.copy(
-            session = newEditorSession(),
-            state = source.copy(
-                sshKeyDraft = sourceDraft.withoutPreparation().copy(preparing = true),
-            ),
-        )
-        if (!editorState.compareAndSet(current, editor)) return
-        viewModelScope.launch {
-            val preparation = prepareSshKey(sourceDraft)
-            editorState.update { current ->
-                if (
-                    current !is SecretsEditor.SshKey ||
-                    current.session != editor.session ||
-                    !current.state.sshKeyDraft.hasSameSourceAs(sourceDraft)
-                ) {
-                    current
-                } else {
-                    current.copy(
-                        state = current.state.copy(
-                            sshKeyDraft = current.state.sshKeyDraft.copy(
-                                privateKeyText = if (preparation.key == null) {
-                                    current.state.sshKeyDraft.privateKeyText
-                                } else {
-                                    ""
-                                },
-                                preparedKey = preparation.key,
-                                preparing = false,
-                                error = preparation.error,
-                            ),
-                        ),
-                    )
-                }
-            }
+            editorState.completeSshKeyPreparation(session, sourceDraft, result)
         }
     }
 
     fun clearSensitiveData() {
-        secretReadEpoch += 1
-        revealedEnvironmentValues.value = emptyMap()
-        revealedUploadValuesState.value = emptyMap()
-        clipboardState.value = null
+        clearSecretReads()
         editorState.clearSensitiveEditorState(::newEditorSession)
     }
 
@@ -458,29 +375,6 @@ internal class SecretsViewModel(
             (target as? SecretTarget.Upload)?.retainResolved ?: false
     }
 
-    private suspend fun generateSshKey(
-        algorithm: SshKeyAlgorithm,
-        comment: String,
-    ): SshPrivateKey = secretRepository.generateSshKey(algorithm, comment)
-
-    private suspend fun importSshKey(value: String): SshPrivateKey =
-        secretRepository.importSshKey(value)
-
-    private suspend fun prepareSshKey(source: SshKeyDraft): SshKeyPreparation {
-        val result = runCatchingNonCancellation {
-            when (source.inputMode) {
-                SshKeyInputMode.GENERATE -> generateSshKey(source.algorithm, source.comment)
-                SshKeyInputMode.IMPORT -> importSshKey(source.privateKeyText)
-            }
-        }
-        return SshKeyPreparation(
-            key = result.getOrNull(),
-            error = result.exceptionOrNull()?.let { failure ->
-                failure.message ?: "The private key is not valid"
-            },
-        )
-    }
-
     private fun launchEditorCommit(
         expected: SecretsEditor,
         action: suspend (SecretsEditorCommit) -> Unit,
@@ -499,19 +393,16 @@ internal class SecretsViewModel(
         }
     }
 
-    fun saveSecretEditor(
-        expected: SecretsEditor.Secret,
-        name: String,
-        description: String,
-    ) {
+    fun saveSecretEditor(expected: SecretsEditor.Active) {
+        val draft = expected.draft as SecretEditorState
         launchEditorCommit(expected) { commit ->
-            val error = if (expected.state.secret == null) {
-                val result = when (expected.state.type) {
+            val error = if (draft.secret == null) {
+                val result = when (draft.type) {
                     SecretType.ENVIRONMENT -> when (
                         val action = actions.createEnvironmentSecret(
-                            name = name,
-                            description = description,
-                            variables = expected.state.environmentVariables
+                            name = draft.name,
+                            description = draft.description,
+                            variables = draft.environmentVariables
                                 .filter { it.name.isNotBlank() || it.value.isNotEmpty() }
                                 .map {
                                     EnvironmentVariableInput(
@@ -529,9 +420,9 @@ internal class SecretsViewModel(
                         }
                     }
                     SecretType.SSH -> secretRepository.createSshSecret(
-                        name,
-                        description,
-                        checkNotNull(expected.state.sshKeyDraft.preparedKey),
+                        draft.name,
+                        draft.description,
+                        checkNotNull(draft.sshKeyDraft.preparedKey),
                     )
                 }
                 when (result) {
@@ -544,7 +435,7 @@ internal class SecretsViewModel(
                     CreateSecretResult.NameInUse -> R.string.secret_name_in_use
                 }
             } else {
-                when (secretRepository.saveSecret(expected.state.secret.id, name, description)) {
+                when (secretRepository.saveSecret(draft.secret.id, draft.name, draft.description)) {
                     SaveSecretResult.SAVED -> {
                         editorState.completeEditorCommit(commit)
                         null
@@ -557,10 +448,11 @@ internal class SecretsViewModel(
         }
     }
 
-    fun replaceSshKey(expected: SecretsEditor.SshKey) {
-        val privateKey = expected.state.sshKeyDraft.preparedKey ?: return
+    fun replaceSshKey(expected: SecretsEditor.Active) {
+        val draft = expected.draft as SshKeyEditorState
+        val privateKey = draft.sshKeyDraft.preparedKey ?: return
         launchEditorCommit(expected) { commit ->
-            when (secretRepository.replaceSshKey(expected.state.secretId, privateKey)) {
+            when (secretRepository.replaceSshKey(draft.secretId, privateKey)) {
                 is SaveSshSecretResult.Saved -> {
                     editorState.completeEditorCommit(commit)
                     publish(R.string.ssh_key_replaced)
@@ -671,22 +563,17 @@ internal class SecretsViewModel(
         }
     }
 
-    fun saveVariableEditor(
-        expected: SecretsEditor.Variable,
-        name: String,
-        value: String,
-        sensitive: Boolean,
-        replaceValue: Boolean,
-    ) {
+    fun saveVariableEditor(expected: SecretsEditor.Active) {
+        val draft = expected.draft as VariableEditorState
         launchEditorCommit(expected) { commit ->
-            val variable = expected.state.variable
+            val variable = draft.variable
             val error = if (variable == null) {
                 when (
                     val action = actions.createEnvironmentVariable(
-                        secretId = expected.state.secretId,
-                        name = name,
-                        value = value,
-                        sensitive = sensitive,
+                        secretId = draft.secretId,
+                        name = draft.name,
+                        value = draft.value,
+                        sensitive = draft.sensitive,
                     )
                 ) {
                     is ProtectedActionResult.AuthenticationFailed -> {
@@ -710,9 +597,9 @@ internal class SecretsViewModel(
                 when (
                     val action = actions.saveEnvironmentVariable(
                         id = variable.id,
-                        name = name,
-                        sensitive = sensitive,
-                        replacementValue = value.takeIf { replaceValue },
+                        name = draft.name,
+                        sensitive = draft.sensitive,
+                        replacementValue = draft.value.takeIf { draft.valueChanged },
                     )
                 ) {
                     is ProtectedActionResult.AuthenticationFailed -> {
@@ -744,8 +631,8 @@ internal class SecretsViewModel(
         }
     }
 
-    fun deleteEnvironmentVariable(expected: SecretsEditor.Variable) {
-        val id = expected.state.variable?.id ?: return
+    fun deleteEnvironmentVariable(expected: SecretsEditor.Active) {
+        val id = (expected.draft as VariableEditorState).variable?.id ?: return
         launchEditorCommit(expected) { commit ->
             val deleted = secretRepository.deleteEnvironmentVariable(id)
             if (deleted) {
@@ -924,8 +811,7 @@ internal class SecretsViewModel(
         uiEvents.send(SecretsUiMessage.Resource(message))
     }
 
-    private suspend fun publish(message: String, hiddenVariableId: String? = null) {
-        hiddenVariableId?.let { id -> revealedEnvironmentValues.update { it - id } }
+    private suspend fun publish(message: String) {
         uiEvents.send(SecretsUiMessage.Text(message))
     }
 
@@ -982,10 +868,38 @@ internal class SecretsViewModel(
     }
 }
 
-private data class SshKeyPreparation(
-    val key: SshPrivateKey?,
-    val error: String?,
-)
+private fun SecretsEditorDraft.sshKeyDraftOrNull(): SshKeyDraft? = when (this) {
+    is SecretEditorState -> sshKeyDraft.takeIf { type == SecretType.SSH }
+    is SshKeyEditorState -> sshKeyDraft
+    is VariableEditorState -> null
+}
+
+private fun SecretsEditorDraft.withSshKeyDraft(draft: SshKeyDraft): SecretsEditorDraft = when (this) {
+    is SecretEditorState -> copy(sshKeyDraft = draft)
+    is SshKeyEditorState -> copy(sshKeyDraft = draft)
+    is VariableEditorState -> error("This editor has no SSH key draft")
+}
+
+internal fun MutableStateFlow<SecretsEditor>.completeSshKeyPreparation(
+    session: Long,
+    source: SshKeyDraft,
+    result: Result<SshPrivateKey>,
+) {
+    mutateEditing(session) { editor ->
+        val draft = editor.draft.sshKeyDraftOrNull()?.takeIf { it.hasSameSourceAs(source) }
+            ?: return@mutateEditing null
+        editor.copy(
+            draft = editor.draft.withSshKeyDraft(
+                draft.copy(
+                    privateKeyText = if (result.isSuccess) "" else draft.privateKeyText,
+                    preparedKey = result.getOrNull(),
+                    preparing = false,
+                    error = result.exceptionOrNull()?.let { it.message ?: "The private key is not valid" },
+                ),
+            ),
+        )
+    }
+}
 
 private fun SshKeyDraft.hasSameSourceAs(other: SshKeyDraft): Boolean =
     inputMode == other.inputMode &&
@@ -993,36 +907,16 @@ private fun SshKeyDraft.hasSameSourceAs(other: SshKeyDraft): Boolean =
         privateKeyText == other.privateKeyText &&
         comment == other.comment
 
-private fun SecretsEditor.sessionOrNull(): Long? = when (this) {
-    SecretsEditor.None -> null
-    is SecretsEditor.Secret -> session
-    is SecretsEditor.Variable -> session
-    is SecretsEditor.SshKey -> session
-}
-
 internal data class SecretsEditorCommit(
-    val editing: SecretsEditor,
-    val committing: SecretsEditor,
+    val editing: SecretsEditor.Active,
+    val committing: SecretsEditor.Active,
 )
 
 internal fun MutableStateFlow<SecretsEditor>.beginEditorCommit(
     expected: SecretsEditor,
 ): SecretsEditorCommit? {
-    val committing = when (expected) {
-        SecretsEditor.None -> return null
-        is SecretsEditor.Secret -> {
-            if (expected.phase != EditorPhase.EDITING) return null
-            expected.copy(phase = EditorPhase.COMMITTING)
-        }
-        is SecretsEditor.Variable -> {
-            if (expected.phase != EditorPhase.EDITING) return null
-            expected.copy(phase = EditorPhase.COMMITTING)
-        }
-        is SecretsEditor.SshKey -> {
-            if (expected.phase != EditorPhase.EDITING) return null
-            expected.copy(phase = EditorPhase.COMMITTING)
-        }
-    }
+    if (expected !is SecretsEditor.Active || expected.phase != EditorPhase.EDITING) return null
+    val committing = expected.copy(phase = EditorPhase.COMMITTING)
     if (!compareAndSet(expected, committing)) return null
     return SecretsEditorCommit(editing = expected, committing = committing)
 }
@@ -1037,62 +931,35 @@ internal fun MutableStateFlow<SecretsEditor>.failEditorCommit(
 
 internal fun MutableStateFlow<SecretsEditor>.mutateEditing(
     session: Long,
-    transform: (SecretsEditor) -> SecretsEditor?,
+    transform: (SecretsEditor.Active) -> SecretsEditor?,
 ): Boolean {
     while (true) {
-        val current = value
-        if (current.sessionOrNull() != session || !current.isEditing()) return false
+        val current = value as? SecretsEditor.Active ?: return false
+        if (current.session != session || current.phase != EditorPhase.EDITING) return false
         val updated = transform(current) ?: return false
         if (compareAndSet(current, updated)) return true
     }
-}
-
-private fun SecretsEditor.isEditing(): Boolean = when (this) {
-    SecretsEditor.None -> false
-    is SecretsEditor.Secret -> phase == EditorPhase.EDITING
-    is SecretsEditor.Variable -> phase == EditorPhase.EDITING
-    is SecretsEditor.SshKey -> phase == EditorPhase.EDITING
 }
 
 internal fun MutableStateFlow<SecretsEditor>.clearSensitiveEditorState(
     newSession: () -> Long,
 ) {
     update { editor ->
-        when (editor) {
-            SecretsEditor.None -> editor
-            is SecretsEditor.Variable -> if (
-                editor.state.variable?.sensitive == true || editor.state.sensitive
-            ) {
-                SecretsEditor.None
-            } else {
-                editor
-            }
-            is SecretsEditor.Secret -> when {
-                editor.containsPrivateKeyMaterial() -> SecretsEditor.None
-                editor.phase == EditorPhase.EDITING -> editor.copy(
+        if (editor !is SecretsEditor.Active) return@update editor
+        when {
+            editor.draft.containsSensitiveData -> SecretsEditor.None
+            editor.phase == EditorPhase.COMMITTING -> editor
+            else -> when (val draft = editor.draft) {
+                is VariableEditorState -> editor
+                is SecretEditorState -> editor.copy(
                     session = newSession(),
-                    state = editor.state.copy(
-                        sshKeyDraft = editor.state.sshKeyDraft.withoutPreparation(),
-                    ),
+                    draft = draft.copy(sshKeyDraft = draft.sshKeyDraft.withoutPreparation()),
                 )
-                else -> editor
-            }
-            is SecretsEditor.SshKey -> when {
-                editor.containsPrivateKeyMaterial() -> SecretsEditor.None
-                editor.phase == EditorPhase.EDITING -> editor.copy(
+                is SshKeyEditorState -> editor.copy(
                     session = newSession(),
-                    state = editor.state.copy(
-                        sshKeyDraft = editor.state.sshKeyDraft.withoutPreparation(),
-                    ),
+                    draft = draft.copy(sshKeyDraft = draft.sshKeyDraft.withoutPreparation()),
                 )
-                else -> editor
             }
         }
     }
 }
-
-private fun SecretsEditor.Secret.containsPrivateKeyMaterial(): Boolean =
-    state.sshKeyDraft.privateKeyText.isNotEmpty() || state.sshKeyDraft.preparedKey != null
-
-private fun SecretsEditor.SshKey.containsPrivateKeyMaterial(): Boolean =
-    state.sshKeyDraft.privateKeyText.isNotEmpty() || state.sshKeyDraft.preparedKey != null

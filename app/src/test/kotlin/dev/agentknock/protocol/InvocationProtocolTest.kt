@@ -115,14 +115,14 @@ class InvocationProtocolTest {
     @Test
     fun `decodes all cli completion variants`() {
         assertEquals(
-            InvocationCompletion.Approved(testClientSoftware("0.2.0", "0.1.0")),
+            ApprovalCompletion.Approved(testClientSoftware("0.2.0", "0.1.0")),
             protocol.decodeCompletion(
                 """{${testClientSoftwareFields("0.2.0", "0.1.0")},"result":"APPROVED"}"""
                     .encodeToByteArray(),
             ),
         )
         assertEquals(
-            InvocationCompletion.Denied(
+            ApprovalCompletion.Denied(
                 testClientSoftware("0.2.0", "0.1.0"),
                 "USER_DENIED",
                 "Denied on device.",
@@ -136,7 +136,7 @@ class InvocationProtocolTest {
             """{${testClientSoftwareFields("0.2.0", "0.1.0")},"result":"ABORTED","reason":"CANCELLED","message":"Cancelled by user."}"""
                 .encodeToByteArray(),
         )
-        check(aborted is InvocationCompletion.Aborted)
+        check(aborted is ApprovalCompletion.Aborted)
         assertEquals("CANCELLED", aborted.reason)
         assertEquals("Cancelled by user.", aborted.message)
         assertNull(

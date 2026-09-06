@@ -106,14 +106,14 @@ class GitSignProtocolTest {
             ),
         )
         assertEquals(
-            GitSignCompletion.Approved(testClientSoftware("0.2.0", "0.1.0")),
+            ApprovalCompletion.Approved(testClientSoftware("0.2.0", "0.1.0")),
             protocol.decodeCompletion(
                 """{${testClientSoftwareFields("0.2.0", "0.1.0")},"result":"APPROVED"}"""
                     .encodeToByteArray(),
             ),
         )
         assertEquals(
-            GitSignCompletion.Denied(
+            ApprovalCompletion.Denied(
                 testClientSoftware("0.2.0", "0.1.0"),
                 "USER_DENIED",
                 "Denied on device.",
@@ -124,7 +124,7 @@ class GitSignProtocolTest {
             ),
         )
         assertEquals(
-            GitSignCompletion.Aborted(
+            ApprovalCompletion.Aborted(
                 testClientSoftware("0.2.0", "0.1.0"),
                 "CANCELLED",
                 "Command ended.",

@@ -196,9 +196,8 @@ private fun RequestRow(
     onDecision: (RequestDecision) -> Unit,
 ) {
     val approval = request.status as? InboxRequestStatus.Approval
-    val canApprove = request.userDecisionAvailable &&
+    val canDecide = request.state == InboxRequestState.ACTION_REQUIRED &&
         approval?.state == ApprovalRequestState.APPROVAL_PENDING
-    val canReject = request.userDecisionAvailable && request.canReject()
     val rejectLabel = "Deny once"
     val swipeState = rememberSwipeToDismissBoxState(
         positionalThreshold = { distance -> distance * 0.65f },
@@ -208,10 +207,10 @@ private fun RequestRow(
         if (completedSwipe == SwipeToDismissBoxValue.Settled) return@LaunchedEffect
 
         when (completedSwipe) {
-            SwipeToDismissBoxValue.StartToEnd -> if (canApprove) {
+            SwipeToDismissBoxValue.StartToEnd -> if (canDecide) {
                 onDecision(RequestDecision.APPROVE)
             }
-            SwipeToDismissBoxValue.EndToStart -> if (canReject) {
+            SwipeToDismissBoxValue.EndToStart -> if (canDecide) {
                 onDecision(RequestDecision.DENY)
             }
             SwipeToDismissBoxValue.Settled -> return@LaunchedEffect
@@ -228,13 +227,11 @@ private fun RequestRow(
             .semantics {
                 this.selected = selected
                 customActions = buildList {
-                    if (canApprove) {
+                    if (canDecide) {
                         add(CustomAccessibilityAction("Approve once") {
                             onDecision(RequestDecision.APPROVE)
                             true
                         })
-                    }
-                    if (canReject) {
                         add(CustomAccessibilityAction(rejectLabel) {
                             onDecision(RequestDecision.DENY)
                             true
@@ -242,8 +239,8 @@ private fun RequestRow(
                     }
                 }
             },
-        enableDismissFromStartToEnd = canApprove,
-        enableDismissFromEndToStart = canReject,
+        enableDismissFromStartToEnd = canDecide,
+        enableDismissFromEndToStart = canDecide,
         backgroundContent = {
             val direction = swipeState.dismissDirection
             val approving = direction == SwipeToDismissBoxValue.StartToEnd
@@ -292,8 +289,7 @@ private fun RequestRowContent(
     onClick: () -> Unit,
 ) {
     val subdued = request.wasRejected() || request.wasAborted() || request.hasVerificationFailure()
-    val actionRequired = request.state == InboxRequestState.ACTION_REQUIRED &&
-        request.userDecisionAvailable
+    val actionRequired = request.state == InboxRequestState.ACTION_REQUIRED
     val semanticColors = MaterialTheme.agentknockColors
     val containerColor = when {
         selected -> MaterialTheme.colorScheme.secondaryContainer
@@ -427,9 +423,7 @@ private fun RequestRowContent(
 private fun RequestStatusBadge(request: InboxRequestSummary) {
     val error = (request.status as? InboxRequestStatus.Approval)?.state ==
         ApprovalRequestState.VERIFICATION_FAILED
-    val rejected = request.wasRejected()
-    val actionRequired = request.state == InboxRequestState.ACTION_REQUIRED &&
-        request.userDecisionAvailable
+    val actionRequired = request.state == InboxRequestState.ACTION_REQUIRED
     val accepted = request.wasAccepted()
     val semanticColors = MaterialTheme.agentknockColors
     Surface(
@@ -437,14 +431,12 @@ private fun RequestStatusBadge(request: InboxRequestSummary) {
             error -> semanticColors.dangerContainer
             actionRequired -> semanticColors.attentionContainer
             accepted -> semanticColors.successContainer
-            rejected -> MaterialTheme.colorScheme.surfaceContainerHighest
             else -> MaterialTheme.colorScheme.surfaceContainerHighest
         },
         contentColor = when {
             error -> semanticColors.onDangerContainer
             actionRequired -> semanticColors.onAttentionContainer
             accepted -> semanticColors.onSuccessContainer
-            rejected -> MaterialTheme.colorScheme.onSurfaceVariant
             else -> MaterialTheme.colorScheme.onSurfaceVariant
         },
         shape = RoundedCornerShape(100.dp),
@@ -459,8 +451,6 @@ private fun RequestStatusBadge(request: InboxRequestSummary) {
 
 private fun InboxRequestSummary.statusLabel(): String = when {
     state == InboxRequestState.REVIEWING -> "AI reviewing"
-    !userDecisionAvailable && approvalStatus()?.state ==
-        ApprovalRequestState.APPROVAL_PENDING -> "AI reviewing"
     kind == InboxRequestKind.SECRET_USE -> requiredApprovalStatus().let {
         secretUseStatusLabel(it.state, it.completionResult, it.completionReason)
     }
@@ -474,9 +464,6 @@ private fun InboxRequestSummary.statusLabel(): String = when {
     state == InboxRequestState.WAITING -> "Waiting"
     else -> "Completed"
 }
-
-private fun InboxRequestSummary.canReject(): Boolean =
-    approvalStatus()?.state == ApprovalRequestState.APPROVAL_PENDING
 
 private fun InboxRequestSummary.wasRejected(): Boolean =
     approvalStatus()?.let {

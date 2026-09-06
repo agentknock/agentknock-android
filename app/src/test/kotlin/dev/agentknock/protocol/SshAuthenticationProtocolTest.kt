@@ -112,14 +112,14 @@ class SshAuthenticationProtocolTest {
             """{${testClientSoftwareFields("0.3.0", "0.1.0")},"result":"APPROVED"}"""
                 .encodeToByteArray(),
         )
-        assert(approved is SshAuthenticationCompletion.Approved)
+        assert(approved is ApprovalCompletion.Approved)
         val denied = protocol.decodeCompletion(
             """{${testClientSoftwareFields("0.3.0", "0.1.0")},"result":"DENIED","reason":"USER_DENIED","message":"No"}"""
                 .encodeToByteArray(),
         )
-        require(denied is SshAuthenticationCompletion.Denied)
+        require(denied is ApprovalCompletion.Denied)
         assertEquals("USER_DENIED", denied.reason)
-        assertNull((approved as? SshAuthenticationCompletion.Denied)?.reason)
+        assertNull(approved.reason)
     }
 
     private fun request(message: ByteArray): ByteArray =

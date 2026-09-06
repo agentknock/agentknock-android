@@ -9,7 +9,6 @@ import kotlinx.coroutines.ExperimentalCoroutinesApi
 import kotlinx.coroutines.flow.SharingStarted
 import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.asStateFlow
-import kotlinx.coroutines.flow.combine
 import kotlinx.coroutines.flow.flatMapLatest
 import kotlinx.coroutines.flow.flowOf
 import kotlinx.coroutines.flow.map
@@ -20,11 +19,7 @@ internal sealed interface AuditHistoryState {
     data class Loaded(val events: List<AuditEvent>) : AuditHistoryState
 }
 
-internal sealed interface AuditDetailState {
-    data object None : AuditDetailState
-    data class Loading(val eventId: Long) : AuditDetailState
-    data class Loaded(val eventId: Long, val event: AuditEvent?) : AuditDetailState
-}
+internal data class AuditDetailResult(val eventId: Long, val event: AuditEvent?)
 
 @OptIn(ExperimentalCoroutinesApi::class)
 internal class AuditViewModel(
@@ -40,23 +35,13 @@ internal class AuditViewModel(
         .map<List<AuditEvent>, AuditHistoryState> { events -> AuditHistoryState.Loaded(events) }
         .stateIn(viewModelScope, whileSubscribed, AuditHistoryState.Loading)
     val selectedEventId: StateFlow<Long?> = _selectedEventId.asStateFlow()
-    private val observedDetail: StateFlow<AuditDetailState> = _selectedEventId.flatMapLatest { id ->
-        id?.let { eventId ->
-            audit.observeEvent(eventId).map<AuditEvent?, AuditDetailState> { event ->
-                AuditDetailState.Loaded(eventId, event)
-            }
-        } ?: flowOf(AuditDetailState.None)
-    }.stateIn(viewModelScope, whileSubscribed, AuditDetailState.None)
-    val detail: StateFlow<AuditDetailState> = combine(
-        _selectedEventId,
-        observedDetail,
-    ) { eventId, observed ->
-        when {
-            eventId == null -> AuditDetailState.None
-            observed is AuditDetailState.Loaded && observed.eventId == eventId -> observed
-            else -> AuditDetailState.Loading(eventId)
+    val detail: StateFlow<AuditDetailResult?> = _selectedEventId.flatMapLatest { id ->
+        if (id == null) {
+            flowOf(null)
+        } else {
+            audit.observeEvent(id).map { event -> AuditDetailResult(id, event) }
         }
-    }.stateIn(viewModelScope, whileSubscribed, AuditDetailState.None)
+    }.stateIn(viewModelScope, whileSubscribed, null)
 
     fun selectEvent(id: Long?) {
         _selectedEventId.value = id
