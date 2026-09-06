@@ -13,6 +13,8 @@ import dev.agentknock.storage.AgentknockDatabase
 import dev.agentknock.storage.RoomWriteTransaction
 import dev.agentknock.storage.approval.ApprovalAction
 import dev.agentknock.storage.approval.ApprovalEvaluation
+import dev.agentknock.storage.approval.AiReview
+import dev.agentknock.storage.approval.AiReviewDecision
 import dev.agentknock.storage.approval.SecretApprovalEvaluation
 import dev.agentknock.storage.audit.AuditDecisionSource
 import dev.agentknock.storage.audit.AuditEventType
@@ -48,6 +50,8 @@ import kotlinx.serialization.decodeFromString
 import kotlinx.serialization.encodeToString
 import kotlinx.serialization.json.Json
 import kotlinx.serialization.json.JsonElement
+import kotlinx.serialization.json.jsonObject
+import kotlinx.serialization.json.jsonPrimitive
 import org.junit.After
 import org.junit.Assert.assertEquals
 import org.junit.Assert.assertFalse
@@ -115,6 +119,88 @@ class InvocationRequestsTest {
     @After
     fun tearDown() {
         database.close()
+    }
+
+    @Test
+    fun aiDenialReturnsTheVerbatimExplanationToTheClient() = runTest {
+        val secretId = (secrets.createEnvironmentSecret("github", "GitHub credentials")
+            as CreateSecretResult.Created).id
+        assertTrue(
+            secrets.createEnvironmentVariable(
+                secretId = secretId,
+                name = "TOKEN",
+                value = "sensitive-value",
+                sensitive = true,
+                nonSensitiveCreationAuthorized = true,
+            ) is CreateEnvironmentVariableResult.Created,
+        )
+        assertEquals(
+            SaveSecretResult.SAVED,
+            secrets.saveApprovalMode(secretId, SecretApprovalMode.ASK_AI),
+        )
+        val credentials = RelayDeviceCredentials(
+            deviceIdentityId = DEVICE_IDENTITY_ID,
+            address = "quiet-river-maple",
+            addressId = "address-id",
+            deviceId = DEVICE_ID,
+            devicePublicKey = ByteArray(32),
+            devicePrivateKey = ByteArray(32),
+            deviceToken = "device-token",
+        )
+        val target = requests(
+            audit,
+            object : RelayDeviceCredentialSource {
+                override suspend fun activeDeviceCredentials() =
+                    DeviceCredentialResult.Available(credentials)
+
+                override suspend fun deviceCredentials(deviceIdentityId: String) =
+                    DeviceCredentialResult.Available(credentials)
+            },
+        )
+        val requestId = "invocation-ai-denied"
+        val plaintext =
+            """{$SOFTWARE_FIELDS,"method":"Invocation","secrets":{"github":{}},"operation":{"type":"exec","command":"deploy","arguments":[],"working_directory":"/tmp","executable_path":"/usr/bin/deploy","executable_mode":"BINARY","stdin":"TERMINAL","stdout":"TERMINAL","stderr":"TERMINAL"},"launcher_chain":[],"invocation_token":"AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA="}"""
+                .encodeToByteArray()
+        var completeReview: (suspend (AiReviewAttempt) -> Unit)? = null
+        var responsePlaintext: ByteArray? = null
+        assertEquals(
+            ProcessedRelayMessage,
+            target.processIncoming(
+                client = client(),
+                relayRequestId = requestId,
+                requestPayload = Json.parseToJsonElement("{}"),
+                plaintext = plaintext,
+                acceptedPsks = acceptedPsks(requestId),
+                credentials = credentials,
+                sealResponse = {
+                    responsePlaintext = it
+                    Json.parseToJsonElement(RESPONSE_JSON)
+                },
+                launchAiReview = { _, _, _, complete ->
+                    completeReview = complete
+                    true
+                },
+            ),
+        )
+        val explanation = "  The command \"deploy\" could disclose this secret.\nIts behavior is opaque — access denied.  "
+        checkNotNull(completeReview)(
+            AiReviewAttempt(
+                review = AiReview(decision = AiReviewDecision.DENY, explanation = explanation),
+                request = null,
+            ),
+        )
+
+        val response = Json.parseToJsonElement(
+            checkNotNull(responsePlaintext).decodeToString(),
+        ).jsonObject
+        assertEquals("DENIED", response.getValue("result").jsonPrimitive.content)
+        assertEquals("POLICY_DENIED", response.getValue("reason").jsonPrimitive.content)
+        assertEquals(explanation, response.getValue("message").jsonPrimitive.content)
+        val stored = checkNotNull(database.requestDao().getSecretUseRequest(requestId))
+        assertEquals(ApprovalDecision.DENIED.storedName, stored.decision)
+        assertEquals(DECISION_SOURCE_AI, stored.decisionSource)
+        assertEquals("POLICY_DENIED", stored.completionReason)
+        assertEquals(explanation, stored.completionMessage)
     }
 
     @Test
@@ -706,10 +792,13 @@ class InvocationRequestsTest {
         return PendingEnvironmentInvocation(secretId, contents, plaintext)
     }
 
-    private fun requests(auditSink: AuditSink) = InvocationRequests(
+    private fun requests(
+        auditSink: AuditSink,
+        credentialSource: RelayDeviceCredentialSource = MissingDeviceCredentials,
+    ) = InvocationRequests(
         dao = database.requestDao(),
         secrets = secrets,
-        deviceCredentials = MissingDeviceCredentials,
+        deviceCredentials = credentialSource,
         approvalReviewer = UnexpectedApprovalReviewer,
         subscription = subscription.repository,
         audit = auditSink,

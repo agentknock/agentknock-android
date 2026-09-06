@@ -258,7 +258,7 @@ internal class GitSigningRequests(
             val aiDenied = denial == null && aiReview?.decision == AiReviewDecision.DENY
             if (aiDenied) {
                 denial = InvocationDenialReason.POLICY_DENIED to
-                    "AI review denied use of the SSH key."
+                    checkNotNull(aiReview.explanation)
             }
             val shouldApprove = !aiInputsChanged && denial == null &&
                 evaluation?.isFullyApproved(aiReview?.decision) == true

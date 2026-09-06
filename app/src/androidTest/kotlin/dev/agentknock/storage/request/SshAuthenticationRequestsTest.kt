@@ -56,6 +56,8 @@ import kotlinx.coroutines.test.runTest
 import kotlinx.serialization.encodeToString
 import kotlinx.serialization.json.Json
 import kotlinx.serialization.json.JsonElement
+import kotlinx.serialization.json.jsonObject
+import kotlinx.serialization.json.jsonPrimitive
 import org.junit.After
 import org.junit.Assert.assertEquals
 import org.junit.Assert.assertFalse
@@ -281,7 +283,9 @@ class SshAuthenticationRequestsTest {
 
         outcomes.forEachIndexed { index, (relayDecision, expectedDecision) ->
             val requestId = "ssh-ai-verdict-$index"
-            reviewer.result = reviewed(relayDecision, "Review $index")
+            val explanation = "  Review $index: \"${relayDecision.name}\".\nDetailed explanation — unchanged.  "
+            reviewer.result = reviewed(relayDecision, explanation)
+            var responsePlaintext: ByteArray? = null
             var pendingReview: PendingAiReview? = null
             assertEquals(
                 ProcessedRelayMessage,
@@ -292,7 +296,10 @@ class SshAuthenticationRequestsTest {
                     plaintext = sshAuthenticationPlaintext(token, key),
                     acceptedPsks = acceptedPsks(requestId),
                     credentials = credentials(),
-                    sealResponse = { Json.parseToJsonElement(RESPONSE_JSON) },
+                    sealResponse = {
+                        responsePlaintext = it
+                        Json.parseToJsonElement(RESPONSE_JSON)
+                    },
                     launchAiReview = { _, _, review, complete ->
                         pendingReview = PendingAiReview(review, complete)
                         true
@@ -307,6 +314,16 @@ class SshAuthenticationRequestsTest {
                 database.requestDao().getSshAuthenticationRequest(requestId),
             )
             assertEquals(expectedDecision?.storedName, stored.decision)
+            if (relayDecision == RelayApprovalReviewDecision.DENY) {
+                val response = Json.parseToJsonElement(
+                    checkNotNull(responsePlaintext).decodeToString(),
+                ).jsonObject
+                assertEquals("DENIED", response.getValue("result").jsonPrimitive.content)
+                assertEquals("POLICY_DENIED", response.getValue("reason").jsonPrimitive.content)
+                assertEquals(explanation, response.getValue("message").jsonPrimitive.content)
+                assertEquals("POLICY_DENIED", stored.completionReason)
+                assertEquals(explanation, stored.completionMessage)
+            }
         }
 
         reviewer.result = reviewed(RelayApprovalReviewDecision.APPROVE, "Approve")

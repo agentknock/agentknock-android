@@ -54,6 +54,8 @@ import kotlinx.coroutines.test.runTest
 import kotlinx.serialization.encodeToString
 import kotlinx.serialization.json.Json
 import kotlinx.serialization.json.JsonElement
+import kotlinx.serialization.json.jsonObject
+import kotlinx.serialization.json.jsonPrimitive
 import org.junit.After
 import org.junit.Assert.assertEquals
 import org.junit.Assert.assertFalse
@@ -431,7 +433,9 @@ class GitSigningRequestsTest {
 
         outcomes.forEachIndexed { index, (relayDecision, expectedState, expectedDecision) ->
             val requestId = "git-ai-verdict-$index"
-            reviewer.result = reviewed(relayDecision, "Review result $index")
+            val explanation = "  Review $index: \"${relayDecision.name}\".\nDetailed explanation — unchanged.  "
+            reviewer.result = reviewed(relayDecision, explanation)
+            var responsePlaintext: ByteArray? = null
             var pendingReview: PendingAiReview? = null
             val processed = target.processIncoming(
                 client = client(),
@@ -440,7 +444,10 @@ class GitSigningRequestsTest {
                 plaintext = gitSignPlaintext(token),
                 acceptedPsks = acceptedPsks(requestId),
                 credentials = credentials(),
-                sealResponse = { Json.parseToJsonElement(RESPONSE_JSON) },
+                sealResponse = {
+                    responsePlaintext = it
+                    Json.parseToJsonElement(RESPONSE_JSON)
+                },
                 launchAiReview = { launchedId, _, review, complete ->
                     assertEquals(requestId, launchedId)
                     pendingReview = PendingAiReview(review, complete)
@@ -466,6 +473,16 @@ class GitSigningRequestsTest {
             assertEquals(expectedState.storedName, storedRequest.state)
             assertEquals(expectedDecision?.storedName, storedGitSign.decision)
             assertEquals(relayDecision.toAiDecision(), evaluation.aiReview?.decision)
+            if (relayDecision == RelayApprovalReviewDecision.DENY) {
+                val response = Json.parseToJsonElement(
+                    checkNotNull(responsePlaintext).decodeToString(),
+                ).jsonObject
+                assertEquals("DENIED", response.getValue("result").jsonPrimitive.content)
+                assertEquals("POLICY_DENIED", response.getValue("reason").jsonPrimitive.content)
+                assertEquals(explanation, response.getValue("message").jsonPrimitive.content)
+                assertEquals("POLICY_DENIED", storedGitSign.completionReason)
+                assertEquals(explanation, storedGitSign.completionMessage)
+            }
             assertEquals(
                 expectedDecision != null,
                 storedRequest.responseJson != null,

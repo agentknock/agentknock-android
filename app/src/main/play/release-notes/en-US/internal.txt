@@ -1,1 +1,1 @@
-AI review settings now clearly show when a subscription is required. Inactive AI access falls back to manual approval while preserving your preferences and instructions. Renewing restores AI review for new requests. Improved activation progress and request history.
+AI denials now return the reviewer's exact explanation to the requesting client for secret use, Git signing, and SSH authentication. Sensitive values in new environment-secret drafts are cleared when the app is backgrounded. Simplified secret editing and approval handling.

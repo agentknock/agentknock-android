@@ -261,7 +261,7 @@ internal class InvocationRequests(
                 ?.takeIf { it.decision == AiReviewDecision.DENY }
                 ?.let {
                     InvocationDenialReason.POLICY_DENIED to
-                        "AI review denied access to a requested secret."
+                        checkNotNull(it.explanation)
                 }
             val allProtectedUsesApproved = !aiInputsChanged && approvalEvaluation
                 ?.isFullyApproved(aiReview?.decision) == true
