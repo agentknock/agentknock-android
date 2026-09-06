@@ -49,6 +49,8 @@ internal fun SubscriptionAndBillingScreen(
     modifier: Modifier = Modifier,
 ) {
     val active = state.access == SubscriptionAccess.ACTIVE
+    val activating = !active && state.refreshing &&
+        state.googlePlayPurchase == GooglePlayPurchaseState.PURCHASED
     val busy = state.refreshing || state.redeeming || state.purchasing
     Column(modifier) {
         PageTopBar("Plan and billing", onBack)
@@ -60,7 +62,7 @@ internal fun SubscriptionAndBillingScreen(
 
             AccessCard(
                 title = "AI review",
-                status = when (state.access) {
+                status = if (activating) "Activating" else when (state.access) {
                     SubscriptionAccess.ACTIVE -> "Active"
                     SubscriptionAccess.CHECKING -> "Checking"
                     SubscriptionAccess.SETUP_REQUIRED -> "Finish device setup"
@@ -68,7 +70,7 @@ internal fun SubscriptionAndBillingScreen(
                     SubscriptionAccess.UNAVAILABLE -> "Status unavailable"
                 },
                 highlighted = active,
-                warning = state.access == SubscriptionAccess.UNAVAILABLE,
+                warning = state.access == SubscriptionAccess.UNAVAILABLE && !activating,
             ) {
                 Text(
                     if (active) {
@@ -97,6 +99,7 @@ internal fun SubscriptionAndBillingScreen(
             }
 
             when {
+                activating -> StoreStatus("Activating AI review…", showProgress = true)
                 state.googlePlayPurchase == GooglePlayPurchaseState.PENDING ->
                     PurchaseStatusCard(
                         title = "Payment pending",

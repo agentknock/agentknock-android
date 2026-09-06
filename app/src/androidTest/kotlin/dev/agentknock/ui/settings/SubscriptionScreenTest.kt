@@ -1,5 +1,6 @@
 package dev.agentknock.ui.settings
 
+import androidx.compose.runtime.mutableStateOf
 import androidx.compose.ui.test.assertIsDisplayed
 import androidx.compose.ui.test.junit4.v2.createComposeRule
 import androidx.compose.ui.test.onNodeWithText
@@ -15,6 +16,62 @@ import org.junit.Test
 
 class SubscriptionScreenTest {
     @get:Rule val compose = createComposeRule()
+
+    @Test fun purchaseActivationShowsProgressUntilAccessIsConfirmed() {
+        val state = mutableStateOf(
+            SubscriptionUiState(
+                access = SubscriptionAccess.FREE,
+                googlePlayPurchase = GooglePlayPurchaseState.PURCHASED,
+                refreshing = true,
+            ),
+        )
+        compose.setContent {
+            AgentknockTheme {
+                SubscriptionAndBillingScreen(
+                    state = state.value,
+                    onBack = {}, onRefresh = {}, onSubscribe = {}, onManageSubscription = {},
+                    onOpenSecrets = {},
+                )
+            }
+        }
+        compose.onNodeWithText("Activating").assertIsDisplayed()
+        compose.onNodeWithText("Activating AI review…").assertIsDisplayed()
+        compose.onNodeWithText("Subscription needs attention").assertDoesNotExist()
+        compose.onNodeWithText("Not active").assertDoesNotExist()
+
+        compose.runOnIdle {
+            state.value = state.value.copy(access = SubscriptionAccess.ACTIVE, refreshing = false)
+        }
+        compose.onNodeWithText("Active").assertIsDisplayed()
+        compose.onNodeWithText("Activating AI review…").assertDoesNotExist()
+        compose.onNodeWithText("Subscription needs attention").assertDoesNotExist()
+    }
+
+    @Test fun purchaseWithoutAccessShowsAttentionOnlyAfterCheckingFinishes() {
+        val state = mutableStateOf(
+            SubscriptionUiState(
+                access = SubscriptionAccess.UNAVAILABLE,
+                googlePlayPurchase = GooglePlayPurchaseState.PURCHASED,
+                refreshing = true,
+            ),
+        )
+        compose.setContent {
+            AgentknockTheme {
+                SubscriptionAndBillingScreen(
+                    state = state.value,
+                    onBack = {}, onRefresh = {}, onSubscribe = {}, onManageSubscription = {},
+                    onOpenSecrets = {},
+                )
+            }
+        }
+        compose.onNodeWithText("Activating AI review…").assertIsDisplayed()
+        compose.onNodeWithText("Subscription needs attention").assertDoesNotExist()
+        compose.onNodeWithText("Status unavailable").assertDoesNotExist()
+
+        compose.runOnIdle { state.value = state.value.copy(refreshing = false) }
+        compose.onNodeWithText("Subscription needs attention").assertIsDisplayed()
+        compose.onNodeWithText("Activating AI review…").assertDoesNotExist()
+    }
 
     @Test fun activeAccessOffersSecretSettingsWithoutInventingAPlayPurchase() {
         var opened = 0
