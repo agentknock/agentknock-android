@@ -36,6 +36,29 @@ internal fun SettingsOverview(
     val requestsEnabled = remember(notificationStateGeneration) {
         RequestNotifications.actionNotificationsEnabled(context)
     }
+    SettingsOverviewContent(
+        authenticationMode = authenticationMode,
+        protection = protection,
+        requestsEnabled = requestsEnabled,
+        pushState = pushState,
+        subscription = subscription,
+        onBack = onBack,
+        onOpen = onOpen,
+        modifier = modifier,
+    )
+}
+
+@Composable
+internal fun SettingsOverviewContent(
+    authenticationMode: DeviceAuthenticationMode,
+    protection: VaultProtection?,
+    requestsEnabled: Boolean,
+    pushState: RelayPushRegistrationState?,
+    subscription: SubscriptionUiState,
+    onBack: () -> Unit,
+    onOpen: (SettingsPage) -> Unit,
+    modifier: Modifier,
+) {
     Column(modifier) {
         PageTopBar("Settings", onBack)
         LazyColumn(

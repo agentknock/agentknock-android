@@ -64,6 +64,7 @@ import dev.agentknock.R
 import dev.agentknock.protocol.DeviceProtocol
 import dev.agentknock.storage.device.ClaimPairingAddressResult
 import dev.agentknock.storage.device.DeviceConfiguration
+import dev.agentknock.storage.device.DeviceIdentity
 import dev.agentknock.ui.auth.DeviceAuthenticationChoices
 import dev.agentknock.ui.auth.DeviceAuthenticationMode
 import dev.agentknock.ui.components.NavigationBackButton
@@ -116,6 +117,41 @@ internal fun DeviceSetupScreen(
         return
     }
 
+    DeviceSetupContent(
+        active = active, candidate = candidate, address = address,
+        claiming = claiming, result = result, changeAddressInitially = changeAddressInitially,
+        authenticationMode = authenticationMode,
+        onAuthenticationModeChange = onAuthenticationModeChange,
+        onBack = (::leaveAddressEditor).takeIf { onDone != null },
+        onOpenSettings = onOpenSettings,
+        onAddressChange = {
+            address = it
+            viewModel.clearClaimResult()
+        },
+        onGenerate = {
+            address = viewModel.generateAddress()
+            viewModel.clearClaimResult()
+        },
+        onSubmit = ::submit,
+    )
+}
+
+@Composable
+internal fun DeviceSetupContent(
+    active: DeviceIdentity?,
+    candidate: DeviceIdentity?,
+    address: String,
+    claiming: Boolean,
+    result: ClaimPairingAddressResult?,
+    changeAddressInitially: Boolean,
+    authenticationMode: DeviceAuthenticationMode,
+    onAuthenticationModeChange: (DeviceAuthenticationMode) -> Unit,
+    onBack: (() -> Unit)?,
+    onOpenSettings: (() -> Unit)?,
+    onAddressChange: (String) -> Unit,
+    onGenerate: () -> Unit,
+    onSubmit: () -> Unit,
+) {
     Scaffold(contentWindowInsets = WindowInsets.navigationBars) { padding ->
         Column(Modifier.fillMaxSize().padding(padding)) {
             TopAppBar(
@@ -131,8 +167,8 @@ internal fun DeviceSetupScreen(
                     )
                 },
                 navigationIcon = {
-                    if (changeAddressInitially && onDone != null) {
-                        NavigationBackButton(::leaveAddressEditor)
+                    if (changeAddressInitially && onBack != null) {
+                        NavigationBackButton(checkNotNull(onBack))
                     }
                 },
                 actions = {
@@ -161,15 +197,9 @@ internal fun DeviceSetupScreen(
                     candidateAddress = candidate?.address,
                     claiming = claiming,
                     result = result,
-                    onAddressChange = {
-                        address = it
-                        viewModel.clearClaimResult()
-                    },
-                    onGenerate = {
-                        address = viewModel.generateAddress()
-                        viewModel.clearClaimResult()
-                    },
-                    onSubmit = ::submit,
+                    onAddressChange = onAddressChange,
+                    onGenerate = onGenerate,
+                    onSubmit = onSubmit,
                     beforeSubmit = {
                         if (active == null) {
                             Text("Device authentication", style = MaterialTheme.typography.titleLarge,
@@ -194,7 +224,7 @@ internal fun DeviceSetupScreen(
 }
 
 @Composable
-private fun WelcomeScreen(onContinue: () -> Unit) {
+internal fun WelcomeScreen(onContinue: () -> Unit) {
     Scaffold(contentWindowInsets = WindowInsets.navigationBars) { padding ->
         Column(
             modifier = Modifier.fillMaxSize().padding(padding).verticalScroll(rememberScrollState())

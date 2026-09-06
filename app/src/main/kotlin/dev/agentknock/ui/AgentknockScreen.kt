@@ -371,40 +371,12 @@ internal fun AgentknockScreen(
                 )
             }
         else -> rootStateHolder.SaveableStateProvider("$MAIN_STATE_PREFIX${section.name}") {
-            val navigationSuiteType = NavigationSuiteScaffoldDefaults.navigationSuiteType(
-                currentWindowAdaptiveInfoV2(),
-            )
-            val navigationState = rememberNavigationSuiteScaffoldState(
-                initialValue = if (showNavigation) {
-                    NavigationSuiteScaffoldValue.Visible
-                } else {
-                    NavigationSuiteScaffoldValue.Hidden
-                },
-            )
-            LaunchedEffect(showNavigation, navigationState) {
-                if (showNavigation) navigationState.show() else navigationState.hide()
-            }
-            val navigationIsVertical =
-                navigationSuiteType == NavigationSuiteType.WideNavigationRailCollapsed ||
-                    navigationSuiteType == NavigationSuiteType.WideNavigationRailExpanded
-            val contentNeedsBottomInset = navigationIsVertical ||
-                (navigationState.currentValue == NavigationSuiteScaffoldValue.Hidden &&
-                    !navigationState.isAnimating)
-
-            NavigationSuiteScaffold(
-                navigationItems = {
-                    MainNavigationItems(
-                        section = section,
-                        actionRequiredCounts = actionRequiredCounts,
-                        onSelect = { section = it },
-                    )
-                },
-                navigationSuiteType = navigationSuiteType,
-                state = navigationState,
-                modifier = Modifier.fillMaxSize().windowInsetsPadding(
-                    WindowInsets.navigationBars.only(WindowInsetsSides.Horizontal),
-                ),
-            ) {
+            MainNavigationScaffold(
+                section = section,
+                actionRequiredCounts = actionRequiredCounts,
+                showNavigation = showNavigation,
+                onSelect = { section = it },
+            ) { contentModifier ->
                 MainContent(
                     section = section,
                     onOpenClients = { section = MainSection.CLIENTS },
@@ -420,15 +392,7 @@ internal fun AgentknockScreen(
                     requestsViewModel = requestsViewModel,
                     secretsViewModel = secretsViewModel,
                     clientsViewModel = clientsViewModel,
-                    modifier = Modifier.fillMaxSize().then(
-                        if (contentNeedsBottomInset) {
-                            Modifier.windowInsetsPadding(
-                                WindowInsets.navigationBars.only(WindowInsetsSides.Bottom),
-                            )
-                        } else {
-                            Modifier
-                        },
-                    ),
+                    modifier = contentModifier,
                 )
             }
         }
@@ -463,7 +427,61 @@ internal fun AgentknockScreen(
 }
 
 @Composable
-private fun AgentknockLockedScreen(
+internal fun MainNavigationScaffold(
+    section: MainSection,
+    actionRequiredCounts: Map<MainSection, Int>,
+    showNavigation: Boolean,
+    onSelect: (MainSection) -> Unit,
+    content: @Composable (Modifier) -> Unit,
+) {
+    val navigationSuiteType = NavigationSuiteScaffoldDefaults.navigationSuiteType(
+        currentWindowAdaptiveInfoV2(),
+    )
+    val navigationState = rememberNavigationSuiteScaffoldState(
+        initialValue = if (showNavigation) {
+            NavigationSuiteScaffoldValue.Visible
+        } else {
+            NavigationSuiteScaffoldValue.Hidden
+        },
+    )
+    LaunchedEffect(showNavigation, navigationState) {
+        if (showNavigation) navigationState.show() else navigationState.hide()
+    }
+    val navigationIsVertical =
+        navigationSuiteType == NavigationSuiteType.WideNavigationRailCollapsed ||
+            navigationSuiteType == NavigationSuiteType.WideNavigationRailExpanded
+    val contentNeedsBottomInset = navigationIsVertical ||
+        (navigationState.currentValue == NavigationSuiteScaffoldValue.Hidden &&
+            !navigationState.isAnimating)
+
+    NavigationSuiteScaffold(
+        navigationItems = {
+            MainNavigationItems(
+                section = section,
+                actionRequiredCounts = actionRequiredCounts,
+                onSelect = onSelect,
+            )
+        },
+        navigationSuiteType = navigationSuiteType,
+        state = navigationState,
+        modifier = Modifier.fillMaxSize().windowInsetsPadding(
+            WindowInsets.navigationBars.only(WindowInsetsSides.Horizontal),
+        ),
+    ) {
+        content(
+            Modifier.fillMaxSize().then(
+                if (contentNeedsBottomInset) {
+                    Modifier.windowInsetsPadding(
+                        WindowInsets.navigationBars.only(WindowInsetsSides.Bottom),
+                    )
+                } else Modifier,
+            ),
+        )
+    }
+}
+
+@Composable
+internal fun AgentknockLockedScreen(
     error: String?,
     onUnlock: () -> Unit,
 ) {
@@ -608,7 +626,7 @@ private fun MainSection.label(): String = when (this) {
     MainSection.CLIENTS -> "Clients"
 }
 
-private enum class MainSection {
+internal enum class MainSection {
     REQUESTS,
     SECRETS,
     CLIENTS,

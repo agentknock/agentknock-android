@@ -7,6 +7,7 @@ import androidx.compose.foundation.layout.imePadding
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.rememberScrollState
+import androidx.compose.foundation.ScrollState
 import androidx.compose.foundation.text.KeyboardOptions
 import androidx.compose.foundation.verticalScroll
 import androidx.compose.material3.AlertDialog
@@ -40,6 +41,8 @@ internal fun FactoryResetSettings(
     consumeClearFailure: () -> Unit,
     report: (String) -> Unit,
     modifier: Modifier,
+    scrollState: ScrollState = rememberScrollState(),
+    confirmationModifier: Modifier = Modifier,
 ) {
     var phrase by rememberSaveable { mutableStateOf("") }
     val working = state == FactoryResetUiState.Working
@@ -53,6 +56,7 @@ internal fun FactoryResetSettings(
 
     if (state == FactoryResetUiState.ConfirmLocalClear) {
         AlertDialog(
+            modifier = confirmationModifier,
             onDismissRequest = cancelLocalClear,
             title = { Text("Relay deletion not confirmed") },
             text = {
@@ -74,7 +78,7 @@ internal fun FactoryResetSettings(
     Column(modifier) {
         PageTopBar("Factory reset Agentknock", onBack = { if (!working) onBack() })
         Column(
-            Modifier.verticalScroll(rememberScrollState()).imePadding().padding(20.dp),
+            Modifier.verticalScroll(scrollState).imePadding().padding(20.dp),
             verticalArrangement = Arrangement.spacedBy(18.dp),
         ) {
             Text(

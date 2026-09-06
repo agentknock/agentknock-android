@@ -17,6 +17,8 @@ import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.layout.width
 import androidx.compose.foundation.lazy.LazyColumn
+import androidx.compose.foundation.lazy.LazyListState
+import androidx.compose.foundation.lazy.rememberLazyListState
 import androidx.compose.foundation.text.selection.SelectionContainer
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.outlined.Add
@@ -103,6 +105,7 @@ internal fun SecretDetail(
     aiReviewAccess: AiReviewAccess,
     onOpenPlan: () -> Unit,
     modifier: Modifier = Modifier,
+    listState: LazyListState = rememberLazyListState(),
 ) {
     var menuExpanded by remember(secret.id) { mutableStateOf(false) }
     var editingSshComment by rememberSaveable(secret.id) { mutableStateOf(false) }
@@ -168,6 +171,7 @@ internal fun SecretDetail(
             },
         )
         LazyColumn(
+            state = listState,
             modifier = Modifier.fillMaxSize(),
             contentPadding = PaddingValues(
                 start = 20.dp,

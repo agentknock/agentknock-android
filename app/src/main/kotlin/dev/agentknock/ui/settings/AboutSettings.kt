@@ -8,6 +8,8 @@ import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.PaddingValues
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.lazy.LazyColumn
+import androidx.compose.foundation.lazy.LazyListState
+import androidx.compose.foundation.lazy.rememberLazyListState
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.outlined.ContentCopy
 import androidx.compose.material3.Icon
@@ -28,6 +30,7 @@ internal fun AboutSettings(
     onBack: () -> Unit,
     report: (String) -> Unit,
     modifier: Modifier,
+    listState: LazyListState = rememberLazyListState(),
 ) {
     val context = LocalContext.current
     fun open(label: String, url: String) {
@@ -37,6 +40,7 @@ internal fun AboutSettings(
     Column(modifier) {
         PageTopBar("About Agentknock", onBack)
         LazyColumn(
+            state = listState,
             contentPadding = PaddingValues(start = 16.dp, end = 16.dp, bottom = 24.dp),
             verticalArrangement = Arrangement.spacedBy(16.dp),
         ) {

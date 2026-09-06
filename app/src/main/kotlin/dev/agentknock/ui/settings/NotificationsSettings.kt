@@ -34,7 +34,6 @@ internal fun NotificationsSettings(
     modifier: Modifier,
 ) {
     val context = LocalContext.current
-    val deliveryWarning = pushState?.deliveryWarning()
     val permissionGranted = remember(refreshGeneration) {
         Build.VERSION.SDK_INT < Build.VERSION_CODES.TIRAMISU ||
             ContextCompat.checkSelfPermission(context, Manifest.permission.POST_NOTIFICATIONS) ==
@@ -59,6 +58,32 @@ internal fun NotificationsSettings(
         )
     }
 
+    NotificationsSettingsContent(
+        pushState = pushState,
+        permissionGranted = permissionGranted,
+        appNotificationsEnabled = appNotificationsEnabled,
+        requestsEnabled = requestsEnabled,
+        backgroundEnabled = backgroundEnabled,
+        requestNotificationPermission = requestNotificationPermission,
+        openChannel = ::openChannel,
+        onBack = onBack,
+        modifier = modifier,
+    )
+}
+
+@Composable
+internal fun NotificationsSettingsContent(
+    pushState: RelayPushRegistrationState?,
+    permissionGranted: Boolean,
+    appNotificationsEnabled: Boolean,
+    requestsEnabled: Boolean,
+    backgroundEnabled: Boolean,
+    requestNotificationPermission: () -> Unit,
+    openChannel: (String) -> Unit,
+    onBack: () -> Unit,
+    modifier: Modifier,
+) {
+    val deliveryWarning = pushState?.deliveryWarning()
     Column(modifier) {
         PageTopBar("Notifications", onBack)
         LazyColumn(

@@ -6,6 +6,7 @@ import androidx.compose.material3.AlertDialog
 import androidx.compose.material3.Text
 import androidx.compose.material3.TextButton
 import androidx.compose.runtime.Composable
+import androidx.compose.ui.Modifier
 import dev.agentknock.storage.secret.EnvironmentVariableMetadata
 import dev.agentknock.storage.secret.SecretDetails
 import dev.agentknock.storage.secret.SecretType
@@ -96,8 +97,10 @@ internal fun DiscardChangesDialog(
     enabled: Boolean,
     onDismiss: () -> Unit,
     onDiscard: () -> Unit,
+    modifier: Modifier = Modifier,
 ) {
     AlertDialog(
+        modifier = modifier,
         onDismissRequest = { if (enabled) onDismiss() },
         title = { Text("Discard changes?") },
         text = { Text("Your unsaved changes will be lost.") },

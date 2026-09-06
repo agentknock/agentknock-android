@@ -10,6 +10,7 @@ import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.rememberScrollState
+import androidx.compose.foundation.ScrollState
 import androidx.compose.foundation.verticalScroll
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.outlined.Edit
@@ -61,6 +62,7 @@ internal fun ClientDetail(
     onSaveInstructions: (String) -> Unit,
     onEndTemporaryAccess: (TemporaryAccessGrant) -> Unit,
     modifier: Modifier = Modifier,
+    scrollState: ScrollState = rememberScrollState(),
 ) {
     var showRename by rememberSaveable(client.clientId) { mutableStateOf(false) }
     var rename by rememberSaveable(client.clientId, client.name) { mutableStateOf(client.name) }
@@ -107,7 +109,7 @@ internal fun ClientDetail(
             },
         )
         Column(
-            Modifier.fillMaxSize().verticalScroll(rememberScrollState())
+            Modifier.fillMaxSize().verticalScroll(scrollState)
                 .padding(horizontal = 20.dp, vertical = 12.dp),
             verticalArrangement = Arrangement.spacedBy(16.dp),
         ) {

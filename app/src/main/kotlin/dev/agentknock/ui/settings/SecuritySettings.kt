@@ -5,6 +5,8 @@ import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.PaddingValues
 import androidx.compose.foundation.lazy.LazyColumn
+import androidx.compose.foundation.lazy.LazyListState
+import androidx.compose.foundation.lazy.rememberLazyListState
 import androidx.compose.runtime.Composable
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.platform.LocalContext
@@ -25,9 +27,30 @@ internal fun SecuritySettings(
 ) {
     val context = LocalContext.current
     val deviceSecure = context.getSystemService(KeyguardManager::class.java).isDeviceSecure
+    SecuritySettingsContent(
+        protection = protection,
+        authenticationMode = authenticationMode,
+        deviceSecure = deviceSecure,
+        onAuthenticationModeChange = onAuthenticationModeChange,
+        onBack = onBack,
+        modifier = modifier,
+    )
+}
+
+@Composable
+internal fun SecuritySettingsContent(
+    protection: VaultProtection?,
+    authenticationMode: DeviceAuthenticationMode,
+    deviceSecure: Boolean,
+    onAuthenticationModeChange: (DeviceAuthenticationMode) -> Unit,
+    onBack: () -> Unit,
+    modifier: Modifier,
+    listState: LazyListState = rememberLazyListState(),
+) {
     Column(modifier) {
         PageTopBar("Security and backup", onBack)
         LazyColumn(
+            state = listState,
             contentPadding = PaddingValues(start = 16.dp, end = 16.dp, bottom = 24.dp),
             verticalArrangement = Arrangement.spacedBy(16.dp),
         ) {

@@ -175,8 +175,10 @@ internal fun TemporaryAccessConfirmation(
     approvesOtherUsesOnce: Boolean,
     onConfirm: () -> Unit,
     onDismiss: () -> Unit,
+    modifier: Modifier = Modifier,
 ) {
     AlertDialog(
+        modifier = modifier,
         onDismissRequest = onDismiss,
         title = { Text("Allow temporary secret access?") },
         text = {

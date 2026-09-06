@@ -3,6 +3,7 @@ import com.github.triplet.gradle.androidpublisher.ReleaseStatus
 plugins {
     alias(libs.plugins.android.application)
     alias(libs.plugins.compose.compiler)
+    alias(libs.plugins.compose.screenshot)
     alias(libs.plugins.google.services)
     alias(libs.plugins.kotlin.serialization)
     alias(libs.plugins.ksp)
@@ -17,6 +18,7 @@ val sourceRevision = providers.environmentVariable("AGENTKNOCK_SOURCE_REVISION")
     .orElse("unverified")
 
 android {
+    experimentalProperties["android.experimental.enableScreenshotTest"] = true
     namespace = "dev.agentknock"
     compileSdk = 37
 
@@ -88,6 +90,9 @@ dependencies {
     implementation(libs.okhttp)
 
     debugImplementation(libs.androidx.compose.ui.test.manifest)
+
+    screenshotTestImplementation(libs.screenshot.validation.api)
+    screenshotTestImplementation(libs.androidx.compose.ui.tooling)
 
     ksp(libs.androidx.room3.compiler)
 

@@ -21,6 +21,48 @@ Build and check the app through the Gradle wrapper:
 
 The debug APK is written to `app/build/outputs/apk/debug/`.
 
+## Screen previews
+
+Render the production Compose screens locally without an emulator:
+
+```sh
+./preview-ui secret-detail --variant dark  # one screen, one variant
+./preview-ui --variant light               # normal phone/light across screens
+./preview-ui secret-detail                 # all variants of one screen
+./preview-ui                               # complete catalog
+./preview-ui --list                        # available screens and their variants
+```
+
+Open `app/build/reports/ui-previews/index.html` for the searchable gallery.
+The gallery starts on the screen and variant from the last command. Its filters
+can show other cached previews; each image displays its last render time and an
+exact rerender command. Rendering one variant preserves the other variants of
+that screen as well as all unrelated screens. Missing images are labelled explicitly.
+The command fails if rendering fails or any requested preview is absent from the results.
+
+Variant names describe the configurations defined in the catalog: `light` and
+`dark` are 360 × 800 dp phones at normal text size; `large-text` and `tablet` are
+the additional configurations listed for their respective screens. No variant is
+preferred by default. Omitting `--variant` renders all variants of the selected screens.
+Filtering happens before rendering, so unselected variants do not generate images.
+
+Previews live in `app/src/screenshotTest/kotlin/dev/agentknock/preview/` and call the
+production composables with synthetic data. The catalog covers setup, navigation,
+requests, clients, secrets, editors, settings, billing, audit history, and important
+empty, error, pending, and confirmation states, including views below the fold.
+See [the preview guide](app/src/screenshotTest/README.md) for coverage and extension instructions.
+
+To serve just the generated gallery over the network:
+
+```sh
+python3 -m http.server 4242 --bind 0.0.0.0 --directory app/build/reports/ui-previews
+```
+
+The script uses the project's Nix development shell, fixed palettes, and UTC timestamps.
+The running app still uses dynamic colors by default. PNGs and the gallery are generated
+and ignored by Git. Android system prompts, keyboard behavior, interactions, and dynamic
+colors still require emulator or device verification.
+
 ## Internal releases
 
 Play publishing credentials and the upload keystore live outside the repository
