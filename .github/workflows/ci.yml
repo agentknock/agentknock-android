@@ -61,7 +61,6 @@ jobs:
             app/build/outputs/bundle/release/app-release.aab
             app/build/outputs/mapping/release/mapping.txt
           if-no-files-found: error
-          compression-level: 0
           retention-days: 7
 
       - name: Upload test, lint, release, and preview reports
