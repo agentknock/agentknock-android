@@ -5,7 +5,9 @@ import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.padding
+import androidx.compose.foundation.layout.size
 import androidx.compose.material.icons.Icons
+import androidx.compose.material.icons.outlined.AutoAwesome
 import androidx.compose.material.icons.outlined.Edit
 import androidx.compose.material.icons.outlined.ExpandMore
 import androidx.compose.material3.Icon
@@ -83,6 +85,75 @@ internal fun AiReviewInstructions(
                     )
                 }
             }
+        }
+    }
+}
+
+/**
+ * A compact instructions card for list and detail pages: an icon, the scope title, the
+ * instructions and the scope description as a caption. Same behaviour as
+ * [AiReviewInstructions]: collapsed until opened when there is nothing to show and AI review
+ * is inactive, otherwise a tap edits.
+ */
+@Composable
+internal fun InstructionsCard(
+    scope: AiInstructionsScope,
+    value: String,
+    access: AiReviewAccess,
+    onEdit: () -> Unit,
+    modifier: Modifier = Modifier,
+) {
+    var expanded by rememberSaveable { mutableStateOf(false) }
+    LaunchedEffect(access) {
+        if (access == AiReviewAccess.ACTIVE) expanded = true
+    }
+    val showInstructions = expanded || value.isNotBlank() || access == AiReviewAccess.ACTIVE
+    Surface(
+        onClick = { if (showInstructions) onEdit() else expanded = true },
+        color = MaterialTheme.colorScheme.surfaceContainer,
+        shape = MaterialTheme.shapes.large,
+        modifier = modifier.fillMaxWidth(),
+    ) {
+        Row(
+            modifier = Modifier.padding(start = 16.dp, end = 12.dp, top = 14.dp, bottom = 14.dp),
+            horizontalArrangement = Arrangement.spacedBy(16.dp),
+            verticalAlignment = Alignment.Top,
+        ) {
+            Icon(
+                Icons.Outlined.AutoAwesome,
+                contentDescription = null,
+                tint = MaterialTheme.colorScheme.primary,
+                modifier = Modifier.padding(top = 2.dp).size(20.dp),
+            )
+            Column(
+                modifier = Modifier.weight(1f),
+                verticalArrangement = Arrangement.spacedBy(4.dp),
+            ) {
+                Text(scope.title, style = MaterialTheme.typography.titleSmall)
+                if (showInstructions) {
+                    Text(
+                        value.ifBlank { "No instructions" },
+                        style = MaterialTheme.typography.bodyMedium,
+                        maxLines = 3,
+                        overflow = TextOverflow.Ellipsis,
+                    )
+                }
+                Text(
+                    if (showInstructions && access != AiReviewAccess.ACTIVE) {
+                        "${scope.description} Used when AI review is active."
+                    } else {
+                        scope.description
+                    },
+                    style = MaterialTheme.typography.labelSmall,
+                    color = MaterialTheme.colorScheme.onSurfaceVariant,
+                )
+            }
+            Icon(
+                if (showInstructions) Icons.Outlined.Edit else Icons.Outlined.ExpandMore,
+                contentDescription = if (showInstructions) "Edit instructions" else "Show instructions",
+                tint = MaterialTheme.colorScheme.onSurfaceVariant,
+                modifier = Modifier.padding(top = 2.dp).size(20.dp),
+            )
         }
     }
 }

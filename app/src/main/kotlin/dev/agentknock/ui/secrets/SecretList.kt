@@ -17,10 +17,7 @@ import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.automirrored.outlined.NavigateNext
 import androidx.compose.material.icons.outlined.Add
-import androidx.compose.material.icons.outlined.AutoAwesome
 import androidx.compose.material.icons.outlined.DataObject
-import androidx.compose.material.icons.outlined.Edit
-import androidx.compose.material.icons.outlined.ExpandMore
 import androidx.compose.material.icons.outlined.Key
 import androidx.compose.material.icons.outlined.Schedule
 import androidx.compose.material.icons.outlined.Settings
@@ -32,11 +29,6 @@ import androidx.compose.material3.Surface
 import androidx.compose.material3.Text
 import androidx.compose.material3.TopAppBar
 import androidx.compose.runtime.Composable
-import androidx.compose.runtime.LaunchedEffect
-import androidx.compose.runtime.getValue
-import androidx.compose.runtime.mutableStateOf
-import androidx.compose.runtime.saveable.rememberSaveable
-import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.graphics.Shape
@@ -54,6 +46,7 @@ import dev.agentknock.storage.secret.SecretSummary
 import dev.agentknock.storage.secret.SecretType
 import dev.agentknock.subscription.AiReviewAccess
 import dev.agentknock.ui.components.AiInstructionsScope
+import dev.agentknock.ui.components.InstructionsCard
 import dev.agentknock.ui.components.TonalIcon
 import dev.agentknock.ui.components.rememberDateTimeFormatter
 
@@ -85,11 +78,12 @@ internal fun SecretList(
         Box(Modifier.weight(1f)) {
             if (secrets.isEmpty() && pendingUploads.isEmpty()) {
                 Column(Modifier.fillMaxSize()) {
-                    GlobalInstructionsCard(
+                    InstructionsCard(
+                        scope = AiInstructionsScope.GLOBAL,
                         value = generalInstructions,
                         access = aiReviewAccess,
                         onEdit = onEditGeneralInstructions,
-                        modifier = Modifier.padding(start = 16.dp, end = 16.dp, top = 4.dp),
+                        modifier = Modifier.padding(start = 16.dp, end = 16.dp, top = 4.dp, bottom = 6.dp),
                     )
                     EmptyMessage(
                         title = stringResource(R.string.no_secrets),
@@ -104,10 +98,12 @@ internal fun SecretList(
                     verticalArrangement = Arrangement.spacedBy(2.dp),
                 ) {
                     item(key = "global_instructions") {
-                        GlobalInstructionsCard(
+                        InstructionsCard(
+                            scope = AiInstructionsScope.GLOBAL,
                             value = generalInstructions,
                             access = aiReviewAccess,
                             onEdit = onEditGeneralInstructions,
+                            modifier = Modifier.padding(bottom = 6.dp),
                         )
                     }
                     if (pendingUploads.isNotEmpty()) {
@@ -157,74 +153,6 @@ internal fun SecretList(
                 containerColor = MaterialTheme.colorScheme.primary,
                 contentColor = MaterialTheme.colorScheme.onPrimary,
                 modifier = Modifier.align(Alignment.BottomEnd).padding(16.dp),
-            )
-        }
-    }
-}
-
-/**
- * The global AI review instructions as a compact card that scrolls with the list. Same
- * behaviour as the shared instructions card: collapsed until opened when there is nothing
- * to show and AI review is inactive, otherwise a tap edits.
- */
-@Composable
-private fun GlobalInstructionsCard(
-    value: String,
-    access: AiReviewAccess,
-    onEdit: () -> Unit,
-    modifier: Modifier = Modifier,
-) {
-    var expanded by rememberSaveable { mutableStateOf(false) }
-    LaunchedEffect(access) {
-        if (access == AiReviewAccess.ACTIVE) expanded = true
-    }
-    val showInstructions = expanded || value.isNotBlank() || access == AiReviewAccess.ACTIVE
-    val scope = AiInstructionsScope.GLOBAL
-    Surface(
-        onClick = { if (showInstructions) onEdit() else expanded = true },
-        color = MaterialTheme.colorScheme.surfaceContainer,
-        shape = MaterialTheme.shapes.large,
-        modifier = modifier.fillMaxWidth().padding(bottom = 6.dp),
-    ) {
-        Row(
-            modifier = Modifier.padding(start = 16.dp, end = 12.dp, top = 14.dp, bottom = 14.dp),
-            horizontalArrangement = Arrangement.spacedBy(16.dp),
-            verticalAlignment = Alignment.Top,
-        ) {
-            Icon(
-                Icons.Outlined.AutoAwesome,
-                contentDescription = null,
-                tint = MaterialTheme.colorScheme.primary,
-                modifier = Modifier.padding(top = 2.dp).size(20.dp),
-            )
-            Column(
-                modifier = Modifier.weight(1f),
-                verticalArrangement = Arrangement.spacedBy(4.dp),
-            ) {
-                Text(scope.title, style = MaterialTheme.typography.titleSmall)
-                if (showInstructions) {
-                    Text(
-                        value.ifBlank { "No instructions" },
-                        style = MaterialTheme.typography.bodyMedium,
-                        maxLines = 3,
-                        overflow = TextOverflow.Ellipsis,
-                    )
-                }
-                Text(
-                    if (showInstructions && access != AiReviewAccess.ACTIVE) {
-                        "${scope.description} Used when AI review is active."
-                    } else {
-                        scope.description
-                    },
-                    style = MaterialTheme.typography.labelSmall,
-                    color = MaterialTheme.colorScheme.onSurfaceVariant,
-                )
-            }
-            Icon(
-                if (showInstructions) Icons.Outlined.Edit else Icons.Outlined.ExpandMore,
-                contentDescription = if (showInstructions) "Edit instructions" else "Show instructions",
-                tint = MaterialTheme.colorScheme.onSurfaceVariant,
-                modifier = Modifier.padding(top = 2.dp).size(20.dp),
             )
         }
     }

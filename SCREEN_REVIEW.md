@@ -28,7 +28,7 @@ All entries below already have Compose previews matching the current configurati
 3. [x] **Git signing request** — `git-sign / dark` — accepted in `68f8005`.
 4. [x] **SSH authentication request** — `ssh-authentication / dark` — accepted in `d49c450`.
 5. [x] **Secrets list** — `secrets / dark` — accepted in `befc72b`.
-6. [ ] **Environment secret detail** — `secret-detail / dark`.
+6. [x] **Environment secret detail** — `secret-detail / dark`.
 7. [ ] **SSH secret detail** — `secret-ssh / dark`.
 8. [ ] **Secret access settings** — `secret-access / dark`.
 9. [ ] **Clients list** — `clients / dark`.

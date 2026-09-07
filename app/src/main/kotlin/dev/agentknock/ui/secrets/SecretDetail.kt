@@ -64,7 +64,7 @@ import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
 import dev.agentknock.subscription.AiReviewAccess
 import dev.agentknock.ui.components.rememberDateTimeFormatter
-import dev.agentknock.ui.components.AiReviewInstructions
+import dev.agentknock.ui.components.InstructionsCard
 import dev.agentknock.ui.components.AiInstructionsScope
 import dev.agentknock.R
 import dev.agentknock.relay.RelayClientState
@@ -283,7 +283,7 @@ internal fun SecretDetail(
                 }
             }
             item {
-                AiReviewInstructions(
+                InstructionsCard(
                     scope = AiInstructionsScope.SECRET,
                     value = secret.instructions,
                     access = aiReviewAccess,
@@ -577,11 +577,11 @@ private fun EnvironmentVariableCard(
         Column(
             modifier = Modifier
                 .fillMaxWidth()
-                .padding(start = 14.dp, end = 14.dp, top = 12.dp, bottom = 4.dp),
-            verticalArrangement = Arrangement.spacedBy(6.dp),
+                .padding(start = 16.dp, top = 12.dp, bottom = 6.dp),
+            verticalArrangement = Arrangement.spacedBy(4.dp),
         ) {
             Row(
-                modifier = Modifier.fillMaxWidth(),
+                modifier = Modifier.fillMaxWidth().padding(end = 16.dp),
                 horizontalArrangement = Arrangement.SpaceBetween,
                 verticalAlignment = Alignment.CenterVertically,
             ) {
@@ -618,7 +618,7 @@ private fun EnvironmentVariableCard(
                 }
             }
             Row(
-                modifier = Modifier.fillMaxWidth(),
+                modifier = Modifier.fillMaxWidth().padding(end = 4.dp),
                 verticalAlignment = Alignment.CenterVertically,
             ) {
                 Column(Modifier.weight(1f)) {
