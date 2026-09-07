@@ -494,15 +494,20 @@ private fun RequestHeadline(request: InboxRequestSummary) {
     }
 }
 
+/** Executables at least this long get their directory on a separate line in list rows. */
+private const val SPLIT_EXECUTABLE_MIN_LENGTH = 24
+
 /**
  * The executable's directory sits on its own muted line so the program name leads the
  * command; the text order is unchanged and the full path remains in the detail.
  */
 @Composable
 private fun CommandHeadline(command: String, arguments: List<String>) {
-    val (directory, _) = renderedExecutable(command)
+    val (directory, name) = renderedExecutable(command)
+    val splitDirectory = directory.isNotEmpty() &&
+        directory.length + name.length >= SPLIT_EXECUTABLE_MIN_LENGTH
     Column(verticalArrangement = Arrangement.spacedBy(2.dp)) {
-        if (directory.isNotEmpty()) {
+        if (splitDirectory) {
             Text(
                 directory,
                 style = MaterialTheme.typography.bodySmall,
@@ -519,7 +524,7 @@ private fun CommandHeadline(command: String, arguments: List<String>) {
                 listed = false,
                 mutedColor = MaterialTheme.colorScheme.onSurfaceVariant,
                 optionColor = MaterialTheme.colorScheme.tertiary,
-                includeDirectory = false,
+                includeDirectory = !splitDirectory,
             ),
             style = MaterialTheme.typography.bodyLarge.copy(
                 fontFamily = FontFamily.Monospace,

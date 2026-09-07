@@ -6,6 +6,7 @@ import androidx.compose.ui.Modifier
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.ui.tooling.preview.Preview
 import com.android.tools.screenshot.PreviewTest
+import dev.agentknock.protocol.*
 import dev.agentknock.storage.request.*
 import dev.agentknock.storage.approval.*
 import dev.agentknock.ui.MainSection
@@ -139,9 +140,46 @@ fun GitSignLightPreview() = GitSignPreview()
 fun GitSignDarkPreview() = GitSignPreview()
 
 @Composable
-private fun GitSignPreview() = PreviewScreen {
-    GitSignRequestDetail(previewRequest(InboxRequestContent.GitSign(previewGitSign)), {}, true, {}, {}, {}, Modifier.fillMaxSize())
+private fun GitSignPreview() = PreviewScreen { GitSignPage(previewGitSign) }
+
+@Composable private fun GitSignPage(details: GitSignRequestDetails, state: InboxRequestState = InboxRequestState.ACTION_REQUIRED) {
+    GitSignRequestDetail(previewRequest(InboxRequestContent.GitSign(details), state), {}, true, {}, {}, {}, Modifier.fillMaxSize())
 }
+
+private val previewSignedRepository = GitSignRepository(
+    remote = "git@example.test:team/service.git", worktree = "/home/developer/service",
+    head = GitSignHead.Branch("main", upstream = "origin/main"), changedPathCount = 2,
+    changedPaths = listOf(
+        GitSignChangedPath(GitSignChangeStatus.MODIFIED, "service/health/checks.py"),
+        GitSignChangedPath(GitSignChangeStatus.ADDED, "service/health/tests/test_checks.py"),
+    ),
+)
+
+@PreviewTest
+@Preview(name = "Dark", group = "git-sign-signed", widthDp = 360, heightDp = 800, locale = "en", uiMode = Configuration.UI_MODE_NIGHT_YES)
+@Composable
+fun GitSignSignedDarkPreview() = PreviewScreen {
+    GitSignPage(previewGitSign.copy(state = ApprovalRequestState.COMPLETED, decision = ApprovalDecision.APPROVED,
+        completionResult = ApprovalCompletionResult.APPROVED, repository = previewSignedRepository), InboxRequestState.COMPLETED)
+}
+
+@PreviewTest
+@Preview(name = "Dark", group = "git-sign-tag", widthDp = 360, heightDp = 800, locale = "en", uiMode = Configuration.UI_MODE_NIGHT_YES)
+@Composable
+fun GitSignTagDarkPreview() = PreviewScreen {
+    GitSignPage(previewGitSign.copy(
+        message = ("object " + "b".repeat(40) + "\ntype commit\ntag v1.4.0\n" +
+            "tagger Developer <dev@example.test> 1788696000 +0000\n\nRelease 1.4.0\n\nHealth checks now retry before failing.\n").encodeToByteArray(),
+        repository = previewSignedRepository.copy(changedPathCount = null, changedPaths = null),
+        command = "git", arguments = listOf("tag", "-s", "v1.4.0", "-m", "Release 1.4.0"),
+        reason = "Sign the release tag.",
+    ))
+}
+
+@PreviewTest
+@Preview(name = "Dark", group = "git-sign-large-text", widthDp = 360, heightDp = 800, fontScale = 1.5f, locale = "en", uiMode = Configuration.UI_MODE_NIGHT_YES)
+@Composable
+fun GitSignLargeTextDarkPreview() = GitSignPreview()
 
 @PreviewTest
 @Preview(name = "Light", group = "ssh-authentication", widthDp = 360, heightDp = 800, locale = "en", uiMode = Configuration.UI_MODE_NIGHT_NO)

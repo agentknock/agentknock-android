@@ -1,31 +1,22 @@
 package dev.agentknock.ui.requests
 
-import androidx.compose.foundation.background
 import androidx.compose.foundation.layout.Arrangement
-import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.BoxWithConstraints
 import androidx.compose.foundation.layout.Column
-import androidx.compose.foundation.layout.FlowRow
-import androidx.compose.foundation.layout.IntrinsicSize
 import androidx.compose.foundation.layout.Row
-import androidx.compose.foundation.layout.fillMaxHeight
 import androidx.compose.foundation.layout.fillMaxWidth
-import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.layout.width
-import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.foundation.text.selection.SelectionContainer
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.outlined.AutoAwesome
 import androidx.compose.material.icons.outlined.Block
 import androidx.compose.material.icons.outlined.CheckCircle
-import androidx.compose.material.icons.outlined.Computer
 import androidx.compose.material.icons.outlined.ErrorOutline
 import androidx.compose.material.icons.outlined.HourglassTop
 import androidx.compose.material.icons.outlined.Key
 import androidx.compose.material3.HorizontalDivider
-import androidx.compose.material3.Icon
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.Surface
 import androidx.compose.material3.Text
@@ -37,7 +28,6 @@ import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.graphics.Color
-import androidx.compose.ui.graphics.vector.ImageVector
 import androidx.compose.ui.platform.LocalDensity
 import androidx.compose.ui.semantics.clearAndSetSemantics
 import androidx.compose.ui.semantics.contentDescription
@@ -79,7 +69,6 @@ import dev.agentknock.ui.components.Disclosure
 import dev.agentknock.ui.components.Notice
 import dev.agentknock.ui.components.NoticeTone
 import dev.agentknock.ui.components.TonalIcon
-import dev.agentknock.ui.theme.agentknockColors
 
 @Composable
 internal fun InvocationRequestDetail(
@@ -285,86 +274,6 @@ internal fun InvocationRequestDetail(
     }
 }
 
-private data class StatusSummary(
-    val title: String,
-    val tone: NoticeTone = NoticeTone.NEUTRAL,
-    val icon: ImageVector? = null,
-    val detail: String? = null,
-)
-
-@Composable
-private fun StatusHeader(status: StatusSummary, requestedAt: String) {
-    Column(verticalArrangement = Arrangement.spacedBy(8.dp)) {
-        FlowRow(
-            modifier = Modifier.fillMaxWidth(),
-            horizontalArrangement = Arrangement.SpaceBetween,
-            verticalArrangement = Arrangement.spacedBy(6.dp),
-            itemVerticalAlignment = Alignment.CenterVertically,
-        ) {
-            StatusChip(status)
-            Text(
-                requestedAt,
-                style = MaterialTheme.typography.bodySmall,
-                color = MaterialTheme.colorScheme.onSurfaceVariant,
-                modifier = Modifier.clearAndSetSemantics {
-                    contentDescription = "Requested $requestedAt"
-                },
-            )
-        }
-        status.detail?.let {
-            Text(
-                it,
-                style = MaterialTheme.typography.bodyMedium,
-                color = MaterialTheme.colorScheme.onSurfaceVariant,
-            )
-        }
-    }
-}
-
-@Composable
-private fun StatusChip(status: StatusSummary, modifier: Modifier = Modifier) {
-    val semanticColors = MaterialTheme.agentknockColors
-    val container = when (status.tone) {
-        NoticeTone.NEUTRAL, NoticeTone.SUBDUED -> MaterialTheme.colorScheme.surfaceContainerHighest
-        NoticeTone.ATTENTION -> semanticColors.attentionContainer
-        NoticeTone.SUCCESS -> semanticColors.successContainer
-        NoticeTone.DANGER -> semanticColors.dangerContainer
-    }
-    val content = when (status.tone) {
-        NoticeTone.NEUTRAL, NoticeTone.SUBDUED -> MaterialTheme.colorScheme.onSurfaceVariant
-        NoticeTone.ATTENTION -> semanticColors.onAttentionContainer
-        NoticeTone.SUCCESS -> semanticColors.onSuccessContainer
-        NoticeTone.DANGER -> semanticColors.onDangerContainer
-    }
-    Surface(
-        color = container,
-        contentColor = content,
-        shape = RoundedCornerShape(100.dp),
-        modifier = modifier,
-    ) {
-        Row(
-            modifier = Modifier.padding(start = if (status.icon == null) 12.dp else 10.dp, end = 12.dp, top = 6.dp, bottom = 6.dp),
-            horizontalArrangement = Arrangement.spacedBy(6.dp),
-            verticalAlignment = Alignment.CenterVertically,
-        ) {
-            status.icon?.let {
-                Icon(it, contentDescription = null, modifier = Modifier.size(16.dp))
-            }
-            Text(status.title, style = MaterialTheme.typography.labelLarge)
-        }
-    }
-}
-
-@Composable
-private fun SectionTitle(text: String) {
-    Text(
-        text,
-        style = MaterialTheme.typography.titleSmall,
-        color = MaterialTheme.colorScheme.primary,
-        modifier = Modifier.padding(horizontal = 4.dp),
-    )
-}
-
 @Composable
 private fun RequestTicket(
     clientName: String,
@@ -386,61 +295,6 @@ private fun RequestTicket(
             IdentityColumns(clientName, secretNames)
             reason?.takeIf(String::isNotBlank)?.let { ReasonQuote(it, clientName) }
             CommandBlock(command, arguments)
-        }
-    }
-}
-
-@Composable
-private fun IdentityColumns(clientName: String, secretNames: List<String>) {
-    val textMeasurer = rememberTextMeasurer()
-    val nameStyle = MaterialTheme.typography.titleMedium
-    val density = LocalDensity.current
-    val secretLabel = if (secretNames.size == 1) "Secret" else "Secrets"
-    BoxWithConstraints(Modifier.fillMaxWidth()) {
-        val columnWidth = with(density) { ((maxWidth - 16.dp) / 2 - 26.dp).roundToPx() }
-        val stack = (listOf(clientName) + secretNames).any { name ->
-            textMeasurer.measure(name, nameStyle, softWrap = false).size.width > columnWidth
-        }
-        if (stack) {
-            Column(verticalArrangement = Arrangement.spacedBy(12.dp)) {
-                Identity(Icons.Outlined.Computer, "Client", listOf(clientName))
-                if (secretNames.isNotEmpty()) Identity(Icons.Outlined.Key, secretLabel, secretNames)
-            }
-        } else {
-            Row(horizontalArrangement = Arrangement.spacedBy(16.dp)) {
-                Identity(Icons.Outlined.Computer, "Client", listOf(clientName), Modifier.weight(1f))
-                if (secretNames.isNotEmpty()) {
-                    Identity(Icons.Outlined.Key, secretLabel, secretNames, Modifier.weight(1f))
-                }
-            }
-        }
-    }
-}
-
-@Composable
-private fun Identity(icon: ImageVector, role: String, names: List<String>, modifier: Modifier = Modifier) {
-    Row(
-        modifier = modifier.clearAndSetSemantics {
-            contentDescription = "$role ${names.joinToString(", ")}"
-        },
-        horizontalArrangement = Arrangement.spacedBy(8.dp),
-        verticalAlignment = Alignment.Top,
-    ) {
-        Icon(
-            icon,
-            contentDescription = null,
-            tint = MaterialTheme.colorScheme.onSurfaceVariant,
-            modifier = Modifier.padding(top = 2.dp).size(18.dp),
-        )
-        Column(verticalArrangement = Arrangement.spacedBy(0.dp)) {
-            names.forEach { name ->
-                Text(name.breakableAtHyphens(), style = MaterialTheme.typography.titleMedium)
-            }
-            Text(
-                role,
-                style = MaterialTheme.typography.labelSmall,
-                color = MaterialTheme.colorScheme.onSurfaceVariant,
-            )
         }
     }
 }
@@ -549,32 +403,6 @@ internal fun annotatedCommand(
             withStyle(SpanStyle(color = optionColor)) { append(word) }
         } else {
             append(word)
-        }
-    }
-}
-
-@Composable
-private fun ReasonQuote(reason: String, clientName: String) {
-    Row(
-        modifier = Modifier.fillMaxWidth().height(IntrinsicSize.Min),
-        horizontalArrangement = Arrangement.spacedBy(12.dp),
-    ) {
-        Box(
-            Modifier
-                .padding(vertical = 2.dp)
-                .width(3.dp)
-                .fillMaxHeight()
-                .background(MaterialTheme.colorScheme.outlineVariant, RoundedCornerShape(2.dp)),
-        )
-        Column(verticalArrangement = Arrangement.spacedBy(4.dp)) {
-            SelectionContainer {
-                Text(reason, style = MaterialTheme.typography.bodyLarge)
-            }
-            Text(
-                "Reason reported by $clientName",
-                style = MaterialTheme.typography.labelMedium,
-                color = MaterialTheme.colorScheme.onSurfaceVariant,
-            )
         }
     }
 }
@@ -822,9 +650,6 @@ private fun HiddenSensitiveValue(style: TextStyle) {
         },
     )
 }
-
-/** Lets long hyphenated names wrap after a hyphen instead of mid-word. */
-internal fun String.breakableAtHyphens(): String = replace("-", "-\u200B")
 
 private fun SecretUseRequestDetails.statusLabel(): String = secretUseStatusLabel(
     state,

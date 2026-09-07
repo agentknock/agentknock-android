@@ -68,6 +68,8 @@ internal data class GitSigningContent(
     val messageLabel: String?,
     val message: String?,
     val identities: List<Pair<String, String>> = emptyList(),
+    /** What the bytes describe when recognised, such as "Commit" or "Tag". */
+    val objectLabel: String? = null,
 )
 
 internal fun describeGitSigningContent(content: ByteArray): GitSigningContent {
@@ -100,11 +102,11 @@ internal fun describeGitSigningContent(content: ByteArray): GitSigningContent {
     }
     return when {
         headerLines.firstOrNull()?.startsWith("tree ") == true ->
-            GitSigningContent("Git commit signature", "Commit message", message, identities)
+            GitSigningContent("Git commit signature", "Commit message", message, identities, "Commit")
         headerLines.firstOrNull()?.startsWith("object ") == true &&
             headerLines.any { it.startsWith("type ") } &&
             headerLines.any { it.startsWith("tag ") } ->
-            GitSigningContent("Git tag signature", "Tag message", message, identities)
+            GitSigningContent("Git tag signature", "Tag message", message, identities, "Tag")
         else -> GitSigningContent("Git signature", null, null)
     }
 }

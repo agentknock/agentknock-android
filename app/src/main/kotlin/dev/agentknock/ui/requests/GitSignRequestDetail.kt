@@ -5,9 +5,19 @@ import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.padding
+import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.layout.width
 import androidx.compose.foundation.text.selection.SelectionContainer
-import androidx.compose.material3.HorizontalDivider
+import androidx.compose.material.icons.Icons
+import androidx.compose.material.icons.outlined.AccountTree
+import androidx.compose.material.icons.outlined.AutoAwesome
+import androidx.compose.material.icons.outlined.Block
+import androidx.compose.material.icons.outlined.CheckCircle
+import androidx.compose.material.icons.outlined.ErrorOutline
+import androidx.compose.material.icons.outlined.HourglassTop
+import androidx.compose.material.icons.outlined.Person
+import androidx.compose.material.icons.outlined.Terminal
+import androidx.compose.material3.Icon
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.Surface
 import androidx.compose.material3.Text
@@ -20,9 +30,9 @@ import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.text.font.FontFamily
 import androidx.compose.ui.unit.dp
+import dev.agentknock.presentation.GitSigningContent
 import dev.agentknock.presentation.describeGitSigningContent
 import dev.agentknock.presentation.formatParentRequestAge
-import dev.agentknock.presentation.renderShellCommand
 import dev.agentknock.presentation.renderSoftware
 import dev.agentknock.protocol.GitSignChangeStatus
 import dev.agentknock.protocol.GitSignHead
@@ -31,21 +41,20 @@ import dev.agentknock.protocol.relayRequestTimestamp
 import dev.agentknock.storage.approval.AiReviewDecision
 import dev.agentknock.storage.approval.ApprovalAction
 import dev.agentknock.storage.request.ApprovalCompletionResult
-import dev.agentknock.storage.request.GitSignRequestDetails
+import dev.agentknock.storage.request.ApprovalDecision
 import dev.agentknock.storage.request.ApprovalRequestState
+import dev.agentknock.storage.request.GitSignRequestDetails
 import dev.agentknock.storage.request.InboxRequestContent
 import dev.agentknock.storage.request.InboxRequestDetails
 import dev.agentknock.storage.request.InboxRequestState
-import dev.agentknock.storage.request.ApprovalDecision
 import dev.agentknock.storage.secret.TemporaryAccessOperation
-import dev.agentknock.ui.components.rememberDateTimeFormatter
 import dev.agentknock.ui.components.DetailPage
 import dev.agentknock.ui.components.DetailValue
-import dev.agentknock.ui.components.ExactText
 import dev.agentknock.ui.components.Disclosure
+import dev.agentknock.ui.components.ExactText
 import dev.agentknock.ui.components.Notice
 import dev.agentknock.ui.components.NoticeTone
-import dev.agentknock.ui.components.StatusLine
+import dev.agentknock.ui.components.rememberDateTimeFormatter
 
 @Composable
 internal fun GitSignRequestDetail(
@@ -57,6 +66,7 @@ internal fun GitSignRequestDetail(
     onAllowTemporarily: () -> Unit,
     modifier: Modifier,
 ) {
+    val dates = rememberDateTimeFormatter()
     val signing = (request.content as InboxRequestContent.GitSign).details
     val actionRequired = request.state == InboxRequestState.ACTION_REQUIRED
     val pending = signing.state == ApprovalRequestState.APPROVAL_PENDING
@@ -68,11 +78,11 @@ internal fun GitSignRequestDetail(
         aiReviewInFlight,
     )
     val signingContent = describeGitSigningContent(signing.message)
-    val title = signingContent.requestTitle
     val exactContent = signing.message.displayForApproval()
     val gitMessage = signingContent.message
+    val requestedAt = relayRequestTimestamp(request.id) ?: request.receivedAt
     DetailPage(
-        title = title,
+        title = signingContent.requestTitle,
         onBack = onBack,
         modifier = modifier,
         showBack = showBack,
@@ -80,7 +90,7 @@ internal fun GitSignRequestDetail(
         bottomContent = if (actionRequired) {
             {
                 Surface(
-                    color = MaterialTheme.colorScheme.surfaceContainerLow,
+                    color = MaterialTheme.colorScheme.surfaceContainer,
                     tonalElevation = 3.dp,
                 ) {
                     RequestDecisionButtons(
@@ -97,102 +107,38 @@ internal fun GitSignRequestDetail(
             null
         },
     ) {
-        RequestIdentity(
-            signing.clientName,
-            listOf(signing.secretName),
-            relayRequestTimestamp(request.id) ?: request.receivedAt,
-        ) {
-            if (pending) StatusLine(
-                if (aiReviewInFlight) "AI review in progress" else signing.statusLabel(),
-                error = signing.state == ApprovalRequestState.VERIFICATION_FAILED,
-                attention = actionRequired,
-                subdued = aiReviewInFlight ||
-                    signing.decision == ApprovalDecision.DENIED ||
-                    signing.completionResult == ApprovalCompletionResult.DENIED ||
-                    signing.completionResult == ApprovalCompletionResult.ABORTED,
+        StatusHeader(
+            if (pending) signing.pendingStatus(actionRequired, aiReviewInFlight) else signing.outcome(),
+            dates.timestamp(requestedAt),
+        )
+
+        SigningTicket(
+            clientName = signing.clientName,
+            secretName = signing.secretName,
+            reason = signing.reason,
+            content = signingContent,
+            command = signing.command,
+            arguments = signing.arguments,
+            parentRequestAge = formatParentRequestAge(signing.invocationReceivedAt, request.receivedAt),
+        )
+
+        if (pending) {
+            if (signing.approvalEvaluation?.aiReview != null || aiReviewRequested) {
+                AiReviewNotice(signing.approvalEvaluation.aiReview, aiReviewInFlight)
+            }
+        } else if (
+            shouldShowDecisionHistory(
+                verificationFailed = signing.state == ApprovalRequestState.VERIFICATION_FAILED,
+                completionReason = signing.completionReason,
             )
-        }
-        if (!pending) {
-            GitSignOutcome(signing)
-        }
-
-        if (
-            pending && (
-                signing.approvalEvaluation?.aiReview != null ||
-                    signing.approvalEvaluation?.secrets
-                        ?.any { it.action == ApprovalAction.ASK_AI } == true
-                )
         ) {
-            AiReviewNotice(signing.approvalEvaluation.aiReview, aiReviewInFlight)
+            GitSignDecisionHistory(signing)
         }
 
-        gitMessage?.let { message ->
-            Surface(
-                color = MaterialTheme.colorScheme.surfaceContainer,
-                contentColor = MaterialTheme.colorScheme.onSurface,
-                shape = MaterialTheme.shapes.large,
-                modifier = Modifier.fillMaxWidth(),
-            ) {
-                Column(
-                    Modifier.padding(16.dp),
-                    verticalArrangement = Arrangement.spacedBy(8.dp),
-                ) {
-                    Text(
-                        checkNotNull(signingContent.messageLabel),
-                        style = MaterialTheme.typography.labelLarge,
-                    )
-                    SelectionContainer {
-                        Column(verticalArrangement = Arrangement.spacedBy(8.dp)) {
-                            Text(message.substringBefore('\n'), style = MaterialTheme.typography.titleLarge)
-                            message.substringAfter('\n', "").trimStart('\n')
-                                .takeIf(String::isNotEmpty)?.let {
-                                    Text(it, style = MaterialTheme.typography.bodyMedium)
-                                }
-                        }
-                    }
-                    signingContent.identities.groupBy({ it.second }, { it.first })
-                        .forEach { (identity, labels) ->
-                            Column(verticalArrangement = Arrangement.spacedBy(2.dp)) {
-                                Text(
-                                    labels.joinToString(" / "),
-                                    style = MaterialTheme.typography.labelMedium,
-                                    color = MaterialTheme.colorScheme.onSurfaceVariant,
-                                )
-                                SelectionContainer {
-                                    Text(identity, style = MaterialTheme.typography.bodyMedium)
-                                }
-                            }
-                        }
-                    signing.repository?.takeIf(GitSignRepository::hasVisibleContext)?.let { repository ->
-                        HorizontalDivider(Modifier.padding(vertical = 4.dp))
-                        GitRepositoryContext(repository)
-                    }
-                }
-            }
-        }
-        if (gitMessage == null) {
-            signing.repository?.takeIf(GitSignRepository::hasVisibleContext)?.let { repository ->
-                GitRepositoryContext(repository)
-            }
+        signing.repository?.takeIf(GitSignRepository::hasVisibleContext)?.let { repository ->
+            RepositoryCard(repository, signing.clientName)
         }
 
-        ClientReason(signing.reason)
-
-        Column(verticalArrangement = Arrangement.spacedBy(6.dp)) {
-            Text("Command reported by client", style = MaterialTheme.typography.labelLarge)
-            SelectionContainer {
-                Text(
-                    renderShellCommand(signing.command, signing.arguments),
-                    fontFamily = FontFamily.Monospace,
-                    style = MaterialTheme.typography.bodyMedium,
-                )
-            }
-            Text(
-                formatParentRequestAge(signing.invocationReceivedAt, request.receivedAt),
-                style = MaterialTheme.typography.bodySmall,
-                color = MaterialTheme.colorScheme.onSurfaceVariant,
-            )
-        }
         Disclosure(
             title = if (gitMessage == null) "Content to sign" else "Exact content to sign",
             initiallyExpanded = gitMessage == null,
@@ -212,10 +158,15 @@ internal fun GitSignRequestDetail(
                 "Git signing uses the private key on this device. The private key is never sent to the client.",
                 style = MaterialTheme.typography.bodySmall,
                 color = MaterialTheme.colorScheme.onSurfaceVariant,
+                modifier = Modifier.padding(horizontal = 4.dp),
             )
         }
 
         Disclosure("Technical details") {
+            DetailValue(
+                "Requested",
+                dates.timestamp(requestedAt, includeSeconds = true),
+            )
             signing.clientSoftware?.let { software ->
                 DetailValue("Client software", renderSoftware(software.application))
                 if (software.library != software.application) {
@@ -228,6 +179,8 @@ internal fun GitSignRequestDetail(
             DetailValue("Client ID", signing.clientId, true)
             DetailValue("Invocation request ID", signing.invocationRequestId, true)
             DetailValue("Signing request ID", request.id, true)
+            signing.decidedAt?.let { DetailValue("Decided", dates.timestamp(it, includeSeconds = true)) }
+            request.completedAt?.let { DetailValue("Completed", dates.timestamp(it, includeSeconds = true)) }
         }
     }
     if (confirmTemporaryAccess) {
@@ -245,62 +198,250 @@ internal fun GitSignRequestDetail(
     }
 }
 
+/**
+ * The request as one unit: who asks with which key, why, the object they want signed, and
+ * the command that led here. Repository context is client-reported and shown separately.
+ */
 @Composable
-private fun GitRepositoryContext(repository: GitSignRepository) {
-    Column(
+private fun SigningTicket(
+    clientName: String,
+    secretName: String,
+    reason: String?,
+    content: GitSigningContent,
+    command: String,
+    arguments: List<String>,
+    parentRequestAge: String,
+) {
+    Surface(
+        color = MaterialTheme.colorScheme.surfaceContainer,
+        contentColor = MaterialTheme.colorScheme.onSurface,
+        shape = MaterialTheme.shapes.extraLarge,
         modifier = Modifier.fillMaxWidth(),
-        verticalArrangement = Arrangement.spacedBy(6.dp),
     ) {
-        Text("Repository reported by client", style = MaterialTheme.typography.labelLarge)
-        (repository.remote ?: repository.worktree)?.let {
+        Column(
+            Modifier.padding(16.dp),
+            verticalArrangement = Arrangement.spacedBy(16.dp),
+        ) {
+            IdentityColumns(clientName, listOf(secretName), secretRole = "Signing key")
+            reason?.takeIf(String::isNotBlank)?.let { ReasonQuote(it, clientName) }
+            content.message?.let { SignedObjectSheet(content, it) }
+            TriggeringCommand(command, arguments, clientName, parentRequestAge)
+        }
+    }
+}
+
+/** The message and identities parsed from the bytes to sign, presented as the document it is. */
+@Composable
+private fun SignedObjectSheet(content: GitSigningContent, message: String) {
+    val subject = message.substringBefore('\n')
+    val body = message.substringAfter('\n', "").trimStart('\n').takeIf(String::isNotEmpty)
+    Surface(
+        color = MaterialTheme.colorScheme.surfaceContainerHigh,
+        contentColor = MaterialTheme.colorScheme.onSurface,
+        shape = MaterialTheme.shapes.small,
+        modifier = Modifier.fillMaxWidth(),
+    ) {
+        Column(
+            Modifier.padding(horizontal = 14.dp, vertical = 14.dp),
+            verticalArrangement = Arrangement.spacedBy(12.dp),
+        ) {
             SelectionContainer {
-                Text(it, style = MaterialTheme.typography.bodyMedium)
+                Column(verticalArrangement = Arrangement.spacedBy(6.dp)) {
+                    Text(subject, style = MaterialTheme.typography.titleLarge)
+                    body?.let { Text(it, style = MaterialTheme.typography.bodyMedium) }
+                }
             }
-        }
-        repository.head?.let { head ->
+            content.identities.groupBy({ it.second }, { it.first }).forEach { (identity, roles) ->
+                SignedIdentity(roles.joinToString(" · "), identity)
+            }
             Text(
-                when (head) {
-                    is GitSignHead.Branch -> buildString {
-                        append("Branch ")
-                        append(head.name)
-                        head.upstream?.let {
-                            append(" · upstream ")
-                            append(it)
-                        }
-                    }
-                    GitSignHead.Detached -> "Detached HEAD"
-                },
-                style = MaterialTheme.typography.bodyMedium,
+                content.objectLabel?.let { "$it to sign" } ?: "Content to sign",
+                style = MaterialTheme.typography.labelSmall,
                 color = MaterialTheme.colorScheme.onSurfaceVariant,
             )
         }
-        repository.changedPathCount?.let { count ->
+    }
+}
+
+/**
+ * An author, committer or tagger from the bytes to sign. Unlike the ticket's identity rows the
+ * exact string stays selectable and copyable, so no wrap hints are inserted and the text keeps
+ * its own semantics; the role is a visible label read after the name.
+ */
+@Composable
+private fun SignedIdentity(role: String, identity: String) {
+    Row(
+        horizontalArrangement = Arrangement.spacedBy(8.dp),
+        verticalAlignment = Alignment.Top,
+    ) {
+        Icon(
+            Icons.Outlined.Person,
+            contentDescription = null,
+            tint = MaterialTheme.colorScheme.onSurfaceVariant,
+            modifier = Modifier.padding(top = 2.dp).size(18.dp),
+        )
+        Column {
+            SelectionContainer {
+                Text(identity, style = MaterialTheme.typography.titleMedium)
+            }
             Text(
-                if (count == 1L) "1 changed file" else "$count changed files",
-                style = MaterialTheme.typography.bodyMedium,
+                role,
+                style = MaterialTheme.typography.labelSmall,
                 color = MaterialTheme.colorScheme.onSurfaceVariant,
             )
         }
-        repository.changedPaths?.takeIf { it.isNotEmpty() }?.forEach { path ->
-            Row(
-                horizontalArrangement = Arrangement.spacedBy(10.dp),
-                verticalAlignment = Alignment.Top,
-            ) {
+    }
+}
+
+@Composable
+private fun TriggeringCommand(
+    command: String,
+    arguments: List<String>,
+    clientName: String,
+    parentRequestAge: String,
+) {
+    Row(
+        horizontalArrangement = Arrangement.spacedBy(10.dp),
+        verticalAlignment = Alignment.Top,
+    ) {
+        Icon(
+            Icons.Outlined.Terminal,
+            contentDescription = null,
+            tint = MaterialTheme.colorScheme.onSurfaceVariant,
+            modifier = Modifier.padding(top = 2.dp).size(18.dp),
+        )
+        Column(verticalArrangement = Arrangement.spacedBy(2.dp)) {
+            SelectionContainer {
                 Text(
-                    when (path.status) {
-                        GitSignChangeStatus.ADDED -> "A"
-                        GitSignChangeStatus.DELETED -> "D"
-                        GitSignChangeStatus.MODIFIED -> "M"
-                        GitSignChangeStatus.TYPE_CHANGED -> "T"
-                    },
-                    modifier = Modifier.width(16.dp),
-                    style = MaterialTheme.typography.labelMedium,
-                    color = MaterialTheme.colorScheme.primary,
+                    annotatedCommand(
+                        command = command,
+                        arguments = arguments,
+                        listed = false,
+                        mutedColor = MaterialTheme.colorScheme.onSurfaceVariant,
+                        optionColor = MaterialTheme.colorScheme.tertiary,
+                    ),
+                    style = MaterialTheme.typography.bodyMedium,
                     fontFamily = FontFamily.Monospace,
                 )
-                SelectionContainer {
-                    Text(path.path, fontFamily = FontFamily.Monospace)
+            }
+            Text(
+                "Command reported by $clientName",
+                style = MaterialTheme.typography.labelSmall,
+                color = MaterialTheme.colorScheme.onSurfaceVariant,
+            )
+            Text(
+                parentRequestAge,
+                style = MaterialTheme.typography.labelSmall,
+                color = MaterialTheme.colorScheme.onSurfaceVariant,
+            )
+        }
+    }
+}
+
+@Composable
+private fun RepositoryCard(repository: GitSignRepository, clientName: String) {
+    Column(verticalArrangement = Arrangement.spacedBy(8.dp)) {
+        SectionTitle("Repository")
+        Surface(
+            color = MaterialTheme.colorScheme.surfaceContainerLow,
+            shape = MaterialTheme.shapes.large,
+            modifier = Modifier.fillMaxWidth(),
+        ) {
+            Column(
+                Modifier.padding(16.dp),
+                verticalArrangement = Arrangement.spacedBy(12.dp),
+            ) {
+                Row(
+                    horizontalArrangement = Arrangement.spacedBy(10.dp),
+                    verticalAlignment = Alignment.Top,
+                ) {
+                    Icon(
+                        Icons.Outlined.AccountTree,
+                        contentDescription = null,
+                        tint = MaterialTheme.colorScheme.onSurfaceVariant,
+                        modifier = Modifier.padding(top = 2.dp).size(18.dp),
+                    )
+                    Column(
+                        modifier = Modifier.weight(1f),
+                        verticalArrangement = Arrangement.spacedBy(4.dp),
+                    ) {
+                        repository.remote?.let {
+                            SelectionContainer {
+                                Text(it, style = MaterialTheme.typography.titleMedium)
+                            }
+                        } ?: repository.worktree?.let {
+                            SelectionContainer {
+                                Text(
+                                    it,
+                                    style = MaterialTheme.typography.bodyMedium,
+                                    fontFamily = FontFamily.Monospace,
+                                )
+                            }
+                        }
+                        repository.head?.let { head ->
+                            Text(
+                                when (head) {
+                                    is GitSignHead.Branch -> buildString {
+                                        append("Branch ")
+                                        append(head.name)
+                                        head.upstream?.let {
+                                            append(" · upstream ")
+                                            append(it)
+                                        }
+                                    }
+                                    GitSignHead.Detached -> "Detached HEAD"
+                                },
+                                style = MaterialTheme.typography.bodyMedium,
+                                color = MaterialTheme.colorScheme.onSurfaceVariant,
+                            )
+                        }
+                        repository.changedPathCount?.let { count ->
+                            Text(
+                                if (count == 1L) "1 changed file" else "$count changed files",
+                                style = MaterialTheme.typography.bodyMedium,
+                                color = MaterialTheme.colorScheme.onSurfaceVariant,
+                            )
+                        }
+                    }
                 }
+                repository.changedPaths?.takeIf { it.isNotEmpty() }?.let { paths ->
+                    Column(
+                        modifier = Modifier.padding(start = 28.dp),
+                        verticalArrangement = Arrangement.spacedBy(4.dp),
+                    ) {
+                        paths.forEach { path ->
+                            Row(
+                                horizontalArrangement = Arrangement.spacedBy(10.dp),
+                                verticalAlignment = Alignment.Top,
+                            ) {
+                                Text(
+                                    when (path.status) {
+                                        GitSignChangeStatus.ADDED -> "A"
+                                        GitSignChangeStatus.DELETED -> "D"
+                                        GitSignChangeStatus.MODIFIED -> "M"
+                                        GitSignChangeStatus.TYPE_CHANGED -> "T"
+                                    },
+                                    modifier = Modifier.width(16.dp),
+                                    style = MaterialTheme.typography.labelMedium,
+                                    color = MaterialTheme.colorScheme.primary,
+                                    fontFamily = FontFamily.Monospace,
+                                )
+                                SelectionContainer {
+                                    Text(
+                                        path.path,
+                                        style = MaterialTheme.typography.bodyMedium,
+                                        fontFamily = FontFamily.Monospace,
+                                    )
+                                }
+                            }
+                        }
+                    }
+                }
+                Text(
+                    "Reported by $clientName, not part of the signed content",
+                    style = MaterialTheme.typography.labelSmall,
+                    color = MaterialTheme.colorScheme.onSurfaceVariant,
+                )
             }
         }
     }
@@ -310,79 +451,110 @@ private fun GitSignRepository.hasVisibleContext(): Boolean =
     remote != null || worktree != null || head != null ||
         changedPathCount != null || changedPaths != null
 
+private fun GitSignRequestDetails.pendingStatus(
+    actionRequired: Boolean,
+    aiReviewInFlight: Boolean,
+): StatusSummary = when {
+    aiReviewInFlight -> StatusSummary(
+        "AI review in progress",
+        NoticeTone.SUBDUED,
+        Icons.Outlined.AutoAwesome,
+    )
+    actionRequired -> StatusSummary(statusLabel(), NoticeTone.ATTENTION)
+    else -> StatusSummary(
+        statusLabel(),
+        if (
+            decision == ApprovalDecision.DENIED ||
+            completionResult == ApprovalCompletionResult.DENIED ||
+            completionResult == ApprovalCompletionResult.ABORTED
+        ) {
+            NoticeTone.SUBDUED
+        } else {
+            NoticeTone.SUCCESS
+        },
+    )
+}
+
+private fun GitSignRequestDetails.outcome(): StatusSummary = when {
+    state == ApprovalRequestState.VERIFICATION_FAILED -> StatusSummary(
+        "Signature could not be confirmed",
+        NoticeTone.DANGER,
+        Icons.Outlined.ErrorOutline,
+        error ?: "The client confirmation was invalid.",
+    )
+    completionResult == ApprovalCompletionResult.APPROVED -> StatusSummary(
+        "Content signed",
+        NoticeTone.SUCCESS,
+        Icons.Outlined.CheckCircle,
+        "The signature was delivered to the client.",
+    )
+    completionResult == ApprovalCompletionResult.DENIED -> if (completionReason == "INVALID_REQUEST") {
+        StatusSummary(
+            "Invalid request",
+            NoticeTone.DANGER,
+            Icons.Outlined.ErrorOutline,
+            completionMessage ?: "No signature was created.",
+        )
+    } else {
+        StatusSummary(
+            "Signature denied",
+            NoticeTone.SUBDUED,
+            Icons.Outlined.Block,
+            completionMessage ?: "No signature was created.",
+        )
+    }
+    completionResult == ApprovalCompletionResult.ABORTED -> StatusSummary(
+        "Request ended",
+        NoticeTone.NEUTRAL,
+        Icons.Outlined.Block,
+        completionMessage ?: "The client ended the Git signing request.",
+    )
+    state == ApprovalRequestState.COMPLETED && error != null -> StatusSummary(
+        "Request ended",
+        NoticeTone.NEUTRAL,
+        null,
+        error,
+    )
+    state == ApprovalRequestState.WAITING_FOR_COMPLETION &&
+        decision == ApprovalDecision.APPROVED -> StatusSummary(
+        "Signature sent",
+        NoticeTone.SUCCESS,
+        Icons.Outlined.HourglassTop,
+        "Waiting for the client to confirm receipt.",
+    )
+    state == ApprovalRequestState.WAITING_FOR_COMPLETION -> StatusSummary(
+        "Signature denied",
+        NoticeTone.SUBDUED,
+        Icons.Outlined.HourglassTop,
+        completionMessage ?: "Waiting for the client to confirm the denial.",
+    )
+    else -> StatusSummary(statusLabel())
+}
+
 @Composable
-private fun GitSignOutcome(signing: GitSignRequestDetails) {
+private fun GitSignDecisionHistory(signing: GitSignRequestDetails) {
     val dates = rememberDateTimeFormatter()
     val temporaryAccessUntil = signing.approvalEvaluation?.secrets
         ?.mapNotNull { it.temporaryAccessExpiresAt }
         ?.maxOrNull()
     val aiReview = signing.approvalEvaluation?.aiReview
-    when {
-        signing.state == ApprovalRequestState.VERIFICATION_FAILED -> Notice(
-            "Signature could not be confirmed",
-            signing.error ?: "The client confirmation was invalid.",
-            NoticeTone.DANGER,
-        )
-        signing.completionResult == ApprovalCompletionResult.APPROVED -> Notice(
-            "Content signed",
-            "The signature was delivered to the client.",
+    temporaryAccessUntil?.let {
+        Notice(
+            "Temporary signing access",
+            "Future Git signing from this client is allowed through ${dates.timestamp(it)}.",
             NoticeTone.SUCCESS,
         )
-        signing.completionResult == ApprovalCompletionResult.DENIED -> Notice(
-            if (signing.completionReason == "INVALID_REQUEST") {
-                "Invalid request"
-            } else {
-                "Signature denied"
-            },
-            signing.completionMessage ?: "No signature was created.",
-            NoticeTone.SUBDUED,
-        )
-        signing.completionResult == ApprovalCompletionResult.ABORTED -> Notice(
-            "Request ended",
-            signing.completionMessage ?: "The client ended the Git signing request.",
-            NoticeTone.NEUTRAL,
-        )
-        signing.state == ApprovalRequestState.COMPLETED && signing.error != null -> Notice(
-            "Request ended",
-            signing.error,
-            NoticeTone.NEUTRAL,
-        )
-        signing.state == ApprovalRequestState.WAITING_FOR_COMPLETION &&
-            signing.decision == ApprovalDecision.APPROVED -> Notice(
-            "Signature sent",
-            "Waiting for the client to confirm receipt.",
-            NoticeTone.SUCCESS,
-        )
-        signing.state == ApprovalRequestState.WAITING_FOR_COMPLETION -> Notice(
-            "Signature denied",
-            signing.completionMessage ?: "Waiting for the client to confirm the denial.",
-            NoticeTone.SUBDUED,
-        )
     }
-    if (
-        shouldShowDecisionHistory(
-            verificationFailed = signing.state == ApprovalRequestState.VERIFICATION_FAILED,
-            completionReason = signing.completionReason,
-        )
-    ) {
-        temporaryAccessUntil?.let {
-            Notice(
-                "Temporary signing access",
-                "Future Git signing from this client is allowed through ${dates.timestamp(it)}.",
-                NoticeTone.SUCCESS,
-            )
-        }
-        HistoricalAiReview(
-            review = aiReview,
-            decision = signing.decision,
-            humanResolution = when {
-                aiReview?.decision != AiReviewDecision.ASK_USER -> null
-                signing.decision == ApprovalDecision.DENIED -> "You denied it."
-                temporaryAccessUntil != null -> "You signed it and allowed temporary access."
-                else -> "You signed it once."
-            },
-        )
-    }
+    HistoricalAiReview(
+        review = aiReview,
+        decision = signing.decision,
+        humanResolution = when {
+            aiReview?.decision != AiReviewDecision.ASK_USER -> null
+            signing.decision == ApprovalDecision.DENIED -> "You denied it."
+            temporaryAccessUntil != null -> "You signed it and allowed temporary access."
+            else -> "You signed it once."
+        },
+    )
 }
 
 private fun ByteArray.displayForApproval(): String {

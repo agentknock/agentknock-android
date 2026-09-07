@@ -74,6 +74,7 @@ class DisplayFormattingTest {
                 messageLabel = "Commit message",
                 message = "Explain the change\n\nWith useful detail",
                 identities = listOf("Author" to "Example"),
+                objectLabel = "Commit",
             ),
             describeGitSigningContent(
                 "tree abc\nauthor Example\n\nExplain the change\n\nWith useful detail\n"
@@ -90,6 +91,7 @@ class DisplayFormattingTest {
                 messageLabel = "Tag message",
                 message = "Release 1.0",
                 identities = listOf("Tagger" to "Example"),
+                objectLabel = "Tag",
             ),
             describeGitSigningContent(
                 "object abc\ntype commit\ntag v1.0\ntagger Example\n\nRelease 1.0\n".encodeToByteArray(),
