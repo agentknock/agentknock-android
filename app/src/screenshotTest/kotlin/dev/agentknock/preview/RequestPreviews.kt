@@ -183,7 +183,7 @@ fun SshUploadDarkPreview() = SshUploadPreview()
 
 @Composable
 private fun SshUploadPreview() = PreviewScreen {
-    UploadPage(previewUpload.copy(secretType = "ssh", uploadedName = "developer-ssh", description = previewSshSecret.description,
+    UploadPage(previewUpload.copy(secretType = "ssh", uploadedName = "cf-key", description = previewSshSecret.description,
         variables = emptyList(), variableNames = emptyList(), addedVariables = emptyList(), publicKey = previewSshKey.publicKey, fingerprint = previewSshKey.fingerprint))
 }
 
@@ -208,3 +208,44 @@ private fun InvocationReviewingPreview() = PreviewScreen {
         secrets = previewEvaluation.secrets.map { it.copy(action = ApprovalAction.ASK_AI) },
     )), InboxRequestState.REVIEWING)
 }
+
+private const val longClientName = "cf-wrk-production-eu-west-1"
+private val longSecretNames = listOf("cf-test-production-db-password", "cf-test-deployment-api-token")
+
+@PreviewTest
+@Preview(name = "Dark", group = "requests-long-names", widthDp = 360, heightDp = 800, locale = "en", uiMode = Configuration.UI_MODE_NIGHT_YES)
+@Composable
+fun RequestsLongNamesDarkPreview() = PreviewScreen {
+    RequestsPage(previewRequestSummaries.map {
+        it.copy(
+            clientName = longClientName,
+            secretNames = if (it.kind == InboxRequestKind.SECRET_USE) longSecretNames
+                else listOf("cf-key-production-deployment"),
+        )
+    })
+}
+
+@PreviewTest
+@Preview(name = "Dark", group = "invocation-long-names", widthDp = 360, heightDp = 800, locale = "en", uiMode = Configuration.UI_MODE_NIGHT_YES)
+@Composable
+fun InvocationLongNamesDarkPreview() = PreviewScreen {
+    InvocationPage(previewInvocation.copy(
+        clientName = longClientName,
+        secrets = longSecretNames,
+        secretDetails = longSecretNames.mapIndexed { index, name ->
+            previewInvocation.secretDetails.single().copy(
+                name = name,
+                description = "",
+                environmentVariableNames = listOf(if (index == 0) "PGPASSWORD" else "DEPLOY_TOKEN"),
+            )
+        },
+        approvalEvaluation = previewEvaluation.copy(secrets = longSecretNames.mapIndexed { index, name ->
+            previewEvaluation.secrets.single().copy(secretId = "long-secret-$index", secretName = name)
+        }),
+    ))
+}
+
+@PreviewTest
+@Preview(name = "Dark", group = "invocation-large-text", widthDp = 360, heightDp = 800, fontScale = 1.5f, locale = "en", uiMode = Configuration.UI_MODE_NIGHT_YES)
+@Composable
+fun InvocationLargeTextDarkPreview() = InvocationPreview()

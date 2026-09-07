@@ -2,14 +2,12 @@ package dev.agentknock.ui.settings
 
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.Arrangement
-import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.ColumnScope
 import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
-import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.text.selection.SelectionContainer
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.automirrored.outlined.Launch
@@ -62,7 +60,7 @@ internal fun SettingsGroup(
 @Composable
 internal fun SettingsGroupDivider(withIcon: Boolean = false) {
     HorizontalDivider(
-        modifier = Modifier.padding(start = if (withIcon) 76.dp else 20.dp),
+        modifier = Modifier.padding(start = if (withIcon) 56.dp else 16.dp, end = 16.dp),
         color = MaterialTheme.colorScheme.outlineVariant.copy(alpha = 0.62f),
     )
 }
@@ -74,9 +72,9 @@ internal fun SettingsSectionLabel(
 ) {
     Text(
         text,
-        style = MaterialTheme.typography.labelLarge,
+        style = MaterialTheme.typography.titleSmall,
         color = MaterialTheme.colorScheme.primary,
-        modifier = modifier.padding(start = 12.dp, bottom = 8.dp),
+        modifier = modifier.padding(start = 16.dp, bottom = 8.dp),
     )
 }
 
@@ -98,29 +96,17 @@ internal fun SettingsRow(
     }
     val clickModifier = if (onClick == null) modifier else modifier.clickable(onClick = onClick)
     Row(
-        modifier = clickModifier.fillMaxWidth().padding(horizontal = 20.dp, vertical = 14.dp),
+        modifier = clickModifier.fillMaxWidth().padding(horizontal = 16.dp, vertical = 16.dp),
         horizontalArrangement = Arrangement.spacedBy(16.dp),
         verticalAlignment = Alignment.CenterVertically,
     ) {
         icon?.let {
-            Surface(
-                color = if (destructive) {
-                    MaterialTheme.agentknockColors.dangerContainer
-                } else {
-                    MaterialTheme.colorScheme.secondaryContainer
-                },
-                contentColor = if (destructive) {
-                    MaterialTheme.agentknockColors.onDangerContainer
-                } else {
-                    MaterialTheme.colorScheme.onSecondaryContainer
-                },
-                shape = CircleShape,
-                modifier = Modifier.size(40.dp),
-            ) {
-                Box(contentAlignment = Alignment.Center) {
-                    Icon(it, contentDescription = null, modifier = Modifier.size(20.dp))
-                }
-            }
+            Icon(
+                it,
+                contentDescription = null,
+                tint = accent,
+                modifier = Modifier.size(24.dp),
+            )
         }
         Column(
             modifier = Modifier.weight(1f),
@@ -137,7 +123,7 @@ internal fun SettingsRow(
                 Text(
                     it,
                     style = MaterialTheme.typography.bodyMedium,
-                    color = if (destructive) accent else MaterialTheme.colorScheme.onSurfaceVariant,
+                    color = MaterialTheme.colorScheme.onSurfaceVariant,
                     maxLines = 3,
                     overflow = TextOverflow.Ellipsis,
                 )
@@ -164,17 +150,18 @@ internal fun SettingsValueRow(
     trailing: (@Composable () -> Unit)? = null,
 ) {
     Row(
-        modifier = modifier.fillMaxWidth().padding(horizontal = 20.dp, vertical = 14.dp),
+        modifier = modifier.fillMaxWidth().padding(horizontal = 16.dp, vertical = 12.dp),
         horizontalArrangement = Arrangement.spacedBy(12.dp),
         verticalAlignment = Alignment.CenterVertically,
     ) {
         Column(Modifier.weight(1f), verticalArrangement = Arrangement.spacedBy(2.dp)) {
-            Text(label, style = MaterialTheme.typography.bodyLarge)
+            Text(label, style = MaterialTheme.typography.bodySmall,
+                color = MaterialTheme.colorScheme.onSurfaceVariant)
             SelectionContainer {
                 Text(
                     value,
                     style = MaterialTheme.typography.bodyMedium,
-                    color = MaterialTheme.colorScheme.onSurfaceVariant,
+                    color = MaterialTheme.colorScheme.onSurface,
                     fontFamily = if (monospace) FontFamily.Monospace else FontFamily.Default,
                 )
             }

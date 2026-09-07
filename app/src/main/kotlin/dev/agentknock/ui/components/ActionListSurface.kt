@@ -1,20 +1,11 @@
 package dev.agentknock.ui.components
 
-import androidx.compose.foundation.background
-import androidx.compose.foundation.layout.Box
-import androidx.compose.foundation.layout.IntrinsicSize
-import androidx.compose.foundation.layout.Row
-import androidx.compose.foundation.layout.fillMaxHeight
 import androidx.compose.foundation.layout.fillMaxWidth
-import androidx.compose.foundation.layout.height
-import androidx.compose.foundation.layout.width
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.Surface
 import androidx.compose.runtime.Composable
 import androidx.compose.ui.Modifier
-import androidx.compose.ui.graphics.Color
-import androidx.compose.ui.unit.dp
-import dev.agentknock.ui.theme.agentknockColors
+import androidx.compose.ui.graphics.compositeOver
 
 @Composable
 internal fun ActionListSurface(
@@ -27,24 +18,15 @@ internal fun ActionListSurface(
     Surface(
         color = if (selected) {
             MaterialTheme.colorScheme.secondaryContainer
+        } else if (actionRequired) {
+            MaterialTheme.colorScheme.primary.copy(alpha = 0.08f)
+                .compositeOver(MaterialTheme.colorScheme.surface)
         } else {
             MaterialTheme.colorScheme.surfaceContainer
         },
         shape = MaterialTheme.shapes.large,
         onClick = onClick,
         modifier = modifier.fillMaxWidth(),
-    ) {
-        Row(Modifier.fillMaxWidth().height(IntrinsicSize.Min)) {
-            Box(
-                Modifier.width(5.dp).fillMaxHeight().background(
-                    if (actionRequired) {
-                        MaterialTheme.agentknockColors.attentionAccent
-                    } else {
-                        Color.Transparent
-                    },
-                ),
-            )
-            Box(Modifier.weight(1f)) { content() }
-        }
-    }
+        content = content,
+    )
 }

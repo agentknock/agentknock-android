@@ -1,29 +1,18 @@
 package dev.agentknock.presentation
 
 import java.time.Duration
-import java.time.Instant
-import java.time.ZoneId
-import java.time.format.DateTimeFormatter
 import java.util.Locale
-
-private val timestampFormatter =
-    DateTimeFormatter.ofPattern("uuuu-MM-dd HH:mm:ss", Locale.ROOT)
 
 private val unquotedShellWord = Regex("[A-Za-z0-9_@%+=:,./-]+")
 
-internal fun formatTimestamp(
-    timestamp: Long,
-    zoneId: ZoneId = ZoneId.systemDefault(),
-): String = timestampFormatter.format(Instant.ofEpochMilli(timestamp).atZone(zoneId))
-
-internal fun formatRelativeTime(timestamp: Long, now: Long = System.currentTimeMillis()): String {
+internal fun formatRelativeTime(timestamp: Long, now: Long, formatDate: (Long) -> String): String {
     val elapsed = Duration.ofMillis((now - timestamp).coerceAtLeast(0))
     return when {
         elapsed.toMinutes() < 1 -> "just now"
         elapsed.toHours() < 1 -> elapsed.toMinutes().relativeUnit("minute")
         elapsed.toDays() < 1 -> elapsed.toHours().relativeUnit("hour")
         elapsed.toDays() < 30 -> elapsed.toDays().relativeUnit("day")
-        else -> formatTimestamp(timestamp).substringBefore(' ')
+        else -> formatDate(timestamp)
     }
 }
 

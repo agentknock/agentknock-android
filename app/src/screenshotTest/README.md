@@ -3,6 +3,8 @@
 `./preview-ui --list` lists screens and the variants available for each one.
 Use `./preview-ui secret-detail --variant dark` to render exactly that screen and
 variant, or `./preview-ui --variant dark` to render that variant across screens.
+Pass several screen names to render them in one Gradle run, for example
+`./preview-ui requests invocation git-sign --variant dark`.
 Without `--variant`, all variants of the selected screens are rendered. There is
 no special default theme, device size, or text scale.
 
@@ -12,11 +14,38 @@ necessary because the renderer's method filter cannot select an individual
 annotation inside a multipreview function. Changed Kotlin sources still compile,
 but unselected variants do not render.
 
-Open `app/build/reports/ui-previews/index.html` directly in a browser. The gallery
-starts with the requested screen and variant selected. Change its dropdowns to
-inspect other cached images. A partial render preserves the other variants and
-their timestamps, including variants belonging to the same screen. Missing
-variants have explicit placeholders and an exact render command.
+Open `app/build/reports/ui-previews/index.html` directly in a browser. When a
+preserved baseline exists, this opens the dark phone comparison with all review
+screens visible. Original baseline and Latest render appear side by side on desktop and stack on
+narrow screens; images preserve their aspect ratio and link to full resolution.
+Filter by name or select one review screen. The baseline revision and each
+image's render timestamp are shown. “Changed” compares PNG contents;
+“unchanged” means a new render produced identical bytes; “pending” means the
+cached image still matches the baseline's bytes and timestamp, or an image is
+missing. Cached renders do not prove the latest source changes were rendered.
+
+The “Browse all screens and variants” link opens `catalog.html`, which starts
+with the requested screen and variant selected for a single-screen render.
+Change its dropdowns to inspect other cached images. A partial render preserves
+the other variants and their timestamps, including variants belonging to the
+same screen. Missing variants have placeholders and an exact render command.
+Without a baseline, `index.html` shows this catalog too.
+
+Every render rebuilds the gallery pages. `./preview-ui --gallery-only` rebuilds
+the pages from cached images without Gradle. The comparison reads the immutable
+`before/screens.json`, `before/images/`, and `before/revision.txt` under the
+gallery directory; the tool never writes to `before/`. The ordered screen-name
+array in `review-screens.json` selects the review set (all baseline screens when
+absent). Keep this baseline for the whole review. Generated pages, manifests,
+and images remain under ignored `app/build/`.
+
+To compare successive design passes, preserve the previous pass separately in
+`previous/screens.json` and `previous/images/`, with a plain-language description
+in `previous/description.txt` (for example, “First design pass, before feedback
+revisions”). When this snapshot exists, `previous-pass.html` compares it with the
+latest renders. Both comparison pages have links to switch between the original
+baseline and the previous pass. The tool never writes to either snapshot, and
+each comparison retains its own image hashes, status, and render timestamps.
 
 For network access, run from the repository root:
 

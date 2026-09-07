@@ -44,7 +44,6 @@ import androidx.compose.ui.semantics.semantics
 import androidx.compose.ui.text.font.FontFamily
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
-import dev.agentknock.presentation.formatTimestamp
 import dev.agentknock.presentation.renderSoftware
 import dev.agentknock.protocol.SecretUploadMode
 import dev.agentknock.storage.request.InboxRequestContent
@@ -53,7 +52,7 @@ import dev.agentknock.storage.request.SecretUploadRequestDetails
 import dev.agentknock.storage.request.SecretUploadRequestState
 import dev.agentknock.storage.request.SecretUploadVariableDetails
 import dev.agentknock.storage.secret.SshKeyCodec
-import dev.agentknock.ui.components.ClientIdentity
+import dev.agentknock.ui.components.rememberDateTimeFormatter
 import dev.agentknock.ui.components.DetailPage
 import dev.agentknock.ui.components.DetailValue
 import dev.agentknock.ui.components.Disclosure
@@ -76,6 +75,7 @@ internal fun SecretUploadRequestDetail(
     onSensitivityChange: (SecretUploadVariableDetails, Boolean) -> Unit,
     modifier: Modifier,
 ) {
+    val dates = rememberDateTimeFormatter()
     val upload = (request.content as InboxRequestContent.SecretUpload).details
     var approvedName by rememberSaveable(request.id, upload.uploadedName, upload.approvedName) {
         mutableStateOf(upload.approvedName ?: upload.uploadedName)
@@ -156,7 +156,11 @@ internal fun SecretUploadRequestDetail(
                         },
                     color = MaterialTheme.colorScheme.onSurfaceVariant,
                 )
-                ClientIdentity(upload.clientName)
+                Text(
+                    "Uploaded by ${upload.clientName}",
+                    style = MaterialTheme.typography.bodyMedium,
+                    color = MaterialTheme.colorScheme.onSurfaceVariant,
+                )
                 upload.description?.takeIf(String::isNotBlank)?.let {
                     Text(it)
                 }
@@ -172,7 +176,7 @@ internal fun SecretUploadRequestDetail(
                         subdued = upload.state == SecretUploadRequestState.REJECTED ||
                             upload.state == SecretUploadRequestState.ENDED,
                     )
-                    Text(formatTimestamp(request.receivedAt), style = MaterialTheme.typography.bodySmall,
+                    Text(dates.timestamp(request.receivedAt), style = MaterialTheme.typography.bodySmall,
                         color = MaterialTheme.colorScheme.onSurfaceVariant)
                 }
             }
@@ -482,7 +486,6 @@ private fun SshKeyUploadDetails(upload: SecretUploadRequestDetails) {
                 )
                 if (key.comment.isNotBlank()) DetailValue("Comment", key.comment)
                 DetailValue("OpenSSH fingerprint", key.fingerprint, true)
-                DetailValue("SHA-256 fingerprint (hex)", key.fingerprintHex, true)
                 Column(verticalArrangement = Arrangement.spacedBy(3.dp)) {
                     Text(
                         "OpenSSH public key",

@@ -18,6 +18,17 @@ import org.junit.Test
 
 class AuditDetailPresentationTest {
     @Test
+    fun `expiry uses the supplied UI timestamp formatter`() {
+        val event = auditEvent(AuditEventType.TEMPORARY_ACCESS_ALLOWED,
+            data = buildJsonObject {}).copy(expiresAt = 123_456L)
+        val fields = event.displayDetailFields {
+            assertEquals(123_456L, it)
+            "7 Dec 2026, 17:05:09"
+        }
+        assertEquals("7 Dec 2026, 17:05:09", fields.single { it.label == "Valid until" }.value)
+    }
+
+    @Test
     fun `display groups recorded participants and command before AI result and process details`() {
         val event = auditEvent(
             type = AuditEventType.SECRET_USE_AI_REVIEWED,
@@ -33,7 +44,7 @@ class AuditDetailPresentationTest {
 
         assertEquals(
             listOf("Client", "Secrets", "Command", "AI decision", "AI explanation", "Working directory"),
-            event.displayDetailFields().map { it.label },
+            event.displayDetailFields { "Formatted expiry" }.map { it.label },
         )
         val summary = event.summaryFields()
         assertEquals("psql 'production database'", summary.first().value)

@@ -24,6 +24,9 @@ import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.outlined.Add
 import androidx.compose.material.icons.outlined.ContentCopy
 import androidx.compose.material.icons.outlined.Edit
+import androidx.compose.material.icons.outlined.ExpandLess
+import androidx.compose.material.icons.outlined.ExpandMore
+import androidx.compose.material.icons.outlined.Key
 import androidx.compose.material.icons.outlined.Lock
 import androidx.compose.material.icons.outlined.MoreVert
 import androidx.compose.material.icons.outlined.Visibility
@@ -55,13 +58,15 @@ import androidx.compose.ui.res.stringResource
 import androidx.compose.ui.semantics.clearAndSetSemantics
 import androidx.compose.ui.semantics.contentDescription
 import androidx.compose.ui.semantics.semantics
+import androidx.compose.ui.semantics.stateDescription
 import androidx.compose.ui.text.font.FontFamily
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
 import dev.agentknock.subscription.AiReviewAccess
+import dev.agentknock.ui.components.rememberDateTimeFormatter
 import dev.agentknock.ui.components.AiReviewInstructions
+import dev.agentknock.ui.components.AiInstructionsScope
 import dev.agentknock.R
-import dev.agentknock.presentation.formatTimestamp
 import dev.agentknock.relay.RelayClientState
 import dev.agentknock.storage.request.ClientSummary
 import dev.agentknock.storage.secret.EnvironmentVariableMetadata
@@ -76,6 +81,7 @@ import dev.agentknock.ui.components.InformationSurface
 import dev.agentknock.ui.components.NavigationBackButton
 import dev.agentknock.ui.components.ProseEditorScreen
 import dev.agentknock.ui.components.ExactText
+import dev.agentknock.ui.components.TonalIcon
 
 internal data class SecretDetailActions(
     val onBack: () -> Unit,
@@ -107,6 +113,7 @@ internal fun SecretDetail(
     modifier: Modifier = Modifier,
     listState: LazyListState = rememberLazyListState(),
 ) {
+    val dates = rememberDateTimeFormatter()
     var menuExpanded by remember(secret.id) { mutableStateOf(false) }
     var editingSshComment by rememberSaveable(secret.id) { mutableStateOf(false) }
     var sshComment by rememberSaveable(secret.id, secret.sshKey?.comment) {
@@ -148,6 +155,9 @@ internal fun SecretDetail(
                 }
             },
             actions = {
+                TextButton(onClick = actions.onEditSecret) {
+                    Text("Edit secret")
+                }
                 IconButton(onClick = { menuExpanded = true }) {
                     Icon(Icons.Outlined.MoreVert, contentDescription = "More options")
                 }
@@ -174,31 +184,20 @@ internal fun SecretDetail(
             state = listState,
             modifier = Modifier.fillMaxSize(),
             contentPadding = PaddingValues(
-                start = 20.dp,
-                end = 20.dp,
+                start = 16.dp,
+                end = 16.dp,
                 top = 8.dp,
                 bottom = 20.dp,
             ),
             verticalArrangement = Arrangement.spacedBy(12.dp),
         ) {
             item {
-                InformationSurface {
-                    Row(verticalAlignment = Alignment.CenterVertically) {
-                        Text(
-                            secret.description.ifBlank { "No description" },
-                            modifier = Modifier.weight(1f),
-                            style = MaterialTheme.typography.bodyLarge,
-                            color = if (secret.description.isBlank()) {
-                                MaterialTheme.colorScheme.onSurfaceVariant
-                            } else {
-                                MaterialTheme.colorScheme.onSurface
-                            },
-                        )
-                        IconButton(onClick = actions.onEditSecret) {
-                            Icon(Icons.Outlined.Edit, contentDescription = "Edit name and description")
-                        }
-                    }
-                }
+                Text(
+                    secret.description.ifBlank { "No description" },
+                    modifier = Modifier.padding(horizontal = 4.dp, vertical = 4.dp),
+                    style = MaterialTheme.typography.bodyMedium,
+                    color = MaterialTheme.colorScheme.onSurfaceVariant,
+                )
             }
             when (secret.type) {
                 SecretType.ENVIRONMENT -> {
@@ -212,15 +211,16 @@ internal fun SecretDetail(
                         ) {
                             Text(
                                 "Environment variables",
-                                style = MaterialTheme.typography.titleLarge,
+                                style = MaterialTheme.typography.titleSmall,
+                                color = MaterialTheme.colorScheme.primary,
                             )
-                            FilledTonalButton(
+                            TextButton(
                                 onClick = actions.onAddVariable,
                                 modifier = Modifier.semantics {
                                     contentDescription = "Add environment variable"
                                 },
                             ) {
-                                Icon(Icons.Outlined.Add, contentDescription = null)
+                                Icon(Icons.Outlined.Add, contentDescription = null, modifier = Modifier.size(18.dp))
                                 Spacer(Modifier.width(6.dp))
                                 Text("Add")
                             }
@@ -237,18 +237,20 @@ internal fun SecretDetail(
                     } else {
                         item {
                             InformationSurface(contentPadding = PaddingValues(0.dp)) {
-                                secret.environmentVariables.forEachIndexed { index, variable ->
-                                    EnvironmentVariableCard(
-                                        variable = variable,
-                                        revealedValue = revealedValues[variable.id],
-                                        onReveal = { actions.onReveal(variable) },
-                                        onReadValue = { actions.onReadValue(variable) },
-                                        onCopy = { actions.onCopy(variable) },
-                                        onEdit = { actions.onEditVariable(variable) },
-                                        embedded = true,
-                                    )
-                                    if (index != secret.environmentVariables.lastIndex) {
-                                        HorizontalDivider(Modifier.padding(start = 16.dp))
+                                Column {
+                                    secret.environmentVariables.forEachIndexed { index, variable ->
+                                        EnvironmentVariableCard(
+                                            variable = variable,
+                                            revealedValue = revealedValues[variable.id],
+                                            onReveal = { actions.onReveal(variable) },
+                                            onReadValue = { actions.onReadValue(variable) },
+                                            onCopy = { actions.onCopy(variable) },
+                                            onEdit = { actions.onEditVariable(variable) },
+                                            embedded = true,
+                                        )
+                                        if (index != secret.environmentVariables.lastIndex) {
+                                            HorizontalDivider(Modifier.padding(start = 16.dp))
+                                        }
                                     }
                                 }
                             }
@@ -258,7 +260,7 @@ internal fun SecretDetail(
                 SecretType.SSH -> {
                     secret.sshKey?.let { key ->
                         item {
-                            Text("SSH key", style = MaterialTheme.typography.titleLarge)
+                            Text("SSH key", style = MaterialTheme.typography.titleSmall, color = MaterialTheme.colorScheme.primary)
                         }
                         item {
                             SshPublicKeyCard(
@@ -281,18 +283,27 @@ internal fun SecretDetail(
                 }
             }
             item {
+                AiReviewInstructions(
+                    scope = AiInstructionsScope.SECRET,
+                    value = secret.instructions,
+                    access = aiReviewAccess,
+                    onEdit = {
+                        instructions = secret.instructions
+                        editingInstructions = true
+                    },
+                )
+            }
+            item {
                 Column(verticalArrangement = Arrangement.spacedBy(4.dp)) {
                     Row(Modifier.fillMaxWidth(), verticalAlignment = Alignment.CenterVertically) {
-                        Text("Access", Modifier.weight(1f), style = MaterialTheme.typography.titleLarge)
+                        Text("Client access", Modifier.weight(1f), style = MaterialTheme.typography.titleSmall, color = MaterialTheme.colorScheme.primary)
                         ApprovalModeHelp()
                     }
                     Text(
                         if (secret.type == SecretType.SSH) {
-                            "These settings control Git signing and SSH authentication. " +
-                                "Reading the public key needs no approval."
+                            "Approval for signing and authentication. Public keys need no approval."
                         } else {
-                            "These settings control disclosure of sensitive values. " +
-                                "Non-sensitive values need no approval."
+                            "Approval for sensitive values. Non-sensitive values need no approval."
                         },
                         style = MaterialTheme.typography.bodySmall,
                         color = MaterialTheme.colorScheme.onSurfaceVariant,
@@ -320,6 +331,7 @@ internal fun SecretDetail(
                             onSelect = actions.onSetApprovalMode,
                         )
                         clients.forEach { client ->
+                            HorizontalDivider(color = MaterialTheme.colorScheme.outlineVariant.copy(alpha = 0.5f))
                             val override = overrides[client.clientId]
                             ApprovalModeRow(
                                 title = client.approvalLabel(duplicateClientNames),
@@ -340,20 +352,18 @@ internal fun SecretDetail(
                     }
                 }
             }
+
             item {
-                AiReviewInstructions(
-                    value = secret.instructions,
-                    access = aiReviewAccess,
-                    onEdit = {
-                        instructions = secret.instructions
-                        editingInstructions = true
-                    },
-                )
-            }
-            item {
-                InformationSurface(modifier = Modifier.padding(top = 8.dp)) {
-                    InformationRow("Created", formatTimestamp(secret.createdAt))
-                    InformationRow("Updated", formatTimestamp(secret.updatedAt))
+                Column(
+                    modifier = Modifier.padding(horizontal = 16.dp, vertical = 8.dp),
+                    verticalArrangement = Arrangement.spacedBy(4.dp),
+                ) {
+                    Text("Created ${dates.timestamp(secret.createdAt)}",
+                        style = MaterialTheme.typography.bodySmall,
+                        color = MaterialTheme.colorScheme.onSurfaceVariant)
+                    Text("Updated ${dates.timestamp(secret.updatedAt)}",
+                        style = MaterialTheme.typography.bodySmall,
+                        color = MaterialTheme.colorScheme.onSurfaceVariant)
                 }
             }
         }
@@ -393,6 +403,7 @@ private fun SecretTemporaryApprovals(
     clients: List<ClientSummary>,
     onEnd: (TemporaryAccessGrant) -> Unit,
 ) {
+    val dates = rememberDateTimeFormatter()
     Column(Modifier.padding(vertical = 8.dp), verticalArrangement = Arrangement.spacedBy(10.dp)) {
         Text("Temporary access", style = MaterialTheme.typography.titleMedium)
         Text(
@@ -416,7 +427,7 @@ private fun SecretTemporaryApprovals(
                 ) {
                     Text(client?.name ?: "Unknown client", style = MaterialTheme.typography.bodyLarge)
                     Text(
-                        "${grant.operation.displayName()} · Ends ${formatTimestamp(grant.expiresAt)}",
+                        "${grant.operation.displayName()} · Ends ${dates.timestamp(grant.expiresAt)}",
                         style = MaterialTheme.typography.bodyMedium,
                         color = MaterialTheme.colorScheme.onSurfaceVariant,
                     )
@@ -450,60 +461,79 @@ private fun SshPublicKeyCard(
     onEditComment: () -> Unit,
     onReplace: () -> Unit,
 ) {
-    Surface(
-        color = MaterialTheme.colorScheme.surfaceContainerLow,
-        shape = MaterialTheme.shapes.medium,
-        tonalElevation = 1.dp,
-    ) {
-        Column(
-            Modifier.fillMaxWidth().padding(16.dp),
-            verticalArrangement = Arrangement.spacedBy(12.dp),
+    var expanded by rememberSaveable(key.fingerprint) { mutableStateOf(false) }
+    InformationSurface {
+        Row(
+            modifier = Modifier.fillMaxWidth(),
+            horizontalArrangement = Arrangement.spacedBy(12.dp),
+            verticalAlignment = Alignment.CenterVertically,
         ) {
-            InformationRow("Algorithm", "${key.algorithm.displayName()} · ${key.bits} bits")
-            InformationRow("OpenSSH fingerprint", key.fingerprint, monospace = true)
-            InformationRow("SHA-256 fingerprint (hex)", key.fingerprintHex, monospace = true)
-            Row(
-                modifier = Modifier.fillMaxWidth(),
-                verticalAlignment = Alignment.CenterVertically,
-            ) {
-                Column(Modifier.weight(1f)) {
-                    Text(
-                        "Comment",
-                        style = MaterialTheme.typography.labelMedium,
-                        color = MaterialTheme.colorScheme.onSurfaceVariant,
-                    )
-                    Text(key.comment.ifBlank { "No comment" })
-                }
-                IconButton(onClick = onEditComment) {
-                    Icon(Icons.Outlined.Edit, contentDescription = "Edit public key comment")
-                }
-            }
-            Column(verticalArrangement = Arrangement.spacedBy(4.dp)) {
+            TonalIcon(Icons.Outlined.Key, contentDescription = null)
+            Column(Modifier.weight(1f), verticalArrangement = Arrangement.spacedBy(2.dp)) {
+                Text(key.algorithm.displayName(), style = MaterialTheme.typography.titleMedium)
                 Text(
-                    "OpenSSH public key",
-                    style = MaterialTheme.typography.labelMedium,
+                    "${key.bits}-bit SSH key",
+                    style = MaterialTheme.typography.bodySmall,
                     color = MaterialTheme.colorScheme.onSurfaceVariant,
                 )
-                ExactText(key.publicKey)
             }
-            if (!key.privateKeyAvailable) {
-                Text(
-                    "Private key unavailable",
-                    color = MaterialTheme.colorScheme.error,
-                    style = MaterialTheme.typography.bodyMedium,
-                )
-            }
-            Row(
-                modifier = Modifier.fillMaxWidth(),
-                horizontalArrangement = Arrangement.spacedBy(8.dp, Alignment.End),
-            ) {
-                TextButton(onClick = onReplace) { Text("Replace key") }
-                FilledTonalButton(onClick = onCopy) {
-                    Icon(Icons.Outlined.ContentCopy, contentDescription = null)
-                    Spacer(Modifier.width(6.dp))
-                    Text("Copy public key")
+        }
+        Row(
+            modifier = Modifier.fillMaxWidth(),
+            horizontalArrangement = Arrangement.spacedBy(12.dp),
+            verticalAlignment = Alignment.CenterVertically,
+        ) {
+            Column(Modifier.weight(1f), verticalArrangement = Arrangement.spacedBy(2.dp)) {
+                Text("Key comment", style = MaterialTheme.typography.labelMedium,
+                    color = MaterialTheme.colorScheme.onSurfaceVariant)
+                SelectionContainer {
+                    Text(key.comment.ifBlank { "No comment" }, style = MaterialTheme.typography.bodyLarge)
                 }
             }
+            IconButton(onClick = onEditComment) {
+                Icon(Icons.Outlined.Edit, contentDescription = "Edit public key comment")
+            }
+        }
+        Column(verticalArrangement = Arrangement.spacedBy(4.dp)) {
+            Text("Fingerprint", style = MaterialTheme.typography.labelMedium,
+                color = MaterialTheme.colorScheme.onSurfaceVariant)
+            SelectionContainer {
+                Text(key.fingerprint, fontFamily = FontFamily.Monospace,
+                    style = MaterialTheme.typography.bodySmall)
+            }
+        }
+        if (!key.privateKeyAvailable) {
+            Text("Private key unavailable", color = MaterialTheme.colorScheme.error,
+                style = MaterialTheme.typography.bodyMedium)
+        }
+        FlowRow(
+            modifier = Modifier.fillMaxWidth(),
+            horizontalArrangement = Arrangement.spacedBy(8.dp),
+            itemVerticalAlignment = Alignment.CenterVertically,
+        ) {
+            FilledTonalButton(onClick = onCopy) {
+                Icon(Icons.Outlined.ContentCopy, contentDescription = null, modifier = Modifier.size(18.dp))
+                Spacer(Modifier.width(8.dp))
+                Text("Copy public key")
+            }
+            TextButton(
+                onClick = { expanded = !expanded },
+                modifier = Modifier.semantics {
+                    stateDescription = if (expanded) "Expanded" else "Collapsed"
+                },
+            ) {
+                Text("Details")
+                Spacer(Modifier.width(4.dp))
+                Icon(if (expanded) Icons.Outlined.ExpandLess else Icons.Outlined.ExpandMore,
+                    contentDescription = null, modifier = Modifier.size(18.dp))
+            }
+        }
+        if (expanded) {
+            HorizontalDivider(color = MaterialTheme.colorScheme.outlineVariant)
+            Text("OpenSSH public key", style = MaterialTheme.typography.labelMedium,
+                color = MaterialTheme.colorScheme.onSurfaceVariant)
+            ExactText(key.publicKey)
+            TextButton(onClick = onReplace) { Text("Replace key") }
         }
     }
 }
@@ -547,7 +577,7 @@ private fun EnvironmentVariableCard(
         Column(
             modifier = Modifier
                 .fillMaxWidth()
-                .padding(horizontal = 14.dp, vertical = 12.dp),
+                .padding(start = 14.dp, end = 14.dp, top = 12.dp, bottom = 4.dp),
             verticalArrangement = Arrangement.spacedBy(6.dp),
         ) {
             Row(

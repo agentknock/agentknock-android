@@ -1,7 +1,6 @@
 package dev.agentknock.ui.settings
 
 import dev.agentknock.presentation.formatPlatformName
-import dev.agentknock.presentation.formatTimestamp
 import dev.agentknock.presentation.renderShellCommand
 import dev.agentknock.storage.audit.AuditDecisionSource
 import dev.agentknock.storage.audit.AuditEvent
@@ -41,7 +40,7 @@ internal fun AuditEvent.summaryFields(): List<AuditDetailField> = buildList {
     }
 }
 
-internal fun AuditEvent.displayDetailFields(): List<AuditDetailField> = buildList {
+internal fun AuditEvent.displayDetailFields(formatTimestamp: (Long) -> String): List<AuditDetailField> = buildList {
     val presentation = presentation()
     val relevant = relevantDetailFields().toMutableList()
     clientField(abbreviateId = false)?.let(::add)

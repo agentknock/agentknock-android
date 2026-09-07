@@ -35,7 +35,7 @@ fun SecretAccessLightPreview() = SecretAccessPreview()
 fun SecretAccessDarkPreview() = SecretAccessPreview()
 
 @Composable
-private fun SecretAccessPreview() = PreviewScreen { SecretPage(previewSecret, firstItem = 3) }
+private fun SecretAccessPreview() = PreviewScreen { SecretPage(previewSecret, firstItem = 4) }
 
 @PreviewTest
 @Preview(name = "Light", group = "secret-ssh", widthDp = 360, heightDp = 800, locale = "en", uiMode = Configuration.UI_MODE_NIGHT_NO)
@@ -96,5 +96,5 @@ fun SecretTemporaryAccessDarkPreview() = SecretTemporaryAccessPreview()
 
 @Composable
 private fun SecretTemporaryAccessPreview() = PreviewScreen {
-    SecretPage(previewSecret.copy(temporaryAccessGrants = previewGrants), firstItem = 3)
+    SecretPage(previewSecret.copy(temporaryAccessGrants = previewGrants), firstItem = 4)
 }

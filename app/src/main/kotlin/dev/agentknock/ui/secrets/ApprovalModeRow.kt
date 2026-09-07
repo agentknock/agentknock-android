@@ -19,7 +19,6 @@ import androidx.compose.material.icons.outlined.Info
 import androidx.compose.material3.AlertDialog
 import androidx.compose.material3.Icon
 import androidx.compose.material3.IconButton
-import androidx.compose.material3.LocalMinimumInteractiveComponentSize
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.SegmentedButton
 import androidx.compose.material3.SegmentedButtonDefaults
@@ -27,7 +26,6 @@ import androidx.compose.material3.SingleChoiceSegmentedButtonRow
 import androidx.compose.material3.Text
 import androidx.compose.material3.TextButton
 import androidx.compose.runtime.Composable
-import androidx.compose.runtime.CompositionLocalProvider
 import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
@@ -35,7 +33,6 @@ import androidx.compose.runtime.saveable.rememberSaveable
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
-import androidx.compose.ui.draw.alpha
 import androidx.compose.ui.semantics.semantics
 import androidx.compose.ui.semantics.stateDescription
 import androidx.compose.ui.text.style.TextAlign
@@ -80,7 +77,7 @@ internal fun ApprovalModeHelp() {
                             append(" — $description")
                         })
                     }
-                    Text("Clients without a custom setting follow the default.")
+                    Text("Muted selections follow the default. Choose a setting to override it, or tap Use default to follow it again.")
                 }
             },
             confirmButton = {
@@ -116,8 +113,8 @@ internal fun ApprovalModeRow(
     val canExploreAi = aiReviewAccess == AiReviewAccess.ACTIVE ||
         aiReviewAccess == AiReviewAccess.INACTIVE
     Column(
-        Modifier.fillMaxWidth().padding(vertical = 8.dp).alpha(if (inherited) 0.65f else 1f),
-        verticalArrangement = Arrangement.spacedBy(4.dp),
+        Modifier.fillMaxWidth().padding(vertical = 12.dp),
+        verticalArrangement = Arrangement.spacedBy(8.dp),
     ) {
         Row(
             Modifier.fillMaxWidth(),
@@ -127,20 +124,13 @@ internal fun ApprovalModeRow(
             if (isClient) {
                 Icon(Icons.Outlined.Computer, contentDescription = "Client", modifier = Modifier.size(18.dp))
             }
-            Text(
-                title,
-                modifier = Modifier.weight(1f).alignByBaseline().padding(vertical = 8.dp),
-                style = MaterialTheme.typography.titleMedium,
-            )
+            Text(title, Modifier.weight(1f), style = MaterialTheme.typography.titleMedium)
             onUseDefault?.let { clear ->
-                CompositionLocalProvider(LocalMinimumInteractiveComponentSize provides 0.dp) {
-                    TextButton(
-                        modifier = Modifier.height(36.dp).alignByBaseline(),
-                        contentPadding = PaddingValues(horizontal = 12.dp),
-                        onClick = { choose(defaultMode, clear) },
-                        enabled = defaultMode != SecretApprovalMode.ASK_AI || canExploreAi,
-                    ) { Text("Use default") }
-                }
+                TextButton(
+                    contentPadding = PaddingValues(horizontal = 8.dp),
+                    onClick = { choose(defaultMode, clear) },
+                    enabled = defaultMode != SecretApprovalMode.ASK_AI || canExploreAi,
+                ) { Text("Use default") }
             }
         }
         SingleChoiceSegmentedButtonRow(Modifier.fillMaxWidth().height(IntrinsicSize.Min)) {
@@ -152,17 +142,26 @@ internal fun ApprovalModeRow(
                     shape = SegmentedButtonDefaults.itemShape(index, approvalModes.size),
                     modifier = Modifier.fillMaxHeight().semantics {
                         if (inactiveAi) stateDescription = "Requires subscription"
+                        else if (selected == mode && inherited) stateDescription = "Uses default"
                     },
                     enabled = mode != SecretApprovalMode.ASK_AI || canExploreAi,
                     onClick = { choose(mode) { onSelect(mode) } },
                     colors = if (inactiveAi) {
                         val mutedText = MaterialTheme.colorScheme.onSurface.copy(alpha = 0.6f)
                         SegmentedButtonDefaults.colors(
+                            activeContainerColor = if (inherited) MaterialTheme.colorScheme.secondaryContainer
+                                else MaterialTheme.colorScheme.primary,
                             inactiveContainerColor = MaterialTheme.colorScheme.surfaceContainerHighest,
                             inactiveContentColor = mutedText,
-                            activeContentColor = mutedText,
+                            activeContentColor = if (inherited) MaterialTheme.colorScheme.onSecondaryContainer
+                                else MaterialTheme.colorScheme.onPrimary,
                         )
-                    } else SegmentedButtonDefaults.colors(),
+                    } else SegmentedButtonDefaults.colors(
+                        activeContainerColor = if (inherited) MaterialTheme.colorScheme.secondaryContainer
+                            else MaterialTheme.colorScheme.primary,
+                        activeContentColor = if (inherited) MaterialTheme.colorScheme.onSecondaryContainer
+                            else MaterialTheme.colorScheme.onPrimary,
+                    ),
                     border = SegmentedButtonDefaults.borderStroke(
                         MaterialTheme.colorScheme.outlineVariant,
                     ),

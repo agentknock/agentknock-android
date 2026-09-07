@@ -29,20 +29,20 @@ import androidx.compose.material3.ListItem
 import androidx.compose.material3.ListItemDefaults
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.Surface
+import androidx.compose.material3.Switch
 import androidx.compose.material3.Text
-import androidx.compose.material3.TextButton
 import androidx.compose.material3.TopAppBar
 import androidx.compose.runtime.Composable
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.platform.LocalContext
+import androidx.compose.ui.semantics.contentDescription
 import androidx.compose.ui.semantics.selected
 import androidx.compose.ui.semantics.semantics
 import androidx.compose.ui.text.font.FontFamily
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
 import dev.agentknock.presentation.formatPlatformName
-import dev.agentknock.presentation.formatRelativeTime
 import dev.agentknock.relay.RelayClientState
 import dev.agentknock.storage.device.DeviceIdentity
 import dev.agentknock.storage.request.ClientSummary
@@ -50,6 +50,7 @@ import dev.agentknock.storage.request.InboxRequestState
 import dev.agentknock.storage.request.InboxRequestStatus
 import dev.agentknock.storage.request.InboxRequestSummary
 import dev.agentknock.storage.request.PairingState
+import dev.agentknock.ui.components.rememberDateTimeFormatter
 import dev.agentknock.ui.components.ActionListSurface
 import dev.agentknock.ui.components.TonalIcon
 
@@ -68,28 +69,30 @@ internal fun ClientList(
     report: (String) -> Unit,
     modifier: Modifier = Modifier,
 ) {
+    val dates = rememberDateTimeFormatter()
     val context = LocalContext.current
     val duplicateClientNames = clients.groupingBy(ClientSummary::name).eachCount()
         .filterValues { it > 1 }
         .keys
     Column(modifier) {
         TopAppBar(
-            title = { Text("Clients") },
+            title = { Text("Clients", style = MaterialTheme.typography.headlineMedium) },
             actions = {
                 IconButton(onClick = onOpenSettings) {
                     Icon(Icons.Outlined.Settings, contentDescription = "Settings")
                 }
             },
         )
-        identity?.let {
-            PairingControls(
-                identity = it,
-                onChangePairingAddress = onChangePairingAddress,
-                onSetPairingEnabled = onSetPairingEnabled,
-                report = report,
-            )
-        }
         if (clients.isEmpty() && pendingPairings.isEmpty()) {
+            identity?.let {
+                PairingControls(
+                    identity = it,
+                    onChangePairingAddress = onChangePairingAddress,
+                    onSetPairingEnabled = onSetPairingEnabled,
+                    report = report,
+                    modifier = Modifier.padding(horizontal = 16.dp, vertical = 8.dp),
+                )
+            }
             Box(Modifier.fillMaxSize(), contentAlignment = Alignment.Center) {
                 Column(
                     horizontalAlignment = Alignment.CenterHorizontally,
@@ -170,6 +173,17 @@ internal fun ClientList(
                 contentPadding = PaddingValues(start = 16.dp, end = 16.dp, top = 4.dp, bottom = 16.dp),
                 verticalArrangement = Arrangement.spacedBy(8.dp),
             ) {
+                identity?.let {
+                    item(key = "pairing_controls") {
+                        PairingControls(
+                            identity = it,
+                            onChangePairingAddress = onChangePairingAddress,
+                            onSetPairingEnabled = onSetPairingEnabled,
+                            report = report,
+                            modifier = Modifier.padding(bottom = 8.dp),
+                        )
+                    }
+                }
                 if (pendingPairings.isNotEmpty()) {
                     item(key = "pairing_requests_heading") {
                         SectionHeading(
@@ -187,13 +201,13 @@ internal fun ClientList(
                             onClick = { onOpenPairing(request.id) },
                         )
                     }
-                    item(key = "paired_clients_heading") {
-                        SectionHeading(
-                            title = "Paired clients",
-                            count = clients.size,
-                            modifier = Modifier.padding(top = 10.dp),
-                        )
-                    }
+                }
+                item(key = "paired_clients_heading") {
+                    SectionHeading(
+                        title = "Paired clients",
+                        count = clients.size,
+                        modifier = Modifier.padding(top = if (pendingPairings.isEmpty()) 0.dp else 10.dp),
+                    )
                 }
                 if (clients.isEmpty()) {
                     item(key = "no_paired_clients") {
@@ -219,14 +233,13 @@ internal fun ClientList(
                         },
                     ) {
                         ListItem(
-                            headlineContent = { Text(client.name) },
+                            headlineContent = {
+                                Text(client.name, maxLines = 2, overflow = TextOverflow.Ellipsis)
+                            },
                             supportingContent = {
                                 val hostname = client.hostname
                                     ?.takeUnless { it.equals(client.name, ignoreCase = true) }
-                                val platform = listOfNotNull(
-                                    client.platform?.let(::formatPlatformName),
-                                    client.architecture,
-                                ).joinToString(" · ").ifBlank { null }
+                                val platform = client.platform?.let(::formatPlatformName)
                                 val machine = when {
                                     hostname != null && platform != null -> "$hostname · $platform"
                                     hostname != null -> hostname
@@ -234,16 +247,18 @@ internal fun ClientList(
                                     else -> ""
                                 }
                                 Column(verticalArrangement = Arrangement.spacedBy(2.dp)) {
-                                    if (machine.isNotEmpty()) Text(machine)
                                     val activity = client.lastRequestAt?.let {
-                                        "Last request ${formatRelativeTime(it)}"
-                                    } ?: client.pairedAt?.let { "Paired ${formatRelativeTime(it)}" }.orEmpty()
-                                    if (activity.isNotEmpty()) {
+                                        "Last request ${dates.relativeTime(it)}"
+                                    } ?: client.pairedAt?.let { "Paired ${dates.relativeTime(it)}" }.orEmpty()
+                                    val summary = listOf(machine, activity)
+                                        .filter(String::isNotBlank)
+                                        .joinToString(" · ")
+                                    if (summary.isNotEmpty()) {
                                         Text(
-                                            activity,
+                                            summary,
                                             style = MaterialTheme.typography.bodySmall,
                                             color = MaterialTheme.colorScheme.onSurfaceVariant,
-                                            maxLines = 1,
+                                            maxLines = 2,
                                             overflow = TextOverflow.Ellipsis,
                                         )
                                     }
@@ -318,25 +333,30 @@ private fun PairingControls(
     onChangePairingAddress: () -> Unit,
     onSetPairingEnabled: (Boolean) -> Unit,
     report: (String) -> Unit,
+    modifier: Modifier = Modifier,
 ) {
     val context = LocalContext.current
     Surface(
-        color = MaterialTheme.colorScheme.surfaceContainer,
-        shape = MaterialTheme.shapes.large,
-        modifier = Modifier.padding(horizontal = 16.dp, vertical = 6.dp).fillMaxWidth(),
+        color = if (identity.pairingEnabled) {
+            MaterialTheme.colorScheme.primaryContainer
+        } else {
+            MaterialTheme.colorScheme.surfaceContainer
+        },
+        contentColor = if (identity.pairingEnabled) {
+            MaterialTheme.colorScheme.onPrimaryContainer
+        } else {
+            MaterialTheme.colorScheme.onSurface
+        },
+        shape = MaterialTheme.shapes.extraLarge,
+        modifier = modifier.fillMaxWidth(),
     ) {
         Column(
-            modifier = Modifier.fillMaxWidth().padding(start = 16.dp, end = 4.dp, top = 6.dp, bottom = 12.dp),
+            modifier = Modifier.fillMaxWidth().padding(start = 20.dp, end = 8.dp, top = 8.dp, bottom = 8.dp),
         ) {
             Row(verticalAlignment = Alignment.CenterVertically) {
                 Text(
-                    if (identity.pairingEnabled) {
-                        "Pairing address"
-                    } else {
-                        "New pairings paused"
-                    },
-                    style = MaterialTheme.typography.labelMedium,
-                    color = MaterialTheme.colorScheme.onSurfaceVariant,
+                    "Pairing address",
+                    style = MaterialTheme.typography.labelLarge,
                     modifier = Modifier.weight(1f),
                 )
                 IconButton(onClick = {
@@ -353,12 +373,27 @@ private fun PairingControls(
             }
             Text(
                 identity.address,
-                style = MaterialTheme.typography.bodyLarge,
+                style = MaterialTheme.typography.titleLarge,
                 fontFamily = FontFamily.Monospace,
                 modifier = Modifier.padding(end = 12.dp),
             )
-            TextButton(onClick = { onSetPairingEnabled(!identity.pairingEnabled) }) {
-                Text(if (identity.pairingEnabled) "Pause new pairings" else "Resume new pairings")
+            Row(
+                modifier = Modifier.fillMaxWidth().padding(end = 12.dp),
+                verticalAlignment = Alignment.CenterVertically,
+                horizontalArrangement = Arrangement.SpaceBetween,
+            ) {
+                Text(
+                    if (identity.pairingEnabled) "New pairings on" else "New pairings paused",
+                    style = MaterialTheme.typography.bodyMedium,
+                    modifier = Modifier.weight(1f),
+                )
+                Switch(
+                    checked = identity.pairingEnabled,
+                    onCheckedChange = onSetPairingEnabled,
+                    modifier = Modifier.semantics {
+                        contentDescription = "Allow new pairings"
+                    },
+                )
             }
         }
     }
@@ -420,7 +455,11 @@ private fun SectionHeading(
         horizontalArrangement = Arrangement.spacedBy(8.dp),
         verticalAlignment = Alignment.CenterVertically,
     ) {
-        Text(title, style = MaterialTheme.typography.titleSmall)
+        Text(
+            title,
+            style = MaterialTheme.typography.titleSmall,
+            color = MaterialTheme.colorScheme.primary,
+        )
         Text(
             count.toString(),
             style = MaterialTheme.typography.labelMedium,

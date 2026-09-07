@@ -1,25 +1,27 @@
 package dev.agentknock.presentation
 
-import java.time.ZoneOffset
 import org.junit.Assert.assertEquals
 import org.junit.Test
 
 class DisplayFormattingTest {
     @Test
-    fun timestamp_isFixedAndUnambiguous() {
-        assertEquals(
-            "2026-05-23 17:55:32",
-            formatTimestamp(1_779_558_932_000, ZoneOffset.UTC),
-        )
+    fun relativeTime_isCompactForRecentActivity() {
+        val now = 2_000_000_000_000
+        val unusedDate: (Long) -> String = { error("Recent activity should use relative time") }
+        assertEquals("just now", formatRelativeTime(now - 20_000, now, unusedDate))
+        assertEquals("7 minutes ago", formatRelativeTime(now - 7 * 60_000, now, unusedDate))
+        assertEquals("5 hours ago", formatRelativeTime(now - 5 * 60 * 60_000, now, unusedDate))
+        assertEquals("12 days ago", formatRelativeTime(now - 12 * 24 * 60 * 60_000L, now, unusedDate))
     }
 
     @Test
-    fun relativeTime_isCompactForRecentActivity() {
-        val now = 2_000_000_000_000
-        assertEquals("just now", formatRelativeTime(now - 20_000, now))
-        assertEquals("7 minutes ago", formatRelativeTime(now - 7 * 60_000, now))
-        assertEquals("5 hours ago", formatRelativeTime(now - 5 * 60 * 60_000, now))
-        assertEquals("12 days ago", formatRelativeTime(now - 12 * 24 * 60 * 60_000L, now))
+    fun relativeTime_usesTheUiDateFormatterForOlderActivity() {
+        val timestamp = 1_000_000L
+        val now = timestamp + 30 * 24 * 60 * 60_000L
+        assertEquals("7 Dec 2026", formatRelativeTime(timestamp, now) {
+            assertEquals(timestamp, it)
+            "7 Dec 2026"
+        })
     }
 
     @Test

@@ -212,7 +212,6 @@ private fun SshKeyPreview(key: SshPrivateKey) {
             "${key.algorithm.displayName()} · ${SshKeyCodec().bitLength(publicKey)} bits",
         )
         InformationRow("OpenSSH fingerprint", key.fingerprint, monospace = true)
-        InformationRow("SHA-256 fingerprint (hex)", publicKey.fingerprintHex, monospace = true)
         if (key.comment.isNotBlank()) InformationRow("Comment", key.comment)
         Column(verticalArrangement = Arrangement.spacedBy(3.dp)) {
             Text(

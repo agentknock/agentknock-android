@@ -1,10 +1,8 @@
 package dev.agentknock.ui.requests
 
 import androidx.compose.foundation.layout.Arrangement
-import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.BoxWithConstraints
 import androidx.compose.foundation.layout.Column
-import androidx.compose.foundation.layout.PaddingValues
 import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.padding
@@ -12,7 +10,6 @@ import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.text.selection.SelectionContainer
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.outlined.Key
-import androidx.compose.material.icons.outlined.Terminal
 import androidx.compose.material3.HorizontalDivider
 import androidx.compose.material3.Icon
 import androidx.compose.material3.MaterialTheme
@@ -25,6 +22,7 @@ import androidx.compose.runtime.remember
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.graphics.compositeOver
 import androidx.compose.ui.platform.LocalDensity
 import androidx.compose.ui.semantics.clearAndSetSemantics
 import androidx.compose.ui.semantics.contentDescription
@@ -33,9 +31,9 @@ import androidx.compose.ui.text.font.FontFamily
 import androidx.compose.ui.text.rememberTextMeasurer
 import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.unit.dp
+import androidx.compose.ui.unit.sp
 import dev.agentknock.presentation.formatPlatformName
 import dev.agentknock.presentation.approvalSummary
-import dev.agentknock.presentation.formatTimestamp
 import dev.agentknock.presentation.renderShellCommand
 import dev.agentknock.presentation.renderSoftware
 import dev.agentknock.review.ApprovalReviewEnvironmentDelivery
@@ -53,10 +51,10 @@ import dev.agentknock.protocol.relayRequestTimestamp
 import dev.agentknock.storage.request.ApprovalRequestState
 import dev.agentknock.storage.secret.SecretMetadata
 import dev.agentknock.storage.secret.TemporaryAccessOperation
+import dev.agentknock.ui.components.rememberDateTimeFormatter
 import dev.agentknock.ui.components.DetailPage
 import dev.agentknock.ui.components.DetailValue
 import dev.agentknock.ui.components.Disclosure
-import dev.agentknock.ui.components.InformationSurface
 import dev.agentknock.ui.components.Notice
 import dev.agentknock.ui.components.NoticeTone
 import dev.agentknock.ui.components.StatusLine
@@ -71,6 +69,7 @@ internal fun InvocationRequestDetail(
     onAllowTemporarily: () -> Unit,
     modifier: Modifier,
 ) {
+    val dates = rememberDateTimeFormatter()
     val secretUse = (request.content as InboxRequestContent.SecretUse).details
     var confirmTemporaryAccess by remember(request.id) { mutableStateOf(false) }
     val aiReviewRequested = secretUse.approvalEvaluation
@@ -129,7 +128,8 @@ internal fun InvocationRequestDetail(
 
         val renderedCommand = renderShellCommand(secretUse.command, secretUse.arguments)
         Surface(
-            color = MaterialTheme.colorScheme.surfaceContainer,
+            color = MaterialTheme.colorScheme.primary.copy(alpha = 0.14f)
+                .compositeOver(MaterialTheme.colorScheme.surface),
             contentColor = MaterialTheme.colorScheme.onSurface,
             shape = MaterialTheme.shapes.large,
             modifier = Modifier.fillMaxWidth(),
@@ -138,29 +138,35 @@ internal fun InvocationRequestDetail(
                 Modifier.padding(16.dp),
                 verticalArrangement = Arrangement.spacedBy(8.dp),
             ) {
-                Row(
-                    horizontalArrangement = Arrangement.spacedBy(10.dp),
-                    verticalAlignment = Alignment.CenterVertically,
-                ) {
-                    Icon(Icons.Outlined.Terminal, contentDescription = null)
-                    Text("Command", style = MaterialTheme.typography.titleMedium)
-                }
+                Text(
+                    "Command",
+                    style = MaterialTheme.typography.labelMedium,
+                    color = MaterialTheme.colorScheme.primary,
+                )
                 SelectionContainer {
                     Text(
                         renderedCommand,
                         fontFamily = FontFamily.Monospace,
-                        style = MaterialTheme.typography.bodyLarge,
+                        style = MaterialTheme.typography.bodyLarge.copy(fontSize = 18.sp, lineHeight = 26.sp),
                     )
                 }
                 if (renderedCommand.any { it.code > 0x7e }) {
-                    Text(
-                        "This command contains non-ASCII characters.",
-                        style = MaterialTheme.typography.bodySmall,
-                        color = MaterialTheme.colorScheme.error,
-                    )
+                    Surface(
+                        color = MaterialTheme.colorScheme.errorContainer,
+                        contentColor = MaterialTheme.colorScheme.onErrorContainer,
+                        shape = MaterialTheme.shapes.small,
+                    ) {
+                        Text(
+                            "This command contains non-ASCII characters.",
+                            style = MaterialTheme.typography.bodySmall,
+                            modifier = Modifier.padding(8.dp),
+                        )
+                    }
                 }
             }
         }
+
+        ClientReason(secretUse.reason)
 
         if (secretUse.state == ApprovalRequestState.APPROVAL_PENDING) {
             val evaluation = secretUse.approvalEvaluation
@@ -177,17 +183,13 @@ internal fun InvocationRequestDetail(
                 decision = secretUse.decision,
                 decisionSource = secretUse.decisionSource,
                 aiReview = secretUse.approvalEvaluation?.aiReview,
-                temporaryAccessScopes = secretUse.approvalEvaluation.temporaryAccessHistory(),
+                temporaryAccessScopes = secretUse.approvalEvaluation.temporaryAccessHistory(dates::timestamp),
             )
         }
-        ClientReason(secretUse.reason)
-
         if (secretUse.secretDetails.isNotEmpty()) {
             Column(verticalArrangement = Arrangement.spacedBy(8.dp)) {
                 Text("Requested secrets", style = MaterialTheme.typography.titleMedium)
-                InformationSurface(
-                    contentPadding = PaddingValues(horizontal = 16.dp, vertical = 8.dp),
-                ) {
+                Column(verticalArrangement = Arrangement.spacedBy(8.dp)) {
                     secretUse.secretDetails.forEachIndexed { index, secret ->
                         SecretSummary(secret, secretUse.environmentVariables[secret.name])
                         if (index != secretUse.secretDetails.lastIndex) HorizontalDivider()
@@ -208,6 +210,10 @@ internal fun InvocationRequestDetail(
         }
 
         Disclosure("Technical details") {
+            DetailValue(
+                "Requested",
+                dates.timestamp(relayRequestTimestamp(request.id) ?: request.receivedAt, includeSeconds = true),
+            )
             Text(
                 "Process information reported by the client",
                 style = MaterialTheme.typography.labelLarge,
@@ -241,8 +247,8 @@ internal fun InvocationRequestDetail(
             HorizontalDivider()
             DetailValue("Client ID", secretUse.clientId, true)
             DetailValue("Request ID", request.id, true)
-            secretUse.decidedAt?.let { DetailValue("Decided", formatTimestamp(it)) }
-            request.completedAt?.let { DetailValue("Completed", formatTimestamp(it)) }
+            secretUse.decidedAt?.let { DetailValue("Decided", dates.timestamp(it, includeSeconds = true)) }
+            request.completedAt?.let { DetailValue("Completed", dates.timestamp(it, includeSeconds = true)) }
         }
     }
     if (confirmTemporaryAccess) {
@@ -370,7 +376,7 @@ private fun ApprovalDecisionHistory(
     }
 }
 
-private fun ApprovalEvaluation?.temporaryAccessHistory(): String = this?.secrets
+private fun ApprovalEvaluation?.temporaryAccessHistory(formatTimestamp: (Long) -> String): String = this?.secrets
     ?.mapNotNull { secret ->
         secret.temporaryAccessExpiresAt?.let { expiresAt ->
             "${secret.secretName} until ${formatTimestamp(expiresAt)}"
@@ -390,82 +396,68 @@ private fun SecretSummary(
     secret: SecretMetadata,
     environmentVariables: ApprovalReviewEnvironmentSecretFacts?,
 ) {
-    Column(
-        Modifier.padding(vertical = 8.dp),
-        verticalArrangement = Arrangement.spacedBy(8.dp),
+    Row(
+        modifier = Modifier.fillMaxWidth().padding(vertical = 4.dp),
+        horizontalArrangement = Arrangement.spacedBy(10.dp),
+        verticalAlignment = Alignment.Top,
     ) {
-        Row(
-            modifier = Modifier.fillMaxWidth(),
-            horizontalArrangement = Arrangement.spacedBy(10.dp),
-            verticalAlignment = Alignment.CenterVertically,
+        Icon(
+            Icons.Outlined.Key,
+            contentDescription = null,
+            tint = MaterialTheme.colorScheme.onSurfaceVariant,
+            modifier = Modifier.padding(top = 2.dp).size(24.dp),
+        )
+        Column(
+            modifier = Modifier.weight(1f),
+            verticalArrangement = Arrangement.spacedBy(4.dp),
         ) {
-            Surface(
-                color = MaterialTheme.colorScheme.tertiaryContainer,
-                contentColor = MaterialTheme.colorScheme.onTertiaryContainer,
-                shape = androidx.compose.foundation.shape.CircleShape,
-                modifier = Modifier.size(36.dp),
-            ) {
-                Box(contentAlignment = Alignment.Center) {
-                    Icon(
-                        Icons.Outlined.Key,
-                        contentDescription = null,
-                        modifier = Modifier.size(18.dp),
-                    )
-                }
-            }
-            Column(Modifier.weight(1f), verticalArrangement = Arrangement.spacedBy(1.dp)) {
-                Text(secret.name, style = MaterialTheme.typography.titleMedium)
-                Text(
+            Text(secret.name, style = MaterialTheme.typography.titleMedium)
+            Text(
+                listOfNotNull(
                     if (secret.type == "ssh") "SSH key" else "Environment variables",
+                    secret.description.takeIf(String::isNotBlank),
+                ).joinToString(" · "),
+                style = MaterialTheme.typography.bodySmall,
+                color = MaterialTheme.colorScheme.onSurfaceVariant,
+            )
+            if (secret.type == "ssh") {
+                Text(
+                    "The public key can be provided; private key operations remain protected.",
                     style = MaterialTheme.typography.bodySmall,
                     color = MaterialTheme.colorScheme.onSurfaceVariant,
                 )
-            }
-        }
-        if (secret.description.isNotBlank()) {
-            Text(
-                secret.description,
-                style = MaterialTheme.typography.bodyMedium,
-                color = MaterialTheme.colorScheme.onSurfaceVariant,
-            )
-        }
-        if (secret.type == "ssh") {
-            Text(
-                "The public key can be provided; private key operations remain protected.",
-                style = MaterialTheme.typography.bodySmall,
-                color = MaterialTheme.colorScheme.onSurfaceVariant,
-            )
-        } else if (environmentVariables != null) {
-            environmentVariables.variables.forEach { (source, variable) ->
-                val label = when (variable.delivery) {
-                    ApprovalReviewEnvironmentDelivery.ENVIRONMENT ->
-                        if (variable.target == source) source else "$source → ${variable.target}"
-                    ApprovalReviewEnvironmentDelivery.STANDARD_INPUT -> "$source → standard input"
-                    ApprovalReviewEnvironmentDelivery.OMITTED -> "$source · Not provided"
+            } else if (environmentVariables != null) {
+                environmentVariables.variables.forEach { (source, variable) ->
+                    val label = when (variable.delivery) {
+                        ApprovalReviewEnvironmentDelivery.ENVIRONMENT ->
+                            if (variable.target == source) source else "$source → ${variable.target}"
+                        ApprovalReviewEnvironmentDelivery.STANDARD_INPUT -> "$source → standard input"
+                        ApprovalReviewEnvironmentDelivery.OMITTED -> "$source · Not provided"
+                    }
+                    EnvironmentVariableFact(
+                        name = label,
+                        value = variable.value,
+                        omitted = variable.delivery == ApprovalReviewEnvironmentDelivery.OMITTED,
+                    )
                 }
-                EnvironmentVariableFact(
-                    name = label,
-                    value = variable.value,
-                    omitted = variable.delivery == ApprovalReviewEnvironmentDelivery.OMITTED,
-                )
-            }
-        } else {
-            Text(
-                "Values were not recorded for this request.",
-                style = MaterialTheme.typography.bodySmall,
-                color = MaterialTheme.colorScheme.onSurfaceVariant,
-            )
-            secret.environmentVariableNames.forEach { name ->
-                val deliveredName = secret.environmentVariableRename[name] ?: name
-                val sentToStdin = secret.environmentVariableStdin == name
+            } else {
+                secret.environmentVariableNames.forEach { name ->
+                    val deliveredName = secret.environmentVariableRename[name] ?: name
+                    val sentToStdin = secret.environmentVariableStdin == name
+                    Text(
+                        text = when {
+                            sentToStdin -> "$name → standard input"
+                            deliveredName != name -> "$name → $deliveredName"
+                            else -> name
+                        },
+                        style = MaterialTheme.typography.bodySmall,
+                        fontFamily = FontFamily.Monospace,
+                    )
+                }
                 Text(
-                    text = when {
-                        sentToStdin -> "$name → standard input"
-                        deliveredName != name -> "$name → $deliveredName"
-                        else -> name
-                    },
-                    style = MaterialTheme.typography.bodyMedium,
-                    fontFamily = FontFamily.Monospace,
+                    "Values were not recorded for this request.",
+                    style = MaterialTheme.typography.bodySmall,
+                    color = MaterialTheme.colorScheme.onSurfaceVariant,
                 )
             }
         }

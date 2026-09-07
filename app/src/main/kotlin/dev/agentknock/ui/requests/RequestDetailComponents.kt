@@ -4,6 +4,10 @@ package dev.agentknock.ui.requests
 
 import androidx.compose.foundation.BorderStroke
 import androidx.compose.foundation.layout.Arrangement
+import androidx.compose.foundation.layout.BoxWithConstraints
+import androidx.compose.foundation.layout.IntrinsicSize
+import androidx.compose.foundation.layout.fillMaxHeight
+import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.FlowRow
 import androidx.compose.foundation.layout.Row
@@ -11,15 +15,16 @@ import androidx.compose.foundation.layout.Spacer
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.heightIn
 import androidx.compose.foundation.layout.padding
+import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.layout.width
 import androidx.compose.foundation.rememberScrollState
+import androidx.compose.foundation.text.selection.SelectionContainer
 import androidx.compose.foundation.verticalScroll
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.outlined.Schedule
 import androidx.compose.material3.AlertDialog
 import androidx.compose.material3.Button
 import androidx.compose.material3.ButtonDefaults
-import androidx.compose.material3.FilledTonalButton
 import androidx.compose.material3.Icon
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.OutlinedButton
@@ -29,7 +34,14 @@ import androidx.compose.material3.TextButton
 import androidx.compose.runtime.Composable
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.Alignment
+import androidx.compose.ui.text.rememberTextMeasurer
+import androidx.compose.ui.platform.LocalDensity
+import androidx.compose.ui.text.style.TextAlign
+import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
+import androidx.compose.ui.unit.sp
+import androidx.compose.ui.semantics.clearAndSetSemantics
+import androidx.compose.ui.semantics.contentDescription
 import dev.agentknock.storage.approval.AiReview
 import dev.agentknock.storage.approval.AiReviewDecision
 import dev.agentknock.storage.approval.AiReviewFailure
@@ -39,13 +51,10 @@ import dev.agentknock.storage.request.ApprovalCompletionResult
 import dev.agentknock.storage.request.ApprovalDecision
 import dev.agentknock.storage.request.ApprovalRequestState
 import dev.agentknock.storage.secret.TemporaryAccessOperation
+import dev.agentknock.ui.components.rememberDateTimeFormatter
 import dev.agentknock.ui.components.DetailPage
 import dev.agentknock.ui.components.Notice
 import dev.agentknock.ui.components.NoticeTone
-import dev.agentknock.ui.components.InformationSurface
-import dev.agentknock.ui.components.ClientIdentity
-import dev.agentknock.ui.components.SecretIdentities
-import dev.agentknock.presentation.formatTimestamp
 import dev.agentknock.ui.theme.agentknockColors
 
 @Composable
@@ -83,9 +92,28 @@ internal fun AiReviewNotice(review: AiReview?, reviewInFlight: Boolean) {
 @Composable
 internal fun ClientReason(reason: String?) {
     reason?.takeIf(String::isNotBlank)?.let {
-        InformationSurface {
-            Text("Reason reported by client", style = MaterialTheme.typography.labelLarge)
-            Text(it, style = MaterialTheme.typography.bodyLarge)
+        Surface(
+            color = MaterialTheme.colorScheme.surfaceContainerLow,
+            contentColor = MaterialTheme.colorScheme.onSurface,
+            shape = MaterialTheme.shapes.large,
+            modifier = Modifier.fillMaxWidth(),
+        ) {
+            Column(
+                Modifier.padding(16.dp),
+                verticalArrangement = Arrangement.spacedBy(8.dp),
+            ) {
+                Text(
+                    "Reason reported by client",
+                    style = MaterialTheme.typography.labelMedium,
+                    color = MaterialTheme.colorScheme.onSurfaceVariant,
+                )
+                SelectionContainer {
+                    Text(
+                        it,
+                        style = MaterialTheme.typography.bodyLarge.copy(fontSize = 18.sp, lineHeight = 26.sp),
+                    )
+                }
+            }
         }
     }
 }
@@ -97,20 +125,79 @@ internal fun RequestIdentity(
     requestedAt: Long,
     status: @Composable () -> Unit,
 ) {
-    InformationSurface {
+    val dates = rememberDateTimeFormatter()
+    Column(verticalArrangement = Arrangement.spacedBy(12.dp)) {
+        RequestParticipants(clientName, secretNames)
         FlowRow(
-            horizontalArrangement = Arrangement.spacedBy(8.dp),
-            verticalArrangement = Arrangement.spacedBy(6.dp),
+            modifier = Modifier.fillMaxWidth(),
+            horizontalArrangement = Arrangement.SpaceBetween,
+            verticalArrangement = Arrangement.spacedBy(4.dp),
             itemVerticalAlignment = Alignment.CenterVertically,
         ) {
-            ClientIdentity(clientName)
-            SecretIdentities(secretNames)
+            status()
+            Text(
+                dates.timestamp(requestedAt),
+                style = MaterialTheme.typography.bodySmall,
+                color = MaterialTheme.colorScheme.onSurfaceVariant,
+                modifier = Modifier.clearAndSetSemantics {
+                    contentDescription = "Requested ${dates.timestamp(requestedAt)}"
+                },
+            )
         }
-        status()
+    }
+}
+
+@Composable
+internal fun RequestParticipants(
+    clientName: String,
+    secretNames: List<String>,
+    maxLines: Int = Int.MAX_VALUE,
+) {
+    val textMeasurer = rememberTextMeasurer()
+    val nameStyle = MaterialTheme.typography.bodyMedium
+    val density = LocalDensity.current
+    BoxWithConstraints(Modifier.fillMaxWidth()) {
+        val columnWidth = with(density) { ((maxWidth - 16.dp) / 2).roundToPx() }
+        val stackFields = (listOf(clientName) + secretNames).any { name ->
+            textMeasurer.measure(name, nameStyle, softWrap = false).size.width > columnWidth
+        }
+        if (stackFields) {
+            Column(verticalArrangement = Arrangement.spacedBy(8.dp)) {
+                RequestParticipant("Client", clientName, maxLines)
+                if (secretNames.isNotEmpty()) {
+                    RequestParticipant(
+                        if (secretNames.size == 1) "Secret" else "Secrets",
+                        secretNames.joinToString(", "), maxLines,
+                    )
+                }
+            }
+        } else {
+            Row(horizontalArrangement = Arrangement.spacedBy(16.dp)) {
+                RequestParticipant("Client", clientName, maxLines, Modifier.weight(1f))
+                if (secretNames.isNotEmpty()) {
+                    RequestParticipant(
+                        if (secretNames.size == 1) "Secret" else "Secrets",
+                        secretNames.joinToString(", "), maxLines, Modifier.weight(1f),
+                    )
+                }
+            }
+        }
+    }
+}
+
+@Composable
+private fun RequestParticipant(label: String, name: String, maxLines: Int, modifier: Modifier = Modifier) {
+    Column(modifier, verticalArrangement = Arrangement.spacedBy(2.dp)) {
         Text(
-            "Requested ${formatTimestamp(requestedAt)}",
-            style = MaterialTheme.typography.bodySmall,
+            label,
+            style = MaterialTheme.typography.labelSmall,
             color = MaterialTheme.colorScheme.onSurfaceVariant,
+        )
+        Text(
+            name,
+            style = MaterialTheme.typography.bodyMedium,
+            maxLines = maxLines,
+            overflow = TextOverflow.Ellipsis,
         )
     }
 }
@@ -125,43 +212,43 @@ internal fun RequestDecisionButtons(
     onAllowTemporarily: () -> Unit,
 ) {
     Column(
-        modifier = Modifier.fillMaxWidth().padding(12.dp),
-        verticalArrangement = Arrangement.spacedBy(8.dp),
+        modifier = Modifier.fillMaxWidth().padding(horizontal = 16.dp, vertical = 8.dp),
+        verticalArrangement = Arrangement.spacedBy(0.dp),
     ) {
         Row(
-            modifier = Modifier.fillMaxWidth(),
+            modifier = Modifier.fillMaxWidth().height(IntrinsicSize.Min),
             horizontalArrangement = Arrangement.spacedBy(10.dp),
         ) {
             OutlinedButton(
                 onClick = onDeny,
-                modifier = Modifier.weight(1f),
+                modifier = Modifier.weight(1f).fillMaxHeight().heightIn(min = 48.dp),
                 colors = ButtonDefaults.outlinedButtonColors(
                     contentColor = MaterialTheme.agentknockColors.danger,
                 ),
                 border = BorderStroke(1.dp, MaterialTheme.agentknockColors.danger),
             ) {
-                Text("Deny once")
+                Text("Deny once", textAlign = TextAlign.Center)
             }
             Button(
                 onClick = onApprove,
                 enabled = approveEnabled,
-                modifier = Modifier.weight(1f),
+                modifier = Modifier.weight(1f).fillMaxHeight().heightIn(min = 48.dp),
                 colors = ButtonDefaults.buttonColors(
                     containerColor = MaterialTheme.agentknockColors.success,
                     contentColor = MaterialTheme.agentknockColors.onSuccess,
                 ),
             ) {
-                Text(approveLabel)
+                Text(approveLabel, textAlign = TextAlign.Center)
             }
         }
         if (temporaryAccessAvailable) {
-            FilledTonalButton(
+            TextButton(
                 onClick = onAllowTemporarily,
-                modifier = Modifier.fillMaxWidth(),
+                modifier = Modifier.align(Alignment.CenterHorizontally).heightIn(min = 48.dp),
             ) {
                 Icon(Icons.Outlined.Schedule, contentDescription = null)
                 Spacer(Modifier.width(8.dp))
-                Text("Temporary access…")
+                Text("Allow temporarily…")
             }
         }
     }

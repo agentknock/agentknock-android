@@ -3,6 +3,9 @@ package dev.agentknock.ui.clients
 import android.content.ClipData
 import android.content.ClipboardManager
 import androidx.compose.foundation.BorderStroke
+import androidx.compose.foundation.layout.Arrangement
+import androidx.compose.foundation.layout.Column
+import androidx.compose.foundation.layout.heightIn
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.padding
@@ -23,17 +26,16 @@ import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.text.font.FontFamily
 import androidx.compose.ui.unit.dp
 import dev.agentknock.presentation.formatPlatformName
-import dev.agentknock.presentation.formatTimestamp
 import dev.agentknock.presentation.renderSoftware
 import dev.agentknock.storage.request.InboxRequestContent
 import dev.agentknock.storage.request.InboxRequestDetails
 import dev.agentknock.storage.request.InboxRequestState
 import dev.agentknock.storage.request.PairingRequestDetails
 import dev.agentknock.storage.request.PairingState
+import dev.agentknock.ui.components.rememberDateTimeFormatter
 import dev.agentknock.ui.components.DetailPage
 import dev.agentknock.ui.components.DetailValue
 import dev.agentknock.ui.components.Disclosure
-import dev.agentknock.ui.components.InformationRow
 import dev.agentknock.ui.components.InformationSurface
 import dev.agentknock.ui.components.Notice
 import dev.agentknock.ui.components.NoticeTone
@@ -49,6 +51,7 @@ internal fun PairingRequestDetail(
     onReject: () -> Unit,
     modifier: Modifier,
 ) {
+    val dates = rememberDateTimeFormatter()
     val pairing = (request.content as InboxRequestContent.Pairing).details
     val context = LocalContext.current
     DetailPage(
@@ -58,27 +61,26 @@ internal fun PairingRequestDetail(
         showBack = showBack,
         scrollResetKey = pairing.pairingState,
     ) {
-        InformationSurface {
+        Column(verticalArrangement = Arrangement.spacedBy(8.dp)) {
             StatusLine(
                 pairing.pairingState.label(),
                 pairing.pairingState.usesErrorStatus,
                 attention = request.state == InboxRequestState.ACTION_REQUIRED,
                 subdued = pairing.pairingState == PairingState.REJECTED,
             )
-            InformationRow("Client", pairing.clientName)
-            val reported = listOfNotNull(
-                pairing.hostname,
-                pairing.platform?.let(::formatPlatformName),
-            ).joinToString(" · ")
-            if (reported.isNotEmpty()) {
-                InformationRow("Machine", reported)
-            }
-            InformationRow("Received", formatTimestamp(request.receivedAt))
-            pairing.decidedAt?.takeIf { pairing.pairingState.hasAcceptedSas }?.let {
-                InformationRow("Code accepted", formatTimestamp(it))
-            }
-            request.completedAt?.let {
-                InformationRow("Completed", formatTimestamp(it))
+            Column(verticalArrangement = Arrangement.spacedBy(2.dp)) {
+                Text(pairing.clientName, style = MaterialTheme.typography.titleLarge)
+                val reported = listOfNotNull(
+                    pairing.hostname,
+                    pairing.platform?.let(::formatPlatformName),
+                ).joinToString(" · ")
+                if (reported.isNotEmpty()) {
+                    Text(
+                        reported,
+                        style = MaterialTheme.typography.bodyMedium,
+                        color = MaterialTheme.colorScheme.onSurfaceVariant,
+                    )
+                }
             }
         }
 
@@ -91,33 +93,42 @@ internal fun PairingRequestDetail(
                         NoticeTone.ATTENTION,
                     )
                 }
-                Text(
-                    "Which code is shown by the client?",
-                    style = MaterialTheme.typography.titleLarge,
-                )
-                Text(
-                    "Choose the exact same code to accept this client. " +
-                        "A wrong choice rejects the pairing.",
-                )
-                pairing.sasOptions.forEachIndexed { index, sas ->
-                    FilledTonalButton(
-                        onClick = { onChooseSas(index) },
-                        modifier = Modifier.fillMaxWidth(),
-                    ) {
-                        Text(sas, fontFamily = FontFamily.Monospace,
-                            style = MaterialTheme.typography.headlineSmall,
-                            modifier = Modifier.padding(vertical = 4.dp))
-                    }
+                Column(verticalArrangement = Arrangement.spacedBy(8.dp)) {
+                    Text(
+                        "Which code is shown by the client?",
+                        style = MaterialTheme.typography.titleMedium,
+                    )
+                    Text(
+                        "Choose the exact same code to accept this client. " +
+                            "A wrong choice rejects the pairing.",
+                        style = MaterialTheme.typography.bodyMedium,
+                        color = MaterialTheme.colorScheme.onSurfaceVariant,
+                    )
                 }
-                OutlinedButton(
-                    onClick = { onChooseSas(null) },
-                    modifier = Modifier.fillMaxWidth(),
-                    colors = ButtonDefaults.outlinedButtonColors(
-                        contentColor = MaterialTheme.agentknockColors.danger,
-                    ),
-                    border = BorderStroke(1.dp, MaterialTheme.agentknockColors.danger),
-                ) {
-                    Text("None of the above")
+                Column(verticalArrangement = Arrangement.spacedBy(8.dp)) {
+                    pairing.sasOptions.forEachIndexed { index, sas ->
+                        FilledTonalButton(
+                            onClick = { onChooseSas(index) },
+                            modifier = Modifier.fillMaxWidth().heightIn(min = 56.dp),
+                        ) {
+                            Text(
+                                sas,
+                                fontFamily = FontFamily.Monospace,
+                                style = MaterialTheme.typography.headlineSmall,
+                                modifier = Modifier.padding(vertical = 4.dp),
+                            )
+                        }
+                    }
+                    OutlinedButton(
+                        onClick = { onChooseSas(null) },
+                        modifier = Modifier.fillMaxWidth().heightIn(min = 48.dp),
+                        colors = ButtonDefaults.outlinedButtonColors(
+                            contentColor = MaterialTheme.agentknockColors.danger,
+                        ),
+                        border = BorderStroke(1.dp, MaterialTheme.agentknockColors.danger),
+                    ) {
+                        Text("None of the above")
+                    }
                 }
             }
             PairingState.WAITING_FOR_FINISH -> {
@@ -175,6 +186,13 @@ internal fun PairingRequestDetail(
             }
         }
         Disclosure("Technical details") {
+            DetailValue("Received", dates.timestamp(request.receivedAt, includeSeconds = true))
+            pairing.decidedAt?.takeIf { pairing.pairingState.hasAcceptedSas }?.let {
+                DetailValue("Code accepted", dates.timestamp(it, includeSeconds = true))
+            }
+            request.completedAt?.let {
+                DetailValue("Completed", dates.timestamp(it, includeSeconds = true))
+            }
             DetailValue("Pairing address", pairing.pairingAddress, true)
             pairing.osVersion?.let { DetailValue("OS version", it) }
             pairing.architecture?.let { DetailValue("Architecture", it) }

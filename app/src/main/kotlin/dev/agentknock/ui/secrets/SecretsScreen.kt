@@ -119,7 +119,7 @@ internal fun SecretsScreen(
     if (editingGeneralInstructions) {
         LaunchedEffect(Unit) { onTopLevelChanged(false) }
         ProseEditorScreen(
-            title = "AI review instructions",
+            title = "Global AI instructions",
             value = generalInstructions,
             originalValue = configuration?.active?.instructions.orEmpty(),
             supportingText = "These instructions apply to every AI review. Secret and client " +

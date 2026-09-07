@@ -17,7 +17,7 @@ import dev.agentknock.ui.secrets.SecretList
 
 internal val previewIdentity = DeviceIdentity("preview-device", previewPairingAddress, "preview-device-id", true, true, previewTimestamp, "")
 internal val previewClient = ClientDetails(
-    clientId = "preview-laptop", name = "Work laptop", hostname = "workstation", platform = "linux", architecture = "x86_64",
+    clientId = "preview-laptop", name = "cf-wrk", hostname = "workstation", platform = "linux", architecture = "x86_64",
     osVersion = "NixOS", machineId = "example-machine-id", clientSoftware = null,
     instructions = "Allow routine development commands. Ask before production changes.",
     state = RelayClientState.ACTIVE, desiredState = null, pairedAt = previewTimestamp, lastRequestAt = previewTimestamp,
@@ -164,5 +164,6 @@ fun ClientTechnicalDetailsDarkPreview() = ClientTechnicalDetailsPreview()
 @Composable
 private fun ClientTechnicalDetailsPreview() = PreviewScreen {
     ClientDetail(previewClient, previewGrants, AiReviewAccess.ACTIVE, {}, true, {}, {}, {}, {},
-        Modifier.fillMaxSize(), scrollState = rememberScrollState(Int.MAX_VALUE))
+        Modifier.fillMaxSize(), scrollState = rememberScrollState(Int.MAX_VALUE),
+        informationInitiallyExpanded = true)
 }

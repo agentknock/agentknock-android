@@ -8,6 +8,7 @@ import androidx.compose.ui.test.onNodeWithText
 import androidx.compose.ui.test.performClick
 import dev.agentknock.subscription.AiReviewAccess
 import dev.agentknock.ui.components.AiReviewInstructions
+import dev.agentknock.ui.components.AiInstructionsScope
 import dev.agentknock.ui.theme.AgentknockTheme
 import org.junit.Assert.assertEquals
 import org.junit.Rule
@@ -21,7 +22,7 @@ class AiReviewInstructionsTest {
         var edits = 0
         compose.setContent {
             AgentknockTheme {
-                AiReviewInstructions("Only approve deployments to staging.", access.value, { edits++ })
+                AiReviewInstructions("Only approve deployments to staging.", access.value, { edits++ }, AiInstructionsScope.SECRET)
             }
         }
         compose.runOnIdle { access.value = AiReviewAccess.INACTIVE }
@@ -34,7 +35,7 @@ class AiReviewInstructionsTest {
     @Test fun expiryDoesNotCollapseAnInstructionEditorThatWasAlreadyVisible() {
         val access = mutableStateOf(AiReviewAccess.ACTIVE)
         compose.setContent {
-            AgentknockTheme { AiReviewInstructions("", access.value, {}) }
+            AgentknockTheme { AiReviewInstructions("", access.value, {}, AiInstructionsScope.SECRET) }
         }
         compose.onNodeWithContentDescription("Edit instructions").assertIsDisplayed()
         compose.runOnIdle { access.value = AiReviewAccess.INACTIVE }
@@ -45,7 +46,7 @@ class AiReviewInstructionsTest {
         var edits = 0
         compose.setContent {
             AgentknockTheme {
-                AiReviewInstructions("", AiReviewAccess.INACTIVE, { edits++ })
+                AiReviewInstructions("", AiReviewAccess.INACTIVE, { edits++ }, AiInstructionsScope.SECRET)
             }
         }
         compose.onNodeWithText("No instructions").assertDoesNotExist()

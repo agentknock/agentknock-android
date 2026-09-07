@@ -1,3 +1,5 @@
+@file:OptIn(androidx.compose.material3.ExperimentalMaterial3Api::class)
+
 package dev.agentknock.ui.settings
 
 import androidx.compose.foundation.layout.Arrangement
@@ -10,6 +12,9 @@ import androidx.compose.material.icons.outlined.Info
 import androidx.compose.material.icons.outlined.Notifications
 import androidx.compose.material.icons.outlined.Security
 import androidx.compose.material.icons.outlined.WorkspacePremium
+import androidx.compose.material3.MaterialTheme
+import androidx.compose.material3.Text
+import androidx.compose.material3.TopAppBar
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.remember
 import androidx.compose.ui.Modifier
@@ -20,6 +25,7 @@ import dev.agentknock.push.RequestNotifications
 import dev.agentknock.relay.RelayPushRegistrationState
 import dev.agentknock.storage.crypto.VaultProtection
 import dev.agentknock.ui.auth.DeviceAuthenticationMode
+import dev.agentknock.ui.components.NavigationBackButton
 
 @Composable
 internal fun SettingsOverview(
@@ -60,9 +66,12 @@ internal fun SettingsOverviewContent(
     modifier: Modifier,
 ) {
     Column(modifier) {
-        PageTopBar("Settings", onBack)
+        TopAppBar(
+            title = { Text("Settings", style = MaterialTheme.typography.headlineMedium) },
+            navigationIcon = { NavigationBackButton(onBack) },
+        )
         LazyColumn(
-            contentPadding = PaddingValues(start = 16.dp, end = 16.dp, bottom = 24.dp),
+            contentPadding = PaddingValues(start = 16.dp, end = 16.dp, top = 8.dp, bottom = 24.dp),
             verticalArrangement = Arrangement.spacedBy(16.dp),
         ) {
             item {

@@ -51,7 +51,7 @@ fun CreateSshKeyDarkPreview() = CreateSshKeyPreview()
 
 @Composable
 private fun CreateSshKeyPreview() = PreviewScreen {
-    SecretEditorScreen(SecretEditorState(null, "developer-ssh", "", SecretType.SSH), true, {}, {}, {}, {}, SnackbarHostState())
+    SecretEditorScreen(SecretEditorState(null, "cf-key", "", SecretType.SSH), true, {}, {}, {}, {}, SnackbarHostState())
 }
 
 @PreviewTest
@@ -160,5 +160,5 @@ fun DeleteSecretDarkPreview() = DeleteSecretPreview()
 
 @Composable
 private fun DeleteSecretPreview() = PreviewScreen {
-    DeleteDialog("Delete production-db?", "This secret and its stored values will be permanently deleted.", {}, {}, modifier = previewDialogModifier())
+    DeleteDialog("Delete cf-test?", "This secret and its stored values will be permanently deleted.", {}, {}, modifier = previewDialogModifier())
 }

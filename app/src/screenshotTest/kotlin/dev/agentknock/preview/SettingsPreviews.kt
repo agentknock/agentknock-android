@@ -175,13 +175,13 @@ private fun SubscriptionUnavailablePreview() = PreviewScreen {
 
 internal val previewAuditEvent = AuditEvent(
     id = 1, occurredAt = previewTimestamp, type = AuditEventType.SECRET_USE_DECIDED, outcome = AuditOutcome.APPROVED,
-    decisionSource = AuditDecisionSource.USER, subject = "production-db", context = null, detail = null,
-    expiresAt = null, clientId = "preview-laptop", clientName = "Work laptop", relayRequestId = "preview-request",
-    data = JsonObject(auditDataOf("command" to "psql", "arguments" to listOf("-c", "SELECT version();"), "secrets" to listOf("production-db"))),
+    decisionSource = AuditDecisionSource.USER, subject = "cf-test", context = null, detail = null,
+    expiresAt = null, clientId = "preview-laptop", clientName = "cf-wrk", relayRequestId = "preview-request",
+    data = JsonObject(auditDataOf("command" to "psql", "arguments" to listOf("-c", "SELECT version();"), "secrets" to listOf("cf-test"))),
 )
 internal val previewAuditEvents = listOf(previewAuditEvent,
-    previewAuditEvent.copy(id = 2, type = AuditEventType.CLIENT_SUSPENDED, outcome = AuditOutcome.CHANGED, subject = "Build server", clientId = "preview-server", clientName = "Build server", relayRequestId = null,
-        decisionSource = null, data = JsonObject(auditDataOf("name" to "Build server", "relay_state" to "suspended"))),
+    previewAuditEvent.copy(id = 2, type = AuditEventType.CLIENT_SUSPENDED, outcome = AuditOutcome.CHANGED, subject = "cf-ci", clientId = "preview-server", clientName = "cf-ci", relayRequestId = null,
+        decisionSource = null, data = JsonObject(auditDataOf("name" to "cf-ci", "relay_state" to "suspended"))),
     previewAuditEvent.copy(id = 3, outcome = AuditOutcome.DENIED, decisionSource = AuditDecisionSource.AI_REVIEW),
 )
 

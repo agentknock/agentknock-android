@@ -5,7 +5,6 @@ package dev.agentknock.ui.clients
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.Row
-import androidx.compose.foundation.layout.Spacer
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.padding
@@ -15,9 +14,12 @@ import androidx.compose.foundation.verticalScroll
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.outlined.Edit
 import androidx.compose.material3.AlertDialog
+import androidx.compose.material3.ButtonDefaults
+import androidx.compose.material3.FilledTonalButton
 import androidx.compose.material3.HorizontalDivider
 import androidx.compose.material3.Icon
 import androidx.compose.material3.IconButton
+import androidx.compose.material3.LocalContentColor
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.OutlinedTextField
 import androidx.compose.material3.Surface
@@ -34,10 +36,10 @@ import androidx.compose.ui.Modifier
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
 import dev.agentknock.subscription.AiReviewAccess
+import dev.agentknock.ui.components.rememberDateTimeFormatter
 import dev.agentknock.ui.components.AiReviewInstructions
+import dev.agentknock.ui.components.AiInstructionsScope
 import dev.agentknock.presentation.formatPlatformName
-import dev.agentknock.presentation.formatRelativeTime
-import dev.agentknock.presentation.formatTimestamp
 import dev.agentknock.presentation.renderSoftware
 import dev.agentknock.relay.RelayClientState
 import dev.agentknock.storage.request.ClientDetails
@@ -63,7 +65,9 @@ internal fun ClientDetail(
     onEndTemporaryAccess: (TemporaryAccessGrant) -> Unit,
     modifier: Modifier = Modifier,
     scrollState: ScrollState = rememberScrollState(),
+    informationInitiallyExpanded: Boolean = false,
 ) {
+    val dates = rememberDateTimeFormatter()
     var showRename by rememberSaveable(client.clientId) { mutableStateOf(false) }
     var rename by rememberSaveable(client.clientId, client.name) { mutableStateOf(client.name) }
     var showInstructions by rememberSaveable(client.clientId) { mutableStateOf(false) }
@@ -110,65 +114,30 @@ internal fun ClientDetail(
         )
         Column(
             Modifier.fillMaxSize().verticalScroll(scrollState)
-                .padding(horizontal = 20.dp, vertical = 12.dp),
+                .padding(horizontal = 16.dp, vertical = 8.dp),
             verticalArrangement = Arrangement.spacedBy(16.dp),
         ) {
             val pending = client.desiredState?.takeIf { it != client.state }
             val temporaryAccessPaused = client.state != RelayClientState.ACTIVE ||
                 client.desiredState?.let { it != RelayClientState.ACTIVE } == true
-            InformationSurface {
-                Row(
-                    modifier = Modifier.fillMaxWidth(),
-                    horizontalArrangement = Arrangement.spacedBy(12.dp),
-                    verticalAlignment = Alignment.CenterVertically,
-                ) {
-                    ClientStateBadge(client.state, pending)
-                    Spacer(Modifier.weight(1f))
-                    when (client.state) {
-                        RelayClientState.ACTIVE -> TextButton(
-                            onClick = { onSetState(RelayClientState.SUSPENDED) },
-                        ) { Text("Suspend client") }
-                        RelayClientState.SUSPENDED -> TextButton(
-                            onClick = { onSetState(RelayClientState.ACTIVE) },
-                        ) { Text("Resume client") }
-                        else -> Unit
-                    }
-                }
-                if (client.state != RelayClientState.ACTIVE) {
-                    Text(client.state.explanation(), color = MaterialTheme.colorScheme.onSurfaceVariant)
-                }
-            }
+            ClientStatus(client, pending, onSetState)
 
-            InformationSurface {
-                Text("Client information", style = MaterialTheme.typography.titleMedium)
-                ClientField("Hostname", client.hostname)
-                ClientField(
-                    "Operating system",
-                    client.osVersion ?: client.platform?.let(::formatPlatformName),
-                )
-                ClientField(
-                    "Last request",
-                    client.lastRequestAt?.let {
-                        "${formatTimestamp(it)} (${formatRelativeTime(it)})"
-                    } ?: "None yet",
-                )
-            }
+            AiReviewInstructions(
+                scope = AiInstructionsScope.CLIENT,
+                value = client.instructions,
+                access = aiReviewAccess,
+                onEdit = {
+                    instructions = client.instructions
+                    showInstructions = true
+                },
+            )
 
             if (temporaryAccessGrants.isNotEmpty()) {
                 InformationSurface {
                     Text(
                         "Temporary access",
-                        style = MaterialTheme.typography.titleMedium,
-                    )
-                    Text(
-                        if (temporaryAccessPaused) {
-                            "These uses are paused until this client is active. They resume if that " +
-                                "happens before their end time."
-                        } else {
-                            "These uses skip manual and AI review until they end. " +
-                                "A secret's Deny setting still blocks access."
-                        },
-                        color = MaterialTheme.colorScheme.onSurfaceVariant,
+                        style = MaterialTheme.typography.titleSmall,
+                        color = MaterialTheme.colorScheme.primary,
                     )
                     temporaryAccessGrants.forEachIndexed { index, grant ->
                         if (index > 0) HorizontalDivider()
@@ -181,32 +150,49 @@ internal fun ClientDetail(
                                 modifier = Modifier.weight(1f),
                                 verticalArrangement = Arrangement.spacedBy(2.dp),
                             ) {
-                                Text(grant.secretName, style = MaterialTheme.typography.bodyLarge)
+                                Text(grant.secretName, style = MaterialTheme.typography.titleMedium)
                                 Text(
-                                    "${grant.operation.displayName()} · Ends " +
-                                        formatTimestamp(grant.expiresAt),
+                                    grant.operation.displayName(),
                                     style = MaterialTheme.typography.bodyMedium,
                                     color = MaterialTheme.colorScheme.onSurfaceVariant,
                                 )
+                                Text(
+                                    "Ends ${dates.timestamp(grant.expiresAt)}",
+                                    style = MaterialTheme.typography.bodySmall,
+                                    color = MaterialTheme.colorScheme.onSurfaceVariant,
+                                )
                             }
-                            TextButton(onClick = { onEndTemporaryAccess(grant) }) {
+                            FilledTonalButton(onClick = { onEndTemporaryAccess(grant) }) {
                                 Text("End")
                             }
                         }
                     }
+                    Text(
+                        if (temporaryAccessPaused) {
+                            "Paused until this client is active. Access resumes if it becomes active " +
+                                "before the end time. A secret's Deny setting still blocks access."
+                        } else {
+                            "Skips manual and AI review until access ends. " +
+                                "A secret's Deny setting still blocks access."
+                        },
+                        style = MaterialTheme.typography.bodySmall,
+                        color = MaterialTheme.colorScheme.onSurfaceVariant,
+                    )
                 }
             }
 
-            AiReviewInstructions(
-                value = client.instructions,
-                access = aiReviewAccess,
-                onEdit = {
-                    instructions = client.instructions
-                    showInstructions = true
-                },
-            )
 
-            InformationSurface {
+
+            Disclosure("Client information", initiallyExpanded = informationInitiallyExpanded) {
+                ClientField("Hostname", client.hostname)
+                ClientField(
+                    "Operating system",
+                    client.osVersion ?: client.platform?.let(::formatPlatformName),
+                )
+                ClientField(
+                    "Last request",
+                    client.lastRequestAt?.let(dates::timestamp) ?: "None yet",
+                )
                 ClientField("Architecture", client.architecture)
                 client.clientSoftware?.let { software ->
                     ClientField("Client software", renderSoftware(software.application))
@@ -215,11 +201,8 @@ internal fun ClientDetail(
                     }
                 }
                 client.pairedAt?.let {
-                    ClientField("Paired", "${formatTimestamp(it)} (${formatRelativeTime(it)})")
+                    ClientField("Paired", dates.timestamp(it))
                 }
-            }
-
-            Disclosure("Technical identifiers") {
                 ClientField("Machine ID", client.machineId, monospace = true)
                 ClientField("Client ID", client.clientId, monospace = true)
             }
@@ -301,27 +284,65 @@ private fun ClientField(
 }
 
 @Composable
-private fun ClientStateBadge(state: RelayClientState, pending: RelayClientState?) {
-    val text = pending?.let { "Changing to ${it.stateLabel().lowercase()}…" }
-        ?: state.stateLabel()
+private fun ClientStatus(
+    client: ClientDetails,
+    pending: RelayClientState?,
+    onSetState: (RelayClientState) -> Unit,
+) {
+    val semanticColors = MaterialTheme.agentknockColors
     Surface(
-        color = if (state == RelayClientState.REVOKED) {
-            MaterialTheme.agentknockColors.dangerContainer
-        } else {
-            MaterialTheme.colorScheme.surfaceContainerHighest
+        color = when {
+            client.state == RelayClientState.REVOKED -> semanticColors.dangerContainer
+            client.state == RelayClientState.ACTIVE && pending == null -> semanticColors.successContainer
+            else -> MaterialTheme.colorScheme.surfaceContainer
         },
-        contentColor = if (state == RelayClientState.REVOKED) {
-            MaterialTheme.agentknockColors.onDangerContainer
-        } else {
-            stateColor(state)
+        contentColor = when {
+            client.state == RelayClientState.REVOKED -> semanticColors.onDangerContainer
+            client.state == RelayClientState.ACTIVE && pending == null -> semanticColors.onSuccessContainer
+            else -> MaterialTheme.colorScheme.onSurface
         },
-        shape = androidx.compose.foundation.shape.RoundedCornerShape(100.dp),
+        shape = MaterialTheme.shapes.extraLarge,
+        modifier = Modifier.fillMaxWidth(),
     ) {
-        Text(
-            text,
-            style = MaterialTheme.typography.labelMedium,
-            modifier = Modifier.padding(horizontal = 10.dp, vertical = 5.dp),
-        )
+        Column(
+            modifier = Modifier.padding(20.dp),
+            verticalArrangement = Arrangement.spacedBy(4.dp),
+        ) {
+            Row(
+                modifier = Modifier.fillMaxWidth(),
+                horizontalArrangement = Arrangement.spacedBy(12.dp),
+                verticalAlignment = Alignment.CenterVertically,
+            ) {
+                Text(
+                    pending?.let { "Changing to ${it.stateLabel().lowercase()}…" }
+                        ?: client.state.stateLabel(),
+                    style = MaterialTheme.typography.headlineSmall,
+                    modifier = Modifier.weight(1f),
+                )
+                val actionColors = ButtonDefaults.textButtonColors(contentColor = LocalContentColor.current)
+                when (client.state) {
+                    RelayClientState.ACTIVE -> TextButton(
+                        onClick = { onSetState(RelayClientState.SUSPENDED) },
+                        colors = actionColors,
+                    ) { Text("Suspend") }
+                    RelayClientState.SUSPENDED -> TextButton(
+                        onClick = { onSetState(RelayClientState.ACTIVE) },
+                        colors = actionColors,
+                    ) { Text("Resume") }
+                    else -> Unit
+                }
+            }
+            val machine = listOfNotNull(
+                client.hostname,
+                client.osVersion ?: client.platform?.let(::formatPlatformName),
+            ).joinToString(" · ")
+            if (machine.isNotBlank()) {
+                Text(machine, style = MaterialTheme.typography.bodyMedium)
+            }
+            if (client.state != RelayClientState.ACTIVE) {
+                Text(client.state.explanation(), style = MaterialTheme.typography.bodyMedium)
+            }
+        }
     }
 }
 

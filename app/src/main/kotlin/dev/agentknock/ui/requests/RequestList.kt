@@ -7,22 +7,23 @@ import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.FlowRow
-import androidx.compose.foundation.layout.IntrinsicSize
 import androidx.compose.foundation.layout.PaddingValues
 import androidx.compose.foundation.layout.Row
-import androidx.compose.foundation.layout.fillMaxHeight
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
-import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
-import androidx.compose.foundation.layout.width
 import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.itemsIndexed
 import androidx.compose.foundation.lazy.rememberLazyListState
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.automirrored.outlined.NavigateNext
+import androidx.compose.material.icons.outlined.CloudUpload
+import androidx.compose.material.icons.outlined.Computer
+import androidx.compose.material.icons.outlined.Edit
+import androidx.compose.material.icons.outlined.Key
+import androidx.compose.material.icons.outlined.Terminal
 import androidx.compose.material.icons.outlined.Check
 import androidx.compose.material.icons.outlined.Close
 import androidx.compose.material.icons.outlined.ErrorOutline
@@ -48,7 +49,7 @@ import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
-import androidx.compose.ui.graphics.Color
+import androidx.compose.ui.graphics.compositeOver
 import androidx.compose.ui.semantics.CustomAccessibilityAction
 import androidx.compose.ui.semantics.contentDescription
 import androidx.compose.ui.semantics.customActions
@@ -57,7 +58,6 @@ import androidx.compose.ui.semantics.semantics
 import androidx.compose.ui.text.font.FontFamily
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
-import dev.agentknock.presentation.formatTimestamp
 import dev.agentknock.presentation.renderShellCommand
 import dev.agentknock.storage.request.ApprovalCompletionResult
 import dev.agentknock.storage.request.ApprovalDecision
@@ -67,8 +67,7 @@ import dev.agentknock.storage.request.InboxRequestState
 import dev.agentknock.storage.request.InboxRequestStatus
 import dev.agentknock.storage.request.InboxRequestSummary
 import dev.agentknock.storage.request.RequestDecision
-import dev.agentknock.ui.components.ClientIdentity
-import dev.agentknock.ui.components.SecretIdentities
+import dev.agentknock.ui.components.rememberDateTimeFormatter
 import dev.agentknock.ui.theme.agentknockColors
 
 @Composable
@@ -104,7 +103,7 @@ internal fun RequestList(
     }
     Column(modifier) {
         TopAppBar(
-            title = { Text("Requests") },
+            title = { Text("Requests", style = MaterialTheme.typography.headlineMedium) },
             actions = {
                 if (!notificationsEnabled) {
                     IconButton(onClick = onOpenSettings) {
@@ -288,12 +287,13 @@ private fun RequestRowContent(
     selected: Boolean,
     onClick: () -> Unit,
 ) {
+    val dates = rememberDateTimeFormatter()
     val subdued = request.wasRejected() || request.wasAborted() || request.hasVerificationFailure()
     val actionRequired = request.state == InboxRequestState.ACTION_REQUIRED
-    val semanticColors = MaterialTheme.agentknockColors
     val containerColor = when {
         selected -> MaterialTheme.colorScheme.secondaryContainer
-        subdued -> MaterialTheme.colorScheme.surfaceContainer
+        actionRequired -> MaterialTheme.colorScheme.primary.copy(alpha = 0.08f)
+            .compositeOver(MaterialTheme.colorScheme.surface)
         else -> MaterialTheme.colorScheme.surfaceContainerLow
     }
     Surface(
@@ -306,113 +306,114 @@ private fun RequestRowContent(
         onClick = onClick,
         modifier = Modifier.fillMaxWidth(),
     ) {
-        Row(Modifier.fillMaxWidth().height(IntrinsicSize.Min)) {
-            Box(
-                Modifier.width(5.dp).fillMaxHeight().background(
-                    if (actionRequired) semanticColors.attentionAccent else Color.Transparent,
-                ),
-            )
-            Column(
-                modifier = Modifier.fillMaxWidth().padding(horizontal = 15.dp, vertical = 13.dp),
-                verticalArrangement = Arrangement.spacedBy(6.dp),
+        Column(
+            modifier = Modifier.fillMaxWidth().padding(16.dp),
+            verticalArrangement = Arrangement.spacedBy(6.dp),
+        ) {
+            Row(
+                modifier = Modifier.fillMaxWidth(),
+                horizontalArrangement = Arrangement.spacedBy(8.dp),
+                verticalAlignment = Alignment.CenterVertically,
             ) {
-                Row(
-                    modifier = Modifier.fillMaxWidth(),
-                    horizontalArrangement = Arrangement.spacedBy(8.dp),
-                    verticalAlignment = Alignment.CenterVertically,
-                ) {
-                    Text(
-                        request.title,
-                        style = if (request.command == null) {
-                            MaterialTheme.typography.titleMedium
-                        } else {
-                            MaterialTheme.typography.labelMedium
-                        },
-                        color = if (request.command == null) {
-                            Color.Unspecified
-                        } else {
-                            MaterialTheme.colorScheme.onSurfaceVariant
-                        },
-                        modifier = Modifier.weight(1f),
-                    )
-                    RequestStatusBadge(request)
-                    Icon(
-                        Icons.AutoMirrored.Outlined.NavigateNext,
-                        contentDescription = null,
-                        tint = MaterialTheme.colorScheme.onSurfaceVariant,
-                        modifier = Modifier.padding(top = 2.dp),
-                    )
-                }
-                request.command?.takeUnless {
-                    request.kind == InboxRequestKind.GIT_SIGN ||
-                        request.kind == InboxRequestKind.SSH_AUTHENTICATE
-                }?.let {
-                    Text(
-                        renderShellCommand(it, request.arguments),
-                        style = MaterialTheme.typography.titleMedium,
-                        fontFamily = FontFamily.Monospace,
-                        maxLines = 2,
-                        overflow = TextOverflow.Ellipsis,
-                    )
-                }
-                request.listSummary?.let {
-                    Text(
-                        it,
-                        style = MaterialTheme.typography.bodyMedium,
-                        color = MaterialTheme.colorScheme.onSurfaceVariant,
-                        maxLines = 2,
-                        overflow = TextOverflow.Ellipsis,
-                    )
-                }
-                request.repository?.let {
-                    Text(
-                        "Repository: $it",
-                        style = MaterialTheme.typography.bodySmall,
-                        color = MaterialTheme.colorScheme.onSurfaceVariant,
-                        maxLines = 1,
-                        overflow = TextOverflow.Ellipsis,
-                    )
-                }
-                if (
-                    (request.kind == InboxRequestKind.GIT_SIGN ||
-                        request.kind == InboxRequestKind.SSH_AUTHENTICATE) &&
-                    request.command != null
-                ) {
-                    Text(
-                        "Triggered by ${renderShellCommand(request.command, request.arguments)}",
-                        style = MaterialTheme.typography.bodySmall,
-                        color = MaterialTheme.colorScheme.onSurfaceVariant,
-                        fontFamily = FontFamily.Monospace,
-                        maxLines = 2,
-                        overflow = TextOverflow.Ellipsis,
-                    )
-                }
-                request.decisionSummary?.let {
-                    Text(
-                        it,
-                        style = MaterialTheme.typography.labelMedium,
-                        color = MaterialTheme.colorScheme.onSurfaceVariant,
-                    )
-                }
-                FlowRow(
-                    horizontalArrangement = Arrangement.spacedBy(8.dp),
-                    verticalArrangement = Arrangement.spacedBy(6.dp),
-                    itemVerticalAlignment = Alignment.CenterVertically,
-                ) {
-                    ClientIdentity(request.clientName)
-                    if (request.secretNames.isNotEmpty()) {
-                        SecretIdentities(
-                            request.secretNames,
-                            unavailable = false,
-                            subdued = subdued,
-                        )
-                    }
-                }
+                Icon(
+                    when (request.kind) {
+                        InboxRequestKind.PAIRING -> Icons.Outlined.Computer
+                        InboxRequestKind.SECRET_USE -> Icons.Outlined.Terminal
+                        InboxRequestKind.GIT_SIGN -> Icons.Outlined.Edit
+                        InboxRequestKind.SSH_AUTHENTICATE -> Icons.Outlined.Key
+                        InboxRequestKind.SECRET_UPLOAD -> Icons.Outlined.CloudUpload
+                    },
+                    contentDescription = null,
+                    tint = if (actionRequired) {
+                        MaterialTheme.colorScheme.primary
+                    } else {
+                        MaterialTheme.colorScheme.onSurfaceVariant
+                    },
+                    modifier = Modifier.size(18.dp),
+                )
                 Text(
-                    formatTimestamp(request.receivedAt),
+                    request.title,
+                    modifier = Modifier.weight(1f),
+                    style = MaterialTheme.typography.labelMedium,
+                    color = MaterialTheme.colorScheme.onSurfaceVariant,
+                )
+                Icon(
+                    Icons.AutoMirrored.Outlined.NavigateNext,
+                    contentDescription = null,
+                    tint = MaterialTheme.colorScheme.onSurfaceVariant,
+                    modifier = Modifier.size(20.dp),
+                )
+            }
+            request.command?.takeUnless {
+                request.kind == InboxRequestKind.GIT_SIGN ||
+                    request.kind == InboxRequestKind.SSH_AUTHENTICATE
+            }?.let {
+                Text(
+                    renderShellCommand(it, request.arguments),
+                    style = MaterialTheme.typography.bodyLarge,
+                    fontFamily = FontFamily.Monospace,
+                    maxLines = 2,
+                    overflow = TextOverflow.Ellipsis,
+                )
+            }
+            request.listSummary?.let {
+                Text(
+                    it,
+                    style = if (request.kind == InboxRequestKind.GIT_SIGN) {
+                        MaterialTheme.typography.titleMedium
+                    } else {
+                        MaterialTheme.typography.bodyMedium
+                    },
+                    color = if (request.kind == InboxRequestKind.GIT_SIGN) {
+                        MaterialTheme.colorScheme.onSurface
+                    } else {
+                        MaterialTheme.colorScheme.onSurfaceVariant
+                    },
+                    maxLines = 2,
+                    overflow = TextOverflow.Ellipsis,
+                )
+            }
+            request.repository?.let {
+                Text(
+                    "Repository: $it",
                     style = MaterialTheme.typography.bodySmall,
                     color = MaterialTheme.colorScheme.onSurfaceVariant,
-                    modifier = Modifier.align(Alignment.End),
+                    maxLines = 1,
+                    overflow = TextOverflow.Ellipsis,
+                )
+            }
+            if (
+                request.kind == InboxRequestKind.SSH_AUTHENTICATE &&
+                request.command != null
+            ) {
+                Text(
+                    "Triggered by ${renderShellCommand(request.command, request.arguments)}",
+                    style = MaterialTheme.typography.bodySmall,
+                    color = MaterialTheme.colorScheme.onSurfaceVariant,
+                    fontFamily = FontFamily.Monospace,
+                    maxLines = 2,
+                    overflow = TextOverflow.Ellipsis,
+                )
+            }
+            RequestParticipants(request.clientName, request.secretNames, maxLines = 2)
+            request.decisionSummary?.let {
+                Text(
+                    it,
+                    style = MaterialTheme.typography.labelMedium,
+                    color = MaterialTheme.colorScheme.onSurfaceVariant,
+                )
+            }
+            FlowRow(
+                modifier = Modifier.fillMaxWidth().padding(top = 2.dp),
+                horizontalArrangement = Arrangement.SpaceBetween,
+                verticalArrangement = Arrangement.spacedBy(4.dp),
+                itemVerticalAlignment = Alignment.CenterVertically,
+            ) {
+                RequestStatusBadge(request)
+                Text(
+                    dates.timestamp(request.receivedAt),
+                    style = MaterialTheme.typography.bodySmall,
+                    color = MaterialTheme.colorScheme.onSurfaceVariant,
                 )
             }
         }

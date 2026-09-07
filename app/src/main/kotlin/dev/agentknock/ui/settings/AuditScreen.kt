@@ -10,6 +10,7 @@ import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
+import androidx.compose.foundation.layout.FlowRow
 import androidx.compose.foundation.layout.IntrinsicSize
 import androidx.compose.foundation.layout.PaddingValues
 import androidx.compose.foundation.layout.Row
@@ -55,18 +56,15 @@ import androidx.compose.ui.text.font.FontFamily
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
-import dev.agentknock.presentation.formatTimestamp
 import dev.agentknock.storage.audit.AuditEvent
 import dev.agentknock.storage.audit.AuditOutcome
+import dev.agentknock.ui.components.rememberDateTimeFormatter
 import dev.agentknock.ui.components.AdaptiveListDetail
 import dev.agentknock.ui.components.Disclosure
 import dev.agentknock.ui.components.ExactText
 import dev.agentknock.ui.components.InformationRow
 import dev.agentknock.ui.components.InformationSurface
 import dev.agentknock.ui.theme.agentknockColors
-import java.time.Instant
-import java.time.ZoneId
-import java.time.format.DateTimeFormatter
 
 private enum class AuditFilter(val label: String) {
     ALL("All"),
@@ -174,9 +172,10 @@ private fun AuditList(
     onOpen: (Long) -> Unit,
     modifier: Modifier,
 ) {
+    val dates = rememberDateTimeFormatter()
     var filter by rememberSaveable { mutableStateOf(AuditFilter.ALL) }
     val visibleEvents = events?.filter(filter::matches)
-    val dayGroups = visibleEvents?.groupBy { it.occurredAt.auditDate() }.orEmpty()
+    val dayGroups = visibleEvents?.groupBy { dates.date(it.occurredAt) }.orEmpty()
     Column(modifier) {
         PageTopBar("Audit log", onBack)
         LazyRow(
@@ -256,6 +255,7 @@ private fun AuditTimelineRow(
     lastInDay: Boolean,
     onClick: () -> Unit,
 ) {
+    val dates = rememberDateTimeFormatter()
     val fields = event.summaryFields()
     val presentation = event.presentation()
     val accent = event.outcome.accentColor()
@@ -275,7 +275,7 @@ private fun AuditTimelineRow(
         verticalAlignment = Alignment.Top,
     ) {
         Text(
-            event.occurredAt.auditTime(),
+            dates.time(event.occurredAt),
             style = MaterialTheme.typography.bodySmall.copy(fontFeatureSettings = "tnum"),
             color = MaterialTheme.colorScheme.onSurfaceVariant,
             maxLines = 1,
@@ -348,9 +348,10 @@ private fun AuditDetail(
     showBack: Boolean,
     modifier: Modifier,
 ) {
+    val dates = rememberDateTimeFormatter()
     val context = LocalContext.current
     val presentation = event.presentation()
-    val fields = event.displayDetailFields()
+    val fields = event.displayDetailFields { dates.timestamp(it, includeSeconds = true) }
     val technicalJson = event.technicalJson()
     fun copy(label: String, value: String) {
         context.getSystemService(ClipboardManager::class.java).setPrimaryClip(
@@ -367,13 +368,14 @@ private fun AuditDetail(
                 verticalArrangement = Arrangement.spacedBy(16.dp),
             ) {
                 Column(verticalArrangement = Arrangement.spacedBy(6.dp)) {
-                    Row(
+                    FlowRow(
                         modifier = Modifier.fillMaxWidth(),
                         horizontalArrangement = Arrangement.SpaceBetween,
-                        verticalAlignment = Alignment.CenterVertically,
+                        verticalArrangement = Arrangement.spacedBy(6.dp),
+                        itemVerticalAlignment = Alignment.CenterVertically,
                     ) {
                         Text(
-                            formatTimestamp(event.occurredAt),
+                            dates.timestamp(event.occurredAt, includeSeconds = true),
                             style = MaterialTheme.typography.bodyMedium,
                             color = MaterialTheme.colorScheme.onSurfaceVariant,
                             fontFamily = FontFamily.Monospace,
@@ -451,14 +453,3 @@ private fun AuditFilter.matches(event: AuditEvent): Boolean {
             presentation.category == AuditCategory.APPROVAL
     }
 }
-
-private val auditDateFormatter = DateTimeFormatter.ofPattern("yyyy-MM-dd")
-private val auditTimeFormatter = DateTimeFormatter.ofPattern("HH:mm:ss")
-
-private fun Long.auditDate(): String = Instant.ofEpochMilli(this)
-    .atZone(ZoneId.systemDefault())
-    .format(auditDateFormatter)
-
-private fun Long.auditTime(): String = Instant.ofEpochMilli(this)
-    .atZone(ZoneId.systemDefault())
-    .format(auditTimeFormatter)

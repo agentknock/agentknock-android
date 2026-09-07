@@ -3,6 +3,8 @@
 package dev.agentknock.ui.secrets
 
 import androidx.compose.foundation.layout.Arrangement
+import androidx.compose.foundation.layout.Box
+import androidx.compose.foundation.layout.FlowRow
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.PaddingValues
 import androidx.compose.foundation.layout.Row
@@ -12,6 +14,8 @@ import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.items
+import androidx.compose.foundation.lazy.itemsIndexed
+import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.automirrored.outlined.NavigateNext
 import androidx.compose.material.icons.outlined.Add
@@ -19,6 +23,7 @@ import androidx.compose.material.icons.outlined.DataObject
 import androidx.compose.material.icons.outlined.Key
 import androidx.compose.material.icons.outlined.Schedule
 import androidx.compose.material.icons.outlined.Settings
+import androidx.compose.material3.ExtendedFloatingActionButton
 import androidx.compose.material3.Icon
 import androidx.compose.material3.IconButton
 import androidx.compose.material3.ListItem
@@ -36,9 +41,10 @@ import androidx.compose.ui.semantics.semantics
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
 import dev.agentknock.subscription.AiReviewAccess
+import dev.agentknock.ui.components.rememberDateTimeFormatter
 import dev.agentknock.ui.components.AiReviewInstructions
+import dev.agentknock.ui.components.AiInstructionsScope
 import dev.agentknock.R
-import dev.agentknock.presentation.formatTimestamp
 import dev.agentknock.storage.request.InboxRequestState
 import dev.agentknock.storage.request.InboxRequestSummary
 import dev.agentknock.storage.request.ClientSummary
@@ -63,174 +69,185 @@ internal fun SecretList(
     onOpenSettings: () -> Unit,
     modifier: Modifier = Modifier,
 ) {
+    val dates = rememberDateTimeFormatter()
     Column(modifier) {
         TopAppBar(
-            title = { Text(stringResource(R.string.secrets)) },
+            title = { Text(stringResource(R.string.secrets), style = MaterialTheme.typography.headlineMedium) },
             actions = {
-                IconButton(onClick = onCreate) {
-                    Icon(
-                        Icons.Outlined.Add,
-                        contentDescription = stringResource(R.string.new_secret),
-                    )
-                }
                 IconButton(onClick = onOpenSettings) {
                     Icon(Icons.Outlined.Settings, contentDescription = "Settings")
                 }
             },
         )
-        if (secrets.isEmpty() && pendingUploads.isEmpty()) {
-            EmptyMessage(
-                title = stringResource(R.string.no_secrets),
-                description = stringResource(R.string.no_secrets_description),
-                modifier = Modifier.fillMaxSize(),
-            )
-        } else {
-            LazyColumn(
-                modifier = Modifier.fillMaxSize(),
-                contentPadding = PaddingValues(start = 16.dp, end = 16.dp, top = 4.dp, bottom = 16.dp),
-                verticalArrangement = Arrangement.spacedBy(8.dp),
-            ) {
-                if (pendingUploads.isNotEmpty()) {
-                    item(key = "incoming_uploads_heading") {
-                        SecretListSectionHeading(
-                            title = "Incoming uploads",
-                            count = pendingUploads.size,
-                        )
+        AiReviewInstructions(
+            value = generalInstructions,
+            access = aiReviewAccess,
+            onEdit = onEditGeneralInstructions,
+            scope = AiInstructionsScope.GLOBAL,
+            modifier = Modifier.padding(horizontal = 16.dp, vertical = 8.dp),
+        )
+        Box(Modifier.weight(1f)) {
+            if (secrets.isEmpty() && pendingUploads.isEmpty()) {
+                EmptyMessage(
+                    title = stringResource(R.string.no_secrets),
+                    description = stringResource(R.string.no_secrets_description),
+                    modifier = Modifier.fillMaxSize(),
+                )
+            } else {
+                LazyColumn(
+                    modifier = Modifier.fillMaxSize(),
+                    contentPadding = PaddingValues(start = 16.dp, end = 16.dp, top = 4.dp, bottom = 96.dp),
+                    verticalArrangement = Arrangement.spacedBy(4.dp),
+                ) {
+                    if (pendingUploads.isNotEmpty()) {
+                        item(key = "incoming_uploads_heading") {
+                            SecretListSectionHeading(
+                                title = "Incoming uploads",
+                                count = pendingUploads.size,
+                            )
+                        }
+                        items(
+                            pendingUploads,
+                            key = { request -> "upload_${request.id}" },
+                        ) { request ->
+                            PendingSecretUploadRow(
+                                request = request,
+                                selected = request.id == selectedUploadRequestId,
+                                onClick = { onSelectUpload(request.id) },
+                            )
+                        }
                     }
-                    items(
-                        pendingUploads,
-                        key = { request -> "upload_${request.id}" },
-                    ) { request ->
-                        PendingSecretUploadRow(
-                            request = request,
-                            selected = request.id == selectedUploadRequestId,
-                            onClick = { onSelectUpload(request.id) },
-                        )
+                    if (pendingUploads.isNotEmpty()) {
+                        item(key = "stored_secrets_heading") {
+                            SecretListSectionHeading(
+                                title = "Stored secrets",
+                                count = secrets.size,
+                                modifier = Modifier.padding(top = 10.dp),
+                            )
+                        }
                     }
-                }
-                item(key = "ai_review_instructions") {
-                    AiReviewInstructions(
-                        value = generalInstructions,
-                        access = aiReviewAccess,
-                        onEdit = onEditGeneralInstructions,
-                    )
-                }
-                if (pendingUploads.isNotEmpty()) {
-                    item(key = "stored_secrets_heading") {
-                        SecretListSectionHeading(
-                            title = "Stored secrets",
-                            count = secrets.size,
-                            modifier = Modifier.padding(top = 10.dp),
-                        )
+                    if (secrets.isEmpty()) {
+                        item(key = "no_stored_secrets") {
+                            Text(
+                                "No secrets are stored yet.",
+                                color = MaterialTheme.colorScheme.onSurfaceVariant,
+                                modifier = Modifier.padding(horizontal = 4.dp, vertical = 8.dp),
+                            )
+                        }
                     }
-                }
-                if (secrets.isEmpty()) {
-                    item(key = "no_stored_secrets") {
-                        Text(
-                            "No secrets are stored yet.",
-                            color = MaterialTheme.colorScheme.onSurfaceVariant,
-                            modifier = Modifier.padding(horizontal = 4.dp, vertical = 8.dp),
-                        )
-                    }
-                }
-                items(secrets, key = SecretSummary::id) { secret ->
-                    val selected = secret.id == selectedSecretId
-                    Surface(
-                        color = if (selected) {
-                            MaterialTheme.colorScheme.secondaryContainer
-                        } else {
-                            MaterialTheme.colorScheme.surfaceContainerLow
-                        },
-                        shape = MaterialTheme.shapes.large,
-                        onClick = { onSelect(secret.id) },
-                        modifier = Modifier.fillMaxWidth().semantics { this.selected = selected },
-                    ) {
-                        ListItem(
-                            headlineContent = {
-                                Text(
-                                    secret.name,
-                                    maxLines = 1,
-                                    overflow = TextOverflow.Ellipsis,
-                                )
+                    itemsIndexed(secrets, key = { _, secret -> secret.id }) { index, secret ->
+                        val selected = secret.id == selectedSecretId
+                        Surface(
+                            color = if (selected) {
+                                MaterialTheme.colorScheme.secondaryContainer
+                            } else {
+                                MaterialTheme.colorScheme.surfaceContainerLow
                             },
-                            supportingContent = {
-                                Column(verticalArrangement = Arrangement.spacedBy(2.dp)) {
-                                    if (secret.description.isNotBlank()) {
-                                        Text(
-                                            secret.description,
-                                            maxLines = 2,
-                                            overflow = TextOverflow.Ellipsis,
-                                        )
-                                    }
+                            shape = RoundedCornerShape(
+                                topStart = if (index == 0) 24.dp else 4.dp,
+                                topEnd = if (index == 0) 24.dp else 4.dp,
+                                bottomStart = if (index == secrets.lastIndex) 24.dp else 4.dp,
+                                bottomEnd = if (index == secrets.lastIndex) 24.dp else 4.dp,
+                            ),
+                            onClick = { onSelect(secret.id) },
+                            modifier = Modifier.fillMaxWidth().semantics { this.selected = selected },
+                        ) {
+                            ListItem(
+                                headlineContent = {
                                     Text(
-                                        when (secret.type) {
-                                            SecretType.SSH ->
-                                                secret.sshKey?.let {
-                                                    "SSH key · ${it.algorithm.displayName()}"
-                                                } ?: "SSH key unavailable"
-                                            SecretType.ENVIRONMENT ->
-                                                "${secret.environmentVariableCount} environment " +
-                                                    if (secret.environmentVariableCount == 1) {
-                                                        "variable"
-                                                    } else {
-                                                        "variables"
-                                                    }
-                                        },
-                                        style = MaterialTheme.typography.bodyMedium,
-                                        color = MaterialTheme.colorScheme.onSurfaceVariant,
+                                        secret.name,
                                         maxLines = 1,
                                         overflow = TextOverflow.Ellipsis,
                                     )
-                                    if (secret.temporaryAccessGrants.isNotEmpty()) {
-                                        val clientIds = secret.temporaryAccessGrants.map { it.clientId }.distinct()
-                                        val singleClient = clientIds.singleOrNull()?.let { id ->
-                                            clients.firstOrNull { it.clientId == id }?.name
-                                        }
-                                        Row(
-                                            horizontalArrangement = Arrangement.spacedBy(6.dp),
-                                            verticalAlignment = Alignment.CenterVertically,
-                                        ) {
-                                            Icon(
-                                                Icons.Outlined.Schedule,
-                                                contentDescription = null,
-                                                modifier = Modifier.size(14.dp),
-                                            )
+                                },
+                                supportingContent = {
+                                    Column(verticalArrangement = Arrangement.spacedBy(2.dp)) {
+                                        if (secret.description.isNotBlank()) {
                                             Text(
-                                                singleClient?.let { "Temporary access: $it" }
-                                                    ?: "Temporary access for ${clientIds.size} clients",
-                                                style = MaterialTheme.typography.labelMedium,
-                                                color = MaterialTheme.colorScheme.primary,
+                                                secret.description,
+                                                maxLines = 2,
+                                                overflow = TextOverflow.Ellipsis,
                                             )
                                         }
                                         Text(
-                                            (if (secret.temporaryAccessGrants.size == 1) "Ends " else "Next expiry ") +
-                                                formatTimestamp(secret.temporaryAccessGrants.minOf { it.expiresAt }),
-                                            style = MaterialTheme.typography.bodySmall,
+                                            when (secret.type) {
+                                                SecretType.SSH ->
+                                                    secret.sshKey?.let {
+                                                        "SSH key · ${it.algorithm.displayName()}"
+                                                    } ?: "SSH key unavailable"
+                                                SecretType.ENVIRONMENT ->
+                                                    "${secret.environmentVariableCount} environment " +
+                                                        if (secret.environmentVariableCount == 1) {
+                                                            "variable"
+                                                        } else {
+                                                            "variables"
+                                                        }
+                                            },
+                                            style = MaterialTheme.typography.labelMedium,
                                             color = MaterialTheme.colorScheme.onSurfaceVariant,
+                                            maxLines = 1,
+                                            overflow = TextOverflow.Ellipsis,
                                         )
+                                        if (secret.temporaryAccessGrants.isNotEmpty()) {
+                                            val clientIds = secret.temporaryAccessGrants.map { it.clientId }.distinct()
+                                            val singleClient = clientIds.singleOrNull()?.let { id ->
+                                                clients.firstOrNull { it.clientId == id }?.name
+                                            }
+                                            Row(
+                                                horizontalArrangement = Arrangement.spacedBy(6.dp),
+                                                verticalAlignment = Alignment.CenterVertically,
+                                            ) {
+                                                Icon(
+                                                    Icons.Outlined.Schedule,
+                                                    contentDescription = null,
+                                                    modifier = Modifier.size(14.dp),
+                                                )
+                                                Text(
+                                                    singleClient?.let { "Temporary access: $it" }
+                                                        ?: "Temporary access for ${clientIds.size} clients",
+                                                    style = MaterialTheme.typography.labelMedium,
+                                                    color = MaterialTheme.colorScheme.primary,
+                                                )
+                                            }
+                                            Text(
+                                                (if (secret.temporaryAccessGrants.size == 1) "Ends " else "Next expiry ") +
+                                                    dates.timestamp(secret.temporaryAccessGrants.minOf { it.expiresAt }),
+                                                style = MaterialTheme.typography.bodySmall,
+                                                color = MaterialTheme.colorScheme.onSurfaceVariant,
+                                            )
+                                        }
                                     }
-                                }
-                            },
-                            leadingContent = {
-                                TonalIcon(
-                                    when (secret.type) {
-                                        SecretType.SSH -> Icons.Outlined.Key
-                                        SecretType.ENVIRONMENT -> Icons.Outlined.DataObject
-                                    },
-                                    contentDescription = null,
-                                )
-                            },
-                            colors = ListItemDefaults.colors(containerColor = androidx.compose.ui.graphics.Color.Transparent),
-                            trailingContent = {
-                                Icon(
-                                    Icons.AutoMirrored.Outlined.NavigateNext,
-                                    contentDescription = null,
-                                )
-                            },
-                        )
+                                },
+                                leadingContent = {
+                                    TonalIcon(
+                                        when (secret.type) {
+                                            SecretType.SSH -> Icons.Outlined.Key
+                                            SecretType.ENVIRONMENT -> Icons.Outlined.DataObject
+                                        },
+                                        contentDescription = null,
+                                    )
+                                },
+                                colors = ListItemDefaults.colors(containerColor = androidx.compose.ui.graphics.Color.Transparent),
+                                trailingContent = {
+                                    Icon(
+                                        Icons.AutoMirrored.Outlined.NavigateNext,
+                                        contentDescription = null,
+                                    )
+                                },
+                            )
+                        }
                     }
+
                 }
             }
+            ExtendedFloatingActionButton(
+                onClick = onCreate,
+                icon = { Icon(Icons.Outlined.Add, contentDescription = null) },
+                text = { Text(stringResource(R.string.new_secret)) },
+                containerColor = MaterialTheme.colorScheme.primary,
+                contentColor = MaterialTheme.colorScheme.onPrimary,
+                modifier = Modifier.align(Alignment.BottomEnd).padding(16.dp),
+            )
         }
     }
 }
@@ -241,6 +258,7 @@ private fun PendingSecretUploadRow(
     selected: Boolean,
     onClick: () -> Unit,
 ) {
+    val dates = rememberDateTimeFormatter()
     val actionRequired = request.state == InboxRequestState.ACTION_REQUIRED
     val secretName = request.secretNames.singleOrNull() ?: "Unnamed secret"
     ActionListSurface(
@@ -249,41 +267,52 @@ private fun PendingSecretUploadRow(
         onClick = onClick,
         modifier = Modifier.fillMaxWidth().semantics { this.selected = selected },
     ) {
-        ListItem(
-            headlineContent = {
-                Text(secretName, maxLines = 1, overflow = TextOverflow.Ellipsis)
-            },
-            supportingContent = {
-                Column(verticalArrangement = Arrangement.spacedBy(2.dp)) {
-                    Text(
-                        listOfNotNull(request.title, request.listSummary)
-                            .filter(String::isNotBlank)
-                            .joinToString(" · "),
-                        maxLines = 2,
-                        overflow = TextOverflow.Ellipsis,
-                    )
-                    Text(
-                        "From ${request.clientName} · ${formatTimestamp(request.receivedAt)}",
-                        style = MaterialTheme.typography.bodySmall,
-                        maxLines = 1,
-                        overflow = TextOverflow.Ellipsis,
-                    )
-                }
-            },
-            leadingContent = {
-                TonalIcon(
+        Column(
+            modifier = Modifier.padding(16.dp),
+            verticalArrangement = Arrangement.spacedBy(8.dp),
+        ) {
+            Row(
+                horizontalArrangement = Arrangement.spacedBy(12.dp),
+                verticalAlignment = Alignment.CenterVertically,
+            ) {
+                Icon(
                     if (request.uploadSecretType == SecretType.SSH.storedName) Icons.Outlined.Key
                     else Icons.Outlined.DataObject,
                     contentDescription = null,
+                    tint = MaterialTheme.colorScheme.primary,
+                    modifier = Modifier.size(20.dp),
                 )
-            },
-            trailingContent = {
-                Icon(Icons.AutoMirrored.Outlined.NavigateNext, contentDescription = null)
-            },
-            colors = ListItemDefaults.colors(
-                containerColor = androidx.compose.ui.graphics.Color.Transparent,
-            ),
-        )
+                Text(
+                    secretName,
+                    style = MaterialTheme.typography.bodyLarge,
+                    modifier = Modifier.weight(1f),
+                    maxLines = 2,
+                    overflow = TextOverflow.Ellipsis,
+                )
+                Icon(Icons.AutoMirrored.Outlined.NavigateNext, contentDescription = null,
+                    modifier = Modifier.size(20.dp))
+            }
+            Text(
+                listOfNotNull(request.title, request.listSummary)
+                    .filter(String::isNotBlank)
+                    .joinToString(" · "),
+                style = MaterialTheme.typography.bodyMedium,
+                color = MaterialTheme.colorScheme.onSurfaceVariant,
+            )
+            FlowRow(
+                modifier = Modifier.fillMaxWidth(),
+                horizontalArrangement = Arrangement.SpaceBetween,
+                verticalArrangement = Arrangement.spacedBy(4.dp),
+            ) {
+                Text("Uploaded by ${request.clientName}",
+                    style = MaterialTheme.typography.bodySmall,
+                    color = MaterialTheme.colorScheme.onSurfaceVariant,
+                    maxLines = 2, overflow = TextOverflow.Ellipsis)
+                Text(dates.relativeTime(request.receivedAt),
+                    style = MaterialTheme.typography.bodySmall,
+                    color = MaterialTheme.colorScheme.onSurfaceVariant)
+            }
+        }
     }
 }
 
@@ -298,7 +327,7 @@ private fun SecretListSectionHeading(
         horizontalArrangement = Arrangement.spacedBy(8.dp),
         verticalAlignment = Alignment.CenterVertically,
     ) {
-        Text(title, style = MaterialTheme.typography.titleSmall)
+        Text(title, style = MaterialTheme.typography.titleSmall, color = MaterialTheme.colorScheme.primary)
         Text(
             count.toString(),
             style = MaterialTheme.typography.labelMedium,

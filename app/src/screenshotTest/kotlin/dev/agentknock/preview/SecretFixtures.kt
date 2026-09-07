@@ -6,7 +6,7 @@ import dev.agentknock.storage.secret.*
 
 internal val previewSecret = SecretDetails(
     id = "preview-database",
-    name = "production-db",
+    name = "cf-test",
     description = "Production PostgreSQL credentials.",
     type = SecretType.ENVIRONMENT,
     environmentVariables = listOf(
@@ -27,8 +27,8 @@ internal val previewSecret = SecretDetails(
 )
 
 internal val previewClients = listOf(
-    "preview-server" to "Build server",
-    "preview-laptop" to "Work laptop",
+    "preview-server" to "cf-ci",
+    "preview-laptop" to "cf-wrk",
 ).map { (id, name) ->
     ClientSummary(
         clientId = id, name = name, hostname = null, platform = "linux", architecture = "x86_64",
@@ -38,17 +38,18 @@ internal val previewClients = listOf(
 
 // Fixed public bytes only; no private key or real credential is needed to render the UI.
 private val previewPublicKey = SshKeyCodec().publicKey(
-    SshKeyAlgorithm.ED25519, ByteArray(32) { (it + 1).toByte() }, "preview@example.test",
+    SshKeyAlgorithm.ED25519, ByteArray(32) { (it + 1).toByte() }, "deploy@cf-wrk",
 )
 internal val previewSshKey = SshKeyMetadata(
     algorithm = SshKeyAlgorithm.ED25519, bits = 256,
     publicKey = previewPublicKey.line,
     fingerprint = previewPublicKey.fingerprint, fingerprintHex = previewPublicKey.fingerprintHex,
-    comment = "preview@example.test", privateKeyAvailable = true,
+    comment = "deploy@cf-wrk", privateKeyAvailable = true,
 )
 internal val previewSshSecret = previewSecret.copy(
-    id = "preview-ssh", name = "developer-ssh", description = "Git signing and deployment access.",
+    id = "preview-ssh", name = "cf-key", description = "Git signing and deployment access.",
     type = SecretType.SSH, environmentVariables = emptyList(), sshKey = previewSshKey,
+    instructions = "Allow signing development commits. Ask before production access.",
 )
 internal val previewGrants = listOf(TemporaryAccessGrant(
     previewSecret.id, previewSecret.name, "preview-laptop",

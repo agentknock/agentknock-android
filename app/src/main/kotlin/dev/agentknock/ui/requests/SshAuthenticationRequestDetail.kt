@@ -16,7 +16,6 @@ import androidx.compose.runtime.setValue
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.text.font.FontFamily
 import androidx.compose.ui.unit.dp
-import dev.agentknock.presentation.formatTimestamp
 import dev.agentknock.presentation.formatParentRequestAge
 import dev.agentknock.presentation.renderShellCommand
 import dev.agentknock.presentation.renderSoftware
@@ -31,6 +30,7 @@ import dev.agentknock.storage.request.ApprovalCompletionResult
 import dev.agentknock.storage.request.SshAuthenticationRequestDetails
 import dev.agentknock.storage.request.ApprovalRequestState
 import dev.agentknock.storage.secret.TemporaryAccessOperation
+import dev.agentknock.ui.components.rememberDateTimeFormatter
 import dev.agentknock.ui.components.DetailPage
 import dev.agentknock.ui.components.DetailValue
 import dev.agentknock.ui.components.Disclosure
@@ -198,6 +198,7 @@ internal fun SshAuthenticationRequestDetail(
 
 @Composable
 private fun SshAuthenticationOutcome(authentication: SshAuthenticationRequestDetails) {
+    val dates = rememberDateTimeFormatter()
     val temporaryAccessUntil = authentication.approvalEvaluation?.secrets
         ?.mapNotNull { it.temporaryAccessExpiresAt }
         ?.maxOrNull()
@@ -255,7 +256,7 @@ private fun SshAuthenticationOutcome(authentication: SshAuthenticationRequestDet
         temporaryAccessUntil?.let {
             Notice(
                 "Temporary SSH access",
-                "SSH authentication from this client is allowed through ${formatTimestamp(it)}.",
+                "SSH authentication from this client is allowed through ${dates.timestamp(it)}.",
                 NoticeTone.SUCCESS,
             )
         }
