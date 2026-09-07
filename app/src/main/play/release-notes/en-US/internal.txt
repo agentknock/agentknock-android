@@ -1,1 +1,1 @@
-Redesigned secret access settings with compact Deny, Ask, AI, and Allow controls. Client icons and muted inherited settings make overrides easier to see. Added access-option help and refined spacing and alignment.
+Clearer approval screens for secret use, Git signing, and SSH authentication. Improved command readability and consistent Allow once / Deny once actions. Refined the Secrets list, AI instructions, and secret details, including more readable SSH fingerprints.

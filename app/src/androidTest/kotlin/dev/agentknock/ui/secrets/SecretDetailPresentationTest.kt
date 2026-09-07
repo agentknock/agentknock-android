@@ -45,7 +45,9 @@ class SecretDetailPresentationTest {
         }
 
         compose.onNodeWithText("Global AI instructions").assertIsDisplayed()
-        compose.onNodeWithText("Applies to every secret and client.").assertIsDisplayed()
+        compose.onNodeWithText(
+            "Applies to every secret and client. Used when AI review is active.",
+        ).assertIsDisplayed()
         compose.onNodeWithText(instructions).assertIsDisplayed()
         compose.onNodeWithContentDescription("Edit instructions").performClick()
         compose.runOnIdle { assertEquals(1, edits) }
