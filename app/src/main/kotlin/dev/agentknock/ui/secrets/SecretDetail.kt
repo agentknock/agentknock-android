@@ -26,7 +26,9 @@ import androidx.compose.material.icons.outlined.ContentCopy
 import androidx.compose.material.icons.outlined.Edit
 import androidx.compose.material.icons.outlined.ExpandLess
 import androidx.compose.material.icons.outlined.ExpandMore
+import androidx.compose.material.icons.outlined.Fingerprint
 import androidx.compose.material.icons.outlined.Key
+import androidx.compose.material.icons.outlined.Label
 import androidx.compose.material.icons.outlined.Lock
 import androidx.compose.material.icons.outlined.MoreVert
 import androidx.compose.material.icons.outlined.Visibility
@@ -82,6 +84,7 @@ import dev.agentknock.ui.components.NavigationBackButton
 import dev.agentknock.ui.components.ProseEditorScreen
 import dev.agentknock.ui.components.ExactText
 import dev.agentknock.ui.components.TonalIcon
+import dev.agentknock.ui.requests.SelectableFact
 
 internal data class SecretDetailActions(
     val onBack: () -> Unit,
@@ -483,25 +486,22 @@ private fun SshPublicKeyCard(
             horizontalArrangement = Arrangement.spacedBy(12.dp),
             verticalAlignment = Alignment.CenterVertically,
         ) {
-            Column(Modifier.weight(1f), verticalArrangement = Arrangement.spacedBy(2.dp)) {
-                Text("Key comment", style = MaterialTheme.typography.labelMedium,
-                    color = MaterialTheme.colorScheme.onSurfaceVariant)
-                SelectionContainer {
-                    Text(key.comment.ifBlank { "No comment" }, style = MaterialTheme.typography.bodyLarge)
-                }
-            }
+            SelectableFact(
+                icon = Icons.Outlined.Label,
+                label = "Key comment",
+                value = key.comment.ifBlank { "No comment" },
+                modifier = Modifier.weight(1f),
+            )
             IconButton(onClick = onEditComment) {
                 Icon(Icons.Outlined.Edit, contentDescription = "Edit public key comment")
             }
         }
-        Column(verticalArrangement = Arrangement.spacedBy(4.dp)) {
-            Text("Fingerprint", style = MaterialTheme.typography.labelMedium,
-                color = MaterialTheme.colorScheme.onSurfaceVariant)
-            SelectionContainer {
-                Text(key.fingerprint, fontFamily = FontFamily.Monospace,
-                    style = MaterialTheme.typography.bodySmall)
-            }
-        }
+        SelectableFact(
+            icon = Icons.Outlined.Fingerprint,
+            label = "Fingerprint",
+            value = key.fingerprint,
+            monospace = true,
+        )
         if (!key.privateKeyAvailable) {
             Text("Private key unavailable", color = MaterialTheme.colorScheme.error,
                 style = MaterialTheme.typography.bodyMedium)

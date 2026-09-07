@@ -229,9 +229,11 @@ internal fun SelectableFact(
     icon: ImageVector,
     label: String,
     value: String,
+    modifier: Modifier = Modifier,
     monospace: Boolean = false,
 ) {
     Row(
+        modifier = modifier,
         horizontalArrangement = Arrangement.spacedBy(8.dp),
         verticalAlignment = Alignment.Top,
     ) {
