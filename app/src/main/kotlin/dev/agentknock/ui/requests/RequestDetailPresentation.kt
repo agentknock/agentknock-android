@@ -19,6 +19,7 @@ import androidx.compose.foundation.text.selection.SelectionContainer
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.outlined.Computer
 import androidx.compose.material.icons.outlined.Key
+import androidx.compose.material.icons.outlined.Terminal
 import androidx.compose.material3.Icon
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.Surface
@@ -30,6 +31,7 @@ import androidx.compose.ui.graphics.vector.ImageVector
 import androidx.compose.ui.platform.LocalDensity
 import androidx.compose.ui.semantics.clearAndSetSemantics
 import androidx.compose.ui.semantics.contentDescription
+import androidx.compose.ui.text.font.FontFamily
 import androidx.compose.ui.text.rememberTextMeasurer
 import androidx.compose.ui.unit.dp
 import dev.agentknock.ui.components.NoticeTone
@@ -211,6 +213,94 @@ internal fun ReasonQuote(reason: String, clientName: String) {
             Text(
                 "Reason reported by $clientName",
                 style = MaterialTheme.typography.labelMedium,
+                color = MaterialTheme.colorScheme.onSurfaceVariant,
+            )
+        }
+    }
+}
+
+/**
+ * A value taken from signed or verified content, with an icon and a label beneath. Unlike
+ * [Identity] the exact string stays selectable and copyable: no wrap hints are inserted and
+ * the text keeps its own semantics, so the label is read after the value.
+ */
+@Composable
+internal fun SelectableFact(
+    icon: ImageVector,
+    label: String,
+    value: String,
+    monospace: Boolean = false,
+) {
+    Row(
+        horizontalArrangement = Arrangement.spacedBy(8.dp),
+        verticalAlignment = Alignment.Top,
+    ) {
+        Icon(
+            icon,
+            contentDescription = null,
+            tint = MaterialTheme.colorScheme.onSurfaceVariant,
+            modifier = Modifier.padding(top = 2.dp).size(18.dp),
+        )
+        Column {
+            SelectionContainer {
+                Text(
+                    value,
+                    style = if (monospace) {
+                        MaterialTheme.typography.bodyMedium.copy(fontFamily = FontFamily.Monospace)
+                    } else {
+                        MaterialTheme.typography.titleMedium
+                    },
+                )
+            }
+            Text(
+                label,
+                style = MaterialTheme.typography.labelSmall,
+                color = MaterialTheme.colorScheme.onSurfaceVariant,
+            )
+        }
+    }
+}
+
+/** The client-reported command that led to a derived request, with its provenance beneath. */
+@Composable
+internal fun TriggeringCommand(
+    command: String,
+    arguments: List<String>,
+    clientName: String,
+    parentRequestAge: String,
+) {
+    Row(
+        horizontalArrangement = Arrangement.spacedBy(10.dp),
+        verticalAlignment = Alignment.Top,
+    ) {
+        Icon(
+            Icons.Outlined.Terminal,
+            contentDescription = null,
+            tint = MaterialTheme.colorScheme.onSurfaceVariant,
+            modifier = Modifier.padding(top = 2.dp).size(18.dp),
+        )
+        Column(verticalArrangement = Arrangement.spacedBy(2.dp)) {
+            SelectionContainer {
+                Text(
+                    annotatedCommand(
+                        command = command,
+                        arguments = arguments,
+                        listed = false,
+                        mutedColor = MaterialTheme.colorScheme.onSurfaceVariant,
+                        optionColor = MaterialTheme.colorScheme.tertiary,
+                    ),
+                    style = MaterialTheme.typography.bodyMedium,
+                    fontFamily = FontFamily.Monospace,
+                )
+            }
+            Text(
+                "Command reported by $clientName",
+                style = MaterialTheme.typography.labelSmall,
+                color = MaterialTheme.colorScheme.onSurfaceVariant,
+            )
+            Text(
+                parentRequestAge,
+                style = MaterialTheme.typography.labelSmall,
                 color = MaterialTheme.colorScheme.onSurfaceVariant,
             )
         }

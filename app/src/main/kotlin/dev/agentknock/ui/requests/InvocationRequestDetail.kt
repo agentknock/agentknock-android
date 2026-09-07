@@ -104,7 +104,6 @@ internal fun InvocationRequestDetail(
                     tonalElevation = 3.dp,
                 ) {
                     RequestDecisionButtons(
-                        approveLabel = "Approve once",
                         approveEnabled = secretUse.missingSecrets.isEmpty(),
                         temporaryAccessAvailable = temporarySecretNames.isNotEmpty() &&
                             secretUse.missingSecrets.isEmpty(),

@@ -334,7 +334,7 @@ private fun RequestRow(
                 stateDescription = statusLabel
                 customActions = buildList {
                     if (canDecide) {
-                        add(CustomAccessibilityAction("Approve once") {
+                        add(CustomAccessibilityAction("Allow once") {
                             onDecision(RequestDecision.APPROVE)
                             true
                         })
@@ -379,7 +379,7 @@ private fun RequestRow(
                             tint = contentColor,
                         )
                         Text(
-                            if (approving) "Approve once" else rejectLabel,
+                            if (approving) "Allow once" else rejectLabel,
                             style = MaterialTheme.typography.labelLarge,
                             color = contentColor,
                         )

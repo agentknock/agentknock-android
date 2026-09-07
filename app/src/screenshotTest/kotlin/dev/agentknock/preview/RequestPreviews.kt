@@ -192,9 +192,35 @@ fun SshAuthenticationLightPreview() = SshAuthenticationPreview()
 fun SshAuthenticationDarkPreview() = SshAuthenticationPreview()
 
 @Composable
-private fun SshAuthenticationPreview() = PreviewScreen {
-    SshAuthenticationRequestDetail(previewRequest(InboxRequestContent.SshAuthentication(previewAuthentication)), {}, true, {}, {}, {}, Modifier.fillMaxSize())
+private fun SshAuthenticationPreview() = PreviewScreen { SshAuthenticationPage(previewAuthentication) }
+
+@Composable private fun SshAuthenticationPage(details: SshAuthenticationRequestDetails, state: InboxRequestState = InboxRequestState.ACTION_REQUIRED) {
+    SshAuthenticationRequestDetail(previewRequest(InboxRequestContent.SshAuthentication(details), state), {}, true, {}, {}, {}, Modifier.fillMaxSize())
 }
+
+@PreviewTest
+@Preview(name = "Dark", group = "ssh-authentication-publickey", widthDp = 360, heightDp = 800, locale = "en", uiMode = Configuration.UI_MODE_NIGHT_YES)
+@Composable
+fun SshAuthenticationPublicKeyDarkPreview() = PreviewScreen {
+    SshAuthenticationPage(previewAuthentication.copy(
+        method = SshAuthenticationMethod.PUBLIC_KEY, hostKeyAlgorithm = null, hostKeyFingerprint = null,
+        username = "git", command = "git", arguments = listOf("push", "origin", "main"),
+        reason = "Push the reviewed branch.",
+    ))
+}
+
+@PreviewTest
+@Preview(name = "Dark", group = "ssh-authentication-signed", widthDp = 360, heightDp = 800, locale = "en", uiMode = Configuration.UI_MODE_NIGHT_YES)
+@Composable
+fun SshAuthenticationSignedDarkPreview() = PreviewScreen {
+    SshAuthenticationPage(previewAuthentication.copy(state = ApprovalRequestState.COMPLETED, decision = ApprovalDecision.APPROVED,
+        completionResult = ApprovalCompletionResult.APPROVED), InboxRequestState.COMPLETED)
+}
+
+@PreviewTest
+@Preview(name = "Dark", group = "ssh-authentication-large-text", widthDp = 360, heightDp = 800, fontScale = 1.5f, locale = "en", uiMode = Configuration.UI_MODE_NIGHT_YES)
+@Composable
+fun SshAuthenticationLargeTextDarkPreview() = SshAuthenticationPreview()
 
 @PreviewTest
 @Preview(name = "Light", group = "secret-upload", widthDp = 360, heightDp = 800, locale = "en", uiMode = Configuration.UI_MODE_NIGHT_NO)

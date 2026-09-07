@@ -204,7 +204,6 @@ private fun RequestParticipant(label: String, name: String, maxLines: Int, modif
 
 @Composable
 internal fun RequestDecisionButtons(
-    approveLabel: String,
     approveEnabled: Boolean,
     temporaryAccessAvailable: Boolean,
     onDeny: () -> Unit,
@@ -238,7 +237,7 @@ internal fun RequestDecisionButtons(
                     contentColor = MaterialTheme.agentknockColors.onSuccess,
                 ),
             ) {
-                Text(approveLabel, textAlign = TextAlign.Center)
+                Text("Allow once", textAlign = TextAlign.Center)
             }
         }
         if (temporaryAccessAvailable) {
@@ -248,7 +247,7 @@ internal fun RequestDecisionButtons(
             ) {
                 Icon(Icons.Outlined.Schedule, contentDescription = null)
                 Spacer(Modifier.width(8.dp))
-                Text("Allow temporarily…")
+                Text("Allow for 4 hours…")
             }
         }
     }
@@ -304,7 +303,7 @@ internal fun TemporaryAccessConfirmation(
                 }
             }
         },
-        confirmButton = { TextButton(onClick = onConfirm) { Text("Allow 4 hours") } },
+        confirmButton = { TextButton(onClick = onConfirm) { Text("Allow for 4 hours") } },
         dismissButton = { TextButton(onClick = onDismiss) { Text("Cancel") } },
     )
 }

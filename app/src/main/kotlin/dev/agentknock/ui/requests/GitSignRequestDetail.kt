@@ -16,7 +16,6 @@ import androidx.compose.material.icons.outlined.CheckCircle
 import androidx.compose.material.icons.outlined.ErrorOutline
 import androidx.compose.material.icons.outlined.HourglassTop
 import androidx.compose.material.icons.outlined.Person
-import androidx.compose.material.icons.outlined.Terminal
 import androidx.compose.material3.Icon
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.Surface
@@ -94,7 +93,6 @@ internal fun GitSignRequestDetail(
                     tonalElevation = 3.dp,
                 ) {
                     RequestDecisionButtons(
-                        approveLabel = "Sign once",
                         approveEnabled = true,
                         temporaryAccessAvailable = temporarySecretNames.isNotEmpty(),
                         onDeny = onDeny,
@@ -252,85 +250,10 @@ private fun SignedObjectSheet(content: GitSigningContent, message: String) {
                 }
             }
             content.identities.groupBy({ it.second }, { it.first }).forEach { (identity, roles) ->
-                SignedIdentity(roles.joinToString(" · "), identity)
+                SelectableFact(Icons.Outlined.Person, roles.joinToString(" · "), identity)
             }
             Text(
                 content.objectLabel?.let { "$it to sign" } ?: "Content to sign",
-                style = MaterialTheme.typography.labelSmall,
-                color = MaterialTheme.colorScheme.onSurfaceVariant,
-            )
-        }
-    }
-}
-
-/**
- * An author, committer or tagger from the bytes to sign. Unlike the ticket's identity rows the
- * exact string stays selectable and copyable, so no wrap hints are inserted and the text keeps
- * its own semantics; the role is a visible label read after the name.
- */
-@Composable
-private fun SignedIdentity(role: String, identity: String) {
-    Row(
-        horizontalArrangement = Arrangement.spacedBy(8.dp),
-        verticalAlignment = Alignment.Top,
-    ) {
-        Icon(
-            Icons.Outlined.Person,
-            contentDescription = null,
-            tint = MaterialTheme.colorScheme.onSurfaceVariant,
-            modifier = Modifier.padding(top = 2.dp).size(18.dp),
-        )
-        Column {
-            SelectionContainer {
-                Text(identity, style = MaterialTheme.typography.titleMedium)
-            }
-            Text(
-                role,
-                style = MaterialTheme.typography.labelSmall,
-                color = MaterialTheme.colorScheme.onSurfaceVariant,
-            )
-        }
-    }
-}
-
-@Composable
-private fun TriggeringCommand(
-    command: String,
-    arguments: List<String>,
-    clientName: String,
-    parentRequestAge: String,
-) {
-    Row(
-        horizontalArrangement = Arrangement.spacedBy(10.dp),
-        verticalAlignment = Alignment.Top,
-    ) {
-        Icon(
-            Icons.Outlined.Terminal,
-            contentDescription = null,
-            tint = MaterialTheme.colorScheme.onSurfaceVariant,
-            modifier = Modifier.padding(top = 2.dp).size(18.dp),
-        )
-        Column(verticalArrangement = Arrangement.spacedBy(2.dp)) {
-            SelectionContainer {
-                Text(
-                    annotatedCommand(
-                        command = command,
-                        arguments = arguments,
-                        listed = false,
-                        mutedColor = MaterialTheme.colorScheme.onSurfaceVariant,
-                        optionColor = MaterialTheme.colorScheme.tertiary,
-                    ),
-                    style = MaterialTheme.typography.bodyMedium,
-                    fontFamily = FontFamily.Monospace,
-                )
-            }
-            Text(
-                "Command reported by $clientName",
-                style = MaterialTheme.typography.labelSmall,
-                color = MaterialTheme.colorScheme.onSurfaceVariant,
-            )
-            Text(
-                parentRequestAge,
                 style = MaterialTheme.typography.labelSmall,
                 color = MaterialTheme.colorScheme.onSurfaceVariant,
             )

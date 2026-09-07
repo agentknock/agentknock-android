@@ -463,7 +463,7 @@ internal object RequestNotifications {
             if (request.decisionAvailable) {
                 builder.addAction(decisionAction(context, request.requestId, DENY_DECISION, "Deny once"))
                 builder.addAction(
-                    decisionAction(context, request.requestId, APPROVE_DECISION, "Approve once"),
+                    decisionAction(context, request.requestId, APPROVE_DECISION, "Allow once"),
                 )
             }
             manager.notify(request.requestId, REQUEST_NOTIFICATION_ID, builder.build())
