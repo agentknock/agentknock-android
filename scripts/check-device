@@ -32,19 +32,22 @@ trap cleanup EXIT
 
 printf 'no\n' | avdmanager create avd --name agentknock_ci \
     --package "$AGENTKNOCK_EMULATOR_IMAGE" --device pixel_7
-emulator -avd agentknock_ci -port 5556 -accel on -no-window -no-audio -no-boot-anim \
+emulator -avd agentknock_ci -port 5556 -accel on -no-window -no-audio -no-boot-anim -no-metrics \
     -no-snapshot -gpu swiftshader -memory 2048 -cores 2 \
     > "$device_report_dir/emulator.txt" 2>&1 &
 emulator_pid=$!
 
-timeout 180 adb -s "$device_serial" wait-for-device
-boot_deadline=$((SECONDS + 180))
-until [[ "$(adb -s "$device_serial" shell getprop sys.boot_completed | tr -d '\r')" == 1 ]]; do
+boot_deadline=$((SECONDS + 360))
+until [[ "$(adb -s "$device_serial" shell getprop sys.boot_completed 2>/dev/null | tr -d '\r')" == 1 ]]; do
+    if ! kill -0 "$emulator_pid" 2>/dev/null; then
+        echo "Emulator exited before finishing boot." >&2
+        tail -n 60 "$device_report_dir/emulator.txt" >&2
+        exit 1
+    fi
     if (( SECONDS >= boot_deadline )); then
         echo "Emulator did not finish booting." >&2
         exit 1
     fi
-    kill -0 "$emulator_pid"
     sleep 1
 done
 actual_api="$(adb -s "$device_serial" shell getprop ro.build.version.sdk | tr -d '\r')"
