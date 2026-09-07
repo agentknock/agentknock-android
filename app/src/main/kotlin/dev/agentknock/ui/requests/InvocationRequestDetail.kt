@@ -1,14 +1,28 @@
 package dev.agentknock.ui.requests
 
+import androidx.compose.foundation.background
 import androidx.compose.foundation.layout.Arrangement
+import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.BoxWithConstraints
 import androidx.compose.foundation.layout.Column
+import androidx.compose.foundation.layout.FlowRow
+import androidx.compose.foundation.layout.IntrinsicSize
 import androidx.compose.foundation.layout.Row
+import androidx.compose.foundation.layout.fillMaxHeight
 import androidx.compose.foundation.layout.fillMaxWidth
+import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
+import androidx.compose.foundation.layout.width
+import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.foundation.text.selection.SelectionContainer
 import androidx.compose.material.icons.Icons
+import androidx.compose.material.icons.outlined.AutoAwesome
+import androidx.compose.material.icons.outlined.Block
+import androidx.compose.material.icons.outlined.CheckCircle
+import androidx.compose.material.icons.outlined.Computer
+import androidx.compose.material.icons.outlined.ErrorOutline
+import androidx.compose.material.icons.outlined.HourglassTop
 import androidx.compose.material.icons.outlined.Key
 import androidx.compose.material3.HorizontalDivider
 import androidx.compose.material3.Icon
@@ -22,19 +36,26 @@ import androidx.compose.runtime.remember
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
-import androidx.compose.ui.graphics.compositeOver
+import androidx.compose.ui.graphics.Color
+import androidx.compose.ui.graphics.vector.ImageVector
 import androidx.compose.ui.platform.LocalDensity
 import androidx.compose.ui.semantics.clearAndSetSemantics
 import androidx.compose.ui.semantics.contentDescription
+import androidx.compose.ui.text.AnnotatedString
+import androidx.compose.ui.text.SpanStyle
 import androidx.compose.ui.text.TextStyle
+import androidx.compose.ui.text.buildAnnotatedString
 import androidx.compose.ui.text.font.FontFamily
 import androidx.compose.ui.text.rememberTextMeasurer
 import androidx.compose.ui.text.style.TextAlign
+import androidx.compose.ui.text.style.TextIndent
+import androidx.compose.ui.text.withStyle
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import dev.agentknock.presentation.formatPlatformName
 import dev.agentknock.presentation.approvalSummary
 import dev.agentknock.presentation.renderShellCommand
+import dev.agentknock.presentation.renderShellWord
 import dev.agentknock.presentation.renderSoftware
 import dev.agentknock.review.ApprovalReviewEnvironmentDelivery
 import dev.agentknock.review.ApprovalReviewEnvironmentSecretFacts
@@ -57,7 +78,8 @@ import dev.agentknock.ui.components.DetailValue
 import dev.agentknock.ui.components.Disclosure
 import dev.agentknock.ui.components.Notice
 import dev.agentknock.ui.components.NoticeTone
-import dev.agentknock.ui.components.StatusLine
+import dev.agentknock.ui.components.TonalIcon
+import dev.agentknock.ui.theme.agentknockColors
 
 @Composable
 internal fun InvocationRequestDetail(
@@ -79,6 +101,7 @@ internal fun InvocationRequestDetail(
     val temporarySecretNames = secretUse.approvalEvaluation.temporaryGrantSecretNames(
         aiReviewInFlight,
     )
+    val requestedAt = relayRequestTimestamp(request.id) ?: request.receivedAt
     DetailPage(
         title = "Secret use",
         onBack = onBack,
@@ -88,7 +111,7 @@ internal fun InvocationRequestDetail(
         bottomContent = if (request.state == InboxRequestState.ACTION_REQUIRED) {
             {
                 Surface(
-                    color = MaterialTheme.colorScheme.surfaceContainerLow,
+                    color = MaterialTheme.colorScheme.surfaceContainer,
                     tonalElevation = 3.dp,
                 ) {
                     RequestDecisionButtons(
@@ -106,67 +129,47 @@ internal fun InvocationRequestDetail(
             null
         },
     ) {
-        RequestIdentity(
-            secretUse.clientName,
-            secretUse.secrets,
-            relayRequestTimestamp(request.id) ?: request.receivedAt,
-        ) {
-            if (secretUse.state == ApprovalRequestState.APPROVAL_PENDING) {
-                StatusLine(
-                    if (aiReviewInFlight) "AI review in progress" else secretUse.statusLabel(),
-                    secretUse.isError(),
-                    attention = request.state == InboxRequestState.ACTION_REQUIRED,
-                    subdued = aiReviewInFlight ||
+        val status = if (secretUse.state == ApprovalRequestState.APPROVAL_PENDING) {
+            when {
+                aiReviewInFlight -> StatusSummary(
+                    "AI review in progress",
+                    tone = NoticeTone.SUBDUED,
+                    icon = Icons.Outlined.AutoAwesome,
+                )
+                secretUse.isError() -> StatusSummary(
+                    secretUse.statusLabel(),
+                    tone = NoticeTone.DANGER,
+                    icon = Icons.Outlined.ErrorOutline,
+                )
+                request.state == InboxRequestState.ACTION_REQUIRED -> StatusSummary(
+                    secretUse.statusLabel(),
+                    tone = NoticeTone.ATTENTION,
+                )
+                else -> StatusSummary(
+                    secretUse.statusLabel(),
+                    tone = if (
                         secretUse.decision == ApprovalDecision.DENIED ||
                         secretUse.completionResult == ApprovalCompletionResult.DENIED ||
-                        secretUse.completionResult == ApprovalCompletionResult.ABORTED,
-                )
-            } else {
-                SecretUseOutcome(secretUse)
-            }
-        }
-
-        val renderedCommand = renderShellCommand(secretUse.command, secretUse.arguments)
-        Surface(
-            color = MaterialTheme.colorScheme.primary.copy(alpha = 0.14f)
-                .compositeOver(MaterialTheme.colorScheme.surface),
-            contentColor = MaterialTheme.colorScheme.onSurface,
-            shape = MaterialTheme.shapes.large,
-            modifier = Modifier.fillMaxWidth(),
-        ) {
-            Column(
-                Modifier.padding(16.dp),
-                verticalArrangement = Arrangement.spacedBy(8.dp),
-            ) {
-                Text(
-                    "Command",
-                    style = MaterialTheme.typography.labelMedium,
-                    color = MaterialTheme.colorScheme.primary,
-                )
-                SelectionContainer {
-                    Text(
-                        renderedCommand,
-                        fontFamily = FontFamily.Monospace,
-                        style = MaterialTheme.typography.bodyLarge.copy(fontSize = 18.sp, lineHeight = 26.sp),
-                    )
-                }
-                if (renderedCommand.any { it.code > 0x7e }) {
-                    Surface(
-                        color = MaterialTheme.colorScheme.errorContainer,
-                        contentColor = MaterialTheme.colorScheme.onErrorContainer,
-                        shape = MaterialTheme.shapes.small,
+                        secretUse.completionResult == ApprovalCompletionResult.ABORTED
                     ) {
-                        Text(
-                            "This command contains non-ASCII characters.",
-                            style = MaterialTheme.typography.bodySmall,
-                            modifier = Modifier.padding(8.dp),
-                        )
-                    }
-                }
+                        NoticeTone.SUBDUED
+                    } else {
+                        NoticeTone.SUCCESS
+                    },
+                )
             }
+        } else {
+            secretUse.outcome()
         }
+        StatusHeader(status, dates.timestamp(requestedAt))
 
-        ClientReason(secretUse.reason)
+        RequestTicket(
+            clientName = secretUse.clientName,
+            secretNames = secretUse.secrets,
+            command = secretUse.command,
+            arguments = secretUse.arguments,
+            reason = secretUse.reason,
+        )
 
         if (secretUse.state == ApprovalRequestState.APPROVAL_PENDING) {
             val evaluation = secretUse.approvalEvaluation
@@ -186,17 +189,6 @@ internal fun InvocationRequestDetail(
                 temporaryAccessScopes = secretUse.approvalEvaluation.temporaryAccessHistory(dates::timestamp),
             )
         }
-        if (secretUse.secretDetails.isNotEmpty()) {
-            Column(verticalArrangement = Arrangement.spacedBy(8.dp)) {
-                Text("Requested secrets", style = MaterialTheme.typography.titleMedium)
-                Column(verticalArrangement = Arrangement.spacedBy(8.dp)) {
-                    secretUse.secretDetails.forEachIndexed { index, secret ->
-                        SecretSummary(secret, secretUse.environmentVariables[secret.name])
-                        if (index != secretUse.secretDetails.lastIndex) HorizontalDivider()
-                    }
-                }
-            }
-        }
 
         if (
             secretUse.missingSecrets.isNotEmpty() &&
@@ -209,10 +201,32 @@ internal fun InvocationRequestDetail(
             )
         }
 
+        if (secretUse.secretDetails.isNotEmpty()) {
+            Column(verticalArrangement = Arrangement.spacedBy(8.dp)) {
+                SectionTitle(
+                    if (secretUse.secretDetails.size == 1) "Requested secret" else "Requested secrets",
+                )
+                Surface(
+                    color = MaterialTheme.colorScheme.surfaceContainerLow,
+                    shape = MaterialTheme.shapes.large,
+                    modifier = Modifier.fillMaxWidth(),
+                ) {
+                    Column {
+                        secretUse.secretDetails.forEachIndexed { index, secret ->
+                            SecretSummary(secret, secretUse.environmentVariables[secret.name])
+                            if (index != secretUse.secretDetails.lastIndex) {
+                                HorizontalDivider(Modifier.padding(start = 72.dp))
+                            }
+                        }
+                    }
+                }
+            }
+        }
+
         Disclosure("Technical details") {
             DetailValue(
                 "Requested",
-                dates.timestamp(relayRequestTimestamp(request.id) ?: request.receivedAt, includeSeconds = true),
+                dates.timestamp(requestedAt, includeSeconds = true),
             )
             Text(
                 "Process information reported by the client",
@@ -271,67 +285,357 @@ internal fun InvocationRequestDetail(
     }
 }
 
+private data class StatusSummary(
+    val title: String,
+    val tone: NoticeTone = NoticeTone.NEUTRAL,
+    val icon: ImageVector? = null,
+    val detail: String? = null,
+)
+
 @Composable
-private fun SecretUseOutcome(secretUse: SecretUseRequestDetails) {
-    val outcome = when (secretUse.state) {
-        ApprovalRequestState.WAITING_FOR_COMPLETION -> OutcomeNotice(
-            title = if (secretUse.decision == ApprovalDecision.APPROVED) {
-                "Approved"
-            } else {
-                "Denied"
-            },
-            detail = "Waiting for the client to finish.",
-            tone = if (secretUse.decision == ApprovalDecision.APPROVED) {
-                NoticeTone.SUCCESS
-            } else {
-                NoticeTone.SUBDUED
-            },
-        )
-        ApprovalRequestState.COMPLETED -> when (secretUse.completionResult) {
-            ApprovalCompletionResult.APPROVED -> OutcomeNotice(
-                "Delivered",
-                "The client received the requested data.",
-                NoticeTone.SUCCESS,
+private fun StatusHeader(status: StatusSummary, requestedAt: String) {
+    Column(verticalArrangement = Arrangement.spacedBy(8.dp)) {
+        FlowRow(
+            modifier = Modifier.fillMaxWidth(),
+            horizontalArrangement = Arrangement.SpaceBetween,
+            verticalArrangement = Arrangement.spacedBy(6.dp),
+            itemVerticalAlignment = Alignment.CenterVertically,
+        ) {
+            StatusChip(status)
+            Text(
+                requestedAt,
+                style = MaterialTheme.typography.bodySmall,
+                color = MaterialTheme.colorScheme.onSurfaceVariant,
+                modifier = Modifier.clearAndSetSemantics {
+                    contentDescription = "Requested $requestedAt"
+                },
             )
-            ApprovalCompletionResult.DENIED -> if (
-                secretUse.completionReason == "INVALID_REQUEST"
-            ) {
-                OutcomeNotice(
-                    "Request rejected",
-                    secretUse.completionMessage ?: "The request was invalid.",
-                    NoticeTone.DANGER,
-                )
-            } else {
-                OutcomeNotice(
-                    "Denied",
-                    "No requested values were released.",
-                    NoticeTone.SUBDUED,
-                )
+        }
+        status.detail?.let {
+            Text(
+                it,
+                style = MaterialTheme.typography.bodyMedium,
+                color = MaterialTheme.colorScheme.onSurfaceVariant,
+            )
+        }
+    }
+}
+
+@Composable
+private fun StatusChip(status: StatusSummary, modifier: Modifier = Modifier) {
+    val semanticColors = MaterialTheme.agentknockColors
+    val container = when (status.tone) {
+        NoticeTone.NEUTRAL, NoticeTone.SUBDUED -> MaterialTheme.colorScheme.surfaceContainerHighest
+        NoticeTone.ATTENTION -> semanticColors.attentionContainer
+        NoticeTone.SUCCESS -> semanticColors.successContainer
+        NoticeTone.DANGER -> semanticColors.dangerContainer
+    }
+    val content = when (status.tone) {
+        NoticeTone.NEUTRAL, NoticeTone.SUBDUED -> MaterialTheme.colorScheme.onSurfaceVariant
+        NoticeTone.ATTENTION -> semanticColors.onAttentionContainer
+        NoticeTone.SUCCESS -> semanticColors.onSuccessContainer
+        NoticeTone.DANGER -> semanticColors.onDangerContainer
+    }
+    Surface(
+        color = container,
+        contentColor = content,
+        shape = RoundedCornerShape(100.dp),
+        modifier = modifier,
+    ) {
+        Row(
+            modifier = Modifier.padding(start = if (status.icon == null) 12.dp else 10.dp, end = 12.dp, top = 6.dp, bottom = 6.dp),
+            horizontalArrangement = Arrangement.spacedBy(6.dp),
+            verticalAlignment = Alignment.CenterVertically,
+        ) {
+            status.icon?.let {
+                Icon(it, contentDescription = null, modifier = Modifier.size(16.dp))
             }
-            ApprovalCompletionResult.ABORTED -> OutcomeNotice(
-                "Aborted",
-                secretUse.completionMessage ?: "The client stopped this request.",
-                NoticeTone.SUBDUED,
-            )
-            null -> if (secretUse.error != null) {
-                OutcomeNotice("Request ended", secretUse.error, NoticeTone.NEUTRAL)
-            } else {
-                OutcomeNotice("Completed", "The request is complete.")
+            Text(status.title, style = MaterialTheme.typography.labelLarge)
+        }
+    }
+}
+
+@Composable
+private fun SectionTitle(text: String) {
+    Text(
+        text,
+        style = MaterialTheme.typography.titleSmall,
+        color = MaterialTheme.colorScheme.primary,
+        modifier = Modifier.padding(horizontal = 4.dp),
+    )
+}
+
+@Composable
+private fun RequestTicket(
+    clientName: String,
+    secretNames: List<String>,
+    command: String,
+    arguments: List<String>,
+    reason: String?,
+) {
+    Surface(
+        color = MaterialTheme.colorScheme.surfaceContainer,
+        contentColor = MaterialTheme.colorScheme.onSurface,
+        shape = MaterialTheme.shapes.extraLarge,
+        modifier = Modifier.fillMaxWidth(),
+    ) {
+        Column(
+            Modifier.padding(16.dp),
+            verticalArrangement = Arrangement.spacedBy(16.dp),
+        ) {
+            IdentityColumns(clientName, secretNames)
+            reason?.takeIf(String::isNotBlank)?.let { ReasonQuote(it, clientName) }
+            CommandBlock(command, arguments)
+        }
+    }
+}
+
+@Composable
+private fun IdentityColumns(clientName: String, secretNames: List<String>) {
+    val textMeasurer = rememberTextMeasurer()
+    val nameStyle = MaterialTheme.typography.titleMedium
+    val density = LocalDensity.current
+    val secretLabel = if (secretNames.size == 1) "Secret" else "Secrets"
+    BoxWithConstraints(Modifier.fillMaxWidth()) {
+        val columnWidth = with(density) { ((maxWidth - 16.dp) / 2 - 26.dp).roundToPx() }
+        val stack = (listOf(clientName) + secretNames).any { name ->
+            textMeasurer.measure(name, nameStyle, softWrap = false).size.width > columnWidth
+        }
+        if (stack) {
+            Column(verticalArrangement = Arrangement.spacedBy(12.dp)) {
+                Identity(Icons.Outlined.Computer, "Client", listOf(clientName))
+                if (secretNames.isNotEmpty()) Identity(Icons.Outlined.Key, secretLabel, secretNames)
+            }
+        } else {
+            Row(horizontalArrangement = Arrangement.spacedBy(16.dp)) {
+                Identity(Icons.Outlined.Computer, "Client", listOf(clientName), Modifier.weight(1f))
+                if (secretNames.isNotEmpty()) {
+                    Identity(Icons.Outlined.Key, secretLabel, secretNames, Modifier.weight(1f))
+                }
             }
         }
-        ApprovalRequestState.VERIFICATION_FAILED -> OutcomeNotice(
-            "Could not verify request",
-            secretUse.error ?: "The cryptographic message was invalid.",
-            NoticeTone.DANGER,
-        )
-        ApprovalRequestState.APPROVAL_PENDING -> return
     }
-    StatusLine(
-        outcome.title,
-        error = outcome.tone == NoticeTone.DANGER,
-        subdued = outcome.tone == NoticeTone.SUBDUED || outcome.tone == NoticeTone.NEUTRAL,
+}
+
+@Composable
+private fun Identity(icon: ImageVector, role: String, names: List<String>, modifier: Modifier = Modifier) {
+    Row(
+        modifier = modifier.clearAndSetSemantics {
+            contentDescription = "$role ${names.joinToString(", ")}"
+        },
+        horizontalArrangement = Arrangement.spacedBy(8.dp),
+        verticalAlignment = Alignment.Top,
+    ) {
+        Icon(
+            icon,
+            contentDescription = null,
+            tint = MaterialTheme.colorScheme.onSurfaceVariant,
+            modifier = Modifier.padding(top = 2.dp).size(18.dp),
+        )
+        Column(verticalArrangement = Arrangement.spacedBy(0.dp)) {
+            names.forEach { name ->
+                Text(name.breakableAtHyphens(), style = MaterialTheme.typography.titleMedium)
+            }
+            Text(
+                role,
+                style = MaterialTheme.typography.labelSmall,
+                color = MaterialTheme.colorScheme.onSurfaceVariant,
+            )
+        }
+    }
+}
+
+/** Commands longer than this, or with more arguments, are listed one argument per line. */
+private const val INLINE_COMMAND_MAX_LENGTH = 72
+private const val INLINE_COMMAND_MAX_ARGUMENTS = 6
+
+@Composable
+private fun CommandBlock(command: String, arguments: List<String>) {
+    val renderedCommand = renderShellCommand(command, arguments)
+    val listed = renderedCommand.length > INLINE_COMMAND_MAX_LENGTH ||
+        arguments.size > INLINE_COMMAND_MAX_ARGUMENTS
+    val style = MaterialTheme.typography.bodyLarge.copy(
+        fontFamily = FontFamily.Monospace,
+        fontSize = if (listed) 15.sp else 16.sp,
+        lineHeight = if (listed) 22.sp else 24.sp,
+        textIndent = if (listed) TextIndent(restLine = 16.sp) else TextIndent.None,
     )
-    Text(outcome.detail, style = MaterialTheme.typography.bodyMedium)
+    Surface(
+        color = MaterialTheme.colorScheme.surfaceContainerLowest,
+        contentColor = MaterialTheme.colorScheme.onSurface,
+        shape = MaterialTheme.shapes.small,
+        modifier = Modifier.fillMaxWidth(),
+    ) {
+        Column(
+            Modifier.padding(horizontal = 14.dp, vertical = 12.dp),
+            verticalArrangement = Arrangement.spacedBy(8.dp),
+        ) {
+            SelectionContainer {
+                Text(
+                    annotatedCommand(
+                        command = command,
+                        arguments = arguments,
+                        listed = listed,
+                        mutedColor = MaterialTheme.colorScheme.onSurfaceVariant,
+                        optionColor = MaterialTheme.colorScheme.tertiary,
+                    ),
+                    style = style,
+                )
+            }
+            if (renderedCommand.any { it.code > 0x7e }) {
+                Surface(
+                    color = MaterialTheme.colorScheme.errorContainer,
+                    contentColor = MaterialTheme.colorScheme.onErrorContainer,
+                    shape = MaterialTheme.shapes.extraSmall,
+                ) {
+                    Text(
+                        "This command contains non-ASCII characters.",
+                        style = MaterialTheme.typography.bodySmall,
+                        modifier = Modifier.padding(8.dp),
+                    )
+                }
+            }
+            Text(
+                if (listed) "Command · ${arguments.size} arguments, one per line" else "Command",
+                style = MaterialTheme.typography.labelSmall,
+                color = MaterialTheme.colorScheme.onSurfaceVariant,
+            )
+        }
+    }
+}
+
+/** Shell line continuation, so a copied multi-line listing still pastes as one command. */
+internal const val COMMAND_LINE_CONTINUATION = " \\\n"
+
+/** The shell-rendered executable word split after its last slash: directory (may be empty) and name. */
+internal fun renderedExecutable(command: String): Pair<String, String> {
+    val executable = renderShellWord(command)
+    val directoryLength = executable.lastIndexOf('/') + 1
+    return executable.substring(0, directoryLength) to executable.substring(directoryLength)
+}
+
+/**
+ * The same words as [renderShellCommand]. When [listed], each argument starts a new line and
+ * the previous line ends with a backslash continuation, so selecting and copying the block
+ * yields an equivalent shell command. The executable's directory and the continuation marks
+ * are muted so the program name and arguments stand out; option-like words are tinted.
+ * Nothing is removed or reordered unless [includeDirectory] is false, which lets a summary
+ * show the directory separately.
+ */
+internal fun annotatedCommand(
+    command: String,
+    arguments: List<String>,
+    listed: Boolean,
+    mutedColor: Color,
+    optionColor: Color,
+    includeDirectory: Boolean = true,
+): AnnotatedString = buildAnnotatedString {
+    val (directory, name) = renderedExecutable(command)
+    if (includeDirectory && directory.isNotEmpty()) {
+        withStyle(SpanStyle(color = mutedColor)) { append(directory) }
+    }
+    append(name)
+    arguments.forEach { argument ->
+        if (listed) {
+            withStyle(SpanStyle(color = mutedColor)) {
+                append(COMMAND_LINE_CONTINUATION, 0, COMMAND_LINE_CONTINUATION.length - 1)
+            }
+            append(COMMAND_LINE_CONTINUATION.last())
+        } else {
+            append(' ')
+        }
+        val word = renderShellWord(argument)
+        if (word.startsWith("-") && word.length > 1) {
+            withStyle(SpanStyle(color = optionColor)) { append(word) }
+        } else {
+            append(word)
+        }
+    }
+}
+
+@Composable
+private fun ReasonQuote(reason: String, clientName: String) {
+    Row(
+        modifier = Modifier.fillMaxWidth().height(IntrinsicSize.Min),
+        horizontalArrangement = Arrangement.spacedBy(12.dp),
+    ) {
+        Box(
+            Modifier
+                .padding(vertical = 2.dp)
+                .width(3.dp)
+                .fillMaxHeight()
+                .background(MaterialTheme.colorScheme.outlineVariant, RoundedCornerShape(2.dp)),
+        )
+        Column(verticalArrangement = Arrangement.spacedBy(4.dp)) {
+            SelectionContainer {
+                Text(reason, style = MaterialTheme.typography.bodyLarge)
+            }
+            Text(
+                "Reason reported by $clientName",
+                style = MaterialTheme.typography.labelMedium,
+                color = MaterialTheme.colorScheme.onSurfaceVariant,
+            )
+        }
+    }
+}
+
+private fun SecretUseRequestDetails.outcome(): StatusSummary = when (state) {
+    ApprovalRequestState.WAITING_FOR_COMPLETION -> if (decision == ApprovalDecision.APPROVED) {
+        StatusSummary(
+            "Approved",
+            NoticeTone.SUCCESS,
+            Icons.Outlined.HourglassTop,
+            "Waiting for the client to finish.",
+        )
+    } else {
+        StatusSummary(
+            "Denied",
+            NoticeTone.SUBDUED,
+            Icons.Outlined.HourglassTop,
+            "Waiting for the client to finish.",
+        )
+    }
+    ApprovalRequestState.COMPLETED -> when (completionResult) {
+        ApprovalCompletionResult.APPROVED -> StatusSummary(
+            "Delivered",
+            NoticeTone.SUCCESS,
+            Icons.Outlined.CheckCircle,
+            "The client received the requested data.",
+        )
+        ApprovalCompletionResult.DENIED -> if (completionReason == "INVALID_REQUEST") {
+            StatusSummary(
+                "Request rejected",
+                NoticeTone.DANGER,
+                Icons.Outlined.ErrorOutline,
+                completionMessage ?: "The request was invalid.",
+            )
+        } else {
+            StatusSummary(
+                "Denied",
+                NoticeTone.SUBDUED,
+                Icons.Outlined.Block,
+                "No requested values were released.",
+            )
+        }
+        ApprovalCompletionResult.ABORTED -> StatusSummary(
+            "Aborted",
+            NoticeTone.SUBDUED,
+            Icons.Outlined.Block,
+            completionMessage ?: "The client stopped this request.",
+        )
+        null -> if (error != null) {
+            StatusSummary("Request ended", NoticeTone.NEUTRAL, null, error)
+        } else {
+            StatusSummary("Completed", NoticeTone.NEUTRAL, null, "The request is complete.")
+        }
+    }
+    ApprovalRequestState.VERIFICATION_FAILED -> StatusSummary(
+        "Could not verify request",
+        NoticeTone.DANGER,
+        Icons.Outlined.ErrorOutline,
+        error ?: "The cryptographic message was invalid.",
+    )
+    ApprovalRequestState.APPROVAL_PENDING -> StatusSummary(statusLabel(), NoticeTone.ATTENTION)
 }
 
 @Composable
@@ -385,33 +689,22 @@ private fun ApprovalEvaluation?.temporaryAccessHistory(formatTimestamp: (Long) -
     ?.joinToString("; ")
     .orEmpty()
 
-private data class OutcomeNotice(
-    val title: String,
-    val detail: String,
-    val tone: NoticeTone = NoticeTone.NEUTRAL,
-)
-
 @Composable
 private fun SecretSummary(
     secret: SecretMetadata,
     environmentVariables: ApprovalReviewEnvironmentSecretFacts?,
 ) {
     Row(
-        modifier = Modifier.fillMaxWidth().padding(vertical = 4.dp),
-        horizontalArrangement = Arrangement.spacedBy(10.dp),
+        modifier = Modifier.fillMaxWidth().padding(16.dp),
+        horizontalArrangement = Arrangement.spacedBy(16.dp),
         verticalAlignment = Alignment.Top,
     ) {
-        Icon(
-            Icons.Outlined.Key,
-            contentDescription = null,
-            tint = MaterialTheme.colorScheme.onSurfaceVariant,
-            modifier = Modifier.padding(top = 2.dp).size(24.dp),
-        )
+        TonalIcon(Icons.Outlined.Key, contentDescription = null)
         Column(
             modifier = Modifier.weight(1f),
             verticalArrangement = Arrangement.spacedBy(4.dp),
         ) {
-            Text(secret.name, style = MaterialTheme.typography.titleMedium)
+            Text(secret.name.breakableAtHyphens(), style = MaterialTheme.typography.titleMedium)
             Text(
                 listOfNotNull(
                     if (secret.type == "ssh") "SSH key" else "Environment variables",
@@ -427,32 +720,42 @@ private fun SecretSummary(
                     color = MaterialTheme.colorScheme.onSurfaceVariant,
                 )
             } else if (environmentVariables != null) {
-                environmentVariables.variables.forEach { (source, variable) ->
-                    val label = when (variable.delivery) {
-                        ApprovalReviewEnvironmentDelivery.ENVIRONMENT ->
-                            if (variable.target == source) source else "$source → ${variable.target}"
-                        ApprovalReviewEnvironmentDelivery.STANDARD_INPUT -> "$source → standard input"
-                        ApprovalReviewEnvironmentDelivery.OMITTED -> "$source · Not provided"
+                Column(
+                    modifier = Modifier.padding(top = 4.dp),
+                    verticalArrangement = Arrangement.spacedBy(4.dp),
+                ) {
+                    environmentVariables.variables.forEach { (source, variable) ->
+                        val label = when (variable.delivery) {
+                            ApprovalReviewEnvironmentDelivery.ENVIRONMENT ->
+                                if (variable.target == source) source else "$source → ${variable.target}"
+                            ApprovalReviewEnvironmentDelivery.STANDARD_INPUT -> "$source → standard input"
+                            ApprovalReviewEnvironmentDelivery.OMITTED -> "$source · Not provided"
+                        }
+                        EnvironmentVariableFact(
+                            name = label,
+                            value = variable.value,
+                            omitted = variable.delivery == ApprovalReviewEnvironmentDelivery.OMITTED,
+                        )
                     }
-                    EnvironmentVariableFact(
-                        name = label,
-                        value = variable.value,
-                        omitted = variable.delivery == ApprovalReviewEnvironmentDelivery.OMITTED,
-                    )
                 }
             } else {
-                secret.environmentVariableNames.forEach { name ->
-                    val deliveredName = secret.environmentVariableRename[name] ?: name
-                    val sentToStdin = secret.environmentVariableStdin == name
-                    Text(
-                        text = when {
-                            sentToStdin -> "$name → standard input"
-                            deliveredName != name -> "$name → $deliveredName"
-                            else -> name
-                        },
-                        style = MaterialTheme.typography.bodySmall,
-                        fontFamily = FontFamily.Monospace,
-                    )
+                Column(
+                    modifier = Modifier.padding(top = 4.dp),
+                    verticalArrangement = Arrangement.spacedBy(2.dp),
+                ) {
+                    secret.environmentVariableNames.forEach { name ->
+                        val deliveredName = secret.environmentVariableRename[name] ?: name
+                        val sentToStdin = secret.environmentVariableStdin == name
+                        Text(
+                            text = when {
+                                sentToStdin -> "$name → standard input"
+                                deliveredName != name -> "$name → $deliveredName"
+                                else -> name
+                            },
+                            style = MaterialTheme.typography.bodyMedium,
+                            fontFamily = FontFamily.Monospace,
+                        )
+                    }
                 }
                 Text(
                     "Values were not recorded for this request.",
@@ -519,6 +822,9 @@ private fun HiddenSensitiveValue(style: TextStyle) {
         },
     )
 }
+
+/** Lets long hyphenated names wrap after a hyphen instead of mid-word. */
+internal fun String.breakableAtHyphens(): String = replace("-", "-\u200B")
 
 private fun SecretUseRequestDetails.statusLabel(): String = secretUseStatusLabel(
     state,

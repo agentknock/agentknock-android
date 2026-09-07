@@ -249,3 +249,95 @@ fun InvocationLongNamesDarkPreview() = PreviewScreen {
 @Preview(name = "Dark", group = "invocation-large-text", widthDp = 360, heightDp = 800, fontScale = 1.5f, locale = "en", uiMode = Configuration.UI_MODE_NIGHT_YES)
 @Composable
 fun InvocationLargeTextDarkPreview() = InvocationPreview()
+
+private const val longCommandExecutable =
+    "/nix/store/7q8v2m4x9n6p1r3s5t0w8y2z4a6b9c1d-openjdk-21.0.7+6/bin/jarsigner"
+private val longCommandArguments = listOf(
+    "-keystore", "/home/naked/.local/share/agentknock-android/upload-keystore.p12",
+    "-storetype", "PKCS12",
+    "-storepass:env", "KEYSTORE_PASSWORD",
+    "-keypass:env", "KEYSTORE_PASSWORD",
+    "-signedjar", "/home/naked/mine/agentknock-android/app/build/publish-internal.aB3xY9/app-release.aab",
+    "/home/naked/mine/agentknock-android/app/build/outputs/bundle/release/app-release.aab",
+    "agentknock-upload",
+)
+private const val longCommandSecretName = "agentknock-android-upload-passphrase"
+
+@PreviewTest
+@Preview(name = "Dark", group = "requests-long-command", widthDp = 360, heightDp = 800, locale = "en", uiMode = Configuration.UI_MODE_NIGHT_YES)
+@Composable
+fun RequestsLongCommandDarkPreview() = PreviewScreen {
+    RequestsPage(previewRequestSummaries.map { request ->
+        if (request.kind == InboxRequestKind.SECRET_USE) {
+            request.copy(
+                command = longCommandExecutable,
+                arguments = longCommandArguments,
+                secretNames = listOf(longCommandSecretName),
+            )
+        } else {
+            request
+        }
+    })
+}
+
+@PreviewTest
+@Preview(name = "Dark", group = "invocation-long-command", widthDp = 360, heightDp = 800, locale = "en", uiMode = Configuration.UI_MODE_NIGHT_YES)
+@Composable
+fun InvocationLongCommandDarkPreview() = PreviewScreen {
+    InvocationPage(previewInvocation.copy(
+        command = longCommandExecutable, arguments = longCommandArguments,
+        reason = "Sign the Agentknock Android app bundle with its Google Play upload key.",
+        secrets = listOf(longCommandSecretName),
+        secretDetails = listOf(previewInvocation.secretDetails.single().copy(
+            name = longCommandSecretName, description = "Google Play upload key passphrase.",
+            environmentVariableNames = listOf("KEYSTORE_PASSWORD"),
+        )),
+        approvalEvaluation = previewEvaluation.copy(secrets = listOf(
+            previewEvaluation.secrets.single().copy(secretId = "long-command-secret", secretName = longCommandSecretName),
+        )),
+        workingDirectory = "/home/naked/mine/agentknock-android", executablePath = longCommandExecutable,
+    ))
+}
+
+private val multiSecretDetails = listOf(
+    previewInvocation.secretDetails.single().copy(
+        name = "cf-db", description = "Staging database.",
+        environmentVariableNames = listOf("PGPASSWORD"),
+    ),
+    previewInvocation.secretDetails.single().copy(
+        name = "cf-api", description = "Deployment API.",
+        environmentVariableNames = listOf("DEPLOY_TOKEN"),
+    ),
+)
+private val multiSecretInvocation = previewInvocation.copy(
+    command = "./deploy", arguments = listOf("--environment", "staging"),
+    executablePath = "/home/developer/service/deploy",
+    reason = "Deploy the service to staging.",
+    secrets = multiSecretDetails.map { it.name },
+    secretDetails = multiSecretDetails,
+    approvalEvaluation = previewEvaluation.copy(secrets = multiSecretDetails.mapIndexed { index, secret ->
+        previewEvaluation.secrets.single().copy(secretId = "multi-secret-$index", secretName = secret.name)
+    }),
+)
+
+@PreviewTest
+@Preview(name = "Dark", group = "requests-multiple-secrets", widthDp = 360, heightDp = 800, locale = "en", uiMode = Configuration.UI_MODE_NIGHT_YES)
+@Composable
+fun RequestsMultipleSecretsDarkPreview() = PreviewScreen {
+    RequestsPage(previewRequestSummaries.map { request ->
+        if (request.kind == InboxRequestKind.SECRET_USE) {
+            request.copy(
+                command = multiSecretInvocation.command,
+                arguments = multiSecretInvocation.arguments,
+                secretNames = multiSecretInvocation.secrets,
+            )
+        } else {
+            request
+        }
+    })
+}
+
+@PreviewTest
+@Preview(name = "Dark", group = "invocation-multiple-secrets", widthDp = 360, heightDp = 800, locale = "en", uiMode = Configuration.UI_MODE_NIGHT_YES)
+@Composable
+fun InvocationMultipleSecretsDarkPreview() = PreviewScreen { InvocationPage(multiSecretInvocation) }
