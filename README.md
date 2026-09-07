@@ -40,10 +40,11 @@ exact rerender command. Rendering one variant preserves the other variants of
 that screen as well as all unrelated screens. Missing images are labelled explicitly.
 The command fails if rendering fails or any requested preview is absent from the results.
 
-Variant names describe the configurations defined in the catalog: `light` and
-`dark` are 360 × 800 dp phones at normal text size; `large-text` and `tablet` are
-the additional configurations listed for their respective screens. No variant is
-preferred by default. Omitting `--variant` renders all variants of the selected screens.
+Variant names describe the configurations defined in the catalog. Most `light` and
+`dark` previews are 360 × 800 dp phones at normal text size. Separately named
+large-text screens can also have a `dark` variant; other configurations use
+`large-text` or `tablet`. No variant is preferred by default.
+Omitting `--variant` renders all variants of the selected screens.
 Filtering happens before rendering, so unselected variants do not generate images.
 
 Previews live in `app/src/screenshotTest/kotlin/dev/agentknock/preview/` and call the
@@ -51,6 +52,9 @@ production composables with synthetic data. The catalog covers setup, navigation
 requests, clients, secrets, editors, settings, billing, audit history, and important
 empty, error, pending, and confirmation states, including views below the fold.
 See [the preview guide](app/src/screenshotTest/README.md) for coverage and extension instructions.
+Track accepted screenshots and the remaining Compose previews, ranked by importance,
+in [the screen review queue](SCREEN_REVIEW.md). All screen reviews use one target:
+dark theme, a 360 × 800 dp portrait phone, and normal text size.
 
 To serve just the generated gallery over the network:
 
