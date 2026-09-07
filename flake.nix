@@ -14,34 +14,46 @@
         };
       };
       buildToolsVersion = "36.0.0";
-      androidComposition = includeEmulator: pkgs.androidenv.composeAndroidPackages {
+      androidComposition = includeEmulator: platformVersions: pkgs.androidenv.composeAndroidPackages {
         abiVersions = [ "x86_64" ];
         buildToolsVersions = [ buildToolsVersion ];
-        inherit includeEmulator;
+        inherit includeEmulator platformVersions;
         includeNDK = false;
         includeSystemImages = includeEmulator;
-        platformVersions = [ "37.0" ];
         systemImageTypes = [ "google_apis" ];
       };
-      androidSdk = (androidComposition false).androidsdk;
-      emulatorSdk = (androidComposition true).androidsdk;
-      androidShell = sdk: pkgs.mkShell {
+      androidSdk = (androidComposition false [ "37.0" ]).androidsdk;
+      emulatorSdk = (androidComposition true [ "37.0" ]).androidsdk;
+      androidShell = sdk: extraPackages: pkgs.mkShell {
         packages = [
           sdk
           pkgs.jdk17
           (pkgs.python3.withPackages (p: [ p.pillow ]))
-        ];
+        ] ++ extraPackages;
 
         ANDROID_HOME = "${sdk}/libexec/android-sdk";
         ANDROID_SDK_ROOT = "${sdk}/libexec/android-sdk";
         JAVA_HOME = "${pkgs.jdk17}";
         GRADLE_OPTS = "-Dorg.gradle.project.android.aapt2FromMavenOverride=${sdk}/libexec/android-sdk/build-tools/${buildToolsVersion}/aapt2";
       };
+      ciEmulatorShell = platform: (androidShell
+        (androidComposition true [ platform ]).androidsdk
+        [ pkgs.bundletool ]).overrideAttrs (_: {
+          AGENTKNOCK_EMULATOR_IMAGE = "system-images;android-${platform};google_apis;x86_64";
+          AGENTKNOCK_EMULATOR_API = builtins.head (pkgs.lib.splitString "." platform);
+        });
     in
     {
       devShells.${system} = {
-        default = androidShell androidSdk;
-        emulator = androidShell emulatorSdk;
+        default = androidShell androidSdk [ ];
+        emulator = androidShell emulatorSdk [ ];
+        ci = androidShell androidSdk [
+          pkgs.actionlint
+          pkgs.bundletool
+          pkgs.shellcheck
+        ];
+        ci-emulator-26 = ciEmulatorShell "26";
+        ci-emulator-37 = ciEmulatorShell "37.0";
       };
     };
 }

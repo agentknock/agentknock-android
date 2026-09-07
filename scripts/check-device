@@ -1,0 +1,92 @@
+#!/usr/bin/env bash
+set -euo pipefail
+cd -- "$(dirname -- "${BASH_SOURCE[0]}")/.."
+
+: "${AGENTKNOCK_EMULATOR_IMAGE:?Use one of the ci-emulator Nix shells}"
+: "${AGENTKNOCK_EMULATOR_API:?Use one of the ci-emulator Nix shells}"
+
+device_serial=emulator-5556
+connected_devices="$(adb devices)"
+if grep -Eq "^${device_serial}[[:space:]]" <<< "$connected_devices"; then
+    echo "$device_serial is already in use; refusing to replace it." >&2
+    exit 1
+fi
+
+device_test_dir="$(mktemp -d)"
+device_report_dir="$PWD/app/build/reports/device-checks/api-$AGENTKNOCK_EMULATOR_API"
+mkdir -p "$device_report_dir"
+export ANDROID_AVD_HOME="$device_test_dir/avd"
+mkdir -p "$ANDROID_AVD_HOME"
+emulator_pid=
+
+cleanup() {
+    if [[ -n "$emulator_pid" ]]; then
+        timeout 10 adb -s "$device_serial" logcat -d > "$device_report_dir/logcat.txt" 2>&1 || true
+        timeout 10 adb -s "$device_serial" emu kill >/dev/null 2>&1 || true
+        kill "$emulator_pid" 2>/dev/null || true
+        wait "$emulator_pid" 2>/dev/null || true
+    fi
+    rm -rf -- "$device_test_dir"
+}
+trap cleanup EXIT
+
+printf 'no\n' | avdmanager create avd --name agentknock_ci \
+    --package "$AGENTKNOCK_EMULATOR_IMAGE" --device pixel_7
+emulator -avd agentknock_ci -port 5556 -accel on -no-window -no-audio -no-boot-anim \
+    -no-snapshot -gpu swiftshader -memory 2048 -cores 2 \
+    > "$device_report_dir/emulator.txt" 2>&1 &
+emulator_pid=$!
+
+timeout 180 adb -s "$device_serial" wait-for-device
+boot_deadline=$((SECONDS + 180))
+until [[ "$(adb -s "$device_serial" shell getprop sys.boot_completed | tr -d '\r')" == 1 ]]; do
+    if (( SECONDS >= boot_deadline )); then
+        echo "Emulator did not finish booting." >&2
+        exit 1
+    fi
+    kill -0 "$emulator_pid"
+    sleep 1
+done
+actual_api="$(adb -s "$device_serial" shell getprop ro.build.version.sdk | tr -d '\r')"
+if [[ "$actual_api" != "$AGENTKNOCK_EMULATOR_API" ]]; then
+    echo "Expected emulator API $AGENTKNOCK_EMULATOR_API, got $actual_api." >&2
+    exit 1
+fi
+adb -s "$device_serial" shell input keyevent 82
+for setting in window_animation_scale transition_animation_scale animator_duration_scale; do
+    adb -s "$device_serial" shell settings put global "$setting" 0
+done
+
+adb -s "$device_serial" install app/build/outputs/apk/debug/app-debug.apk
+adb -s "$device_serial" install app/build/outputs/apk/androidTest/debug/app-debug-androidTest.apk
+adb -s "$device_serial" shell am instrument -w \
+    dev.agentknock.test/androidx.test.runner.AndroidJUnitRunner \
+    | tee "$device_report_dir/instrumentation.txt"
+# adb can exit successfully even when instrumentation crashes or reports failed tests.
+grep -Eq '^OK \([1-9][0-9]* tests?\)' "$device_report_dir/instrumentation.txt"
+
+# Exercise the actual R8 bundle using a disposable signing key, then a clean install.
+keytool -genkeypair -keystore "$device_test_dir/test-key.p12" -storetype PKCS12 \
+    -alias ci -storepass android -keypass android -keyalg RSA -keysize 2048 \
+    -validity 1 -dname 'CN=Agentknock CI test'
+bundletool build-apks --bundle=app/build/outputs/bundle/release/app-release.aab \
+    --output="$device_test_dir/release.apks" --connected-device --device-id="$device_serial" \
+    --aapt2="$ANDROID_HOME/build-tools/36.0.0/aapt2" \
+    --ks="$device_test_dir/test-key.p12" --ks-key-alias=ci --ks-pass=pass:android
+adb -s "$device_serial" uninstall dev.agentknock
+bundletool install-apks --apks="$device_test_dir/release.apks" --device-id="$device_serial"
+adb -s "$device_serial" shell am start -W -n dev.agentknock/.MainActivity \
+    | tee "$device_report_dir/release-startup.txt"
+grep -q '^Status: ok' "$device_report_dir/release-startup.txt"
+adb -s "$device_serial" shell uiautomator dump /sdcard/agentknock-ci.xml
+adb -s "$device_serial" pull /sdcard/agentknock-ci.xml "$device_report_dir/release-ui.xml"
+python3 - "$device_report_dir/release-ui.xml" <<'PY'
+import sys
+import xml.etree.ElementTree as ET
+
+nodes = ET.parse(sys.argv[1]).getroot().iter("node")
+if not any(node.get("package") == "dev.agentknock" and node.get("text") == "Welcome to Agentknock" for node in nodes):
+    raise SystemExit("The minified release did not display the welcome screen")
+PY
+adb -s "$device_serial" shell pidof dev.agentknock
+echo "Instrumentation and minified release startup passed."
