@@ -16,6 +16,7 @@ import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.itemsIndexed
+import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.automirrored.outlined.NavigateNext
 import androidx.compose.material.icons.outlined.Computer
@@ -35,6 +36,8 @@ import androidx.compose.material3.TopAppBar
 import androidx.compose.runtime.Composable
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.graphics.Shape
+import androidx.compose.ui.graphics.compositeOver
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.semantics.contentDescription
 import androidx.compose.ui.semantics.selected
@@ -51,7 +54,6 @@ import dev.agentknock.storage.request.InboxRequestStatus
 import dev.agentknock.storage.request.InboxRequestSummary
 import dev.agentknock.storage.request.PairingState
 import dev.agentknock.ui.components.rememberDateTimeFormatter
-import dev.agentknock.ui.components.ActionListSurface
 import dev.agentknock.ui.components.TonalIcon
 
 @Composable
@@ -171,7 +173,7 @@ internal fun ClientList(
             LazyColumn(
                 modifier = Modifier.fillMaxSize(),
                 contentPadding = PaddingValues(start = 16.dp, end = 16.dp, top = 4.dp, bottom = 16.dp),
-                verticalArrangement = Arrangement.spacedBy(8.dp),
+                verticalArrangement = Arrangement.spacedBy(2.dp),
             ) {
                 identity?.let {
                     item(key = "pairing_controls") {
@@ -180,7 +182,7 @@ internal fun ClientList(
                             onChangePairingAddress = onChangePairingAddress,
                             onSetPairingEnabled = onSetPairingEnabled,
                             report = report,
-                            modifier = Modifier.padding(bottom = 8.dp),
+                            modifier = Modifier.padding(bottom = 6.dp),
                         )
                     }
                 }
@@ -194,10 +196,11 @@ internal fun ClientList(
                     itemsIndexed(
                         pendingPairings,
                         key = { _, request -> "pairing_${request.id}" },
-                    ) { _, request ->
+                    ) { index, request ->
                         PendingPairingRow(
                             request = request,
                             selected = request.id == selectedPairingRequestId,
+                            shape = groupShape(index, pendingPairings.lastIndex),
                             onClick = { onOpenPairing(request.id) },
                         )
                     }
@@ -206,7 +209,6 @@ internal fun ClientList(
                     SectionHeading(
                         title = "Paired clients",
                         count = clients.size,
-                        modifier = Modifier.padding(top = if (pendingPairings.isEmpty()) 0.dp else 10.dp),
                     )
                 }
                 if (clients.isEmpty()) {
@@ -218,7 +220,7 @@ internal fun ClientList(
                         )
                     }
                 }
-                itemsIndexed(clients, key = { _, client -> client.clientId }) { _, client ->
+                itemsIndexed(clients, key = { _, client -> client.clientId }) { index, client ->
                     val selected = client.clientId == selectedClientId
                     Surface(
                         color = if (selected) {
@@ -226,7 +228,7 @@ internal fun ClientList(
                         } else {
                             MaterialTheme.colorScheme.surfaceContainerLow
                         },
-                        shape = MaterialTheme.shapes.large,
+                        shape = groupShape(index, clients.lastIndex),
                         onClick = { onOpen(client.clientId) },
                         modifier = Modifier.fillMaxWidth().semantics {
                             this.selected = selected
@@ -403,35 +405,61 @@ private fun PairingControls(
 private fun PendingPairingRow(
     request: InboxRequestSummary,
     selected: Boolean,
+    shape: Shape,
     onClick: () -> Unit,
 ) {
     val pairingState = (request.status as InboxRequestStatus.Pairing).state
     val actionRequired = request.state == InboxRequestState.ACTION_REQUIRED
-    ActionListSurface(
-        actionRequired = actionRequired,
-        selected = selected,
+    Surface(
+        color = when {
+            selected -> MaterialTheme.colorScheme.secondaryContainer
+            actionRequired -> MaterialTheme.colorScheme.primary.copy(alpha = 0.08f)
+                .compositeOver(MaterialTheme.colorScheme.surfaceContainerLow)
+            else -> MaterialTheme.colorScheme.surfaceContainerLow
+        },
+        shape = shape,
         onClick = onClick,
         modifier = Modifier.fillMaxWidth().semantics { this.selected = selected },
     ) {
-        ListItem(
-            headlineContent = {
-                Text(request.clientName, maxLines = 1, overflow = TextOverflow.Ellipsis)
-            },
-            supportingContent = {
+        Row(
+            modifier = Modifier.padding(start = 16.dp, end = 12.dp, top = 14.dp, bottom = 14.dp),
+            horizontalArrangement = Arrangement.spacedBy(16.dp),
+            verticalAlignment = Alignment.CenterVertically,
+        ) {
+            Icon(
+                Icons.Outlined.Computer,
+                contentDescription = null,
+                tint = if (actionRequired) {
+                    MaterialTheme.colorScheme.primary
+                } else {
+                    MaterialTheme.colorScheme.onSurfaceVariant
+                },
+                modifier = Modifier.size(24.dp),
+            )
+            Column(
+                modifier = Modifier.weight(1f),
+                verticalArrangement = Arrangement.spacedBy(2.dp),
+            ) {
+                Text(
+                    request.clientName,
+                    style = MaterialTheme.typography.titleMedium,
+                    maxLines = 1,
+                    overflow = TextOverflow.Ellipsis,
+                )
                 Text(
                     pairingState.pairingListDescription(),
+                    style = MaterialTheme.typography.bodyMedium,
+                    color = MaterialTheme.colorScheme.onSurfaceVariant,
                     maxLines = 2,
                     overflow = TextOverflow.Ellipsis,
                 )
-            },
-            leadingContent = { TonalIcon(Icons.Outlined.Computer, contentDescription = null) },
-            trailingContent = {
-                Icon(Icons.AutoMirrored.Outlined.NavigateNext, contentDescription = null)
-            },
-            colors = ListItemDefaults.colors(
-                containerColor = androidx.compose.ui.graphics.Color.Transparent,
-            ),
-        )
+            }
+            Icon(
+                Icons.AutoMirrored.Outlined.NavigateNext,
+                contentDescription = null,
+                tint = MaterialTheme.colorScheme.onSurfaceVariant,
+            )
+        }
     }
 }
 
@@ -451,7 +479,7 @@ private fun SectionHeading(
     modifier: Modifier = Modifier,
 ) {
     Row(
-        modifier = modifier.fillMaxWidth().padding(horizontal = 4.dp, vertical = 4.dp),
+        modifier = modifier.fillMaxWidth().padding(start = 4.dp, end = 4.dp, top = 14.dp, bottom = 6.dp),
         horizontalArrangement = Arrangement.spacedBy(8.dp),
         verticalAlignment = Alignment.CenterVertically,
     ) {
@@ -471,4 +499,16 @@ private fun SectionHeading(
 private fun ClientSummary.visibleState(): String? {
     val pending = desiredState?.takeIf { it != state }
     return pending?.let { "Changing…" } ?: state.takeIf { it != RelayClientState.ACTIVE }?.stateLabel()
+}
+
+/** Large outer corners with small inner ones, so consecutive rows read as one group. */
+private fun groupShape(index: Int, lastIndex: Int): Shape {
+    val outer = 20.dp
+    val inner = 4.dp
+    return RoundedCornerShape(
+        topStart = if (index == 0) outer else inner,
+        topEnd = if (index == 0) outer else inner,
+        bottomStart = if (index == lastIndex) outer else inner,
+        bottomEnd = if (index == lastIndex) outer else inner,
+    )
 }

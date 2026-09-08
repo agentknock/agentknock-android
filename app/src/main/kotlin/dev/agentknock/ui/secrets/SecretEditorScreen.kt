@@ -125,7 +125,11 @@ internal fun SecretEditorScreen(
             ) {
             if (secret == null) {
                 Column(verticalArrangement = Arrangement.spacedBy(8.dp)) {
-                    Text("Secret type", style = MaterialTheme.typography.titleMedium)
+                    Text(
+                        "Secret type",
+                        style = MaterialTheme.typography.titleSmall,
+                        color = MaterialTheme.colorScheme.primary,
+                    )
                     FlowRow(
                         horizontalArrangement = Arrangement.spacedBy(8.dp),
                         verticalArrangement = Arrangement.spacedBy(4.dp),
@@ -164,7 +168,18 @@ internal fun SecretEditorScreen(
                     )
                 }
             } else {
-                Text(editor.type.displayName(), color = MaterialTheme.colorScheme.onSurfaceVariant)
+                Column(verticalArrangement = Arrangement.spacedBy(4.dp)) {
+                    Text(
+                        "Secret type",
+                        style = MaterialTheme.typography.titleSmall,
+                        color = MaterialTheme.colorScheme.primary,
+                    )
+                    Text(
+                        editor.type.displayName(),
+                        style = MaterialTheme.typography.bodyMedium,
+                        color = MaterialTheme.colorScheme.onSurfaceVariant,
+                    )
+                }
             }
             OutlinedTextField(
                 value = name,

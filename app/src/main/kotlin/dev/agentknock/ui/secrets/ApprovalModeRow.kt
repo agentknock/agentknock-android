@@ -125,12 +125,20 @@ internal fun ApprovalModeRow(
                 Icon(Icons.Outlined.Computer, contentDescription = "Client", modifier = Modifier.size(18.dp))
             }
             Text(title, Modifier.weight(1f), style = MaterialTheme.typography.titleMedium)
-            onUseDefault?.let { clear ->
-                TextButton(
+            when {
+                onUseDefault != null -> TextButton(
                     contentPadding = PaddingValues(horizontal = 8.dp),
-                    onClick = { choose(defaultMode, clear) },
+                    onClick = { choose(defaultMode, onUseDefault) },
                     enabled = defaultMode != SecretApprovalMode.ASK_AI || canExploreAi,
                 ) { Text("Use default") }
+                // Status in the slot where an overriding client shows the "Use default" action,
+                // so the muted selection below is explained without opening the help dialog.
+                isClient && inherited -> Text(
+                    "Uses default",
+                    style = MaterialTheme.typography.labelMedium,
+                    color = MaterialTheme.colorScheme.onSurfaceVariant,
+                    modifier = Modifier.padding(horizontal = 8.dp),
+                )
             }
         }
         SingleChoiceSegmentedButtonRow(Modifier.fillMaxWidth().height(IntrinsicSize.Min)) {

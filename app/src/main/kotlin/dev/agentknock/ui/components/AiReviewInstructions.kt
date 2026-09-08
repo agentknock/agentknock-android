@@ -32,68 +32,10 @@ internal enum class AiInstructionsScope(val title: String, val description: Stri
     CLIENT("Client AI instructions", "Additional guidance for this client."),
 }
 
-@Composable
-internal fun AiReviewInstructions(
-    value: String,
-    access: AiReviewAccess,
-    onEdit: () -> Unit,
-    scope: AiInstructionsScope,
-    modifier: Modifier = Modifier,
-) {
-    var expanded by rememberSaveable { mutableStateOf(false) }
-    LaunchedEffect(access) {
-        if (access == AiReviewAccess.ACTIVE) expanded = true
-    }
-    val showInstructions = expanded || value.isNotBlank() || access == AiReviewAccess.ACTIVE
-    Surface(
-        onClick = { if (showInstructions) onEdit() else expanded = true },
-        color = MaterialTheme.colorScheme.surfaceContainerHigh,
-        shape = MaterialTheme.shapes.large,
-        modifier = modifier.fillMaxWidth(),
-    ) {
-        Column(
-            modifier = Modifier.padding(16.dp),
-            verticalArrangement = Arrangement.spacedBy(8.dp),
-        ) {
-            Row(
-                horizontalArrangement = Arrangement.spacedBy(12.dp),
-                verticalAlignment = Alignment.CenterVertically,
-            ) {
-                Text(scope.title, Modifier.weight(1f), style = MaterialTheme.typography.titleSmall,
-                    color = MaterialTheme.colorScheme.primary)
-                Icon(
-                    if (showInstructions) Icons.Outlined.Edit else Icons.Outlined.ExpandMore,
-                    contentDescription = if (showInstructions) "Edit instructions" else "Show instructions",
-                    tint = MaterialTheme.colorScheme.primary,
-                )
-            }
-            Text(scope.description, style = MaterialTheme.typography.bodySmall,
-                color = MaterialTheme.colorScheme.onSurfaceVariant)
-            if (showInstructions) {
-                Text(
-                    value.ifBlank { "No instructions" },
-                    style = MaterialTheme.typography.bodyLarge,
-                    color = MaterialTheme.colorScheme.onSurface,
-                    maxLines = 3,
-                    overflow = TextOverflow.Ellipsis,
-                )
-                if (access != AiReviewAccess.ACTIVE) {
-                    Text(
-                        "Used when AI review is active.",
-                        style = MaterialTheme.typography.bodySmall,
-                        color = MaterialTheme.colorScheme.onSurfaceVariant,
-                    )
-                }
-            }
-        }
-    }
-}
-
 /**
  * A compact instructions card for list and detail pages: an icon, the scope title, the
- * instructions and the scope description as a caption. Same behaviour as
- * [AiReviewInstructions]: collapsed until opened when there is nothing to show and AI review
- * is inactive, otherwise a tap edits.
+ * instructions and the scope description as a caption. Collapsed until opened when there is
+ * nothing to show and AI review is inactive, otherwise a tap edits.
  */
 @Composable
 internal fun InstructionsCard(

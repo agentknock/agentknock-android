@@ -11,6 +11,7 @@ import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.text.selection.SelectionContainer
 import androidx.compose.material.icons.Icons
+import androidx.compose.material.icons.outlined.Computer
 import androidx.compose.material.icons.outlined.ContentCopy
 import androidx.compose.material3.Icon
 import androidx.compose.material3.IconButton
@@ -39,7 +40,9 @@ import dev.agentknock.ui.components.Disclosure
 import dev.agentknock.ui.components.InformationSurface
 import dev.agentknock.ui.components.Notice
 import dev.agentknock.ui.components.NoticeTone
-import dev.agentknock.ui.components.StatusLine
+import dev.agentknock.ui.requests.Identity
+import dev.agentknock.ui.requests.StatusHeader
+import dev.agentknock.ui.requests.StatusSummary
 import dev.agentknock.ui.theme.agentknockColors
 
 @Composable
@@ -61,26 +64,32 @@ internal fun PairingRequestDetail(
         showBack = showBack,
         scrollResetKey = pairing.pairingState,
     ) {
-        Column(verticalArrangement = Arrangement.spacedBy(8.dp)) {
-            StatusLine(
+        StatusHeader(
+            StatusSummary(
                 pairing.pairingState.label(),
-                pairing.pairingState.usesErrorStatus,
-                attention = request.state == InboxRequestState.ACTION_REQUIRED,
-                subdued = pairing.pairingState == PairingState.REJECTED,
-            )
-            Column(verticalArrangement = Arrangement.spacedBy(2.dp)) {
-                Text(pairing.clientName, style = MaterialTheme.typography.titleLarge)
-                val reported = listOfNotNull(
-                    pairing.hostname,
-                    pairing.platform?.let(::formatPlatformName),
-                ).joinToString(" · ")
-                if (reported.isNotEmpty()) {
-                    Text(
-                        reported,
-                        style = MaterialTheme.typography.bodyMedium,
-                        color = MaterialTheme.colorScheme.onSurfaceVariant,
-                    )
-                }
+                when {
+                    pairing.pairingState.usesErrorStatus -> NoticeTone.DANGER
+                    request.state == InboxRequestState.ACTION_REQUIRED -> NoticeTone.ATTENTION
+                    pairing.pairingState == PairingState.REJECTED -> NoticeTone.SUBDUED
+                    pairing.pairingState == PairingState.COMPLETED -> NoticeTone.SUCCESS
+                    else -> NoticeTone.NEUTRAL
+                },
+            ),
+            dates.timestamp(request.receivedAt),
+        )
+        Column(verticalArrangement = Arrangement.spacedBy(4.dp)) {
+            Identity(Icons.Outlined.Computer, "Client", listOf(pairing.clientName))
+            val reported = listOfNotNull(
+                pairing.hostname,
+                pairing.platform?.let(::formatPlatformName),
+            ).joinToString(" · ")
+            if (reported.isNotEmpty()) {
+                Text(
+                    reported,
+                    style = MaterialTheme.typography.bodyMedium,
+                    color = MaterialTheme.colorScheme.onSurfaceVariant,
+                    modifier = Modifier.padding(start = 26.dp),
+                )
             }
         }
 

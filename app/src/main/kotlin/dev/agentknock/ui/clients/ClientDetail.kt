@@ -37,7 +37,7 @@ import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
 import dev.agentknock.subscription.AiReviewAccess
 import dev.agentknock.ui.components.rememberDateTimeFormatter
-import dev.agentknock.ui.components.AiReviewInstructions
+import dev.agentknock.ui.components.InstructionsCard
 import dev.agentknock.ui.components.AiInstructionsScope
 import dev.agentknock.presentation.formatPlatformName
 import dev.agentknock.presentation.renderSoftware
@@ -46,7 +46,6 @@ import dev.agentknock.storage.request.ClientDetails
 import dev.agentknock.storage.secret.TemporaryAccessGrant
 import dev.agentknock.storage.secret.TemporaryAccessOperation
 import dev.agentknock.ui.components.InformationRow
-import dev.agentknock.ui.components.InformationSurface
 import dev.agentknock.ui.components.NavigationBackButton
 import dev.agentknock.ui.components.Disclosure
 import dev.agentknock.ui.components.ProseEditorScreen
@@ -122,7 +121,7 @@ internal fun ClientDetail(
                 client.desiredState?.let { it != RelayClientState.ACTIVE } == true
             ClientStatus(client, pending, onSetState)
 
-            AiReviewInstructions(
+            InstructionsCard(
                 scope = AiInstructionsScope.CLIENT,
                 value = client.instructions,
                 access = aiReviewAccess,
@@ -133,55 +132,65 @@ internal fun ClientDetail(
             )
 
             if (temporaryAccessGrants.isNotEmpty()) {
-                InformationSurface {
+                Column(verticalArrangement = Arrangement.spacedBy(8.dp)) {
                     Text(
                         "Temporary access",
                         style = MaterialTheme.typography.titleSmall,
                         color = MaterialTheme.colorScheme.primary,
+                        modifier = Modifier.padding(horizontal = 4.dp),
                     )
-                    temporaryAccessGrants.forEachIndexed { index, grant ->
-                        if (index > 0) HorizontalDivider()
-                        Row(
-                            modifier = Modifier.fillMaxWidth(),
-                            horizontalArrangement = Arrangement.spacedBy(12.dp),
-                            verticalAlignment = Alignment.CenterVertically,
+                    Surface(
+                        color = MaterialTheme.colorScheme.surfaceContainerLow,
+                        shape = MaterialTheme.shapes.large,
+                        modifier = Modifier.fillMaxWidth(),
+                    ) {
+                        Column(
+                            modifier = Modifier.padding(16.dp),
+                            verticalArrangement = Arrangement.spacedBy(12.dp),
                         ) {
-                            Column(
-                                modifier = Modifier.weight(1f),
-                                verticalArrangement = Arrangement.spacedBy(2.dp),
-                            ) {
-                                Text(grant.secretName, style = MaterialTheme.typography.titleMedium)
-                                Text(
-                                    grant.operation.displayName(),
-                                    style = MaterialTheme.typography.bodyMedium,
-                                    color = MaterialTheme.colorScheme.onSurfaceVariant,
-                                )
-                                Text(
-                                    "Ends ${dates.timestamp(grant.expiresAt)}",
-                                    style = MaterialTheme.typography.bodySmall,
-                                    color = MaterialTheme.colorScheme.onSurfaceVariant,
-                                )
+                            temporaryAccessGrants.forEachIndexed { index, grant ->
+                                if (index > 0) HorizontalDivider()
+                                Row(
+                                    modifier = Modifier.fillMaxWidth(),
+                                    horizontalArrangement = Arrangement.spacedBy(12.dp),
+                                    verticalAlignment = Alignment.CenterVertically,
+                                ) {
+                                    Column(
+                                        modifier = Modifier.weight(1f),
+                                        verticalArrangement = Arrangement.spacedBy(2.dp),
+                                    ) {
+                                        Text(grant.secretName, style = MaterialTheme.typography.titleMedium)
+                                        Text(
+                                            grant.operation.displayName(),
+                                            style = MaterialTheme.typography.bodyMedium,
+                                            color = MaterialTheme.colorScheme.onSurfaceVariant,
+                                        )
+                                        Text(
+                                            "Ends ${dates.timestamp(grant.expiresAt)}",
+                                            style = MaterialTheme.typography.bodySmall,
+                                            color = MaterialTheme.colorScheme.onSurfaceVariant,
+                                        )
+                                    }
+                                    FilledTonalButton(onClick = { onEndTemporaryAccess(grant) }) {
+                                        Text("End")
+                                    }
+                                }
                             }
-                            FilledTonalButton(onClick = { onEndTemporaryAccess(grant) }) {
-                                Text("End")
-                            }
+                            Text(
+                                if (temporaryAccessPaused) {
+                                    "Paused until this client is active. Access resumes if it becomes active " +
+                                        "before the end time. A secret's Deny setting still blocks access."
+                                } else {
+                                    "Skips manual and AI review until access ends. " +
+                                        "A secret's Deny setting still blocks access."
+                                },
+                                style = MaterialTheme.typography.bodySmall,
+                                color = MaterialTheme.colorScheme.onSurfaceVariant,
+                            )
                         }
                     }
-                    Text(
-                        if (temporaryAccessPaused) {
-                            "Paused until this client is active. Access resumes if it becomes active " +
-                                "before the end time. A secret's Deny setting still blocks access."
-                        } else {
-                            "Skips manual and AI review until access ends. " +
-                                "A secret's Deny setting still blocks access."
-                        },
-                        style = MaterialTheme.typography.bodySmall,
-                        color = MaterialTheme.colorScheme.onSurfaceVariant,
-                    )
                 }
             }
-
-
 
             Disclosure("Client information", initiallyExpanded = informationInitiallyExpanded) {
                 ClientField("Hostname", client.hostname)

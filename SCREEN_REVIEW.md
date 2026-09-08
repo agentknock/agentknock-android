@@ -4,12 +4,16 @@ One checkbox is one specific Compose preview PNG. Ordered by importance to appro
 decisions and everyday secret/client management, followed by setup, settings,
 and less frequent screens.
 
+The first pass establishes a consistent baseline across the whole queue. Broader
+layout and interaction improvements follow after this pass is complete.
+
 All screen reviews use one target: **dark theme, a 360 × 800 dp portrait phone,
 and normal text size (100%, font scale 1.0)**. Use this same configuration for
 the whole queue and subsequent screen reviews.
 
 For each unchecked item, render the specified preview and variant, ask an AI to
-review that PNG, edit the production Compose code, and render the same image again.
+review that PNG, make warranted production Compose changes, and render the same
+image again.
 Check it off when the visual changes are accepted. Checked entries record completed
 reviews; other images have their own review status.
 
@@ -30,19 +34,19 @@ All entries below already have Compose previews matching the current configurati
 5. [x] **Secrets list** — `secrets / dark` — accepted in `befc72b`.
 6. [x] **Environment secret detail** — `secret-detail / dark`.
 7. [x] **SSH secret detail** — `secret-ssh / dark`.
-8. [ ] **Secret access settings** — `secret-access / dark`.
-9. [ ] **Clients list** — `clients / dark`.
-10. [ ] **Client detail** — `client-detail / dark`.
-11. [ ] **Pairing verification** — `pairing / dark`.
-12. [ ] **Temporary-access confirmation dialog** — `temporary-access / dark`.
-13. [ ] **Environment upload review** — `secret-upload / dark`.
-14. [ ] **SSH key upload review** — `ssh-upload / dark`.
-15. [ ] **Create environment secret** — `create-secret / dark`.
-16. [ ] **Create environment variable** — `create-variable / dark`.
-17. [ ] **Edit environment variable** — `environment-variable / dark`.
-18. [ ] **Generate SSH key** — `create-ssh-key / dark`.
-19. [ ] **Import SSH key** — `import-ssh-key / dark`.
-20. [ ] **Edit secret** — `edit-secret / dark`.
+8. [x] **Secret access settings** — `secret-access / dark`.
+9. [x] **Clients list** — `clients / dark`.
+10. [x] **Client detail** — `client-detail / dark`.
+11. [x] **Pairing verification** — `pairing / dark`.
+12. [x] **Temporary-access confirmation dialog** — `temporary-access / dark`.
+13. [x] **Environment upload review** — `secret-upload / dark`.
+14. [x] **SSH key upload review** — `ssh-upload / dark`.
+15. [x] **Create environment secret** — `create-secret / dark`.
+16. [x] **Create environment variable** — `create-variable / dark`.
+17. [x] **Edit environment variable** — `environment-variable / dark`.
+18. [x] **Generate SSH key** — `create-ssh-key / dark`.
+19. [x] **Import SSH key** — `import-ssh-key / dark`.
+20. [x] **Edit secret** — `edit-secret / dark`.
 21. [ ] **Replace SSH key** — `replace-ssh-key / dark`.
 22. [ ] **Secret AI instructions editor** — `instructions / dark`.
 23. [ ] **Secret detail: temporary access** — `secret-temporary-access / dark`.

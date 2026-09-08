@@ -21,6 +21,7 @@ import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.text.selection.SelectionContainer
 import androidx.compose.foundation.verticalScroll
 import androidx.compose.material.icons.Icons
+import androidx.compose.material.icons.outlined.Key
 import androidx.compose.material.icons.outlined.Schedule
 import androidx.compose.material3.AlertDialog
 import androidx.compose.material3.Button
@@ -282,11 +283,25 @@ internal fun TemporaryAccessConfirmation(
                         modifier = Modifier
                             .heightIn(max = 144.dp)
                             .verticalScroll(rememberScrollState())
-                            .padding(horizontal = 12.dp, vertical = 8.dp),
-                        verticalArrangement = Arrangement.spacedBy(4.dp),
+                            .padding(horizontal = 12.dp, vertical = 10.dp),
+                        verticalArrangement = Arrangement.spacedBy(6.dp),
                     ) {
                         secretNames.forEach { secretName ->
-                            Text("• $secretName", style = MaterialTheme.typography.bodyMedium)
+                            Row(
+                                modifier = Modifier.clearAndSetSemantics {
+                                    contentDescription = "Secret $secretName"
+                                },
+                                horizontalArrangement = Arrangement.spacedBy(8.dp),
+                                verticalAlignment = Alignment.Top,
+                            ) {
+                                Icon(
+                                    Icons.Outlined.Key,
+                                    contentDescription = null,
+                                    tint = MaterialTheme.colorScheme.onSurfaceVariant,
+                                    modifier = Modifier.padding(top = 2.dp).size(16.dp),
+                                )
+                                Text(secretName, style = MaterialTheme.typography.bodyMedium)
+                            }
                         }
                     }
                 }

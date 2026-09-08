@@ -17,6 +17,8 @@ import androidx.compose.foundation.layout.widthIn
 import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.text.KeyboardOptions
 import androidx.compose.foundation.verticalScroll
+import androidx.compose.material.icons.Icons
+import androidx.compose.material.icons.outlined.Key
 import androidx.compose.material3.Button
 import androidx.compose.material3.TextButton
 import androidx.compose.material3.FilledTonalButton
@@ -51,6 +53,7 @@ import dev.agentknock.ui.components.InformationRow
 import dev.agentknock.ui.components.InformationSurface
 import dev.agentknock.ui.components.ExactText
 import dev.agentknock.ui.components.NavigationBackButton
+import dev.agentknock.ui.requests.Identity
 
 @Composable
 internal fun SshKeyInput(
@@ -61,7 +64,11 @@ internal fun SshKeyInput(
 ) {
     val sourceEnabled = enabled && !draft.preparing
     Column(verticalArrangement = Arrangement.spacedBy(12.dp)) {
-        Text("Private key", style = MaterialTheme.typography.titleMedium)
+        Text(
+            "Private key",
+            style = MaterialTheme.typography.titleSmall,
+            color = MaterialTheme.colorScheme.primary,
+        )
         if (draft.preparedKey != null) {
             SshKeyPreview(draft.preparedKey)
             TextButton(
@@ -280,7 +287,7 @@ internal fun SshKeyEditorScreen(
                     .padding(20.dp),
                 verticalArrangement = Arrangement.spacedBy(18.dp),
             ) {
-            Text(editor.secretName, style = MaterialTheme.typography.titleMedium)
+            Identity(Icons.Outlined.Key, "Secret", listOf(editor.secretName))
             Text(
                 "This replaces the stored private key. Register the new public key with any " +
                     "services that need it; the old public key is not revoked there.",

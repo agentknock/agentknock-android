@@ -16,6 +16,7 @@ import androidx.compose.foundation.layout.widthIn
 import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.text.KeyboardOptions
 import androidx.compose.material.icons.Icons
+import androidx.compose.material.icons.outlined.DataObject
 import androidx.compose.material.icons.outlined.MoreVert
 import androidx.compose.material3.Button
 import androidx.compose.material3.DropdownMenu
@@ -46,6 +47,7 @@ import androidx.compose.ui.text.input.KeyboardType
 import androidx.compose.ui.unit.dp
 import dev.agentknock.R
 import dev.agentknock.ui.components.NavigationBackButton
+import dev.agentknock.ui.requests.Identity
 
 internal val environmentVariableName = Regex("[A-Za-z_][A-Za-z0-9_]*")
 
@@ -147,7 +149,7 @@ internal fun EnvironmentVariableEditorScreen(
                 verticalArrangement = Arrangement.spacedBy(16.dp),
             ) {
                 item {
-                    Text(editor.secretName, style = MaterialTheme.typography.titleMedium)
+                    Identity(Icons.Outlined.DataObject, "Secret", listOf(editor.secretName))
                 }
                 item {
                     OutlinedTextField(
