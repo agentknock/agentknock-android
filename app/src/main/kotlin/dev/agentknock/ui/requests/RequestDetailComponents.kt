@@ -21,6 +21,7 @@ import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.text.selection.SelectionContainer
 import androidx.compose.foundation.verticalScroll
 import androidx.compose.material.icons.Icons
+import androidx.compose.material.icons.outlined.AutoAwesome
 import androidx.compose.material.icons.outlined.Key
 import androidx.compose.material.icons.outlined.Schedule
 import androidx.compose.material3.AlertDialog
@@ -60,32 +61,44 @@ import dev.agentknock.ui.theme.agentknockColors
 
 @Composable
 internal fun AiReviewNotice(review: AiReview?, reviewInFlight: Boolean) {
+    val icon = Icons.Outlined.AutoAwesome
     when {
         review?.decision == AiReviewDecision.APPROVE -> Notice(
             "AI review approved its part",
             review.explanationText() ?: "Another protected use still needs your decision.",
             NoticeTone.SUCCESS,
+            icon,
         )
         review?.decision == AiReviewDecision.ASK_USER -> Notice(
             "AI review asked you to decide",
             review.explanationText() ?: "The reviewer could not decide safely.",
             NoticeTone.ATTENTION,
+            icon,
         )
         review?.failure == AiReviewFailure.SUBSCRIPTION_REQUIRED -> Notice(
             "AI review is inactive",
             "This request needs your decision.",
             NoticeTone.NEUTRAL,
+            icon,
         )
         review?.failure != null -> Notice(
             "AI review couldn’t complete",
             "Please decide this request.",
             NoticeTone.NEUTRAL,
+            icon,
         )
-        reviewInFlight -> Unit
+        reviewInFlight -> Notice(
+            "No action needed yet",
+            "AI review is checking this request against your instructions. It can approve " +
+                "or deny it, or ask you to decide.",
+            NoticeTone.NEUTRAL,
+            icon,
+        )
         else -> Notice(
             "AI review was interrupted",
             "Decide this request yourself.",
             NoticeTone.ATTENTION,
+            icon,
         )
     }
 }

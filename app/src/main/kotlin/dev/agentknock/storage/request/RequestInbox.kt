@@ -874,7 +874,7 @@ internal class RequestInbox(
                                     PairingState.EXCHANGE_FAILED -> request.error
                                         ?: "The secure exchange failed. Reject this pairing to continue."
                                     PairingState.SAS_VERIFICATION_PENDING ->
-                                        "Open Agentknock and compare the security code."
+                                        "Open Agentknock and compare the verification code."
                                     PairingState.WAITING_FOR_FINISH,
                                     -> "The pairing is still waiting for the client and can be rejected."
                                     else -> "Open Agentknock to review this pairing."

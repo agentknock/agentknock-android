@@ -4,9 +4,6 @@ One checkbox is one specific Compose preview PNG. Ordered by importance to appro
 decisions and everyday secret/client management, followed by setup, settings,
 and less frequent screens.
 
-The first pass establishes a consistent baseline across the whole queue. Broader
-layout and interaction improvements follow after this pass is complete.
-
 All screen reviews use one target: **dark theme, a 360 × 800 dp portrait phone,
 and normal text size (100%, font scale 1.0)**. Use this same configuration for
 the whole queue and subsequent screen reviews.
@@ -47,32 +44,32 @@ All entries below already have Compose previews matching the current configurati
 18. [x] **Generate SSH key** — `create-ssh-key / dark`.
 19. [x] **Import SSH key** — `import-ssh-key / dark`.
 20. [x] **Edit secret** — `edit-secret / dark`.
-21. [ ] **Replace SSH key** — `replace-ssh-key / dark`.
-22. [ ] **Secret AI instructions editor** — `instructions / dark`.
-23. [ ] **Secret detail: temporary access** — `secret-temporary-access / dark`.
-24. [ ] **Settings overview** — `settings / dark`.
-25. [ ] **Security & backup** — `security / dark`.
-26. [ ] **Welcome** — `welcome / dark`.
-27. [ ] **Device setup** — `setup / dark`.
-28. [ ] **Pairing address editor** — `pairing-address / dark`.
-29. [ ] **App locked** — `locked / dark`.
-30. [ ] **Notification settings** — `notifications / dark`.
-31. [ ] **Plan & billing: free plan** — `subscription / dark`.
-32. [ ] **Audit log** — `audit / dark`.
-33. [ ] **Audit event detail** — `audit-detail / dark`.
-34. [ ] **Delete secret confirmation dialog** — `delete-secret / dark`.
-35. [ ] **Discard changes confirmation dialog** — `discard-changes / dark`.
-36. [ ] **Security: restored keys** — `security-restored / dark`.
-37. [ ] **Secret detail: unavailable environment values** — `secret-unavailable / dark`.
-38. [ ] **Secret use: AI review explanation** — `invocation-ai-review / dark`.
-39. [ ] **Secret use: AI review in progress** — `invocation-reviewing / dark`.
-40. [ ] **Secret use: verification failure** — `invocation-failed / dark`.
-41. [ ] **Requests list: offline** — `requests-offline / dark`.
-42. [ ] **Unlock failure** — `unlock-failed / dark`.
-43. [ ] **Pairing failure** — `pairing-failed / dark`.
-44. [ ] **Pairing address unavailable** — `pairing-address-unavailable / dark`.
-45. [ ] **Notifications blocked** — `notifications-blocked / dark`.
-46. [ ] **Suspended client** — `client-suspended / dark`.
+21. [x] **Replace SSH key** — `replace-ssh-key / dark`.
+22. [x] **Secret AI instructions editor** — `instructions / dark`.
+23. [x] **Secret detail: temporary access** — `secret-temporary-access / dark`.
+24. [x] **Settings overview** — `settings / dark`.
+25. [x] **Security & backup** — `security / dark`.
+26. [x] **Welcome** — `welcome / dark`.
+27. [x] **Device setup** — `setup / dark`.
+28. [x] **Pairing address editor** — `pairing-address / dark`.
+29. [x] **App locked** — `locked / dark`.
+30. [x] **Notification settings** — `notifications / dark`.
+31. [x] **Plan & billing: free plan** — `subscription / dark`.
+32. [x] **Audit log** — `audit / dark`.
+33. [x] **Audit event detail** — `audit-detail / dark`.
+34. [x] **Delete secret confirmation dialog** — `delete-secret / dark`.
+35. [x] **Discard changes confirmation dialog** — `discard-changes / dark`.
+36. [x] **Security: restored keys** — `security-restored / dark`.
+37. [x] **Secret detail: unavailable environment values** — `secret-unavailable / dark`.
+38. [x] **Secret use: AI review explanation** — `invocation-ai-review / dark`.
+39. [x] **Secret use: AI review in progress** — `invocation-reviewing / dark`.
+40. [x] **Secret use: verification failure** — `invocation-failed / dark`.
+41. [x] **Requests list: offline** — `requests-offline / dark`.
+42. [x] **Unlock failure** — `unlock-failed / dark`.
+43. [x] **Pairing failure** — `pairing-failed / dark`.
+44. [x] **Pairing address unavailable** — `pairing-address-unavailable / dark`.
+45. [x] **Notifications blocked** — `notifications-blocked / dark`.
+46. [x] **Suspended client** — `client-suspended / dark`.
 47. [ ] **Plan & billing: active subscription** — `subscription-active / dark`.
 48. [ ] **Plan & billing: payment pending** — `subscription-pending / dark`.
 49. [ ] **Plan & billing: store unavailable** — `subscription-unavailable / dark`.

@@ -240,7 +240,7 @@ private fun MutableList<AuditDetailField>.addPairingFields(data: JsonObject) {
     addText(data, "pairing_state", "Pairing state", transform = ::displayStoredValue)
     addText(data, "action", "Action", transform = ::displayStoredValue)
     data.boolean("sas_matched")?.let {
-        add(AuditDetailField("Pairing code", if (it) "Matched" else "Did not match"))
+        add(AuditDetailField("Verification code", if (it) "Matched" else "Did not match"))
     }
     addClientSystem(data)
 }

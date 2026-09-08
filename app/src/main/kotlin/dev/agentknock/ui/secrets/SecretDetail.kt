@@ -22,6 +22,7 @@ import androidx.compose.foundation.lazy.rememberLazyListState
 import androidx.compose.foundation.text.selection.SelectionContainer
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.outlined.Add
+import androidx.compose.material.icons.outlined.Computer
 import androidx.compose.material.icons.outlined.ContentCopy
 import androidx.compose.material.icons.outlined.Edit
 import androidx.compose.material.icons.outlined.ExpandLess
@@ -81,9 +82,12 @@ import dev.agentknock.storage.secret.TemporaryAccessOperation
 import dev.agentknock.ui.components.InformationRow
 import dev.agentknock.ui.components.InformationSurface
 import dev.agentknock.ui.components.NavigationBackButton
+import dev.agentknock.ui.components.Notice
+import dev.agentknock.ui.components.NoticeTone
 import dev.agentknock.ui.components.ProseEditorScreen
 import dev.agentknock.ui.components.ExactText
 import dev.agentknock.ui.components.TonalIcon
+import dev.agentknock.ui.theme.agentknockColors
 import dev.agentknock.ui.requests.SelectableFact
 
 internal data class SecretDetailActions(
@@ -229,6 +233,16 @@ internal fun SecretDetail(
                             }
                         }
                     }
+                    if (secret.environmentVariables.any { !it.valueAvailable }) {
+                        item {
+                            Notice(
+                                title = "Some values are unavailable on this device",
+                                detail = "They cannot be recovered here. Edit each affected variable " +
+                                    "to enter a replacement value.",
+                                tone = NoticeTone.ATTENTION,
+                            )
+                        }
+                    }
                     if (secret.environmentVariables.isEmpty()) {
                         item {
                             EmptyMessage(
@@ -313,17 +327,18 @@ internal fun SecretDetail(
                     )
                 }
             }
+            if (secret.temporaryAccessGrants.isNotEmpty()) {
+                item {
+                    SecretTemporaryApprovals(
+                        grants = secret.temporaryAccessGrants,
+                        clients = clients,
+                        onEnd = actions.onEndTemporaryAccess,
+                    )
+                }
+            }
             item {
                 InformationSurface(contentPadding = PaddingValues(horizontal = 16.dp, vertical = 4.dp)) {
                     Column {
-                        if (secret.temporaryAccessGrants.isNotEmpty()) {
-                            SecretTemporaryApprovals(
-                                grants = secret.temporaryAccessGrants,
-                                clients = clients,
-                                onEnd = actions.onEndTemporaryAccess,
-                            )
-                            HorizontalDivider()
-                        }
                         ApprovalModeRow(
                             title = "Default for all clients",
                             selected = secret.approvalMode,
@@ -407,43 +422,68 @@ private fun SecretTemporaryApprovals(
     onEnd: (TemporaryAccessGrant) -> Unit,
 ) {
     val dates = rememberDateTimeFormatter()
-    Column(Modifier.padding(vertical = 8.dp), verticalArrangement = Arrangement.spacedBy(10.dp)) {
-        Text("Temporary access", style = MaterialTheme.typography.titleMedium)
-        Text(
-            "These uses skip manual and AI review until they end. The saved settings below " +
-                "apply again afterwards; Deny still blocks access.",
-            color = MaterialTheme.colorScheme.onSurfaceVariant,
-        )
-        grants.forEachIndexed { index, grant ->
-            if (index > 0) HorizontalDivider()
-            val client = clients.firstOrNull { it.clientId == grant.clientId }
-            val paused = client == null || client.state != RelayClientState.ACTIVE ||
-                client.desiredState?.let { it != RelayClientState.ACTIVE } == true
-            Row(
-                modifier = Modifier.fillMaxWidth(),
-                horizontalArrangement = Arrangement.spacedBy(12.dp),
-                verticalAlignment = Alignment.CenterVertically,
-            ) {
-                Column(
-                    modifier = Modifier.weight(1f),
-                    verticalArrangement = Arrangement.spacedBy(2.dp),
+    Surface(
+        color = MaterialTheme.colorScheme.surfaceContainerLow,
+        shape = RoundedCornerShape(20.dp),
+        modifier = Modifier.fillMaxWidth(),
+    ) {
+        Column(Modifier.padding(16.dp), verticalArrangement = Arrangement.spacedBy(12.dp)) {
+            Text("Temporary access", style = MaterialTheme.typography.titleMedium)
+            grants.forEachIndexed { index, grant ->
+                if (index > 0) HorizontalDivider()
+                val client = clients.firstOrNull { it.clientId == grant.clientId }
+                val paused = client == null || client.state != RelayClientState.ACTIVE ||
+                    client.desiredState?.let { it != RelayClientState.ACTIVE } == true
+                Row(
+                    modifier = Modifier.fillMaxWidth(),
+                    horizontalArrangement = Arrangement.spacedBy(12.dp),
+                    verticalAlignment = Alignment.CenterVertically,
                 ) {
-                    Text(client?.name ?: "Unknown client", style = MaterialTheme.typography.bodyLarge)
-                    Text(
-                        "${grant.operation.displayName()} · Ends ${dates.timestamp(grant.expiresAt)}",
-                        style = MaterialTheme.typography.bodyMedium,
-                        color = MaterialTheme.colorScheme.onSurfaceVariant,
-                    )
-                    if (paused) {
+                    Column(
+                        modifier = Modifier.weight(1f),
+                        verticalArrangement = Arrangement.spacedBy(2.dp),
+                    ) {
+                        Row(
+                            horizontalArrangement = Arrangement.spacedBy(8.dp),
+                            verticalAlignment = Alignment.CenterVertically,
+                        ) {
+                            Icon(
+                                Icons.Outlined.Computer,
+                                contentDescription = "Client",
+                                modifier = Modifier.size(18.dp),
+                            )
+                            Text(
+                                client?.name ?: "Unknown client",
+                                style = MaterialTheme.typography.titleMedium,
+                            )
+                        }
                         Text(
-                            "Paused until this client is active",
-                            style = MaterialTheme.typography.labelMedium,
+                            grant.operation.displayName(),
+                            style = MaterialTheme.typography.bodyMedium,
                             color = MaterialTheme.colorScheme.onSurfaceVariant,
                         )
+                        Text(
+                            "Ends ${dates.timestamp(grant.expiresAt)}",
+                            style = MaterialTheme.typography.bodySmall,
+                            color = MaterialTheme.colorScheme.onSurfaceVariant,
+                        )
+                        if (paused) {
+                            Text(
+                                "Paused until this client is active",
+                                style = MaterialTheme.typography.labelMedium,
+                                color = MaterialTheme.colorScheme.onSurfaceVariant,
+                            )
+                        }
                     }
+                    FilledTonalButton(onClick = { onEnd(grant) }) { Text("End") }
                 }
-                TextButton(onClick = { onEnd(grant) }) { Text("End") }
             }
+            Text(
+                "These uses skip manual and AI review until they end. The saved settings below " +
+                    "apply again afterwards; Deny still blocks access.",
+                style = MaterialTheme.typography.bodySmall,
+                color = MaterialTheme.colorScheme.onSurfaceVariant,
+            )
         }
     }
 }
@@ -625,7 +665,7 @@ private fun EnvironmentVariableCard(
                     if (!variable.valueAvailable || publicValueUnavailable) {
                         Text(
                             stringResource(R.string.value_unavailable),
-                            color = MaterialTheme.colorScheme.error,
+                            color = MaterialTheme.agentknockColors.attentionAccent,
                         )
                     } else if (displayedValue == null) {
                         if (variable.sensitive) {

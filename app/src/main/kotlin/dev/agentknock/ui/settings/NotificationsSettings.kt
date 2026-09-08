@@ -13,6 +13,7 @@ import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.outlined.Notifications
+import androidx.compose.material.icons.outlined.NotificationsOff
 import androidx.compose.material3.Button
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.Text
@@ -87,13 +88,17 @@ internal fun NotificationsSettingsContent(
     Column(modifier) {
         PageTopBar("Notifications", onBack)
         LazyColumn(
-            contentPadding = PaddingValues(start = 16.dp, end = 16.dp, bottom = 24.dp),
+            contentPadding = PaddingValues(start = 16.dp, end = 16.dp, top = 8.dp, bottom = 24.dp),
             verticalArrangement = Arrangement.spacedBy(16.dp),
         ) {
             item {
                 SettingsGroup {
                     SettingsRow(
-                        icon = Icons.Outlined.Notifications,
+                        icon = if (appNotificationsEnabled) {
+                            Icons.Outlined.Notifications
+                        } else {
+                            Icons.Outlined.NotificationsOff
+                        },
                         title = if (appNotificationsEnabled) {
                             "Notifications allowed"
                         } else {
@@ -104,6 +109,7 @@ internal fun NotificationsSettingsContent(
                         } else {
                             "Android is blocking request alerts. Background request delivery continues."
                         },
+                        attention = !appNotificationsEnabled,
                     )
                 }
             }
@@ -122,23 +128,29 @@ internal fun NotificationsSettingsContent(
                         SettingsRow(
                             title = "Requests needing action",
                             summary = if (requestsEnabled) "Enabled" else "Blocked by Android settings",
+                            attention = !requestsEnabled,
                             onClick = { openChannel(RequestNotifications.ACTION_CHANNEL_ID) },
                             external = true,
                         )
                         SettingsGroupDivider()
                         SettingsRow(
                             title = "Background processing",
-                            summary = (if (backgroundEnabled) "Enabled" else "Hidden") +
-                                " · Hiding this silent notification does not stop request processing",
+                            summary = if (backgroundEnabled) {
+                                "Silent notification shown"
+                            } else {
+                                "Silent notification hidden"
+                            },
                             onClick = { openChannel(RequestNotifications.BACKGROUND_CHANNEL_ID) },
                             external = true,
                         )
                     }
                     Text(
-                        "Android controls sound, vibration, lock-screen visibility, and interruption for each category.",
+                        "Hiding the background processing notification does not stop request " +
+                            "processing. Android controls sound, vibration, lock-screen visibility, " +
+                            "and interruption for each category.",
                         style = MaterialTheme.typography.bodySmall,
                         color = MaterialTheme.colorScheme.onSurfaceVariant,
-                        modifier = Modifier.padding(horizontal = 12.dp, vertical = 8.dp),
+                        modifier = Modifier.padding(horizontal = 16.dp, vertical = 8.dp),
                     )
                 }
             }
@@ -150,6 +162,7 @@ internal fun NotificationsSettingsContent(
                             SettingsRow(
                                 title = "Push delivery needs attention",
                                 summary = deliveryWarning,
+                                attention = true,
                             )
                         }
                     }

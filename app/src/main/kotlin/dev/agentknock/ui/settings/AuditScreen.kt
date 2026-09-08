@@ -374,12 +374,6 @@ private fun AuditDetail(
                         verticalArrangement = Arrangement.spacedBy(6.dp),
                         itemVerticalAlignment = Alignment.CenterVertically,
                     ) {
-                        Text(
-                            dates.timestamp(event.occurredAt, includeSeconds = true),
-                            style = MaterialTheme.typography.bodyMedium,
-                            color = MaterialTheme.colorScheme.onSurfaceVariant,
-                            fontFamily = FontFamily.Monospace,
-                        )
                         Surface(
                             color = event.outcome.accentColor().copy(alpha = 0.18f),
                             contentColor = event.outcome.accentColor(),
@@ -387,10 +381,15 @@ private fun AuditDetail(
                         ) {
                             Text(
                                 event.outcome.displayName(),
-                                style = MaterialTheme.typography.labelMedium,
-                                modifier = Modifier.padding(horizontal = 10.dp, vertical = 5.dp),
+                                style = MaterialTheme.typography.labelLarge,
+                                modifier = Modifier.padding(horizontal = 12.dp, vertical = 6.dp),
                             )
                         }
+                        Text(
+                            dates.timestamp(event.occurredAt, includeSeconds = true),
+                            style = MaterialTheme.typography.bodyMedium,
+                            color = MaterialTheme.colorScheme.onSurfaceVariant,
+                        )
                     }
                     Text(presentation.title, style = MaterialTheme.typography.headlineSmall)
                 }
@@ -436,7 +435,11 @@ private fun AuditOutcome.accentColor(): Color = when (this) {
     AuditOutcome.APPROVED,
     AuditOutcome.COMPLETED,
     -> MaterialTheme.agentknockColors.success
-    AuditOutcome.FAILED -> MaterialTheme.agentknockColors.danger
+    AuditOutcome.DENIED,
+    AuditOutcome.REJECTED,
+    AuditOutcome.FAILED,
+    -> MaterialTheme.agentknockColors.danger
+    AuditOutcome.DEFERRED -> MaterialTheme.agentknockColors.attentionAccent
     else -> MaterialTheme.colorScheme.onSurfaceVariant
 }
 

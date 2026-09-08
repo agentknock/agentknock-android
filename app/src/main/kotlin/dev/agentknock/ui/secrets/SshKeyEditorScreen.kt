@@ -7,10 +7,12 @@ import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.FlowRow
+import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.fillMaxHeight
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.padding
+import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.layout.consumeWindowInsets
 import androidx.compose.foundation.layout.imePadding
 import androidx.compose.foundation.layout.widthIn
@@ -18,11 +20,14 @@ import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.text.KeyboardOptions
 import androidx.compose.foundation.verticalScroll
 import androidx.compose.material.icons.Icons
+import androidx.compose.material.icons.outlined.Fingerprint
+import androidx.compose.material.icons.outlined.Info
 import androidx.compose.material.icons.outlined.Key
 import androidx.compose.material3.Button
 import androidx.compose.material3.TextButton
 import androidx.compose.material3.FilledTonalButton
 import androidx.compose.material3.FilterChip
+import androidx.compose.material3.Icon
 import androidx.compose.material3.LinearProgressIndicator
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.OutlinedTextField
@@ -54,6 +59,7 @@ import dev.agentknock.ui.components.InformationSurface
 import dev.agentknock.ui.components.ExactText
 import dev.agentknock.ui.components.NavigationBackButton
 import dev.agentknock.ui.requests.Identity
+import dev.agentknock.ui.requests.SelectableFact
 
 @Composable
 internal fun SshKeyInput(
@@ -287,12 +293,32 @@ internal fun SshKeyEditorScreen(
                     .padding(20.dp),
                 verticalArrangement = Arrangement.spacedBy(18.dp),
             ) {
-            Identity(Icons.Outlined.Key, "Secret", listOf(editor.secretName))
-            Text(
-                "This replaces the stored private key. Register the new public key with any " +
-                    "services that need it; the old public key is not revoked there.",
-                color = MaterialTheme.colorScheme.onSurfaceVariant,
-            )
+            Column(verticalArrangement = Arrangement.spacedBy(12.dp)) {
+                Identity(Icons.Outlined.Key, "Secret", listOf(editor.secretName))
+                SelectableFact(
+                    icon = Icons.Outlined.Fingerprint,
+                    label = "Current key · ${editor.currentKey.algorithm.displayName()} · " +
+                        "${editor.currentKey.bits}-bit",
+                    value = editor.currentKey.fingerprint,
+                    monospace = true,
+                )
+            }
+            Row(
+                horizontalArrangement = Arrangement.spacedBy(8.dp),
+                verticalAlignment = Alignment.Top,
+            ) {
+                Icon(
+                    Icons.Outlined.Info,
+                    contentDescription = null,
+                    tint = MaterialTheme.colorScheme.onSurfaceVariant,
+                    modifier = Modifier.padding(top = 3.dp).size(18.dp),
+                )
+                Text(
+                    "This replaces the stored private key. Register the new public key with any " +
+                        "services that need it; the old public key is not revoked there.",
+                    color = MaterialTheme.colorScheme.onSurfaceVariant,
+                )
+            }
             SshKeyInput(
                 draft = draft,
                 enabled = enabled,

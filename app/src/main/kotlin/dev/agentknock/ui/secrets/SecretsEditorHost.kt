@@ -2,6 +2,9 @@
 
 package dev.agentknock.ui.secrets
 
+import androidx.compose.material.icons.Icons
+import androidx.compose.material.icons.outlined.DeleteForever
+import androidx.compose.material3.Icon
 import androidx.compose.material3.AlertDialog
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.SnackbarHostState
@@ -96,6 +99,8 @@ internal fun DeleteDialog(
     AlertDialog(
         modifier = modifier,
         onDismissRequest = onDismiss,
+        icon = { Icon(Icons.Outlined.DeleteForever, contentDescription = null) },
+        iconContentColor = MaterialTheme.colorScheme.error,
         title = { Text(title) },
         text = { Text(explanation) },
         confirmButton = {

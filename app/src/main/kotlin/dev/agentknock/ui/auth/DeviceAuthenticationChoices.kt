@@ -34,7 +34,13 @@ internal fun DeviceAuthenticationChoices(
                 modifier = Modifier
                     .fillMaxWidth()
                     .clip(MaterialTheme.shapes.medium)
-                    .background(if (mode == selected) MaterialTheme.colorScheme.primaryContainer else Color.Transparent)
+                    .background(
+                        if (mode == selected) {
+                            MaterialTheme.colorScheme.primary.copy(alpha = 0.10f)
+                        } else {
+                            Color.Transparent
+                        },
+                    )
                     .selectable(
                         selected = mode == selected,
                         enabled = enabled,
@@ -49,14 +55,11 @@ internal fun DeviceAuthenticationChoices(
                     modifier = Modifier.weight(1f),
                     verticalArrangement = Arrangement.spacedBy(2.dp),
                 ) {
-                    Text(mode.displayLabel(), style = MaterialTheme.typography.titleSmall,
-                        color = if (mode == selected) MaterialTheme.colorScheme.onPrimaryContainer
-                        else MaterialTheme.colorScheme.onSurface)
+                    Text(mode.displayLabel(), style = MaterialTheme.typography.titleSmall)
                     Text(
                         mode.explanation(),
                         style = MaterialTheme.typography.bodyMedium,
-                        color = if (mode == selected) MaterialTheme.colorScheme.onPrimaryContainer
-                        else MaterialTheme.colorScheme.onSurfaceVariant,
+                        color = MaterialTheme.colorScheme.onSurfaceVariant,
                     )
                 }
                 RadioButton(

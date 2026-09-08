@@ -11,6 +11,7 @@ import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.text.selection.SelectionContainer
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.automirrored.outlined.Launch
+import androidx.compose.material.icons.automirrored.outlined.NavigateNext
 import androidx.compose.material3.HorizontalDivider
 import androidx.compose.material3.Icon
 import androidx.compose.material3.ExperimentalMaterial3Api
@@ -39,6 +40,16 @@ internal fun PageTopBar(title: String, onBack: () -> Unit, showBack: Boolean = t
                 NavigationBackButton(onBack)
             }
         },
+    )
+}
+
+/** Marks a settings row that opens another page. */
+@Composable
+internal fun SettingsNavigationChevron() {
+    Icon(
+        Icons.AutoMirrored.Outlined.NavigateNext,
+        contentDescription = null,
+        tint = MaterialTheme.colorScheme.onSurfaceVariant,
     )
 }
 
@@ -86,6 +97,7 @@ internal fun SettingsRow(
     icon: ImageVector? = null,
     destructive: Boolean = false,
     external: Boolean = false,
+    attention: Boolean = false,
     onClick: (() -> Unit)? = null,
     trailing: (@Composable () -> Unit)? = null,
 ) {
@@ -93,6 +105,11 @@ internal fun SettingsRow(
         MaterialTheme.agentknockColors.danger
     } else {
         MaterialTheme.colorScheme.primary
+    }
+    val summaryColor = if (attention) {
+        MaterialTheme.agentknockColors.attentionAccent
+    } else {
+        MaterialTheme.colorScheme.onSurfaceVariant
     }
     val clickModifier = if (onClick == null) modifier else modifier.clickable(onClick = onClick)
     Row(
@@ -123,7 +140,7 @@ internal fun SettingsRow(
                 Text(
                     it,
                     style = MaterialTheme.typography.bodyMedium,
-                    color = MaterialTheme.colorScheme.onSurfaceVariant,
+                    color = summaryColor,
                     maxLines = 3,
                     overflow = TextOverflow.Ellipsis,
                 )
@@ -147,6 +164,7 @@ internal fun SettingsValueRow(
     value: String,
     modifier: Modifier = Modifier,
     monospace: Boolean = false,
+    attention: Boolean = false,
     trailing: (@Composable () -> Unit)? = null,
 ) {
     Row(
@@ -161,7 +179,11 @@ internal fun SettingsValueRow(
                 Text(
                     value,
                     style = MaterialTheme.typography.bodyMedium,
-                    color = MaterialTheme.colorScheme.onSurface,
+                    color = if (attention) {
+                        MaterialTheme.agentknockColors.attentionAccent
+                    } else {
+                        MaterialTheme.colorScheme.onSurface
+                    },
                     fontFamily = if (monospace) FontFamily.Monospace else FontFamily.Default,
                 )
             }

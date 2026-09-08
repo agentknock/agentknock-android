@@ -805,7 +805,7 @@ internal class PairingRequests(
         const val INITIAL_COMPLETION_VERIFICATION_ERROR =
             "The pairing message could not be verified."
         const val METADATA_WARNING =
-            "The client details could not be read, but the security code is valid."
+            "The client details could not be read, but the verification code is valid."
         const val FINISH_REJECTED_ERROR = "The client did not accept the pairing."
         const val FINISH_VERIFICATION_ERROR =
             "The pairing confirmation could not be verified."

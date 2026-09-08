@@ -8,11 +8,13 @@ import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.padding
+import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.ScrollState
 import androidx.compose.foundation.verticalScroll
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.outlined.Edit
+import androidx.compose.material.icons.outlined.PauseCircleOutline
 import androidx.compose.material3.AlertDialog
 import androidx.compose.material3.ButtonDefaults
 import androidx.compose.material3.FilledTonalButton
@@ -322,6 +324,14 @@ private fun ClientStatus(
                 horizontalArrangement = Arrangement.spacedBy(12.dp),
                 verticalAlignment = Alignment.CenterVertically,
             ) {
+                if (client.state == RelayClientState.SUSPENDED && pending == null) {
+                    Icon(
+                        Icons.Outlined.PauseCircleOutline,
+                        contentDescription = null,
+                        tint = stateColor(client.state),
+                        modifier = Modifier.size(28.dp),
+                    )
+                }
                 Text(
                     pending?.let { "Changing to ${it.stateLabel().lowercase()}…" }
                         ?: client.state.stateLabel(),
@@ -334,9 +344,8 @@ private fun ClientStatus(
                         onClick = { onSetState(RelayClientState.SUSPENDED) },
                         colors = actionColors,
                     ) { Text("Suspend") }
-                    RelayClientState.SUSPENDED -> TextButton(
+                    RelayClientState.SUSPENDED -> FilledTonalButton(
                         onClick = { onSetState(RelayClientState.ACTIVE) },
-                        colors = actionColors,
                     ) { Text("Resume") }
                     else -> Unit
                 }

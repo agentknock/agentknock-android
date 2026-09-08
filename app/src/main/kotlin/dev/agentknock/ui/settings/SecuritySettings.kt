@@ -15,6 +15,8 @@ import dev.agentknock.storage.crypto.EncryptionKeyBacking
 import dev.agentknock.storage.crypto.VaultKeyPurpose
 import dev.agentknock.storage.crypto.VaultProtection
 import dev.agentknock.ui.auth.DeviceAuthenticationMode
+import dev.agentknock.ui.components.Notice
+import dev.agentknock.ui.components.NoticeTone
 import dev.agentknock.ui.auth.DeviceAuthenticationChoices
 
 @Composable
@@ -47,6 +49,7 @@ internal fun SecuritySettingsContent(
     modifier: Modifier,
     listState: LazyListState = rememberLazyListState(),
 ) {
+    val unavailableStoredData = protection?.unavailableStoredData.orEmpty()
     Column(modifier) {
         PageTopBar("Security and backup", onBack)
         LazyColumn(
@@ -54,6 +57,16 @@ internal fun SecuritySettingsContent(
             contentPadding = PaddingValues(start = 16.dp, end = 16.dp, top = 8.dp, bottom = 24.dp),
             verticalArrangement = Arrangement.spacedBy(16.dp),
         ) {
+            if (unavailableStoredData.isNotEmpty()) {
+                item {
+                    Notice(
+                        title = "Some stored data cannot be decrypted",
+                        detail = "This device does not have the keys for some stored data. " +
+                            unavailableStoredData.recoveryAction(),
+                        tone = NoticeTone.ATTENTION,
+                    )
+                }
+            }
             item {
                 Column {
                     SettingsSectionLabel("Device authentication")
@@ -66,6 +79,7 @@ internal fun SecuritySettingsContent(
                         SettingsValueRow(
                             "Android screen lock",
                             if (deviceSecure) "Configured" else "Not configured",
+                            attention = !deviceSecure,
                         )
                     }
                 }
@@ -76,11 +90,16 @@ internal fun SecuritySettingsContent(
                     SettingsGroup {
                         SettingsValueRow("Algorithm", "AES-128-GCM")
                         SettingsGroupDivider()
-                        SettingsValueRow("Current key storage", protection.keyStorageDescription())
+                        SettingsValueRow(
+                            "Current key storage",
+                            protection.keyStorageDescription(),
+                            attention = protection is VaultProtection.ActiveKeysUnavailable,
+                        )
                         SettingsGroupDivider()
                         SettingsValueRow(
                             "Stored encrypted data",
                             protection.storedDataDescription(),
+                            attention = protection != null && protection.unavailableStoredData.isNotEmpty(),
                         )
                     }
                 }
@@ -128,6 +147,13 @@ private fun VaultProtection?.storedDataDescription(): String = when {
     this == null -> "Checking this device…"
     unavailableStoredData.isEmpty() -> "Available on this device"
     else -> unavailableStoredData.explanation()
+}
+
+/** What the user can do about data this device can no longer decrypt. */
+private fun Set<VaultKeyPurpose>.recoveryAction(): String = when (this) {
+    setOf(VaultKeyPurpose.SECRET_VALUES) -> "Replace the affected secret values."
+    setOf(VaultKeyPurpose.DEVICE_STATE) -> "Pair your clients again."
+    else -> "Replace the affected secret values and pair your clients again."
 }
 
 private fun Set<VaultKeyPurpose>.explanation(): String = when (this) {

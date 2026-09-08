@@ -68,7 +68,7 @@ needed. `app/build/` can be deleted and regenerated.
 | Source file | Review coverage |
 | --- | --- |
 | `SetupPreviews.kt` | Welcome, initial setup, address change and conflict, locked/unlock failure, temporary-access confirmation |
-| `ClientPreviews.kt` | Clients and secrets with the production navigation shell; empty lists; pending pairing/upload rows; active/suspended client; lower client details; pairing codes and failure |
+| `ClientPreviews.kt` | Clients and secrets with the production navigation shell; empty lists; pending pairing/upload rows; active/suspended client; lower client details; verification codes and pairing failure |
 | `SecretDetailPreviews.kt` | Environment and SSH secrets, missing values, access overrides, temporary access, instructions and metadata below the fold, 150% text |
 | `EditorPreviews.kt` | Create/edit secret, generate/import/replace SSH key, create/edit environment variable, instruction editor, discard/delete confirmations |
 | `RequestPreviews.kt` | Request inbox and empty/offline states; command approval, AI escalation/review in progress, completed and verification failure; Git signing; SSH authentication; environment/SSH uploads |

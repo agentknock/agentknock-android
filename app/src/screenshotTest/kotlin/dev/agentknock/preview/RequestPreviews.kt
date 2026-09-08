@@ -50,7 +50,7 @@ fun RequestsOfflineLightPreview() = RequestsOfflinePreview()
 fun RequestsOfflineDarkPreview() = RequestsOfflinePreview()
 
 @Composable
-private fun RequestsOfflinePreview() = PreviewScreen { RequestsPage(previewRequestSummaries, "Could not connect to the relay. Pull down to retry.") }
+private fun RequestsOfflinePreview() = PreviewScreen { RequestsPage(previewRequestSummaries, "Couldn't connect to the relay. Check your connection and try again.") }
 
 @Composable private fun RequestsPage(requests: List<InboxRequestSummary>, problem: String? = null) {
     PreviewNavigation(MainSection.REQUESTS, empty = requests.isEmpty()) { modifier ->

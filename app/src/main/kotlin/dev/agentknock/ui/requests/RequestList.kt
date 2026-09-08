@@ -39,9 +39,11 @@ import androidx.compose.material.icons.outlined.Refresh
 import androidx.compose.material.icons.outlined.Settings
 import androidx.compose.material.icons.outlined.Terminal
 import androidx.compose.material3.Button
+import androidx.compose.material3.ButtonDefaults
 import androidx.compose.material3.CircularProgressIndicator
 import androidx.compose.material3.Icon
 import androidx.compose.material3.IconButton
+import androidx.compose.material3.LocalContentColor
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.Surface
 import androidx.compose.material3.SwipeToDismissBox
@@ -205,8 +207,8 @@ internal fun RequestList(
 @Composable
 private fun SyncProblemBanner(problem: String, syncing: Boolean, onRetry: () -> Unit) {
     Surface(
-        color = MaterialTheme.colorScheme.surfaceContainerHigh,
-        contentColor = MaterialTheme.colorScheme.onSurface,
+        color = MaterialTheme.agentknockColors.attentionContainer,
+        contentColor = MaterialTheme.agentknockColors.onAttentionContainer,
         shape = MaterialTheme.shapes.large,
         modifier = Modifier
             .fillMaxWidth()
@@ -220,7 +222,6 @@ private fun SyncProblemBanner(problem: String, syncing: Boolean, onRetry: () -> 
             Icon(
                 Icons.Outlined.CloudOff,
                 contentDescription = null,
-                tint = MaterialTheme.colorScheme.error,
                 modifier = Modifier.size(20.dp),
             )
             Text(
@@ -228,7 +229,11 @@ private fun SyncProblemBanner(problem: String, syncing: Boolean, onRetry: () -> 
                 style = MaterialTheme.typography.bodyMedium,
                 modifier = Modifier.weight(1f),
             )
-            TextButton(onClick = onRetry, enabled = !syncing) { Text("Retry") }
+            TextButton(
+                onClick = onRetry,
+                enabled = !syncing,
+                colors = ButtonDefaults.textButtonColors(contentColor = LocalContentColor.current),
+            ) { Text("Retry") }
         }
     }
 }

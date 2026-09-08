@@ -24,6 +24,7 @@ import dev.agentknock.BuildConfig
 import dev.agentknock.push.RequestNotifications
 import dev.agentknock.relay.RelayPushRegistrationState
 import dev.agentknock.storage.crypto.VaultProtection
+import dev.agentknock.subscription.AiReviewAccess
 import dev.agentknock.ui.auth.DeviceAuthenticationMode
 import dev.agentknock.ui.components.NavigationBackButton
 
@@ -76,11 +77,15 @@ internal fun SettingsOverviewContent(
         ) {
             item {
                 SettingsGroup {
+                    val deliveryNeedsAttention = pushState != null &&
+                        pushState != RelayPushRegistrationState.REGISTERED
                     SettingsRow(
                         icon = Icons.Outlined.Security,
                         title = "Security and backup",
                         summary = "${authenticationMode.overviewLabel()} · ${protection.overviewDescription()}",
+                        attention = protection.overviewNeedsAttention(),
                         onClick = { onOpen(SettingsPage.SECURITY_BACKUP) },
+                        trailing = { SettingsNavigationChevron() },
                     )
                     SettingsGroupDivider(withIcon = true)
                     SettingsRow(
@@ -88,11 +93,12 @@ internal fun SettingsOverviewContent(
                         title = "Notifications",
                         summary = when {
                             !requestsEnabled -> "Requests needing action are muted"
-                            pushState != null && pushState != RelayPushRegistrationState.REGISTERED ->
-                                "Delivery needs attention"
+                            deliveryNeedsAttention -> "Delivery needs attention"
                             else -> "Request alerts enabled"
                         },
+                        attention = !requestsEnabled || deliveryNeedsAttention,
                         onClick = { onOpen(SettingsPage.NOTIFICATIONS) },
+                        trailing = { SettingsNavigationChevron() },
                     )
                 }
             }
@@ -102,7 +108,10 @@ internal fun SettingsOverviewContent(
                         icon = Icons.Outlined.WorkspacePremium,
                         title = "Plan and billing",
                         summary = subscription.overviewLabel(),
+                        attention = subscription.access == AiReviewAccess.SETUP_REQUIRED ||
+                            subscription.access == AiReviewAccess.UNAVAILABLE,
                         onClick = { onOpen(SettingsPage.SUBSCRIPTION) },
+                        trailing = { SettingsNavigationChevron() },
                     )
                 }
             }
@@ -113,6 +122,7 @@ internal fun SettingsOverviewContent(
                         title = "Audit log",
                         summary = "Security activity kept for one year",
                         onClick = { onOpen(SettingsPage.AUDIT) },
+                        trailing = { SettingsNavigationChevron() },
                     )
                     SettingsGroupDivider(withIcon = true)
                     SettingsRow(
@@ -120,6 +130,7 @@ internal fun SettingsOverviewContent(
                         title = "About Agentknock",
                         summary = "Version ${BuildConfig.VERSION_NAME} (${BuildConfig.VERSION_CODE})",
                         onClick = { onOpen(SettingsPage.ABOUT) },
+                        trailing = { SettingsNavigationChevron() },
                     )
                 }
             }
@@ -129,6 +140,7 @@ internal fun SettingsOverviewContent(
                     summary = "Erase this device's Agentknock data",
                     destructive = true,
                     onClick = { onOpen(SettingsPage.FACTORY_RESET) },
+                    trailing = { SettingsNavigationChevron() },
                 )
             }
         }
@@ -139,11 +151,15 @@ private fun VaultProtection?.overviewDescription(): String = when (this) {
     null -> "Checking encryption"
     else -> when {
         unavailableStoredData.isNotEmpty() -> "Stored data unavailable"
-        this is VaultProtection.ActiveKeysAvailable -> "Backup information"
+        this is VaultProtection.ActiveKeysAvailable -> "Encryption active"
         this is VaultProtection.ActiveKeysUnavailable -> "Current encryption key unavailable"
         else -> "Encryption status unknown"
     }
 }
+
+/** True for every state that [overviewDescription] does not describe as healthy. */
+private fun VaultProtection?.overviewNeedsAttention(): Boolean = this != null &&
+    (unavailableStoredData.isNotEmpty() || this !is VaultProtection.ActiveKeysAvailable)
 
 private fun DeviceAuthenticationMode.overviewLabel(): String = when (this) {
     DeviceAuthenticationMode.DEVICE_LOCK -> "Device lock"

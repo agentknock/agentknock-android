@@ -13,6 +13,7 @@ import androidx.compose.foundation.layout.WindowInsets
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.navigationBars
+import androidx.compose.foundation.layout.systemBars
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.consumeWindowInsets
 import androidx.compose.foundation.layout.imePadding
@@ -23,7 +24,9 @@ import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.text.KeyboardOptions
 import androidx.compose.foundation.verticalScroll
 import androidx.compose.material.icons.Icons
+import androidx.compose.material.icons.outlined.Autorenew
 import androidx.compose.material.icons.outlined.Computer
+import androidx.compose.material.icons.outlined.Link
 import androidx.compose.material.icons.outlined.PhoneAndroid
 import androidx.compose.material.icons.outlined.Settings
 import androidx.compose.material.icons.outlined.SyncAlt
@@ -68,6 +71,7 @@ import dev.agentknock.storage.device.DeviceIdentity
 import dev.agentknock.ui.auth.DeviceAuthenticationChoices
 import dev.agentknock.ui.auth.DeviceAuthenticationMode
 import dev.agentknock.ui.components.NavigationBackButton
+import dev.agentknock.ui.requests.SelectableFact
 import dev.agentknock.ui.theme.agentknockColors
 
 @Composable
@@ -225,7 +229,8 @@ internal fun DeviceSetupContent(
 
 @Composable
 internal fun WelcomeScreen(onContinue: () -> Unit) {
-    Scaffold(contentWindowInsets = WindowInsets.navigationBars) { padding ->
+    // No top bar here, so the status bar inset must come from the scaffold.
+    Scaffold(contentWindowInsets = WindowInsets.systemBars) { padding ->
         Column(
             modifier = Modifier.fillMaxSize().padding(padding).verticalScroll(rememberScrollState())
                 .padding(horizontal = 24.dp, vertical = 32.dp),
@@ -259,7 +264,7 @@ internal fun WelcomeScreen(onContinue: () -> Unit) {
                     WelcomeItem(
                         Icons.Outlined.Computer,
                         "Pair your computer",
-                        "Connect the Agentknock command-line client and compare the pairing code.",
+                        "Connect the Agentknock command-line client and compare the verification code.",
                     )
                     WelcomeItem(
                         Icons.Outlined.SyncAlt,
@@ -318,6 +323,7 @@ internal fun PairingAddressEditor(
     beforeSubmit: @Composable () -> Unit,
 ) {
     val valid = DeviceProtocol.validPairingAddress(address) && address != activeAddress
+    val addressUnavailable = result == ClaimPairingAddressResult.AddressUnavailable
     var fieldValue by remember {
         mutableStateOf(TextFieldValue(address, selection = TextRange(address.length)))
     }
@@ -330,11 +336,20 @@ internal fun PairingAddressEditor(
         if (activeAddress == null) {
             Text("Pairing address", style = MaterialTheme.typography.titleLarge)
         }
-        Text(stringResource(R.string.pairing_address_description))
+        Text(
+            stringResource(R.string.pairing_address_description),
+            color = MaterialTheme.colorScheme.onSurfaceVariant,
+        )
         if (activeAddress != null) {
             Text(
                 stringResource(R.string.change_pairing_address_existing_clients),
                 color = MaterialTheme.colorScheme.onSurfaceVariant,
+            )
+            SelectableFact(
+                icon = Icons.Outlined.Link,
+                label = "Current pairing address",
+                value = activeAddress,
+                modifier = Modifier.padding(vertical = 4.dp),
             )
         }
         OutlinedTextField(
@@ -347,14 +362,15 @@ internal fun PairingAddressEditor(
             label = { Text(stringResource(R.string.pairing_address)) },
             supportingText = {
                 Text(
-                    if (address == activeAddress) {
-                        stringResource(R.string.pairing_address_unchanged)
-                    } else {
-                        stringResource(R.string.pairing_address_format)
+                    when {
+                        address == activeAddress -> stringResource(R.string.pairing_address_unchanged)
+                        addressUnavailable -> result.explanation()
+                        else -> stringResource(R.string.pairing_address_format)
                     },
                 )
             },
-            isError = address.isNotEmpty() && !DeviceProtocol.validPairingAddress(address),
+            isError = addressUnavailable ||
+                (address.isNotEmpty() && !DeviceProtocol.validPairingAddress(address)),
             enabled = !claiming,
             singleLine = true,
             keyboardOptions = KeyboardOptions(
@@ -364,18 +380,21 @@ internal fun PairingAddressEditor(
                 imeAction = ImeAction.Done,
             ),
         )
-        result?.takeUnless { it == ClaimPairingAddressResult.Claimed }?.let {
-            Text(
-                it.explanation(),
-                color = if (it == ClaimPairingAddressResult.AddressUnavailable) {
-                    MaterialTheme.colorScheme.error
-                } else {
-                    MaterialTheme.colorScheme.onSurfaceVariant
-                },
-            )
+        result?.takeUnless {
+            it == ClaimPairingAddressResult.Claimed || it == ClaimPairingAddressResult.AddressUnavailable
+        }?.let {
+            Text(it.explanation(), color = MaterialTheme.colorScheme.onSurfaceVariant)
         }
-        OutlinedButton(onClick = onGenerate, enabled = !claiming, modifier = Modifier.fillMaxWidth()) {
-            Text(stringResource(R.string.another_suggestion))
+        Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.End) {
+            OutlinedButton(onClick = onGenerate, enabled = !claiming) {
+                Icon(
+                    Icons.Outlined.Autorenew,
+                    contentDescription = null,
+                    modifier = Modifier.size(18.dp),
+                )
+                Spacer(Modifier.width(8.dp))
+                Text(stringResource(R.string.another_suggestion))
+            }
         }
         beforeSubmit()
         Button(

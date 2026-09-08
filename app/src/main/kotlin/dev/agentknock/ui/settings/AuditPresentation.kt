@@ -50,7 +50,7 @@ internal fun AuditEvent.presentation(): AuditPresentation = when (type) {
 
     AuditEventType.PAIRING_DECIDED -> AuditPresentation(
         title = when (outcome) {
-            AuditOutcome.APPROVED -> "Pairing code accepted"
+            AuditOutcome.APPROVED -> "Verification code accepted"
             AuditOutcome.REJECTED -> "Pairing rejected"
             else -> invalidOutcome()
         },

@@ -18,6 +18,7 @@ import androidx.compose.material.icons.automirrored.outlined.OpenInNew
 import androidx.compose.material.icons.outlined.AutoAwesome
 import androidx.compose.material.icons.outlined.CloudOff
 import androidx.compose.material.icons.outlined.HourglassTop
+import androidx.compose.material.icons.outlined.Lock
 import androidx.compose.material.icons.outlined.Refresh
 import androidx.compose.material.icons.outlined.WorkspacePremium
 import androidx.compose.material3.Button
@@ -83,11 +84,20 @@ internal fun SubscriptionAndBillingScreen(
                     },
                     style = MaterialTheme.typography.bodyMedium,
                 )
-                Text(
-                    "Sensitive values and private keys are never sent for review.",
-                    style = MaterialTheme.typography.bodyMedium,
-                    color = LocalContentColor.current.copy(alpha = 0.85f),
-                )
+                Row(
+                    horizontalArrangement = Arrangement.spacedBy(8.dp),
+                    verticalAlignment = Alignment.Top,
+                ) {
+                    Icon(
+                        Icons.Outlined.Lock,
+                        contentDescription = null,
+                        modifier = Modifier.padding(top = 2.dp).size(18.dp),
+                    )
+                    Text(
+                        "Sensitive values and private keys are never sent for review.",
+                        style = MaterialTheme.typography.bodyMedium,
+                    )
+                }
                 if (state.access == AiReviewAccess.INACTIVE && !activating) {
                     Text(
                         "Secrets set to Ask AI will ask you instead. Your settings and instructions " +
@@ -211,17 +221,28 @@ private fun SubscriptionOffer(
                 horizontalArrangement = Arrangement.spacedBy(12.dp),
                 verticalAlignment = Alignment.CenterVertically,
             ) {
-                Icon(Icons.Outlined.WorkspacePremium, contentDescription = null)
+                Icon(
+                    Icons.Outlined.WorkspacePremium,
+                    contentDescription = null,
+                    tint = MaterialTheme.colorScheme.primary,
+                )
                 Column(Modifier.weight(1f)) {
                     Text("AI review subscription", style = MaterialTheme.typography.titleMedium)
-                    Text(offer.price, style = MaterialTheme.typography.titleLarge)
+                    Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+                        Text(
+                            offer.price,
+                            style = MaterialTheme.typography.titleLarge,
+                            modifier = Modifier.alignByBaseline(),
+                        )
+                        Text(
+                            offer.terms,
+                            style = MaterialTheme.typography.bodyMedium,
+                            color = MaterialTheme.colorScheme.onSurfaceVariant,
+                            modifier = Modifier.alignByBaseline(),
+                        )
+                    }
                 }
             }
-            Text(
-                offer.terms,
-                style = MaterialTheme.typography.bodySmall,
-                color = MaterialTheme.colorScheme.onSurfaceVariant,
-            )
             Button(
                 onClick = onSubscribe,
                 enabled = enabled,
@@ -329,6 +350,7 @@ private fun AccessCard(
                 Icon(
                     Icons.Outlined.AutoAwesome,
                     contentDescription = null,
+                    tint = if (highlighted || warning) LocalContentColor.current else MaterialTheme.colorScheme.primary,
                 )
                 Column(Modifier.weight(1f)) {
                     Text(

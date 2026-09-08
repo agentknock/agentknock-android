@@ -307,7 +307,7 @@ private fun DeviceManagementResult.message(enabled: Boolean): String = when (thi
 }
 
 private fun PairingDecisionResult.message(): String = when (this) {
-    PairingDecisionResult.VERIFIED -> "Pairing code verified"
+    PairingDecisionResult.VERIFIED -> "Verification code confirmed"
     PairingDecisionResult.REJECTED -> "Pairing rejected"
     PairingDecisionResult.NOT_PENDING -> "This pairing no longer needs a decision"
     PairingDecisionResult.NOT_FOUND -> "Request is no longer available"

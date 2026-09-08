@@ -13,6 +13,7 @@ import androidx.compose.foundation.text.selection.SelectionContainer
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.outlined.Computer
 import androidx.compose.material.icons.outlined.ContentCopy
+import androidx.compose.material.icons.outlined.ErrorOutline
 import androidx.compose.material3.Icon
 import androidx.compose.material3.IconButton
 import androidx.compose.material3.ButtonDefaults
@@ -74,6 +75,12 @@ internal fun PairingRequestDetail(
                     pairing.pairingState == PairingState.COMPLETED -> NoticeTone.SUCCESS
                     else -> NoticeTone.NEUTRAL
                 },
+                icon = Icons.Outlined.ErrorOutline.takeIf { pairing.pairingState.usesErrorStatus },
+                detail = if (pairing.pairingState == PairingState.EXCHANGE_FAILED) {
+                    pairing.error ?: "The secure exchange ended before the pairing could be verified."
+                } else {
+                    null
+                },
             ),
             dates.timestamp(request.receivedAt),
         )
@@ -104,11 +111,11 @@ internal fun PairingRequestDetail(
                 }
                 Column(verticalArrangement = Arrangement.spacedBy(8.dp)) {
                     Text(
-                        "Which code is shown by the client?",
+                        "Which verification code is shown by the client?",
                         style = MaterialTheme.typography.titleMedium,
                     )
                     Text(
-                        "Choose the exact same code to accept this client. " +
+                        "Choose the exact same verification code to accept this client. " +
                             "A wrong choice rejects the pairing.",
                         style = MaterialTheme.typography.bodyMedium,
                         color = MaterialTheme.colorScheme.onSurfaceVariant,
@@ -141,7 +148,7 @@ internal fun PairingRequestDetail(
                 }
             }
             PairingState.WAITING_FOR_FINISH -> {
-                Text("Code verified", style = MaterialTheme.typography.titleMedium)
+                Text("Verification code confirmed", style = MaterialTheme.typography.titleMedium)
                 Text("Run this command on the client to finish pairing:")
                 val command = "agentknock pairing finish"
                 InformationSurface {
@@ -169,14 +176,14 @@ internal fun PairingRequestDetail(
                 NoticeTone.SUBDUED,
             )
             PairingState.EXCHANGE_PENDING -> Text(
-                "Waiting for the client's secure exchange before a code can be shown. " +
+                "Waiting for the client's secure exchange before a verification code can be shown. " +
                     "Reject this attempt to allow another pairing.",
             )
-            PairingState.EXCHANGE_FAILED -> Notice(
-                "Pairing could not continue",
-                pairing.error
-                    ?: "The secure exchange ended before the pairing could be verified.",
-                NoticeTone.DANGER,
+            PairingState.EXCHANGE_FAILED -> Text(
+                "Reject this attempt to allow another pairing, then start pairing again " +
+                    "from the client.",
+                style = MaterialTheme.typography.bodyMedium,
+                color = MaterialTheme.colorScheme.onSurfaceVariant,
             )
         }
         if (
@@ -197,7 +204,7 @@ internal fun PairingRequestDetail(
         Disclosure("Technical details") {
             DetailValue("Received", dates.timestamp(request.receivedAt, includeSeconds = true))
             pairing.decidedAt?.takeIf { pairing.pairingState.hasAcceptedSas }?.let {
-                DetailValue("Code accepted", dates.timestamp(it, includeSeconds = true))
+                DetailValue("Verification code accepted", dates.timestamp(it, includeSeconds = true))
             }
             request.completedAt?.let {
                 DetailValue("Completed", dates.timestamp(it, includeSeconds = true))
@@ -223,7 +230,7 @@ internal fun PairingRequestDetail(
 private fun PairingState.label(): String = when (this) {
     PairingState.EXCHANGE_PENDING -> "Waiting"
     PairingState.EXCHANGE_FAILED -> "Pairing could not continue"
-    PairingState.SAS_VERIFICATION_PENDING -> "Verify security code"
+    PairingState.SAS_VERIFICATION_PENDING -> "Compare verification code"
     PairingState.WAITING_FOR_FINISH -> "Waiting for client"
     PairingState.REJECTED -> "Rejected"
     PairingState.COMPLETED -> "Completed"

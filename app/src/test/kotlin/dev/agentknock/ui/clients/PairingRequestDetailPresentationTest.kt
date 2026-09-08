@@ -11,7 +11,7 @@ import org.junit.Test
 class PairingRequestDetailPresentationTest {
     @Test
     fun `metadata warning is shown near actionable SAS without error status styling`() {
-        val warning = "The client details could not be read, but the security code is valid."
+        val warning = "The client details could not be read, but the verification code is valid."
         val details = pairingDetails(
             state = PairingState.SAS_VERIFICATION_PENDING,
             error = warning,
