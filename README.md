@@ -4,6 +4,9 @@ Developer secrets on your phone, provided only to approved commands.
 
 The app is built with Kotlin and Jetpack Compose.
 
+The [device-relay protocol](docs/device-relay-protocol.md) specifies relay
+connections, message delivery and recovery, and device HTTP endpoints.
+
 ## Development
 
 The reproducible development shell provides JDK 17 and the Android SDK on
