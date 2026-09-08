@@ -11,7 +11,7 @@ plugins {
     alias(libs.plugins.room3)
 }
 
-val agentknockVersionCode = 45
+val agentknockVersionCode = 46
 val agentknockVersionName = "0.2.0"
 val playCredentialsFile = providers.environmentVariable("AGENTKNOCK_PLAY_CREDENTIALS_FILE")
 val sourceRevision = providers.environmentVariable("AGENTKNOCK_SOURCE_REVISION")

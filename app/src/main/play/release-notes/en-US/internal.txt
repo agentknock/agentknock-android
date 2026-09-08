@@ -1,1 +1,1 @@
-Clearer approval screens for secret use, Git signing, and SSH authentication. Improved command readability and consistent Allow once / Deny once actions. Refined the Secrets list, AI instructions, and secret details, including more readable SSH fingerprints.
+Refined client management, pairing, and secret upload screens. Clearer secret editors, approval settings, and AI instructions. Improved setup guidance, security and notification settings, billing, and audit history, with clearer offline, empty, and confirmation states.
