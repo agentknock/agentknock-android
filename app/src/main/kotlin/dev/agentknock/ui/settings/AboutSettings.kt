@@ -23,6 +23,15 @@ import androidx.compose.ui.unit.dp
 import androidx.core.net.toUri
 import dev.agentknock.BuildConfig
 import dev.agentknock.storage.device.DeviceIdentity
+import androidx.compose.foundation.Image
+import androidx.compose.foundation.layout.Row
+import androidx.compose.foundation.layout.size
+import androidx.compose.foundation.shape.CircleShape
+import androidx.compose.material3.Surface
+import androidx.compose.ui.Alignment
+import androidx.compose.ui.graphics.Color
+import androidx.compose.ui.res.painterResource
+import dev.agentknock.R
 
 @Composable
 internal fun AboutSettings(
@@ -41,15 +50,27 @@ internal fun AboutSettings(
         PageTopBar("About Agentknock", onBack)
         LazyColumn(
             state = listState,
-            contentPadding = PaddingValues(start = 16.dp, end = 16.dp, bottom = 24.dp),
+            contentPadding = PaddingValues(start = 16.dp, end = 16.dp, top = 8.dp, bottom = 24.dp),
             verticalArrangement = Arrangement.spacedBy(16.dp),
         ) {
             item {
                 Column(
                     modifier = Modifier.padding(horizontal = 12.dp, vertical = 4.dp),
-                    verticalArrangement = Arrangement.spacedBy(6.dp),
+                    verticalArrangement = Arrangement.spacedBy(10.dp),
                 ) {
-                    Text("Agentknock", style = MaterialTheme.typography.headlineMedium)
+                    Row(
+                        horizontalArrangement = Arrangement.spacedBy(16.dp),
+                        verticalAlignment = Alignment.CenterVertically,
+                    ) {
+                        Surface(color = Color.Black, shape = CircleShape, modifier = Modifier.size(56.dp)) {
+                            Image(
+                                painter = painterResource(R.drawable.ic_launcher_foreground),
+                                contentDescription = null,
+                                modifier = Modifier.padding(4.dp),
+                            )
+                        }
+                        Text("Agentknock", style = MaterialTheme.typography.headlineMedium)
+                    }
                     Text(
                         "Developer secrets on your phone, provided only to approved commands. " +
                             "Supply environment variables, sign Git commits and tags, or authenticate " +

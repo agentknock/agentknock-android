@@ -1,8 +1,8 @@
 # Screen review queue
 
-One checkbox is one specific Compose preview PNG. Ordered by importance to approval
-decisions and everyday secret/client management, followed by setup, settings,
-and less frequent screens.
+One checkbox is one specific Compose preview PNG. Completed checks keep their
+original order. Remaining checks prioritize screens not yet reviewed, then
+variants most likely to benefit from updates, then the other variants.
 
 All screen reviews use one target: **dark theme, a 360 × 800 dp portrait phone,
 and normal text size (100%, font scale 1.0)**. Use this same configuration for
@@ -70,25 +70,28 @@ All entries below already have Compose previews matching the current configurati
 44. [x] **Pairing address unavailable** — `pairing-address-unavailable / dark`.
 45. [x] **Notifications blocked** — `notifications-blocked / dark`.
 46. [x] **Suspended client** — `client-suspended / dark`.
-47. [ ] **Plan & billing: active subscription** — `subscription-active / dark`.
-48. [ ] **Plan & billing: payment pending** — `subscription-pending / dark`.
-49. [ ] **Plan & billing: store unavailable** — `subscription-unavailable / dark`.
-50. [ ] **Secrets list: empty** — `secrets-empty / dark`.
-51. [ ] **Clients list: empty** — `clients-empty / dark`.
-52. [ ] **Requests list: empty** — `requests-empty / dark`.
-53. [ ] **Audit log: empty** — `audit-empty / dark`.
-54. [ ] **Git signing: tag** — `git-sign-tag / dark`.
-55. [ ] **SSH authentication: plain public key** — `ssh-authentication-publickey / dark`.
-56. [ ] **Secret use: completed** — `invocation-completed / dark`.
-57. [ ] **Git signing: signed** — `git-sign-signed / dark`.
-58. [ ] **SSH authentication: signed** — `ssh-authentication-signed / dark`.
-59. [ ] **Security: backup section** — `security-backup / dark`.
-60. [ ] **Client detail: technical details** — `client-technical-details / dark`.
-61. [ ] **About** — `about / dark`.
-62. [ ] **About: device details** — `about-device / dark`.
-63. [ ] **Factory reset explanation** — `factory-reset / dark`.
-64. [ ] **Factory reset action** — `factory-reset-action / dark`.
-65. [ ] **Factory reset confirmation dialog** — `factory-reset-confirmation / dark`.
+47. [x] **About** — `about / dark`.
+48. [x] **About: device details** — `about-device / dark`.
+49. [x] **Factory reset explanation** — `factory-reset / dark`.
+50. [x] **Factory reset action** — `factory-reset-action / dark`.
+51. [x] **Factory reset confirmation dialog** — `factory-reset-confirmation / dark`.
+52. [x] **Plan & billing: payment pending** — `subscription-pending / dark`.
+53. [x] **Plan & billing: store unavailable** — `subscription-unavailable / dark`.
+54. [x] **Security: backup section** — `security-backup / dark`.
+55. [x] **Secrets list: empty** — `secrets-empty / dark`.
+56. [x] **Git signing: signed** — `git-sign-signed / dark`.
+57. [x] **SSH authentication: signed** — `ssh-authentication-signed / dark`.
+
+## Remaining variants
+
+58. [ ] **Plan & billing: active subscription** — `subscription-active / dark`.
+59. [ ] **Clients list: empty** — `clients-empty / dark`.
+60. [ ] **Requests list: empty** — `requests-empty / dark`.
+61. [ ] **Audit log: empty** — `audit-empty / dark`.
+62. [ ] **Git signing: tag** — `git-sign-tag / dark`.
+63. [ ] **SSH authentication: plain public key** — `ssh-authentication-publickey / dark`.
+64. [ ] **Secret use: completed** — `invocation-completed / dark`.
+65. [ ] **Client detail: technical details** — `client-technical-details / dark`.
 66. [ ] **Requests list: long command** — `requests-long-command / dark`.
 67. [ ] **Secret use: long command** — `invocation-long-command / dark`.
 68. [ ] **Requests list: multiple secrets** — `requests-multiple-secrets / dark`.

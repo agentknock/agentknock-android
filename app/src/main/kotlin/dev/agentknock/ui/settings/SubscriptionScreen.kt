@@ -121,7 +121,10 @@ internal fun SubscriptionAndBillingScreen(
                 state.access == AiReviewAccess.CHECKING ->
                     StoreStatus("Checking AI access…", showProgress = true)
                 state.statusUnavailable || state.access == AiReviewAccess.UNAVAILABLE ->
-                    StoreStatus("AI access couldn’t be checked. You can still decide requests yourself.")
+                    StoreStatus(
+                        "AI access couldn’t be checked. You can still decide requests yourself.",
+                        attention = true,
+                    )
                 state.googlePlayPurchase == GooglePlayPurchaseState.PENDING ->
                     PurchaseStatusCard(
                         title = "Payment pending",
@@ -152,11 +155,14 @@ internal fun SubscriptionAndBillingScreen(
                     }
                 }
                 state.access == AiReviewAccess.SETUP_REQUIRED ->
-                    StoreStatus("Finish device setup before subscribing.")
+                    StoreStatus("Finish device setup before subscribing.", attention = true)
                 state.playStore == PlayStoreAvailability.CHECKING ->
                     StoreStatus("Loading Google Play plans…", showProgress = true)
                 state.playStore == PlayStoreAvailability.UNAVAILABLE ->
-                    StoreStatus("Google Play billing is unavailable right now. Subscribing requires a signed-in Play Store and a Play-installed copy of Agentknock. Existing AI access can still be refreshed.")
+                    StoreStatus(
+                        "Google Play billing is unavailable right now. Subscribing requires a signed-in Play Store and a Play-installed copy of Agentknock. Existing AI access can still be refreshed.",
+                        attention = true,
+                    )
                 state.offers.isEmpty() ->
                     StoreStatus("No subscription plan is currently available in Google Play.")
                 else -> {
@@ -295,8 +301,14 @@ private fun ManageSubscriptionButton(onClick: () -> Unit, enabled: Boolean) {
     }
 }
 
+/** A store or access status line; [attention] marks a problem the user may need to act on. */
 @Composable
-private fun StoreStatus(text: String, showProgress: Boolean = false) {
+private fun StoreStatus(text: String, showProgress: Boolean = false, attention: Boolean = false) {
+    val color = if (attention) {
+        MaterialTheme.agentknockColors.attentionAccent
+    } else {
+        MaterialTheme.colorScheme.onSurfaceVariant
+    }
     Row(
         Modifier.fillMaxWidth().padding(vertical = 8.dp),
         horizontalArrangement = Arrangement.spacedBy(12.dp),
@@ -305,13 +317,9 @@ private fun StoreStatus(text: String, showProgress: Boolean = false) {
         if (showProgress) {
             CircularProgressIndicator(Modifier.size(20.dp), strokeWidth = 2.dp)
         } else {
-            Icon(Icons.Outlined.CloudOff, contentDescription = null)
+            Icon(Icons.Outlined.CloudOff, contentDescription = null, tint = color)
         }
-        Text(
-            text,
-            style = MaterialTheme.typography.bodyMedium,
-            color = MaterialTheme.colorScheme.onSurfaceVariant,
-        )
+        Text(text, style = MaterialTheme.typography.bodyMedium, color = color)
     }
 }
 

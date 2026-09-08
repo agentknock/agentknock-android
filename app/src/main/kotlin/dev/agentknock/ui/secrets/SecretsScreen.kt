@@ -49,6 +49,14 @@ import dev.agentknock.ui.components.ProseEditorScreen
 import kotlinx.coroutines.flow.collectLatest
 import kotlinx.coroutines.launch
 import java.util.UUID
+import androidx.compose.foundation.layout.Spacer
+import androidx.compose.foundation.layout.height
+import androidx.compose.foundation.layout.size
+import androidx.compose.foundation.shape.CircleShape
+import androidx.compose.material3.Icon
+import androidx.compose.material3.Surface
+import androidx.compose.ui.graphics.vector.ImageVector
+import androidx.compose.ui.text.style.TextAlign
 
 @Composable
 internal fun SecretsScreen(
@@ -312,6 +320,7 @@ internal fun EmptyMessage(
     title: String,
     description: String,
     modifier: Modifier = Modifier,
+    icon: ImageVector? = null,
 ) {
     Box(modifier, contentAlignment = Alignment.Center) {
         Column(
@@ -319,11 +328,25 @@ internal fun EmptyMessage(
             horizontalAlignment = Alignment.CenterHorizontally,
             verticalArrangement = Arrangement.spacedBy(8.dp),
         ) {
-            Text(title, style = MaterialTheme.typography.titleLarge)
+            icon?.let {
+                Surface(
+                    color = MaterialTheme.colorScheme.secondaryContainer,
+                    contentColor = MaterialTheme.colorScheme.onSecondaryContainer,
+                    shape = CircleShape,
+                    modifier = Modifier.size(96.dp),
+                ) {
+                    Box(contentAlignment = Alignment.Center) {
+                        Icon(it, contentDescription = null, modifier = Modifier.size(40.dp))
+                    }
+                }
+                Spacer(Modifier.height(12.dp))
+            }
+            Text(title, style = MaterialTheme.typography.titleLarge, textAlign = TextAlign.Center)
             Text(
                 description,
                 style = MaterialTheme.typography.bodyMedium,
                 color = MaterialTheme.colorScheme.onSurfaceVariant,
+                textAlign = TextAlign.Center,
             )
         }
     }

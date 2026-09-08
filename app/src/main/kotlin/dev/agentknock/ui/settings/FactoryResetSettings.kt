@@ -30,6 +30,16 @@ import androidx.compose.ui.semantics.semantics
 import androidx.compose.ui.text.input.KeyboardCapitalization
 import androidx.compose.ui.text.input.KeyboardType
 import androidx.compose.ui.unit.dp
+import androidx.compose.foundation.layout.Row
+import androidx.compose.material.icons.Icons
+import androidx.compose.material.icons.outlined.CloudOff
+import androidx.compose.material.icons.outlined.Computer
+import androidx.compose.material.icons.outlined.History
+import androidx.compose.material.icons.outlined.Key
+import androidx.compose.material.icons.outlined.PhoneAndroid
+import androidx.compose.material3.Icon
+import androidx.compose.ui.Alignment
+import androidx.compose.ui.graphics.vector.ImageVector
 
 @Composable
 internal fun FactoryResetSettings(
@@ -58,6 +68,8 @@ internal fun FactoryResetSettings(
         AlertDialog(
             modifier = confirmationModifier,
             onDismissRequest = cancelLocalClear,
+            icon = { Icon(Icons.Outlined.CloudOff, contentDescription = null) },
+            iconContentColor = MaterialTheme.colorScheme.error,
             title = { Text("Relay deletion not confirmed") },
             text = {
                 Text(
@@ -88,11 +100,11 @@ internal fun FactoryResetSettings(
                 modifier = Modifier.semantics { heading() },
             )
             Text("Permanently erase all Agentknock data on this device:")
-            Column(verticalArrangement = Arrangement.spacedBy(6.dp)) {
-                Text("• Device identity and encryption keys")
-                Text("• Secrets and their stored values")
-                Text("• Paired clients and requests")
-                Text("• Audit log and settings")
+            Column(verticalArrangement = Arrangement.spacedBy(10.dp)) {
+                ErasedItem(Icons.Outlined.PhoneAndroid, "Device identity and encryption keys")
+                ErasedItem(Icons.Outlined.Key, "Secrets and their stored values")
+                ErasedItem(Icons.Outlined.Computer, "Paired clients and requests")
+                ErasedItem(Icons.Outlined.History, "Audit log and settings")
             }
             Text("Setup starts again with a new device identity and pairing address. Every client must pair again.")
             Text("This does not cancel a Google Play subscription. Manage subscriptions in Google Play.")
@@ -134,5 +146,21 @@ internal fun FactoryResetSettings(
                 }
             }
         }
+    }
+}
+
+@Composable
+private fun ErasedItem(icon: ImageVector, text: String) {
+    Row(
+        horizontalArrangement = Arrangement.spacedBy(12.dp),
+        verticalAlignment = Alignment.CenterVertically,
+    ) {
+        Icon(
+            icon,
+            contentDescription = null,
+            tint = MaterialTheme.colorScheme.onSurfaceVariant,
+            modifier = Modifier.size(20.dp),
+        )
+        Text(text)
     }
 }

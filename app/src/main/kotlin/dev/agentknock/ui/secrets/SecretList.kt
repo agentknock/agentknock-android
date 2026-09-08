@@ -89,6 +89,7 @@ internal fun SecretList(
                         title = stringResource(R.string.no_secrets),
                         description = stringResource(R.string.no_secrets_description),
                         modifier = Modifier.fillMaxSize(),
+                        icon = Icons.Outlined.Key,
                     )
                 }
             } else {

@@ -1,1 +1,1 @@
-Refined client management, pairing, and secret upload screens. Clearer secret editors, approval settings, and AI instructions. Improved setup guidance, security and notification settings, billing, and audit history, with clearer offline, empty, and confirmation states.
+Refined the About screen, factory reset guidance and confirmation, and backup explanations. Clearer billing warnings when the store or AI access is unavailable, plus an improved empty Secrets screen.

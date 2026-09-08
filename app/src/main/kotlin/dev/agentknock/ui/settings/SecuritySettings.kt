@@ -18,6 +18,19 @@ import dev.agentknock.ui.auth.DeviceAuthenticationMode
 import dev.agentknock.ui.components.Notice
 import dev.agentknock.ui.components.NoticeTone
 import dev.agentknock.ui.auth.DeviceAuthenticationChoices
+import androidx.compose.foundation.layout.Row
+import androidx.compose.foundation.layout.fillMaxWidth
+import androidx.compose.foundation.layout.padding
+import androidx.compose.foundation.layout.size
+import androidx.compose.material.icons.Icons
+import androidx.compose.material.icons.outlined.CloudDone
+import androidx.compose.material.icons.outlined.PhoneAndroid
+import androidx.compose.material3.Icon
+import androidx.compose.material3.MaterialTheme
+import androidx.compose.material3.Text
+import androidx.compose.ui.Alignment
+import androidx.compose.ui.graphics.vector.ImageVector
+import androidx.compose.foundation.text.selection.SelectionContainer
 
 @Composable
 internal fun SecuritySettings(
@@ -108,10 +121,28 @@ internal fun SecuritySettingsContent(
                 Column {
                     SettingsSectionLabel("Backup")
                     SettingsGroup {
-                        SettingsValueRow(
-                            label = "Android backup",
-                            value = "Metadata, history and encrypted values are eligible for Android backup. Encryption keys stay on this installation and are not backed up.",
-                        )
+                        Column(
+                            modifier = Modifier.fillMaxWidth().padding(horizontal = 16.dp, vertical = 12.dp),
+                            verticalArrangement = Arrangement.spacedBy(8.dp),
+                        ) {
+                            Text(
+                                "Android backup",
+                                style = MaterialTheme.typography.bodySmall,
+                                color = MaterialTheme.colorScheme.onSurfaceVariant,
+                            )
+                            SelectionContainer {
+                                Column(verticalArrangement = Arrangement.spacedBy(8.dp)) {
+                                    BackupFact(
+                                        Icons.Outlined.CloudDone,
+                                        "Metadata, history and encrypted values are eligible for Android backup.",
+                                    )
+                                    BackupFact(
+                                        Icons.Outlined.PhoneAndroid,
+                                        "Encryption keys stay on this installation and are not backed up.",
+                                    )
+                                }
+                            }
+                        }
                         SettingsGroupDivider()
                         SettingsValueRow(
                             label = "After a restore",
@@ -162,4 +193,21 @@ private fun Set<VaultKeyPurpose>.explanation(): String = when (this) {
     setOf(VaultKeyPurpose.DEVICE_STATE) ->
         "Some client pairings, device credentials, or in-progress requests cannot be decrypted on this device."
     else -> "Some secret values or encrypted device state cannot be decrypted on this device."
+}
+
+/** One line of the backup explanation, led by an icon for what is or is not backed up. */
+@Composable
+private fun BackupFact(icon: ImageVector, text: String) {
+    Row(
+        horizontalArrangement = Arrangement.spacedBy(12.dp),
+        verticalAlignment = Alignment.Top,
+    ) {
+        Icon(
+            icon,
+            contentDescription = null,
+            tint = MaterialTheme.colorScheme.onSurfaceVariant,
+            modifier = Modifier.padding(top = 2.dp).size(20.dp),
+        )
+        Text(text, style = MaterialTheme.typography.bodyMedium)
+    }
 }
