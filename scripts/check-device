@@ -56,6 +56,8 @@ cleanup() {
     if [[ -n "$emulator_pid" ]]; then
         timeout 10 adb -s "$device_serial" logcat -d > "$device_report_dir/logcat.txt" 2>&1 || true
         if (( result != 0 )); then
+            echo 'Emulator feature configuration:' >&2
+            grep -Ei 'feature|api level|systempath' "$device_report_dir/emulator.txt" >&2 || true
             echo 'Emulator output:' >&2
             tail -n 60 "$device_report_dir/emulator.txt" >&2
             echo 'Android crashes:' >&2
@@ -76,11 +78,11 @@ printf 'no\n' | avdmanager create avd --name agentknock_ci \
     --package "$AGENTKNOCK_EMULATOR_IMAGE" --device pixel_7
 emulator_options=(-gpu swiftshader -memory 2048)
 if [[ "$AGENTKNOCK_EMULATOR_API" == 37 ]]; then
-    # API 37's mapper requires DMA readback; hosted SDK defaults leave it disabled.
-    emulator_options=(-gpu swangle -memory 4096 -feature GLDirectMem)
+    # API 37's mapper needs both host memory features for DMA readback.
+    emulator_options=(-gpu swangle -memory 4096 -feature 'GLDirectMem,HasSharedSlotsHostMemoryAllocator')
 fi
 # Google services exceed the hosted SDK's default writable partition during boot.
-emulator -avd agentknock_ci -port 5556 -accel on -no-window -no-audio -no-boot-anim -no-metrics \
+emulator -avd agentknock_ci -port 5556 -accel on -no-window -no-audio -no-boot-anim -no-metrics -verbose \
     -no-snapshot -partition-size 4096 -cores 2 "${emulator_options[@]}" \
     > "$device_report_dir/emulator.txt" 2>&1 &
 emulator_pid=$!
