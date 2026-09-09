@@ -55,6 +55,26 @@ Nix is optional. On Linux x86-64, `nix develop` supplies the JDK, SDK, Python,
 and Pillow; `nix develop .#emulator` also includes an emulator and system image.
 Local builds and tests do not require publishing credentials.
 
+## Continuous integration
+
+Pull requests and pushes to `master` run repository checks plus independent Play
+and FOSS jobs for JVM tests, debug/release lint, all screen previews, debug APKs,
+and minified releases. Instrumentation runs on API 26 and 37 as soon as each
+distribution's debug APKs are ready. Separate API 26 and 37 jobs install and
+launch the minified FOSS APK or device-specific APKs from the Play bundle.
+Release checks use disposable signing keys and do not publish anything.
+
+The workflow has 19 work jobs and a final `CI passed` check. Reports and preview
+galleries are retained for seven days; APKs, bundles, and mappings for three.
+GitHub runners use their Android SDK directly. Gradle caches are scoped by job
+and distribution, and pull requests can reuse their own caches across updates.
+
+For the repository checks locally, install actionlint and shellcheck and run
+`scripts/check-repository`, or run it in `nix develop .#ci`. The optional `ci-emulator-26` and `ci-emulator-37`
+Nix shells also supply the image and tools for `scripts/check-device`. Pass
+`foss instrumentation` or `foss release` as arguments, substituting `play` for
+the Play distribution. Build the corresponding artifacts first.
+
 ## Screen previews
 
 The preview helper requires Bash and Python 3.10 or newer:

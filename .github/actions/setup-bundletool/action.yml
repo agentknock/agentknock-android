@@ -1,0 +1,19 @@
+name: Set up bundletool
+description: Install the checksum-verified bundletool used to inspect and install Play bundles.
+runs:
+  using: composite
+  steps:
+    - name: Install bundletool
+      shell: bash
+      run: |
+        tool_dir="$RUNNER_TEMP/bundletool"
+        mkdir -p "$tool_dir"
+        curl --proto '=https' --tlsv1.2 --fail --silent --show-error --location \
+          https://github.com/google/bundletool/releases/download/1.18.3/bundletool-all-1.18.3.jar \
+          --output "$tool_dir/bundletool.jar"
+        echo "a099cfa1543f55593bc2ed16a70a7c67fe54b1747bb7301f37fdfd6d91028e29  $tool_dir/bundletool.jar" \
+          | sha256sum --check
+        printf '#!/usr/bin/env bash\nexec java -jar "%s/bundletool.jar" "$@"\n' "$tool_dir" \
+          > "$tool_dir/bundletool"
+        chmod +x "$tool_dir/bundletool"
+        echo "$tool_dir" >> "$GITHUB_PATH"

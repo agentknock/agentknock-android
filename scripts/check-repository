@@ -1,0 +1,7 @@
+#!/usr/bin/env bash
+set -euo pipefail
+cd -- "$(dirname -- "${BASH_SOURCE[0]}")/.."
+
+actionlint
+shellcheck publish-internal publish-subscriptions preview-ui scripts/check-repository scripts/check-device
+./gradlew --build-cache --max-workers=2 :spotlessCheck :app:verifyFossDependencies

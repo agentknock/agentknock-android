@@ -1,0 +1,33 @@
+name: Set up Android build
+description: Use the hosted JDK and Android SDK with a Gradle cache for this job.
+inputs:
+  cache-scope:
+    description: Job and distribution whose Gradle state is cached.
+    required: true
+runs:
+  using: composite
+  steps:
+    - uses: actions/setup-java@b6effb05e454b25005698d916606bdc6ffcbf961 # v5
+      with:
+        distribution: temurin
+        java-version: '17'
+
+    - name: Install required SDK packages
+      shell: bash
+      run: sdkmanager 'platforms;android-37.0' 'build-tools;36.0.0' platform-tools
+
+    - name: Set up Gradle and validate wrapper
+      uses: gradle/actions/setup-gradle@9c971963bec38e04b3d30dcc455b5382be2fdbfb # v6.3.0
+      with:
+        cache-disabled: true
+
+    - name: Cache Gradle state
+      uses: actions/cache@caa296126883cff596d87d8935842f9db880ef25 # v5
+      with:
+        path: |
+          ~/.gradle/caches
+          ~/.gradle/wrapper
+        key: ${{ runner.os }}-${{ runner.arch }}-gradle-${{ inputs.cache-scope }}-${{ hashFiles('**/*.gradle.kts', 'gradle/libs.versions.toml', 'gradle/wrapper/gradle-wrapper.properties') }}-${{ github.sha }}
+        restore-keys: |
+          ${{ runner.os }}-${{ runner.arch }}-gradle-${{ inputs.cache-scope }}-${{ hashFiles('**/*.gradle.kts', 'gradle/libs.versions.toml', 'gradle/wrapper/gradle-wrapper.properties') }}-
+          ${{ runner.os }}-${{ runner.arch }}-gradle-${{ inputs.cache-scope }}-
