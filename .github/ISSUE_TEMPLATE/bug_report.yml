@@ -1,0 +1,77 @@
+name: Report a bug
+description: Report reproducible incorrect behavior in Agentknock for Android.
+labels:
+  - bug
+body:
+  - type: markdown
+    attributes:
+      value: |
+        Thank you for reporting a problem. Search existing issues before you submit this report. Don't include secret values, pairing data, authentication tokens, or other sensitive information.
+
+        For security vulnerabilities, follow the instructions in `SECURITY.md` instead of opening a public issue.
+
+  - type: textarea
+    id: behavior
+    attributes:
+      label: What happened?
+      description: Describe the incorrect behavior and its effect.
+    validations:
+      required: true
+
+  - type: textarea
+    id: expected
+    attributes:
+      label: What did you expect?
+      description: Describe the behavior that you expected instead.
+    validations:
+      required: true
+
+  - type: textarea
+    id: reproduction
+    attributes:
+      label: How can we reproduce the problem?
+      description: Provide the smallest reliable sequence of actions in the app and any relevant CLI commands. Replace sensitive values with clear placeholders.
+    validations:
+      required: true
+
+  - type: input
+    id: version
+    attributes:
+      label: Agentknock for Android version
+      description: Open Settings → About and include the version and version code.
+      placeholder: 0.2.0 (47)
+    validations:
+      required: true
+
+  - type: input
+    id: platform
+    attributes:
+      label: Android version and device
+      description: Include the Android version, device model, and whether this is an emulator or a physical device.
+      placeholder: Android 16, Pixel 9, physical device
+    validations:
+      required: true
+
+  - type: input
+    id: cli_version
+    attributes:
+      label: Agentknock CLI version and platform
+      description: If the problem involves a paired CLI, include `agentknock --version` and the computer’s operating system.
+      placeholder: agentknock version, operating system, and architecture
+
+  - type: textarea
+    id: output
+    attributes:
+      label: Relevant output
+      description: Include relevant output or logs after you remove all sensitive information.
+      render: text
+
+  - type: checkboxes
+    id: confirmation
+    attributes:
+      label: Confirmation
+      options:
+        - label: I searched the existing issues.
+          required: true
+        - label: I removed secrets and other sensitive information from this report.
+          required: true

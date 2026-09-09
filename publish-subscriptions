@@ -11,4 +11,4 @@ if [[ ! -f "${AGENTKNOCK_PLAY_CREDENTIALS_FILE}" ]]; then
 fi
 
 cd "${agentknock_project_dir}"
-exec nix develop --command ./gradlew publishSubscriptions --rerun-tasks "$@"
+exec ./gradlew publishSubscriptions --rerun-tasks "$@"

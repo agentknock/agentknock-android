@@ -1,0 +1,5 @@
+blank_issues_enabled: false
+contact_links:
+  - name: Report a security vulnerability
+    url: https://github.com/agentknock/agentknock-android/security/policy
+    about: Follow the security policy to report a vulnerability privately.

@@ -15,3 +15,5 @@ local.properties
 /play-publisher.json
 **/build/
 .DS_Store
+.venv/
+__pycache__/

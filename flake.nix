@@ -29,6 +29,7 @@
         packages = [
           sdk
           pkgs.jdk17
+          (pkgs.python3.withPackages (p: [ p.pillow ]))
         ];
 
         ANDROID_HOME = "${sdk}/libexec/android-sdk";

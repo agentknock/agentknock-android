@@ -31,9 +31,14 @@ do
 done
 
 cd "${agentknock_project_dir}"
-nix develop --command ./gradlew bundleRelease
+: "${JAVA_HOME:?Set JAVA_HOME to the JDK used to build and sign the release.}"
+agentknock_jarsigner="${JAVA_HOME}/bin/jarsigner"
+if [[ ! -x "${agentknock_jarsigner}" ]]; then
+    echo "Missing JDK signing tool: ${agentknock_jarsigner}" >&2
+    exit 1
+fi
+./gradlew bundleRelease
 
-agentknock_jarsigner="$(nix develop --command printenv JAVA_HOME)/bin/jarsigner"
 agentknock_signed_dir="$(mktemp -d "${agentknock_project_dir}/app/build/publish-internal.XXXXXX")"
 trap 'rm -rf -- "${agentknock_signed_dir}"' EXIT
 agentknock_signed_bundle="${agentknock_signed_dir}/app-release.aab"
@@ -51,5 +56,5 @@ agentknock --secret agentknock-android-upload-passphrase \
 
 "${agentknock_jarsigner}" -verify "${agentknock_signed_bundle}"
 sha256sum "${agentknock_signed_bundle}"
-nix develop --command ./gradlew publishReleaseBundle \
+./gradlew publishReleaseBundle \
     --artifact-dir "${agentknock_signed_dir}" "$@"

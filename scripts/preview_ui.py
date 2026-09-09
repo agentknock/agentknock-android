@@ -238,7 +238,7 @@ def main():
     missing = set(args.screens) - {name for name, _ in selected}
     if missing:
         parser.error(f'Screens without the {args.variant} variant: {", ".join(sorted(missing))}')
-    command = ["nix", "develop", "-c", "./gradlew", ":app:updateDebugScreenshotTest", "--rerun"]
+    command = ["./gradlew", ":app:updateDebugScreenshotTest", "--rerun"]
     if args.screens or selected_variant:
         for method in selected.values():
             command += ["--tests", method]
@@ -285,7 +285,7 @@ def main():
     manifest.write_text(json.dumps(entries, indent=2) + "\n")
     write_gallery(entries, screens, args.screens[0] if len(args.screens) == 1 else None, selected_variant)
     count = sum(map(len, rendered.values()))
-    print(f"\nRendered {len(rendered)} screen(s), {count} images in {elapsed:.1f}s (including Nix startup).")
+    print(f"\nRendered {len(rendered)} screen(s), {count} images in {elapsed:.1f}s.")
     print(f"Gallery: {REPORT / 'index.html'}")
 
 

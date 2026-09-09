@@ -1,5 +1,9 @@
 # UI preview catalog
 
+Set up the JDK and Android SDK as described in the root [README](../../../README.md#development).
+The preview command requires Bash and Python 3.10 or newer and invokes the Gradle
+wrapper directly. Nix is optional.
+
 `./preview-ui --list` lists screens and the variants available for each one.
 Use `./preview-ui secret-detail --variant dark` to render exactly that screen and
 variant, or `./preview-ui --variant dark` to render that variant across screens.
@@ -122,3 +126,30 @@ Host rendering is useful for layout, wrapping, hierarchy, and color review. It
 is not a substitute for testing navigation, keyboard/IME behavior, Android-owned
 permission/authentication dialogs, accessibility interactions, or device-specific
 dynamic colors. Those still belong in emulator/device checks.
+
+## Play listing screenshots
+
+Run these commands from the repository root.
+
+The eight phone screenshots show command approval, secrets, Git signing, SSH
+authentication, secret access settings, client management, pairing, and audit
+history, in that order. `PlayStorePreviews.kt` reuses the production screen
+fixtures in dark theme at 1080 × 1920 pixels (432 × 768 dp, normal text size).
+These store variants are separate from the standard 360 × 800 dp phone previews.
+
+If Pillow is not already installed, create and activate a Python environment:
+
+```sh
+python3 -m venv .venv
+. .venv/bin/activate
+python3 -m pip install Pillow
+```
+
+Regenerate and export the listing's 24-bit PNGs with:
+
+```sh
+python3 scripts/update_play_screenshots.py
+```
+
+The script updates `app/src/main/play/listings/en-GB/graphics/phone-screenshots/`
+locally. Review the images before uploading them to Google Play.
