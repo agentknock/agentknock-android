@@ -4,7 +4,7 @@
 .kotlin/
 build/
 captures/
-/app/src/screenshotTestDebug/reference/
+/app/src/screenshotTest*Debug/reference/
 local.properties
 # Local signing and Play publishing credentials
 *.jks

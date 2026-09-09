@@ -19,7 +19,7 @@ SCREENS = (
     "audit",
 )
 
-subprocess.run([str(ROOT / "preview-ui"), *SCREENS, "--variant", "play-store"], cwd=ROOT, check=True)
+subprocess.run([str(ROOT / "preview-ui"), *SCREENS, "--distribution", "play", "--variant", "play-store"], cwd=ROOT, check=True)
 exports = {}
 for number, screen in enumerate(SCREENS, 1):
     with Image.open(IMAGES / f"{screen}-play-store.png") as image:

@@ -13,15 +13,22 @@ and `ANDROID_HOME` to the SDK, or configure `sdk.dir` in `local.properties`.
 Android Studio should use the same Gradle JDK.
 
 ```sh
-./gradlew :app:assembleDebug :app:testDebugUnitTest :app:lintDebug
+./gradlew :app:assembleFossDebug :app:testFossDebugUnitTest :app:lintFossDebug
 ```
 
-The debug APK is written to `app/build/outputs/apk/debug/`. On Windows, use
+The APK is written to `app/build/outputs/apk/foss/debug/`. On Windows, use
 `gradlew.bat`. Device tests require an emulator or connected device:
 
 ```sh
-./gradlew :app:connectedDebugAndroidTest
+./gradlew :app:connectedFossDebugAndroidTest
 ```
+
+The `foss` flavor has no Firebase or Google Play Billing dependencies. Keep the
+app in the foreground to receive requests; background push delivery is not yet
+supported. Existing AI access and activation links work without in-app purchases.
+Use `Play` instead of `Foss` in task names for the Google Play flavor, which adds
+FCM and Play Billing. Both flavors share the application ID and local storage;
+installing one over the other requires matching signing keys.
 
 Nix is optional. On Linux x86-64, `nix develop` supplies the JDK, SDK, Python,
 and Pillow; `nix develop .#emulator` also includes an emulator and system image.
@@ -35,7 +42,9 @@ The preview helper requires Bash and Python 3.10 or newer:
 ./preview-ui secret-detail --variant dark
 ```
 
-Open `app/build/reports/ui-previews/index.html` for the gallery. The
+Previews default to `play`. Add `--distribution foss` for FOSS. Open
+`app/build/reports/ui-previews/index.html` for Play or its `foss/index.html`
+subdirectory for FOSS. The
 [preview guide](app/src/screenshotTest/README.md) covers available screens,
 comparisons, adding previews, and exporting Play Store screenshots.
 

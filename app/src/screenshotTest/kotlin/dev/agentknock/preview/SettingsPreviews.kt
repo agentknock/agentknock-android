@@ -1,6 +1,7 @@
 package dev.agentknock.preview
 
 import android.content.res.Configuration
+import dev.agentknock.BuildConfig
 import androidx.compose.runtime.Composable
 import androidx.compose.foundation.lazy.rememberLazyListState
 import androidx.compose.foundation.rememberScrollState
@@ -170,7 +171,15 @@ private fun SubscriptionUnavailablePreview() = PreviewScreen {
 }
 
 @Composable private fun SubscriptionPage(state: SubscriptionUiState) {
-    SubscriptionAndBillingScreen(state, {}, {}, {}, {}, {}, Modifier.fillMaxSize())
+    val distributionState = if (BuildConfig.FLAVOR == "foss") {
+        state.copy(
+            playStore = PlayStoreAvailability.NOT_SUPPORTED,
+            offers = emptyList(),
+            googlePlayPurchase = GooglePlayPurchaseState.NONE,
+            googlePlayProductId = null,
+        )
+    } else state
+    SubscriptionAndBillingScreen(distributionState, {}, {}, {}, {}, {}, Modifier.fillMaxSize())
 }
 
 internal val previewAuditEvent = AuditEvent(

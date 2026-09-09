@@ -37,7 +37,7 @@ if [[ ! -x "${agentknock_jarsigner}" ]]; then
     echo "Missing JDK signing tool: ${agentknock_jarsigner}" >&2
     exit 1
 fi
-./gradlew bundleRelease
+./gradlew bundlePlayRelease
 
 agentknock_signed_dir="$(mktemp -d "${agentknock_project_dir}/app/build/publish-internal.XXXXXX")"
 trap 'rm -rf -- "${agentknock_signed_dir}"' EXIT
@@ -51,10 +51,10 @@ agentknock --secret agentknock-android-upload-passphrase \
     -storepass:env KEYSTORE_PASSWORD \
     -keypass:env KEYSTORE_PASSWORD \
     -signedjar "${agentknock_signed_bundle}" \
-    "${agentknock_project_dir}/app/build/outputs/bundle/release/app-release.aab" \
+    "${agentknock_project_dir}/app/build/outputs/bundle/playRelease/app-play-release.aab" \
     agentknock-upload
 
 "${agentknock_jarsigner}" -verify "${agentknock_signed_bundle}"
 sha256sum "${agentknock_signed_bundle}"
-./gradlew publishReleaseBundle \
+./gradlew publishPlayReleaseBundle \
     --artifact-dir "${agentknock_signed_dir}" "$@"

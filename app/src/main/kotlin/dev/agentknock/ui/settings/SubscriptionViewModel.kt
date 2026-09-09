@@ -11,7 +11,6 @@ import dev.agentknock.subscription.PlaySubscriptionLaunchResult
 import dev.agentknock.subscription.PlaySubscriptionOffer
 import dev.agentknock.subscription.PlaySubscriptionOfferId
 import dev.agentknock.subscription.PlaySubscriptionQueryResult
-import dev.agentknock.subscription.PlaySubscriptionSnapshot
 import dev.agentknock.subscription.PlaySubscriptionUpdate
 import dev.agentknock.subscription.SubscriptionRepository
 import dev.agentknock.subscription.SubscriptionResult
@@ -29,6 +28,7 @@ internal enum class PlayStoreAvailability {
     CHECKING,
     AVAILABLE,
     UNAVAILABLE,
+    NOT_SUPPORTED,
 }
 
 internal enum class GooglePlayPurchaseState {
@@ -188,7 +188,7 @@ internal class SubscriptionViewModel(
         _state.update { it.copy(refreshing = true, purchasing = false) }
         val playResult = operation { billing.query() }
         val snapshot = (playResult as? PlaySubscriptionQueryResult.Success)?.snapshot
-        _state.update { current -> current.withPlaySnapshot(snapshot) }
+        _state.update { current -> current.withPlayResult(playResult) }
 
         val purchased = snapshot?.purchases
             ?.filter { it.state == PlayPurchaseState.PURCHASED }
@@ -234,9 +234,10 @@ internal class SubscriptionViewModel(
     }
 }
 
-private fun SubscriptionUiState.withPlaySnapshot(
-    snapshot: PlaySubscriptionSnapshot?,
+private fun SubscriptionUiState.withPlayResult(
+    result: PlaySubscriptionQueryResult?,
 ): SubscriptionUiState {
+    val snapshot = (result as? PlaySubscriptionQueryResult.Success)?.snapshot
     val relevant = snapshot?.purchases
         ?.filter { it.productId == GOOGLE_PLAY_SUBSCRIPTION_PRODUCT_ID }
         .orEmpty()
@@ -248,10 +249,10 @@ private fun SubscriptionUiState.withPlaySnapshot(
         else -> GooglePlayPurchaseState.NONE
     }
     return copy(
-        playStore = if (snapshot?.offersAvailable == true) {
-            PlayStoreAvailability.AVAILABLE
-        } else {
-            PlayStoreAvailability.UNAVAILABLE
+        playStore = when {
+            result == PlaySubscriptionQueryResult.NotSupported -> PlayStoreAvailability.NOT_SUPPORTED
+            snapshot?.offersAvailable == true -> PlayStoreAvailability.AVAILABLE
+            else -> PlayStoreAvailability.UNAVAILABLE
         },
         offers = snapshot?.offers.orEmpty(),
         googlePlayPurchase = purchase,

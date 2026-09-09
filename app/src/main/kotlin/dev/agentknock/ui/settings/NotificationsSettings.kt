@@ -1,5 +1,7 @@
 package dev.agentknock.ui.settings
 
+import dev.agentknock.BACKGROUND_DELIVERY_SUPPORTED
+
 import android.Manifest
 import android.content.Intent
 import android.content.pm.PackageManager
@@ -84,13 +86,27 @@ internal fun NotificationsSettingsContent(
     onBack: () -> Unit,
     modifier: Modifier,
 ) {
-    val deliveryWarning = pushState?.deliveryWarning()
+    val deliveryWarning = if (BACKGROUND_DELIVERY_SUPPORTED) pushState?.deliveryWarning() else null
     Column(modifier) {
         PageTopBar("Notifications", onBack)
         LazyColumn(
             contentPadding = PaddingValues(start = 16.dp, end = 16.dp, top = 8.dp, bottom = 24.dp),
             verticalArrangement = Arrangement.spacedBy(16.dp),
         ) {
+            if (!BACKGROUND_DELIVERY_SUPPORTED) {
+                item {
+                    Column {
+                        SettingsSectionLabel("Delivery")
+                        SettingsGroup {
+                            SettingsRow(
+                                title = "Receive requests while the app is open",
+                                summary = "Keep Agentknock in the foreground to receive new requests. " +
+                                    "This build does not support background push delivery.",
+                            )
+                        }
+                    }
+                }
+            }
             item {
                 SettingsGroup {
                     SettingsRow(
@@ -107,7 +123,7 @@ internal fun NotificationsSettingsContent(
                         summary = if (appNotificationsEnabled) {
                             "Android can show Agentknock notifications."
                         } else {
-                            "Android is blocking request alerts. Background request delivery continues."
+                            "Android is blocking request alerts. You can still review requests in the app."
                         },
                         attention = !appNotificationsEnabled,
                     )

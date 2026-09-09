@@ -156,6 +156,35 @@ class SubscriptionViewModelTest {
         }
     }
 
+    @OptIn(ExperimentalCoroutinesApi::class)
+    @Test
+    fun `billing unsupported keeps access inactive until redeemed and refreshes existing access`() = runTest {
+        val fixture = Fixture(UnconfinedTestDispatcher(testScheduler))
+        try {
+            fixture.billing.queryResult = PlaySubscriptionQueryResult.NotSupported
+            fixture.viewModel.refresh()
+            runCurrent()
+            assertEquals(PlayStoreAvailability.NOT_SUPPORTED, fixture.viewModel.state.value.playStore)
+            assertEquals(AiReviewAccess.INACTIVE, fixture.viewModel.state.value.access)
+            assertEquals(true, fixture.viewModel.state.value.offers.isEmpty())
+            assertEquals(null, fixture.relay.googlePlayPurchase)
+
+            fixture.viewModel.redeem("activation-token")
+            runCurrent()
+            assertEquals("activation-token", fixture.relay.redeemedToken)
+            assertEquals(AiReviewAccess.ACTIVE, fixture.viewModel.state.value.access)
+
+            fixture.relay.statusResult = RelayEndpointResult.Success(RelaySubscriptionStatus(active = true))
+            fixture.viewModel.refresh()
+            runCurrent()
+            assertEquals(AiReviewAccess.ACTIVE, fixture.viewModel.state.value.access)
+            assertEquals(PlayStoreAvailability.NOT_SUPPORTED, fixture.viewModel.state.value.playStore)
+            assertEquals(null, fixture.relay.googlePlayPurchase)
+        } finally {
+            fixture.close()
+        }
+    }
+
     private fun queryResult(state: PlayPurchaseState) = PlaySubscriptionQueryResult.Success(
         PlaySubscriptionSnapshot(
             purchases = listOf(
@@ -222,6 +251,7 @@ class SubscriptionViewModelTest {
             RelayEndpointResult.Success(RelaySubscriptionStatus(active = false))
         var statusCalls = 0
         var googlePlayPurchase: String? = null
+        var redeemedToken: String? = null
 
         override suspend fun status(
             deviceId: String,
@@ -235,7 +265,10 @@ class SubscriptionViewModelTest {
             deviceId: String,
             deviceToken: String,
             redemptionToken: String,
-        ): RelaySubscriptionResult = error("Not used")
+        ): RelaySubscriptionResult {
+            redeemedToken = redemptionToken
+            return RelayEndpointResult.Success(RelaySubscriptionStatus(active = true))
+        }
 
         override suspend fun updateFromGooglePlay(
             deviceId: String,

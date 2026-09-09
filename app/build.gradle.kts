@@ -1,10 +1,12 @@
 import com.github.triplet.gradle.androidpublisher.ReleaseStatus
+import com.google.gms.googleservices.GoogleServicesTask
+import com.google.gms.googleservices.GoogleServicesPlugin.MissingGoogleServicesStrategy
 
 plugins {
     alias(libs.plugins.android.application)
     alias(libs.plugins.compose.compiler)
     alias(libs.plugins.compose.screenshot)
-    alias(libs.plugins.google.services)
+    alias(libs.plugins.google.services) apply false
     alias(libs.plugins.kotlin.serialization)
     alias(libs.plugins.ksp)
     alias(libs.plugins.play.publisher)
@@ -32,6 +34,16 @@ android {
         buildConfigField("String", "SOURCE_REVISION", "\"${sourceRevision.get()}\"")
     }
 
+    flavorDimensions += "distribution"
+    productFlavors {
+        create("play") { dimension = "distribution" }
+        create("foss") { dimension = "distribution" }
+    }
+
+    playConfigs {
+        register("playRelease") { enabled.set(true) }
+    }
+
     compileOptions {
         sourceCompatibility = JavaVersion.VERSION_17
         targetCompatibility = JavaVersion.VERSION_17
@@ -52,6 +64,7 @@ android {
 }
 
 play {
+    enabled.set(false)
     defaultToAppBundles.set(true)
     releaseName.set("$agentknockVersionName-internal.$agentknockVersionCode")
     releaseStatus.set(ReleaseStatus.COMPLETED)
@@ -59,6 +72,23 @@ play {
 
     if (playCredentialsFile.isPresent) {
         serviceAccountCredentials.set(file(playCredentialsFile.get()))
+    }
+}
+
+// Wire Firebase configuration only into Play variants. Applying the plugin globally
+// would register a Google Services task and generated resources for FOSS as well.
+androidComponents {
+    onVariants(selector().withFlavor("distribution" to "play")) { variant ->
+        val googleServices = tasks.register<GoogleServicesTask>(
+            "process${variant.name.replaceFirstChar { it.uppercase() }}GoogleServices",
+        ) {
+            googleServicesJsonFiles.set(listOf(file("src/play/google-services.json")))
+            applicationId.set(variant.applicationId)
+            missingGoogleServicesStrategy.set(MissingGoogleServicesStrategy.ERROR)
+            gmpAppId.set(layout.buildDirectory.file("gmpAppId/${variant.name}.txt"))
+            outputDirectory.set(layout.buildDirectory.dir("generated/google-services/${variant.name}"))
+        }
+        variant.sources.res?.addGeneratedSourceDirectory(googleServices, GoogleServicesTask::outputDirectory)
     }
 }
 
@@ -82,9 +112,9 @@ dependencies {
     implementation(libs.androidx.room3.runtime)
     implementation(libs.androidx.work.runtime)
     implementation(libs.bouncycastle.provider)
-    implementation(platform(libs.firebase.bom))
-    implementation(libs.firebase.messaging)
-    implementation(libs.google.play.billing)
+    "playImplementation"(platform(libs.firebase.bom))
+    "playImplementation"(libs.firebase.messaging)
+    "playImplementation"(libs.google.play.billing)
     implementation(libs.kotlinx.coroutines.android)
     implementation(libs.kotlinx.serialization.json)
     implementation(libs.okhttp)
@@ -117,6 +147,6 @@ val requirePlayCredentials = tasks.register("requirePlayCredentials") {
     }
 }
 
-tasks.matching { it.name == "publishReleaseBundle" }.configureEach {
+tasks.matching { it.name == "publishPlayReleaseBundle" }.configureEach {
     dependsOn(requirePlayCredentials)
 }

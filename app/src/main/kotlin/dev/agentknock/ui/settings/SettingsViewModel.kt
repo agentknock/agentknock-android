@@ -5,7 +5,7 @@ import androidx.lifecycle.viewModelScope
 import dev.agentknock.storage.crypto.VaultProtection
 import dev.agentknock.storage.crypto.VaultKeyManager
 import dev.agentknock.storage.device.DeviceConfiguration
-import dev.agentknock.push.PushRegistrationRepository
+import dev.agentknock.push.PushRegistration
 import dev.agentknock.ui.auth.DeviceAuthenticationMode
 import dev.agentknock.ui.auth.DeviceAuthenticationResult
 import dev.agentknock.ui.auth.ProtectedActionAuthorizer
@@ -27,7 +27,7 @@ internal sealed interface FactoryResetUiState {
 
 internal class SettingsViewModel(
     val configuration: StateFlow<DeviceConfiguration?>,
-    pushRegistration: PushRegistrationRepository,
+    pushRegistration: PushRegistration,
     private val vaultKeys: VaultKeyManager,
     private val beginFactoryReset: suspend () -> Boolean,
     private val cancelFactoryReset: () -> Unit,

@@ -2,6 +2,8 @@
 
 package dev.agentknock.ui.settings
 
+import dev.agentknock.BACKGROUND_DELIVERY_SUPPORTED
+
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.PaddingValues
@@ -77,7 +79,7 @@ internal fun SettingsOverviewContent(
         ) {
             item {
                 SettingsGroup {
-                    val deliveryNeedsAttention = pushState != null &&
+                    val deliveryNeedsAttention = BACKGROUND_DELIVERY_SUPPORTED && pushState != null &&
                         pushState != RelayPushRegistrationState.REGISTERED
                     SettingsRow(
                         icon = Icons.Outlined.Security,
@@ -92,6 +94,7 @@ internal fun SettingsOverviewContent(
                         icon = Icons.Outlined.Notifications,
                         title = "Notifications",
                         summary = when {
+                            !BACKGROUND_DELIVERY_SUPPORTED -> "Keep the app open to receive requests"
                             !requestsEnabled -> "Requests needing action are muted"
                             deliveryNeedsAttention -> "Delivery needs attention"
                             else -> "Request alerts enabled"

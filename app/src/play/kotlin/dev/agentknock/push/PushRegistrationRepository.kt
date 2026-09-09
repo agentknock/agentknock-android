@@ -40,13 +40,13 @@ internal class PushRegistrationRepository(
     private val deviceAuthorization: RelayDeviceAuthorizationSource,
     private val relay: RelayPushRegistrationClient,
     private val requestRegistration: () -> Unit,
-) {
+) : PushRegistration {
     private val _registrationState = MutableStateFlow<RelayPushRegistrationState?>(null)
 
-    val registrationState: StateFlow<RelayPushRegistrationState?> =
+    override val registrationState: StateFlow<RelayPushRegistrationState?> =
         _registrationState.asStateFlow()
 
-    fun updateRelayState(state: RelayPushRegistrationState) {
+    override fun updateRelayState(state: RelayPushRegistrationState) {
         _registrationState.value = state
         if (state != RelayPushRegistrationState.REGISTERED) requestRegistration()
     }

@@ -156,6 +156,13 @@ internal fun SubscriptionAndBillingScreen(
                 }
                 state.access == AiReviewAccess.SETUP_REQUIRED ->
                     StoreStatus("Finish device setup before subscribing.", attention = true)
+                state.playStore == PlayStoreAvailability.NOT_SUPPORTED ->
+                    Text(
+                        "This build does not include in-app purchases. Open an activation link to " +
+                            "activate AI review, or refresh to check existing access.",
+                        style = MaterialTheme.typography.bodyMedium,
+                        color = MaterialTheme.colorScheme.onSurfaceVariant,
+                    )
                 state.playStore == PlayStoreAvailability.CHECKING ->
                     StoreStatus("Loading Google Play plans…", showProgress = true)
                 state.playStore == PlayStoreAvailability.UNAVAILABLE ->

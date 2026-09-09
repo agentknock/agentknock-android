@@ -3,8 +3,6 @@ package dev.agentknock
 import android.app.Application
 import androidx.lifecycle.ProcessLifecycleOwner
 import dev.agentknock.network.AgentknockUserAgentInterceptor
-import dev.agentknock.push.PushRegistrationRepository
-import dev.agentknock.push.FirebaseRegistrationWorker
 import dev.agentknock.push.RequestNotifications
 import dev.agentknock.push.PushSynchronizationWorker
 import dev.agentknock.push.RequestNotificationCoordinator
@@ -18,7 +16,6 @@ import dev.agentknock.storage.secret.SecretRepository
 import dev.agentknock.storage.secret.SecretSummary
 import dev.agentknock.relay.HttpRelayClaimClient
 import dev.agentknock.relay.HttpRelayApprovalReviewClient
-import dev.agentknock.relay.HttpRelayPushRegistrationClient
 import dev.agentknock.relay.HttpRelaySubscriptionClient
 import dev.agentknock.relay.HttpRelayDeviceManagementClient
 import dev.agentknock.relay.RelayHttpTransport
@@ -42,7 +39,6 @@ import dev.agentknock.storage.device.DeviceIdentityRepository
 import dev.agentknock.storage.device.DeviceManagementRepository
 import dev.agentknock.storage.device.DeviceSettingsCoordinator
 import dev.agentknock.protocol.PairingProtocol
-import dev.agentknock.subscription.GooglePlaySubscriptionBilling
 import dev.agentknock.subscription.SubscriptionRepository
 import dev.agentknock.ui.auth.AuthenticationSession
 import dev.agentknock.ui.auth.DeviceAuthenticationCoordinator
@@ -131,17 +127,17 @@ internal class ApplicationContainer(private val application: Application) {
         initialValue = null,
     )
 
-    val pushRegistration = PushRegistrationRepository(
+    val pushRegistration = createPushRegistration(
+        context = application,
         deviceAuthorization = deviceIdentity,
-        relay = HttpRelayPushRegistrationClient(relayHttp),
-        requestRegistration = { FirebaseRegistrationWorker.enqueue(application) },
+        transport = relayHttp,
     )
 
     val subscription = SubscriptionRepository(
         deviceAuthorization = deviceIdentity,
         relay = HttpRelaySubscriptionClient(relayHttp),
     )
-    val playSubscriptionBilling = GooglePlaySubscriptionBilling(application)
+    val playSubscriptionBilling = createSubscriptionBilling(application)
     val deviceManagement = DeviceManagementRepository(
         deviceIdentityDao = database.deviceIdentityDao(),
         deviceAuthorization = deviceIdentity,

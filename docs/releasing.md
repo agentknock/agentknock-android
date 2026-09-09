@@ -27,7 +27,10 @@ To publish a completed release to the internal testing track:
 4. Commit the release changes.
 5. Run `./publish-internal`.
 
-Release builds made directly with Gradle are unsigned.
+`publish-internal` builds and publishes only `playRelease`. FOSS publishing is
+disabled in the Play Publisher configuration. Build an unsigned FOSS release
+with `./gradlew :app:assembleFossRelease`. Release builds made directly with
+Gradle are unsigned.
 
 The release name is derived from the application version and version code.
 Room schema 1 is the compatibility baseline for releases using the current

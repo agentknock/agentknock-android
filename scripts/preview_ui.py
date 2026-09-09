@@ -16,7 +16,6 @@ import xml.etree.ElementTree as ET
 ROOT = Path(__file__).resolve().parent.parent
 SOURCE = ROOT / "app/src/screenshotTest/kotlin/dev/agentknock/preview"
 REPORT = ROOT / "app/build/reports/ui-previews"
-RESULTS = ROOT / "app/build/test-results/updateDebugScreenshotTest"
 
 
 def catalog():
@@ -47,7 +46,7 @@ def select_options(values, selected, all_label):
     )
 
 
-def write_gallery(entries, screens, selected_screen=None, selected_variant=None):
+def write_gallery(entries, screens, selected_screen=None, selected_variant=None, distribution="play"):
     comparisons = (
         ("before", "comparison.html", "Original → latest"),
         ("previous", "previous-pass.html", "Previous pass → latest"),
@@ -55,7 +54,7 @@ def write_gallery(entries, screens, selected_screen=None, selected_variant=None)
     comparison_links = []
     for directory, filename, label in comparisons:
         if (REPORT / directory / "screens.json").exists():
-            write_review_gallery(entries, screens, directory, filename)
+            write_review_gallery(entries, screens, directory, filename, distribution)
             comparison_links.append(f'<a href="{filename}">{label}</a>')
         else:
             (REPORT / filename).unlink(missing_ok=True)
@@ -65,7 +64,7 @@ def write_gallery(entries, screens, selected_screen=None, selected_variant=None)
         previews = {entry["variant"]: entry for entry in entries.get(name, [])}
         for variant in screen["variants"]:
             title = html.escape(f'{name} · {variant}')
-            command = html.escape(f'./preview-ui {name} --variant {variant_slug(variant)}')
+            command = html.escape(f'./preview-ui {name} --distribution {distribution} --variant {variant_slug(variant)}')
             card = (f'<article data-search="{title.lower()}" data-screen="{html.escape(name, quote=True)}" '
                     f'data-variant="{html.escape(variant, quote=True)}"><h2>{title}</h2>')
             entry = previews.get(variant)
@@ -100,11 +99,12 @@ const cards=[...document.querySelectorAll('article')],search=document.querySelec
 function filter(){let count=0;for(const card of cards){card.hidden=!card.dataset.search.includes(search.value.toLowerCase())||(screen.value&&card.dataset.screen!==screen.value)||(variant.value&&card.dataset.variant!==variant.value);if(!card.hidden)count++;}document.querySelector('#count').textContent=count+' previews shown';}
 search.addEventListener('input',filter);screen.addEventListener('change',filter);variant.addEventListener('change',filter);filter();
 </script></html>'''
+    page = page.replace("Agentknock UI previews", f"Agentknock UI previews · {distribution}")
     (REPORT / "catalog.html").write_text(page)
     (REPORT / "index.html").write_text(page)
 
 
-def write_review_gallery(entries, screens, baseline_directory="before", output_filename="comparison.html"):
+def write_review_gallery(entries, screens, baseline_directory="before", output_filename="comparison.html", distribution="play"):
     baseline_path = REPORT / baseline_directory
     baseline = json.loads((baseline_path / "screens.json").read_text())
     original = baseline_directory == "before"
@@ -173,7 +173,7 @@ def write_review_gallery(entries, screens, baseline_directory="before", output_f
             f'<h2>{escaped_name} <span class="status {state}">{status}</span></h2>'
             '<div class="comparison">' + image_panel(name, baseline_label, before, before_hash, baseline_directory + "/")
             + image_panel(name, "Latest render", after, after_hash) + '</div>'
-            f'<p class="command"><code>./preview-ui {escaped_name} --variant dark</code></p></article>'
+            f'<p class="command"><code>./preview-ui {escaped_name} --distribution {distribution} --variant dark</code></p></article>'
         )
     page = '''<!doctype html><html lang="en"><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1">
 <title>Agentknock · ''' + comparison_label + '''</title><style>
@@ -208,15 +208,22 @@ search.addEventListener('input',filter);screen.addEventListener('change',filter)
 
 
 def main():
+    global REPORT
     screens = catalog()
     variants = {variant_slug(variant): variant for screen in screens.values() for variant in screen["variants"]}
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("screens", nargs="*", metavar="SCREEN", help="Render only these screens (all their theme variants). Omit to render everything; use --list for names.")
+    parser.add_argument("--distribution", choices=["play", "foss"], default="play",
+                        help="App flavor to render (default: play).")
     parser.add_argument("--variant", choices=["all", *sorted(variants)], default="all",
                         help="Render only this named variant. Omit to render all variants.")
     parser.add_argument("--list", action="store_true", help="List screen names without running Gradle.")
     parser.add_argument("--gallery-only", action="store_true", help="Rebuild gallery pages from cached images without running Gradle.")
     args = parser.parse_args()
+    if args.distribution == "foss":
+        REPORT = REPORT / "foss"
+    task = f"update{args.distribution.title()}DebugScreenshotTest"
+    results = ROOT / "app/build/test-results" / task
     unknown = set(args.screens) - screens.keys()
     if unknown:
         parser.error(f'Unknown screens: {", ".join(sorted(unknown))}; use --list for names')
@@ -225,7 +232,7 @@ def main():
             print(f'{name}: {", ".join(map(variant_slug, screen["variants"]))}')
         return
     if args.gallery_only:
-        write_gallery(json.loads((REPORT / "screens.json").read_text()), screens)
+        write_gallery(json.loads((REPORT / "screens.json").read_text()), screens, distribution=args.distribution)
         print(f"Gallery: {REPORT / 'index.html'}")
         return
     selected_variant = None if args.variant == "all" else variants[args.variant]
@@ -238,7 +245,7 @@ def main():
     missing = set(args.screens) - {name for name, _ in selected}
     if missing:
         parser.error(f'Screens without the {args.variant} variant: {", ".join(sorted(missing))}')
-    command = ["./gradlew", ":app:updateDebugScreenshotTest", "--rerun"]
+    command = ["./gradlew", f":app:{task}", "--rerun"]
     if args.screens or selected_variant:
         for method in selected.values():
             command += ["--tests", method]
@@ -252,7 +259,7 @@ def main():
     completed = set()
     stamp = datetime.now(timezone.utc).isoformat(timespec="microseconds")
     REPORT.mkdir(parents=True, exist_ok=True)
-    for result in sorted(RESULTS.glob("TEST-*.xml")):
+    for result in sorted(results.glob("TEST-*.xml")):
         suite = ET.parse(result).getroot()
         for case in suite.findall("testcase"):
             properties = {p.attrib["name"]: p.attrib["value"] for p in case.findall("properties/property")}
@@ -283,7 +290,7 @@ def main():
         merged.update({entry["variant"]: entry for entry in previews})
         entries[name] = list(merged.values())
     manifest.write_text(json.dumps(entries, indent=2) + "\n")
-    write_gallery(entries, screens, args.screens[0] if len(args.screens) == 1 else None, selected_variant)
+    write_gallery(entries, screens, args.screens[0] if len(args.screens) == 1 else None, selected_variant, distribution=args.distribution)
     count = sum(map(len, rendered.values()))
     print(f"\nRendered {len(rendered)} screen(s), {count} images in {elapsed:.1f}s.")
     print(f"Gallery: {REPORT / 'index.html'}")

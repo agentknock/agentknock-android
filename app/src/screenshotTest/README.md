@@ -12,6 +12,10 @@ Pass several screen names to render them in one Gradle run, for example
 Without `--variant`, all variants of the selected screens are rendered. There is
 no special default theme, device size, or text scale.
 
+Previews default to the `play` distribution. Pass `--distribution foss` to render
+the FOSS build; its separate gallery is `app/build/reports/ui-previews/foss/index.html`.
+Play Store export always renders the `play` distribution.
+
 Each variant has its own top-level `@PreviewTest` function with one explicit
 `@Preview`. The command filters those exact functions before rendering. This is
 necessary because the renderer's method filter cannot select an individual
