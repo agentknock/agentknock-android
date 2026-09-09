@@ -79,7 +79,7 @@ printf 'no\n' | avdmanager create avd --name agentknock_ci \
 emulator_options=(-gpu swiftshader -memory 2048)
 if [[ "$AGENTKNOCK_EMULATOR_API" == 37 ]]; then
     # API 37's mapper needs both host memory features for DMA readback.
-    emulator_options=(-gpu swangle -memory 4096 -feature 'GLDirectMem,HasSharedSlotsHostMemoryAllocator')
+    emulator_options=(-gpu swiftshader -memory 4096 -feature 'GLDirectMem,HasSharedSlotsHostMemoryAllocator')
 fi
 # Google services exceed the hosted SDK's default writable partition during boot.
 emulator -avd agentknock_ci -port 5556 -accel on -no-window -no-audio -no-boot-anim -no-metrics -verbose \
@@ -150,15 +150,31 @@ esac
 adb -s "$device_serial" shell am start -W -n dev.agentknock/.MainActivity \
     | tee "$device_report_dir/release-startup.txt"
 grep -q '^Status: ok' "$device_report_dir/release-startup.txt"
-adb -s "$device_serial" shell uiautomator dump /sdcard/agentknock-ci.xml
-adb -s "$device_serial" pull /sdcard/agentknock-ci.xml "$device_report_dir/release-ui.xml"
-python3 - "$device_report_dir/release-ui.xml" <<'PY'
+welcome_deadline=$((SECONDS + 60))
+while true; do
+    adb -s "$device_serial" shell pidof dev.agentknock
+    adb -s "$device_serial" shell uiautomator dump /sdcard/agentknock-ci.xml
+    adb -s "$device_serial" pull /sdcard/agentknock-ci.xml "$device_report_dir/release-ui.xml"
+    if python3 - "$device_report_dir/release-ui.xml" <<'PY'
 import sys
 import xml.etree.ElementTree as ET
 
 nodes = ET.parse(sys.argv[1]).getroot().iter("node")
-if not any(node.get("package") == "dev.agentknock" and node.get("text") == "Welcome to Agentknock" for node in nodes):
-    raise SystemExit("The minified release did not display the welcome screen")
+welcome_visible = any(
+    node.get("package") == "dev.agentknock" and node.get("text") == "Welcome to Agentknock"
+    for node in nodes
+)
+raise SystemExit(0 if welcome_visible else 1)
 PY
+    then
+        break
+    fi
+    if (( SECONDS >= welcome_deadline )); then
+        echo 'The minified release did not display the welcome screen. Observed UI:' >&2
+        cat "$device_report_dir/release-ui.xml" >&2
+        exit 1
+    fi
+    sleep 1
+done
 adb -s "$device_serial" shell pidof dev.agentknock
 echo "Minified release startup passed."
