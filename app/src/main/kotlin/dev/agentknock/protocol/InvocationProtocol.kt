@@ -1,5 +1,6 @@
 package dev.agentknock.protocol
 
+import java.util.Base64
 import kotlinx.serialization.SerialName
 import kotlinx.serialization.Serializable
 import kotlinx.serialization.SerializationException
@@ -12,7 +13,6 @@ import kotlinx.serialization.json.JsonPrimitive
 import kotlinx.serialization.json.buildJsonObject
 import kotlinx.serialization.json.jsonPrimitive
 import kotlinx.serialization.json.put
-import java.util.Base64
 
 internal data class InvocationRequestMessage(
     val clientSoftware: ClientSoftware,
@@ -24,9 +24,7 @@ internal data class InvocationRequestMessage(
     val launcherChain: List<String>,
 )
 
-internal data class InvocationSecretDelivery(
-    val environment: InvocationEnvironmentDelivery? = null,
-)
+internal data class InvocationSecretDelivery(val environment: InvocationEnvironmentDelivery? = null)
 
 internal data class InvocationEnvironmentDelivery(
     val only: Set<String>? = null,
@@ -49,13 +47,13 @@ internal data class InvocationExecOperation(
 
 internal enum class InvocationExecutableMode(val wireName: String) {
     BINARY("BINARY"),
-    SCRIPT("SCRIPT"),
-    ;
+    SCRIPT("SCRIPT");
 
     companion object {
-        fun fromWireName(value: String): InvocationExecutableMode = entries.singleOrNull {
-            it.wireName == value
-        } ?: throw IllegalArgumentException("Unsupported executable mode")
+        fun fromWireName(value: String): InvocationExecutableMode =
+            entries.singleOrNull {
+                it.wireName == value
+            } ?: throw IllegalArgumentException("Unsupported executable mode")
     }
 }
 
@@ -65,13 +63,13 @@ internal enum class InvocationStreamKind(val wireName: String) {
     PIPE("PIPE"),
     SOCKET("SOCKET"),
     REGULAR_FILE("REGULAR_FILE"),
-    UNKNOWN("UNKNOWN"),
-    ;
+    UNKNOWN("UNKNOWN");
 
     companion object {
-        fun fromWireName(value: String): InvocationStreamKind = entries.singleOrNull {
-            it.wireName == value
-        } ?: throw IllegalArgumentException("Unsupported standard-stream kind")
+        fun fromWireName(value: String): InvocationStreamKind =
+            entries.singleOrNull {
+                it.wireName == value
+            } ?: throw IllegalArgumentException("Unsupported standard-stream kind")
     }
 }
 
@@ -96,9 +94,7 @@ internal enum class InvocationDenialReason(val wireName: String) {
     OTHER("OTHER"),
 }
 
-internal class InvocationProtocol(
-    private val json: Json = Json { ignoreUnknownKeys = true },
-) {
+internal class InvocationProtocol(private val json: Json = Json { ignoreUnknownKeys = true }) {
     fun decodeRequest(plaintext: ByteArray): InvocationRequestMessage {
         val clientSoftware = json.decodeClientSoftware(plaintext)
         val request = json.decodeFromString<InvocationRequestWire>(plaintext.decodeToString())
@@ -107,9 +103,10 @@ internal class InvocationProtocol(
         require(request.secrets.keys.none(String::isEmpty)) {
             "Secret use request has an empty secret"
         }
-        val secretDelivery = request.secrets.mapValues { (secret, options) ->
-            decodeSecretDelivery(secret, options)
-        }
+        val secretDelivery =
+            request.secrets.mapValues { (secret, options) ->
+                decodeSecretDelivery(secret, options)
+            }
         require(secretDelivery.values.count { it.environment?.stdin != null } <= 1) {
             "An invocation can send only one environment variable to standard input"
         }
@@ -119,7 +116,8 @@ internal class InvocationProtocol(
         }
         val invocationToken = runCatching {
             Base64.getDecoder().decode(request.invocationToken)
-        }.getOrElse { throw IllegalArgumentException("Invalid invocation token", it) }
+        }
+            .getOrElse { throw IllegalArgumentException("Invalid invocation token", it) }
         require(invocationToken.size == INVOCATION_TOKEN_BYTES) {
             "Invocation token must be $INVOCATION_TOKEN_BYTES bytes"
         }
@@ -129,70 +127,78 @@ internal class InvocationProtocol(
             secrets = request.secrets.keys.toList(),
             secretDelivery = secretDelivery,
             reason = request.reason,
-            operation = InvocationExecOperation(
-                command = request.operation.command,
-                arguments = request.operation.arguments,
-                workingDirectory = request.operation.workingDirectory,
-                executablePath = request.operation.executablePath,
-                executableHash = request.operation.executableHash?.let(::decodeExecutableHash),
-                executableMode = InvocationExecutableMode.fromWireName(
-                    request.operation.executableMode,
+            operation =
+                InvocationExecOperation(
+                    command = request.operation.command,
+                    arguments = request.operation.arguments,
+                    workingDirectory = request.operation.workingDirectory,
+                    executablePath = request.operation.executablePath,
+                    executableHash = request.operation.executableHash?.let(::decodeExecutableHash),
+                    executableMode =
+                        InvocationExecutableMode.fromWireName(request.operation.executableMode),
+                    stdin = InvocationStreamKind.fromWireName(request.operation.stdin),
+                    stdout = InvocationStreamKind.fromWireName(request.operation.stdout),
+                    stderr = InvocationStreamKind.fromWireName(request.operation.stderr),
                 ),
-                stdin = InvocationStreamKind.fromWireName(request.operation.stdin),
-                stdout = InvocationStreamKind.fromWireName(request.operation.stdout),
-                stderr = InvocationStreamKind.fromWireName(request.operation.stderr),
-            ),
             launcherChain = request.launcherChain,
         )
     }
 
     fun approvedResponse(secrets: Map<String, InvocationResponseSecret>): ByteArray =
-        json.encodeToString(
-            JsonObject.serializer(),
-            buildJsonObject {
-                put("result", RESULT_APPROVED)
-                put(
-                    "secrets",
-                    buildJsonObject {
-                        secrets.toSortedMap().forEach { (name, secret) ->
-                            put(name, secret.toWire())
-                        }
-                    },
-                )
-            },
-        ).encodeToByteArray()
+        json
+            .encodeToString(
+                JsonObject.serializer(),
+                buildJsonObject {
+                    put("result", RESULT_APPROVED)
+                    put(
+                        "secrets",
+                        buildJsonObject {
+                            secrets.toSortedMap().forEach { (name, secret) ->
+                                put(name, secret.toWire())
+                            }
+                        },
+                    )
+                },
+            )
+            .encodeToByteArray()
 
     fun deniedResponse(reason: InvocationDenialReason, message: String): ByteArray =
-        json.encodeToString(
-            InvocationResponseWire.serializer(),
-            InvocationResponseWire(
-                result = RESULT_DENIED,
-                reason = reason.wireName,
-                message = message,
-            ),
-        ).encodeToByteArray()
+        json
+            .encodeToString(
+                InvocationResponseWire.serializer(),
+                InvocationResponseWire(
+                    result = RESULT_DENIED,
+                    reason = reason.wireName,
+                    message = message,
+                ),
+            )
+            .encodeToByteArray()
 
     fun decodeCompletion(plaintext: ByteArray): ApprovalCompletion {
         val clientSoftware = json.decodeClientSoftware(plaintext)
-        val completion = json.decodeFromString<InvocationCompletionWire>(
-            plaintext.decodeToString(),
-        )
+        val completion = json.decodeFromString<InvocationCompletionWire>(plaintext.decodeToString())
         return when (completion.result) {
             RESULT_APPROVED -> ApprovalCompletion.Approved(clientSoftware)
-            RESULT_DENIED -> ApprovalCompletion.Denied(
-                clientSoftware = clientSoftware,
-                reason = completion.reason
-                    ?: throw SerializationException("Denied completion has no reason"),
-                message = completion.message
-                    ?: throw SerializationException("Denied completion has no message"),
-            )
-            RESULT_ABORTED -> ApprovalCompletion.Aborted(
-                clientSoftware = clientSoftware,
-                reason = completion.reason
-                    ?: throw SerializationException("Aborted completion has no reason"),
-                message = completion.message
-                    ?: throw SerializationException("Aborted completion has no message"),
-            )
+            RESULT_DENIED ->
+                ApprovalCompletion.Denied(
+                    clientSoftware = clientSoftware,
+                    reason =
+                        completion.reason
+                            ?: throw SerializationException("Denied completion has no reason"),
+                    message =
+                        completion.message
+                            ?: throw SerializationException("Denied completion has no message"),
+                )
+            RESULT_ABORTED ->
+                ApprovalCompletion.Aborted(
+                    clientSoftware = clientSoftware,
+                    reason =
+                        completion.reason
+                            ?: throw SerializationException("Aborted completion has no reason"),
+                    message =
+                        completion.message
+                            ?: throw SerializationException("Aborted completion has no message"),
+                )
             else -> throw SerializationException("Unsupported invocation completion result")
         }
     }
@@ -235,8 +241,9 @@ internal class InvocationProtocol(
         secret: String,
         value: JsonElement,
     ): InvocationSecretDelivery {
-        val options = value as? JsonObject
-            ?: throw IllegalArgumentException("Secret delivery options must be an object")
+        val options =
+            value as? JsonObject
+                ?: throw IllegalArgumentException("Secret delivery options must be an object")
         val environment = options["environment"]?.let { decodeEnvironmentDelivery(secret, it) }
         return InvocationSecretDelivery(environment)
     }
@@ -245,18 +252,20 @@ internal class InvocationProtocol(
         secret: String,
         value: JsonElement,
     ): InvocationEnvironmentDelivery {
-        val options = value as? JsonObject
-            ?: throw IllegalArgumentException("Environment delivery options must be an object")
+        val options =
+            value as? JsonObject
+                ?: throw IllegalArgumentException("Environment delivery options must be an object")
         val only = options["only"]?.let { decodeEnvironmentNames("only", it) }
         val omitted = options["omit"]?.let { decodeEnvironmentNames("omit", it) }
         val omit = omitted.orEmpty()
         val rename = options["rename"]?.let(::decodeEnvironmentRename).orEmpty()
-        val stdin = options["stdin"]?.let { value ->
-            require(value is JsonPrimitive && value.isString) {
-                "Environment stdin must be a string"
+        val stdin =
+            options["stdin"]?.let { value ->
+                require(value is JsonPrimitive && value.isString) {
+                    "Environment stdin must be a string"
+                }
+                value.content.also(::requireValidEnvironmentName)
             }
-            value.content.also(::requireValidEnvironmentName)
-        }
         require(only == null || only.isNotEmpty()) { "Secret $secret has an empty only set" }
         require(omitted == null || omitted.isNotEmpty()) { "Secret $secret has an empty omit set" }
         require(only == null || omit.isEmpty()) { "Secret $secret uses both only and omit" }
@@ -284,14 +293,14 @@ internal class InvocationProtocol(
     }
 
     private fun decodeEnvironmentNames(option: String, value: JsonElement): Set<String> {
-        val array = value as? JsonArray
-            ?: throw IllegalArgumentException("Environment $option must be an array")
+        val array =
+            value as? JsonArray
+                ?: throw IllegalArgumentException("Environment $option must be an array")
         val names = array.map { element ->
             require(element is JsonPrimitive && element.isString) {
                 "Environment $option must contain strings"
             }
-            element.jsonPrimitive.content
-                .also(::requireValidEnvironmentName)
+            element.jsonPrimitive.content.also(::requireValidEnvironmentName)
         }
         require(names.size == names.distinct().size) { "Environment $option contains duplicates" }
         return names.toSet()
@@ -304,8 +313,9 @@ internal class InvocationProtocol(
     }
 
     private fun decodeEnvironmentRename(value: JsonElement): Map<String, String> {
-        val mapping = value as? JsonObject
-            ?: throw IllegalArgumentException("Environment rename must be an object")
+        val mapping =
+            value as? JsonObject
+                ?: throw IllegalArgumentException("Environment rename must be an object")
         return mapping.mapValues { (source, destination) ->
             requireValidEnvironmentName(source)
             require(destination is JsonPrimitive && destination.isString) {
@@ -316,7 +326,9 @@ internal class InvocationProtocol(
     }
 
     private fun decodeExecutableHash(value: String): String {
-        val decoded = runCatching { Base64.getDecoder().decode(value) }
+        val decoded = runCatching {
+            Base64.getDecoder().decode(value)
+        }
             .getOrElse { throw IllegalArgumentException("Invalid executable hash", it) }
         require(decoded.size == EXECUTABLE_HASH_BYTES) {
             "Executable hash must be $EXECUTABLE_HASH_BYTES bytes"

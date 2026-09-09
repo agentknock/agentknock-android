@@ -1,6 +1,6 @@
 import com.github.triplet.gradle.androidpublisher.ReleaseStatus
-import com.google.gms.googleservices.GoogleServicesTask
 import com.google.gms.googleservices.GoogleServicesPlugin.MissingGoogleServicesStrategy
+import com.google.gms.googleservices.GoogleServicesTask
 import org.gradle.api.artifacts.component.ModuleComponentIdentifier
 import org.gradle.work.DisableCachingByDefault
 
@@ -18,8 +18,8 @@ plugins {
 val agentknockVersionCode = 47
 val agentknockVersionName = "0.2.0"
 val playCredentialsFile = providers.environmentVariable("AGENTKNOCK_PLAY_CREDENTIALS_FILE")
-val sourceRevision = providers.environmentVariable("AGENTKNOCK_SOURCE_REVISION")
-    .orElse("unverified")
+val sourceRevision =
+    providers.environmentVariable("AGENTKNOCK_SOURCE_REVISION").orElse("unverified")
 
 android {
     experimentalProperties["android.experimental.enableScreenshotTest"] = true
@@ -81,16 +81,22 @@ play {
 // would register a Google Services task and generated resources for FOSS as well.
 androidComponents {
     onVariants(selector().withFlavor("distribution" to "play")) { variant ->
-        val googleServices = tasks.register<GoogleServicesTask>(
-            "process${variant.name.replaceFirstChar { it.uppercase() }}GoogleServices",
-        ) {
-            googleServicesJsonFiles.set(listOf(file("src/play/google-services.json")))
-            applicationId.set(variant.applicationId)
-            missingGoogleServicesStrategy.set(MissingGoogleServicesStrategy.ERROR)
-            gmpAppId.set(layout.buildDirectory.file("gmpAppId/${variant.name}.txt"))
-            outputDirectory.set(layout.buildDirectory.dir("generated/google-services/${variant.name}"))
-        }
-        variant.sources.res?.addGeneratedSourceDirectory(googleServices, GoogleServicesTask::outputDirectory)
+        val googleServices =
+            tasks.register<GoogleServicesTask>(
+                "process${variant.name.replaceFirstChar { it.uppercase() }}GoogleServices"
+            ) {
+                googleServicesJsonFiles.set(listOf(file("src/play/google-services.json")))
+                applicationId.set(variant.applicationId)
+                missingGoogleServicesStrategy.set(MissingGoogleServicesStrategy.ERROR)
+                gmpAppId.set(layout.buildDirectory.file("gmpAppId/${variant.name}.txt"))
+                outputDirectory.set(
+                    layout.buildDirectory.dir("generated/google-services/${variant.name}")
+                )
+            }
+        variant.sources.res?.addGeneratedSourceDirectory(
+            googleServices,
+            GoogleServicesTask::outputDirectory,
+        )
     }
 }
 
@@ -141,34 +147,39 @@ dependencies {
     androidTestImplementation(libs.kotlinx.coroutines.test)
 }
 
-val requirePlayCredentials = tasks.register("requirePlayCredentials") {
-    doLast {
-        check(playCredentialsFile.isPresent) {
-            "Play publishing requires AGENTKNOCK_PLAY_CREDENTIALS_FILE"
+val requirePlayCredentials =
+    tasks.register("requirePlayCredentials") {
+        doLast {
+            check(playCredentialsFile.isPresent) {
+                "Play publishing requires AGENTKNOCK_PLAY_CREDENTIALS_FILE"
+            }
         }
     }
-}
 
-tasks.matching { it.name == "publishPlayReleaseBundle" }.configureEach {
-    dependsOn(requirePlayCredentials)
-}
+tasks
+    .matching { it.name == "publishPlayReleaseBundle" }
+    .configureEach {
+        dependsOn(requirePlayCredentials)
+    }
 
 @DisableCachingByDefault(because = "Checks resolved coordinates without producing artifacts")
 abstract class VerifyFossDependencies : DefaultTask() {
-    @get:Input
-    abstract val dependencyCoordinates: MapProperty<String, List<String>>
+    @get:Input abstract val dependencyCoordinates: MapProperty<String, List<String>>
 
     @TaskAction
     fun verify() {
-        val forbiddenGroups = setOf(
-            "com.google.firebase",
-            "com.google.android.gms",
-            "com.android.billingclient",
-        )
-        val violations = dependencyCoordinates.get().flatMap { (configuration, coordinates) ->
-            coordinates.filter { it.substringBefore(':') in forbiddenGroups }
-                .map { "$configuration: $it" }
-        }
+        val forbiddenGroups =
+            setOf(
+                "com.google.firebase",
+                "com.google.android.gms",
+                "com.android.billingclient",
+            )
+        val violations =
+            dependencyCoordinates.get().flatMap { (configuration, coordinates) ->
+                coordinates
+                    .filter { it.substringBefore(':') in forbiddenGroups }
+                    .map { "$configuration: $it" }
+            }
         check(violations.isEmpty()) {
             "FOSS builds must not include Firebase, Google Play Services, or Play Billing:\n" +
                 violations.sorted().joinToString("\n")
@@ -176,24 +187,31 @@ abstract class VerifyFossDependencies : DefaultTask() {
     }
 }
 
-val verifyFossDependencies = tasks.register<VerifyFossDependencies>("verifyFossDependencies") {
-    group = "verification"
-    description = "Rejects Google SDK dependencies in the FOSS debug and release runtimes."
-    for (buildType in listOf("Debug", "Release")) {
-        val configuration = "foss${buildType}RuntimeClasspath"
-        dependencyCoordinates.put(
-            configuration,
-            configurations.named(configuration).flatMap { it.incoming.artifacts.resolvedArtifacts }
-                .map { artifacts ->
-                    artifacts.mapNotNull { artifact ->
-                        (artifact.id.componentIdentifier as? ModuleComponentIdentifier)?.let {
-                            "${it.group}:${it.module}:${it.version}"
-                        }
-                    }.distinct().sorted()
-                },
-        )
+val verifyFossDependencies =
+    tasks.register<VerifyFossDependencies>("verifyFossDependencies") {
+        group = "verification"
+        description = "Rejects Google SDK dependencies in the FOSS debug and release runtimes."
+        for (buildType in listOf("Debug", "Release")) {
+            val configuration = "foss${buildType}RuntimeClasspath"
+            dependencyCoordinates.put(
+                configuration,
+                configurations
+                    .named(configuration)
+                    .flatMap { it.incoming.artifacts.resolvedArtifacts }
+                    .map { artifacts ->
+                        artifacts
+                            .mapNotNull { artifact ->
+                                (artifact.id.componentIdentifier as? ModuleComponentIdentifier)
+                                    ?.let {
+                                        "${it.group}:${it.module}:${it.version}"
+                                    }
+                            }
+                            .distinct()
+                            .sorted()
+                    },
+            )
+        }
     }
-}
 
 tasks.named("check") {
     dependsOn(":spotlessCheck")

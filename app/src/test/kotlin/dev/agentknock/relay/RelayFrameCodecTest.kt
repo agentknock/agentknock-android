@@ -10,7 +10,7 @@ class RelayFrameCodecTest {
     @Test(expected = IllegalStateException::class)
     fun `rejects a malformed optional inactive kind`() {
         codec.decode(
-            """{"type":"inactive","client_id":"client","request_id":"request","kind":{}}""",
+            """{"type":"inactive","client_id":"client","request_id":"request","kind":{}}"""
         )
     }
 
@@ -29,7 +29,7 @@ class RelayFrameCodecTest {
                     CLIENT_ID,
                     REQUEST_ID,
                     RelayMessageKind.REQUEST,
-                ),
+                )
             ),
         )
         assertEquals(
@@ -53,7 +53,7 @@ class RelayFrameCodecTest {
                 addressId = ADDRESS_ID,
             ),
             codec.decode(
-                """{"type":"message","client_id":"$CLIENT_ID","request_id":"$REQUEST_ID","kind":"request","payload":{"method":"List"},"address_id":"$ADDRESS_ID","future":true}""",
+                """{"type":"message","client_id":"$CLIENT_ID","request_id":"$REQUEST_ID","kind":"request","payload":{"method":"List"},"address_id":"$ADDRESS_ID","future":true}"""
             ),
         )
         assertEquals(
@@ -64,7 +64,7 @@ class RelayFrameCodecTest {
                 response = RelayMessageState.DISCARDED,
             ),
             codec.decode(
-                """{"type":"state","client_id":"$CLIENT_ID","request_id":"$REQUEST_ID","exchange":"closing","request":"delivered","response":"discarded","completion":"accepted"}""",
+                """{"type":"state","client_id":"$CLIENT_ID","request_id":"$REQUEST_ID","exchange":"closing","request":"delivered","response":"discarded","completion":"accepted"}"""
             ),
         )
     }
@@ -73,20 +73,16 @@ class RelayFrameCodecTest {
     fun `decodes relay control and terminal frames`() {
         assertEquals(
             RelayDeviceEvent.PushRegistration(RelayPushRegistrationState.MISSING),
-            codec.decode(
-                """{"type":"push_registration","state":"missing"}""",
-            ),
+            codec.decode("""{"type":"push_registration","state":"missing"}"""),
         )
         assertEquals(
             RelayDeviceEvent.ClientState(CLIENT_ID, RelayClientState.ACTIVE),
-            codec.decode(
-                """{"type":"client_state","client_id":"$CLIENT_ID","state":"active"}""",
-            ),
+            codec.decode("""{"type":"client_state","client_id":"$CLIENT_ID","state":"active"}"""),
         )
         assertEquals(
             RelayDeviceEvent.Inactive(CLIENT_ID, REQUEST_ID, null),
             codec.decode(
-                """{"type":"inactive","client_id":"$CLIENT_ID","request_id":"$REQUEST_ID"}""",
+                """{"type":"inactive","client_id":"$CLIENT_ID","request_id":"$REQUEST_ID"}"""
             ),
         )
         assertEquals(RelayDeviceEvent.CaughtUp, codec.decode("""{"type":"caught_up"}"""))
@@ -99,7 +95,7 @@ class RelayFrameCodecTest {
                 retryAfterMillis = 250,
             ),
             codec.decode(
-                """{"type":"error","error":"BUSY","message":"retry","retryable":true,"retry_after_ms":250}""",
+                """{"type":"error","error":"BUSY","message":"retry","retryable":true,"retry_after_ms":250}"""
             ),
         )
     }
@@ -111,14 +107,15 @@ class RelayFrameCodecTest {
                 code = "REQUEST_ID_CONFLICT",
                 message = "conflict",
                 retryable = false,
-                scope = RelayDeviceErrorScope.Exchange(
-                    clientId = CLIENT_ID,
-                    requestId = REQUEST_ID,
-                    kind = RelayMessageKind.RESPONSE,
-                ),
+                scope =
+                    RelayDeviceErrorScope.Exchange(
+                        clientId = CLIENT_ID,
+                        requestId = REQUEST_ID,
+                        kind = RelayMessageKind.RESPONSE,
+                    ),
             ),
             codec.decode(
-                """{"type":"error","client_id":"$CLIENT_ID","request_id":"$REQUEST_ID","kind":"response","error":"REQUEST_ID_CONFLICT","message":"conflict","retryable":false}""",
+                """{"type":"error","client_id":"$CLIENT_ID","request_id":"$REQUEST_ID","kind":"response","error":"REQUEST_ID_CONFLICT","message":"conflict","retryable":false}"""
             ),
         )
     }
@@ -126,22 +123,23 @@ class RelayFrameCodecTest {
     @Test(expected = IllegalStateException::class)
     fun `rejects a partial exchange error scope`() {
         codec.decode(
-            """{"type":"error","client_id":"$CLIENT_ID","error":"BUSY","message":"retry","retryable":true}""",
+            """{"type":"error","client_id":"$CLIENT_ID","error":"BUSY","message":"retry","retryable":true}"""
         )
     }
 
     @Test(expected = IllegalStateException::class)
     fun `rejects a negative retry delay`() {
         codec.decode(
-            """{"type":"error","error":"BUSY","message":"retry","retryable":true,"retry_after_ms":-1}""",
+            """{"type":"error","error":"BUSY","message":"retry","retryable":true,"retry_after_ms":-1}"""
         )
     }
 
     @Test
     fun `clamps an overflowing retry delay`() {
-        val event = codec.decode(
-            """{"type":"error","error":"BUSY","message":"retry","retryable":true,"retry_after_ms":999999999999999999999999999999}""",
-        )
+        val event =
+            codec.decode(
+                """{"type":"error","error":"BUSY","message":"retry","retryable":true,"retry_after_ms":999999999999999999999999999999}"""
+            )
 
         assertEquals(Long.MAX_VALUE, (event as RelayDeviceEvent.Error).retryAfterMillis)
     }

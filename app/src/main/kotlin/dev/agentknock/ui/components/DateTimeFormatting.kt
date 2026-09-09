@@ -23,16 +23,23 @@ internal class UiDateTimeFormatter(
     private val timeZone: TimeZone,
 ) {
     private val datePattern = DateFormat.getBestDateTimePattern(locale, "yMMMd")
-    private val timePattern = DateFormat.getBestDateTimePattern(locale, if (use24Hour) "Hms" else "hms")
-    private val timestampPattern = DateFormat.getBestDateTimePattern(
-        locale, if (use24Hour) "yMMMdHm" else "yMMMdhm",
-    )
-    private val preciseTimestampPattern = DateFormat.getBestDateTimePattern(
-        locale, if (use24Hour) "yMMMdHms" else "yMMMdhms",
-    )
+    private val timePattern =
+        DateFormat.getBestDateTimePattern(locale, if (use24Hour) "Hms" else "hms")
+    private val timestampPattern =
+        DateFormat.getBestDateTimePattern(
+            locale,
+            if (use24Hour) "yMMMdHm" else "yMMMdhm",
+        )
+    private val preciseTimestampPattern =
+        DateFormat.getBestDateTimePattern(
+            locale,
+            if (use24Hour) "yMMMdHms" else "yMMMdhms",
+        )
 
     fun date(timestamp: Long): String = format(timestamp, datePattern)
+
     fun time(timestamp: Long): String = format(timestamp, timePattern)
+
     fun timestamp(timestamp: Long, includeSeconds: Boolean = false): String =
         format(timestamp, if (includeSeconds) preciseTimestampPattern else timestampPattern)
 
@@ -40,7 +47,8 @@ internal class UiDateTimeFormatter(
         formatRelativeTime(timestamp, now, ::date)
 
     private fun format(timestamp: Long, pattern: String): String =
-        SimpleDateFormat(pattern, locale).apply { timeZone = this@UiDateTimeFormatter.timeZone }
+        SimpleDateFormat(pattern, locale)
+            .apply { timeZone = this@UiDateTimeFormatter.timeZone }
             .format(Date(timestamp))
 }
 
@@ -48,7 +56,9 @@ internal val LocalDateTimeFormatter = staticCompositionLocalOf<UiDateTimeFormatt
 
 @Composable
 internal fun rememberDateTimeFormatter(): UiDateTimeFormatter {
-    LocalDateTimeFormatter.current?.let { return it }
+    LocalDateTimeFormatter.current?.let {
+        return it
+    }
     val context = LocalContext.current
     val locale = LocalConfiguration.current.locales[0]
     var use24Hour by remember(context) { mutableStateOf(DateFormat.is24HourFormat(context)) }
@@ -56,7 +66,7 @@ internal fun rememberDateTimeFormatter(): UiDateTimeFormatter {
     LifecycleResumeEffect(context) {
         use24Hour = DateFormat.is24HourFormat(context)
         timeZone = TimeZone.getDefault()
-        onPauseOrDispose { }
+        onPauseOrDispose {}
     }
     return remember(locale, use24Hour, timeZone) {
         UiDateTimeFormatter(locale, use24Hour, timeZone)

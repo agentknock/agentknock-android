@@ -2,7 +2,6 @@ package dev.agentknock.push
 
 import dev.agentknock.relay.RelayEndpointResult
 import dev.agentknock.relay.RelayPushRegistrationClient
-import dev.agentknock.relay.RelayPushRegistrationResult
 import dev.agentknock.relay.RelayPushRegistrationState
 import dev.agentknock.relay.isTransientRelayStatus
 import dev.agentknock.storage.device.DeviceCredentialResult
@@ -52,32 +51,35 @@ internal class PushRegistrationRepository(
     }
 
     suspend fun register(firebaseInstallationId: String): PushRegistrationResult {
-        val authorization = when (val result = deviceAuthorization.activeDeviceAuthorization()) {
-            is DeviceCredentialResult.Available -> result.value
-            null -> return PushRegistrationResult.NoDevice
-            DeviceCredentialResult.Unavailable -> {
-                return PushRegistrationResult.DeviceCredentialsUnavailable
+        val authorization =
+            when (val result = deviceAuthorization.activeDeviceAuthorization()) {
+                is DeviceCredentialResult.Available -> result.value
+                null -> return PushRegistrationResult.NoDevice
+                DeviceCredentialResult.Unavailable -> {
+                    return PushRegistrationResult.DeviceCredentialsUnavailable
+                }
+                DeviceCredentialResult.Corrupted -> {
+                    return PushRegistrationResult.DeviceCredentialsCorrupted
+                }
+                DeviceCredentialResult.UnsupportedEncryption -> {
+                    return PushRegistrationResult.UnsupportedDeviceCredentialEncryption
+                }
             }
-            DeviceCredentialResult.Corrupted -> {
-                return PushRegistrationResult.DeviceCredentialsCorrupted
-            }
-            DeviceCredentialResult.UnsupportedEncryption -> {
-                return PushRegistrationResult.UnsupportedDeviceCredentialEncryption
-            }
-        }
         return when (
-            val result = relay.register(
-                deviceId = authorization.deviceId,
-                deviceToken = authorization.deviceToken,
-                firebaseInstallationId = firebaseInstallationId,
-            )
+            val result =
+                relay.register(
+                    deviceId = authorization.deviceId,
+                    deviceToken = authorization.deviceToken,
+                    firebaseInstallationId = firebaseInstallationId,
+                )
         ) {
             is RelayEndpointResult.Success -> PushRegistrationResult.Registered
-            is RelayEndpointResult.Rejected -> PushRegistrationResult.RelayRejected(
-                status = result.status,
-                code = result.code,
-                message = result.message,
-            )
+            is RelayEndpointResult.Rejected ->
+                PushRegistrationResult.RelayRejected(
+                    status = result.status,
+                    code = result.code,
+                    message = result.message,
+                )
             is RelayEndpointResult.Unavailable -> {
                 PushRegistrationResult.RelayUnavailable(result.cause.message)
             }

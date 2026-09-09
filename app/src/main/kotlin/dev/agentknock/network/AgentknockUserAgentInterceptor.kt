@@ -9,10 +9,6 @@ internal class AgentknockUserAgentInterceptor(
 ) : Interceptor {
     private val userAgent = "Agentknock-Android/$versionName (build $versionCode)"
 
-    override fun intercept(chain: Interceptor.Chain): Response = chain.proceed(
-        chain.request()
-            .newBuilder()
-            .header("User-Agent", userAgent)
-            .build(),
-    )
+    override fun intercept(chain: Interceptor.Chain): Response =
+        chain.proceed(chain.request().newBuilder().header("User-Agent", userAgent).build())
 }

@@ -12,10 +12,11 @@ import org.junit.Test
 
 class SshAuthenticationProtocolTest {
     private val protocol = SshAuthenticationProtocol()
-    private val publicKeyBlob = sshStrings(
-        "ssh-ed25519".encodeToByteArray(),
-        ByteArray(32) { 7 },
-    )
+    private val publicKeyBlob =
+        sshStrings(
+            "ssh-ed25519".encodeToByteArray(),
+            ByteArray(32) { 7 },
+        )
 
     @Test
     fun `decodes and validates ordinary Ed25519 authentication`() {
@@ -39,11 +40,12 @@ class SshAuthenticationProtocolTest {
     @Test
     fun `validates host-bound authentication and reports the host key`() {
         val hostKey = sshStrings("ssh-ed25519".encodeToByteArray(), ByteArray(32) { 9 })
-        val details = protocol.validateMessage(
-            authenticationMessage("publickey-hostbound-v00@openssh.com", hostKey),
-            publicKeyBlob,
-            "ssh-ed25519",
-        )
+        val details =
+            protocol.validateMessage(
+                authenticationMessage("publickey-hostbound-v00@openssh.com", hostKey),
+                publicKeyBlob,
+                "ssh-ed25519",
+            )
 
         assertEquals(SshAuthenticationMethod.HOST_BOUND, details.method)
         assertEquals("ssh-ed25519", details.hostKeyAlgorithm)
@@ -53,21 +55,23 @@ class SshAuthenticationProtocolTest {
 
     @Test
     fun `accepts modern RSA authentication algorithms and rejects mismatches`() {
-        val rsaPublicKey = sshStrings(
-            "ssh-rsa".encodeToByteArray(),
-            byteArrayOf(1, 0, 1),
-            byteArrayOf(0, 1, 2, 3, 4),
-        )
-        for (algorithm in listOf("rsa-sha2-256", "rsa-sha2-512")) {
-            val details = protocol.validateMessage(
-                authenticationMessage(
-                    method = "publickey",
-                    algorithm = algorithm,
-                    publicKey = rsaPublicKey,
-                ),
-                rsaPublicKey,
-                "ssh-rsa",
+        val rsaPublicKey =
+            sshStrings(
+                "ssh-rsa".encodeToByteArray(),
+                byteArrayOf(1, 0, 1),
+                byteArrayOf(0, 1, 2, 3, 4),
             )
+        for (algorithm in listOf("rsa-sha2-256", "rsa-sha2-512")) {
+            val details =
+                protocol.validateMessage(
+                    authenticationMessage(
+                        method = "publickey",
+                        algorithm = algorithm,
+                        publicKey = rsaPublicKey,
+                    ),
+                    rsaPublicKey,
+                    "ssh-rsa",
+                )
             assertEquals(algorithm, details.algorithm.wireName)
         }
         assertThrows(IllegalArgumentException::class.java) {
@@ -100,23 +104,26 @@ class SshAuthenticationProtocolTest {
     @Test
     fun `encodes signature response and completion variants`() {
         val signature = sshSignatureBlob(SshSignatureAlgorithm.ED25519, ByteArray(64) { 5 })
-        val response = Json.parseToJsonElement(
-            protocol.approvedResponse(signature).decodeToString(),
-        ).let { it as kotlinx.serialization.json.JsonObject }
+        val response =
+            Json.parseToJsonElement(protocol.approvedResponse(signature).decodeToString()).let {
+                it as kotlinx.serialization.json.JsonObject
+            }
         assertEquals("APPROVED", response.getValue("result").toString().trim('"'))
         assertArrayEquals(
             signature,
             Base64.getDecoder().decode(response.getValue("signature").toString().trim('"')),
         )
-        val approved = protocol.decodeCompletion(
-            """{${testClientSoftwareFields("0.3.0", "0.1.0")},"result":"APPROVED"}"""
-                .encodeToByteArray(),
-        )
+        val approved =
+            protocol.decodeCompletion(
+                """{${testClientSoftwareFields("0.3.0", "0.1.0")},"result":"APPROVED"}"""
+                    .encodeToByteArray()
+            )
         assert(approved is ApprovalCompletion.Approved)
-        val denied = protocol.decodeCompletion(
-            """{${testClientSoftwareFields("0.3.0", "0.1.0")},"result":"DENIED","reason":"USER_DENIED","message":"No"}"""
-                .encodeToByteArray(),
-        )
+        val denied =
+            protocol.decodeCompletion(
+                """{${testClientSoftwareFields("0.3.0", "0.1.0")},"result":"DENIED","reason":"USER_DENIED","message":"No"}"""
+                    .encodeToByteArray()
+            )
         require(denied is ApprovalCompletion.Denied)
         assertEquals("USER_DENIED", denied.reason)
         assertNull(approved.reason)

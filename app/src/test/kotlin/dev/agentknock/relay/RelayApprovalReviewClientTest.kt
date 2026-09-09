@@ -29,10 +29,8 @@ class RelayApprovalReviewClientTest {
             server.enqueue(
                 MockResponse.Builder()
                     .code(200)
-                    .body(
-                        """{"decision":"approve","explanation":"The policy allows it."}""",
-                    )
-                    .build(),
+                    .body("""{"decision":"approve","explanation":"The policy allows it."}""")
+                    .build()
             )
 
             assertEquals(
@@ -40,7 +38,7 @@ class RelayApprovalReviewClientTest {
                     RelayApprovalReview(
                         RelayApprovalReviewDecision.APPROVE,
                         "The policy allows it.",
-                    ),
+                    )
                 ),
                 client(server).review(DEVICE_ID, DEVICE_TOKEN, reviewRequest()),
             )
@@ -65,8 +63,12 @@ class RelayApprovalReviewClientTest {
             )
             assertEquals(
                 "Allow reading issues but not publishing releases.",
-                instructions.getValue("secrets").jsonObject
-                    .getValue("github").jsonPrimitive.content,
+                instructions
+                    .getValue("secrets")
+                    .jsonObject
+                    .getValue("github")
+                    .jsonPrimitive
+                    .content,
             )
             assertEquals(setOf("github"), instructions.getValue("secrets").jsonObject.keys)
             val facts = body.getValue("facts").jsonObject
@@ -83,20 +85,33 @@ class RelayApprovalReviewClientTest {
             )
             assertEquals(
                 "https://api.github.com",
-                variables.getValue("GITHUB_API_URL").jsonObject
-                    .getValue("value").jsonPrimitive.content,
+                variables
+                    .getValue("GITHUB_API_URL")
+                    .jsonObject
+                    .getValue("value")
+                    .jsonPrimitive
+                    .content,
             )
             assertEquals(
                 "GITHUB_API_URL",
-                variables.getValue("GITHUB_API_URL").jsonObject
-                    .getValue("target").jsonPrimitive.content,
+                variables
+                    .getValue("GITHUB_API_URL")
+                    .jsonObject
+                    .getValue("target")
+                    .jsonPrimitive
+                    .content,
             )
             val evidence = body.getValue("evidence").jsonObject
             assertEquals(setOf("reason", "command"), evidence.keys)
             assertEquals(
                 "issue",
-                evidence.getValue("command").jsonObject.getValue("argv")
-                    .jsonArray[1].jsonPrimitive.content,
+                evidence
+                    .getValue("command")
+                    .jsonObject
+                    .getValue("argv")
+                    .jsonArray[1]
+                    .jsonPrimitive
+                    .content,
             )
         }
     }
@@ -109,9 +124,9 @@ class RelayApprovalReviewClientTest {
                 MockResponse.Builder()
                     .code(402)
                     .body(
-                        """{"error":"SUBSCRIPTION_REQUIRED","message":"An active subscription is required."}""",
+                        """{"error":"SUBSCRIPTION_REQUIRED","message":"An active subscription is required."}"""
                     )
-                    .build(),
+                    .build()
             )
 
             assertEquals(
@@ -132,10 +147,8 @@ class RelayApprovalReviewClientTest {
             server.enqueue(
                 MockResponse.Builder()
                     .code(200)
-                    .body(
-                        """{"decision":"ask_user","explanation":"The reason is ambiguous."}""",
-                    )
-                    .build(),
+                    .body("""{"decision":"ask_user","explanation":"The reason is ambiguous."}""")
+                    .build()
             )
 
             assertEquals(
@@ -143,7 +156,7 @@ class RelayApprovalReviewClientTest {
                     RelayApprovalReview(
                         RelayApprovalReviewDecision.ASK_USER,
                         "The reason is ambiguous.",
-                    ),
+                    )
                 ),
                 client(server).review(DEVICE_ID, DEVICE_TOKEN, reviewRequest()),
             )
@@ -157,10 +170,8 @@ class RelayApprovalReviewClientTest {
             server.enqueue(
                 MockResponse.Builder()
                     .code(200)
-                    .body(
-                        """{"decision":"deny","explanation":"The command is destructive."}""",
-                    )
-                    .build(),
+                    .body("""{"decision":"deny","explanation":"The command is destructive."}""")
+                    .build()
             )
 
             assertEquals(
@@ -168,7 +179,7 @@ class RelayApprovalReviewClientTest {
                     RelayApprovalReview(
                         RelayApprovalReviewDecision.DENY,
                         "The command is destructive.",
-                    ),
+                    )
                 ),
                 client(server).review(DEVICE_ID, DEVICE_TOKEN, reviewRequest()),
             )
@@ -183,7 +194,7 @@ class RelayApprovalReviewClientTest {
                 MockResponse.Builder()
                     .code(200)
                     .body("""{"decision":"approve","explanation":""}""")
-                    .build(),
+                    .build()
             )
 
             assertEquals(
@@ -193,47 +204,57 @@ class RelayApprovalReviewClientTest {
         }
     }
 
-    private fun client(server: MockWebServer) = HttpRelayApprovalReviewClient(
-        transport = RelayHttpTransport(
-            client = OkHttpClient(),
-            relayUrl = server.url("/").toString(),
-        ),
-    )
+    private fun client(server: MockWebServer) =
+        HttpRelayApprovalReviewClient(
+            transport =
+                RelayHttpTransport(
+                    client = OkHttpClient(),
+                    relayUrl = server.url("/").toString(),
+                )
+        )
 
-    private fun reviewRequest() = ApprovalReviewRequest(
-        instructions = ApprovalReviewInstructions(
-            general = "Protect production systems.",
-            client = "Use only for work on this repository.",
-            secrets = mapOf(
-                "github" to "Allow reading issues but not publishing releases.",
-            ),
-        ),
-        facts = ApprovalReviewFacts(
-            client = "git",
-            operation = ApprovalReviewOperation.INVOCATION,
-            secrets = linkedMapOf(
-                "github" to ApprovalReviewEnvironmentSecretFacts(
-                    variables = linkedMapOf(
-                        "GITHUB_TOKEN" to environmentFact("GITHUB_TOKEN", null),
-                        "GITHUB_API_URL" to environmentFact(
-                            "GITHUB_API_URL",
-                            "https://api.github.com",
-                        ),
-                    ),
+    private fun reviewRequest() =
+        ApprovalReviewRequest(
+            instructions =
+                ApprovalReviewInstructions(
+                    general = "Protect production systems.",
+                    client = "Use only for work on this repository.",
+                    secrets =
+                        mapOf("github" to "Allow reading issues but not publishing releases."),
                 ),
-                "git-signing" to ApprovalReviewSshSecretFacts,
-            ),
-        ),
-        evidence = ApprovalReviewEvidence(
-            reason = "Inspect an issue",
-            command = ApprovalReviewCommandEvidence(
-                argv = listOf("gh", "issue", "view", "234"),
-                workingDirectory = "/work/project",
-                resolvedExecutable = "/run/current-system/sw/bin/gh",
-                launcherChain = listOf("agentknock", "shell"),
-            ),
-        ),
-    )
+            facts =
+                ApprovalReviewFacts(
+                    client = "git",
+                    operation = ApprovalReviewOperation.INVOCATION,
+                    secrets =
+                        linkedMapOf(
+                            "github" to
+                                ApprovalReviewEnvironmentSecretFacts(
+                                    variables =
+                                        linkedMapOf(
+                                            "GITHUB_TOKEN" to environmentFact("GITHUB_TOKEN", null),
+                                            "GITHUB_API_URL" to
+                                                environmentFact(
+                                                    "GITHUB_API_URL",
+                                                    "https://api.github.com",
+                                                ),
+                                        )
+                                ),
+                            "git-signing" to ApprovalReviewSshSecretFacts,
+                        ),
+                ),
+            evidence =
+                ApprovalReviewEvidence(
+                    reason = "Inspect an issue",
+                    command =
+                        ApprovalReviewCommandEvidence(
+                            argv = listOf("gh", "issue", "view", "234"),
+                            workingDirectory = "/work/project",
+                            resolvedExecutable = "/run/current-system/sw/bin/gh",
+                            launcherChain = listOf("agentknock", "shell"),
+                        ),
+                ),
+        )
 
     private fun environmentFact(name: String, value: String?) =
         ApprovalReviewEnvironmentVariableFacts(

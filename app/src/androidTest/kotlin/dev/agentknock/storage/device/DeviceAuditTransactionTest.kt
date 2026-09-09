@@ -48,18 +48,21 @@ class DeviceAuditTransactionTest {
 
     @Before
     fun setUp() {
-        database = Room.inMemoryDatabaseBuilder(
-            InstrumentationRegistry.getInstrumentation().targetContext,
-            AgentknockDatabase::class.java,
-        ).build()
+        database =
+            Room.inMemoryDatabaseBuilder(
+                    InstrumentationRegistry.getInstrumentation().targetContext,
+                    AgentknockDatabase::class.java,
+                )
+                .build()
         audit = AuditRepository(database.auditDao(), currentTimeMillis = { 1_000L })
         keys = TestEncryptionKeyStore()
-        keyManager = VaultKeyManager(
-            dao = database.vaultKeyDao(),
-            keyStore = keys,
-            newKeyId = { "test-key-${++nextKeyId}" },
-            currentTimeMillis = { 100L + nextKeyId },
-        )
+        keyManager =
+            VaultKeyManager(
+                dao = database.vaultKeyDao(),
+                keyStore = keys,
+                newKeyId = { "test-key-${++nextKeyId}" },
+                currentTimeMillis = { 100L + nextKeyId },
+            )
         transaction = RoomWriteTransaction(database)
     }
 
@@ -71,11 +74,12 @@ class DeviceAuditTransactionTest {
     @Test
     fun claimingAndAuditingADeviceIdentityRollBackTogether() = runTest {
         val relay = SuccessfulClaimClient()
-        val failingRepository = identityRepository(
-            relay = relay,
-            auditSink = InsertThenFailAuditSink(audit),
-            dispatcher = UnconfinedTestDispatcher(testScheduler),
-        )
+        val failingRepository =
+            identityRepository(
+                relay = relay,
+                auditSink = InsertThenFailAuditSink(audit),
+                dispatcher = UnconfinedTestDispatcher(testScheduler),
+            )
 
         val failed = runCatching {
             failingRepository.stageAndClaim("amber-river-maple")
@@ -84,18 +88,23 @@ class DeviceAuditTransactionTest {
         assertTrue(failed.isFailure)
         assertNull(database.deviceIdentityDao().getIdentity(DeviceIdentityRole.ACTIVE.storedName))
         assertNotNull(
-            database.deviceIdentityDao().getIdentity(DeviceIdentityRole.CANDIDATE.storedName),
+            database.deviceIdentityDao().getIdentity(DeviceIdentityRole.CANDIDATE.storedName)
         )
         assertTrue(audit.observeEvents().first().isEmpty())
 
-        val repository = identityRepository(
-            relay = relay,
-            auditSink = audit,
-            dispatcher = UnconfinedTestDispatcher(testScheduler),
-        )
+        val repository =
+            identityRepository(
+                relay = relay,
+                auditSink = audit,
+                dispatcher = UnconfinedTestDispatcher(testScheduler),
+            )
         assertEquals(ClaimPairingAddressResult.Claimed, repository.claimCandidate())
-        assertNotNull(database.deviceIdentityDao().getIdentity(DeviceIdentityRole.ACTIVE.storedName))
-        assertNull(database.deviceIdentityDao().getIdentity(DeviceIdentityRole.CANDIDATE.storedName))
+        assertNotNull(
+            database.deviceIdentityDao().getIdentity(DeviceIdentityRole.ACTIVE.storedName)
+        )
+        assertNull(
+            database.deviceIdentityDao().getIdentity(DeviceIdentityRole.CANDIDATE.storedName)
+        )
         assertEquals(
             listOf(AuditEventType.PAIRING_ADDRESS_CLAIMED),
             audit.observeEvents().first().map { it.type },
@@ -105,18 +114,20 @@ class DeviceAuditTransactionTest {
     @Test
     fun deviceInstructionsAndTheirAuditRollBackTogether() = runTest {
         database.deviceIdentityDao().insertIdentity(activeIdentity(instructions = "Original"))
-        val repository = identityRepository(
-            relay = SuccessfulClaimClient(),
-            auditSink = InsertThenFailAuditSink(audit),
-            dispatcher = UnconfinedTestDispatcher(testScheduler),
-        )
+        val repository =
+            identityRepository(
+                relay = SuccessfulClaimClient(),
+                auditSink = InsertThenFailAuditSink(audit),
+                dispatcher = UnconfinedTestDispatcher(testScheduler),
+            )
 
         val failed = runCatching { repository.saveInstructions("Changed") }
 
         assertTrue(failed.isFailure)
         assertEquals(
             "Original",
-            database.deviceIdentityDao()
+            database
+                .deviceIdentityDao()
                 .getIdentity(DeviceIdentityRole.ACTIVE.storedName)
                 ?.instructions,
         )
@@ -126,21 +137,24 @@ class DeviceAuditTransactionTest {
     @Test
     fun pairingAdmissionAndItsAuditRollBackTogether() = runTest {
         database.deviceIdentityDao().insertIdentity(activeIdentity(pairingEnabled = true))
-        val authorization = RelayDeviceAuthorization(
-            deviceIdentityId = IDENTITY_ID,
-            deviceId = DEVICE_ID,
-            deviceToken = "device-token",
-        )
+        val authorization =
+            RelayDeviceAuthorization(
+                deviceIdentityId = IDENTITY_ID,
+                deviceId = DEVICE_ID,
+                deviceToken = "device-token",
+            )
         val relay = SuccessfulManagementClient()
-        val repository = DeviceManagementRepository(
-            deviceIdentityDao = database.deviceIdentityDao(),
-            deviceAuthorization = RelayDeviceAuthorizationSource {
-                DeviceCredentialResult.Available(authorization)
-            },
-            relay = relay,
-            audit = InsertThenFailAuditSink(audit),
-            writeTransaction = transaction,
-        )
+        val repository =
+            DeviceManagementRepository(
+                deviceIdentityDao = database.deviceIdentityDao(),
+                deviceAuthorization =
+                    RelayDeviceAuthorizationSource {
+                        DeviceCredentialResult.Available(authorization)
+                    },
+                relay = relay,
+                audit = InsertThenFailAuditSink(audit),
+                writeTransaction = transaction,
+            )
 
         val failed = runCatching { repository.setPairingEnabled(false) }
 
@@ -148,30 +162,32 @@ class DeviceAuditTransactionTest {
         assertEquals(listOf(false), relay.pairingChanges)
         assertTrue(
             checkNotNull(
-                database.deviceIdentityDao()
-                    .getIdentity(DeviceIdentityRole.ACTIVE.storedName),
-            ).pairingEnabled,
+                    database.deviceIdentityDao().getIdentity(DeviceIdentityRole.ACTIVE.storedName)
+                )
+                .pairingEnabled
         )
         assertTrue(audit.observeEvents().first().isEmpty())
 
-        val successfulRepository = DeviceManagementRepository(
-            deviceIdentityDao = database.deviceIdentityDao(),
-            deviceAuthorization = RelayDeviceAuthorizationSource {
-                DeviceCredentialResult.Available(authorization)
-            },
-            relay = relay,
-            audit = audit,
-            writeTransaction = transaction,
-        )
+        val successfulRepository =
+            DeviceManagementRepository(
+                deviceIdentityDao = database.deviceIdentityDao(),
+                deviceAuthorization =
+                    RelayDeviceAuthorizationSource {
+                        DeviceCredentialResult.Available(authorization)
+                    },
+                relay = relay,
+                audit = audit,
+                writeTransaction = transaction,
+            )
         assertEquals(
             DeviceManagementResult.Changed,
             successfulRepository.setPairingEnabled(false),
         )
         assertFalse(
             checkNotNull(
-                database.deviceIdentityDao()
-                    .getIdentity(DeviceIdentityRole.ACTIVE.storedName),
-            ).pairingEnabled,
+                    database.deviceIdentityDao().getIdentity(DeviceIdentityRole.ACTIVE.storedName)
+                )
+                .pairingEnabled
         )
         assertEquals(listOf(false, false), relay.pairingChanges)
         assertEquals(
@@ -184,34 +200,34 @@ class DeviceAuditTransactionTest {
         relay: RelayClaimClient,
         auditSink: AuditSink,
         dispatcher: kotlinx.coroutines.CoroutineDispatcher,
-    ) = DeviceIdentityRepository(
-        dao = database.deviceIdentityDao(),
-        keyManager = keyManager,
-        encryption = AesGcmEncryption(keys),
-        relay = relay,
-        audit = auditSink,
-        writeTransaction = transaction,
-        newId = { "identity" },
-        currentTimeMillis = { 200L },
-        cryptographyDispatcher = dispatcher,
-    )
+    ) =
+        DeviceIdentityRepository(
+            dao = database.deviceIdentityDao(),
+            keyManager = keyManager,
+            encryption = AesGcmEncryption(keys),
+            relay = relay,
+            audit = auditSink,
+            writeTransaction = transaction,
+            newId = { "identity" },
+            currentTimeMillis = { 200L },
+            cryptographyDispatcher = dispatcher,
+        )
 
     private fun activeIdentity(
         pairingEnabled: Boolean = true,
         instructions: String = "",
-    ) = DeviceIdentityEntity(
-        id = IDENTITY_ID,
-        role = DeviceIdentityRole.ACTIVE.storedName,
-        address = "amber-river-maple",
-        deviceId = DEVICE_ID,
-        createdAt = 1L,
-        pairingEnabled = pairingEnabled,
-        instructions = instructions,
-    )
+    ) =
+        DeviceIdentityEntity(
+            id = IDENTITY_ID,
+            role = DeviceIdentityRole.ACTIVE.storedName,
+            address = "amber-river-maple",
+            deviceId = DEVICE_ID,
+            createdAt = 1L,
+            pairingEnabled = pairingEnabled,
+            instructions = instructions,
+        )
 
-    private class InsertThenFailAuditSink(
-        private val delegate: AuditSink,
-    ) : AuditSink {
+    private class InsertThenFailAuditSink(private val delegate: AuditSink) : AuditSink {
         override suspend fun record(record: AuditRecord) {
             delegate.record(record)
             error("Injected audit failure")
@@ -262,10 +278,11 @@ class DeviceAuditTransactionTest {
 
         override fun generate(keyId: String): GeneratedEncryptionKey {
             check(keyId !in keys)
-            keys[keyId] = KeyGenerator.getInstance("AES").run {
-                init(128)
-                generateKey()
-            }
+            keys[keyId] =
+                KeyGenerator.getInstance("AES").run {
+                    init(128)
+                    generateKey()
+                }
             return GeneratedEncryptionKey(EncryptionKeyBacking.SOFTWARE)
         }
 

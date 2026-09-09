@@ -45,27 +45,32 @@ internal fun EnvironmentVariableValueField(
         enabled = enabled,
         minLines = 1,
         maxLines = 6,
-        visualTransformation = if (sensitive && !visible) {
-            PasswordVisualTransformation()
-        } else {
-            VisualTransformation.None
-        },
-        keyboardOptions = KeyboardOptions(
-            autoCorrectEnabled = false,
-            keyboardType = if (sensitive) KeyboardType.Password else KeyboardType.Text,
-        ),
-        trailingIcon = if (sensitive) {
-            {
-                IconButton(onClick = { onVisibilityChange(!visible) }, enabled = enabled) {
-                    Icon(
-                        if (visible) Icons.Outlined.VisibilityOff else Icons.Outlined.Visibility,
-                        contentDescription = stringResource(if (visible) R.string.hide else R.string.show),
-                    )
+        visualTransformation =
+            if (sensitive && !visible) {
+                PasswordVisualTransformation()
+            } else {
+                VisualTransformation.None
+            },
+        keyboardOptions =
+            KeyboardOptions(
+                autoCorrectEnabled = false,
+                keyboardType = if (sensitive) KeyboardType.Password else KeyboardType.Text,
+            ),
+        trailingIcon =
+            if (sensitive) {
+                {
+                    IconButton(onClick = { onVisibilityChange(!visible) }, enabled = enabled) {
+                        Icon(
+                            if (visible) Icons.Outlined.VisibilityOff
+                            else Icons.Outlined.Visibility,
+                            contentDescription =
+                                stringResource(if (visible) R.string.hide else R.string.show),
+                        )
+                    }
                 }
-            }
-        } else {
-            null
-        },
+            } else {
+                null
+            },
         modifier = Modifier.fillMaxWidth(),
     )
 }
@@ -77,12 +82,14 @@ internal fun EnvironmentVariableSensitivity(
     onChange: (Boolean) -> Unit,
 ) {
     Row(
-        modifier = Modifier.fillMaxWidth().toggleable(
-            value = sensitive,
-            enabled = enabled,
-            role = Role.Switch,
-            onValueChange = onChange,
-        ),
+        modifier =
+            Modifier.fillMaxWidth()
+                .toggleable(
+                    value = sensitive,
+                    enabled = enabled,
+                    role = Role.Switch,
+                    onValueChange = onChange,
+                ),
         verticalAlignment = Alignment.CenterVertically,
     ) {
         Column(Modifier.weight(1f)) {

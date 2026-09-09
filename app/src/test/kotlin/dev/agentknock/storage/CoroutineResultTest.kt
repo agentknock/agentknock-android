@@ -21,12 +21,13 @@ class CoroutineResultTest {
     fun `cancellation propagates`() {
         val cancellation = CancellationException("cancelled")
 
-        val thrown = try {
-            runCatchingNonCancellation<String> { throw cancellation }
-            null
-        } catch (failure: CancellationException) {
-            failure
-        }
+        val thrown =
+            try {
+                runCatchingNonCancellation<String> { throw cancellation }
+                null
+            } catch (failure: CancellationException) {
+                failure
+            }
 
         assertSame(cancellation, thrown)
     }

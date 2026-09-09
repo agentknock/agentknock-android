@@ -17,16 +17,17 @@ internal object DeviceProtocol {
     private val baseDerivationSalt = "agentknock-v1".encodeToByteArray()
     private val addressDerivationInfo = "agentknock-v1 address".encodeToByteArray()
 
-    fun validPairingAddress(address: String): Boolean = address
-        .split('-')
-        .all { word -> word.isNotEmpty() && word.all { it in 'a'..'z' } }
+    fun validPairingAddress(address: String): Boolean =
+        address.split('-').all { word -> word.isNotEmpty() && word.all { it in 'a'..'z' } }
 
-    fun addressId(address: String): String = derive(
-        input = address.encodeToByteArray(),
-        salt = baseDerivationSalt,
-        info = addressDerivationInfo,
-        length = 16,
-    ).toHex()
+    fun addressId(address: String): String =
+        derive(
+                input = address.encodeToByteArray(),
+                salt = baseDerivationSalt,
+                info = addressDerivationInfo,
+                length = 16,
+            )
+            .toHex()
 
     fun generateDeviceId(
         timestampMillis: Long = System.currentTimeMillis(),
@@ -43,9 +44,10 @@ internal object DeviceProtocol {
 
         var value = BigInteger(1, bytes)
         return CharArray(ULID_CHARACTERS) { index ->
-            val shift = (ULID_CHARACTERS - index - 1) * 5
-            ULID_ALPHABET[value.shiftRight(shift).and(ULID_MASK).toInt()]
-        }.concatToString()
+                val shift = (ULID_CHARACTERS - index - 1) * 5
+                ULID_ALPHABET[value.shiftRight(shift).and(ULID_MASK).toInt()]
+            }
+            .concatToString()
     }
 
     fun generateDeviceKeyPair(random: SecureRandom = SecureRandom()): DeviceKeyPair {
@@ -83,9 +85,10 @@ internal object DeviceProtocol {
         return output
     }
 
-    private fun ByteArray.toHex(): String = joinToString(separator = "") { byte ->
-        "%02x".format(byte.toInt() and 0xff)
-    }
+    private fun ByteArray.toHex(): String =
+        joinToString(separator = "") { byte ->
+            "%02x".format(byte.toInt() and 0xff)
+        }
 
     private fun SecureRandom.nextBytes(bytes: ByteArray, fromIndex: Int, toIndex: Int) {
         val random = ByteArray(toIndex - fromIndex)

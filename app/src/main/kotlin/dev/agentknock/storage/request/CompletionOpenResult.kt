@@ -5,15 +5,18 @@ import org.bouncycastle.crypto.InvalidCipherTextException
 
 internal sealed interface CompletionOpenResult {
     data class Opened(val plaintext: ByteArray) : CompletionOpenResult
+
     data object IrrecoverablyInvalid : CompletionOpenResult
+
     data object RetryLater : CompletionOpenResult
 }
 
-internal inline fun <T> decodeWireCompletionOrNull(decode: () -> T): T? = try {
-    decode()
-} catch (_: SerializationException) {
-    null
-}
+internal inline fun <T> decodeWireCompletionOrNull(decode: () -> T): T? =
+    try {
+        decode()
+    } catch (_: SerializationException) {
+        null
+    }
 
 internal fun Exception.isIrrecoverableCompletionFailure(): Boolean =
     this is SerializationException ||

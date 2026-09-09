@@ -7,10 +7,10 @@ import dev.agentknock.relay.RelayApprovalReviewClient
 import dev.agentknock.relay.RelayApprovalReviewDecision
 import dev.agentknock.relay.RelayEndpointResult
 import dev.agentknock.review.ApprovalReviewRequest
-import dev.agentknock.storage.approval.ApprovalAction
 import dev.agentknock.storage.approval.AiReview
 import dev.agentknock.storage.approval.AiReviewDecision
 import dev.agentknock.storage.approval.AiReviewFailure
+import dev.agentknock.storage.approval.ApprovalAction
 import dev.agentknock.storage.approval.ApprovalEvaluation
 import dev.agentknock.storage.approval.SecretApprovalEvaluation
 import dev.agentknock.storage.audit.AuditDecisionSource
@@ -38,11 +38,12 @@ internal const val DECISION_SOURCE_VALIDATION = "validation"
 internal const val TEMPORARY_ACCESS_DURATION_MILLIS = 4 * 60 * 60 * 1_000L
 
 internal val ApprovalCompletion.storedResult: String
-    get() = when (this) {
-        is ApprovalCompletion.Approved -> ApprovalCompletionResult.APPROVED
-        is ApprovalCompletion.Denied -> ApprovalCompletionResult.DENIED
-        is ApprovalCompletion.Aborted -> ApprovalCompletionResult.ABORTED
-    }.storedName
+    get() =
+        when (this) {
+            is ApprovalCompletion.Approved -> ApprovalCompletionResult.APPROVED
+            is ApprovalCompletion.Denied -> ApprovalCompletionResult.DENIED
+            is ApprovalCompletion.Aborted -> ApprovalCompletionResult.ABORTED
+        }.storedName
 
 internal data class AiReviewAttempt(
     val review: AiReview,
@@ -56,24 +57,32 @@ internal fun invocationTokenHash(token: ByteArray): ByteArray =
     MessageDigest.getInstance("SHA-256").digest(token)
 
 internal fun InvocationRequestMessage.environmentSelections():
-    Map<String, EnvironmentVariableSelection> = secretDelivery.mapNotNull { (secret, delivery) ->
-        delivery.environment?.let { environment ->
-            secret to EnvironmentVariableSelection(
-                only = environment.only,
-                omit = environment.omit,
-                rename = environment.rename,
-                stdin = environment.stdin,
-            )
+    Map<String, EnvironmentVariableSelection> =
+    secretDelivery
+        .mapNotNull { (secret, delivery) ->
+            delivery.environment?.let { environment ->
+                secret to
+                    EnvironmentVariableSelection(
+                        only = environment.only,
+                        omit = environment.omit,
+                        rename = environment.rename,
+                        stdin = environment.stdin,
+                    )
+            }
         }
-    }.toMap()
+        .toMap()
 
-internal fun decodeApprovalEvaluation(value: String): ApprovalEvaluation? =
-    runCatching { storedJson.decodeFromString<ApprovalEvaluation>(value) }.getOrNull()
-
-internal fun SecretValues.toResponseSecret(): InvocationResponseSecret = when (this) {
-    is SecretValues.Environment -> InvocationResponseSecret.Environment(description, environment)
-    is SecretValues.Ssh -> InvocationResponseSecret.Ssh(description, publicKey)
+internal fun decodeApprovalEvaluation(value: String): ApprovalEvaluation? = runCatching {
+    storedJson.decodeFromString<ApprovalEvaluation>(value)
 }
+    .getOrNull()
+
+internal fun SecretValues.toResponseSecret(): InvocationResponseSecret =
+    when (this) {
+        is SecretValues.Environment ->
+            InvocationResponseSecret.Environment(description, environment)
+        is SecretValues.Ssh -> InvocationResponseSecret.Ssh(description, publicKey)
+    }
 
 internal fun SecretApprovalPolicy.evaluate(): SecretApprovalEvaluation {
     val activeTemporaryAccess = temporaryAccessExpiresAt?.takeIf {
@@ -82,15 +91,16 @@ internal fun SecretApprovalPolicy.evaluate(): SecretApprovalEvaluation {
     return SecretApprovalEvaluation(
         secretId = secretId,
         secretName = secretName,
-        action = when {
-            activeTemporaryAccess != null -> ApprovalAction.APPROVE
-            mode == SecretApprovalMode.DENY -> ApprovalAction.DENY
-            mode == SecretApprovalMode.ASK_ME -> ApprovalAction.ASK_ME
-            mode == SecretApprovalMode.ASK_AI -> ApprovalAction.ASK_AI
-            else -> ApprovalAction.APPROVE
-        },
-        temporaryAccessEligible = mode == SecretApprovalMode.ASK_ME ||
-            mode == SecretApprovalMode.ASK_AI,
+        action =
+            when {
+                activeTemporaryAccess != null -> ApprovalAction.APPROVE
+                mode == SecretApprovalMode.DENY -> ApprovalAction.DENY
+                mode == SecretApprovalMode.ASK_ME -> ApprovalAction.ASK_ME
+                mode == SecretApprovalMode.ASK_AI -> ApprovalAction.ASK_AI
+                else -> ApprovalAction.APPROVE
+            },
+        temporaryAccessEligible =
+            mode == SecretApprovalMode.ASK_ME || mode == SecretApprovalMode.ASK_AI,
         temporaryAccessExpiresAt = activeTemporaryAccess,
         revision = revision,
     )
@@ -99,50 +109,57 @@ internal fun SecretApprovalPolicy.evaluate(): SecretApprovalEvaluation {
 internal fun RequestedSecretDescription.authorizationCommitment(
     policies: List<SecretApprovalPolicy>,
     instructions: AuthorizationInstructionsCommitment? = null,
-): AuthorizationCommitment = AuthorizationCommitment(
-    secretRevisions = reviewMetadata.associate { secret -> secret.id to secret.revision },
-    policies = policies.associate { policy ->
-        policy.secretId to AuthorizationPolicyCommitment(
-            mode = policy.mode.storedName,
-            temporaryAccessExpiresAt = policy.temporaryAccessExpiresAt,
-        )
-    },
-    expectedAbsentSecretNames = missingSecrets.toSet(),
-    instructions = instructions,
-)
+): AuthorizationCommitment =
+    AuthorizationCommitment(
+        secretRevisions = reviewMetadata.associate { secret -> secret.id to secret.revision },
+        policies =
+            policies.associate { policy ->
+                policy.secretId to
+                    AuthorizationPolicyCommitment(
+                        mode = policy.mode.storedName,
+                        temporaryAccessExpiresAt = policy.temporaryAccessExpiresAt,
+                    )
+            },
+        expectedAbsentSecretNames = missingSecrets.toSet(),
+        instructions = instructions,
+    )
 
 internal fun ApprovalEvaluation.hasSameSecretPolicies(other: ApprovalEvaluation): Boolean =
-    secrets.size == other.secrets.size && secrets.zip(other.secrets).all { (stored, current) ->
-        stored.secretId == current.secretId &&
-            stored.secretName == current.secretName &&
-            stored.action == current.action &&
-            stored.temporaryAccessEligible == current.temporaryAccessEligible &&
-            stored.temporaryAccessExpiresAt == current.temporaryAccessExpiresAt &&
-            stored.revision == current.revision
-    }
+    secrets.size == other.secrets.size &&
+        secrets.zip(other.secrets).all { (stored, current) ->
+            stored.secretId == current.secretId &&
+                stored.secretName == current.secretName &&
+                stored.action == current.action &&
+                stored.temporaryAccessEligible == current.temporaryAccessEligible &&
+                stored.temporaryAccessExpiresAt == current.temporaryAccessExpiresAt &&
+                stored.revision == current.revision
+        }
 
-internal fun String.toAuditDecisionSource(): AuditDecisionSource = when (this) {
-    DECISION_SOURCE_USER -> AuditDecisionSource.USER
-    DECISION_SOURCE_POLICY -> AuditDecisionSource.APPROVAL_SETTINGS
-    DECISION_SOURCE_AI -> AuditDecisionSource.AI_REVIEW
-    DECISION_SOURCE_NON_SENSITIVE -> AuditDecisionSource.NON_SENSITIVE
-    DECISION_SOURCE_TEMPORARY_ACCESS -> AuditDecisionSource.TEMPORARY_ACCESS
-    DECISION_SOURCE_MIXED -> AuditDecisionSource.MIXED
-    DECISION_SOURCE_VALIDATION -> AuditDecisionSource.VALIDATION
-    else -> error("Unknown decision source: $this")
-}
+internal fun String.toAuditDecisionSource(): AuditDecisionSource =
+    when (this) {
+        DECISION_SOURCE_USER -> AuditDecisionSource.USER
+        DECISION_SOURCE_POLICY -> AuditDecisionSource.APPROVAL_SETTINGS
+        DECISION_SOURCE_AI -> AuditDecisionSource.AI_REVIEW
+        DECISION_SOURCE_NON_SENSITIVE -> AuditDecisionSource.NON_SENSITIVE
+        DECISION_SOURCE_TEMPORARY_ACCESS -> AuditDecisionSource.TEMPORARY_ACCESS
+        DECISION_SOURCE_MIXED -> AuditDecisionSource.MIXED
+        DECISION_SOURCE_VALIDATION -> AuditDecisionSource.VALIDATION
+        else -> error("Unknown decision source: $this")
+    }
 
 internal suspend fun SubscriptionRepository.reviewFallback(deviceId: String): AiReviewAttempt? {
     val access = accessForReview(deviceId)
     if (access == AiReviewAccess.ACTIVE) return null
     return AiReviewAttempt(
-        review = AiReview(
-            failure = if (access == AiReviewAccess.INACTIVE) {
-                AiReviewFailure.SUBSCRIPTION_REQUIRED
-            } else {
-                AiReviewFailure.UNAVAILABLE
-            },
-        ),
+        review =
+            AiReview(
+                failure =
+                    if (access == AiReviewAccess.INACTIVE) {
+                        AiReviewFailure.SUBSCRIPTION_REQUIRED
+                    } else {
+                        AiReviewFailure.UNAVAILABLE
+                    }
+            ),
         request = null,
     )
 }
@@ -153,80 +170,90 @@ internal suspend fun performAiReview(
     credentials: RelayDeviceCredentials,
     request: ApprovalReviewRequest,
 ): AiReview {
-    val result = try {
-        reviewer.review(credentials.deviceId, credentials.deviceToken, request)
-    } catch (cancelled: kotlinx.coroutines.CancellationException) {
-        throw cancelled
-    } catch (_: Exception) {
-        return AiReview(failure = AiReviewFailure.UNAVAILABLE)
-    }
-    val review = when (result) {
-        is RelayEndpointResult.Success -> AiReview(
-            decision = when (result.value.decision) {
-                RelayApprovalReviewDecision.APPROVE -> AiReviewDecision.APPROVE
-                RelayApprovalReviewDecision.DENY -> AiReviewDecision.DENY
-                RelayApprovalReviewDecision.ASK_USER -> AiReviewDecision.ASK_USER
-            },
-            explanation = result.value.explanation,
-        )
-        is RelayEndpointResult.Rejected -> AiReview(
-            failure = if (
-                result.status == 402 || result.code == "SUBSCRIPTION_REQUIRED"
-            ) {
-                AiReviewFailure.SUBSCRIPTION_REQUIRED
-            } else {
-                AiReviewFailure.RELAY_REJECTED
-            },
-            httpStatus = result.status,
-            errorCode = result.code,
-        )
-        is RelayEndpointResult.Unavailable ->
-            AiReview(failure = AiReviewFailure.UNAVAILABLE)
-        RelayEndpointResult.InvalidResponse ->
-            AiReview(failure = AiReviewFailure.INVALID_RESPONSE)
-    }
+    val result =
+        try {
+            reviewer.review(credentials.deviceId, credentials.deviceToken, request)
+        } catch (cancelled: kotlinx.coroutines.CancellationException) {
+            throw cancelled
+        } catch (_: Exception) {
+            return AiReview(failure = AiReviewFailure.UNAVAILABLE)
+        }
+    val review =
+        when (result) {
+            is RelayEndpointResult.Success ->
+                AiReview(
+                    decision =
+                        when (result.value.decision) {
+                            RelayApprovalReviewDecision.APPROVE -> AiReviewDecision.APPROVE
+                            RelayApprovalReviewDecision.DENY -> AiReviewDecision.DENY
+                            RelayApprovalReviewDecision.ASK_USER -> AiReviewDecision.ASK_USER
+                        },
+                    explanation = result.value.explanation,
+                )
+            is RelayEndpointResult.Rejected ->
+                AiReview(
+                    failure =
+                        if (result.status == 402 || result.code == "SUBSCRIPTION_REQUIRED") {
+                            AiReviewFailure.SUBSCRIPTION_REQUIRED
+                        } else {
+                            AiReviewFailure.RELAY_REJECTED
+                        },
+                    httpStatus = result.status,
+                    errorCode = result.code,
+                )
+            is RelayEndpointResult.Unavailable -> AiReview(failure = AiReviewFailure.UNAVAILABLE)
+            RelayEndpointResult.InvalidResponse ->
+                AiReview(failure = AiReviewFailure.INVALID_RESPONSE)
+        }
     if (review.failure == AiReviewFailure.SUBSCRIPTION_REQUIRED) {
         subscription.recordInactiveReviewAccess(credentials.deviceId)
     }
     return review
 }
 
-internal fun AiReview.auditFailureDetail(): String? = when (failure) {
-    AiReviewFailure.SUBSCRIPTION_REQUIRED -> "AI review is inactive."
-    AiReviewFailure.RELAY_REJECTED -> "The relay rejected AI review."
-    AiReviewFailure.UNAVAILABLE -> "AI review was unavailable."
-    AiReviewFailure.INVALID_RESPONSE -> "AI review returned an invalid response."
-    null -> null
-}
+internal fun AiReview.auditFailureDetail(): String? =
+    when (failure) {
+        AiReviewFailure.SUBSCRIPTION_REQUIRED -> "AI review is inactive."
+        AiReviewFailure.RELAY_REJECTED -> "The relay rejected AI review."
+        AiReviewFailure.UNAVAILABLE -> "AI review was unavailable."
+        AiReviewFailure.INVALID_RESPONSE -> "AI review returned an invalid response."
+        null -> null
+    }
 
-internal fun AiReview.auditOutcome(): AuditOutcome = when {
-    failure == AiReviewFailure.SUBSCRIPTION_REQUIRED -> AuditOutcome.DEFERRED
-    failure != null -> AuditOutcome.FAILED
-    decision == AiReviewDecision.APPROVE -> AuditOutcome.APPROVED
-    decision == AiReviewDecision.DENY -> AuditOutcome.DENIED
-    decision == AiReviewDecision.ASK_USER -> AuditOutcome.DEFERRED
-    else -> AuditOutcome.FAILED
-}
+internal fun AiReview.auditOutcome(): AuditOutcome =
+    when {
+        failure == AiReviewFailure.SUBSCRIPTION_REQUIRED -> AuditOutcome.DEFERRED
+        failure != null -> AuditOutcome.FAILED
+        decision == AiReviewDecision.APPROVE -> AuditOutcome.APPROVED
+        decision == AiReviewDecision.DENY -> AuditOutcome.DENIED
+        decision == AiReviewDecision.ASK_USER -> AuditOutcome.DEFERRED
+        else -> AuditOutcome.FAILED
+    }
 
-internal fun AiReview.auditData() = auditDataOf(
-    "ai_decision" to decision?.name?.lowercase(),
-    "ai_explanation" to explanation,
-    "ai_failure" to failure?.name?.lowercase(),
-    "ai_http_status" to httpStatus,
-    "ai_error_code" to errorCode,
-)
+internal fun AiReview.auditData() =
+    auditDataOf(
+        "ai_decision" to decision?.name?.lowercase(),
+        "ai_explanation" to explanation,
+        "ai_failure" to failure?.name?.lowercase(),
+        "ai_http_status" to httpStatus,
+        "ai_error_code" to errorCode,
+    )
 
-internal fun AiReviewAttempt.auditRequestData() = auditDataOf(
-    "ai_review_request" to request?.let {
-        storedJson.encodeToJsonElement(it)
-    },
-)
+internal fun AiReviewAttempt.auditRequestData() =
+    auditDataOf(
+        "ai_review_request" to
+            request?.let {
+                storedJson.encodeToJsonElement(it)
+            }
+    )
 
 internal fun AiReviewAttempt.auditData(appliedReview: AiReview) =
-    review.auditData() + auditRequestData() + auditDataOf(
-        "ai_review_service_called" to (request != null),
-        "ai_result_applied" to (review == appliedReview),
-        "resulting_review_decision" to appliedReview.decision?.name?.lowercase(),
-        "resulting_review_explanation" to appliedReview.explanation,
-        "resulting_review_failure" to appliedReview.failure?.name?.lowercase(),
-    )
+    review.auditData() +
+        auditRequestData() +
+        auditDataOf(
+            "ai_review_service_called" to (request != null),
+            "ai_result_applied" to (review == appliedReview),
+            "resulting_review_decision" to appliedReview.decision?.name?.lowercase(),
+            "resulting_review_explanation" to appliedReview.explanation,
+            "resulting_review_failure" to appliedReview.failure?.name?.lowercase(),
+        )

@@ -45,35 +45,41 @@ class PairingRequestsTest {
 
     @Before
     fun setUp() = runTest {
-        database = Room.inMemoryDatabaseBuilder(
-            InstrumentationRegistry.getInstrumentation().targetContext,
-            AgentknockDatabase::class.java,
-        ).build()
-        database.deviceIdentityDao().insertIdentity(
-            DeviceIdentityEntity(
-                id = DEVICE_IDENTITY_ID,
-                role = "active",
-                address = ADDRESS,
-                deviceId = DEVICE_ID,
-                createdAt = 1L,
-            ),
-        )
+        database =
+            Room.inMemoryDatabaseBuilder(
+                    InstrumentationRegistry.getInstrumentation().targetContext,
+                    AgentknockDatabase::class.java,
+                )
+                .build()
+        database
+            .deviceIdentityDao()
+            .insertIdentity(
+                DeviceIdentityEntity(
+                    id = DEVICE_IDENTITY_ID,
+                    role = "active",
+                    address = ADDRESS,
+                    deviceId = DEVICE_ID,
+                    createdAt = 1L,
+                )
+            )
         val keyStore = MemoryEncryptionKeyStore()
         var nextKey = 0
-        val keyManager = VaultKeyManager(
-            dao = database.vaultKeyDao(),
-            keyStore = keyStore,
-            newKeyId = { "pairing-key-${nextKey++}" },
-            currentTimeMillis = { NOW },
-            keyStoreDispatcher = Dispatchers.Unconfined,
-        )
-        material = RequestMaterialStore(
-            dao = database.requestDao(),
-            keyManager = keyManager,
-            encryption = AesGcmEncryption(keyStore),
-            currentTimeMillis = { NOW },
-            cryptographyDispatcher = Dispatchers.Unconfined,
-        )
+        val keyManager =
+            VaultKeyManager(
+                dao = database.vaultKeyDao(),
+                keyStore = keyStore,
+                newKeyId = { "pairing-key-${nextKey++}" },
+                currentTimeMillis = { NOW },
+                keyStoreDispatcher = Dispatchers.Unconfined,
+            )
+        material =
+            RequestMaterialStore(
+                dao = database.requestDao(),
+                keyManager = keyManager,
+                encryption = AesGcmEncryption(keyStore),
+                currentTimeMillis = { NOW },
+                cryptographyDispatcher = Dispatchers.Unconfined,
+            )
         audit = AuditRepository(database.auditDao(), currentTimeMillis = { NOW })
     }
 
@@ -95,15 +101,17 @@ class PairingRequestsTest {
             requests.finishContext(
                 credentials().copy(deviceIdentityId = "different-identity"),
                 CLIENT_ID,
-            ),
+            )
         )
 
         val attempt = checkNotNull(database.requestDao().getPairingAttempt(CLIENT_ID))
         assertEquals(
             1,
-            database.requestDao().updatePairingAttempt(
-                attempt.copy(state = PairingState.SAS_VERIFICATION_PENDING.storedName),
-            ),
+            database
+                .requestDao()
+                .updatePairingAttempt(
+                    attempt.copy(state = PairingState.SAS_VERIFICATION_PENDING.storedName)
+                ),
         )
         assertNull(requests.finishContext(credentials(), CLIENT_ID))
     }
@@ -122,9 +130,9 @@ class PairingRequestsTest {
         val attempt = checkNotNull(database.requestDao().getPairingAttempt(CLIENT_ID))
         assertEquals(
             1,
-            database.requestDao().updatePairingAttempt(
-                attempt.copy(friendlyName = null, hostname = null),
-            ),
+            database
+                .requestDao()
+                .updatePairingAttempt(attempt.copy(friendlyName = null, hostname = null)),
         )
         assertEquals(
             MatchingPairingSas("linux"),
@@ -183,13 +191,15 @@ class PairingRequestsTest {
         val attempt = checkNotNull(database.requestDao().getPairingAttempt(CLIENT_ID))
         assertEquals(
             1,
-            database.requestDao().updatePairingAttempt(
-                attempt.copy(
-                    state = PairingState.REJECTED.storedName,
-                    desiredRelayClientState = RelayClientState.REVOKED.wireName,
-                    pendingPsk = null,
+            database
+                .requestDao()
+                .updatePairingAttempt(
+                    attempt.copy(
+                        state = PairingState.REJECTED.storedName,
+                        desiredRelayClientState = RelayClientState.REVOKED.wireName,
+                        pendingPsk = null,
+                    )
                 ),
-            ),
         )
 
         assertNull(
@@ -200,7 +210,7 @@ class PairingRequestsTest {
                 plaintext = finishPlaintext(),
                 requestPsk = requestPsk(),
                 sealResponse = { RESPONSE },
-            ),
+            )
         )
         assertNull(database.requestDao().getRequestById(FINISH_REQUEST_ID))
         assertNull(database.requestDao().getClient(CLIENT_ID))
@@ -214,14 +224,15 @@ class PairingRequestsTest {
         val requestPsk = requestPsk()
 
         assertNull(
-            requests(InsertThenFailAuditSink(audit)).receiveFinish(
-                pairing = pairing,
-                relayRequestId = FINISH_REQUEST_ID,
-                requestPayload = REQUEST,
-                plaintext = finishPlaintext(),
-                requestPsk = requestPsk,
-                sealResponse = { RESPONSE },
-            ),
+            requests(InsertThenFailAuditSink(audit))
+                .receiveFinish(
+                    pairing = pairing,
+                    relayRequestId = FINISH_REQUEST_ID,
+                    requestPayload = REQUEST,
+                    plaintext = finishPlaintext(),
+                    requestPsk = requestPsk,
+                    sealResponse = { RESPONSE },
+                )
         )
         assertNull(database.requestDao().getRequestById(FINISH_REQUEST_ID))
         assertNull(database.requestDao().getClient(CLIENT_ID))
@@ -253,7 +264,7 @@ class PairingRequestsTest {
                 plaintext = finishPlaintext(),
                 requestPsk = requestPsk,
                 sealResponse = { Json.parseToJsonElement("""{"changed":true}""") },
-            ),
+            )
         )
         assertEquals(stored, database.requestDao().getRequestById(FINISH_REQUEST_ID))
         assertEquals(1, audit.observeEvents().first().size)
@@ -274,7 +285,7 @@ class PairingRequestsTest {
                 responsePayload = RESPONSE,
                 requestPsk = requestPsk,
                 code = PairedRequestErrorCode.INVALID_STATE,
-            ),
+            )
         )
         val rejected = checkNotNull(database.requestDao().getRequestById(FINISH_REQUEST_ID))
         assertEquals(RequestKind.UNKNOWN.storedName, rejected.kind)
@@ -288,91 +299,96 @@ class PairingRequestsTest {
                 responsePayload = RESPONSE,
                 requestPsk = requestPsk,
                 code = PairedRequestErrorCode.INVALID_REQUEST,
-            ),
+            )
         )
     }
 
-    private fun requests(auditSink: AuditSink) = PairingRequests(
-        dao = database.requestDao(),
-        material = material,
-        audit = auditSink,
-        writeTransaction = RoomWriteTransaction(database),
-        pairingProtocol = PairingProtocol(),
-        json = Json,
-        currentTimeMillis = { NOW },
-    )
+    private fun requests(auditSink: AuditSink) =
+        PairingRequests(
+            dao = database.requestDao(),
+            material = material,
+            audit = auditSink,
+            writeTransaction = RoomWriteTransaction(database),
+            pairingProtocol = PairingProtocol(),
+            json = Json,
+            currentTimeMillis = { NOW },
+        )
 
     private suspend fun insertPendingPairing(
         state: PairingState = PairingState.WAITING_FOR_FINISH,
         relayState: RelayClientState = RelayClientState.PENDING,
     ) {
-        val request = InboxRequestEntity(
-            id = CLIENT_ID,
-            parentRequestId = null,
-            deviceIdentityId = DEVICE_IDENTITY_ID,
-            clientId = CLIENT_ID,
-            clientNameSnapshot = CLIENT_ID,
-            clientSoftwareJson = CLIENT_SOFTWARE,
-            kind = RequestKind.PAIRING.storedName,
-            state = InboxRequestState.WAITING.storedName,
-            listed = true,
-            requestJson = "{}",
-            responseJson = "{}",
-            error = null,
-            receivedAt = 2L,
-            completedAt = null,
-            exchangeEndedAt = 3L,
-            responseOutboxFinished = true,
-        )
-        val attempt = PairingAttemptEntity(
-            requestId = CLIENT_ID,
-            pairingAddress = ADDRESS,
-            friendlyName = "Developer laptop",
-            deviceRandom = ByteArray(32),
-            desiredRelayClientState = RelayClientState.ACTIVE.wireName,
-            relayClientState = relayState.wireName,
-            state = state.storedName,
-            sasOption0 = 1L,
-            sasOption1 = 2L,
-            sasOption2 = 3L,
-            correctSasIndex = 1,
-            platform = "linux",
-            architecture = "x86_64",
-            hostname = "survo",
-            machineId = "machine-id",
-            osVersion = "NixOS",
-            pendingPsk = null,
-            decidedAt = 4L,
-        )
-        database.requestDao().insertPairingRequest(
-            request = request,
-            attempt = material.withEncryptedPendingPsk(attempt, request, PENDING_PSK),
-        )
+        val request =
+            InboxRequestEntity(
+                id = CLIENT_ID,
+                parentRequestId = null,
+                deviceIdentityId = DEVICE_IDENTITY_ID,
+                clientId = CLIENT_ID,
+                clientNameSnapshot = CLIENT_ID,
+                clientSoftwareJson = CLIENT_SOFTWARE,
+                kind = RequestKind.PAIRING.storedName,
+                state = InboxRequestState.WAITING.storedName,
+                listed = true,
+                requestJson = "{}",
+                responseJson = "{}",
+                error = null,
+                receivedAt = 2L,
+                completedAt = null,
+                exchangeEndedAt = 3L,
+                responseOutboxFinished = true,
+            )
+        val attempt =
+            PairingAttemptEntity(
+                requestId = CLIENT_ID,
+                pairingAddress = ADDRESS,
+                friendlyName = "Developer laptop",
+                deviceRandom = ByteArray(32),
+                desiredRelayClientState = RelayClientState.ACTIVE.wireName,
+                relayClientState = relayState.wireName,
+                state = state.storedName,
+                sasOption0 = 1L,
+                sasOption1 = 2L,
+                sasOption2 = 3L,
+                correctSasIndex = 1,
+                platform = "linux",
+                architecture = "x86_64",
+                hostname = "survo",
+                machineId = "machine-id",
+                osVersion = "NixOS",
+                pendingPsk = null,
+                decidedAt = 4L,
+            )
+        database
+            .requestDao()
+            .insertPairingRequest(
+                request = request,
+                attempt = material.withEncryptedPendingPsk(attempt, request, PENDING_PSK),
+            )
     }
 
-    private suspend fun requestPsk() = material.encryptRequestPsk(
-        deviceIdentityId = DEVICE_IDENTITY_ID,
-        clientId = CLIENT_ID,
-        relayRequestId = FINISH_REQUEST_ID,
-        clientPsk = PENDING_PSK,
-    )
+    private suspend fun requestPsk() =
+        material.encryptRequestPsk(
+            deviceIdentityId = DEVICE_IDENTITY_ID,
+            clientId = CLIENT_ID,
+            relayRequestId = FINISH_REQUEST_ID,
+            clientPsk = PENDING_PSK,
+        )
 
-    private fun credentials() = RelayDeviceCredentials(
-        deviceIdentityId = DEVICE_IDENTITY_ID,
-        address = ADDRESS,
-        addressId = "address-id",
-        deviceId = DEVICE_ID,
-        devicePublicKey = ByteArray(32),
-        devicePrivateKey = ByteArray(32),
-        deviceToken = "token",
-    )
+    private fun credentials() =
+        RelayDeviceCredentials(
+            deviceIdentityId = DEVICE_IDENTITY_ID,
+            address = ADDRESS,
+            addressId = "address-id",
+            deviceId = DEVICE_ID,
+            devicePublicKey = ByteArray(32),
+            devicePrivateKey = ByteArray(32),
+            deviceToken = "token",
+        )
 
     private fun finishPlaintext() =
         """{$CLIENT_SOFTWARE_FIELDS,"method":"PairingFinish"}""".encodeToByteArray()
 
-    private class InsertThenFailAuditSink(
-        private val delegate: AuditSink,
-    ) : AuditSink {
+    private class InsertThenFailAuditSink(private val delegate: AuditSink) : AuditSink {
         override suspend fun record(record: AuditRecord) {
             delegate.record(record)
             error("Injected audit failure")

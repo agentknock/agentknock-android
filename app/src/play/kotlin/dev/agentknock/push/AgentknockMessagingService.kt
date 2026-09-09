@@ -16,11 +16,11 @@ import com.google.firebase.messaging.FirebaseMessaging
 import com.google.firebase.messaging.FirebaseMessagingService
 import com.google.firebase.messaging.RemoteMessage
 import dev.agentknock.AgentknockApplication
-import kotlinx.coroutines.CancellationException
-import kotlinx.coroutines.suspendCancellableCoroutine
 import java.util.concurrent.TimeUnit
 import kotlin.coroutines.resume
 import kotlin.coroutines.resumeWithException
+import kotlinx.coroutines.CancellationException
+import kotlinx.coroutines.suspendCancellableCoroutine
 
 @SuppressLint("MissingFirebaseInstanceTokenRefresh")
 class AgentknockMessagingService : FirebaseMessagingService() {
@@ -35,9 +35,7 @@ class AgentknockMessagingService : FirebaseMessagingService() {
         if (container.factoryResetInProgress) return
 
         val foreground =
-            ProcessLifecycleOwner.get().lifecycle.currentState.isAtLeast(
-                Lifecycle.State.STARTED,
-            )
+            ProcessLifecycleOwner.get().lifecycle.currentState.isAtLeast(Lifecycle.State.STARTED)
         if (!foreground) container.requestNotifications.showWake()
         // Usually the foreground socket already covers the wake. Announcing it is still required:
         // a visible session may have stopped on a terminal device result and needs new work to
@@ -51,9 +49,9 @@ class PushRegistrationWorker(
     parameters: WorkerParameters,
 ) : CoroutineWorker(applicationContext, parameters) {
     override suspend fun doWork(): Result {
-        val firebaseInstallationId = inputData.getString(FIREBASE_INSTALLATION_ID_KEY)
-            ?.takeIf(String::isNotEmpty)
-            ?: return Result.failure()
+        val firebaseInstallationId =
+            inputData.getString(FIREBASE_INSTALLATION_ID_KEY)?.takeIf(String::isNotEmpty)
+                ?: return Result.failure()
         val container = (applicationContext as AgentknockApplication).container
         if (container.factoryResetInProgress) return Result.success()
         container.localStorage.await()
@@ -63,8 +61,7 @@ class PushRegistrationWorker(
             PushRegistrationResult.NoDevice,
             PushRegistrationResult.DeviceCredentialsUnavailable,
             PushRegistrationResult.DeviceCredentialsCorrupted,
-            PushRegistrationResult.UnsupportedDeviceCredentialEncryption,
-            -> Result.success()
+            PushRegistrationResult.UnsupportedDeviceCredentialEncryption -> Result.success()
             is PushRegistrationResult.RelayUnavailable -> {
                 val detail = result.message?.let { ": $it" }.orEmpty()
                 Log.w(TAG, "Relay unavailable while registering FCM$detail")
@@ -90,18 +87,20 @@ class PushRegistrationWorker(
         private const val TAG = "AgentknockPush"
 
         fun enqueue(context: Context, firebaseInstallationId: String) {
-            val request = OneTimeWorkRequestBuilder<PushRegistrationWorker>()
-                .setInputData(
-                    workDataOf(FIREBASE_INSTALLATION_ID_KEY to firebaseInstallationId),
+            val request =
+                OneTimeWorkRequestBuilder<PushRegistrationWorker>()
+                    .setInputData(
+                        workDataOf(FIREBASE_INSTALLATION_ID_KEY to firebaseInstallationId)
+                    )
+                    .setConstraints(networkConstraints())
+                    .setBackoffCriteria(BackoffPolicy.EXPONENTIAL, 10, TimeUnit.SECONDS)
+                    .build()
+            WorkManager.getInstance(context)
+                .enqueueUniqueWork(
+                    WORK_NAME,
+                    ExistingWorkPolicy.REPLACE,
+                    request,
                 )
-                .setConstraints(networkConstraints())
-                .setBackoffCriteria(BackoffPolicy.EXPONENTIAL, 10, TimeUnit.SECONDS)
-                .build()
-            WorkManager.getInstance(context).enqueueUniqueWork(
-                WORK_NAME,
-                ExistingWorkPolicy.REPLACE,
-                request,
-            )
         }
     }
 }
@@ -130,27 +129,30 @@ class FirebaseRegistrationWorker(
         private const val TAG = "AgentknockPush"
 
         fun enqueue(context: Context) {
-            val request = OneTimeWorkRequestBuilder<FirebaseRegistrationWorker>()
-                .setConstraints(networkConstraints())
-                .setBackoffCriteria(BackoffPolicy.EXPONENTIAL, 10, TimeUnit.SECONDS)
-                .build()
-            WorkManager.getInstance(context).enqueueUniqueWork(
-                WORK_NAME,
-                ExistingWorkPolicy.KEEP,
-                request,
-            )
+            val request =
+                OneTimeWorkRequestBuilder<FirebaseRegistrationWorker>()
+                    .setConstraints(networkConstraints())
+                    .setBackoffCriteria(BackoffPolicy.EXPONENTIAL, 10, TimeUnit.SECONDS)
+                    .build()
+            WorkManager.getInstance(context)
+                .enqueueUniqueWork(
+                    WORK_NAME,
+                    ExistingWorkPolicy.KEEP,
+                    request,
+                )
         }
     }
 }
 
 private suspend fun FirebaseMessaging.awaitRegistration() {
     suspendCancellableCoroutine { continuation ->
-        val registration = try {
-            register()
-        } catch (failure: Exception) {
-            continuation.resumeWithException(failure)
-            return@suspendCancellableCoroutine
-        }
+        val registration =
+            try {
+                register()
+            } catch (failure: Exception) {
+                continuation.resumeWithException(failure)
+                return@suspendCancellableCoroutine
+            }
         registration.addOnCompleteListener { completed ->
             if (!continuation.isActive) return@addOnCompleteListener
             if (completed.isSuccessful) {
@@ -158,7 +160,7 @@ private suspend fun FirebaseMessaging.awaitRegistration() {
             } else {
                 continuation.resumeWithException(
                     completed.exception
-                        ?: IllegalStateException("FCM registration failed without a cause"),
+                        ?: IllegalStateException("FCM registration failed without a cause")
                 )
             }
         }

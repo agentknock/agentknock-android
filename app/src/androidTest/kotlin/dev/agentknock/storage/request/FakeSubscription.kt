@@ -12,25 +12,35 @@ import dev.agentknock.subscription.SubscriptionRepository
 internal class FakeSubscription(deviceId: String) {
     var active = true
     var statusCalls = 0
-    val repository = SubscriptionRepository(
-        deviceAuthorization = RelayDeviceAuthorizationSource {
-            DeviceCredentialResult.Available(
-                RelayDeviceAuthorization("device-identity", deviceId, "device-token"),
-            )
-        },
-        relay = object : RelaySubscriptionClient {
-            override suspend fun status(deviceId: String, deviceToken: String): RelaySubscriptionResult {
-                statusCalls++
-                return RelayEndpointResult.Success(RelaySubscriptionStatus(active))
-            }
+    val repository =
+        SubscriptionRepository(
+            deviceAuthorization =
+                RelayDeviceAuthorizationSource {
+                    DeviceCredentialResult.Available(
+                        RelayDeviceAuthorization("device-identity", deviceId, "device-token")
+                    )
+                },
+            relay =
+                object : RelaySubscriptionClient {
+                    override suspend fun status(
+                        deviceId: String,
+                        deviceToken: String,
+                    ): RelaySubscriptionResult {
+                        statusCalls++
+                        return RelayEndpointResult.Success(RelaySubscriptionStatus(active))
+                    }
 
-            override suspend fun redeem(
-                deviceId: String, deviceToken: String, redemptionToken: String,
-            ): RelaySubscriptionResult = error("No redemption expected")
+                    override suspend fun redeem(
+                        deviceId: String,
+                        deviceToken: String,
+                        redemptionToken: String,
+                    ): RelaySubscriptionResult = error("No redemption expected")
 
-            override suspend fun updateFromGooglePlay(
-                deviceId: String, deviceToken: String, purchaseToken: String,
-            ): RelaySubscriptionResult = error("No purchase expected")
-        },
-    )
+                    override suspend fun updateFromGooglePlay(
+                        deviceId: String,
+                        deviceToken: String,
+                        purchaseToken: String,
+                    ): RelaySubscriptionResult = error("No purchase expected")
+                },
+        )
 }

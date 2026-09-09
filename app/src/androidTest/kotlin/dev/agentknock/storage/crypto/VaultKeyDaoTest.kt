@@ -35,28 +35,30 @@ class VaultKeyDaoTest {
 
     @Before
     fun setUp() {
-        database = Room.inMemoryDatabaseBuilder(
-            InstrumentationRegistry.getInstrumentation().targetContext,
-            AgentknockDatabase::class.java,
-        ).build()
+        database =
+            Room.inMemoryDatabaseBuilder(
+                    InstrumentationRegistry.getInstrumentation().targetContext,
+                    AgentknockDatabase::class.java,
+                )
+                .build()
         dao = database.vaultKeyDao()
     }
 
-    @After
-    fun tearDown() = database.close()
+    @After fun tearDown() = database.close()
 
     @Test
     fun everyCiphertextLocationContributesItsReferencedVaultKey() = runTest {
-        val expected = setOf(
-            ENVIRONMENT_KEY,
-            SSH_KEY,
-            UPLOAD_ENVIRONMENT_KEY,
-            UPLOAD_SSH_KEY,
-            DEVICE_CREDENTIAL_KEY,
-            CLIENT_PSK_KEY,
-            REQUEST_PSK_KEY,
-            PENDING_PSK_KEY,
-        )
+        val expected =
+            setOf(
+                ENVIRONMENT_KEY,
+                SSH_KEY,
+                UPLOAD_ENVIRONMENT_KEY,
+                UPLOAD_SSH_KEY,
+                DEVICE_CREDENTIAL_KEY,
+                CLIENT_PSK_KEY,
+                REQUEST_PSK_KEY,
+                PENDING_PSK_KEY,
+            )
         expected.forEach { keyId ->
             dao.insertKey(
                 vaultKey(
@@ -66,12 +68,13 @@ class VaultKeyDaoTest {
                     } else {
                         VaultKeyPurpose.DEVICE_STATE
                     },
-                ),
+                )
             )
         }
         insertEveryReference()
 
-        val referenced = dao.observeReferencedKeys().first().mapTo(linkedSetOf(), VaultKeyEntity::id)
+        val referenced =
+            dao.observeReferencedKeys().first().mapTo(linkedSetOf(), VaultKeyEntity::id)
 
         assertEquals(expected, referenced)
     }
@@ -80,25 +83,27 @@ class VaultKeyDaoTest {
     fun removingTheLastCiphertextReferenceUpdatesTheObservedKeys() = runTest {
         dao.insertKey(vaultKey(ENVIRONMENT_KEY, VaultKeyPurpose.SECRET_VALUES))
         val secret = secret("environment-secret", "environment")
-        val variable = EnvironmentVariableEntity(
-            id = "environment-variable",
-            secretId = secret.id,
-            name = "TOKEN",
-            sensitive = true,
-            encryptedValue = encrypted(ENVIRONMENT_KEY),
-            valueUpdatedAt = 1,
-        )
+        val variable =
+            EnvironmentVariableEntity(
+                id = "environment-variable",
+                secretId = secret.id,
+                name = "TOKEN",
+                sensitive = true,
+                encryptedValue = encrypted(ENVIRONMENT_KEY),
+                valueUpdatedAt = 1,
+            )
         database.secretDao().insertSecret(secret)
         database.secretDao().insertEnvironmentVariableRow(variable)
         assertEquals(
             setOf(ENVIRONMENT_KEY),
             dao.observeReferencedKeys().first().mapTo(linkedSetOf(), VaultKeyEntity::id),
         )
-        val afterDeletion = async(start = CoroutineStart.UNDISPATCHED) {
-            dao.observeReferencedKeys()
-                .map { keys -> keys.mapTo(linkedSetOf(), VaultKeyEntity::id) }
-                .first { keys -> keys.isEmpty() }
-        }
+        val afterDeletion =
+            async(start = CoroutineStart.UNDISPATCHED) {
+                dao.observeReferencedKeys()
+                    .map { keys -> keys.mapTo(linkedSetOf(), VaultKeyEntity::id) }
+                    .first { keys -> keys.isEmpty() }
+            }
 
         database.secretDao().deleteEnvironmentVariableRow(variable)
 
@@ -109,13 +114,14 @@ class VaultKeyDaoTest {
         val secretDao = database.secretDao()
         val requestDao = database.requestDao()
         val identityDao = database.deviceIdentityDao()
-        val identity = DeviceIdentityEntity(
-            id = IDENTITY_ID,
-            role = "active",
-            address = "write-leader-hungry",
-            deviceId = "device-id",
-            createdAt = 1,
-        )
+        val identity =
+            DeviceIdentityEntity(
+                id = IDENTITY_ID,
+                role = "active",
+                address = "write-leader-hungry",
+                deviceId = "device-id",
+                createdAt = 1,
+            )
         identityDao.insertIdentity(identity)
         identityDao.insertCredentials(
             listOf(
@@ -123,8 +129,8 @@ class VaultKeyDaoTest {
                     identityId = identity.id,
                     kind = "device_token",
                     encryptedValue = encrypted(DEVICE_CREDENTIAL_KEY),
-                ),
-            ),
+                )
+            )
         )
         val environmentSecret = secret("environment-secret", "environment")
         secretDao.insertSecret(environmentSecret)
@@ -136,7 +142,7 @@ class VaultKeyDaoTest {
                 sensitive = true,
                 encryptedValue = encrypted(ENVIRONMENT_KEY),
                 valueUpdatedAt = 1,
-            ),
+            )
         )
         val sshSecret = secret("ssh-secret", "ssh")
         secretDao.insertSecret(sshSecret)
@@ -147,25 +153,26 @@ class VaultKeyDaoTest {
                 publicKey = byteArrayOf(1),
                 comment = "",
                 encryptedPrivateKey = encrypted(SSH_KEY),
-            ),
+            )
         )
 
-        val client = ClientEntity(
-            clientId = CLIENT_ID,
-            deviceIdentityId = identity.id,
-            name = "Test client",
-            instructions = "",
-            desiredRelayClientState = null,
-            relayClientState = "active",
-            clientSoftwareJson = null,
-            platform = null,
-            architecture = null,
-            hostname = null,
-            machineId = null,
-            osVersion = null,
-            pairedAt = 1,
-            lastSeenAt = null,
-        )
+        val client =
+            ClientEntity(
+                clientId = CLIENT_ID,
+                deviceIdentityId = identity.id,
+                name = "Test client",
+                instructions = "",
+                desiredRelayClientState = null,
+                relayClientState = "active",
+                clientSoftwareJson = null,
+                platform = null,
+                architecture = null,
+                hostname = null,
+                machineId = null,
+                osVersion = null,
+                pairedAt = 1,
+                lastSeenAt = null,
+            )
         requestDao.insertClient(client)
         requestDao.insertClientPsk(
             ClientPskEntity(
@@ -173,7 +180,7 @@ class VaultKeyDaoTest {
                 slot = "current",
                 encryptedPsk = encrypted(CLIENT_PSK_KEY),
                 storedAt = 1,
-            ),
+            )
         )
 
         requestDao.insertRequest(request(REQUEST_ID))
@@ -181,7 +188,7 @@ class VaultKeyDaoTest {
             RequestPskEntity(
                 requestId = REQUEST_ID,
                 encryptedPsk = encrypted(REQUEST_PSK_KEY),
-            ),
+            )
         )
         requestDao.insertRequest(request(PAIRING_ID, clientId = PAIRING_ID))
         requestDao.insertPairingAttempt(
@@ -204,7 +211,7 @@ class VaultKeyDaoTest {
                 osVersion = null,
                 pendingPsk = encrypted(PENDING_PSK_KEY),
                 decidedAt = null,
-            ),
+            )
         )
 
         insertUpload(UPLOAD_ENVIRONMENT_REQUEST_ID, "environment")
@@ -216,8 +223,8 @@ class VaultKeyDaoTest {
                     name = "TOKEN",
                     sensitive = true,
                     encryptedValue = encrypted(UPLOAD_ENVIRONMENT_KEY),
-                ),
-            ),
+                )
+            )
         )
         insertUpload(UPLOAD_SSH_REQUEST_ID, "ssh")
         requestDao.insertSecretUploadSshKey(
@@ -227,7 +234,7 @@ class VaultKeyDaoTest {
                 publicKey = byteArrayOf(2),
                 comment = "",
                 encryptedPrivateKey = encrypted(UPLOAD_SSH_KEY),
-            ),
+            )
         )
     }
 
@@ -249,52 +256,56 @@ class VaultKeyDaoTest {
                 summaryJson = "{}",
                 intakeError = null,
                 decidedAt = null,
-            ),
+            )
         )
     }
 
-    private fun request(id: String, clientId: String = CLIENT_ID) = InboxRequestEntity(
-        id = id,
-        parentRequestId = null,
-        deviceIdentityId = IDENTITY_ID,
-        clientId = clientId,
-        clientNameSnapshot = "Test client",
-        clientSoftwareJson = null,
-        kind = "test",
-        state = "waiting",
-        listed = false,
-        requestJson = "{}",
-        responseJson = null,
-        error = null,
-        receivedAt = 1,
-        completedAt = null,
-        exchangeEndedAt = null,
-        responseOutboxFinished = false,
-    )
+    private fun request(id: String, clientId: String = CLIENT_ID) =
+        InboxRequestEntity(
+            id = id,
+            parentRequestId = null,
+            deviceIdentityId = IDENTITY_ID,
+            clientId = clientId,
+            clientNameSnapshot = "Test client",
+            clientSoftwareJson = null,
+            kind = "test",
+            state = "waiting",
+            listed = false,
+            requestJson = "{}",
+            responseJson = null,
+            error = null,
+            receivedAt = 1,
+            completedAt = null,
+            exchangeEndedAt = null,
+            responseOutboxFinished = false,
+        )
 
-    private fun secret(id: String, type: String) = SecretEntity(
-        id = id,
-        name = id,
-        description = "",
-        type = type,
-        createdAt = 1,
-        updatedAt = 1,
-    )
+    private fun secret(id: String, type: String) =
+        SecretEntity(
+            id = id,
+            name = id,
+            description = "",
+            type = type,
+            createdAt = 1,
+            updatedAt = 1,
+        )
 
-    private fun encrypted(keyId: String) = EncryptedValue(
-        formatVersion = 1,
-        keyId = keyId,
-        nonce = ByteArray(12),
-        ciphertext = byteArrayOf(1),
-    )
+    private fun encrypted(keyId: String) =
+        EncryptedValue(
+            formatVersion = 1,
+            keyId = keyId,
+            nonce = ByteArray(12),
+            ciphertext = byteArrayOf(1),
+        )
 
-    private fun vaultKey(id: String, purpose: VaultKeyPurpose) = VaultKeyEntity(
-        id = id,
-        purpose = purpose.storedName,
-        active = false,
-        createdAt = 1,
-        backing = EncryptionKeyBacking.SOFTWARE.storedName,
-    )
+    private fun vaultKey(id: String, purpose: VaultKeyPurpose) =
+        VaultKeyEntity(
+            id = id,
+            purpose = purpose.storedName,
+            active = false,
+            createdAt = 1,
+            backing = EncryptionKeyBacking.SOFTWARE.storedName,
+        )
 
     private companion object {
         const val IDENTITY_ID = "identity"
@@ -312,11 +323,12 @@ class VaultKeyDaoTest {
         const val CLIENT_PSK_KEY = "client-psk-key"
         const val REQUEST_PSK_KEY = "request-psk-key"
         const val PENDING_PSK_KEY = "pending-psk-key"
-        val SECRET_VALUE_KEYS = setOf(
-            ENVIRONMENT_KEY,
-            SSH_KEY,
-            UPLOAD_ENVIRONMENT_KEY,
-            UPLOAD_SSH_KEY,
-        )
+        val SECRET_VALUE_KEYS =
+            setOf(
+                ENVIRONMENT_KEY,
+                SSH_KEY,
+                UPLOAD_ENVIRONMENT_KEY,
+                UPLOAD_SSH_KEY,
+            )
     }
 }

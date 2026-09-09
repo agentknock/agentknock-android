@@ -8,5 +8,7 @@ internal val storedJson = Json {
     ignoreUnknownKeys = true
 }
 
-internal fun decodeStoredClientSoftware(value: String): ClientSoftware? =
-    runCatching { storedJson.decodeFromString<ClientSoftware>(value) }.getOrNull()
+internal fun decodeStoredClientSoftware(value: String): ClientSoftware? = runCatching {
+    storedJson.decodeFromString<ClientSoftware>(value)
+}
+    .getOrNull()

@@ -21,13 +21,14 @@ import org.junit.Test
 class VaultKeyManagerTest {
     @Test
     fun `encryption key backing identifiers preserve their schema 1 encoding`() {
-        val expected = mapOf(
-            EncryptionKeyBacking.STRONGBOX to "STRONGBOX",
-            EncryptionKeyBacking.TRUSTED_ENVIRONMENT to "TRUSTED_ENVIRONMENT",
-            EncryptionKeyBacking.SOFTWARE to "SOFTWARE",
-            EncryptionKeyBacking.UNKNOWN_SECURE to "UNKNOWN_SECURE",
-            EncryptionKeyBacking.UNKNOWN to "UNKNOWN",
-        )
+        val expected =
+            mapOf(
+                EncryptionKeyBacking.STRONGBOX to "STRONGBOX",
+                EncryptionKeyBacking.TRUSTED_ENVIRONMENT to "TRUSTED_ENVIRONMENT",
+                EncryptionKeyBacking.SOFTWARE to "SOFTWARE",
+                EncryptionKeyBacking.UNKNOWN_SECURE to "UNKNOWN_SECURE",
+                EncryptionKeyBacking.UNKNOWN to "UNKNOWN",
+            )
 
         expected.forEach { (backing, storedName) ->
             assertEquals(storedName, backing.storedName)
@@ -62,14 +63,16 @@ class VaultKeyManagerTest {
 
     @Test
     fun `reuses available active keys`() = runTest {
-        val dao = FakeVaultKeyDao().apply {
-            keys += keyMetadata("secret-key", VaultKeyPurpose.SECRET_VALUES)
-            keys += keyMetadata("device-key", VaultKeyPurpose.DEVICE_STATE)
-        }
-        val keyStore = FakeEncryptionKeyStore().apply {
-            generate("secret-key")
-            generate("device-key")
-        }
+        val dao =
+            FakeVaultKeyDao().apply {
+                keys += keyMetadata("secret-key", VaultKeyPurpose.SECRET_VALUES)
+                keys += keyMetadata("device-key", VaultKeyPurpose.DEVICE_STATE)
+            }
+        val keyStore =
+            FakeEncryptionKeyStore().apply {
+                generate("secret-key")
+                generate("device-key")
+            }
         val manager = manager(dao, keyStore, "unused-key")
 
         val result = manager.initialize()
@@ -81,10 +84,11 @@ class VaultKeyManagerTest {
 
     @Test
     fun `replaces only a key missing after restore and preserves its metadata`() = runTest {
-        val dao = FakeVaultKeyDao().apply {
-            keys += keyMetadata("unavailable-secret-key", VaultKeyPurpose.SECRET_VALUES)
-            keys += keyMetadata("device-key", VaultKeyPurpose.DEVICE_STATE)
-        }
+        val dao =
+            FakeVaultKeyDao().apply {
+                keys += keyMetadata("unavailable-secret-key", VaultKeyPurpose.SECRET_VALUES)
+                keys += keyMetadata("device-key", VaultKeyPurpose.DEVICE_STATE)
+            }
         val keyStore = FakeEncryptionKeyStore().apply { generate("device-key") }
         val manager = manager(dao, keyStore, "replacement-secret-key")
 
@@ -109,38 +113,42 @@ class VaultKeyManagerTest {
     }
 
     @Test
-    fun `replacement write key does not mask ciphertext that still references the lost key`() = runTest {
-        val dao = FakeVaultKeyDao().apply {
-            keys += keyMetadata("lost-secret-key", VaultKeyPurpose.SECRET_VALUES)
-            keys += keyMetadata("device-key", VaultKeyPurpose.DEVICE_STATE)
-            referencedKeyIds.value = setOf("lost-secret-key")
+    fun `replacement write key does not mask ciphertext that still references the lost key`() =
+        runTest {
+            val dao =
+                FakeVaultKeyDao().apply {
+                    keys += keyMetadata("lost-secret-key", VaultKeyPurpose.SECRET_VALUES)
+                    keys += keyMetadata("device-key", VaultKeyPurpose.DEVICE_STATE)
+                    referencedKeyIds.value = setOf("lost-secret-key")
+                }
+            val keyStore = FakeEncryptionKeyStore().apply { generate("device-key") }
+            val manager = manager(dao, keyStore, "replacement-secret-key")
+
+            val protection = manager.observeProtection().first()
+
+            assertTrue(protection is VaultProtection.ActiveKeysAvailable)
+            assertEquals(
+                setOf(VaultKeyPurpose.SECRET_VALUES),
+                protection.unavailableStoredData,
+            )
+            assertEquals(
+                "replacement-secret-key",
+                manager.activeKey(VaultKeyPurpose.SECRET_VALUES).id,
+            )
         }
-        val keyStore = FakeEncryptionKeyStore().apply { generate("device-key") }
-        val manager = manager(dao, keyStore, "replacement-secret-key")
-
-        val protection = manager.observeProtection().first()
-
-        assertTrue(protection is VaultProtection.ActiveKeysAvailable)
-        assertEquals(
-            setOf(VaultKeyPurpose.SECRET_VALUES),
-            protection.unavailableStoredData,
-        )
-        assertEquals(
-            "replacement-secret-key",
-            manager.activeKey(VaultKeyPurpose.SECRET_VALUES).id,
-        )
-    }
 
     @Test
     fun `reports when a current write key becomes unavailable`() = runTest {
-        val dao = FakeVaultKeyDao().apply {
-            keys += keyMetadata("secret-key", VaultKeyPurpose.SECRET_VALUES)
-            keys += keyMetadata("device-key", VaultKeyPurpose.DEVICE_STATE)
-        }
-        val keyStore = FakeEncryptionKeyStore().apply {
-            generate("secret-key")
-            generate("device-key")
-        }
+        val dao =
+            FakeVaultKeyDao().apply {
+                keys += keyMetadata("secret-key", VaultKeyPurpose.SECRET_VALUES)
+                keys += keyMetadata("device-key", VaultKeyPurpose.DEVICE_STATE)
+            }
+        val keyStore =
+            FakeEncryptionKeyStore().apply {
+                generate("secret-key")
+                generate("device-key")
+            }
         val manager = manager(dao, keyStore, "unused-key")
         manager.initialize()
         keyStore.delete("secret-key")
@@ -158,11 +166,12 @@ class VaultKeyManagerTest {
 
     @Test
     fun `protection updates when the last reference to a lost key is removed`() = runTest {
-        val dao = FakeVaultKeyDao().apply {
-            keys += keyMetadata("lost-secret-key", VaultKeyPurpose.SECRET_VALUES)
-            keys += keyMetadata("device-key", VaultKeyPurpose.DEVICE_STATE)
-            referencedKeyIds.value = setOf("lost-secret-key")
-        }
+        val dao =
+            FakeVaultKeyDao().apply {
+                keys += keyMetadata("lost-secret-key", VaultKeyPurpose.SECRET_VALUES)
+                keys += keyMetadata("device-key", VaultKeyPurpose.DEVICE_STATE)
+                referencedKeyIds.value = setOf("lost-secret-key")
+            }
         val keyStore = FakeEncryptionKeyStore().apply { generate("device-key") }
         val manager = manager(dao, keyStore, "replacement-secret-key")
         val protections = mutableListOf<VaultProtection>()
@@ -213,9 +222,10 @@ class VaultKeyManagerTest {
     @Test
     fun `deletes a partially generated key when generation fails`() = runTest {
         val dao = FakeVaultKeyDao()
-        val keyStore = FakeEncryptionKeyStore().apply {
-            generateFailuresAfterInsert += "secret-key"
-        }
+        val keyStore =
+            FakeEncryptionKeyStore().apply {
+                generateFailuresAfterInsert += "secret-key"
+            }
         val manager = manager(dao, keyStore, "secret-key")
 
         val failure = runCatching { manager.initialize() }.exceptionOrNull()
@@ -254,13 +264,14 @@ class VaultKeyManagerTest {
         )
     }
 
-    private fun keyMetadata(id: String, purpose: VaultKeyPurpose) = VaultKeyEntity(
-        id = id,
-        purpose = purpose.storedName,
-        active = true,
-        createdAt = 1L,
-        backing = EncryptionKeyBacking.SOFTWARE.storedName,
-    )
+    private fun keyMetadata(id: String, purpose: VaultKeyPurpose) =
+        VaultKeyEntity(
+            id = id,
+            purpose = purpose.storedName,
+            active = true,
+            createdAt = 1L,
+            backing = EncryptionKeyBacking.SOFTWARE.storedName,
+        )
 
     private fun managerKeyAvailable(keyStore: FakeEncryptionKeyStore, keyId: String): Boolean =
         keyStore.get(keyId) != null
@@ -280,13 +291,16 @@ internal class FakeVaultKeyDao : VaultKeyDao {
     override suspend fun getKey(id: String): VaultKeyEntity? = keys.find { it.id == id }
 
     override fun observeReferencedKeys(): Flow<List<VaultKeyEntity>> = referencedKeyIds.map { ids ->
-        keys.filter { it.id in ids }.sortedWith(compareBy(VaultKeyEntity::purpose, VaultKeyEntity::id))
+        keys
+            .filter { it.id in ids }
+            .sortedWith(compareBy(VaultKeyEntity::purpose, VaultKeyEntity::id))
     }
 
     override suspend fun insertKey(key: VaultKeyEntity) {
         if (failInsert) {
-            throw IllegalStateException("Metadata activation failed")
-                .also { lastInsertFailure = it }
+            throw IllegalStateException("Metadata activation failed").also {
+                lastInsertFailure = it
+            }
         }
         check(keys.none { it.id == key.id })
         keys += key
@@ -298,9 +312,8 @@ internal class FakeVaultKeyDao : VaultKeyDao {
         }
     }
 
-    fun activeKeyIds(): Map<String, String> = keys
-        .filter(VaultKeyEntity::active)
-        .associate { it.purpose to it.id }
+    fun activeKeyIds(): Map<String, String> =
+        keys.filter(VaultKeyEntity::active).associate { it.purpose to it.id }
 }
 
 internal class FakeEncryptionKeyStore : EncryptionKeyStore {
@@ -314,10 +327,11 @@ internal class FakeEncryptionKeyStore : EncryptionKeyStore {
 
     override fun generate(keyId: String): GeneratedEncryptionKey {
         check(keyId !in keys)
-        keys[keyId] = KeyGenerator.getInstance("AES").run {
-            init(128)
-            generateKey()
-        }
+        keys[keyId] =
+            KeyGenerator.getInstance("AES").run {
+                init(128)
+                generateKey()
+            }
         generatedKeyIds += keyId
         check(keyId !in generateFailuresAfterInsert) { "Generation failed for $keyId" }
         return GeneratedEncryptionKey(EncryptionKeyBacking.SOFTWARE)
@@ -328,5 +342,4 @@ internal class FakeEncryptionKeyStore : EncryptionKeyStore {
         deletedKeyIds += keyId
         keys.remove(keyId)
     }
-
 }

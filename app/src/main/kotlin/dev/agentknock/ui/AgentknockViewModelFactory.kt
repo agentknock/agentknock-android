@@ -1,7 +1,7 @@
 package dev.agentknock.ui
 
-import android.app.Application
 import android.app.ActivityManager
+import android.app.Application
 import androidx.lifecycle.ViewModelProvider
 import androidx.lifecycle.createSavedStateHandle
 import androidx.lifecycle.viewmodel.initializer
@@ -22,11 +22,13 @@ internal fun agentknockViewModelFactory(
     application: Application,
     container: ApplicationContainer,
 ): ViewModelProvider.Factory {
-    val pairingAddresses = PairingAddressGenerator(
-        application.resources.openRawResource(R.raw.pairing_address_words)
-            .bufferedReader()
-            .use { reader -> reader.readLines() },
-    )
+    val pairingAddresses =
+        PairingAddressGenerator(
+            application.resources
+                .openRawResource(R.raw.pairing_address_words)
+                .bufferedReader()
+                .use { reader -> reader.readLines() }
+        )
     val awaitStorageReady: suspend () -> Unit = container.localStorage::await
 
     return viewModelFactory {
@@ -100,7 +102,8 @@ internal fun agentknockViewModelFactory(
                 beginFactoryReset = container::beginFactoryReset,
                 cancelFactoryReset = container::cancelFactoryReset,
                 clearApplicationData = {
-                    application.getSystemService(ActivityManager::class.java)
+                    application
+                        .getSystemService(ActivityManager::class.java)
                         .clearApplicationUserData()
                 },
                 awaitStorageReady = awaitStorageReady,

@@ -2,8 +2,8 @@ package dev.agentknock.storage.request
 
 import kotlinx.coroutines.CompletableDeferred
 import kotlinx.coroutines.ExperimentalCoroutinesApi
-import kotlinx.coroutines.awaitCancellation
 import kotlinx.coroutines.async
+import kotlinx.coroutines.awaitCancellation
 import kotlinx.coroutines.cancelAndJoin
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.test.advanceTimeBy
@@ -11,7 +11,6 @@ import kotlinx.coroutines.test.runCurrent
 import kotlinx.coroutines.test.runTest
 import org.junit.Assert.assertEquals
 import org.junit.Assert.assertFalse
-import org.junit.Assert.assertNull
 import org.junit.Assert.assertTrue
 import org.junit.Test
 
@@ -22,19 +21,20 @@ class RequestConnectionManagerTest {
         var connections = 0
         var cancellations = 0
         var backgroundSynchronizations = 0
-        val manager = manager(
-            listen = { onCaughtUp ->
-                connections += 1
-                onCaughtUp()
-                try {
-                    awaitCancellation()
-                } finally {
-                    cancellations += 1
-                }
-            },
-            scheduleBackgroundSynchronization = { backgroundSynchronizations += 1 },
-            backgroundGracePeriodMillis = 5_000,
-        )
+        val manager =
+            manager(
+                listen = { onCaughtUp ->
+                    connections += 1
+                    onCaughtUp()
+                    try {
+                        awaitCancellation()
+                    } finally {
+                        cancellations += 1
+                    }
+                },
+                scheduleBackgroundSynchronization = { backgroundSynchronizations += 1 },
+                backgroundGracePeriodMillis = 5_000,
+            )
 
         manager.appForegrounded()
         runCurrent()
@@ -83,20 +83,21 @@ class RequestConnectionManagerTest {
     @Test
     fun `background handoff schedules only after foreground session cleanup`() = runTest {
         val events = mutableListOf<String>()
-        val manager = manager(
-            listen = { onCaughtUp ->
-                onCaughtUp()
-                try {
-                    awaitCancellation()
-                } finally {
-                    events += "connection closed"
-                }
-            },
-            scheduleBackgroundSynchronization = {
-                events += "background scheduled"
-            },
-            backgroundGracePeriodMillis = 5_000,
-        )
+        val manager =
+            manager(
+                listen = { onCaughtUp ->
+                    onCaughtUp()
+                    try {
+                        awaitCancellation()
+                    } finally {
+                        events += "connection closed"
+                    }
+                },
+                scheduleBackgroundSynchronization = {
+                    events += "background scheduled"
+                },
+                backgroundGracePeriodMillis = 5_000,
+            )
         manager.appForegrounded()
         runCurrent()
 
@@ -120,21 +121,22 @@ class RequestConnectionManagerTest {
             val oneShotStarted = CompletableDeferred<Unit>()
             val finishOneShot = CompletableDeferred<Unit>()
             lateinit var manager: RequestConnectionManager
-            manager = manager(
-                synchronizeOnce = {
-                    oneShotStarted.complete(Unit)
-                    finishOneShot.await()
-                    RequestSyncResult.Success
-                },
-                listen = { onCaughtUp ->
-                    onCaughtUp()
-                    awaitCancellation()
-                },
-                scheduleBackgroundSynchronization = {
-                    backgroundScope.launch { manager.synchronizeOnce() }
-                },
-                backgroundGracePeriodMillis = 0,
-            )
+            manager =
+                manager(
+                    synchronizeOnce = {
+                        oneShotStarted.complete(Unit)
+                        finishOneShot.await()
+                        RequestSyncResult.Success
+                    },
+                    listen = { onCaughtUp ->
+                        onCaughtUp()
+                        awaitCancellation()
+                    },
+                    scheduleBackgroundSynchronization = {
+                        backgroundScope.launch { manager.synchronizeOnce() }
+                    },
+                    backgroundGracePeriodMillis = 0,
+                )
             manager.appForegrounded()
             runCurrent()
 
@@ -153,14 +155,15 @@ class RequestConnectionManagerTest {
     fun `pause during background grace suppresses handoff and background resume reconciles once`() =
         runTest {
             var scheduled = 0
-            val manager = manager(
-                listen = { onCaughtUp ->
-                    onCaughtUp()
-                    awaitCancellation()
-                },
-                scheduleBackgroundSynchronization = { scheduled += 1 },
-                backgroundGracePeriodMillis = 5_000,
-            )
+            val manager =
+                manager(
+                    listen = { onCaughtUp ->
+                        onCaughtUp()
+                        awaitCancellation()
+                    },
+                    scheduleBackgroundSynchronization = { scheduled += 1 },
+                    backgroundGracePeriodMillis = 5_000,
+                )
             manager.appForegrounded()
             runCurrent()
             manager.appBackgrounded()
@@ -183,17 +186,18 @@ class RequestConnectionManagerTest {
     fun `refresh replaces the foreground connection`() = runTest {
         var connections = 0
         var cancellations = 0
-        val manager = manager(
-            listen = { onCaughtUp ->
-                connections += 1
-                onCaughtUp()
-                try {
-                    awaitCancellation()
-                } finally {
-                    cancellations += 1
+        val manager =
+            manager(
+                listen = { onCaughtUp ->
+                    connections += 1
+                    onCaughtUp()
+                    try {
+                        awaitCancellation()
+                    } finally {
+                        cancellations += 1
+                    }
                 }
-            },
-        )
+            )
 
         manager.appForegrounded()
         runCurrent()
@@ -207,16 +211,17 @@ class RequestConnectionManagerTest {
     @Test
     fun `finite synchronization returns immediately behind a foreground socket`() = runTest {
         var finiteSynchronizations = 0
-        val manager = manager(
-            synchronizeOnce = {
-                finiteSynchronizations += 1
-                RequestSyncResult.Success
-            },
-            listen = { onCaughtUp ->
-                onCaughtUp()
-                awaitCancellation()
-            },
-        )
+        val manager =
+            manager(
+                synchronizeOnce = {
+                    finiteSynchronizations += 1
+                    RequestSyncResult.Success
+                },
+                listen = { onCaughtUp ->
+                    onCaughtUp()
+                    awaitCancellation()
+                },
+            )
         manager.appForegrounded()
         runCurrent()
 
@@ -233,30 +238,31 @@ class RequestConnectionManagerTest {
         var activeTransports = 0
         var maximumActiveTransports = 0
         var connections = 0
-        val manager = manager(
-            synchronizeOnce = {
-                activeTransports += 1
-                maximumActiveTransports = maxOf(maximumActiveTransports, activeTransports)
-                finiteStarted.complete(Unit)
-                try {
-                    finishFinite.await()
-                    RequestSyncResult.Success
-                } finally {
-                    activeTransports -= 1
-                }
-            },
-            listen = { onCaughtUp ->
-                activeTransports += 1
-                maximumActiveTransports = maxOf(maximumActiveTransports, activeTransports)
-                connections += 1
-                onCaughtUp()
-                try {
-                    awaitCancellation()
-                } finally {
-                    activeTransports -= 1
-                }
-            },
-        )
+        val manager =
+            manager(
+                synchronizeOnce = {
+                    activeTransports += 1
+                    maximumActiveTransports = maxOf(maximumActiveTransports, activeTransports)
+                    finiteStarted.complete(Unit)
+                    try {
+                        finishFinite.await()
+                        RequestSyncResult.Success
+                    } finally {
+                        activeTransports -= 1
+                    }
+                },
+                listen = { onCaughtUp ->
+                    activeTransports += 1
+                    maximumActiveTransports = maxOf(maximumActiveTransports, activeTransports)
+                    connections += 1
+                    onCaughtUp()
+                    try {
+                        awaitCancellation()
+                    } finally {
+                        activeTransports -= 1
+                    }
+                },
+            )
 
         val finite = launch { manager.synchronizeOnce() }
         finiteStarted.await()
@@ -279,18 +285,19 @@ class RequestConnectionManagerTest {
         val finiteReturned = CompletableDeferred<Unit>()
         val finishCallerPostProcessing = CompletableDeferred<Unit>()
         var connections = 0
-        val manager = manager(
-            synchronizeOnce = {
-                finiteStarted.complete(Unit)
-                finishFiniteSession.await()
-                RequestSyncResult.Success
-            },
-            listen = { onCaughtUp ->
-                connections += 1
-                onCaughtUp()
-                awaitCancellation()
-            },
-        )
+        val manager =
+            manager(
+                synchronizeOnce = {
+                    finiteStarted.complete(Unit)
+                    finishFiniteSession.await()
+                    RequestSyncResult.Success
+                },
+                listen = { onCaughtUp ->
+                    connections += 1
+                    onCaughtUp()
+                    awaitCancellation()
+                },
+            )
         val finiteCaller = launch {
             manager.synchronizeOnce()
             finiteReturned.complete(Unit)
@@ -313,11 +320,11 @@ class RequestConnectionManagerTest {
     }
 
     @Test
-    fun `foreground synchronization request keeps the healthy live session`() =
-        runTest {
-            var scheduled = 0
-            var connections = 0
-            val manager = manager(
+    fun `foreground synchronization request keeps the healthy live session`() = runTest {
+        var scheduled = 0
+        var connections = 0
+        val manager =
+            manager(
                 listen = { onCaughtUp ->
                     connections += 1
                     onCaughtUp()
@@ -325,30 +332,31 @@ class RequestConnectionManagerTest {
                 },
                 scheduleBackgroundSynchronization = { scheduled += 1 },
             )
-            manager.appForegrounded()
-            runCurrent()
+        manager.appForegrounded()
+        runCurrent()
 
-            manager.requestSynchronization()
-            runCurrent()
+        manager.requestSynchronization()
+        runCurrent()
 
-            assertEquals(0, scheduled)
-            assertEquals(1, connections)
-        }
+        assertEquals(0, scheduled)
+        assertEquals(1, connections)
+    }
 
     @Test
     fun `foreground synchronization request interrupts relay failure backoff`() = runTest {
         var attempts = 0
-        val manager = manager(
-            listen = {
-                attempts += 1
-                if (attempts == 1) {
-                    RequestSyncResult.RelayUnavailable("offline")
-                } else {
-                    awaitCancellation()
-                }
-            },
-            reconnectDelayMillis = 60_000,
-        )
+        val manager =
+            manager(
+                listen = {
+                    attempts += 1
+                    if (attempts == 1) {
+                        RequestSyncResult.RelayUnavailable("offline")
+                    } else {
+                        awaitCancellation()
+                    }
+                },
+                reconnectDelayMillis = 60_000,
+            )
         manager.appForegrounded()
         runCurrent()
         assertEquals(1, attempts)
@@ -362,17 +370,18 @@ class RequestConnectionManagerTest {
     @Test
     fun `foreground synchronization request interrupts post-success reconnect delay`() = runTest {
         var attempts = 0
-        val manager = manager(
-            listen = {
-                attempts += 1
-                if (attempts == 1) {
-                    RequestSyncResult.Success
-                } else {
-                    awaitCancellation()
-                }
-            },
-            reconnectDelayMillis = 60_000,
-        )
+        val manager =
+            manager(
+                listen = {
+                    attempts += 1
+                    if (attempts == 1) {
+                        RequestSyncResult.Success
+                    } else {
+                        awaitCancellation()
+                    }
+                },
+                reconnectDelayMillis = 60_000,
+            )
         manager.appForegrounded()
         runCurrent()
         assertEquals(1, attempts)
@@ -387,17 +396,18 @@ class RequestConnectionManagerTest {
     fun `pause cancels and joins the active session and resume reconnects`() = runTest {
         var connections = 0
         var cancellations = 0
-        val manager = manager(
-            listen = { onCaughtUp ->
-                connections += 1
-                onCaughtUp()
-                try {
-                    awaitCancellation()
-                } finally {
-                    cancellations += 1
+        val manager =
+            manager(
+                listen = { onCaughtUp ->
+                    connections += 1
+                    onCaughtUp()
+                    try {
+                        awaitCancellation()
+                    } finally {
+                        cancellations += 1
+                    }
                 }
-            },
-        )
+            )
         manager.appForegrounded()
         runCurrent()
 
@@ -418,16 +428,17 @@ class RequestConnectionManagerTest {
     fun `pause cancels and joins a finite synchronization`() = runTest {
         val started = CompletableDeferred<Unit>()
         var cancellationObserved = false
-        val manager = manager(
-            synchronizeOnce = {
-                started.complete(Unit)
-                try {
-                    awaitCancellation()
-                } finally {
-                    cancellationObserved = true
+        val manager =
+            manager(
+                synchronizeOnce = {
+                    started.complete(Unit)
+                    try {
+                        awaitCancellation()
+                    } finally {
+                        cancellationObserved = true
+                    }
                 }
-            },
-        )
+            )
         val caller = async { manager.synchronizeOnce() }
         started.await()
 
@@ -444,20 +455,21 @@ class RequestConnectionManagerTest {
         val started = CompletableDeferred<Unit>()
         var cancellationObserved = false
         var attempts = 0
-        val manager = manager(
-            synchronizeOnce = {
-                attempts += 1
-                if (attempts == 1) {
-                    started.complete(Unit)
-                    try {
-                        awaitCancellation()
-                    } finally {
-                        cancellationObserved = true
+        val manager =
+            manager(
+                synchronizeOnce = {
+                    attempts += 1
+                    if (attempts == 1) {
+                        started.complete(Unit)
+                        try {
+                            awaitCancellation()
+                        } finally {
+                            cancellationObserved = true
+                        }
                     }
+                    RequestSyncResult.Success
                 }
-                RequestSyncResult.Success
-            },
-        )
+            )
         val caller = launch { manager.synchronizeOnce() }
         started.await()
 
@@ -475,13 +487,14 @@ class RequestConnectionManagerTest {
     @Test
     fun `terminal result stops retries until an explicit refresh`() = runTest {
         var attempts = 0
-        val manager = manager(
-            listen = {
-                attempts += 1
-                RequestSyncResult.NoDevice
-            },
-            reconnectDelayMillis = 100,
-        )
+        val manager =
+            manager(
+                listen = {
+                    attempts += 1
+                    RequestSyncResult.NoDevice
+                },
+                reconnectDelayMillis = 100,
+            )
 
         manager.appForegrounded()
         runCurrent()
@@ -499,12 +512,13 @@ class RequestConnectionManagerTest {
     @Test
     fun `new durable work restarts a foreground session stopped by a terminal result`() = runTest {
         var attempts = 0
-        val manager = manager(
-            listen = {
-                attempts += 1
-                RequestSyncResult.NoDevice
-            },
-        )
+        val manager =
+            manager(
+                listen = {
+                    attempts += 1
+                    RequestSyncResult.NoDevice
+                }
+            )
         manager.appForegrounded()
         runCurrent()
         assertEquals(1, attempts)
@@ -519,17 +533,18 @@ class RequestConnectionManagerTest {
     fun `terminal session cannot stop work announced as it returns`() = runTest {
         var attempts = 0
         lateinit var manager: RequestConnectionManager
-        manager = manager(
-            listen = {
-                attempts += 1
-                if (attempts == 1) {
-                    manager.requestSynchronization()
-                    RequestSyncResult.NoDevice
-                } else {
-                    awaitCancellation()
+        manager =
+            manager(
+                listen = {
+                    attempts += 1
+                    if (attempts == 1) {
+                        manager.requestSynchronization()
+                        RequestSyncResult.NoDevice
+                    } else {
+                        awaitCancellation()
+                    }
                 }
-            },
-        )
+            )
 
         manager.appForegrounded()
         runCurrent()
@@ -540,13 +555,14 @@ class RequestConnectionManagerTest {
     @Test
     fun `finite synchronization is not covered by a stopped foreground session`() = runTest {
         var finiteSynchronizations = 0
-        val manager = manager(
-            synchronizeOnce = {
-                finiteSynchronizations += 1
-                RequestSyncResult.Success
-            },
-            listen = { RequestSyncResult.NoDevice },
-        )
+        val manager =
+            manager(
+                synchronizeOnce = {
+                    finiteSynchronizations += 1
+                    RequestSyncResult.Success
+                },
+                listen = { RequestSyncResult.NoDevice },
+            )
         manager.appForegrounded()
         runCurrent()
 
@@ -560,12 +576,13 @@ class RequestConnectionManagerTest {
     @Test
     fun `foreground lifecycle transition restarts a terminal session`() = runTest {
         var attempts = 0
-        val manager = manager(
-            listen = {
-                attempts += 1
-                RequestSyncResult.RelayRejected(401, "revoked")
-            },
-        )
+        val manager =
+            manager(
+                listen = {
+                    attempts += 1
+                    RequestSyncResult.RelayRejected(401, "revoked")
+                }
+            )
         manager.appForegrounded()
         runCurrent()
         assertEquals(1, attempts)
@@ -580,20 +597,21 @@ class RequestConnectionManagerTest {
     @Test
     fun `new synchronization work cannot bypass the server retry delay`() = runTest {
         var attempts = 0
-        val manager = manager(
-            listen = {
-                attempts += 1
-                if (attempts == 1) {
-                    RequestSyncResult.RelayUnavailable(
-                        message = "rate limited",
-                        retryAfterMillis = 1_000,
-                    )
-                } else {
-                    awaitCancellation()
-                }
-            },
-            reconnectDelayMillis = 100,
-        )
+        val manager =
+            manager(
+                listen = {
+                    attempts += 1
+                    if (attempts == 1) {
+                        RequestSyncResult.RelayUnavailable(
+                            message = "rate limited",
+                            retryAfterMillis = 1_000,
+                        )
+                    } else {
+                        awaitCancellation()
+                    }
+                },
+                reconnectDelayMillis = 100,
+            )
         manager.appForegrounded()
         runCurrent()
         assertEquals(1, attempts)
@@ -611,23 +629,24 @@ class RequestConnectionManagerTest {
     @Test
     fun `server retry delay applies to a later finite synchronization`() = runTest {
         var attempts = 0
-        val manager = manager(
-            synchronizeOnce = {
-                attempts += 1
-                if (attempts == 1) {
-                    RequestSyncResult.RelayUnavailable(
-                        message = "rate limited",
-                        retryAfterMillis = 1_000,
-                    )
-                } else {
-                    RequestSyncResult.Success
+        val manager =
+            manager(
+                synchronizeOnce = {
+                    attempts += 1
+                    if (attempts == 1) {
+                        RequestSyncResult.RelayUnavailable(
+                            message = "rate limited",
+                            retryAfterMillis = 1_000,
+                        )
+                    } else {
+                        RequestSyncResult.Success
+                    }
                 }
-            },
-        )
+            )
 
         assertEquals(
             OneShotSynchronizationResult.Completed(
-                RequestSyncResult.RelayUnavailable("rate limited", 1_000),
+                RequestSyncResult.RelayUnavailable("rate limited", 1_000)
             ),
             manager.synchronizeOnce(),
         )
@@ -656,30 +675,32 @@ class RequestConnectionManagerTest {
     fun `zero retry directive remains immediate and is not persisted`() = runTest {
         var attempts = 0
         var deadlineWrites = 0
-        val manager = manager(
-            synchronizeOnce = {
-                attempts += 1
-                if (attempts == 1) {
-                    RequestSyncResult.RelayUnavailable(
-                        message = "try again",
-                        retryAfterMillis = 0,
-                    )
-                } else {
-                    RequestSyncResult.Success
-                }
-            },
-            relayRetryDeadline = RelayRetryDeadline(
-                readState = { RelayRetryDeadlineState() },
-                writeState = { deadlineWrites += 1 },
-                bootCount = 7,
-                currentTimeMillis = { 1_000 },
-                elapsedRealtimeMillis = { 1_000 },
-            ),
-        )
+        val manager =
+            manager(
+                synchronizeOnce = {
+                    attempts += 1
+                    if (attempts == 1) {
+                        RequestSyncResult.RelayUnavailable(
+                            message = "try again",
+                            retryAfterMillis = 0,
+                        )
+                    } else {
+                        RequestSyncResult.Success
+                    }
+                },
+                relayRetryDeadline =
+                    RelayRetryDeadline(
+                        readState = { RelayRetryDeadlineState() },
+                        writeState = { deadlineWrites += 1 },
+                        bootCount = 7,
+                        currentTimeMillis = { 1_000 },
+                        elapsedRealtimeMillis = { 1_000 },
+                    ),
+            )
 
         assertEquals(
             OneShotSynchronizationResult.Completed(
-                RequestSyncResult.RelayUnavailable("try again", 0),
+                RequestSyncResult.RelayUnavailable("try again", 0)
             ),
             manager.synchronizeOnce(),
         )
@@ -694,34 +715,37 @@ class RequestConnectionManagerTest {
     @Test
     fun `server retry deadline survives manager recreation`() = runTest {
         var storedDeadline = RelayRetryDeadlineState()
-        fun retryDeadline() = RelayRetryDeadline(
-            readState = { storedDeadline },
-            writeState = { storedDeadline = it },
-            bootCount = 7,
-            currentTimeMillis = { testScheduler.currentTime },
-            elapsedRealtimeMillis = { testScheduler.currentTime },
-        )
-        val first = manager(
-            synchronizeOnce = {
-                RequestSyncResult.RelayUnavailable("rate limited", 1_000)
-            },
-            relayRetryDeadline = retryDeadline(),
-        )
+        fun retryDeadline() =
+            RelayRetryDeadline(
+                readState = { storedDeadline },
+                writeState = { storedDeadline = it },
+                bootCount = 7,
+                currentTimeMillis = { testScheduler.currentTime },
+                elapsedRealtimeMillis = { testScheduler.currentTime },
+            )
+        val first =
+            manager(
+                synchronizeOnce = {
+                    RequestSyncResult.RelayUnavailable("rate limited", 1_000)
+                },
+                relayRetryDeadline = retryDeadline(),
+            )
         assertEquals(
             OneShotSynchronizationResult.Completed(
-                RequestSyncResult.RelayUnavailable("rate limited", 1_000),
+                RequestSyncResult.RelayUnavailable("rate limited", 1_000)
             ),
             first.synchronizeOnce(),
         )
 
         var attemptsAfterRestart = 0
-        val recreated = manager(
-            synchronizeOnce = {
-                attemptsAfterRestart += 1
-                RequestSyncResult.Success
-            },
-            relayRetryDeadline = retryDeadline(),
-        )
+        val recreated =
+            manager(
+                synchronizeOnce = {
+                    attemptsAfterRestart += 1
+                    RequestSyncResult.Success
+                },
+                relayRetryDeadline = retryDeadline(),
+            )
         assertEquals(
             OneShotSynchronizationResult.Deferred(1_000),
             recreated.synchronizeOnce(),
@@ -734,14 +758,15 @@ class RequestConnectionManagerTest {
         var attempts = 0
         val failure = IllegalStateException("broken local state")
         var reportedFailure: Exception? = null
-        val manager = manager(
-            listen = {
-                attempts += 1
-                throw failure
-            },
-            reconnectDelayMillis = 100,
-            reportInternalFailure = { reportedFailure = it },
-        )
+        val manager =
+            manager(
+                listen = {
+                    attempts += 1
+                    throw failure
+                },
+                reconnectDelayMillis = 100,
+                reportInternalFailure = { reportedFailure = it },
+            )
 
         manager.appForegrounded()
         runCurrent()
@@ -760,14 +785,15 @@ class RequestConnectionManagerTest {
     @Test
     fun `relay failures back off exponentially and cap the local delay`() = runTest {
         var attempts = 0
-        val manager = manager(
-            listen = {
-                attempts += 1
-                RequestSyncResult.RelayUnavailable("offline")
-            },
-            reconnectDelayMillis = 100,
-            maximumReconnectDelayMillis = 250,
-        )
+        val manager =
+            manager(
+                listen = {
+                    attempts += 1
+                    RequestSyncResult.RelayUnavailable("offline")
+                },
+                reconnectDelayMillis = 100,
+                maximumReconnectDelayMillis = 250,
+            )
         manager.appForegrounded()
         runCurrent()
         assertEquals(1, attempts)
@@ -798,18 +824,19 @@ class RequestConnectionManagerTest {
         maximumReconnectDelayMillis: Long = 60_000,
         relayRetryDeadline: RelayRetryDeadline? = null,
         reportInternalFailure: (Exception) -> Unit = {},
-    ) = RequestConnectionManager(
-        scope = backgroundScope,
-        synchronizeOnce = synchronizeOnce,
-        listen = listen,
-        scheduleBackgroundSynchronization = scheduleBackgroundSynchronization,
-        relayRetryDeadline = relayRetryDeadline ?: inMemoryRetryDeadline(),
-        backgroundGracePeriodMillis = backgroundGracePeriodMillis,
-        reconnectDelayMillis = reconnectDelayMillis,
-        maximumReconnectDelayMillis = maximumReconnectDelayMillis,
-        elapsedRealtimeMillis = { testScheduler.currentTime },
-        reportInternalFailure = reportInternalFailure,
-    )
+    ) =
+        RequestConnectionManager(
+            scope = backgroundScope,
+            synchronizeOnce = synchronizeOnce,
+            listen = listen,
+            scheduleBackgroundSynchronization = scheduleBackgroundSynchronization,
+            relayRetryDeadline = relayRetryDeadline ?: inMemoryRetryDeadline(),
+            backgroundGracePeriodMillis = backgroundGracePeriodMillis,
+            reconnectDelayMillis = reconnectDelayMillis,
+            maximumReconnectDelayMillis = maximumReconnectDelayMillis,
+            elapsedRealtimeMillis = { testScheduler.currentTime },
+            reportInternalFailure = reportInternalFailure,
+        )
 
     private fun kotlinx.coroutines.test.TestScope.inMemoryRetryDeadline(): RelayRetryDeadline {
         var state = RelayRetryDeadlineState()

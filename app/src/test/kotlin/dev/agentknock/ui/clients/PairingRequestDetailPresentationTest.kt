@@ -12,10 +12,11 @@ class PairingRequestDetailPresentationTest {
     @Test
     fun `metadata warning is shown near actionable SAS without error status styling`() {
         val warning = "The client details could not be read, but the verification code is valid."
-        val details = pairingDetails(
-            state = PairingState.SAS_VERIFICATION_PENDING,
-            error = warning,
-        )
+        val details =
+            pairingDetails(
+                state = PairingState.SAS_VERIFICATION_PENDING,
+                error = warning,
+            )
 
         assertEquals(
             PairingWarningNotice(
@@ -29,10 +30,11 @@ class PairingRequestDetailPresentationTest {
 
     @Test
     fun `exchange failure uses error status styling instead of a SAS warning`() {
-        val details = pairingDetails(
-            state = PairingState.EXCHANGE_FAILED,
-            error = "The pairing message could not be verified.",
-        )
+        val details =
+            pairingDetails(
+                state = PairingState.EXCHANGE_FAILED,
+                error = "The pairing message could not be verified.",
+            )
 
         assertNull(details.warningNotice)
         assertTrue(details.pairingState.usesErrorStatus)
@@ -41,19 +43,20 @@ class PairingRequestDetailPresentationTest {
     private fun pairingDetails(
         state: PairingState,
         error: String?,
-    ) = PairingRequestDetails(
-        pairingState = state,
-        clientName = "Client",
-        pairingAddress = "pairing-address",
-        clientId = "client-id",
-        sasOptions = listOf("one", "two", "three"),
-        clientSoftware = null,
-        platform = null,
-        architecture = null,
-        hostname = null,
-        machineId = null,
-        osVersion = null,
-        error = error,
-        decidedAt = null,
-    )
+    ) =
+        PairingRequestDetails(
+            pairingState = state,
+            clientName = "Client",
+            pairingAddress = "pairing-address",
+            clientId = "client-id",
+            sasOptions = listOf("one", "two", "three"),
+            clientSoftware = null,
+            platform = null,
+            architecture = null,
+            hostname = null,
+            machineId = null,
+            osVersion = null,
+            error = error,
+            decidedAt = null,
+        )
 }

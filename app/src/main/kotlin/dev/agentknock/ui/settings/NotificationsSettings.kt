@@ -1,7 +1,5 @@
 package dev.agentknock.ui.settings
 
-import dev.agentknock.BACKGROUND_DELIVERY_SUPPORTED
-
 import android.Manifest
 import android.content.Intent
 import android.content.pm.PackageManager
@@ -25,6 +23,7 @@ import androidx.compose.ui.Modifier
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.unit.dp
 import androidx.core.content.ContextCompat
+import dev.agentknock.BACKGROUND_DELIVERY_SUPPORTED
 import dev.agentknock.push.RequestNotifications
 import dev.agentknock.relay.RelayPushRegistrationState
 
@@ -37,27 +36,36 @@ internal fun NotificationsSettings(
     modifier: Modifier,
 ) {
     val context = LocalContext.current
-    val permissionGranted = remember(refreshGeneration) {
-        Build.VERSION.SDK_INT < Build.VERSION_CODES.TIRAMISU ||
-            ContextCompat.checkSelfPermission(context, Manifest.permission.POST_NOTIFICATIONS) ==
-            PackageManager.PERMISSION_GRANTED
-    }
-    val appNotificationsEnabled = remember(refreshGeneration) {
-        RequestNotifications.appNotificationsEnabled(context)
-    }
-    val requestsEnabled = remember(refreshGeneration) {
-        RequestNotifications.actionNotificationsEnabled(context)
-    }
-    val backgroundEnabled = remember(refreshGeneration) {
-        RequestNotifications.channelNotificationsEnabled(context, RequestNotifications.BACKGROUND_CHANNEL_ID)
-    }
+    val permissionGranted =
+        remember(refreshGeneration) {
+            Build.VERSION.SDK_INT < Build.VERSION_CODES.TIRAMISU ||
+                ContextCompat.checkSelfPermission(
+                    context,
+                    Manifest.permission.POST_NOTIFICATIONS,
+                ) == PackageManager.PERMISSION_GRANTED
+        }
+    val appNotificationsEnabled =
+        remember(refreshGeneration) {
+            RequestNotifications.appNotificationsEnabled(context)
+        }
+    val requestsEnabled =
+        remember(refreshGeneration) {
+            RequestNotifications.actionNotificationsEnabled(context)
+        }
+    val backgroundEnabled =
+        remember(refreshGeneration) {
+            RequestNotifications.channelNotificationsEnabled(
+                context,
+                RequestNotifications.BACKGROUND_CHANNEL_ID,
+            )
+        }
 
     fun openChannel(channelId: String) {
         context.startActivity(
             Intent(Settings.ACTION_CHANNEL_NOTIFICATION_SETTINGS).apply {
                 putExtra(Settings.EXTRA_APP_PACKAGE, context.packageName)
                 putExtra(Settings.EXTRA_CHANNEL_ID, channelId)
-            },
+            }
         )
     }
 
@@ -100,8 +108,9 @@ internal fun NotificationsSettingsContent(
                         SettingsGroup {
                             SettingsRow(
                                 title = "Receive requests while the app is open",
-                                summary = "Keep Agentknock in the foreground to receive new requests. " +
-                                    "This build does not support background push delivery.",
+                                summary =
+                                    "Keep Agentknock in the foreground to receive new requests. " +
+                                        "This build does not support background push delivery.",
                             )
                         }
                     }
@@ -110,21 +119,24 @@ internal fun NotificationsSettingsContent(
             item {
                 SettingsGroup {
                     SettingsRow(
-                        icon = if (appNotificationsEnabled) {
-                            Icons.Outlined.Notifications
-                        } else {
-                            Icons.Outlined.NotificationsOff
-                        },
-                        title = if (appNotificationsEnabled) {
-                            "Notifications allowed"
-                        } else {
-                            "Notifications blocked"
-                        },
-                        summary = if (appNotificationsEnabled) {
-                            "Android can show Agentknock notifications."
-                        } else {
-                            "Android is blocking request alerts. You can still review requests in the app."
-                        },
+                        icon =
+                            if (appNotificationsEnabled) {
+                                Icons.Outlined.Notifications
+                            } else {
+                                Icons.Outlined.NotificationsOff
+                            },
+                        title =
+                            if (appNotificationsEnabled) {
+                                "Notifications allowed"
+                            } else {
+                                "Notifications blocked"
+                            },
+                        summary =
+                            if (appNotificationsEnabled) {
+                                "Android can show Agentknock notifications."
+                            } else {
+                                "Android is blocking request alerts. You can still review requests in the app."
+                            },
                         attention = !appNotificationsEnabled,
                     )
                 }
@@ -134,7 +146,9 @@ internal fun NotificationsSettingsContent(
                     Button(
                         onClick = requestNotificationPermission,
                         modifier = Modifier.fillMaxWidth(),
-                    ) { Text("Allow notifications") }
+                    ) {
+                        Text("Allow notifications")
+                    }
                 }
             }
             item {
@@ -143,7 +157,8 @@ internal fun NotificationsSettingsContent(
                     SettingsGroup {
                         SettingsRow(
                             title = "Requests needing action",
-                            summary = if (requestsEnabled) "Enabled" else "Blocked by Android settings",
+                            summary =
+                                if (requestsEnabled) "Enabled" else "Blocked by Android settings",
                             attention = !requestsEnabled,
                             onClick = { openChannel(RequestNotifications.ACTION_CHANNEL_ID) },
                             external = true,
@@ -151,11 +166,12 @@ internal fun NotificationsSettingsContent(
                         SettingsGroupDivider()
                         SettingsRow(
                             title = "Background processing",
-                            summary = if (backgroundEnabled) {
-                                "Silent notification shown"
-                            } else {
-                                "Silent notification hidden"
-                            },
+                            summary =
+                                if (backgroundEnabled) {
+                                    "Silent notification shown"
+                                } else {
+                                    "Silent notification hidden"
+                                },
                             onClick = { openChannel(RequestNotifications.BACKGROUND_CHANNEL_ID) },
                             external = true,
                         )
@@ -188,10 +204,11 @@ internal fun NotificationsSettingsContent(
     }
 }
 
-private fun RelayPushRegistrationState.deliveryWarning(): String? = when (this) {
-    RelayPushRegistrationState.MISSING ->
-        "This device has not finished registering. Agentknock will retry."
-    RelayPushRegistrationState.INVALID ->
-        "The relay rejected the registration. Agentknock will retry."
-    RelayPushRegistrationState.REGISTERED -> null
-}
+private fun RelayPushRegistrationState.deliveryWarning(): String? =
+    when (this) {
+        RelayPushRegistrationState.MISSING ->
+            "This device has not finished registering. Agentknock will retry."
+        RelayPushRegistrationState.INVALID ->
+            "The relay rejected the registration. Agentknock will retry."
+        RelayPushRegistrationState.REGISTERED -> null
+    }

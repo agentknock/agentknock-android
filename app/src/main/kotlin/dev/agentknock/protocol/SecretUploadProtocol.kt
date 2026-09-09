@@ -36,28 +36,35 @@ internal data class SecretUploadCompletion(
     val message: String?,
 )
 
-internal class SecretUploadProtocol(
-    private val json: Json = Json { ignoreUnknownKeys = true },
-) {
+internal class SecretUploadProtocol(private val json: Json = Json { ignoreUnknownKeys = true }) {
     fun decodeRequest(plaintext: ByteArray): SecretUploadRequestMessage {
         val clientSoftware = json.decodeClientSoftware(plaintext)
         val root = json.parseToJsonElement(plaintext.decodeToString()).jsonObject
         require(root.requiredString("method") == METHOD) { "Unexpected request method" }
         val secret = root.getValue("secret").jsonObject
-        val contents = when (secret.requiredString("type")) {
-            TYPE_ENVIRONMENT -> SecretUploadContents.Environment(
-                secret.getValue("variables").jsonObject.mapValues { (_, value) ->
-                    value.jsonObject.requiredString("value")
-                }.also { require(it.isNotEmpty()) { "Environment upload has no variables" } },
-            )
-            TYPE_SSH -> SecretUploadContents.Ssh(secret.requiredString("private_key"))
-            else -> error("Unsupported secret type")
-        }
+        val contents =
+            when (secret.requiredString("type")) {
+                TYPE_ENVIRONMENT ->
+                    SecretUploadContents.Environment(
+                        secret
+                            .getValue("variables")
+                            .jsonObject
+                            .mapValues { (_, value) ->
+                                value.jsonObject.requiredString("value")
+                            }
+                            .also {
+                                require(it.isNotEmpty()) { "Environment upload has no variables" }
+                            }
+                    )
+                TYPE_SSH -> SecretUploadContents.Ssh(secret.requiredString("private_key"))
+                else -> error("Unsupported secret type")
+            }
         return SecretUploadRequestMessage(
             clientSoftware = clientSoftware,
-            mode = SecretUploadMode.entries.singleOrNull {
-                it.wireName == root.requiredString("mode")
-            } ?: error("Unsupported secret upload mode"),
+            mode =
+                SecretUploadMode.entries.singleOrNull {
+                    it.wireName == root.requiredString("mode")
+                } ?: error("Unsupported secret upload mode"),
             name = secret.requiredString("name"),
             descriptionProvided = "description" in secret,
             description = secret.optionalString("description"),
@@ -65,19 +72,18 @@ internal class SecretUploadProtocol(
         )
     }
 
-    fun receivedResponse(): ByteArray = json.encodeToString(
-        SecretUploadResultWire(result = RESULT_RECEIVED),
-    ).encodeToByteArray()
+    fun receivedResponse(): ByteArray =
+        json.encodeToString(SecretUploadResultWire(result = RESULT_RECEIVED)).encodeToByteArray()
 
-    fun rejectedResponse(message: String): ByteArray = json.encodeToString(
-        SecretUploadResultWire(result = RESULT_REJECTED, message = message),
-    ).encodeToByteArray()
+    fun rejectedResponse(message: String): ByteArray =
+        json
+            .encodeToString(SecretUploadResultWire(result = RESULT_REJECTED, message = message))
+            .encodeToByteArray()
 
     fun decodeCompletion(plaintext: ByteArray): SecretUploadCompletion {
         val clientSoftware = json.decodeClientSoftware(plaintext)
-        val completion = json.decodeFromString<SecretUploadCompletionWire>(
-            plaintext.decodeToString(),
-        )
+        val completion =
+            json.decodeFromString<SecretUploadCompletionWire>(plaintext.decodeToString())
         if (completion.result != RESULT_RECEIVED && completion.result != RESULT_REJECTED) {
             throw SerializationException("Unsupported secret upload completion result")
         }
@@ -99,14 +105,16 @@ internal class SecretUploadProtocol(
         return value.content
     }
 
-    private fun JsonObject.optionalString(name: String): String? = when (val value = this[name]) {
-        null, JsonNull -> null
-        is JsonPrimitive -> {
-            require(value.isString) { "$name must be a string or null" }
-            value.content
+    private fun JsonObject.optionalString(name: String): String? =
+        when (val value = this[name]) {
+            null,
+            JsonNull -> null
+            is JsonPrimitive -> {
+                require(value.isString) { "$name must be a string or null" }
+                value.content
+            }
+            else -> throw IllegalArgumentException("$name must be a string or null")
         }
-        else -> throw IllegalArgumentException("$name must be a string or null")
-    }
 
     companion object {
         const val METHOD = "SecretUpload"

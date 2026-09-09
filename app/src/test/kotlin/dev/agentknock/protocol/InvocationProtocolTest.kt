@@ -1,8 +1,8 @@
 package dev.agentknock.protocol
 
 import kotlinx.serialization.json.Json
-import org.junit.Assert.assertEquals
 import org.junit.Assert.assertArrayEquals
+import org.junit.Assert.assertEquals
 import org.junit.Assert.assertNull
 import org.junit.Assert.assertTrue
 import org.junit.Test
@@ -13,8 +13,9 @@ class InvocationProtocolTest {
 
     @Test
     fun `decodes the cli invocation request shape`() {
-        val request = protocol.decodeRequest(
-            """
+        val request =
+            protocol.decodeRequest(
+                """
             {
               ${testClientSoftwareFields("0.2.0", "0.1.0")},
               "method":"Invocation",
@@ -35,8 +36,10 @@ class InvocationProtocolTest {
               },
               "launcher_chain":["sudo","agentknock"]
             }
-            """.trimIndent().encodeToByteArray(),
-        )
+            """
+                    .trimIndent()
+                    .encodeToByteArray()
+            )
 
         assertEquals(testClientSoftware("0.2.0", "0.1.0"), request.clientSoftware)
         assertArrayEquals(ByteArray(32), request.invocationToken)
@@ -68,46 +71,55 @@ class InvocationProtocolTest {
     fun `encodes exact approved and denied response variants`() {
         assertEquals(
             json.parseToJsonElement(
-                """{"result":"APPROVED","secrets":{"aws-read-only":{"type":"environment","variables":{"AWS_REGION":{"value":"eu-west-1"},"TOKEN":{"value":"secret"}}}}}""",
+                """{"result":"APPROVED","secrets":{"aws-read-only":{"type":"environment","variables":{"AWS_REGION":{"value":"eu-west-1"},"TOKEN":{"value":"secret"}}}}}"""
             ),
             json.parseToJsonElement(
-                protocol.approvedResponse(
-                    mapOf(
-                        "aws-read-only" to InvocationResponseSecret.Environment(
-                            description = "",
-                            environment = linkedMapOf(
-                                "AWS_REGION" to "eu-west-1",
-                                "TOKEN" to "secret",
-                            ),
-                        ),
-                    ),
-                ).decodeToString(),
-            ),
-        )
-        assertEquals(
-            json.parseToJsonElement(
-                """{"result":"APPROVED","secrets":{"production-ssh":{"type":"ssh","public_key":"ssh-ed25519 AAAA example@host"}}}""",
-            ),
-            json.parseToJsonElement(
-                protocol.approvedResponse(
-                    mapOf(
-                        "production-ssh" to InvocationResponseSecret.Ssh(
-                            description = "",
-                            publicKey = "ssh-ed25519 AAAA example@host",
-                        ),
-                    ),
-                ).decodeToString(),
+                protocol
+                    .approvedResponse(
+                        mapOf(
+                            "aws-read-only" to
+                                InvocationResponseSecret.Environment(
+                                    description = "",
+                                    environment =
+                                        linkedMapOf(
+                                            "AWS_REGION" to "eu-west-1",
+                                            "TOKEN" to "secret",
+                                        ),
+                                )
+                        )
+                    )
+                    .decodeToString()
             ),
         )
         assertEquals(
             json.parseToJsonElement(
-                """{"result":"DENIED","reason":"USER_DENIED","message":"Denied on device."}""",
+                """{"result":"APPROVED","secrets":{"production-ssh":{"type":"ssh","public_key":"ssh-ed25519 AAAA example@host"}}}"""
             ),
             json.parseToJsonElement(
-                protocol.deniedResponse(
-                    InvocationDenialReason.USER_DENIED,
-                    "Denied on device.",
-                ).decodeToString(),
+                protocol
+                    .approvedResponse(
+                        mapOf(
+                            "production-ssh" to
+                                InvocationResponseSecret.Ssh(
+                                    description = "",
+                                    publicKey = "ssh-ed25519 AAAA example@host",
+                                )
+                        )
+                    )
+                    .decodeToString()
+            ),
+        )
+        assertEquals(
+            json.parseToJsonElement(
+                """{"result":"DENIED","reason":"USER_DENIED","message":"Denied on device."}"""
+            ),
+            json.parseToJsonElement(
+                protocol
+                    .deniedResponse(
+                        InvocationDenialReason.USER_DENIED,
+                        "Denied on device.",
+                    )
+                    .decodeToString()
             ),
         )
     }
@@ -118,7 +130,7 @@ class InvocationProtocolTest {
             ApprovalCompletion.Approved(testClientSoftware("0.2.0", "0.1.0")),
             protocol.decodeCompletion(
                 """{${testClientSoftwareFields("0.2.0", "0.1.0")},"result":"APPROVED"}"""
-                    .encodeToByteArray(),
+                    .encodeToByteArray()
             ),
         )
         assertEquals(
@@ -129,28 +141,32 @@ class InvocationProtocolTest {
             ),
             protocol.decodeCompletion(
                 """{${testClientSoftwareFields("0.2.0", "0.1.0")},"result":"DENIED","reason":"USER_DENIED","message":"Denied on device."}"""
-                    .encodeToByteArray(),
+                    .encodeToByteArray()
             ),
         )
-        val aborted = protocol.decodeCompletion(
-            """{${testClientSoftwareFields("0.2.0", "0.1.0")},"result":"ABORTED","reason":"CANCELLED","message":"Cancelled by user."}"""
-                .encodeToByteArray(),
-        )
+        val aborted =
+            protocol.decodeCompletion(
+                """{${testClientSoftwareFields("0.2.0", "0.1.0")},"result":"ABORTED","reason":"CANCELLED","message":"Cancelled by user."}"""
+                    .encodeToByteArray()
+            )
         check(aborted is ApprovalCompletion.Aborted)
         assertEquals("CANCELLED", aborted.reason)
         assertEquals("Cancelled by user.", aborted.message)
         assertNull(
-            protocol.decodeRequest(
-                """{${testClientSoftwareFields("0.2.0", "0.1.0")},"method":"Invocation","invocation_token":"AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA=","secrets":{"test":{}},"operation":{"type":"exec","command":"env","arguments":[],"working_directory":"/tmp","executable_path":"/bin/env","executable_mode":"BINARY","stdin":"TERMINAL","stdout":"TERMINAL","stderr":"TERMINAL"},"launcher_chain":[]}"""
-                    .encodeToByteArray(),
-            ).reason,
+            protocol
+                .decodeRequest(
+                    """{${testClientSoftwareFields("0.2.0", "0.1.0")},"method":"Invocation","invocation_token":"AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA=","secrets":{"test":{}},"operation":{"type":"exec","command":"env","arguments":[],"working_directory":"/tmp","executable_path":"/bin/env","executable_mode":"BINARY","stdin":"TERMINAL","stdout":"TERMINAL","stderr":"TERMINAL"},"launcher_chain":[]}"""
+                        .encodeToByteArray()
+                )
+                .reason
         )
     }
 
     @Test
     fun `decodes only and omit environment delivery options`() {
-        val request = protocol.decodeRequest(
-            """
+        val request =
+            protocol.decodeRequest(
+                """
             {
               ${testClientSoftwareFields("0.3.0", "0.1.0")},
               "method":"Invocation",
@@ -172,17 +188,21 @@ class InvocationProtocolTest {
               },
               "launcher_chain":[]
             }
-            """.trimIndent().encodeToByteArray(),
-        )
+            """
+                    .trimIndent()
+                    .encodeToByteArray()
+            )
 
         assertEquals(
             mapOf(
-                "github" to InvocationSecretDelivery(
-                    InvocationEnvironmentDelivery(only = setOf("GH_HOST", "GH_TOKEN")),
-                ),
-                "cloudflare" to InvocationSecretDelivery(
-                    InvocationEnvironmentDelivery(omit = setOf("CF_ACCOUNT_ID")),
-                ),
+                "github" to
+                    InvocationSecretDelivery(
+                        InvocationEnvironmentDelivery(only = setOf("GH_HOST", "GH_TOKEN"))
+                    ),
+                "cloudflare" to
+                    InvocationSecretDelivery(
+                        InvocationEnvironmentDelivery(omit = setOf("CF_ACCOUNT_ID"))
+                    ),
             ),
             request.secretDelivery,
         )
@@ -190,9 +210,10 @@ class InvocationProtocolTest {
 
     @Test
     fun `decodes environment variable renaming`() {
-        val request = decodeWithSecrets(
-            """{"github":{"environment":{"only":["GH_HOST","GH_TOKEN"],"rename":{"GH_HOST":"GITHUB_HOST"}}}}""",
-        )
+        val request =
+            decodeWithSecrets(
+                """{"github":{"environment":{"only":["GH_HOST","GH_TOKEN"],"rename":{"GH_HOST":"GITHUB_HOST"}}}}"""
+            )
 
         assertEquals(
             mapOf("GH_HOST" to "GITHUB_HOST"),
@@ -202,9 +223,10 @@ class InvocationProtocolTest {
 
     @Test
     fun `decodes standard input delivery`() {
-        val request = decodeWithSecrets(
-            """{"github":{"environment":{"only":["GH_TOKEN"],"stdin":"GH_TOKEN"}}}""",
-        )
+        val request =
+            decodeWithSecrets(
+                """{"github":{"environment":{"only":["GH_TOKEN"],"stdin":"GH_TOKEN"}}}"""
+            )
 
         assertEquals(
             "GH_TOKEN",
@@ -214,9 +236,10 @@ class InvocationProtocolTest {
 
     @Test
     fun `ignores unknown nested members`() {
-        val request = decodeWithSecrets(
-            """{"test":{"future_delivery":{"mode":"new"},"environment":{"only":["TOKEN"],"future_option":true}}}""",
-        )
+        val request =
+            decodeWithSecrets(
+                """{"test":{"future_delivery":{"mode":"new"},"environment":{"only":["TOKEN"],"future_option":true}}}"""
+            )
 
         assertEquals(
             setOf("TOKEN"),
@@ -226,9 +249,7 @@ class InvocationProtocolTest {
 
     @Test(expected = IllegalArgumentException::class)
     fun `rejects combining only and omit`() {
-        decodeWithSecrets(
-            """{"test":{"environment":{"only":["TOKEN"],"omit":["OTHER"]}}}""",
-        )
+        decodeWithSecrets("""{"test":{"environment":{"only":["TOKEN"],"omit":["OTHER"]}}}""")
     }
 
     @Test(expected = IllegalArgumentException::class)
@@ -249,35 +270,36 @@ class InvocationProtocolTest {
     @Test(expected = IllegalArgumentException::class)
     fun `rejects renaming a variable excluded by only`() {
         decodeWithSecrets(
-            """{"test":{"environment":{"only":["TOKEN"],"rename":{"OTHER":"RENAMED"}}}}""",
+            """{"test":{"environment":{"only":["TOKEN"],"rename":{"OTHER":"RENAMED"}}}}"""
         )
     }
 
     @Test(expected = IllegalArgumentException::class)
     fun `rejects multiple standard input sources`() {
         decodeWithSecrets(
-            """{"first":{"environment":{"stdin":"ONE"}},"second":{"environment":{"stdin":"TWO"}}}""",
+            """{"first":{"environment":{"stdin":"ONE"}},"second":{"environment":{"stdin":"TWO"}}}"""
         )
     }
 
     @Test(expected = IllegalArgumentException::class)
     fun `rejects renaming the standard input source`() {
         decodeWithSecrets(
-            """{"test":{"environment":{"rename":{"TOKEN":"OTHER"},"stdin":"TOKEN"}}}""",
+            """{"test":{"environment":{"rename":{"TOKEN":"OTHER"},"stdin":"TOKEN"}}}"""
         )
     }
 
     @Test
     fun `rejects invalid operation evidence`() {
-        val invalidRequests = listOf(
-            operation(executableHash = "not base64"),
-            operation(executableHash = "AA=="),
-            operation(executableMode = "NATIVE"),
-            operation(stdin = "INHERITED"),
-            operation(stdout = "INHERITED"),
-            operation(stderr = "INHERITED"),
-            operation(launcherChain = listOf("one", "two", "three", "four", "five")),
-        )
+        val invalidRequests =
+            listOf(
+                operation(executableHash = "not base64"),
+                operation(executableHash = "AA=="),
+                operation(executableMode = "NATIVE"),
+                operation(stdin = "INHERITED"),
+                operation(stdout = "INHERITED"),
+                operation(stderr = "INHERITED"),
+                operation(launcherChain = listOf("one", "two", "three", "four", "five")),
+            )
 
         invalidRequests.forEach { request ->
             assertTrue(
@@ -290,7 +312,7 @@ class InvocationProtocolTest {
     private fun decodeWithSecrets(secrets: String): InvocationRequestMessage =
         protocol.decodeRequest(
             """{${testClientSoftwareFields("0.3.0", "0.1.0")},"method":"Invocation","invocation_token":"AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA=","secrets":$secrets,"operation":{"type":"exec","command":"env","arguments":[],"working_directory":"/tmp","executable_path":"/bin/env","executable_mode":"BINARY","stdin":"TERMINAL","stdout":"TERMINAL","stderr":"TERMINAL"},"launcher_chain":[]}"""
-                .encodeToByteArray(),
+                .encodeToByteArray()
         )
 
     private fun operation(

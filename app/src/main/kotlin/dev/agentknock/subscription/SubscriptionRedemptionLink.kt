@@ -14,16 +14,17 @@ internal sealed interface SubscriptionRedemptionLink {
             val url = value?.toHttpUrlOrNull() ?: return Unrelated
             if (
                 url.scheme != "https" ||
-                url.host != HOST ||
-                url.port != HTTPS_PORT ||
-                url.encodedPath != PATH
+                    url.host != HOST ||
+                    url.port != HTTPS_PORT ||
+                    url.encodedPath != PATH
             ) {
                 return Unrelated
             }
             if (url.query != null) return Invalid
-            val token = url.fragment
-                ?.takeIf { it.startsWith(FRAGMENT_PREFIX) }
-                ?.removePrefix(FRAGMENT_PREFIX)
+            val token =
+                url.fragment
+                    ?.takeIf { it.startsWith(FRAGMENT_PREFIX) }
+                    ?.removePrefix(FRAGMENT_PREFIX)
             return if (token != null && REDEMPTION_TOKEN.matches(token)) {
                 Valid(token)
             } else {

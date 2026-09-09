@@ -53,8 +53,8 @@ import dev.agentknock.storage.request.InboxRequestState
 import dev.agentknock.storage.request.InboxRequestStatus
 import dev.agentknock.storage.request.InboxRequestSummary
 import dev.agentknock.storage.request.PairingState
-import dev.agentknock.ui.components.rememberDateTimeFormatter
 import dev.agentknock.ui.components.TonalIcon
+import dev.agentknock.ui.components.rememberDateTimeFormatter
 
 @Composable
 internal fun ClientList(
@@ -73,9 +73,8 @@ internal fun ClientList(
 ) {
     val dates = rememberDateTimeFormatter()
     val context = LocalContext.current
-    val duplicateClientNames = clients.groupingBy(ClientSummary::name).eachCount()
-        .filterValues { it > 1 }
-        .keys
+    val duplicateClientNames =
+        clients.groupingBy(ClientSummary::name).eachCount().filterValues { it > 1 }.keys
     Column(modifier) {
         TopAppBar(
             title = { Text("Clients", style = MaterialTheme.typography.headlineMedium) },
@@ -116,30 +115,33 @@ internal fun ClientList(
                             val pairingCommand = "agentknock pairing start ${it.address}"
                             Surface(
                                 onClick = {
-                                    context.getSystemService(ClipboardManager::class.java)
+                                    context
+                                        .getSystemService(ClipboardManager::class.java)
                                         .setPrimaryClip(
                                             ClipData.newPlainText(
                                                 "Agentknock pairing command",
                                                 pairingCommand,
-                                            ),
+                                            )
                                         )
                                     report("Pairing command copied")
                                 },
                                 color = MaterialTheme.colorScheme.surfaceContainerLow,
                                 shape = MaterialTheme.shapes.medium,
-                                border = BorderStroke(
-                                    1.dp,
-                                    MaterialTheme.colorScheme.outlineVariant,
-                                ),
+                                border =
+                                    BorderStroke(
+                                        1.dp,
+                                        MaterialTheme.colorScheme.outlineVariant,
+                                    ),
                                 modifier = Modifier.fillMaxWidth(),
                             ) {
                                 Row(
-                                    modifier = Modifier.padding(
-                                        start = 14.dp,
-                                        end = 4.dp,
-                                        top = 10.dp,
-                                        bottom = 10.dp,
-                                    ),
+                                    modifier =
+                                        Modifier.padding(
+                                            start = 14.dp,
+                                            end = 4.dp,
+                                            top = 10.dp,
+                                            bottom = 10.dp,
+                                        ),
                                     verticalAlignment = Alignment.CenterVertically,
                                 ) {
                                     Text(
@@ -148,16 +150,19 @@ internal fun ClientList(
                                         style = MaterialTheme.typography.bodyMedium,
                                         modifier = Modifier.weight(1f),
                                     )
-                                    IconButton(onClick = {
-                                        context.getSystemService(ClipboardManager::class.java)
-                                            .setPrimaryClip(
-                                                ClipData.newPlainText(
-                                                    "Agentknock pairing command",
-                                                    pairingCommand,
-                                                ),
-                                            )
-                                        report("Pairing command copied")
-                                    }) {
+                                    IconButton(
+                                        onClick = {
+                                            context
+                                                .getSystemService(ClipboardManager::class.java)
+                                                .setPrimaryClip(
+                                                    ClipData.newPlainText(
+                                                        "Agentknock pairing command",
+                                                        pairingCommand,
+                                                    )
+                                                )
+                                            report("Pairing command copied")
+                                        }
+                                    ) {
                                         Icon(
                                             Icons.Outlined.ContentCopy,
                                             contentDescription = "Copy pairing command",
@@ -172,7 +177,8 @@ internal fun ClientList(
         } else {
             LazyColumn(
                 modifier = Modifier.fillMaxSize(),
-                contentPadding = PaddingValues(start = 16.dp, end = 16.dp, top = 4.dp, bottom = 16.dp),
+                contentPadding =
+                    PaddingValues(start = 16.dp, end = 16.dp, top = 4.dp, bottom = 16.dp),
                 verticalArrangement = Arrangement.spacedBy(2.dp),
             ) {
                 identity?.let {
@@ -223,38 +229,49 @@ internal fun ClientList(
                 itemsIndexed(clients, key = { _, client -> client.clientId }) { index, client ->
                     val selected = client.clientId == selectedClientId
                     Surface(
-                        color = if (selected) {
-                            MaterialTheme.colorScheme.secondaryContainer
-                        } else {
-                            MaterialTheme.colorScheme.surfaceContainerLow
-                        },
+                        color =
+                            if (selected) {
+                                MaterialTheme.colorScheme.secondaryContainer
+                            } else {
+                                MaterialTheme.colorScheme.surfaceContainerLow
+                            },
                         shape = groupShape(index, clients.lastIndex),
                         onClick = { onOpen(client.clientId) },
-                        modifier = Modifier.fillMaxWidth().semantics {
-                            this.selected = selected
-                        },
+                        modifier =
+                            Modifier.fillMaxWidth().semantics {
+                                this.selected = selected
+                            },
                     ) {
                         ListItem(
                             headlineContent = {
                                 Text(client.name, maxLines = 2, overflow = TextOverflow.Ellipsis)
                             },
                             supportingContent = {
-                                val hostname = client.hostname
-                                    ?.takeUnless { it.equals(client.name, ignoreCase = true) }
+                                val hostname =
+                                    client.hostname?.takeUnless {
+                                        it.equals(client.name, ignoreCase = true)
+                                    }
                                 val platform = client.platform?.let(::formatPlatformName)
-                                val machine = when {
-                                    hostname != null && platform != null -> "$hostname · $platform"
-                                    hostname != null -> hostname
-                                    platform != null -> platform
-                                    else -> ""
-                                }
+                                val machine =
+                                    when {
+                                        hostname != null && platform != null ->
+                                            "$hostname · $platform"
+                                        hostname != null -> hostname
+                                        platform != null -> platform
+                                        else -> ""
+                                    }
                                 Column(verticalArrangement = Arrangement.spacedBy(2.dp)) {
-                                    val activity = client.lastRequestAt?.let {
-                                        "Last request ${dates.relativeTime(it)}"
-                                    } ?: client.pairedAt?.let { "Paired ${dates.relativeTime(it)}" }.orEmpty()
-                                    val summary = listOf(machine, activity)
-                                        .filter(String::isNotBlank)
-                                        .joinToString(" · ")
+                                    val activity =
+                                        client.lastRequestAt?.let {
+                                            "Last request ${dates.relativeTime(it)}"
+                                        }
+                                            ?: client.pairedAt
+                                                ?.let { "Paired ${dates.relativeTime(it)}" }
+                                                .orEmpty()
+                                    val summary =
+                                        listOf(machine, activity)
+                                            .filter(String::isNotBlank)
+                                            .joinToString(" · ")
                                     if (summary.isNotEmpty()) {
                                         Text(
                                             summary,
@@ -318,9 +335,10 @@ internal fun ClientList(
                                     )
                                 }
                             },
-                            colors = ListItemDefaults.colors(
-                                containerColor = androidx.compose.ui.graphics.Color.Transparent,
-                            ),
+                            colors =
+                                ListItemDefaults.colors(
+                                    containerColor = androidx.compose.ui.graphics.Color.Transparent
+                                ),
                         )
                     }
                 }
@@ -339,21 +357,25 @@ private fun PairingControls(
 ) {
     val context = LocalContext.current
     Surface(
-        color = if (identity.pairingEnabled) {
-            MaterialTheme.colorScheme.primaryContainer
-        } else {
-            MaterialTheme.colorScheme.surfaceContainer
-        },
-        contentColor = if (identity.pairingEnabled) {
-            MaterialTheme.colorScheme.onPrimaryContainer
-        } else {
-            MaterialTheme.colorScheme.onSurface
-        },
+        color =
+            if (identity.pairingEnabled) {
+                MaterialTheme.colorScheme.primaryContainer
+            } else {
+                MaterialTheme.colorScheme.surfaceContainer
+            },
+        contentColor =
+            if (identity.pairingEnabled) {
+                MaterialTheme.colorScheme.onPrimaryContainer
+            } else {
+                MaterialTheme.colorScheme.onSurface
+            },
         shape = MaterialTheme.shapes.extraLarge,
         modifier = modifier.fillMaxWidth(),
     ) {
         Column(
-            modifier = Modifier.fillMaxWidth().padding(start = 20.dp, end = 8.dp, top = 8.dp, bottom = 8.dp),
+            modifier =
+                Modifier.fillMaxWidth()
+                    .padding(start = 20.dp, end = 8.dp, top = 8.dp, bottom = 8.dp)
         ) {
             Row(verticalAlignment = Alignment.CenterVertically) {
                 Text(
@@ -361,12 +383,19 @@ private fun PairingControls(
                     style = MaterialTheme.typography.labelLarge,
                     modifier = Modifier.weight(1f),
                 )
-                IconButton(onClick = {
-                    context.getSystemService(ClipboardManager::class.java).setPrimaryClip(
-                        ClipData.newPlainText("Agentknock pairing address", identity.address),
-                    )
-                    report("Pairing address copied")
-                }) {
+                IconButton(
+                    onClick = {
+                        context
+                            .getSystemService(ClipboardManager::class.java)
+                            .setPrimaryClip(
+                                ClipData.newPlainText(
+                                    "Agentknock pairing address",
+                                    identity.address,
+                                )
+                            )
+                        report("Pairing address copied")
+                    }
+                ) {
                     Icon(Icons.Outlined.ContentCopy, contentDescription = "Copy pairing address")
                 }
                 IconButton(onClick = onChangePairingAddress) {
@@ -392,9 +421,10 @@ private fun PairingControls(
                 Switch(
                     checked = identity.pairingEnabled,
                     onCheckedChange = onSetPairingEnabled,
-                    modifier = Modifier.semantics {
-                        contentDescription = "Allow new pairings"
-                    },
+                    modifier =
+                        Modifier.semantics {
+                            contentDescription = "Allow new pairings"
+                        },
                 )
             }
         }
@@ -411,12 +441,15 @@ private fun PendingPairingRow(
     val pairingState = (request.status as InboxRequestStatus.Pairing).state
     val actionRequired = request.state == InboxRequestState.ACTION_REQUIRED
     Surface(
-        color = when {
-            selected -> MaterialTheme.colorScheme.secondaryContainer
-            actionRequired -> MaterialTheme.colorScheme.primary.copy(alpha = 0.08f)
-                .compositeOver(MaterialTheme.colorScheme.surfaceContainerLow)
-            else -> MaterialTheme.colorScheme.surfaceContainerLow
-        },
+        color =
+            when {
+                selected -> MaterialTheme.colorScheme.secondaryContainer
+                actionRequired ->
+                    MaterialTheme.colorScheme.primary
+                        .copy(alpha = 0.08f)
+                        .compositeOver(MaterialTheme.colorScheme.surfaceContainerLow)
+                else -> MaterialTheme.colorScheme.surfaceContainerLow
+            },
         shape = shape,
         onClick = onClick,
         modifier = Modifier.fillMaxWidth().semantics { this.selected = selected },
@@ -429,11 +462,12 @@ private fun PendingPairingRow(
             Icon(
                 Icons.Outlined.Computer,
                 contentDescription = null,
-                tint = if (actionRequired) {
-                    MaterialTheme.colorScheme.primary
-                } else {
-                    MaterialTheme.colorScheme.onSurfaceVariant
-                },
+                tint =
+                    if (actionRequired) {
+                        MaterialTheme.colorScheme.primary
+                    } else {
+                        MaterialTheme.colorScheme.onSurfaceVariant
+                    },
                 modifier = Modifier.size(24.dp),
             )
             Column(
@@ -463,14 +497,15 @@ private fun PendingPairingRow(
     }
 }
 
-private fun PairingState.pairingListDescription(): String = when (this) {
-    PairingState.EXCHANGE_PENDING -> "Waiting for the secure exchange"
-    PairingState.EXCHANGE_FAILED -> "Pairing could not continue; reject to continue"
-    PairingState.SAS_VERIFICATION_PENDING -> "Compare the verification code"
-    PairingState.WAITING_FOR_FINISH -> "Verification code confirmed; waiting for the client"
-    PairingState.REJECTED -> "Pairing rejected"
-    PairingState.COMPLETED -> "Pairing complete"
-}
+private fun PairingState.pairingListDescription(): String =
+    when (this) {
+        PairingState.EXCHANGE_PENDING -> "Waiting for the secure exchange"
+        PairingState.EXCHANGE_FAILED -> "Pairing could not continue; reject to continue"
+        PairingState.SAS_VERIFICATION_PENDING -> "Compare the verification code"
+        PairingState.WAITING_FOR_FINISH -> "Verification code confirmed; waiting for the client"
+        PairingState.REJECTED -> "Pairing rejected"
+        PairingState.COMPLETED -> "Pairing complete"
+    }
 
 @Composable
 private fun SectionHeading(
@@ -479,7 +514,8 @@ private fun SectionHeading(
     modifier: Modifier = Modifier,
 ) {
     Row(
-        modifier = modifier.fillMaxWidth().padding(start = 4.dp, end = 4.dp, top = 14.dp, bottom = 6.dp),
+        modifier =
+            modifier.fillMaxWidth().padding(start = 4.dp, end = 4.dp, top = 14.dp, bottom = 6.dp),
         horizontalArrangement = Arrangement.spacedBy(8.dp),
         verticalAlignment = Alignment.CenterVertically,
     ) {
@@ -498,7 +534,8 @@ private fun SectionHeading(
 
 private fun ClientSummary.visibleState(): String? {
     val pending = desiredState?.takeIf { it != state }
-    return pending?.let { "Changing…" } ?: state.takeIf { it != RelayClientState.ACTIVE }?.stateLabel()
+    return pending?.let { "Changing…" }
+        ?: state.takeIf { it != RelayClientState.ACTIVE }?.stateLabel()
 }
 
 /** Large outer corners with small inner ones, so consecutive rows read as one group. */

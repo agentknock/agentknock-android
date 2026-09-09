@@ -24,6 +24,7 @@ internal enum class SecretValueAction {
 
 internal sealed interface ProtectedActionResult<out T> {
     data class Completed<T>(val value: T) : ProtectedActionResult<T>
+
     data class AuthenticationFailed(val message: String) : ProtectedActionResult<Nothing>
 }
 
@@ -51,11 +52,14 @@ internal class AgentknockActions(
         if (selectedIndex != null) {
             requests.matchingPendingSas(requestId, selectedIndex)?.let { pairing ->
                 authenticate(
-                    context.getString(
-                        R.string.accept_client,
-                        pairing.clientLabel ?: context.getString(R.string.unnamed_client),
-                    ),
-                )?.let { return it }
+                        context.getString(
+                            R.string.accept_client,
+                            pairing.clientLabel ?: context.getString(R.string.unnamed_client),
+                        )
+                    )
+                    ?.let {
+                        return it
+                    }
             }
         }
         return ProtectedActionResult.Completed(requests.chooseSas(requestId, selectedIndex))
@@ -100,10 +104,12 @@ internal class AgentknockActions(
     ): ProtectedActionResult<CreateSecretResult> {
         awaitStorageReady()
         if (variables.any { !it.sensitive }) {
-            authenticate("Create a secret containing non-sensitive values")?.let { return it }
+            authenticate("Create a secret containing non-sensitive values")?.let {
+                return it
+            }
         }
         return ProtectedActionResult.Completed(
-            secrets.createEnvironmentSecret(name, description, variables),
+            secrets.createEnvironmentSecret(name, description, variables)
         )
     }
 
@@ -222,7 +228,9 @@ internal class AgentknockActions(
     ): ProtectedActionResult<T> {
         val result = operation(false)
         val title = challenge(result) ?: return ProtectedActionResult.Completed(result)
-        authenticate(title)?.let { return it }
+        authenticate(title)?.let {
+            return it
+        }
         return ProtectedActionResult.Completed(operation(true))
     }
 

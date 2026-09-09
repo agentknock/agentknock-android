@@ -1,6 +1,5 @@
 package dev.agentknock.ui.settings
 
-import dev.agentknock.subscription.AiReviewAccess
 import android.content.Intent
 import androidx.activity.compose.BackHandler
 import androidx.activity.compose.LocalActivity
@@ -28,6 +27,7 @@ import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.unit.dp
 import androidx.core.net.toUri
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
+import dev.agentknock.subscription.AiReviewAccess
 import dev.agentknock.ui.auth.DeviceAuthenticationMode
 import kotlinx.coroutines.launch
 
@@ -84,16 +84,16 @@ internal fun SettingsScreen(
     fun back() {
         when (page) {
             SettingsPage.OVERVIEW -> onClose()
-            SettingsPage.FACTORY_RESET -> when (factoryReset) {
-                FactoryResetUiState.Working -> Unit
-                FactoryResetUiState.ConfirmLocalClear -> {
-                    viewModel.cancelLocalClear()
-                    page = SettingsPage.OVERVIEW
+            SettingsPage.FACTORY_RESET ->
+                when (factoryReset) {
+                    FactoryResetUiState.Working -> Unit
+                    FactoryResetUiState.ConfirmLocalClear -> {
+                        viewModel.cancelLocalClear()
+                        page = SettingsPage.OVERVIEW
+                    }
+                    FactoryResetUiState.Idle,
+                    FactoryResetUiState.ClearFailed -> page = SettingsPage.OVERVIEW
                 }
-                FactoryResetUiState.Idle,
-                FactoryResetUiState.ClearFailed,
-                -> page = SettingsPage.OVERVIEW
-            }
             SettingsPage.SUBSCRIPTION -> {
                 subscriptionViewModel.dismissNotice()
                 if (returnToCaller) onClose() else page = SettingsPage.OVERVIEW
@@ -108,86 +108,99 @@ internal fun SettingsScreen(
         contentWindowInsets = WindowInsets.navigationBars,
     ) { padding ->
         Box(Modifier.fillMaxSize().padding(padding)) {
-            val modifier = if (page == SettingsPage.AUDIT) {
-                Modifier.fillMaxSize()
-            } else {
-                Modifier.fillMaxHeight().widthIn(max = 720.dp).align(Alignment.TopCenter)
-            }
+            val modifier =
+                if (page == SettingsPage.AUDIT) {
+                    Modifier.fillMaxSize()
+                } else {
+                    Modifier.fillMaxHeight().widthIn(max = 720.dp).align(Alignment.TopCenter)
+                }
             when (page) {
-                SettingsPage.OVERVIEW -> SettingsOverview(
-                    authenticationMode = authenticationMode,
-                    protection = protection,
-                    notificationStateGeneration = notificationStateGeneration,
-                    pushState = pushState,
-                    subscription = subscription,
-                    onBack = onClose,
-                    onOpen = { page = it },
-                    modifier = modifier,
-                )
-                SettingsPage.SECURITY_BACKUP -> SecuritySettings(
-                    protection = protection,
-                    authenticationMode = authenticationMode,
-                    onAuthenticationModeChange = viewModel::changeAuthenticationMode,
-                    onBack = ::back,
-                    modifier = modifier,
-                )
-                SettingsPage.NOTIFICATIONS -> NotificationsSettings(
-                    pushState = pushState,
-                    refreshGeneration = notificationStateGeneration,
-                    requestNotificationPermission = requestNotificationPermission,
-                    onBack = ::back,
-                    modifier = modifier,
-                )
-                SettingsPage.SUBSCRIPTION -> SubscriptionAndBillingScreen(
-                    state = subscription,
-                    onBack = ::back,
-                    onRefresh = {
-                        subscriptionViewModel.dismissNotice()
-                        subscriptionViewModel.refresh()
-                    },
-                    onSubscribe = { offerId ->
-                        activity?.let { subscriptionViewModel.subscribe(it, offerId) }
-                    },
-                    onOpenSecrets = {
-                        subscriptionViewModel.dismissNotice()
-                        onOpenSecrets()
-                    },
-                    onManageSubscription = { productId ->
-                        val uri = "https://play.google.com/store/account/subscriptions".toUri()
-                            .buildUpon()
-                            .appendQueryParameter("sku", productId)
-                            .appendQueryParameter("package", context.packageName)
-                            .build()
-                        runCatching {
-                            context.startActivity(Intent(Intent.ACTION_VIEW, uri))
-                        }.onFailure {
-                            scope.launch { snackbar.showSnackbar("Google Play could not be opened") }
-                        }
-                    },
-                    modifier = modifier,
-                )
-                SettingsPage.AUDIT -> AuditSettings(
-                    viewModel = auditViewModel,
-                    onBack = ::back,
-                    report = { message -> scope.launch { snackbar.showSnackbar(message) } },
-                    modifier = modifier,
-                )
-                SettingsPage.FACTORY_RESET -> FactoryResetSettings(
-                    onBack = ::back,
-                    state = factoryReset,
-                    startReset = viewModel::startFactoryReset,
-                    confirmLocalClear = viewModel::confirmLocalClear,
-                    cancelLocalClear = viewModel::cancelLocalClear,
-                    consumeClearFailure = viewModel::consumeClearFailure,
-                    report = { message -> scope.launch { snackbar.showSnackbar(message) } },
-                    modifier = modifier,
-                )
-                SettingsPage.ABOUT -> AboutSettings(
-                    identity = configuration?.active,
-                    onBack = ::back,
-                    report = { message -> scope.launch { snackbar.showSnackbar(message) } },
-                    modifier = modifier,
-                )
+                SettingsPage.OVERVIEW ->
+                    SettingsOverview(
+                        authenticationMode = authenticationMode,
+                        protection = protection,
+                        notificationStateGeneration = notificationStateGeneration,
+                        pushState = pushState,
+                        subscription = subscription,
+                        onBack = onClose,
+                        onOpen = { page = it },
+                        modifier = modifier,
+                    )
+                SettingsPage.SECURITY_BACKUP ->
+                    SecuritySettings(
+                        protection = protection,
+                        authenticationMode = authenticationMode,
+                        onAuthenticationModeChange = viewModel::changeAuthenticationMode,
+                        onBack = ::back,
+                        modifier = modifier,
+                    )
+                SettingsPage.NOTIFICATIONS ->
+                    NotificationsSettings(
+                        pushState = pushState,
+                        refreshGeneration = notificationStateGeneration,
+                        requestNotificationPermission = requestNotificationPermission,
+                        onBack = ::back,
+                        modifier = modifier,
+                    )
+                SettingsPage.SUBSCRIPTION ->
+                    SubscriptionAndBillingScreen(
+                        state = subscription,
+                        onBack = ::back,
+                        onRefresh = {
+                            subscriptionViewModel.dismissNotice()
+                            subscriptionViewModel.refresh()
+                        },
+                        onSubscribe = { offerId ->
+                            activity?.let { subscriptionViewModel.subscribe(it, offerId) }
+                        },
+                        onOpenSecrets = {
+                            subscriptionViewModel.dismissNotice()
+                            onOpenSecrets()
+                        },
+                        onManageSubscription = { productId ->
+                            val uri =
+                                "https://play.google.com/store/account/subscriptions"
+                                    .toUri()
+                                    .buildUpon()
+                                    .appendQueryParameter("sku", productId)
+                                    .appendQueryParameter("package", context.packageName)
+                                    .build()
+                            runCatching {
+                                context.startActivity(Intent(Intent.ACTION_VIEW, uri))
+                            }
+                                .onFailure {
+                                    scope.launch {
+                                        snackbar.showSnackbar("Google Play could not be opened")
+                                    }
+                                }
+                        },
+                        modifier = modifier,
+                    )
+                SettingsPage.AUDIT ->
+                    AuditSettings(
+                        viewModel = auditViewModel,
+                        onBack = ::back,
+                        report = { message -> scope.launch { snackbar.showSnackbar(message) } },
+                        modifier = modifier,
+                    )
+                SettingsPage.FACTORY_RESET ->
+                    FactoryResetSettings(
+                        onBack = ::back,
+                        state = factoryReset,
+                        startReset = viewModel::startFactoryReset,
+                        confirmLocalClear = viewModel::confirmLocalClear,
+                        cancelLocalClear = viewModel::cancelLocalClear,
+                        consumeClearFailure = viewModel::consumeClearFailure,
+                        report = { message -> scope.launch { snackbar.showSnackbar(message) } },
+                        modifier = modifier,
+                    )
+                SettingsPage.ABOUT ->
+                    AboutSettings(
+                        identity = configuration?.active,
+                        onBack = ::back,
+                        report = { message -> scope.launch { snackbar.showSnackbar(message) } },
+                        modifier = modifier,
+                    )
             }
         }
     }

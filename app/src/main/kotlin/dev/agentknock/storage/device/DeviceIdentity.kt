@@ -10,8 +10,8 @@ import androidx.room3.Insert
 import androidx.room3.PrimaryKey
 import androidx.room3.Query
 import androidx.room3.Transaction
-import dev.agentknock.storage.crypto.VaultKeyEntity
 import dev.agentknock.storage.crypto.EncryptedValue
+import dev.agentknock.storage.crypto.VaultKeyEntity
 import kotlinx.coroutines.flow.Flow
 
 @Entity(
@@ -19,55 +19,42 @@ import kotlinx.coroutines.flow.Flow
     indices = [Index(value = ["role"])],
 )
 internal data class DeviceIdentityEntity(
-    @PrimaryKey
-    @ColumnInfo(name = "id")
-    val id: String,
-    @ColumnInfo(name = "role")
-    val role: String,
-    @ColumnInfo(name = "address")
-    val address: String,
-    @ColumnInfo(name = "device_id")
-    val deviceId: String,
-    @ColumnInfo(name = "created_at")
-    val createdAt: Long,
-    @ColumnInfo(name = "claim_attempted_at")
-    val claimAttemptedAt: Long? = null,
-    @ColumnInfo(name = "pairing_enabled")
-    val pairingEnabled: Boolean = true,
-    @ColumnInfo(name = "instructions")
-    val instructions: String = "",
+    @PrimaryKey @ColumnInfo(name = "id") val id: String,
+    @ColumnInfo(name = "role") val role: String,
+    @ColumnInfo(name = "address") val address: String,
+    @ColumnInfo(name = "device_id") val deviceId: String,
+    @ColumnInfo(name = "created_at") val createdAt: Long,
+    @ColumnInfo(name = "claim_attempted_at") val claimAttemptedAt: Long? = null,
+    @ColumnInfo(name = "pairing_enabled") val pairingEnabled: Boolean = true,
+    @ColumnInfo(name = "instructions") val instructions: String = "",
 )
 
 @Entity(
     tableName = "device_credentials",
     primaryKeys = ["identity_id", "kind"],
-    foreignKeys = [
-        ForeignKey(
-            entity = DeviceIdentityEntity::class,
-            parentColumns = ["id"],
-            childColumns = ["identity_id"],
-            onDelete = ForeignKey.CASCADE,
-            onUpdate = ForeignKey.NO_ACTION,
-        ),
-        ForeignKey(
-            entity = VaultKeyEntity::class,
-            parentColumns = ["id"],
-            childColumns = ["encryption_key_id"],
-            onDelete = ForeignKey.RESTRICT,
-            onUpdate = ForeignKey.NO_ACTION,
-        ),
-    ],
-    indices = [
-        Index(value = ["encryption_key_id"]),
-    ],
+    foreignKeys =
+        [
+            ForeignKey(
+                entity = DeviceIdentityEntity::class,
+                parentColumns = ["id"],
+                childColumns = ["identity_id"],
+                onDelete = ForeignKey.CASCADE,
+                onUpdate = ForeignKey.NO_ACTION,
+            ),
+            ForeignKey(
+                entity = VaultKeyEntity::class,
+                parentColumns = ["id"],
+                childColumns = ["encryption_key_id"],
+                onDelete = ForeignKey.RESTRICT,
+                onUpdate = ForeignKey.NO_ACTION,
+            ),
+        ],
+    indices = [Index(value = ["encryption_key_id"])],
 )
 internal data class DeviceCredentialEntity(
-    @ColumnInfo(name = "identity_id")
-    val identityId: String,
-    @ColumnInfo(name = "kind")
-    val kind: String,
-    @Embedded
-    val encryptedValue: EncryptedValue,
+    @ColumnInfo(name = "identity_id") val identityId: String,
+    @ColumnInfo(name = "kind") val kind: String,
+    @Embedded val encryptedValue: EncryptedValue,
 )
 
 internal enum class DeviceIdentityRole(val storedName: String) {
@@ -117,18 +104,16 @@ internal interface DeviceIdentityDao {
     @Query("SELECT EXISTS(SELECT 1 FROM device_identities WHERE id = :id AND role = :role)")
     suspend fun identityExists(id: String, role: String): Boolean
 
-    @Insert
-    suspend fun insertIdentity(identity: DeviceIdentityEntity)
+    @Insert suspend fun insertIdentity(identity: DeviceIdentityEntity)
 
-    @Insert
-    suspend fun insertCredentials(credentials: List<DeviceCredentialEntity>)
+    @Insert suspend fun insertCredentials(credentials: List<DeviceCredentialEntity>)
 
     @Query(
         """
         UPDATE device_identities
         SET role = :activeRole
         WHERE id = :candidateId AND role = :candidateRole
-        """,
+        """
     )
     suspend fun markCandidateActive(
         candidateId: String,
@@ -146,7 +131,7 @@ internal interface DeviceIdentityDao {
             pairing_enabled = 0,
             instructions = ''
         WHERE id = :activeId AND role = :activeRole
-        """,
+        """
     )
     suspend fun retireActiveIdentity(
         activeId: String,
@@ -162,7 +147,7 @@ internal interface DeviceIdentityDao {
             SELECT 1 FROM inbox_requests
             WHERE inbox_requests.device_identity_id = device_identities.id
           )
-        """,
+        """
     )
     suspend fun deleteOrphanedRetiredIdentities(retiredRole: String): Int
 
@@ -180,7 +165,7 @@ internal interface DeviceIdentityDao {
             completed_at = COALESCE(completed_at, :now),
             exchange_ended_at = COALESCE(exchange_ended_at, :now)
         WHERE device_identity_id = :identityId
-        """,
+        """
     )
     suspend fun abandonRequests(identityId: String, now: Long, error: String): Int
 
@@ -203,7 +188,7 @@ internal interface DeviceIdentityDao {
         WHERE request_id IN (
             SELECT id FROM inbox_requests WHERE device_identity_id = :identityId
         )
-        """,
+        """
     )
     suspend fun abandonPairingAttempts(identityId: String, now: Long): Int
 
@@ -214,7 +199,7 @@ internal interface DeviceIdentityDao {
         WHERE request_id IN (
             SELECT id FROM inbox_requests WHERE device_identity_id = :identityId
         )
-        """,
+        """
     )
     suspend fun discardSshAuthenticationMessages(identityId: String): Int
 
@@ -228,7 +213,7 @@ internal interface DeviceIdentityDao {
               ON inbox_requests.id = secret_upload_requests.request_id
             WHERE inbox_requests.device_identity_id = :identityId
         )
-        """,
+        """
     )
     suspend fun deleteUploadEnvironmentValues(identityId: String): Int
 
@@ -242,7 +227,7 @@ internal interface DeviceIdentityDao {
               ON inbox_requests.id = secret_upload_requests.request_id
             WHERE inbox_requests.device_identity_id = :identityId
         )
-        """,
+        """
     )
     suspend fun deleteUploadSshKeys(identityId: String): Int
 
@@ -255,7 +240,7 @@ internal interface DeviceIdentityDao {
           AND request_id IN (
             SELECT id FROM inbox_requests WHERE device_identity_id = :identityId
           )
-        """,
+        """
     )
     suspend fun rejectPendingUploads(identityId: String, now: Long): Int
 
@@ -268,7 +253,7 @@ internal interface DeviceIdentityDao {
         WHERE request_id IN (
             SELECT id FROM inbox_requests WHERE device_identity_id = :identityId
         )
-        """,
+        """
     )
     suspend fun deleteRequestPsks(identityId: String): Int
 
@@ -280,7 +265,7 @@ internal interface DeviceIdentityDao {
         UPDATE device_identities
         SET address = :address
         WHERE id = :activeId AND role = :activeRole
-        """,
+        """
     )
     suspend fun updateActiveAddress(
         activeId: String,
@@ -290,7 +275,7 @@ internal interface DeviceIdentityDao {
 
     @Query(
         "UPDATE device_identities SET address = :address " +
-            "WHERE id = :candidateId AND role = :candidateRole",
+            "WHERE id = :candidateId AND role = :candidateRole"
     )
     suspend fun updateCandidateAddress(
         candidateId: String,
@@ -304,7 +289,7 @@ internal interface DeviceIdentityDao {
         SET pairing_enabled = 1,
             instructions = :instructions
         WHERE id = :candidateId AND role = :candidateRole
-        """,
+        """
     )
     suspend fun prepareReplacementCandidate(
         candidateId: String,
@@ -323,7 +308,7 @@ internal interface DeviceIdentityDao {
         UPDATE device_identities
         SET pairing_enabled = :enabled
         WHERE id = :identityId AND role = :activeRole
-        """,
+        """
     )
     suspend fun updatePairingEnabled(
         identityId: String,
@@ -338,7 +323,7 @@ internal interface DeviceIdentityDao {
         WHERE id = :candidateId
           AND role = :candidateRole
           AND claim_attempted_at IS NULL
-        """,
+        """
     )
     suspend fun markCandidateClaimAttempted(
         candidateId: String,
@@ -375,7 +360,7 @@ internal interface DeviceIdentityDao {
                     activeId = active.id,
                     address = candidate.address,
                     activeRole = activeRole,
-                ) == 1,
+                ) == 1
             )
             return true
         }
@@ -385,7 +370,7 @@ internal interface DeviceIdentityDao {
                     candidateId = candidate.id,
                     instructions = active.instructions,
                     candidateRole = candidateRole,
-                ) == 1,
+                ) == 1
             )
             abandonRequests(
                 identityId = active.id,

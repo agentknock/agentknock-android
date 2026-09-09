@@ -6,10 +6,10 @@ import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.Row
-import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.heightIn
 import androidx.compose.foundation.layout.padding
+import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.foundation.text.selection.SelectionContainer
@@ -71,10 +71,14 @@ internal fun DetailPage(
             },
         )
         Column(
-            Modifier.weight(1f).fillMaxWidth().verticalScroll(scrollState)
+            Modifier.weight(1f)
+                .fillMaxWidth()
+                .verticalScroll(scrollState)
                 .padding(horizontal = 16.dp, vertical = 12.dp),
             verticalArrangement = Arrangement.spacedBy(16.dp),
-        ) { content() }
+        ) {
+            content()
+        }
         bottomContent?.invoke()
     }
 }
@@ -93,8 +97,7 @@ internal fun Disclosure(
     ) {
         Column {
             Row(
-                Modifier
-                    .fillMaxWidth()
+                Modifier.fillMaxWidth()
                     .heightIn(min = 48.dp)
                     .clickable { expanded = !expanded }
                     .semantics {
@@ -104,8 +107,12 @@ internal fun Disclosure(
                 horizontalArrangement = Arrangement.spacedBy(12.dp),
                 verticalAlignment = Alignment.CenterVertically,
             ) {
-                Text(title, modifier = Modifier.weight(1f), style = MaterialTheme.typography.bodyMedium,
-                    color = MaterialTheme.colorScheme.onSurfaceVariant)
+                Text(
+                    title,
+                    modifier = Modifier.weight(1f),
+                    style = MaterialTheme.typography.bodyMedium,
+                    color = MaterialTheme.colorScheme.onSurfaceVariant,
+                )
                 Icon(
                     if (expanded) Icons.Outlined.ExpandLess else Icons.Outlined.ExpandMore,
                     contentDescription = null,
@@ -132,22 +139,25 @@ internal fun Notice(
 ) {
     val semanticColors = MaterialTheme.agentknockColors
     Card(
-        colors = CardDefaults.cardColors(
-            containerColor = when (tone) {
-                NoticeTone.NEUTRAL -> MaterialTheme.colorScheme.surfaceContainerLow
-                NoticeTone.ATTENTION -> semanticColors.attentionContainer
-                NoticeTone.SUCCESS -> semanticColors.successContainer
-                NoticeTone.DANGER -> semanticColors.dangerContainer
-                NoticeTone.SUBDUED -> MaterialTheme.colorScheme.surfaceContainerHighest
-            },
-            contentColor = when (tone) {
-                NoticeTone.NEUTRAL -> MaterialTheme.colorScheme.onSurface
-                NoticeTone.ATTENTION -> semanticColors.onAttentionContainer
-                NoticeTone.SUCCESS -> semanticColors.onSuccessContainer
-                NoticeTone.DANGER -> semanticColors.onDangerContainer
-                NoticeTone.SUBDUED -> MaterialTheme.colorScheme.onSurfaceVariant
-            },
-        ),
+        colors =
+            CardDefaults.cardColors(
+                containerColor =
+                    when (tone) {
+                        NoticeTone.NEUTRAL -> MaterialTheme.colorScheme.surfaceContainerLow
+                        NoticeTone.ATTENTION -> semanticColors.attentionContainer
+                        NoticeTone.SUCCESS -> semanticColors.successContainer
+                        NoticeTone.DANGER -> semanticColors.dangerContainer
+                        NoticeTone.SUBDUED -> MaterialTheme.colorScheme.surfaceContainerHighest
+                    },
+                contentColor =
+                    when (tone) {
+                        NoticeTone.NEUTRAL -> MaterialTheme.colorScheme.onSurface
+                        NoticeTone.ATTENTION -> semanticColors.onAttentionContainer
+                        NoticeTone.SUCCESS -> semanticColors.onSuccessContainer
+                        NoticeTone.DANGER -> semanticColors.onDangerContainer
+                        NoticeTone.SUBDUED -> MaterialTheme.colorScheme.onSurfaceVariant
+                    },
+            ),
         shape = MaterialTheme.shapes.large,
     ) {
         Column(
@@ -179,18 +189,20 @@ internal fun StatusLine(
 ) {
     val semanticColors = MaterialTheme.agentknockColors
     Surface(
-        color = when {
-            error -> semanticColors.dangerContainer
-            attention -> semanticColors.attentionContainer
-            subdued -> MaterialTheme.colorScheme.surfaceContainerHighest
-            else -> semanticColors.successContainer
-        },
-        contentColor = when {
-            error -> semanticColors.onDangerContainer
-            attention -> semanticColors.onAttentionContainer
-            subdued -> MaterialTheme.colorScheme.onSurfaceVariant
-            else -> semanticColors.onSuccessContainer
-        },
+        color =
+            when {
+                error -> semanticColors.dangerContainer
+                attention -> semanticColors.attentionContainer
+                subdued -> MaterialTheme.colorScheme.surfaceContainerHighest
+                else -> semanticColors.successContainer
+            },
+        contentColor =
+            when {
+                error -> semanticColors.onDangerContainer
+                attention -> semanticColors.onAttentionContainer
+                subdued -> MaterialTheme.colorScheme.onSurfaceVariant
+                else -> semanticColors.onSuccessContainer
+            },
         shape = RoundedCornerShape(100.dp),
     ) {
         Text(

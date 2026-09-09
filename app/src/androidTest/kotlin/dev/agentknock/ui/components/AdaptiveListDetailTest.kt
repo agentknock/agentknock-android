@@ -33,8 +33,7 @@ import org.junit.runner.RunWith
 @OptIn(ExperimentalMaterial3AdaptiveApi::class)
 @RunWith(AndroidJUnit4::class)
 class AdaptiveListDetailTest {
-    @get:Rule
-    val compose = createComposeRule()
+    @get:Rule val compose = createComposeRule()
 
     @Test
     fun compactBackRestorationAndExpandedResizePreservePaneState() {
@@ -42,8 +41,8 @@ class AdaptiveListDetailTest {
         val restoration = StateRestorationTester(compose)
         lateinit var pressBack: () -> Unit
         restoration.setContent {
-            val backDispatcher = checkNotNull(LocalOnBackPressedDispatcherOwner.current)
-                .onBackPressedDispatcher
+            val backDispatcher =
+                checkNotNull(LocalOnBackPressedDispatcherOwner.current).onBackPressedDispatcher
             SideEffect { pressBack = backDispatcher::onBackPressed }
             MaterialTheme {
                 TestListDetail(directive.value)
@@ -109,9 +108,8 @@ private fun TestListDetail(directive: PaneScaffoldDirective) {
     )
 }
 
-private fun PaneScaffoldDirective.withPartitions(count: Int): PaneScaffoldDirective = copy(
-    maxHorizontalPartitions = count,
-)
+private fun PaneScaffoldDirective.withPartitions(count: Int): PaneScaffoldDirective =
+    copy(maxHorizontalPartitions = count)
 
 private const val LIST_INPUT = "list_input"
 private const val OPEN_DETAIL = "open_detail"

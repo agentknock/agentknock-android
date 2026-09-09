@@ -59,10 +59,11 @@ class DeviceProtocolTest {
 
     @Test
     fun `generates a canonical device ulid`() {
-        val deviceId = DeviceProtocol.generateDeviceId(
-            timestampMillis = 1_700_000_000_000,
-            random = SecureRandom(byteArrayOf(4, 5, 6)),
-        )
+        val deviceId =
+            DeviceProtocol.generateDeviceId(
+                timestampMillis = 1_700_000_000_000,
+                random = SecureRandom(byteArrayOf(4, 5, 6)),
+            )
 
         assertTrue(deviceId.matches(Regex("[0-7][0-9A-HJKMNP-TV-Z]{25}")))
         assertEquals("01HF7YAT00", deviceId.take(10))

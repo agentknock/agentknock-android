@@ -2,8 +2,6 @@
 
 package dev.agentknock.ui.settings
 
-import dev.agentknock.BACKGROUND_DELIVERY_SUPPORTED
-
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.PaddingValues
@@ -22,6 +20,7 @@ import androidx.compose.runtime.remember
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.unit.dp
+import dev.agentknock.BACKGROUND_DELIVERY_SUPPORTED
 import dev.agentknock.BuildConfig
 import dev.agentknock.push.RequestNotifications
 import dev.agentknock.relay.RelayPushRegistrationState
@@ -42,9 +41,10 @@ internal fun SettingsOverview(
     modifier: Modifier,
 ) {
     val context = LocalContext.current
-    val requestsEnabled = remember(notificationStateGeneration) {
-        RequestNotifications.actionNotificationsEnabled(context)
-    }
+    val requestsEnabled =
+        remember(notificationStateGeneration) {
+            RequestNotifications.actionNotificationsEnabled(context)
+        }
     SettingsOverviewContent(
         authenticationMode = authenticationMode,
         protection = protection,
@@ -79,12 +79,15 @@ internal fun SettingsOverviewContent(
         ) {
             item {
                 SettingsGroup {
-                    val deliveryNeedsAttention = BACKGROUND_DELIVERY_SUPPORTED && pushState != null &&
-                        pushState != RelayPushRegistrationState.REGISTERED
+                    val deliveryNeedsAttention =
+                        BACKGROUND_DELIVERY_SUPPORTED &&
+                            pushState != null &&
+                            pushState != RelayPushRegistrationState.REGISTERED
                     SettingsRow(
                         icon = Icons.Outlined.Security,
                         title = "Security and backup",
-                        summary = "${authenticationMode.overviewLabel()} · ${protection.overviewDescription()}",
+                        summary =
+                            "${authenticationMode.overviewLabel()} · ${protection.overviewDescription()}",
                         attention = protection.overviewNeedsAttention(),
                         onClick = { onOpen(SettingsPage.SECURITY_BACKUP) },
                         trailing = { SettingsNavigationChevron() },
@@ -93,12 +96,14 @@ internal fun SettingsOverviewContent(
                     SettingsRow(
                         icon = Icons.Outlined.Notifications,
                         title = "Notifications",
-                        summary = when {
-                            !BACKGROUND_DELIVERY_SUPPORTED -> "Keep the app open to receive requests"
-                            !requestsEnabled -> "Requests needing action are muted"
-                            deliveryNeedsAttention -> "Delivery needs attention"
-                            else -> "Request alerts enabled"
-                        },
+                        summary =
+                            when {
+                                !BACKGROUND_DELIVERY_SUPPORTED ->
+                                    "Keep the app open to receive requests"
+                                !requestsEnabled -> "Requests needing action are muted"
+                                deliveryNeedsAttention -> "Delivery needs attention"
+                                else -> "Request alerts enabled"
+                            },
                         attention = !requestsEnabled || deliveryNeedsAttention,
                         onClick = { onOpen(SettingsPage.NOTIFICATIONS) },
                         trailing = { SettingsNavigationChevron() },
@@ -111,8 +116,9 @@ internal fun SettingsOverviewContent(
                         icon = Icons.Outlined.WorkspacePremium,
                         title = "Plan and billing",
                         summary = subscription.overviewLabel(),
-                        attention = subscription.access == AiReviewAccess.SETUP_REQUIRED ||
-                            subscription.access == AiReviewAccess.UNAVAILABLE,
+                        attention =
+                            subscription.access == AiReviewAccess.SETUP_REQUIRED ||
+                                subscription.access == AiReviewAccess.UNAVAILABLE,
                         onClick = { onOpen(SettingsPage.SUBSCRIPTION) },
                         trailing = { SettingsNavigationChevron() },
                     )
@@ -131,7 +137,8 @@ internal fun SettingsOverviewContent(
                     SettingsRow(
                         icon = Icons.Outlined.Info,
                         title = "About Agentknock",
-                        summary = "Version ${BuildConfig.VERSION_NAME} (${BuildConfig.VERSION_CODE})",
+                        summary =
+                            "Version ${BuildConfig.VERSION_NAME} (${BuildConfig.VERSION_CODE})",
                         onClick = { onOpen(SettingsPage.ABOUT) },
                         trailing = { SettingsNavigationChevron() },
                     )
@@ -150,22 +157,27 @@ internal fun SettingsOverviewContent(
     }
 }
 
-private fun VaultProtection?.overviewDescription(): String = when (this) {
-    null -> "Checking encryption"
-    else -> when {
-        unavailableStoredData.isNotEmpty() -> "Stored data unavailable"
-        this is VaultProtection.ActiveKeysAvailable -> "Encryption active"
-        this is VaultProtection.ActiveKeysUnavailable -> "Current encryption key unavailable"
-        else -> "Encryption status unknown"
+private fun VaultProtection?.overviewDescription(): String =
+    when (this) {
+        null -> "Checking encryption"
+        else ->
+            when {
+                unavailableStoredData.isNotEmpty() -> "Stored data unavailable"
+                this is VaultProtection.ActiveKeysAvailable -> "Encryption active"
+                this is VaultProtection.ActiveKeysUnavailable ->
+                    "Current encryption key unavailable"
+                else -> "Encryption status unknown"
+            }
     }
-}
 
 /** True for every state that [overviewDescription] does not describe as healthy. */
-private fun VaultProtection?.overviewNeedsAttention(): Boolean = this != null &&
-    (unavailableStoredData.isNotEmpty() || this !is VaultProtection.ActiveKeysAvailable)
+private fun VaultProtection?.overviewNeedsAttention(): Boolean =
+    this != null &&
+        (unavailableStoredData.isNotEmpty() || this !is VaultProtection.ActiveKeysAvailable)
 
-private fun DeviceAuthenticationMode.overviewLabel(): String = when (this) {
-    DeviceAuthenticationMode.DEVICE_LOCK -> "Device lock"
-    DeviceAuthenticationMode.SENSITIVE_VALUES_AND_PAIRING -> "Protect sensitive actions"
-    DeviceAuthenticationMode.APP_LOCK -> "App lock"
-}
+private fun DeviceAuthenticationMode.overviewLabel(): String =
+    when (this) {
+        DeviceAuthenticationMode.DEVICE_LOCK -> "Device lock"
+        DeviceAuthenticationMode.SENSITIVE_VALUES_AND_PAIRING -> "Protect sensitive actions"
+        DeviceAuthenticationMode.APP_LOCK -> "App lock"
+    }

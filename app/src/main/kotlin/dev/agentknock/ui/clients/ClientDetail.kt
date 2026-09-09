@@ -2,6 +2,7 @@
 
 package dev.agentknock.ui.clients
 
+import androidx.compose.foundation.ScrollState
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.Row
@@ -10,7 +11,6 @@ import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.rememberScrollState
-import androidx.compose.foundation.ScrollState
 import androidx.compose.foundation.verticalScroll
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.outlined.Edit
@@ -37,20 +37,20 @@ import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
-import dev.agentknock.subscription.AiReviewAccess
-import dev.agentknock.ui.components.rememberDateTimeFormatter
-import dev.agentknock.ui.components.InstructionsCard
-import dev.agentknock.ui.components.AiInstructionsScope
 import dev.agentknock.presentation.formatPlatformName
 import dev.agentknock.presentation.renderSoftware
 import dev.agentknock.relay.RelayClientState
 import dev.agentknock.storage.request.ClientDetails
 import dev.agentknock.storage.secret.TemporaryAccessGrant
 import dev.agentknock.storage.secret.TemporaryAccessOperation
-import dev.agentknock.ui.components.InformationRow
-import dev.agentknock.ui.components.NavigationBackButton
+import dev.agentknock.subscription.AiReviewAccess
+import dev.agentknock.ui.components.AiInstructionsScope
 import dev.agentknock.ui.components.Disclosure
+import dev.agentknock.ui.components.InformationRow
+import dev.agentknock.ui.components.InstructionsCard
+import dev.agentknock.ui.components.NavigationBackButton
 import dev.agentknock.ui.components.ProseEditorScreen
+import dev.agentknock.ui.components.rememberDateTimeFormatter
 import dev.agentknock.ui.theme.agentknockColors
 
 @Composable
@@ -72,12 +72,14 @@ internal fun ClientDetail(
     var showRename by rememberSaveable(client.clientId) { mutableStateOf(false) }
     var rename by rememberSaveable(client.clientId, client.name) { mutableStateOf(client.name) }
     var showInstructions by rememberSaveable(client.clientId) { mutableStateOf(false) }
-    var instructions by rememberSaveable(client.clientId, client.instructions) {
-        mutableStateOf(client.instructions)
-    }
-    var confirmation by rememberSaveable(client.clientId) {
-        mutableStateOf<RelayClientState?>(null)
-    }
+    var instructions by
+        rememberSaveable(client.clientId, client.instructions) {
+            mutableStateOf(client.instructions)
+        }
+    var confirmation by
+        rememberSaveable(client.clientId) {
+            mutableStateOf<RelayClientState?>(null)
+        }
     if (showInstructions) {
         ProseEditorScreen(
             title = "Client instructions",
@@ -105,22 +107,26 @@ internal fun ClientDetail(
                 }
             },
             actions = {
-                IconButton(onClick = {
-                    rename = client.name
-                    showRename = true
-                }) {
+                IconButton(
+                    onClick = {
+                        rename = client.name
+                        showRename = true
+                    }
+                ) {
                     Icon(Icons.Outlined.Edit, contentDescription = "Rename client")
                 }
             },
         )
         Column(
-            Modifier.fillMaxSize().verticalScroll(scrollState)
+            Modifier.fillMaxSize()
+                .verticalScroll(scrollState)
                 .padding(horizontal = 16.dp, vertical = 8.dp),
             verticalArrangement = Arrangement.spacedBy(16.dp),
         ) {
             val pending = client.desiredState?.takeIf { it != client.state }
-            val temporaryAccessPaused = client.state != RelayClientState.ACTIVE ||
-                client.desiredState?.let { it != RelayClientState.ACTIVE } == true
+            val temporaryAccessPaused =
+                client.state != RelayClientState.ACTIVE ||
+                    client.desiredState?.let { it != RelayClientState.ACTIVE } == true
             ClientStatus(client, pending, onSetState)
 
             InstructionsCard(
@@ -161,7 +167,10 @@ internal fun ClientDetail(
                                         modifier = Modifier.weight(1f),
                                         verticalArrangement = Arrangement.spacedBy(2.dp),
                                     ) {
-                                        Text(grant.secretName, style = MaterialTheme.typography.titleMedium)
+                                        Text(
+                                            grant.secretName,
+                                            style = MaterialTheme.typography.titleMedium,
+                                        )
                                         Text(
                                             grant.operation.displayName(),
                                             style = MaterialTheme.typography.bodyMedium,
@@ -251,7 +260,9 @@ internal fun ClientDetail(
                         onRename(rename)
                         showRename = false
                     },
-                ) { Text("Save") }
+                ) {
+                    Text("Save")
+                }
             },
             dismissButton = { TextButton(onClick = { showRename = false }) { Text("Cancel") } },
         )
@@ -264,14 +275,16 @@ internal fun ClientDetail(
             text = {
                 Text(
                     "This permanently blocks future requests from this client. It must pair again " +
-                        "to reconnect. Values already received cannot be recalled.",
+                        "to reconnect. Values already received cannot be recalled."
                 )
             },
             confirmButton = {
-                TextButton(onClick = {
-                    onSetState(target)
-                    confirmation = null
-                }) {
+                TextButton(
+                    onClick = {
+                        onSetState(target)
+                        confirmation = null
+                    }
+                ) {
                     Text(target.actionLabel(), color = MaterialTheme.agentknockColors.danger)
                 }
             },
@@ -302,16 +315,20 @@ private fun ClientStatus(
 ) {
     val semanticColors = MaterialTheme.agentknockColors
     Surface(
-        color = when {
-            client.state == RelayClientState.REVOKED -> semanticColors.dangerContainer
-            client.state == RelayClientState.ACTIVE && pending == null -> semanticColors.successContainer
-            else -> MaterialTheme.colorScheme.surfaceContainer
-        },
-        contentColor = when {
-            client.state == RelayClientState.REVOKED -> semanticColors.onDangerContainer
-            client.state == RelayClientState.ACTIVE && pending == null -> semanticColors.onSuccessContainer
-            else -> MaterialTheme.colorScheme.onSurface
-        },
+        color =
+            when {
+                client.state == RelayClientState.REVOKED -> semanticColors.dangerContainer
+                client.state == RelayClientState.ACTIVE && pending == null ->
+                    semanticColors.successContainer
+                else -> MaterialTheme.colorScheme.surfaceContainer
+            },
+        contentColor =
+            when {
+                client.state == RelayClientState.REVOKED -> semanticColors.onDangerContainer
+                client.state == RelayClientState.ACTIVE && pending == null ->
+                    semanticColors.onSuccessContainer
+                else -> MaterialTheme.colorScheme.onSurface
+            },
         shape = MaterialTheme.shapes.extraLarge,
         modifier = Modifier.fillMaxWidth(),
     ) {
@@ -338,22 +355,29 @@ private fun ClientStatus(
                     style = MaterialTheme.typography.headlineSmall,
                     modifier = Modifier.weight(1f),
                 )
-                val actionColors = ButtonDefaults.textButtonColors(contentColor = LocalContentColor.current)
+                val actionColors =
+                    ButtonDefaults.textButtonColors(contentColor = LocalContentColor.current)
                 when (client.state) {
-                    RelayClientState.ACTIVE -> TextButton(
-                        onClick = { onSetState(RelayClientState.SUSPENDED) },
-                        colors = actionColors,
-                    ) { Text("Suspend") }
-                    RelayClientState.SUSPENDED -> FilledTonalButton(
-                        onClick = { onSetState(RelayClientState.ACTIVE) },
-                    ) { Text("Resume") }
+                    RelayClientState.ACTIVE ->
+                        TextButton(
+                            onClick = { onSetState(RelayClientState.SUSPENDED) },
+                            colors = actionColors,
+                        ) {
+                            Text("Suspend")
+                        }
+                    RelayClientState.SUSPENDED ->
+                        FilledTonalButton(onClick = { onSetState(RelayClientState.ACTIVE) }) {
+                            Text("Resume")
+                        }
                     else -> Unit
                 }
             }
-            val machine = listOfNotNull(
-                client.hostname,
-                client.osVersion ?: client.platform?.let(::formatPlatformName),
-            ).joinToString(" · ")
+            val machine =
+                listOfNotNull(
+                        client.hostname,
+                        client.osVersion ?: client.platform?.let(::formatPlatformName),
+                    )
+                    .joinToString(" · ")
             if (machine.isNotBlank()) {
                 Text(machine, style = MaterialTheme.typography.bodyMedium)
             }
@@ -365,43 +389,49 @@ private fun ClientStatus(
 }
 
 @Composable
-internal fun stateColor(state: RelayClientState) = when (state) {
-    RelayClientState.ACTIVE -> MaterialTheme.agentknockColors.success
-    RelayClientState.PENDING -> MaterialTheme.agentknockColors.attentionAccent
-    RelayClientState.SUSPENDED -> MaterialTheme.colorScheme.tertiary
-    RelayClientState.REVOKED -> MaterialTheme.agentknockColors.danger
-}
+internal fun stateColor(state: RelayClientState) =
+    when (state) {
+        RelayClientState.ACTIVE -> MaterialTheme.agentknockColors.success
+        RelayClientState.PENDING -> MaterialTheme.agentknockColors.attentionAccent
+        RelayClientState.SUSPENDED -> MaterialTheme.colorScheme.tertiary
+        RelayClientState.REVOKED -> MaterialTheme.agentknockColors.danger
+    }
 
-internal fun RelayClientState.stateLabel(): String = when (this) {
-    RelayClientState.PENDING -> "Pending"
-    RelayClientState.ACTIVE -> "Active"
-    RelayClientState.SUSPENDED -> "Suspended"
-    RelayClientState.REVOKED -> "Revoked"
-}
+internal fun RelayClientState.stateLabel(): String =
+    when (this) {
+        RelayClientState.PENDING -> "Pending"
+        RelayClientState.ACTIVE -> "Active"
+        RelayClientState.SUSPENDED -> "Suspended"
+        RelayClientState.REVOKED -> "Revoked"
+    }
 
-private fun RelayClientState.explanation(): String = when (this) {
-    RelayClientState.PENDING -> "Pairing has not finished yet."
-    RelayClientState.ACTIVE -> "This client can connect and make requests."
-    RelayClientState.SUSPENDED -> "This client cannot connect until it is resumed."
-    RelayClientState.REVOKED -> "This client's pairing has been permanently revoked."
-}
+private fun RelayClientState.explanation(): String =
+    when (this) {
+        RelayClientState.PENDING -> "Pairing has not finished yet."
+        RelayClientState.ACTIVE -> "This client can connect and make requests."
+        RelayClientState.SUSPENDED -> "This client cannot connect until it is resumed."
+        RelayClientState.REVOKED -> "This client's pairing has been permanently revoked."
+    }
 
-private fun RelayClientState.actionLabel(): String = when (this) {
-    RelayClientState.PENDING -> "Set pending"
-    RelayClientState.ACTIVE -> "Resume"
-    RelayClientState.SUSPENDED -> "Suspend"
-    RelayClientState.REVOKED -> "Revoke"
-}
+private fun RelayClientState.actionLabel(): String =
+    when (this) {
+        RelayClientState.PENDING -> "Set pending"
+        RelayClientState.ACTIVE -> "Resume"
+        RelayClientState.SUSPENDED -> "Suspend"
+        RelayClientState.REVOKED -> "Revoke"
+    }
 
-internal fun RelayClientState.successMessage(): String = when (this) {
-    RelayClientState.ACTIVE -> "Client resumed"
-    RelayClientState.SUSPENDED -> "Client suspended"
-    RelayClientState.REVOKED -> "Client revoked"
-    RelayClientState.PENDING -> "Client state updated"
-}
+internal fun RelayClientState.successMessage(): String =
+    when (this) {
+        RelayClientState.ACTIVE -> "Client resumed"
+        RelayClientState.SUSPENDED -> "Client suspended"
+        RelayClientState.REVOKED -> "Client revoked"
+        RelayClientState.PENDING -> "Client state updated"
+    }
 
-private fun TemporaryAccessOperation.displayName(): String = when (this) {
-    TemporaryAccessOperation.INVOCATION -> "Secret values for any command"
-    TemporaryAccessOperation.GIT_SIGN -> "Git signing for any repository"
-    TemporaryAccessOperation.SSH_AUTHENTICATE -> "SSH authentication for any server"
-}
+private fun TemporaryAccessOperation.displayName(): String =
+    when (this) {
+        TemporaryAccessOperation.INVOCATION -> "Secret values for any command"
+        TemporaryAccessOperation.GIT_SIGN -> "Git signing for any repository"
+        TemporaryAccessOperation.SSH_AUTHENTICATE -> "SSH authentication for any server"
+    }

@@ -10,9 +10,10 @@ import org.junit.runner.RunWith
 class MainActivityNavigationSavedStateTest {
     @Test
     fun pendingTargetsSurviveActivityStateAndConsumedTargetsDoNot() {
-        val original = MainActivityNavigationState().apply {
-            open(ExternalNavigation.Request(null))
-        }
+        val original =
+            MainActivityNavigationState().apply {
+                open(ExternalNavigation.Request(null))
+            }
         val restored = MainActivityNavigationState().apply { restore(original.save()) }
 
         assertEquals(ExternalNavigation.Request(null), restored.target.value)
@@ -25,9 +26,10 @@ class MainActivityNavigationSavedStateTest {
 
     @Test
     fun redemptionTokenIsNotWrittenToActivityState() {
-        val original = MainActivityNavigationState().apply {
-            open(ExternalNavigation.SubscriptionRedemption("token"))
-        }
+        val original =
+            MainActivityNavigationState().apply {
+                open(ExternalNavigation.SubscriptionRedemption("token"))
+            }
 
         val restored = MainActivityNavigationState().apply { restore(original.save()) }
 

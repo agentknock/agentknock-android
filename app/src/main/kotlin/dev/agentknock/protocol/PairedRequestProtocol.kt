@@ -44,13 +44,15 @@ internal class PairedRequestProtocol(
         json.decodeFromString<RequestMethodWire>(plaintext.decodeToString()).method
 
     fun errorResponse(code: PairedRequestErrorCode): ByteArray =
-        json.encodeToString(
-            PairedRequestErrorResponseWire.serializer(),
-            PairedRequestErrorResponseWire(
-                error = code.wireName,
-                message = code.message,
-            ),
-        ).encodeToByteArray()
+        json
+            .encodeToString(
+                PairedRequestErrorResponseWire.serializer(),
+                PairedRequestErrorResponseWire(
+                    error = code.wireName,
+                    message = code.message,
+                ),
+            )
+            .encodeToByteArray()
 
     fun openPairedRequest(
         deviceId: String,
@@ -63,17 +65,18 @@ internal class PairedRequestProtocol(
         devicePublicKey: ByteArray,
         request: JsonElement,
     ): OpenedPairedRequest {
-        val opened = openPairedContext(
-            deviceId = deviceId,
-            requestId = requestId,
-            clientId = clientId,
-            clientPsk = clientPsk,
-            previousClientPsk = previousClientPsk,
-            allowRotation = allowRotation,
-            devicePrivateKey = devicePrivateKey,
-            devicePublicKey = devicePublicKey,
-            request = request,
-        )
+        val opened =
+            openPairedContext(
+                deviceId = deviceId,
+                requestId = requestId,
+                clientId = clientId,
+                clientPsk = clientPsk,
+                previousClientPsk = previousClientPsk,
+                allowRotation = allowRotation,
+                devicePrivateKey = devicePrivateKey,
+                devicePublicKey = devicePublicKey,
+                request = request,
+            )
         return opened.toOpenedRequest()
     }
 
@@ -89,12 +92,13 @@ internal class PairedRequestProtocol(
         val responseRandom = ByteArray(RESPONSE_RANDOM_BYTES).also(random::nextBytes)
         val salt = responseContext.encapsulatedKey + responseRandom
         val key = derive(responseContext.exportedSecret, salt, RESPONSE_KEY_INFO, CHACHA_KEY_BYTES)
-        val nonce = derive(
-            responseContext.exportedSecret,
-            salt,
-            RESPONSE_NONCE_INFO,
-            RESPONSE_NONCE_BYTES,
-        )
+        val nonce =
+            derive(
+                responseContext.exportedSecret,
+                salt,
+                RESPONSE_NONCE_INFO,
+                RESPONSE_NONCE_BYTES,
+            )
         val ciphertext = chachaSeal(key, nonce, plaintext)
         return json.encodeToJsonElement(
             EncryptedResponse.serializer(),
@@ -116,17 +120,18 @@ internal class PairedRequestProtocol(
         request: JsonElement,
         plaintext: ByteArray,
     ): JsonElement {
-        val opened = openPairedContext(
-            deviceId = deviceId,
-            requestId = requestId,
-            clientId = clientId,
-            clientPsk = clientPsk,
-            previousClientPsk = null,
-            allowRotation = false,
-            devicePrivateKey = devicePrivateKey,
-            devicePublicKey = devicePublicKey,
-            request = request,
-        )
+        val opened =
+            openPairedContext(
+                deviceId = deviceId,
+                requestId = requestId,
+                clientId = clientId,
+                clientPsk = clientPsk,
+                previousClientPsk = null,
+                allowRotation = false,
+                devicePrivateKey = devicePrivateKey,
+                devicePublicKey = devicePublicKey,
+                request = request,
+            )
         return sealPairedResponse(opened.toOpenedRequest(), plaintext)
     }
 
@@ -140,17 +145,18 @@ internal class PairedRequestProtocol(
         request: JsonElement,
         completion: JsonElement,
     ): ByteArray {
-        val opened = openPairedContext(
-            deviceId = deviceId,
-            requestId = requestId,
-            clientId = clientId,
-            clientPsk = clientPsk,
-            previousClientPsk = null,
-            allowRotation = false,
-            devicePrivateKey = devicePrivateKey,
-            devicePublicKey = devicePublicKey,
-            request = request,
-        )
+        val opened =
+            openPairedContext(
+                deviceId = deviceId,
+                requestId = requestId,
+                clientId = clientId,
+                clientPsk = clientPsk,
+                previousClientPsk = null,
+                allowRotation = false,
+                devicePrivateKey = devicePrivateKey,
+                devicePublicKey = devicePublicKey,
+                request = request,
+            )
         val decoded = json.decodeFromJsonElement(EncryptedCompletion.serializer(), completion)
         return opened.context.open(EMPTY, BASE64_DECODER.decode(decoded.ciphertext))
     }
@@ -163,15 +169,16 @@ internal class PairedRequestProtocol(
         devicePrivateKey: ByteArray,
         devicePublicKey: ByteArray,
         encapsulatedKey: ByteArray,
-    ) = pskReceiver(
-        deviceId = deviceId,
-        clientId = clientId,
-        requestId = requestId.ulidBytes(),
-        clientPsk = clientPsk,
-        devicePrivateKey = devicePrivateKey,
-        devicePublicKey = devicePublicKey,
-        encapsulatedKey = encapsulatedKey,
-    )
+    ) =
+        pskReceiver(
+            deviceId = deviceId,
+            clientId = clientId,
+            requestId = requestId.ulidBytes(),
+            clientPsk = clientPsk,
+            devicePrivateKey = devicePrivateKey,
+            devicePublicKey = devicePublicKey,
+            encapsulatedKey = encapsulatedKey,
+        )
 
     private fun pskReceiver(
         deviceId: String,
@@ -181,22 +188,23 @@ internal class PairedRequestProtocol(
         devicePrivateKey: ByteArray,
         devicePublicKey: ByteArray,
         encapsulatedKey: ByteArray,
-    ) = pskHpke.setupPSKR(
-        encapsulatedKey.also {
-            require(it.size == X25519_KEY_BYTES) { "Invalid request key" }
-        },
-        pskHpke.deserializePrivateKey(
-            devicePrivateKey.also {
-                require(it.size == X25519_KEY_BYTES) { "Invalid device private key" }
+    ) =
+        pskHpke.setupPSKR(
+            encapsulatedKey.also {
+                require(it.size == X25519_KEY_BYTES) { "Invalid request key" }
             },
-            devicePublicKey.also {
-                require(it.size == X25519_KEY_BYTES) { "Invalid device public key" }
-            },
-        ),
-        protocolInfo(deviceId, requestId),
-        clientPsk,
-        clientId.ulidBytes(),
-    )
+            pskHpke.deserializePrivateKey(
+                devicePrivateKey.also {
+                    require(it.size == X25519_KEY_BYTES) { "Invalid device private key" }
+                },
+                devicePublicKey.also {
+                    require(it.size == X25519_KEY_BYTES) { "Invalid device public key" }
+                },
+            ),
+            protocolInfo(deviceId, requestId),
+            clientPsk,
+            clientId.ulidBytes(),
+        )
 
     private fun openPairedContext(
         deviceId: String,
@@ -217,15 +225,16 @@ internal class PairedRequestProtocol(
         val ciphertext = BASE64_DECODER.decode(decoded.ciphertext)
 
         fun open(psk: ByteArray, source: PairedRequestKeySource): OpenedPairedContext {
-            val context = pskReceiver(
-                deviceId = deviceId,
-                clientId = clientId,
-                requestId = requestId,
-                clientPsk = psk,
-                devicePrivateKey = devicePrivateKey,
-                devicePublicKey = devicePublicKey,
-                encapsulatedKey = encapsulatedKey,
-            )
+            val context =
+                pskReceiver(
+                    deviceId = deviceId,
+                    clientId = clientId,
+                    requestId = requestId,
+                    clientPsk = psk,
+                    devicePrivateKey = devicePrivateKey,
+                    devicePublicKey = devicePublicKey,
+                    encapsulatedKey = encapsulatedKey,
+                )
             return OpenedPairedContext(
                 encapsulatedKey = encapsulatedKey,
                 context = context,
@@ -236,31 +245,38 @@ internal class PairedRequestProtocol(
         }
 
         val current = runCatching { open(clientPsk, PairedRequestKeySource.CURRENT) }
-        current.getOrNull()?.let { return it }
+        current.getOrNull()?.let {
+            return it
+        }
         val previous = previousClientPsk?.let { previousPsk ->
             runCatching { open(previousPsk, PairedRequestKeySource.PREVIOUS) }
         }
-        previous?.getOrNull()?.let { return it }
+        previous?.getOrNull()?.let {
+            return it
+        }
         if (!allowRotation) {
             throw checkNotNull(previous?.exceptionOrNull() ?: current.exceptionOrNull())
         }
-        val rotationValue = requestObject["rotation_key"]
-            ?: throw checkNotNull(previous?.exceptionOrNull() ?: current.exceptionOrNull())
+        val rotationValue =
+            requestObject["rotation_key"]
+                ?: throw checkNotNull(previous?.exceptionOrNull() ?: current.exceptionOrNull())
         val rotationPrimitive = rotationValue as? JsonPrimitive
         require(rotationPrimitive?.isString == true) { "Invalid rotation key" }
-        val rotationKey = decodeFixedBase64(
-            rotationPrimitive.content,
-            X25519_KEY_BYTES,
-            "rotation key",
-        )
-        val rotatedClientPsk = rotateClientPsk(
-            deviceId = deviceId,
-            clientId = clientId,
-            clientPsk = clientPsk,
-            devicePrivateKey = devicePrivateKey,
-            devicePublicKey = devicePublicKey,
-            rotationKey = rotationKey,
-        )
+        val rotationKey =
+            decodeFixedBase64(
+                rotationPrimitive.content,
+                X25519_KEY_BYTES,
+                "rotation key",
+            )
+        val rotatedClientPsk =
+            rotateClientPsk(
+                deviceId = deviceId,
+                clientId = clientId,
+                clientPsk = clientPsk,
+                devicePrivateKey = devicePrivateKey,
+                devicePublicKey = devicePublicKey,
+                rotationKey = rotationKey,
+            )
         return open(rotatedClientPsk, PairedRequestKeySource.ROTATED)
     }
 
@@ -271,15 +287,17 @@ internal class PairedRequestProtocol(
         devicePrivateKey: ByteArray,
         devicePublicKey: ByteArray,
         rotationKey: ByteArray,
-    ): ByteArray = pskReceiver(
-        deviceId = deviceId,
-        clientId = clientId,
-        requestId = ByteArray(IDENTIFIER_BYTES),
-        clientPsk = clientPsk,
-        devicePrivateKey = devicePrivateKey,
-        devicePublicKey = devicePublicKey,
-        encapsulatedKey = rotationKey,
-    ).export(PSK_EXPORT_CONTEXT, CLIENT_PSK_BYTES)
+    ): ByteArray =
+        pskReceiver(
+                deviceId = deviceId,
+                clientId = clientId,
+                requestId = ByteArray(IDENTIFIER_BYTES),
+                clientPsk = clientPsk,
+                devicePrivateKey = devicePrivateKey,
+                devicePublicKey = devicePublicKey,
+                encapsulatedKey = rotationKey,
+            )
+            .export(PSK_EXPORT_CONTEXT, CLIENT_PSK_BYTES)
 
     private fun chachaSeal(key: ByteArray, nonce: ByteArray, plaintext: ByteArray): ByteArray {
         val cipher = ChaCha20Poly1305()
@@ -290,18 +308,21 @@ internal class PairedRequestProtocol(
         return output.copyOf(length)
     }
 
-    private fun OpenedPairedContext.toOpenedRequest() = OpenedPairedRequest(
-        plaintext = plaintext,
-        clientPsk = clientPsk,
-        keySource = keySource,
-        responseContext = PairedResponseContext(
-            encapsulatedKey = encapsulatedKey,
-            exportedSecret = context.export(
-                RESPONSE_EXPORT_CONTEXT,
-                EXPORTED_SECRET_BYTES,
-            ),
-        ),
-    )
+    private fun OpenedPairedContext.toOpenedRequest() =
+        OpenedPairedRequest(
+            plaintext = plaintext,
+            clientPsk = clientPsk,
+            keySource = keySource,
+            responseContext =
+                PairedResponseContext(
+                    encapsulatedKey = encapsulatedKey,
+                    exportedSecret =
+                        context.export(
+                            RESPONSE_EXPORT_CONTEXT,
+                            EXPORTED_SECRET_BYTES,
+                        ),
+                ),
+        )
 
     companion object {
         const val FINISH_PAIRING_METHOD = "PairingFinish"
@@ -313,12 +334,13 @@ internal class PairedRequestProtocol(
         private const val RESPONSE_RANDOM_BYTES = 32
         private const val RESPONSE_NONCE_BYTES = 12
         private const val AUTHENTICATION_TAG_BITS = 128
-        private val pskHpke = HPKE(
-            HPKE.mode_psk,
-            HPKE.kem_X25519_SHA256,
-            HPKE.kdf_HKDF_SHA256,
-            HPKE.aead_CHACHA20_POLY1305,
-        )
+        private val pskHpke =
+            HPKE(
+                HPKE.mode_psk,
+                HPKE.kem_X25519_SHA256,
+                HPKE.kdf_HKDF_SHA256,
+                HPKE.aead_CHACHA20_POLY1305,
+            )
     }
 }
 
@@ -406,8 +428,7 @@ internal val BASE64_DECODER: Base64.Decoder = Base64.getDecoder()
 internal val BASE64_ENCODER: Base64.Encoder = Base64.getEncoder()
 private const val ULID_ALPHABET = "0123456789ABCDEFGHJKMNPQRSTVWXYZ"
 
-@Serializable
-private data class RequestMethodWire(val method: String)
+@Serializable private data class RequestMethodWire(val method: String)
 
 @Serializable
 private data class PairedRequestErrorResponseWire(
@@ -428,5 +449,4 @@ private data class EncryptedResponse(
     val ciphertext: String,
 )
 
-@Serializable
-private data class EncryptedCompletion(val ciphertext: String)
+@Serializable private data class EncryptedCompletion(val ciphertext: String)

@@ -14,8 +14,8 @@ import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
-import androidx.compose.ui.semantics.contentDescription
 import androidx.compose.ui.semantics.clearAndSetSemantics
+import androidx.compose.ui.semantics.contentDescription
 import androidx.compose.ui.unit.dp
 import dev.agentknock.ui.theme.agentknockColors
 
@@ -43,23 +43,26 @@ internal fun SecretIdentity(
     subdued: Boolean = false,
 ) {
     Surface(
-        modifier = modifier.clearAndSetSemantics {
-            contentDescription = if (unavailable) "Unavailable secret $name" else "Secret $name"
-        },
-        color = if (unavailable) {
-            MaterialTheme.agentknockColors.dangerContainer
-        } else if (subdued) {
-            MaterialTheme.colorScheme.surfaceContainerHighest
-        } else {
-            MaterialTheme.colorScheme.tertiaryContainer
-        },
-        contentColor = if (unavailable) {
-            MaterialTheme.agentknockColors.onDangerContainer
-        } else if (subdued) {
-            MaterialTheme.colorScheme.onSurfaceVariant
-        } else {
-            MaterialTheme.colorScheme.onTertiaryContainer
-        },
+        modifier =
+            modifier.clearAndSetSemantics {
+                contentDescription = if (unavailable) "Unavailable secret $name" else "Secret $name"
+            },
+        color =
+            if (unavailable) {
+                MaterialTheme.agentknockColors.dangerContainer
+            } else if (subdued) {
+                MaterialTheme.colorScheme.surfaceContainerHighest
+            } else {
+                MaterialTheme.colorScheme.tertiaryContainer
+            },
+        contentColor =
+            if (unavailable) {
+                MaterialTheme.agentknockColors.onDangerContainer
+            } else if (subdued) {
+                MaterialTheme.colorScheme.onSurfaceVariant
+            } else {
+                MaterialTheme.colorScheme.onTertiaryContainer
+            },
         shape = MaterialTheme.shapes.small,
     ) {
         Row(

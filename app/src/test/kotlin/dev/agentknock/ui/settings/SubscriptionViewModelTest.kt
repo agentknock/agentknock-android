@@ -1,15 +1,15 @@
 package dev.agentknock.ui.settings
 
-import dev.agentknock.subscription.AiReviewAccess
 import android.app.Activity
 import androidx.lifecycle.viewModelScope
 import dev.agentknock.relay.RelayEndpointResult
 import dev.agentknock.relay.RelaySubscriptionClient
 import dev.agentknock.relay.RelaySubscriptionResult
 import dev.agentknock.relay.RelaySubscriptionStatus
-import dev.agentknock.storage.device.RelayDeviceAuthorization
 import dev.agentknock.storage.device.DeviceCredentialResult
+import dev.agentknock.storage.device.RelayDeviceAuthorization
 import dev.agentknock.storage.device.RelayDeviceAuthorizationSource
+import dev.agentknock.subscription.AiReviewAccess
 import dev.agentknock.subscription.GOOGLE_PLAY_SUBSCRIPTION_PRODUCT_ID
 import dev.agentknock.subscription.PlayPurchaseState
 import dev.agentknock.subscription.PlaySubscriptionBilling
@@ -37,34 +37,41 @@ import org.junit.Test
 class SubscriptionViewModelTest {
     @Test
     fun `code redemption shows activation without hiding existing access`() {
-        assertEquals(AiReviewAccess.ACTIVATING,
-            SubscriptionUiState(access = AiReviewAccess.INACTIVE, redeeming = true).aiReviewAccess)
-        assertEquals(AiReviewAccess.ACTIVE,
-            SubscriptionUiState(access = AiReviewAccess.ACTIVE, redeeming = true).aiReviewAccess)
+        assertEquals(
+            AiReviewAccess.ACTIVATING,
+            SubscriptionUiState(access = AiReviewAccess.INACTIVE, redeeming = true).aiReviewAccess,
+        )
+        assertEquals(
+            AiReviewAccess.ACTIVE,
+            SubscriptionUiState(access = AiReviewAccess.ACTIVE, redeeming = true).aiReviewAccess,
+        )
     }
 
     @OptIn(ExperimentalCoroutinesApi::class)
     @Test
-    fun `failed refresh preserves active controls and reports unavailable status separately`() = runTest {
-        val fixture = Fixture(UnconfinedTestDispatcher(testScheduler))
-        try {
-            fixture.relay.statusResult = RelayEndpointResult.Success(RelaySubscriptionStatus(active = true))
-            fixture.viewModel.refresh()
-            runCurrent()
-            fixture.relay.statusResult = RelayEndpointResult.InvalidResponse
-            fixture.viewModel.refresh()
-            runCurrent()
-            assertEquals(AiReviewAccess.ACTIVE, fixture.viewModel.state.value.aiReviewAccess)
-            assertEquals(true, fixture.viewModel.state.value.statusUnavailable)
-            fixture.relay.statusResult = RelayEndpointResult.Success(RelaySubscriptionStatus(active = false))
-            fixture.viewModel.refresh()
-            runCurrent()
-            assertEquals(AiReviewAccess.INACTIVE, fixture.viewModel.state.value.aiReviewAccess)
-            assertEquals(false, fixture.viewModel.state.value.statusUnavailable)
-        } finally {
-            fixture.close()
+    fun `failed refresh preserves active controls and reports unavailable status separately`() =
+        runTest {
+            val fixture = Fixture(UnconfinedTestDispatcher(testScheduler))
+            try {
+                fixture.relay.statusResult =
+                    RelayEndpointResult.Success(RelaySubscriptionStatus(active = true))
+                fixture.viewModel.refresh()
+                runCurrent()
+                fixture.relay.statusResult = RelayEndpointResult.InvalidResponse
+                fixture.viewModel.refresh()
+                runCurrent()
+                assertEquals(AiReviewAccess.ACTIVE, fixture.viewModel.state.value.aiReviewAccess)
+                assertEquals(true, fixture.viewModel.state.value.statusUnavailable)
+                fixture.relay.statusResult =
+                    RelayEndpointResult.Success(RelaySubscriptionStatus(active = false))
+                fixture.viewModel.refresh()
+                runCurrent()
+                assertEquals(AiReviewAccess.INACTIVE, fixture.viewModel.state.value.aiReviewAccess)
+                assertEquals(false, fixture.viewModel.state.value.statusUnavailable)
+            } finally {
+                fixture.close()
+            }
         }
-    }
 
     @OptIn(ExperimentalCoroutinesApi::class)
     @Test
@@ -158,47 +165,57 @@ class SubscriptionViewModelTest {
 
     @OptIn(ExperimentalCoroutinesApi::class)
     @Test
-    fun `billing unsupported keeps access inactive until redeemed and refreshes existing access`() = runTest {
-        val fixture = Fixture(UnconfinedTestDispatcher(testScheduler))
-        try {
-            fixture.billing.queryResult = PlaySubscriptionQueryResult.NotSupported
-            fixture.viewModel.refresh()
-            runCurrent()
-            assertEquals(PlayStoreAvailability.NOT_SUPPORTED, fixture.viewModel.state.value.playStore)
-            assertEquals(AiReviewAccess.INACTIVE, fixture.viewModel.state.value.access)
-            assertEquals(true, fixture.viewModel.state.value.offers.isEmpty())
-            assertEquals(null, fixture.relay.googlePlayPurchase)
+    fun `billing unsupported keeps access inactive until redeemed and refreshes existing access`() =
+        runTest {
+            val fixture = Fixture(UnconfinedTestDispatcher(testScheduler))
+            try {
+                fixture.billing.queryResult = PlaySubscriptionQueryResult.NotSupported
+                fixture.viewModel.refresh()
+                runCurrent()
+                assertEquals(
+                    PlayStoreAvailability.NOT_SUPPORTED,
+                    fixture.viewModel.state.value.playStore,
+                )
+                assertEquals(AiReviewAccess.INACTIVE, fixture.viewModel.state.value.access)
+                assertEquals(true, fixture.viewModel.state.value.offers.isEmpty())
+                assertEquals(null, fixture.relay.googlePlayPurchase)
 
-            fixture.viewModel.redeem("activation-token")
-            runCurrent()
-            assertEquals("activation-token", fixture.relay.redeemedToken)
-            assertEquals(AiReviewAccess.ACTIVE, fixture.viewModel.state.value.access)
+                fixture.viewModel.redeem("activation-token")
+                runCurrent()
+                assertEquals("activation-token", fixture.relay.redeemedToken)
+                assertEquals(AiReviewAccess.ACTIVE, fixture.viewModel.state.value.access)
 
-            fixture.relay.statusResult = RelayEndpointResult.Success(RelaySubscriptionStatus(active = true))
-            fixture.viewModel.refresh()
-            runCurrent()
-            assertEquals(AiReviewAccess.ACTIVE, fixture.viewModel.state.value.access)
-            assertEquals(PlayStoreAvailability.NOT_SUPPORTED, fixture.viewModel.state.value.playStore)
-            assertEquals(null, fixture.relay.googlePlayPurchase)
-        } finally {
-            fixture.close()
+                fixture.relay.statusResult =
+                    RelayEndpointResult.Success(RelaySubscriptionStatus(active = true))
+                fixture.viewModel.refresh()
+                runCurrent()
+                assertEquals(AiReviewAccess.ACTIVE, fixture.viewModel.state.value.access)
+                assertEquals(
+                    PlayStoreAvailability.NOT_SUPPORTED,
+                    fixture.viewModel.state.value.playStore,
+                )
+                assertEquals(null, fixture.relay.googlePlayPurchase)
+            } finally {
+                fixture.close()
+            }
         }
-    }
 
-    private fun queryResult(state: PlayPurchaseState) = PlaySubscriptionQueryResult.Success(
-        PlaySubscriptionSnapshot(
-            purchases = listOf(
-                PlaySubscriptionPurchase(
-                    token = PURCHASE_TOKEN,
-                    productId = GOOGLE_PLAY_SUBSCRIPTION_PRODUCT_ID,
-                    purchasedAtMillis = 1_000,
-                    state = state,
-                ),
-            ),
-            offers = emptyList(),
-            offersAvailable = true,
-        ),
-    )
+    private fun queryResult(state: PlayPurchaseState) =
+        PlaySubscriptionQueryResult.Success(
+            PlaySubscriptionSnapshot(
+                purchases =
+                    listOf(
+                        PlaySubscriptionPurchase(
+                            token = PURCHASE_TOKEN,
+                            productId = GOOGLE_PLAY_SUBSCRIPTION_PRODUCT_ID,
+                            purchasedAtMillis = 1_000,
+                            state = state,
+                        )
+                    ),
+                offers = emptyList(),
+                offersAvailable = true,
+            )
+        )
 
     @OptIn(ExperimentalCoroutinesApi::class)
     private class Fixture(dispatcher: CoroutineDispatcher) {
@@ -214,14 +231,15 @@ class SubscriptionViewModelTest {
                         deviceIdentityId = "identity",
                         deviceId = "device",
                         deviceToken = "token",
-                    ),
+                    )
                 )
             }
-            viewModel = SubscriptionViewModel(
-                repository = SubscriptionRepository(authorization, relay),
-                billing = billing,
-                awaitStorageReady = {},
-            )
+            viewModel =
+                SubscriptionViewModel(
+                    repository = SubscriptionRepository(authorization, relay),
+                    billing = billing,
+                    awaitStorageReady = {},
+                )
         }
 
         fun close() {

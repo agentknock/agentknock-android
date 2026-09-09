@@ -33,7 +33,7 @@ internal class DeviceSettingsCoordinator(
     }
 
     private suspend fun completeClaim(
-        result: ClaimPairingAddressResult,
+        result: ClaimPairingAddressResult
     ): ClaimPairingAddressResult {
         if (result == ClaimPairingAddressResult.Claimed) {
             onIdentityChanged()
@@ -41,9 +41,8 @@ internal class DeviceSettingsCoordinator(
         return result
     }
 
-    private suspend fun <T> operation(block: suspend () -> T): T =
-        operations.withLock {
-            awaitStorageReady()
-            block()
-        }
+    private suspend fun <T> operation(block: suspend () -> T): T = operations.withLock {
+        awaitStorageReady()
+        block()
+    }
 }

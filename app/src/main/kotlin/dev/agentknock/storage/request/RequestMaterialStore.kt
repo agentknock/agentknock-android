@@ -35,13 +35,14 @@ internal class RequestMaterialStore(
     ): SecretUploadEnvironmentVariableEntity {
         val id = newId()
         val key = keyManager.activeKey(VaultKeyPurpose.SECRET_VALUES)
-        val encrypted = withContext(cryptographyDispatcher) {
-            encryption.encrypt(
-                keyId = key.id,
-                location = secretUploadVariableLocation(id, relayRequestId, clientId, name),
-                plaintext = value.encodeToByteArray(),
-            )
-        }
+        val encrypted =
+            withContext(cryptographyDispatcher) {
+                encryption.encrypt(
+                    keyId = key.id,
+                    location = secretUploadVariableLocation(id, relayRequestId, clientId, name),
+                    plaintext = value.encodeToByteArray(),
+                )
+            }
         return SecretUploadEnvironmentVariableEntity(
             id = id,
             requestId = relayRequestId,
@@ -54,17 +55,19 @@ internal class RequestMaterialStore(
     suspend fun decryptSecretUploadEnvironmentVariable(
         request: InboxRequestEntity,
         variable: SecretUploadEnvironmentVariableEntity,
-    ): DecryptionResult = withContext(cryptographyDispatcher) {
-        encryption.decrypt(
-            encrypted = variable.encryptedValue,
-            location = secretUploadVariableLocation(
-                variable.id,
-                request.id,
-                request.clientId,
-                variable.name,
-            ),
-        )
-    }
+    ): DecryptionResult =
+        withContext(cryptographyDispatcher) {
+            encryption.decrypt(
+                encrypted = variable.encryptedValue,
+                location =
+                    secretUploadVariableLocation(
+                        variable.id,
+                        request.id,
+                        request.clientId,
+                        variable.name,
+                    ),
+            )
+        }
 
     suspend fun encryptSecretUploadSshKey(
         relayRequestId: String,
@@ -72,18 +75,20 @@ internal class RequestMaterialStore(
         privateKey: SshPrivateKey,
     ): SecretUploadSshKeyEntity {
         val key = keyManager.activeKey(VaultKeyPurpose.SECRET_VALUES)
-        val encrypted = withContext(cryptographyDispatcher) {
-            encryption.encrypt(
-                keyId = key.id,
-                location = secretUploadSshKeyLocation(
-                    relayRequestId,
-                    clientId,
-                    privateKey.algorithm,
-                    privateKey.publicKey,
-                ),
-                plaintext = privateKey.privateKey,
-            )
-        }
+        val encrypted =
+            withContext(cryptographyDispatcher) {
+                encryption.encrypt(
+                    keyId = key.id,
+                    location =
+                        secretUploadSshKeyLocation(
+                            relayRequestId,
+                            clientId,
+                            privateKey.algorithm,
+                            privateKey.publicKey,
+                        ),
+                    plaintext = privateKey.privateKey,
+                )
+            }
         return SecretUploadSshKeyEntity(
             requestId = relayRequestId,
             algorithm = privateKey.algorithm.storedName,
@@ -97,17 +102,19 @@ internal class RequestMaterialStore(
         request: InboxRequestEntity,
         key: SecretUploadSshKeyEntity,
     ): DecryptionResult {
-        val algorithm = SshKeyAlgorithm.fromStoredName(key.algorithm)
-            ?: return DecryptionResult.UnsupportedFormat
+        val algorithm =
+            SshKeyAlgorithm.fromStoredName(key.algorithm)
+                ?: return DecryptionResult.UnsupportedFormat
         return withContext(cryptographyDispatcher) {
             encryption.decrypt(
                 encrypted = key.encryptedPrivateKey,
-                location = secretUploadSshKeyLocation(
-                    request.id,
-                    request.clientId,
-                    algorithm,
-                    key.publicKey,
-                ),
+                location =
+                    secretUploadSshKeyLocation(
+                        request.id,
+                        request.clientId,
+                        algorithm,
+                        key.publicKey,
+                    ),
             )
         }
     }
@@ -119,12 +126,13 @@ internal class RequestMaterialStore(
         currentClientPsk: ByteArray,
         now: Long,
     ): AcceptedRequestPsks {
-        val requestPsk = encryptRequestPsk(
-            deviceIdentityId = client.deviceIdentityId,
-            clientId = client.clientId,
-            relayRequestId = relayRequestId,
-            clientPsk = opened.clientPsk,
-        )
+        val requestPsk =
+            encryptRequestPsk(
+                deviceIdentityId = client.deviceIdentityId,
+                clientId = client.clientId,
+                relayRequestId = relayRequestId,
+                clientPsk = opened.clientPsk,
+            )
         if (opened.keySource != PairedRequestKeySource.ROTATED) {
             return AcceptedRequestPsks(requestPsk, null, null)
         }
@@ -133,18 +141,20 @@ internal class RequestMaterialStore(
         }
         return AcceptedRequestPsks(
             requestPsk = requestPsk,
-            currentClientPsk = encryptClientPsk(
-                client = client,
-                clientPsk = opened.clientPsk,
-                now = now,
-                slot = ClientPskSlot.CURRENT,
-            ),
-            previousClientPsk = encryptClientPsk(
-                client = client,
-                clientPsk = currentClientPsk,
-                now = now,
-                slot = ClientPskSlot.PREVIOUS,
-            ),
+            currentClientPsk =
+                encryptClientPsk(
+                    client = client,
+                    clientPsk = opened.clientPsk,
+                    now = now,
+                    slot = ClientPskSlot.CURRENT,
+                ),
+            previousClientPsk =
+                encryptClientPsk(
+                    client = client,
+                    clientPsk = currentClientPsk,
+                    now = now,
+                    slot = ClientPskSlot.PREVIOUS,
+                ),
         )
     }
 
@@ -156,13 +166,14 @@ internal class RequestMaterialStore(
     ): RequestPskEntity {
         require(clientPsk.size == CLIENT_PSK_BYTES)
         val key = keyManager.activeKey(VaultKeyPurpose.DEVICE_STATE)
-        val encrypted = withContext(cryptographyDispatcher) {
-            encryption.encrypt(
-                keyId = key.id,
-                location = requestPskLocation(relayRequestId, clientId, deviceIdentityId),
-                plaintext = clientPsk,
-            )
-        }
+        val encrypted =
+            withContext(cryptographyDispatcher) {
+                encryption.encrypt(
+                    keyId = key.id,
+                    location = requestPskLocation(relayRequestId, clientId, deviceIdentityId),
+                    plaintext = clientPsk,
+                )
+            }
         return RequestPskEntity(
             requestId = relayRequestId,
             encryptedPsk = encrypted,
@@ -175,16 +186,18 @@ internal class RequestMaterialStore(
 
     suspend fun decryptRequestPskResult(request: InboxRequestEntity): DecryptionResult {
         val secret = dao.getRequestPsk(request.id) ?: return DecryptionResult.AuthenticationFailed
-        val result = withContext(cryptographyDispatcher) {
-            encryption.decrypt(
-                encrypted = secret.encryptedPsk,
-                location = requestPskLocation(
-                    request.id,
-                    request.clientId,
-                    request.deviceIdentityId,
-                ),
-            )
-        }
+        val result =
+            withContext(cryptographyDispatcher) {
+                encryption.decrypt(
+                    encrypted = secret.encryptedPsk,
+                    location =
+                        requestPskLocation(
+                            request.id,
+                            request.clientId,
+                            request.deviceIdentityId,
+                        ),
+                )
+            }
         return if (result is DecryptionResult.Plaintext && result.value.size != CLIENT_PSK_BYTES) {
             DecryptionResult.AuthenticationFailed
         } else {
@@ -202,15 +215,15 @@ internal class RequestMaterialStore(
         decryptClientPsk(client, ClientPskSlot.CURRENT)
 
     suspend fun decryptPreviousClientPsk(client: ClientEntity): ByteArray? {
-        val previous = dao.getClientPsk(client.clientId, ClientPskSlot.PREVIOUS.storedName)
-            ?: return null
+        val previous =
+            dao.getClientPsk(client.clientId, ClientPskSlot.PREVIOUS.storedName) ?: return null
         if (!previousPskEligible(previous.storedAt, currentTimeMillis())) return null
         return decryptClientPsk(client, ClientPskSlot.PREVIOUS)
     }
 
     suspend fun deleteExpiredPreviousClientPsks(): Int =
         dao.deleteExpiredPreviousClientPsks(
-            storedBefore = currentTimeMillis() - PREVIOUS_PSK_OVERLAP_MILLIS,
+            storedBefore = currentTimeMillis() - PREVIOUS_PSK_OVERLAP_MILLIS
         )
 
     suspend fun withEncryptedPendingPsk(
@@ -222,13 +235,14 @@ internal class RequestMaterialStore(
         require(attempt.requestId == request.clientId)
         require(clientPsk.size == CLIENT_PSK_BYTES)
         val key = keyManager.activeKey(VaultKeyPurpose.DEVICE_STATE)
-        val encrypted = withContext(cryptographyDispatcher) {
-            encryption.encrypt(
-                keyId = key.id,
-                location = pendingPskLocation(attempt, request),
-                plaintext = clientPsk,
-            )
-        }
+        val encrypted =
+            withContext(cryptographyDispatcher) {
+                encryption.encrypt(
+                    keyId = key.id,
+                    location = pendingPskLocation(attempt, request),
+                    plaintext = clientPsk,
+                )
+            }
         return attempt.copy(pendingPsk = encrypted)
     }
 
@@ -239,12 +253,13 @@ internal class RequestMaterialStore(
         require(attempt.requestId == request.id)
         require(attempt.requestId == request.clientId)
         val pendingPsk = attempt.pendingPsk ?: return null
-        val result = withContext(cryptographyDispatcher) {
-            encryption.decrypt(
-                encrypted = pendingPsk,
-                location = pendingPskLocation(attempt, request),
-            )
-        }
+        val result =
+            withContext(cryptographyDispatcher) {
+                encryption.decrypt(
+                    encrypted = pendingPsk,
+                    location = pendingPskLocation(attempt, request),
+                )
+            }
         return (result as? DecryptionResult.Plaintext)?.value?.takeIf {
             it.size == CLIENT_PSK_BYTES
         }
@@ -258,13 +273,14 @@ internal class RequestMaterialStore(
     ): ClientPskEntity {
         require(clientPsk.size == CLIENT_PSK_BYTES)
         val key = keyManager.activeKey(VaultKeyPurpose.DEVICE_STATE)
-        val encrypted = withContext(cryptographyDispatcher) {
-            encryption.encrypt(
-                keyId = key.id,
-                location = clientPskLocation(client, slot),
-                plaintext = clientPsk,
-            )
-        }
+        val encrypted =
+            withContext(cryptographyDispatcher) {
+                encryption.encrypt(
+                    keyId = key.id,
+                    location = clientPskLocation(client, slot),
+                    plaintext = clientPsk,
+                )
+            }
         return ClientPskEntity(
             clientId = client.clientId,
             slot = slot.storedName,
@@ -278,12 +294,13 @@ internal class RequestMaterialStore(
         slot: ClientPskSlot,
     ): ByteArray? {
         val secret = dao.getClientPsk(client.clientId, slot.storedName) ?: return null
-        val result = withContext(cryptographyDispatcher) {
-            encryption.decrypt(
-                encrypted = secret.encryptedPsk,
-                location = clientPskLocation(client, slot),
-            )
-        }
+        val result =
+            withContext(cryptographyDispatcher) {
+                encryption.decrypt(
+                    encrypted = secret.encryptedPsk,
+                    location = clientPskLocation(client, slot),
+                )
+            }
         return (result as? DecryptionResult.Plaintext)?.value?.takeIf {
             it.size == CLIENT_PSK_BYTES
         }
@@ -294,73 +311,83 @@ internal class RequestMaterialStore(
         requestId: String,
         clientId: String,
         name: String,
-    ) = EncryptionLocation(
-        recordType = "secret_upload_variable",
-        recordId = id,
-        fieldName = "value",
-        bindings = listOf(
-            EncryptionBinding("request_id", requestId),
-            EncryptionBinding("client_id", clientId),
-            EncryptionBinding("name", name),
-        ),
-    )
+    ) =
+        EncryptionLocation(
+            recordType = "secret_upload_variable",
+            recordId = id,
+            fieldName = "value",
+            bindings =
+                listOf(
+                    EncryptionBinding("request_id", requestId),
+                    EncryptionBinding("client_id", clientId),
+                    EncryptionBinding("name", name),
+                ),
+        )
 
     private fun secretUploadSshKeyLocation(
         relayRequestId: String,
         clientId: String,
         algorithm: SshKeyAlgorithm,
         publicKey: ByteArray,
-    ) = EncryptionLocation(
-        recordType = "secret_upload_ssh_key",
-        recordId = relayRequestId,
-        fieldName = "private_key",
-        bindings = listOf(
-            EncryptionBinding("client_id", clientId),
-            EncryptionBinding("algorithm", algorithm.storedName),
-            EncryptionBinding("private_key_format", algorithm.canonicalPrivateKeyFormat()),
-            EncryptionBinding("public_key", Base64.getEncoder().encodeToString(publicKey)),
-        ),
-    )
+    ) =
+        EncryptionLocation(
+            recordType = "secret_upload_ssh_key",
+            recordId = relayRequestId,
+            fieldName = "private_key",
+            bindings =
+                listOf(
+                    EncryptionBinding("client_id", clientId),
+                    EncryptionBinding("algorithm", algorithm.storedName),
+                    EncryptionBinding("private_key_format", algorithm.canonicalPrivateKeyFormat()),
+                    EncryptionBinding("public_key", Base64.getEncoder().encodeToString(publicKey)),
+                ),
+        )
 
     private fun requestPskLocation(
         requestId: String,
         clientId: String,
         deviceIdentityId: String,
-    ) = EncryptionLocation(
-        recordType = "request_psk",
-        recordId = requestId,
-        fieldName = "client_psk",
-        bindings = listOf(
-            EncryptionBinding("client_id", clientId),
-            EncryptionBinding("device_identity_id", deviceIdentityId),
-        ),
-    )
+    ) =
+        EncryptionLocation(
+            recordType = "request_psk",
+            recordId = requestId,
+            fieldName = "client_psk",
+            bindings =
+                listOf(
+                    EncryptionBinding("client_id", clientId),
+                    EncryptionBinding("device_identity_id", deviceIdentityId),
+                ),
+        )
 
     private fun clientPskLocation(
         client: ClientEntity,
         slot: ClientPskSlot,
-    ) = EncryptionLocation(
-        recordType = "client_psk",
-        recordId = client.clientId,
-        fieldName = "value",
-        bindings = listOf(
-            EncryptionBinding("slot", slot.storedName),
-            EncryptionBinding("device_identity_id", client.deviceIdentityId),
-        ),
-    )
+    ) =
+        EncryptionLocation(
+            recordType = "client_psk",
+            recordId = client.clientId,
+            fieldName = "value",
+            bindings =
+                listOf(
+                    EncryptionBinding("slot", slot.storedName),
+                    EncryptionBinding("device_identity_id", client.deviceIdentityId),
+                ),
+        )
 
     private fun pendingPskLocation(
         attempt: PairingAttemptEntity,
         request: InboxRequestEntity,
-    ) = EncryptionLocation(
-        recordType = "pairing_attempt",
-        recordId = attempt.requestId,
-        fieldName = "pending_client_psk",
-        bindings = listOf(
-            EncryptionBinding("client_id", request.clientId),
-            EncryptionBinding("device_identity_id", request.deviceIdentityId),
-        ),
-    )
+    ) =
+        EncryptionLocation(
+            recordType = "pairing_attempt",
+            recordId = attempt.requestId,
+            fieldName = "pending_client_psk",
+            bindings =
+                listOf(
+                    EncryptionBinding("client_id", request.clientId),
+                    EncryptionBinding("device_identity_id", request.deviceIdentityId),
+                ),
+        )
 
     private enum class ClientPskSlot(val storedName: String) {
         CURRENT("current"),

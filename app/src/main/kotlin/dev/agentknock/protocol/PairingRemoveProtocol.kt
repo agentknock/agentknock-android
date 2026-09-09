@@ -3,9 +3,7 @@ package dev.agentknock.protocol
 import kotlinx.serialization.Serializable
 import kotlinx.serialization.json.Json
 
-internal class PairingRemoveProtocol(
-    private val json: Json = Json { ignoreUnknownKeys = true },
-) {
+internal class PairingRemoveProtocol(private val json: Json = Json { ignoreUnknownKeys = true }) {
     fun decodeRequest(plaintext: ByteArray): ClientSoftware {
         val clientSoftware = json.decodeClientSoftware(plaintext)
         val request = json.decodeFromString<PairingRemoveRequestWire>(plaintext.decodeToString())
@@ -23,7 +21,4 @@ internal class PairingRemoveProtocol(
     }
 }
 
-@Serializable
-private data class PairingRemoveRequestWire(
-    val method: String,
-)
+@Serializable private data class PairingRemoveRequestWire(val method: String)

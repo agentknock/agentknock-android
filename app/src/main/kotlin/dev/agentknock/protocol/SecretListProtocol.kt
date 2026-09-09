@@ -18,9 +18,7 @@ internal data class SecretListSecret(
     val sshPublicKey: String? = null,
 )
 
-internal class SecretListProtocol(
-    private val json: Json = Json { ignoreUnknownKeys = true },
-) {
+internal class SecretListProtocol(private val json: Json = Json { ignoreUnknownKeys = true }) {
     fun decodeRequest(plaintext: ByteArray): SecretListRequestMessage {
         val clientSoftware = json.decodeClientSoftware(plaintext)
         val request = json.decodeFromString<SecretListRequestWire>(plaintext.decodeToString())
@@ -28,19 +26,22 @@ internal class SecretListProtocol(
         return SecretListRequestMessage(clientSoftware)
     }
 
-    fun response(secrets: Map<String, SecretListSecret>): ByteArray = json.encodeToString(
-        JsonObject.serializer(),
-        buildJsonObject {
-            put(
-                "secrets",
+    fun response(secrets: Map<String, SecretListSecret>): ByteArray =
+        json
+            .encodeToString(
+                JsonObject.serializer(),
                 buildJsonObject {
-                    secrets.toSortedMap().forEach { (name, secret) ->
-                        put(name, secret.toWire())
-                    }
+                    put(
+                        "secrets",
+                        buildJsonObject {
+                            secrets.toSortedMap().forEach { (name, secret) ->
+                                put(name, secret.toWire())
+                            }
+                        },
+                    )
                 },
             )
-        },
-    ).encodeToByteArray()
+            .encodeToByteArray()
 
     fun decodeCompletion(plaintext: ByteArray): ClientSoftware =
         json.decodeClientSoftware(plaintext)
@@ -55,22 +56,21 @@ internal class SecretListProtocol(
         if (description.isNotEmpty()) put("description", description)
         put("type", type)
         when (type) {
-            TYPE_ENVIRONMENT -> put(
-                "variables",
-                buildJsonArray {
-                    environmentVariableNames.sorted().forEach { add(JsonPrimitive(it)) }
-                },
-            )
-            TYPE_SSH -> put(
-                "public_key",
-                requireNotNull(sshPublicKey) { "SSH secret metadata has no public key" },
-            )
+            TYPE_ENVIRONMENT ->
+                put(
+                    "variables",
+                    buildJsonArray {
+                        environmentVariableNames.sorted().forEach { add(JsonPrimitive(it)) }
+                    },
+                )
+            TYPE_SSH ->
+                put(
+                    "public_key",
+                    requireNotNull(sshPublicKey) { "SSH secret metadata has no public key" },
+                )
             else -> error("Unsupported secret type")
         }
     }
 }
 
-@Serializable
-private data class SecretListRequestWire(
-    val method: String,
-)
+@Serializable private data class SecretListRequestWire(val method: String)

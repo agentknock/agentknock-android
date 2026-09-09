@@ -19,7 +19,7 @@ class RelayPushRegistrationClientTest {
                 MockResponse.Builder()
                     .code(200)
                     .body("""{"push_registration":"registered"}""")
-                    .build(),
+                    .build()
             )
             val client = client(server)
 
@@ -45,10 +45,7 @@ class RelayPushRegistrationClientTest {
         MockWebServer().use { server ->
             server.start()
             server.enqueue(
-                MockResponse.Builder()
-                    .code(200)
-                    .body("""{"push_registration":"pending"}""")
-                    .build(),
+                MockResponse.Builder().code(200).body("""{"push_registration":"pending"}""").build()
             )
             val client = client(server)
 
@@ -59,12 +56,14 @@ class RelayPushRegistrationClientTest {
         }
     }
 
-    private fun client(server: MockWebServer) = HttpRelayPushRegistrationClient(
-        transport = RelayHttpTransport(
-            client = OkHttpClient(),
-            relayUrl = server.url("/").toString(),
-        ),
-    )
+    private fun client(server: MockWebServer) =
+        HttpRelayPushRegistrationClient(
+            transport =
+                RelayHttpTransport(
+                    client = OkHttpClient(),
+                    relayUrl = server.url("/").toString(),
+                )
+        )
 
     private companion object {
         const val DEVICE_ID = "01K2ENXDTW1P3XAR4J7V7C9D0H"

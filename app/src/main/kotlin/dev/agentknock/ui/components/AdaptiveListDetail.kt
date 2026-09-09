@@ -27,27 +27,28 @@ internal fun AdaptiveListDetail(
     onBack: () -> Unit,
     onTopLevelChanged: (Boolean) -> Unit,
     modifier: Modifier = Modifier,
-    directive: PaneScaffoldDirective = calculatePaneScaffoldDirective(
-        currentWindowAdaptiveInfoV2(),
-    ),
+    directive: PaneScaffoldDirective =
+        calculatePaneScaffoldDirective(currentWindowAdaptiveInfoV2()),
     list: @Composable (Modifier) -> Unit,
     emptyDetail: @Composable (Modifier) -> Unit,
     detail: @Composable (showBack: Boolean, Modifier) -> Unit,
 ) {
     val paneState = rememberSaveableStateHolder()
-    val destination = ThreePaneScaffoldDestinationItem<String>(
-        if (hasDetail) {
-            ListDetailPaneScaffoldRole.Detail
-        } else {
-            ListDetailPaneScaffoldRole.List
-        },
-    )
-    val scaffoldValue = calculateThreePaneScaffoldValue(
-        maxHorizontalPartitions = directive.maxHorizontalPartitions,
-        adaptStrategies = ListDetailPaneScaffoldDefaults.adaptStrategies(),
-        currentDestination = destination,
-        maxVerticalPartitions = directive.maxVerticalPartitions,
-    )
+    val destination =
+        ThreePaneScaffoldDestinationItem<String>(
+            if (hasDetail) {
+                ListDetailPaneScaffoldRole.Detail
+            } else {
+                ListDetailPaneScaffoldRole.List
+            }
+        )
+    val scaffoldValue =
+        calculateThreePaneScaffoldValue(
+            maxHorizontalPartitions = directive.maxHorizontalPartitions,
+            adaptStrategies = ListDetailPaneScaffoldDefaults.adaptStrategies(),
+            currentDestination = destination,
+            maxVerticalPartitions = directive.maxVerticalPartitions,
+        )
     val listVisible = scaffoldValue[ListDetailPaneScaffoldRole.List] != PaneAdaptedValue.Hidden
 
     BackHandler(enabled = hasDetail, onBack = onBack)

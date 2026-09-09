@@ -12,7 +12,6 @@ import dev.agentknock.storage.secret.TemporaryAccessGrant
 import kotlinx.coroutines.flow.Flow
 import kotlinx.coroutines.flow.combine
 import kotlinx.coroutines.flow.map
-import kotlinx.serialization.decodeFromString
 import kotlinx.serialization.json.JsonElement
 
 internal data class ClientSummary(
@@ -56,65 +55,73 @@ internal class ClientRepository(
     private val audit: AuditSink,
     private val writeTransaction: WriteTransaction,
 ) {
-    fun observeClients(): Flow<List<ClientSummary>> = combine(
-        dao.observeClients(),
-        temporaryAccessGrants,
-    ) { clients, grants ->
-        val grantCounts = grants.distinctBy { it.clientId to it.secretId }
-            .groupingBy { it.clientId }.eachCount()
-        clients
-            .mapNotNull { client ->
-                val state = client.relayClientState.toRelayClientState()
-                val desiredState = client.desiredRelayClientState?.toRelayClientState()
-                if (state == RelayClientState.REVOKED || desiredState == RelayClientState.REVOKED) {
-                    return@mapNotNull null
+    fun observeClients(): Flow<List<ClientSummary>> =
+        combine(
+            dao.observeClients(),
+            temporaryAccessGrants,
+        ) { clients, grants ->
+            val grantCounts =
+                grants
+                    .distinctBy { it.clientId to it.secretId }
+                    .groupingBy { it.clientId }
+                    .eachCount()
+            clients
+                .mapNotNull { client ->
+                    val state = client.relayClientState.toRelayClientState()
+                    val desiredState = client.desiredRelayClientState?.toRelayClientState()
+                    if (
+                        state == RelayClientState.REVOKED ||
+                            desiredState == RelayClientState.REVOKED
+                    ) {
+                        return@mapNotNull null
+                    }
+                    ClientSummary(
+                        clientId = client.clientId,
+                        name = client.name,
+                        hostname = client.hostname,
+                        platform = client.platform,
+                        architecture = client.architecture,
+                        state = state,
+                        desiredState = desiredState,
+                        pairedAt = client.pairedAt,
+                        lastRequestAt = client.lastSeenAt,
+                        temporaryAccessCount = grantCounts[client.clientId] ?: 0,
+                    )
                 }
-                ClientSummary(
-                    clientId = client.clientId,
-                    name = client.name,
-                    hostname = client.hostname,
-                    platform = client.platform,
-                    architecture = client.architecture,
-                    state = state,
-                    desiredState = desiredState,
-                    pairedAt = client.pairedAt,
-                    lastRequestAt = client.lastSeenAt,
-                    temporaryAccessCount = grantCounts[client.clientId] ?: 0,
-                )
-            }
-            .sortedBy { it.name.lowercase() }
-    }
+                .sortedBy { it.name.lowercase() }
+        }
 
     fun observeClient(clientId: String): Flow<ClientDetails?> =
         dao.observeClient(clientId).map { client ->
-            client?.takeIf {
-                it.relayClientState != RelayClientState.REVOKED.wireName &&
-                    it.desiredRelayClientState != RelayClientState.REVOKED.wireName
-            }?.let {
-                ClientDetails(
-                    clientId = it.clientId,
-                    name = it.name,
-                    hostname = it.hostname,
-                    platform = it.platform,
-                    architecture = it.architecture,
-                    osVersion = it.osVersion,
-                    machineId = it.machineId,
-                    clientSoftware = it.clientSoftwareJson?.let(::decodeStoredClientSoftware),
-                    instructions = it.instructions,
-                    state = it.relayClientState.toRelayClientState(),
-                    desiredState = it.desiredRelayClientState?.toRelayClientState(),
-                    pairedAt = it.pairedAt,
-                    lastRequestAt = it.lastSeenAt,
-                )
-            }
+            client
+                ?.takeIf {
+                    it.relayClientState != RelayClientState.REVOKED.wireName &&
+                        it.desiredRelayClientState != RelayClientState.REVOKED.wireName
+                }
+                ?.let {
+                    ClientDetails(
+                        clientId = it.clientId,
+                        name = it.name,
+                        hostname = it.hostname,
+                        platform = it.platform,
+                        architecture = it.architecture,
+                        osVersion = it.osVersion,
+                        machineId = it.machineId,
+                        clientSoftware = it.clientSoftwareJson?.let(::decodeStoredClientSoftware),
+                        instructions = it.instructions,
+                        state = it.relayClientState.toRelayClientState(),
+                        desiredState = it.desiredRelayClientState?.toRelayClientState(),
+                        pairedAt = it.pairedAt,
+                        lastRequestAt = it.lastSeenAt,
+                    )
+                }
         }
 
     suspend fun rename(clientId: String, name: String): ClientChangeResult {
         val trimmed = name.trim()
         require(trimmed.isNotEmpty()) { "A client name cannot be empty" }
         return writeTransaction.execute {
-            val client = dao.getClient(clientId)
-                ?: return@execute ClientChangeResult.NOT_FOUND
+            val client = dao.getClient(clientId) ?: return@execute ClientChangeResult.NOT_FOUND
             if (client.name == trimmed) return@execute ClientChangeResult.CHANGED
             check(dao.updateClient(client.copy(name = trimmed)) == 1)
             audit.record(
@@ -125,10 +132,10 @@ internal class ClientRepository(
                     detail = client.name.takeUnless { it == trimmed },
                     clientId = clientId,
                     clientName = trimmed,
-                    data = client.copy(name = trimmed).auditData() + auditDataOf(
-                        "previous_name" to client.name,
-                    ),
-                ),
+                    data =
+                        client.copy(name = trimmed).auditData() +
+                            auditDataOf("previous_name" to client.name),
+                )
             )
             ClientChangeResult.CHANGED
         }
@@ -138,8 +145,7 @@ internal class ClientRepository(
         clientId: String,
         instructions: String,
     ): ClientChangeResult = writeTransaction.execute {
-        val client = dao.getClient(clientId)
-            ?: return@execute ClientChangeResult.NOT_FOUND
+        val client = dao.getClient(clientId) ?: return@execute ClientChangeResult.NOT_FOUND
         val normalized = instructions.trim()
         if (client.instructions == normalized) return@execute ClientChangeResult.CHANGED
         check(dao.updateClient(client.copy(instructions = normalized)) == 1)
@@ -150,10 +156,10 @@ internal class ClientRepository(
                 subject = client.name,
                 clientId = clientId,
                 clientName = client.name,
-                data = client.copy(instructions = normalized).auditData() + auditDataOf(
-                    "previous_instructions" to client.instructions,
-                ),
-            ),
+                data =
+                    client.copy(instructions = normalized).auditData() +
+                        auditDataOf("previous_instructions" to client.instructions),
+            )
         )
         ClientChangeResult.CHANGED
     }
@@ -163,8 +169,7 @@ internal class ClientRepository(
         state: RelayClientState,
     ): ClientChangeResult = writeTransaction.execute {
         if (state == RelayClientState.PENDING) return@execute ClientChangeResult.INVALID_STATE
-        val client = dao.getClient(clientId)
-            ?: return@execute ClientChangeResult.NOT_FOUND
+        val client = dao.getClient(clientId) ?: return@execute ClientChangeResult.NOT_FOUND
         if (client.desiredRelayClientState == RelayClientState.REVOKED.wireName) {
             return@execute if (state == RelayClientState.REVOKED) {
                 ClientChangeResult.CHANGED
@@ -173,14 +178,15 @@ internal class ClientRepository(
             }
         }
         val current = client.relayClientState.toRelayClientState()
-        val allowed = when (current) {
-            RelayClientState.ACTIVE -> state == RelayClientState.SUSPENDED ||
-                state == RelayClientState.REVOKED
-            RelayClientState.SUSPENDED -> state == RelayClientState.ACTIVE ||
-                state == RelayClientState.REVOKED
-            RelayClientState.REVOKED -> state == RelayClientState.REVOKED
-            RelayClientState.PENDING -> false
-        }
+        val allowed =
+            when (current) {
+                RelayClientState.ACTIVE ->
+                    state == RelayClientState.SUSPENDED || state == RelayClientState.REVOKED
+                RelayClientState.SUSPENDED ->
+                    state == RelayClientState.ACTIVE || state == RelayClientState.REVOKED
+                RelayClientState.REVOKED -> state == RelayClientState.REVOKED
+                RelayClientState.PENDING -> false
+            }
         if (!allowed) return@execute ClientChangeResult.INVALID_STATE
         val updated = client.copy(desiredRelayClientState = state.wireName)
         if (state == RelayClientState.REVOKED) {
@@ -201,35 +207,40 @@ internal class ClientRepository(
                     dao.updateClient(
                         client.copy(
                             relayClientState = state.wireName,
-                            desiredRelayClientState = client.desiredRelayClientState
-                                ?.takeUnless { it == state.wireName },
-                        ),
-                    ) == 1,
+                            desiredRelayClientState =
+                                client.desiredRelayClientState?.takeUnless { it == state.wireName },
+                        )
+                    ) == 1
                 )
             }
             if (client.relayClientState != state.wireName) {
-                val applied = client.copy(
-                    relayClientState = state.wireName,
-                    desiredRelayClientState = client.desiredRelayClientState
-                        ?.takeUnless { it == state.wireName },
-                )
+                val applied =
+                    client.copy(
+                        relayClientState = state.wireName,
+                        desiredRelayClientState =
+                            client.desiredRelayClientState?.takeUnless { it == state.wireName },
+                    )
                 audit.record(
                     AuditRecord(
-                        type = when (state) {
-                            RelayClientState.ACTIVE -> AuditEventType.CLIENT_RESUMED
-                            RelayClientState.SUSPENDED -> AuditEventType.CLIENT_SUSPENDED
-                            RelayClientState.REVOKED -> AuditEventType.CLIENT_REVOKED
-                            RelayClientState.PENDING -> AuditEventType.CLIENT_PENDING
-                        },
+                        type =
+                            when (state) {
+                                RelayClientState.ACTIVE -> AuditEventType.CLIENT_RESUMED
+                                RelayClientState.SUSPENDED -> AuditEventType.CLIENT_SUSPENDED
+                                RelayClientState.REVOKED -> AuditEventType.CLIENT_REVOKED
+                                RelayClientState.PENDING -> AuditEventType.CLIENT_PENDING
+                            },
                         outcome = AuditOutcome.CHANGED,
                         subject = client.name,
                         clientId = client.clientId,
                         clientName = client.name,
-                        data = applied.auditData() + auditDataOf(
-                            "previous_relay_state" to client.relayClientState,
-                            "previous_desired_relay_state" to client.desiredRelayClientState,
-                        ),
-                    ),
+                        data =
+                            applied.auditData() +
+                                auditDataOf(
+                                    "previous_relay_state" to client.relayClientState,
+                                    "previous_desired_relay_state" to
+                                        client.desiredRelayClientState,
+                                ),
+                    )
                 )
             }
         }
@@ -238,22 +249,23 @@ internal class ClientRepository(
     private fun String.toRelayClientState(): RelayClientState =
         checkNotNull(RelayClientState.entries.find { it.wireName == this })
 
-    private fun ClientEntity.auditData(): Map<String, JsonElement> = auditDataOf(
-        "device_identity_id" to deviceIdentityId,
-        "name" to name,
-        "instructions" to instructions,
-        "hostname" to hostname,
-        "platform" to platform,
-        "architecture" to architecture,
-        "os_version" to osVersion,
-        "machine_id" to machineId,
-        "client_software" to clientSoftwareJson?.let { encoded ->
-            runCatching { storedJson.parseToJsonElement(encoded) }.getOrNull()
-        },
-        "relay_state" to relayClientState,
-        "desired_relay_state" to desiredRelayClientState,
-        "paired_at" to pairedAt,
-        "last_seen_at" to lastSeenAt,
-    )
-
+    private fun ClientEntity.auditData(): Map<String, JsonElement> =
+        auditDataOf(
+            "device_identity_id" to deviceIdentityId,
+            "name" to name,
+            "instructions" to instructions,
+            "hostname" to hostname,
+            "platform" to platform,
+            "architecture" to architecture,
+            "os_version" to osVersion,
+            "machine_id" to machineId,
+            "client_software" to
+                clientSoftwareJson?.let { encoded ->
+                    runCatching { storedJson.parseToJsonElement(encoded) }.getOrNull()
+                },
+            "relay_state" to relayClientState,
+            "desired_relay_state" to desiredRelayClientState,
+            "paired_at" to pairedAt,
+            "last_seen_at" to lastSeenAt,
+        )
 }

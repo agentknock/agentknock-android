@@ -8,8 +8,8 @@ import dev.agentknock.review.ApprovalReviewRequest
 import dev.agentknock.storage.approval.AiReview
 import dev.agentknock.storage.approval.AiReviewDecision
 import dev.agentknock.storage.approval.AiReviewFailure
-import dev.agentknock.storage.approval.ApprovalEvaluation
 import dev.agentknock.storage.approval.ApprovalAction
+import dev.agentknock.storage.approval.ApprovalEvaluation
 import dev.agentknock.storage.approval.SecretApprovalEvaluation
 import dev.agentknock.storage.secret.SecretApprovalMode
 import dev.agentknock.storage.secret.SecretApprovalPolicy
@@ -22,12 +22,13 @@ import org.junit.Test
 class RequestApprovalPlannerTest {
     @Test
     fun policyEvaluationRetainsIdentityRevisionAndEffectiveMode() {
-        val actions = listOf(
-            SecretApprovalMode.DENY to ApprovalAction.DENY,
-            SecretApprovalMode.ASK_ME to ApprovalAction.ASK_ME,
-            SecretApprovalMode.ASK_AI to ApprovalAction.ASK_AI,
-            SecretApprovalMode.APPROVE to ApprovalAction.APPROVE,
-        )
+        val actions =
+            listOf(
+                SecretApprovalMode.DENY to ApprovalAction.DENY,
+                SecretApprovalMode.ASK_ME to ApprovalAction.ASK_ME,
+                SecretApprovalMode.ASK_AI to ApprovalAction.ASK_AI,
+                SecretApprovalMode.APPROVE to ApprovalAction.APPROVE,
+            )
         for ((mode, action) in actions) {
             val policy = policy("secret", mode).copy(secretName = "display-name", revision = 42L)
             val eligible = mode == SecretApprovalMode.ASK_ME || mode == SecretApprovalMode.ASK_AI
@@ -42,10 +43,12 @@ class RequestApprovalPlannerTest {
                 policy.evaluate(),
             )
             assertEquals(
-                policy.evaluate().copy(
-                    action = if (eligible) ApprovalAction.APPROVE else action,
-                    temporaryAccessExpiresAt = 1234L.takeIf { eligible },
-                ),
+                policy
+                    .evaluate()
+                    .copy(
+                        action = if (eligible) ApprovalAction.APPROVE else action,
+                        temporaryAccessExpiresAt = 1234L.takeIf { eligible },
+                    ),
                 policy.copy(temporaryAccessExpiresAt = 1234L).evaluate(),
             )
         }
@@ -53,10 +56,11 @@ class RequestApprovalPlannerTest {
 
     @Test
     fun aiAuditDataRetainsTheExactVerdictAndExplanation() {
-        val review = AiReview(
-            decision = AiReviewDecision.ASK_USER,
-            explanation = "The repository does not match the permitted scope.",
-        )
+        val review =
+            AiReview(
+                decision = AiReviewDecision.ASK_USER,
+                explanation = "The repository does not match the permitted scope.",
+            )
 
         assertEquals(JsonPrimitive("ask_user"), review.auditData()["ai_decision"])
         assertEquals(
@@ -67,24 +71,28 @@ class RequestApprovalPlannerTest {
 
     @Test
     fun aiAttemptAuditDistinguishesTheServiceVerdictFromTheAppliedFallback() {
-        val serviceReview = AiReview(
-            decision = AiReviewDecision.APPROVE,
-            explanation = "The operation is allowed by the instructions.",
-        )
-        val appliedReview = AiReview(
-            decision = AiReviewDecision.ASK_USER,
-            explanation = "Approval settings changed while the review was running.",
-        )
+        val serviceReview =
+            AiReview(
+                decision = AiReviewDecision.APPROVE,
+                explanation = "The operation is allowed by the instructions.",
+            )
+        val appliedReview =
+            AiReview(
+                decision = AiReviewDecision.ASK_USER,
+                explanation = "Approval settings changed while the review was running.",
+            )
 
-        val request = ApprovalReviewRequest(
-            instructions = ApprovalReviewInstructions("", "", emptyMap()),
-            facts = ApprovalReviewFacts(
-                client = "workstation",
-                operation = ApprovalReviewOperation.INVOCATION,
-                secrets = emptyMap(),
-            ),
-            evidence = ApprovalReviewEvidence(),
-        )
+        val request =
+            ApprovalReviewRequest(
+                instructions = ApprovalReviewInstructions("", "", emptyMap()),
+                facts =
+                    ApprovalReviewFacts(
+                        client = "workstation",
+                        operation = ApprovalReviewOperation.INVOCATION,
+                        secrets = emptyMap(),
+                    ),
+                evidence = ApprovalReviewEvidence(),
+            )
         val data = AiReviewAttempt(serviceReview, request).auditData(appliedReview)
 
         assertEquals(JsonPrimitive("approve"), data["ai_decision"])
@@ -100,11 +108,12 @@ class RequestApprovalPlannerTest {
     @Test
     fun approvedSourceDistinguishesPolicyTemporaryAiMixedAndNonSensitive() {
         val policy = policy("policy", SecretApprovalMode.APPROVE)
-        val temporary = policy(
-            "temporary",
-            SecretApprovalMode.ASK_ME,
-            temporaryAccessExpiresAt = 8_000L,
-        )
+        val temporary =
+            policy(
+                "temporary",
+                SecretApprovalMode.ASK_ME,
+                temporaryAccessExpiresAt = 8_000L,
+            )
         val ai = policy("ai", SecretApprovalMode.ASK_AI)
 
         assertEquals(
@@ -119,54 +128,60 @@ class RequestApprovalPlannerTest {
             DECISION_SOURCE_AI,
             approvedPlan(listOf(ai), AiReviewDecision.APPROVE).decisionSource,
         )
-        val mixed = approvedPlan(
-            listOf(temporary, ai),
-            AiReviewDecision.APPROVE,
-        )
+        val mixed =
+            approvedPlan(
+                listOf(temporary, ai),
+                AiReviewDecision.APPROVE,
+            )
         assertEquals(DECISION_SOURCE_MIXED, mixed.decisionSource)
         assertTrue(mixed.aiApprovalUsed)
         assertEquals(
             DECISION_SOURCE_NON_SENSITIVE,
             planAutomaticApproval(
-                outcome = AutomaticApprovalOutcome.APPROVED,
-                evaluation = null,
-                aiDecision = null,
-                nonSensitive = true,
-            ).decisionSource,
+                    outcome = AutomaticApprovalOutcome.APPROVED,
+                    evaluation = null,
+                    aiDecision = null,
+                    nonSensitive = true,
+                )
+                .decisionSource,
         )
     }
 
     @Test
     fun deniedAndActionRequiredPlansDoNotInventAReason() {
-        val policyDenial = planAutomaticApproval(
-            outcome = AutomaticApprovalOutcome.DENIED,
-            evaluation = null,
-            aiDecision = null,
-            denialSource = AutomaticApprovalDenialSource.POLICY,
-        )
+        val policyDenial =
+            planAutomaticApproval(
+                outcome = AutomaticApprovalOutcome.DENIED,
+                evaluation = null,
+                aiDecision = null,
+                denialSource = AutomaticApprovalDenialSource.POLICY,
+            )
         assertEquals(ApprovalDecision.DENIED, policyDenial.decision)
         assertEquals(DECISION_SOURCE_POLICY, policyDenial.decisionSource)
 
-        val aiDenial = planAutomaticApproval(
-            outcome = AutomaticApprovalOutcome.DENIED,
-            evaluation = null,
-            aiDecision = AiReviewDecision.DENY,
-            denialSource = AutomaticApprovalDenialSource.AI,
-        )
+        val aiDenial =
+            planAutomaticApproval(
+                outcome = AutomaticApprovalOutcome.DENIED,
+                evaluation = null,
+                aiDecision = AiReviewDecision.DENY,
+                denialSource = AutomaticApprovalDenialSource.AI,
+            )
         assertEquals(DECISION_SOURCE_AI, aiDenial.decisionSource)
 
-        val unrelatedFailure = planAutomaticApproval(
-            outcome = AutomaticApprovalOutcome.DENIED,
-            evaluation = null,
-            aiDecision = null,
-        )
+        val unrelatedFailure =
+            planAutomaticApproval(
+                outcome = AutomaticApprovalOutcome.DENIED,
+                evaluation = null,
+                aiDecision = null,
+            )
         assertNull(unrelatedFailure.decisionSource)
 
-        val actionRequired = planAutomaticApproval(
-            outcome = AutomaticApprovalOutcome.ACTION_REQUIRED,
-            evaluation = null,
-            aiDecision = null,
-        )
+        val actionRequired =
+            planAutomaticApproval(
+                outcome = AutomaticApprovalOutcome.ACTION_REQUIRED,
+                evaluation = null,
+                aiDecision = null,
+            )
         assertNull(actionRequired.decision)
         assertNull(actionRequired.decisionSource)
     }
@@ -176,9 +191,8 @@ class RequestApprovalPlannerTest {
         val temporary = policy("temporary", SecretApprovalMode.ASK_ME)
         val ai = policy("ai", SecretApprovalMode.ASK_AI)
         val policies = listOf(temporary, ai)
-        val stored = evaluation(policies).copy(
-            aiReview = AiReview(decision = AiReviewDecision.ASK_USER),
-        )
+        val stored =
+            evaluation(policies).copy(aiReview = AiReview(decision = AiReviewDecision.ASK_USER))
 
         val plan = checkNotNull(planTemporaryAccess(policies, stored, now = 1_000L))
 
@@ -193,9 +207,8 @@ class RequestApprovalPlannerTest {
         val temporary = policy("temporary", SecretApprovalMode.ASK_ME)
         val ai = policy("ai", SecretApprovalMode.ASK_AI)
         val policies = listOf(temporary, ai)
-        val stored = evaluation(policies).copy(
-            aiReview = AiReview(decision = AiReviewDecision.APPROVE),
-        )
+        val stored =
+            evaluation(policies).copy(aiReview = AiReview(decision = AiReviewDecision.APPROVE))
 
         val plan = checkNotNull(planTemporaryAccess(policies, stored, now = 2_000L))
 
@@ -208,9 +221,9 @@ class RequestApprovalPlannerTest {
     @Test
     fun failedAiReviewCanEscalateToTemporaryAccess() {
         val policy = policy("ai", SecretApprovalMode.ASK_AI)
-        val stored = evaluation(listOf(policy)).copy(
-            aiReview = AiReview(failure = AiReviewFailure.UNAVAILABLE),
-        )
+        val stored =
+            evaluation(listOf(policy))
+                .copy(aiReview = AiReview(failure = AiReviewFailure.UNAVAILABLE))
 
         val plan = checkNotNull(planTemporaryAccess(listOf(policy), stored, now = 2_000L))
 
@@ -227,27 +240,26 @@ class RequestApprovalPlannerTest {
                 policies = listOf(original.copy(revision = original.revision + 1)),
                 storedEvaluation = stored,
                 now = 3_000L,
-            ),
+            )
         )
         assertNull(
             planTemporaryAccess(
                 policies = listOf(policy("secret", SecretApprovalMode.APPROVE)),
-                storedEvaluation = evaluation(
-                    listOf(policy("secret", SecretApprovalMode.APPROVE)),
-                ),
+                storedEvaluation = evaluation(listOf(policy("secret", SecretApprovalMode.APPROVE))),
                 now = 3_000L,
-            ),
+            )
         )
     }
 
     private fun approvedPlan(
         policies: List<SecretApprovalPolicy>,
         aiDecision: AiReviewDecision? = null,
-    ): AutomaticApprovalPlan = planAutomaticApproval(
-        outcome = AutomaticApprovalOutcome.APPROVED,
-        evaluation = evaluation(policies),
-        aiDecision = aiDecision,
-    )
+    ): AutomaticApprovalPlan =
+        planAutomaticApproval(
+            outcome = AutomaticApprovalOutcome.APPROVED,
+            evaluation = evaluation(policies),
+            aiDecision = aiDecision,
+        )
 
     private fun evaluation(policies: List<SecretApprovalPolicy>) =
         ApprovalEvaluation(policies.map(SecretApprovalPolicy::evaluate))
@@ -256,12 +268,13 @@ class RequestApprovalPlannerTest {
         id: String,
         mode: SecretApprovalMode,
         temporaryAccessExpiresAt: Long? = null,
-    ) = SecretApprovalPolicy(
-        secretId = id,
-        secretName = id,
-        mode = mode,
-        instructions = "",
-        revision = 1L,
-        temporaryAccessExpiresAt = temporaryAccessExpiresAt,
-    )
+    ) =
+        SecretApprovalPolicy(
+            secretId = id,
+            secretName = id,
+            mode = mode,
+            instructions = "",
+            revision = 1L,
+            temporaryAccessExpiresAt = temporaryAccessExpiresAt,
+        )
 }

@@ -39,8 +39,13 @@ internal fun EnvironmentVariableDrafts(
     enabled: Boolean,
     onChange: (List<EnvironmentVariableDraft>) -> Unit,
 ) {
-    val duplicateNames = variables.filter { it.name.isNotBlank() }
-        .groupingBy { it.name }.eachCount().filterValues { it > 1 }.keys
+    val duplicateNames =
+        variables
+            .filter { it.name.isNotBlank() }
+            .groupingBy { it.name }
+            .eachCount()
+            .filterValues { it > 1 }
+            .keys
     Column(verticalArrangement = Arrangement.spacedBy(10.dp)) {
         Row(
             modifier = Modifier.fillMaxWidth(),
@@ -72,8 +77,8 @@ internal fun EnvironmentVariableDrafts(
             )
         }
         variables.forEach { variable ->
-            val invalidName = variable.name.isNotEmpty() &&
-                !environmentVariableName.matches(variable.name)
+            val invalidName =
+                variable.name.isNotEmpty() && !environmentVariableName.matches(variable.name)
             Surface(
                 color = MaterialTheme.colorScheme.surfaceContainer,
                 shape = MaterialTheme.shapes.large,
@@ -90,26 +95,36 @@ internal fun EnvironmentVariableDrafts(
                         label = { Text("Environment variable name") },
                         trailingIcon = {
                             IconButton(
-                                onClick = { onChange(variables.filterNot { it.id == variable.id }) },
+                                onClick = {
+                                    onChange(variables.filterNot { it.id == variable.id })
+                                },
                                 enabled = enabled,
                             ) {
-                                Icon(Icons.Outlined.Delete, contentDescription = "Remove environment variable")
+                                Icon(
+                                    Icons.Outlined.Delete,
+                                    contentDescription = "Remove environment variable",
+                                )
                             }
                         },
-                        textStyle = MaterialTheme.typography.bodyLarge.copy(fontFamily = FontFamily.Monospace),
+                        textStyle =
+                            MaterialTheme.typography.bodyLarge.copy(
+                                fontFamily = FontFamily.Monospace
+                            ),
                         singleLine = true,
                         enabled = enabled,
                         isError = invalidName || variable.name in duplicateNames,
-                        supportingText = when {
-                            variable.name in duplicateNames -> ({ Text("Name is duplicated") })
-                            invalidName -> ({ Text("Enter a valid environment variable name") })
-                            else -> null
-                        },
-                        keyboardOptions = KeyboardOptions(
-                            capitalization = KeyboardCapitalization.Characters,
-                            autoCorrectEnabled = false,
-                            keyboardType = KeyboardType.Ascii,
-                        ),
+                        supportingText =
+                            when {
+                                variable.name in duplicateNames -> ({ Text("Name is duplicated") })
+                                invalidName -> ({ Text("Enter a valid environment variable name") })
+                                else -> null
+                            },
+                        keyboardOptions =
+                            KeyboardOptions(
+                                capitalization = KeyboardCapitalization.Characters,
+                                autoCorrectEnabled = false,
+                                keyboardType = KeyboardType.Ascii,
+                            ),
                         modifier = Modifier.fillMaxWidth(),
                     )
                     EnvironmentVariableDraftValue(
@@ -123,7 +138,9 @@ internal fun EnvironmentVariableDrafts(
                         sensitive = variable.sensitive,
                         enabled = enabled,
                         onChange = { sensitive ->
-                            onChange(variables.replace(variable.id) { it.copy(sensitive = sensitive) })
+                            onChange(
+                                variables.replace(variable.id) { it.copy(sensitive = sensitive) }
+                            )
                         },
                     )
                 }
@@ -154,8 +171,9 @@ private fun List<EnvironmentVariableDraft>.replace(
     transform: (EnvironmentVariableDraft) -> EnvironmentVariableDraft,
 ): List<EnvironmentVariableDraft> = map { if (it.id == id) transform(it) else it }
 
-internal fun sensitivityDescription(sensitive: Boolean): String = if (sensitive) {
-    "Follows approval settings. Hidden on this device until revealed."
-} else {
-    "Visible and provided without approval; may be shared with AI."
-}
+internal fun sensitivityDescription(sensitive: Boolean): String =
+    if (sensitive) {
+        "Follows approval settings. Hidden on this device until revealed."
+    } else {
+        "Visible and provided without approval; may be shared with AI."
+    }

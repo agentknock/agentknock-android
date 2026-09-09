@@ -12,8 +12,8 @@ import androidx.room3.OnConflictStrategy
 import androidx.room3.PrimaryKey
 import androidx.room3.Query
 import androidx.room3.Transaction
-import dev.agentknock.storage.crypto.VaultKeyEntity
 import dev.agentknock.storage.crypto.EncryptedValue
+import dev.agentknock.storage.crypto.VaultKeyEntity
 import dev.agentknock.storage.request.ClientEntity
 import kotlinx.coroutines.flow.Flow
 
@@ -22,25 +22,15 @@ import kotlinx.coroutines.flow.Flow
     indices = [Index(value = ["name"], unique = true)],
 )
 internal data class SecretEntity(
-    @PrimaryKey
-    @ColumnInfo(name = "id")
-    val id: String,
-    @ColumnInfo(name = "name")
-    val name: String,
-    @ColumnInfo(name = "description")
-    val description: String,
-    @ColumnInfo(name = "type")
-    val type: String,
-    @ColumnInfo(name = "created_at")
-    val createdAt: Long,
-    @ColumnInfo(name = "updated_at")
-    val updatedAt: Long,
-    @ColumnInfo(name = "revision")
-    val revision: Long = 1,
-    @ColumnInfo(name = "approval_mode")
-    val approvalMode: String = "ask_me",
-    @ColumnInfo(name = "instructions")
-    val instructions: String = "",
+    @PrimaryKey @ColumnInfo(name = "id") val id: String,
+    @ColumnInfo(name = "name") val name: String,
+    @ColumnInfo(name = "description") val description: String,
+    @ColumnInfo(name = "type") val type: String,
+    @ColumnInfo(name = "created_at") val createdAt: Long,
+    @ColumnInfo(name = "updated_at") val updatedAt: Long,
+    @ColumnInfo(name = "revision") val revision: Long = 1,
+    @ColumnInfo(name = "approval_mode") val approvalMode: String = "ask_me",
+    @ColumnInfo(name = "instructions") val instructions: String = "",
 )
 
 internal val SecretEntity.secretType: SecretType
@@ -49,202 +39,160 @@ internal val SecretEntity.secretType: SecretType
 @Entity(
     tableName = "secret_client_approval_overrides",
     primaryKeys = ["secret_id", "client_id"],
-    foreignKeys = [
-        ForeignKey(
-            entity = SecretEntity::class,
-            parentColumns = ["id"],
-            childColumns = ["secret_id"],
-            onDelete = ForeignKey.CASCADE,
-            onUpdate = ForeignKey.NO_ACTION,
-        ),
-        ForeignKey(
-            entity = ClientEntity::class,
-            parentColumns = ["client_id"],
-            childColumns = ["client_id"],
-            onDelete = ForeignKey.CASCADE,
-            onUpdate = ForeignKey.NO_ACTION,
-        ),
-    ],
+    foreignKeys =
+        [
+            ForeignKey(
+                entity = SecretEntity::class,
+                parentColumns = ["id"],
+                childColumns = ["secret_id"],
+                onDelete = ForeignKey.CASCADE,
+                onUpdate = ForeignKey.NO_ACTION,
+            ),
+            ForeignKey(
+                entity = ClientEntity::class,
+                parentColumns = ["client_id"],
+                childColumns = ["client_id"],
+                onDelete = ForeignKey.CASCADE,
+                onUpdate = ForeignKey.NO_ACTION,
+            ),
+        ],
     indices = [Index(value = ["client_id"])],
 )
 internal data class SecretClientApprovalOverrideEntity(
-    @ColumnInfo(name = "secret_id")
-    val secretId: String,
-    @ColumnInfo(name = "client_id")
-    val clientId: String,
-    @ColumnInfo(name = "approval_mode")
-    val approvalMode: String,
+    @ColumnInfo(name = "secret_id") val secretId: String,
+    @ColumnInfo(name = "client_id") val clientId: String,
+    @ColumnInfo(name = "approval_mode") val approvalMode: String,
 )
 
 @Entity(
     tableName = "temporary_access_grants",
     primaryKeys = ["secret_id", "client_id", "operation"],
-    foreignKeys = [
-        ForeignKey(
-            entity = SecretEntity::class,
-            parentColumns = ["id"],
-            childColumns = ["secret_id"],
-            onDelete = ForeignKey.CASCADE,
-            onUpdate = ForeignKey.NO_ACTION,
-        ),
-        ForeignKey(
-            entity = ClientEntity::class,
-            parentColumns = ["client_id"],
-            childColumns = ["client_id"],
-            onDelete = ForeignKey.CASCADE,
-            onUpdate = ForeignKey.NO_ACTION,
-        ),
-    ],
+    foreignKeys =
+        [
+            ForeignKey(
+                entity = SecretEntity::class,
+                parentColumns = ["id"],
+                childColumns = ["secret_id"],
+                onDelete = ForeignKey.CASCADE,
+                onUpdate = ForeignKey.NO_ACTION,
+            ),
+            ForeignKey(
+                entity = ClientEntity::class,
+                parentColumns = ["client_id"],
+                childColumns = ["client_id"],
+                onDelete = ForeignKey.CASCADE,
+                onUpdate = ForeignKey.NO_ACTION,
+            ),
+        ],
     indices = [Index(value = ["client_id"])],
 )
 internal data class TemporaryAccessGrantEntity(
-    @ColumnInfo(name = "secret_id")
-    val secretId: String,
-    @ColumnInfo(name = "client_id")
-    val clientId: String,
-    @ColumnInfo(name = "operation")
-    val operation: String,
-    @ColumnInfo(name = "expires_at")
-    val expiresAt: Long,
+    @ColumnInfo(name = "secret_id") val secretId: String,
+    @ColumnInfo(name = "client_id") val clientId: String,
+    @ColumnInfo(name = "operation") val operation: String,
+    @ColumnInfo(name = "expires_at") val expiresAt: Long,
 )
 
 internal data class TemporaryAccessGrantRow(
-    @ColumnInfo(name = "secret_id")
-    val secretId: String,
-    @ColumnInfo(name = "secret_name")
-    val secretName: String,
-    @ColumnInfo(name = "client_id")
-    val clientId: String,
-    @ColumnInfo(name = "operation")
-    val operation: String,
-    @ColumnInfo(name = "expires_at")
-    val expiresAt: Long,
+    @ColumnInfo(name = "secret_id") val secretId: String,
+    @ColumnInfo(name = "secret_name") val secretName: String,
+    @ColumnInfo(name = "client_id") val clientId: String,
+    @ColumnInfo(name = "operation") val operation: String,
+    @ColumnInfo(name = "expires_at") val expiresAt: Long,
 )
 
 @Entity(
     tableName = "environment_variables",
-    foreignKeys = [
-        ForeignKey(
-            entity = SecretEntity::class,
-            parentColumns = ["id"],
-            childColumns = ["secret_id"],
-            onDelete = ForeignKey.CASCADE,
-            onUpdate = ForeignKey.NO_ACTION,
-        ),
-        ForeignKey(
-            entity = VaultKeyEntity::class,
-            parentColumns = ["id"],
-            childColumns = ["encryption_key_id"],
-            onDelete = ForeignKey.RESTRICT,
-            onUpdate = ForeignKey.NO_ACTION,
-        ),
-    ],
-    indices = [
-        Index(value = ["secret_id", "name"], unique = true),
-        Index(value = ["encryption_key_id"]),
-    ],
+    foreignKeys =
+        [
+            ForeignKey(
+                entity = SecretEntity::class,
+                parentColumns = ["id"],
+                childColumns = ["secret_id"],
+                onDelete = ForeignKey.CASCADE,
+                onUpdate = ForeignKey.NO_ACTION,
+            ),
+            ForeignKey(
+                entity = VaultKeyEntity::class,
+                parentColumns = ["id"],
+                childColumns = ["encryption_key_id"],
+                onDelete = ForeignKey.RESTRICT,
+                onUpdate = ForeignKey.NO_ACTION,
+            ),
+        ],
+    indices =
+        [
+            Index(value = ["secret_id", "name"], unique = true),
+            Index(value = ["encryption_key_id"]),
+        ],
 )
 internal data class EnvironmentVariableEntity(
-    @PrimaryKey
-    @ColumnInfo(name = "id")
-    val id: String,
-    @ColumnInfo(name = "secret_id")
-    val secretId: String,
-    @ColumnInfo(name = "name")
-    val name: String,
-    @ColumnInfo(name = "sensitive")
-    val sensitive: Boolean,
-    @Embedded
-    val encryptedValue: EncryptedValue,
-    @ColumnInfo(name = "value_updated_at")
-    val valueUpdatedAt: Long,
+    @PrimaryKey @ColumnInfo(name = "id") val id: String,
+    @ColumnInfo(name = "secret_id") val secretId: String,
+    @ColumnInfo(name = "name") val name: String,
+    @ColumnInfo(name = "sensitive") val sensitive: Boolean,
+    @Embedded val encryptedValue: EncryptedValue,
+    @ColumnInfo(name = "value_updated_at") val valueUpdatedAt: Long,
 )
 
 @Entity(
     tableName = "ssh_keys",
-    foreignKeys = [
-        ForeignKey(
-            entity = SecretEntity::class,
-            parentColumns = ["id"],
-            childColumns = ["secret_id"],
-            onDelete = ForeignKey.CASCADE,
-            onUpdate = ForeignKey.NO_ACTION,
-        ),
-        ForeignKey(
-            entity = VaultKeyEntity::class,
-            parentColumns = ["id"],
-            childColumns = ["encryption_key_id"],
-            onDelete = ForeignKey.RESTRICT,
-            onUpdate = ForeignKey.NO_ACTION,
-        ),
-    ],
+    foreignKeys =
+        [
+            ForeignKey(
+                entity = SecretEntity::class,
+                parentColumns = ["id"],
+                childColumns = ["secret_id"],
+                onDelete = ForeignKey.CASCADE,
+                onUpdate = ForeignKey.NO_ACTION,
+            ),
+            ForeignKey(
+                entity = VaultKeyEntity::class,
+                parentColumns = ["id"],
+                childColumns = ["encryption_key_id"],
+                onDelete = ForeignKey.RESTRICT,
+                onUpdate = ForeignKey.NO_ACTION,
+            ),
+        ],
     indices = [Index(value = ["encryption_key_id"])],
 )
 internal data class SshKeyEntity(
-    @PrimaryKey
-    @ColumnInfo(name = "secret_id")
-    val secretId: String,
-    @ColumnInfo(name = "algorithm")
-    val algorithm: String,
-    @ColumnInfo(name = "public_key")
-    val publicKey: ByteArray,
-    @ColumnInfo(name = "comment")
-    val comment: String,
-    @Embedded
-    val encryptedPrivateKey: EncryptedValue,
+    @PrimaryKey @ColumnInfo(name = "secret_id") val secretId: String,
+    @ColumnInfo(name = "algorithm") val algorithm: String,
+    @ColumnInfo(name = "public_key") val publicKey: ByteArray,
+    @ColumnInfo(name = "comment") val comment: String,
+    @Embedded val encryptedPrivateKey: EncryptedValue,
 )
 
 internal data class SecretSummaryRow(
-    @ColumnInfo(name = "id")
-    val id: String,
-    @ColumnInfo(name = "name")
-    val name: String,
-    @ColumnInfo(name = "description")
-    val description: String,
-    @ColumnInfo(name = "type")
-    val type: String,
-    @ColumnInfo(name = "created_at")
-    val createdAt: Long,
-    @ColumnInfo(name = "updated_at")
-    val updatedAt: Long,
-    @ColumnInfo(name = "environment_variable_count")
-    val environmentVariableCount: Int,
-    @ColumnInfo(name = "ssh_algorithm")
-    val sshAlgorithm: String? = null,
-    @ColumnInfo(name = "ssh_public_key")
-    val sshPublicKey: ByteArray? = null,
-    @ColumnInfo(name = "ssh_comment")
-    val sshComment: String? = null,
-    @ColumnInfo(name = "ssh_encryption_key_id")
-    val sshEncryptionKeyId: String? = null,
+    @ColumnInfo(name = "id") val id: String,
+    @ColumnInfo(name = "name") val name: String,
+    @ColumnInfo(name = "description") val description: String,
+    @ColumnInfo(name = "type") val type: String,
+    @ColumnInfo(name = "created_at") val createdAt: Long,
+    @ColumnInfo(name = "updated_at") val updatedAt: Long,
+    @ColumnInfo(name = "environment_variable_count") val environmentVariableCount: Int,
+    @ColumnInfo(name = "ssh_algorithm") val sshAlgorithm: String? = null,
+    @ColumnInfo(name = "ssh_public_key") val sshPublicKey: ByteArray? = null,
+    @ColumnInfo(name = "ssh_comment") val sshComment: String? = null,
+    @ColumnInfo(name = "ssh_encryption_key_id") val sshEncryptionKeyId: String? = null,
 )
 
 internal data class EnvironmentVariableMetadataRow(
-    @ColumnInfo(name = "id")
-    val id: String,
-    @ColumnInfo(name = "secret_id")
-    val secretId: String,
-    @ColumnInfo(name = "name")
-    val name: String,
-    @ColumnInfo(name = "sensitive")
-    val sensitive: Boolean,
-    @ColumnInfo(name = "encryption_key_id")
-    val encryptionKeyId: String,
-    @ColumnInfo(name = "value_updated_at")
-    val valueUpdatedAt: Long,
+    @ColumnInfo(name = "id") val id: String,
+    @ColumnInfo(name = "secret_id") val secretId: String,
+    @ColumnInfo(name = "name") val name: String,
+    @ColumnInfo(name = "sensitive") val sensitive: Boolean,
+    @ColumnInfo(name = "encryption_key_id") val encryptionKeyId: String,
+    @ColumnInfo(name = "value_updated_at") val valueUpdatedAt: Long,
 )
 
 internal data class SshKeyMetadataRow(
-    @ColumnInfo(name = "secret_id")
-    val secretId: String,
-    @ColumnInfo(name = "algorithm")
-    val algorithm: String,
-    @ColumnInfo(name = "public_key")
-    val publicKey: ByteArray,
-    @ColumnInfo(name = "comment")
-    val comment: String,
-    @ColumnInfo(name = "encryption_key_id")
-    val encryptionKeyId: String,
+    @ColumnInfo(name = "secret_id") val secretId: String,
+    @ColumnInfo(name = "algorithm") val algorithm: String,
+    @ColumnInfo(name = "public_key") val publicKey: ByteArray,
+    @ColumnInfo(name = "comment") val comment: String,
+    @ColumnInfo(name = "encryption_key_id") val encryptionKeyId: String,
 )
 
 /** A transactionally consistent view of every usable secret and its typed content. */
@@ -282,7 +230,7 @@ internal interface SecretDao {
         LEFT JOIN ssh_keys ON ssh_keys.secret_id = secrets.id
         GROUP BY secrets.id
         ORDER BY secrets.name COLLATE NOCASE, secrets.id
-        """,
+        """
     )
     fun observeSecrets(): Flow<List<SecretSummaryRow>>
 
@@ -291,10 +239,10 @@ internal interface SecretDao {
 
     @Query(
         "SELECT * FROM secret_client_approval_overrides " +
-            "WHERE secret_id = :secretId ORDER BY client_id",
+            "WHERE secret_id = :secretId ORDER BY client_id"
     )
     fun observeClientApprovalOverrides(
-        secretId: String,
+        secretId: String
     ): Flow<List<SecretClientApprovalOverrideEntity>>
 
     @Query(
@@ -307,7 +255,7 @@ internal interface SecretDao {
         FROM temporary_access_grants
         JOIN secrets ON secrets.id = temporary_access_grants.secret_id
         ORDER BY temporary_access_grants.expires_at, secrets.name COLLATE NOCASE
-        """,
+        """
     )
     fun observeTemporaryAccessGrants(): Flow<List<TemporaryAccessGrantRow>>
 
@@ -322,11 +270,9 @@ internal interface SecretDao {
         FROM environment_variables
         WHERE secret_id = :secretId
         ORDER BY name COLLATE NOCASE, id
-        """,
+        """
     )
-    fun observeEnvironmentVariables(
-        secretId: String,
-    ): Flow<List<EnvironmentVariableMetadataRow>>
+    fun observeEnvironmentVariables(secretId: String): Flow<List<EnvironmentVariableMetadataRow>>
 
     @Query(
         """
@@ -337,12 +283,11 @@ internal interface SecretDao {
                encryption_key_id
         FROM ssh_keys
         WHERE secret_id = :secretId
-        """,
+        """
     )
     fun observeSshKey(secretId: String): Flow<SshKeyMetadataRow?>
 
-    @Query("SELECT * FROM secrets WHERE id = :id")
-    suspend fun getSecret(id: String): SecretEntity?
+    @Query("SELECT * FROM secrets WHERE id = :id") suspend fun getSecret(id: String): SecretEntity?
 
     @Query("SELECT * FROM environment_variables WHERE id = :id")
     suspend fun getEnvironmentVariable(id: String): EnvironmentVariableEntity?
@@ -361,7 +306,7 @@ internal interface SecretDao {
 
     @Query(
         "SELECT * FROM secret_client_approval_overrides " +
-            "WHERE client_id = :clientId AND secret_id IN (:secretIds)",
+            "WHERE client_id = :clientId AND secret_id IN (:secretIds)"
     )
     suspend fun getClientApprovalOverrides(
         clientId: String,
@@ -371,7 +316,7 @@ internal interface SecretDao {
     @Query(
         "SELECT * FROM temporary_access_grants " +
             "WHERE client_id = :clientId AND secret_id IN (:secretIds) " +
-            "AND operation = :operation AND expires_at > :now",
+            "AND operation = :operation AND expires_at > :now"
     )
     suspend fun getActiveTemporaryAccessGrants(
         clientId: String,
@@ -382,7 +327,7 @@ internal interface SecretDao {
 
     @Query(
         "SELECT * FROM temporary_access_grants WHERE secret_id = :secretId " +
-            "AND client_id = :clientId AND operation = :operation",
+            "AND client_id = :clientId AND operation = :operation"
     )
     suspend fun getTemporaryAccessGrant(
         secretId: String,
@@ -401,19 +346,19 @@ internal interface SecretDao {
               AND clients.relay_client_state = 'active'
               AND COALESCE(clients.desired_relay_client_state, 'active') = 'active'
         )
-        """,
+        """
     )
     suspend fun clientCanReceiveTemporaryAccess(clientId: String): Boolean
 
-    @Query("SELECT * FROM ssh_keys ORDER BY secret_id")
-    suspend fun getSshKeys(): List<SshKeyEntity>
+    @Query("SELECT * FROM ssh_keys ORDER BY secret_id") suspend fun getSshKeys(): List<SshKeyEntity>
 
     @Transaction
-    suspend fun getSecretSnapshot(): SecretSnapshot = SecretSnapshot(
-        secrets = getSecrets(),
-        environmentVariables = getEnvironmentVariables(),
-        sshKeys = getSshKeys(),
-    )
+    suspend fun getSecretSnapshot(): SecretSnapshot =
+        SecretSnapshot(
+            secrets = getSecrets(),
+            environmentVariables = getEnvironmentVariables(),
+            sshKeys = getSshKeys(),
+        )
 
     @Query("SELECT EXISTS(SELECT 1 FROM secrets WHERE name = :name AND id != :excludingId)")
     suspend fun secretNameInUse(name: String, excludingId: String): Boolean
@@ -425,7 +370,7 @@ internal interface SecretDao {
             FROM environment_variables
             WHERE secret_id = :secretId AND name = :name AND id != :excludingId
         )
-        """,
+        """
     )
     suspend fun environmentVariableNameInUse(
         secretId: String,
@@ -433,13 +378,12 @@ internal interface SecretDao {
         excludingId: String,
     ): Boolean
 
-    @Insert
-    suspend fun insertSecret(secret: SecretEntity)
+    @Insert suspend fun insertSecret(secret: SecretEntity)
 
     @Query(
         "UPDATE secrets SET name = :name, description = :description, updated_at = :updatedAt, " +
             "revision = revision + CASE WHEN name = :name THEN 0 ELSE 1 END " +
-            "WHERE id = :secretId AND revision = :expectedRevision AND type = :expectedType",
+            "WHERE id = :secretId AND revision = :expectedRevision AND type = :expectedType"
     )
     suspend fun updateSecretMetadataIfCurrent(
         secretId: String,
@@ -452,7 +396,7 @@ internal interface SecretDao {
 
     @Query(
         "UPDATE secrets SET approval_mode = :approvalMode, updated_at = :updatedAt " +
-            "WHERE id = :secretId",
+            "WHERE id = :secretId"
     )
     suspend fun updateSecretApprovalMode(
         secretId: String,
@@ -462,7 +406,7 @@ internal interface SecretDao {
 
     @Query(
         "UPDATE secrets SET instructions = :instructions, updated_at = :updatedAt, " +
-            "revision = revision + 1 WHERE id = :secretId",
+            "revision = revision + 1 WHERE id = :secretId"
     )
     suspend fun updateSecretInstructions(
         secretId: String,
@@ -474,7 +418,7 @@ internal interface SecretDao {
         "UPDATE secrets SET description = :description, updated_at = MAX(updated_at, :updatedAt), " +
             "revision = revision + 1 " +
             "WHERE id = :secretId AND revision = :expectedRevision AND name = :expectedName " +
-            "AND type = :expectedType",
+            "AND type = :expectedType"
     )
     suspend fun reviseSecretForUploadIfCurrent(
         secretId: String,
@@ -506,27 +450,31 @@ internal interface SecretDao {
         require(operations.size == 1) { "Temporary access must cover one operation" }
         require(expectedRevisions.keys == secretIds && expectedApprovalModes.keys == secretIds)
         if (grants.any { it.expiresAt <= now }) return false
-        val currentSecrets = getSecrets().filter { it.id in secretIds }.associateBy(SecretEntity::id)
+        val currentSecrets =
+            getSecrets().filter { it.id in secretIds }.associateBy(SecretEntity::id)
         if (currentSecrets.size != secretIds.size) return false
         val clientId = clientIds.single()
-        val overrides = getClientApprovalOverrides(clientId, secretIds.toList())
-            .associateBy(SecretClientApprovalOverrideEntity::secretId)
-        if (secretIds.any { secretId ->
+        val overrides =
+            getClientApprovalOverrides(clientId, secretIds.toList())
+                .associateBy(SecretClientApprovalOverrideEntity::secretId)
+        if (
+            secretIds.any { secretId ->
                 currentSecrets.getValue(secretId).revision != expectedRevisions[secretId] ||
                     (overrides[secretId]?.approvalMode
                         ?: currentSecrets.getValue(secretId).approvalMode) !=
-                    expectedApprovalModes[secretId]
+                        expectedApprovalModes[secretId]
             }
         ) {
             return false
         }
         if (!clientCanReceiveTemporaryAccess(clientId)) return false
-        val activeGrants = getActiveTemporaryAccessGrants(
-            clientId = clientId,
-            secretIds = secretIds.toList(),
-            operation = operations.single(),
-            now = now,
-        )
+        val activeGrants =
+            getActiveTemporaryAccessGrants(
+                clientId = clientId,
+                secretIds = secretIds.toList(),
+                operation = operations.single(),
+                now = now,
+            )
         if (activeGrants.isNotEmpty()) return false
         upsertTemporaryAccessGrants(grants)
         return true
@@ -534,13 +482,13 @@ internal interface SecretDao {
 
     @Query(
         "DELETE FROM secret_client_approval_overrides " +
-            "WHERE secret_id = :secretId AND client_id = :clientId",
+            "WHERE secret_id = :secretId AND client_id = :clientId"
     )
     suspend fun deleteClientApprovalOverride(secretId: String, clientId: String): Int
 
     @Query(
         "DELETE FROM temporary_access_grants " +
-            "WHERE secret_id = :secretId AND client_id = :clientId AND operation = :operation",
+            "WHERE secret_id = :secretId AND client_id = :clientId AND operation = :operation"
     )
     suspend fun deleteTemporaryAccessGrant(
         secretId: String,
@@ -553,7 +501,7 @@ internal interface SecretDao {
 
     @Query(
         "DELETE FROM temporary_access_grants " +
-            "WHERE secret_id = :secretId AND client_id = :clientId",
+            "WHERE secret_id = :secretId AND client_id = :clientId"
     )
     suspend fun deleteTemporaryAccessGrantsForSecretClient(
         secretId: String,
@@ -569,21 +517,18 @@ internal interface SecretDao {
             WHERE secret_id = temporary_access_grants.secret_id
               AND client_id = temporary_access_grants.client_id
           )
-        """,
+        """
     )
     suspend fun deleteTemporaryAccessGrantsUsingDefaultApproval(secretId: String): Int
 
     @Query("DELETE FROM temporary_access_grants WHERE expires_at <= :now")
     suspend fun deleteExpiredTemporaryAccessGrants(now: Long): Int
 
-    @Query("DELETE FROM temporary_access_grants")
-    suspend fun deleteAllTemporaryAccessGrants(): Int
+    @Query("DELETE FROM temporary_access_grants") suspend fun deleteAllTemporaryAccessGrants(): Int
 
-    @Delete
-    suspend fun deleteSecret(secret: SecretEntity)
+    @Delete suspend fun deleteSecret(secret: SecretEntity)
 
-    @Insert
-    suspend fun insertEnvironmentVariableRow(variable: EnvironmentVariableEntity)
+    @Insert suspend fun insertEnvironmentVariableRow(variable: EnvironmentVariableEntity)
 
     @Transaction
     suspend fun insertEnvironmentSecret(
@@ -600,7 +545,7 @@ internal interface SecretDao {
         "UPDATE environment_variables SET name = :name, sensitive = :sensitive, " +
             "encryption_format = :encryptionFormat, encryption_key_id = :encryptionKeyId, " +
             "nonce = :nonce, ciphertext = :ciphertext, " +
-            "value_updated_at = :valueUpdatedAt WHERE id = :variableId AND secret_id = :secretId",
+            "value_updated_at = :valueUpdatedAt WHERE id = :variableId AND secret_id = :secretId"
     )
     suspend fun updateEnvironmentVariableMaterialRow(
         variableId: String,
@@ -614,17 +559,15 @@ internal interface SecretDao {
         valueUpdatedAt: Long,
     ): Int
 
-    @Delete
-    suspend fun deleteEnvironmentVariableRow(variable: EnvironmentVariableEntity)
+    @Delete suspend fun deleteEnvironmentVariableRow(variable: EnvironmentVariableEntity)
 
-    @Insert
-    suspend fun insertSshKeyRow(key: SshKeyEntity)
+    @Insert suspend fun insertSshKeyRow(key: SshKeyEntity)
 
     @Query(
         "UPDATE ssh_keys SET algorithm = :algorithm, public_key = :publicKey, comment = :comment, " +
             "encryption_format = :encryptionFormat, " +
             "encryption_key_id = :encryptionKeyId, nonce = :nonce, ciphertext = :ciphertext " +
-            "WHERE secret_id = :secretId",
+            "WHERE secret_id = :secretId"
     )
     suspend fun updateSshKeyMaterialRow(
         secretId: String,
@@ -645,7 +588,7 @@ internal interface SecretDao {
             "encryption_format = :encryptionFormat, encryption_key_id = :encryptionKeyId, " +
             "nonce = :nonce, ciphertext = :ciphertext, " +
             "value_updated_at = :valueUpdatedAt " +
-            "WHERE id = :variableId AND secret_id = :secretId",
+            "WHERE id = :variableId AND secret_id = :secretId"
     )
     suspend fun updateUploadedEnvironmentVariableRow(
         variableId: String,
@@ -663,13 +606,13 @@ internal interface SecretDao {
 
     @Query(
         "UPDATE secrets SET updated_at = MAX(updated_at, :updatedAt), revision = revision + 1 " +
-            "WHERE id = :secretId",
+            "WHERE id = :secretId"
     )
     suspend fun reviseSecret(secretId: String, updatedAt: Long)
 
     @Query(
         "UPDATE secrets SET updated_at = MAX(updated_at, :updatedAt), revision = revision + 1 " +
-            "WHERE id = :secretId AND revision = :expectedRevision AND type = :expectedType",
+            "WHERE id = :secretId AND revision = :expectedRevision AND type = :expectedType"
     )
     suspend fun reviseSecretIfCurrent(
         secretId: String,
@@ -681,9 +624,7 @@ internal interface SecretDao {
     @Query("DELETE FROM environment_variables WHERE secret_id = :secretId")
     suspend fun deleteAllEnvironmentVariables(secretId: String): Int
 
-    @Query(
-        "DELETE FROM environment_variables WHERE secret_id = :secretId AND name NOT IN (:names)",
-    )
+    @Query("DELETE FROM environment_variables WHERE secret_id = :secretId AND name NOT IN (:names)")
     suspend fun deleteEnvironmentVariablesExcept(secretId: String, names: List<String>): Int
 
     @Transaction
@@ -726,7 +667,8 @@ internal interface SecretDao {
                 description = description,
                 updatedAt = updatedAt,
             ) != 1
-        ) return false
+        )
+            return false
         if (nameChanged) deleteTemporaryAccessGrantsForSecret(secretId)
         return true
     }
@@ -743,7 +685,7 @@ internal interface SecretDao {
             deleteClientApprovalOverride(secretId, clientId)
         } else {
             upsertClientApprovalOverride(
-                SecretClientApprovalOverrideEntity(secretId, clientId, approvalMode),
+                SecretClientApprovalOverrideEntity(secretId, clientId, approvalMode)
             )
         }
         if (effectiveModeChanged) deleteTemporaryAccessGrantsForSecretClient(secretId, clientId)
@@ -758,9 +700,9 @@ internal interface SecretDao {
     ): Boolean {
         val secret = getSecret(variable.secretId) ?: return false
         if (
-            secret.secretType != SecretType.ENVIRONMENT ||
-            secret.revision != expectedSecretRevision
-        ) return false
+            secret.secretType != SecretType.ENVIRONMENT || secret.revision != expectedSecretRevision
+        )
+            return false
         insertEnvironmentVariableRow(variable)
         check(
             reviseSecretIfCurrent(
@@ -768,7 +710,7 @@ internal interface SecretDao {
                 expectedSecretRevision,
                 SecretType.ENVIRONMENT.storedName,
                 secretUpdatedAt,
-            ) == 1,
+            ) == 1
         )
         deleteTemporaryAccessGrantsForSecret(variable.secretId)
         return true
@@ -782,9 +724,9 @@ internal interface SecretDao {
     ): Boolean {
         val secret = getSecret(variable.secretId) ?: return false
         if (
-            secret.secretType != SecretType.ENVIRONMENT ||
-            secret.revision != expectedSecretRevision
-        ) return false
+            secret.secretType != SecretType.ENVIRONMENT || secret.revision != expectedSecretRevision
+        )
+            return false
         if (
             updateEnvironmentVariableMaterialRow(
                 variableId = variable.id,
@@ -797,14 +739,15 @@ internal interface SecretDao {
                 ciphertext = variable.encryptedValue.ciphertext,
                 valueUpdatedAt = variable.valueUpdatedAt,
             ) != 1
-        ) return false
+        )
+            return false
         check(
             reviseSecretIfCurrent(
                 variable.secretId,
                 expectedSecretRevision,
                 SecretType.ENVIRONMENT.storedName,
                 secretUpdatedAt,
-            ) == 1,
+            ) == 1
         )
         deleteTemporaryAccessGrantsForSecret(variable.secretId)
         return true
@@ -818,9 +761,9 @@ internal interface SecretDao {
     ): Boolean {
         val secret = getSecret(variable.secretId) ?: return false
         if (
-            secret.secretType != SecretType.ENVIRONMENT ||
-            secret.revision != expectedSecretRevision
-        ) return false
+            secret.secretType != SecretType.ENVIRONMENT || secret.revision != expectedSecretRevision
+        )
+            return false
         deleteEnvironmentVariableRow(variable)
         check(
             reviseSecretIfCurrent(
@@ -828,7 +771,7 @@ internal interface SecretDao {
                 expectedSecretRevision,
                 SecretType.ENVIRONMENT.storedName,
                 secretUpdatedAt,
-            ) == 1,
+            ) == 1
         )
         deleteTemporaryAccessGrantsForSecret(variable.secretId)
         return true
@@ -863,14 +806,15 @@ internal interface SecretDao {
                 nonce = key.encryptedPrivateKey.nonce,
                 ciphertext = key.encryptedPrivateKey.ciphertext,
             ) != 1
-        ) return false
+        )
+            return false
         check(
             reviseSecretIfCurrent(
                 key.secretId,
                 expectedSecretRevision,
                 SecretType.SSH.storedName,
                 secretUpdatedAt,
-            ) == 1,
+            ) == 1
         )
         deleteTemporaryAccessGrantsForSecret(key.secretId)
         return true
@@ -906,23 +850,29 @@ internal interface SecretDao {
             insertSecret(secret.copy(revision = 1))
         } else {
             if (
-                current == null || current.id != secret.id || current.name != expectedName ||
-                current.revision != target.revision || current.secretType != SecretType.ENVIRONMENT
-            ) return false
+                current == null ||
+                    current.id != secret.id ||
+                    current.name != expectedName ||
+                    current.revision != target.revision ||
+                    current.secretType != SecretType.ENVIRONMENT
+            )
+                return false
             if (
                 reviseSecretForUploadIfCurrent(
                     secretId = current.id,
                     expectedRevision = target.revision,
                     expectedName = expectedName,
                     expectedType = SecretType.ENVIRONMENT.storedName,
-                    description = if (preserveCurrentDescription) {
-                        current.description
-                    } else {
-                        secret.description
-                    },
+                    description =
+                        if (preserveCurrentDescription) {
+                            current.description
+                        } else {
+                            secret.description
+                        },
                     updatedAt = secret.updatedAt,
                 ) != 1
-            ) return false
+            )
+                return false
             deleteTemporaryAccessGrantsForSecret(current.id)
         }
         if (replaceVariables) {
@@ -945,7 +895,7 @@ internal interface SecretDao {
                         nonce = variable.encryptedValue.nonce,
                         ciphertext = variable.encryptedValue.ciphertext,
                         valueUpdatedAt = variable.valueUpdatedAt,
-                    ) == 1,
+                    ) == 1
                 )
             }
         }
@@ -971,21 +921,27 @@ internal interface SecretDao {
             return true
         }
         if (
-            current == null || current.id != secret.id || current.name != expectedName ||
-            current.revision != target.revision || current.secretType != SecretType.SSH
-        ) return false
-        val metadataUpdated = reviseSecretForUploadIfCurrent(
-            secretId = current.id,
-            expectedRevision = target.revision,
-            expectedName = expectedName,
-            expectedType = SecretType.SSH.storedName,
-            description = if (preserveCurrentDescription) {
-                current.description
-            } else {
-                secret.description
-            },
-            updatedAt = secret.updatedAt,
+            current == null ||
+                current.id != secret.id ||
+                current.name != expectedName ||
+                current.revision != target.revision ||
+                current.secretType != SecretType.SSH
         )
+            return false
+        val metadataUpdated =
+            reviseSecretForUploadIfCurrent(
+                secretId = current.id,
+                expectedRevision = target.revision,
+                expectedName = expectedName,
+                expectedType = SecretType.SSH.storedName,
+                description =
+                    if (preserveCurrentDescription) {
+                        current.description
+                    } else {
+                        secret.description
+                    },
+                updatedAt = secret.updatedAt,
+            )
         if (metadataUpdated != 1) return false
         deleteTemporaryAccessGrantsForSecret(current.id)
         check(
@@ -998,7 +954,7 @@ internal interface SecretDao {
                 encryptionKeyId = key.encryptedPrivateKey.keyId,
                 nonce = key.encryptedPrivateKey.nonce,
                 ciphertext = key.encryptedPrivateKey.ciphertext,
-            ) == 1,
+            ) == 1
         )
         return true
     }

@@ -6,8 +6,11 @@ internal sealed interface ApprovalCompletion {
     val message: String?
 
     data class Approved(override val clientSoftware: ClientSoftware) : ApprovalCompletion {
-        override val reason: String? get() = null
-        override val message: String? get() = null
+        override val reason: String?
+            get() = null
+
+        override val message: String?
+            get() = null
     }
 
     data class Denied(

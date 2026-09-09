@@ -11,9 +11,7 @@ class AndroidKeyAttestationTest {
     fun `derives the backend device claim challenge`() {
         assertEquals(
             "00cb71c6abdf04fbdb499d3a4f28f3f328dd380d7ead91194bd769999a575227",
-            HexFormat.of().formatHex(
-                deviceClaimAttestationChallenge(DEVICE_ID, DEVICE_TOKEN),
-            ),
+            HexFormat.of().formatHex(deviceClaimAttestationChallenge(DEVICE_ID, DEVICE_TOKEN)),
         )
     }
 

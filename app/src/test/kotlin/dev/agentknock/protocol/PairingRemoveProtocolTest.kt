@@ -12,15 +12,14 @@ class PairingRemoveProtocolTest {
             testClientSoftware("0.2.0", "0.1.0"),
             protocol.decodeRequest(
                 """{${testClientSoftwareFields("0.2.0", "0.1.0")},"method":"PairingRemove"}"""
-                    .encodeToByteArray(),
+                    .encodeToByteArray()
             ),
         )
         assertEquals("{}", protocol.response().decodeToString())
         assertEquals(
             testClientSoftware("0.2.0", "0.1.0"),
             protocol.decodeCompletion(
-                """{${testClientSoftwareFields("0.2.0", "0.1.0")}}"""
-                    .encodeToByteArray(),
+                """{${testClientSoftwareFields("0.2.0", "0.1.0")}}""".encodeToByteArray()
             ),
         )
     }

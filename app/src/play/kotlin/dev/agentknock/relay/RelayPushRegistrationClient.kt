@@ -23,15 +23,17 @@ internal class HttpRelayPushRegistrationClient(
         deviceToken: String,
         firebaseInstallationId: String,
     ): RelayPushRegistrationResult {
-        val body = json.encodeToString(
-            PushRegistrationRequest.serializer(),
-            PushRegistrationRequest(firebaseInstallationId),
-        )
-        return transport.post(
-            path = "v1/device/$deviceId/push",
-            body = body,
-            bearerToken = deviceToken,
-        )
+        val body =
+            json.encodeToString(
+                PushRegistrationRequest.serializer(),
+                PushRegistrationRequest(firebaseInstallationId),
+            )
+        return transport
+            .post(
+                path = "v1/device/$deviceId/push",
+                body = body,
+                bearerToken = deviceToken,
+            )
             .decodeSuccess { encoded ->
                 val response = json.decodeFromString<PushRegistrationResponse>(encoded)
                 require(response.state == RelayPushRegistrationState.REGISTERED.wireName)
@@ -40,11 +42,7 @@ internal class HttpRelayPushRegistrationClient(
 }
 
 @Serializable
-private data class PushRegistrationRequest(
-    @SerialName("fid") val firebaseInstallationId: String,
-)
+private data class PushRegistrationRequest(@SerialName("fid") val firebaseInstallationId: String)
 
 @Serializable
-private data class PushRegistrationResponse(
-    @SerialName("push_registration") val state: String,
-)
+private data class PushRegistrationResponse(@SerialName("push_registration") val state: String)

@@ -30,27 +30,27 @@ internal class GooglePlaySubscriptionBilling(context: Context) : PlaySubscriptio
     private val purchaseListener = PurchasesUpdatedListener { result, purchases ->
         _updates.tryEmit(
             when (result.responseCode) {
-                BillingClient.BillingResponseCode.OK -> if (purchases.isNullOrEmpty()) {
-                    PlaySubscriptionUpdate.Failed
-                } else {
-                    PlaySubscriptionUpdate.Changed
-                }
+                BillingClient.BillingResponseCode.OK ->
+                    if (purchases.isNullOrEmpty()) {
+                        PlaySubscriptionUpdate.Failed
+                    } else {
+                        PlaySubscriptionUpdate.Changed
+                    }
                 BillingClient.BillingResponseCode.USER_CANCELED -> PlaySubscriptionUpdate.Canceled
                 BillingClient.BillingResponseCode.ITEM_ALREADY_OWNED ->
                     PlaySubscriptionUpdate.Changed
                 else -> PlaySubscriptionUpdate.Failed
-            },
+            }
         )
     }
-    private val client = BillingClient.newBuilder(context.applicationContext)
-        .setListener(purchaseListener)
-        .enablePendingPurchases(
-            PendingPurchasesParams.newBuilder()
-                .enableOneTimeProducts()
-                .build(),
-        )
-        .enableAutoServiceReconnection()
-        .build()
+    private val client =
+        BillingClient.newBuilder(context.applicationContext)
+            .setListener(purchaseListener)
+            .enablePendingPurchases(
+                PendingPurchasesParams.newBuilder().enableOneTimeProducts().build()
+            )
+            .enableAutoServiceReconnection()
+            .build()
 
     override val updates: Flow<PlaySubscriptionUpdate> = _updates.asSharedFlow()
 
@@ -63,7 +63,7 @@ internal class GooglePlaySubscriptionBilling(context: Context) : PlaySubscriptio
                 purchases = purchases,
                 offers = productDetails?.flatMap(::offers).orEmpty(),
                 offersAvailable = productDetails != null,
-            ),
+            )
         )
     }
 
@@ -72,27 +72,28 @@ internal class GooglePlaySubscriptionBilling(context: Context) : PlaySubscriptio
         offerId: PlaySubscriptionOfferId,
     ): PlaySubscriptionLaunchResult {
         if (!connect()) return PlaySubscriptionLaunchResult.Unavailable
-        val product = queryProductDetails()
-            ?.firstOrNull { it.productId == offerId.productId }
-            ?: return PlaySubscriptionLaunchResult.Unavailable
-        val offer = product.subscriptionOfferDetails
-            ?.firstOrNull {
+        val product =
+            queryProductDetails()?.firstOrNull { it.productId == offerId.productId }
+                ?: return PlaySubscriptionLaunchResult.Unavailable
+        val offer =
+            product.subscriptionOfferDetails?.firstOrNull {
                 it.basePlanId == offerId.basePlanId && it.offerId == offerId.offerId
+            } ?: return PlaySubscriptionLaunchResult.Unavailable
+        val params =
+            BillingFlowParams.newBuilder()
+                .setProductDetailsParamsList(
+                    listOf(
+                        BillingFlowParams.ProductDetailsParams.newBuilder()
+                            .setProductDetails(product)
+                            .setOfferToken(offer.offerToken)
+                            .build()
+                    )
+                )
+                .build()
+        val result =
+            withContext(Dispatchers.Main.immediate) {
+                client.launchBillingFlow(activity, params)
             }
-            ?: return PlaySubscriptionLaunchResult.Unavailable
-        val params = BillingFlowParams.newBuilder()
-            .setProductDetailsParamsList(
-                listOf(
-                    BillingFlowParams.ProductDetailsParams.newBuilder()
-                        .setProductDetails(product)
-                        .setOfferToken(offer.offerToken)
-                        .build(),
-                ),
-            )
-            .build()
-        val result = withContext(Dispatchers.Main.immediate) {
-            client.launchBillingFlow(activity, params)
-        }
         return when (result.responseCode) {
             BillingClient.BillingResponseCode.OK -> PlaySubscriptionLaunchResult.Started
             BillingClient.BillingResponseCode.ITEM_ALREADY_OWNED ->
@@ -109,13 +110,13 @@ internal class GooglePlaySubscriptionBilling(context: Context) : PlaySubscriptio
                     override fun onBillingSetupFinished(result: BillingResult) {
                         if (continuation.isActive) {
                             continuation.resume(
-                                result.responseCode == BillingClient.BillingResponseCode.OK,
+                                result.responseCode == BillingClient.BillingResponseCode.OK
                             )
                         }
                     }
 
                     override fun onBillingServiceDisconnected() = Unit
-                },
+                }
             )
         }
     }
@@ -123,38 +124,41 @@ internal class GooglePlaySubscriptionBilling(context: Context) : PlaySubscriptio
     private suspend fun queryPurchases(): List<PlaySubscriptionPurchase>? {
         // The relay tracks lifecycle changes through Google Play notifications. Sending a
         // suspended purchase here could replace a different entitlement that is still valid.
-        val result = client.queryPurchasesAsync(
-            QueryPurchasesParams.newBuilder()
-                .setProductType(BillingClient.ProductType.SUBS)
-                .build(),
-        )
+        val result =
+            client.queryPurchasesAsync(
+                QueryPurchasesParams.newBuilder()
+                    .setProductType(BillingClient.ProductType.SUBS)
+                    .build()
+            )
         if (result.billingResult.responseCode != BillingClient.BillingResponseCode.OK) return null
         return result.purchasesList.flatMap(::purchases)
     }
 
     private suspend fun queryProductDetails(): List<ProductDetails>? {
-        val result = client.queryProductDetails(
-            QueryProductDetailsParams.newBuilder()
-                .setProductList(
-                    listOf(
-                        QueryProductDetailsParams.Product.newBuilder()
-                            .setProductId(GOOGLE_PLAY_SUBSCRIPTION_PRODUCT_ID)
-                            .setProductType(BillingClient.ProductType.SUBS)
-                            .build(),
-                    ),
-                )
-                .build(),
-        )
+        val result =
+            client.queryProductDetails(
+                QueryProductDetailsParams.newBuilder()
+                    .setProductList(
+                        listOf(
+                            QueryProductDetailsParams.Product.newBuilder()
+                                .setProductId(GOOGLE_PLAY_SUBSCRIPTION_PRODUCT_ID)
+                                .setProductType(BillingClient.ProductType.SUBS)
+                                .build()
+                        )
+                    )
+                    .build()
+            )
         if (result.billingResult.responseCode != BillingClient.BillingResponseCode.OK) return null
         return result.productDetailsList
     }
 
     private fun purchases(purchase: Purchase): List<PlaySubscriptionPurchase> {
-        val state = when (purchase.purchaseState) {
-            Purchase.PurchaseState.PURCHASED -> PlayPurchaseState.PURCHASED
-            Purchase.PurchaseState.PENDING -> PlayPurchaseState.PENDING
-            else -> return emptyList()
-        }
+        val state =
+            when (purchase.purchaseState) {
+                Purchase.PurchaseState.PURCHASED -> PlayPurchaseState.PURCHASED
+                Purchase.PurchaseState.PENDING -> PlayPurchaseState.PENDING
+                else -> return emptyList()
+            }
         return purchase.products
             .filter { it == GOOGLE_PLAY_SUBSCRIPTION_PRODUCT_ID }
             .map { productId ->
@@ -169,28 +173,33 @@ internal class GooglePlaySubscriptionBilling(context: Context) : PlaySubscriptio
 
     private fun offers(product: ProductDetails): List<PlaySubscriptionOffer> =
         product.subscriptionOfferDetails.orEmpty().mapNotNull { offer ->
-            val phases = offer.pricingPhases.pricingPhaseList.map { phase ->
-                SubscriptionPricingPhase(
-                    formattedPrice = phase.formattedPrice,
-                    priceAmountMicros = phase.priceAmountMicros,
-                    billingPeriod = phase.billingPeriod,
-                    billingCycleCount = phase.billingCycleCount,
-                    recurrence = when (phase.recurrenceMode) {
-                        ProductDetails.RecurrenceMode.INFINITE_RECURRING ->
-                            PricingRecurrence.INFINITE
-                        ProductDetails.RecurrenceMode.FINITE_RECURRING -> PricingRecurrence.FINITE
-                        ProductDetails.RecurrenceMode.NON_RECURRING -> PricingRecurrence.NONE
-                        else -> return@mapNotNull null
-                    },
-                )
-            }
+            val phases =
+                offer.pricingPhases.pricingPhaseList.map { phase ->
+                    SubscriptionPricingPhase(
+                        formattedPrice = phase.formattedPrice,
+                        priceAmountMicros = phase.priceAmountMicros,
+                        billingPeriod = phase.billingPeriod,
+                        billingCycleCount = phase.billingCycleCount,
+                        recurrence =
+                            when (phase.recurrenceMode) {
+                                ProductDetails.RecurrenceMode.INFINITE_RECURRING ->
+                                    PricingRecurrence.INFINITE
+                                ProductDetails.RecurrenceMode.FINITE_RECURRING ->
+                                    PricingRecurrence.FINITE
+                                ProductDetails.RecurrenceMode.NON_RECURRING ->
+                                    PricingRecurrence.NONE
+                                else -> return@mapNotNull null
+                            },
+                    )
+                }
             val summary = summarizeSubscriptionPricing(phases) ?: return@mapNotNull null
             PlaySubscriptionOffer(
-                id = PlaySubscriptionOfferId(
-                    productId = product.productId,
-                    basePlanId = offer.basePlanId,
-                    offerId = offer.offerId,
-                ),
+                id =
+                    PlaySubscriptionOfferId(
+                        productId = product.productId,
+                        basePlanId = offer.basePlanId,
+                        offerId = offer.offerId,
+                    ),
                 price = summary.price,
                 terms = summary.terms,
                 autoRenewing = summary.autoRenewing,
@@ -219,30 +228,34 @@ internal data class SubscriptionPricingSummary(
 )
 
 internal fun summarizeSubscriptionPricing(
-    phases: List<SubscriptionPricingPhase>,
+    phases: List<SubscriptionPricingPhase>
 ): SubscriptionPricingSummary? {
     val final = phases.lastOrNull() ?: return null
-    val finalDuration = billingPeriodDuration(
-        period = final.billingPeriod,
-        cycles = final.billingCycleCount.coerceAtLeast(1),
-    ) ?: return null
+    val finalDuration =
+        billingPeriodDuration(
+            period = final.billingPeriod,
+            cycles = final.billingCycleCount.coerceAtLeast(1),
+        ) ?: return null
     val autoRenewing = final.recurrence == PricingRecurrence.INFINITE
-    val price = when (final.recurrence) {
-        PricingRecurrence.INFINITE -> "${final.formattedPrice}/${finalDuration.priceUnit}"
-        PricingRecurrence.FINITE -> if (final.priceAmountMicros == 0L) {
-            "$finalDuration free"
-        } else if (final.billingCycleCount > 1) {
-            val period = billingPeriodDuration(final.billingPeriod, 1) ?: return null
-            "${final.formattedPrice}/${period.priceUnit} for $finalDuration"
-        } else {
-            "${final.formattedPrice} for $finalDuration"
+    val price =
+        when (final.recurrence) {
+            PricingRecurrence.INFINITE -> "${final.formattedPrice}/${finalDuration.priceUnit}"
+            PricingRecurrence.FINITE ->
+                if (final.priceAmountMicros == 0L) {
+                    "$finalDuration free"
+                } else if (final.billingCycleCount > 1) {
+                    val period = billingPeriodDuration(final.billingPeriod, 1) ?: return null
+                    "${final.formattedPrice}/${period.priceUnit} for $finalDuration"
+                } else {
+                    "${final.formattedPrice} for $finalDuration"
+                }
+            PricingRecurrence.NONE ->
+                if (final.priceAmountMicros == 0L) {
+                    "$finalDuration free"
+                } else {
+                    "${final.formattedPrice} for $finalDuration"
+                }
         }
-        PricingRecurrence.NONE -> if (final.priceAmountMicros == 0L) {
-            "$finalDuration free"
-        } else {
-            "${final.formattedPrice} for $finalDuration"
-        }
-    }
     val introductory = phases.dropLast(1).mapNotNull(::describeIntroductoryPhase)
     val terms = buildList {
         if (introductory.isNotEmpty()) {
@@ -253,17 +266,19 @@ internal fun summarizeSubscriptionPricing(
                 "Renews automatically until canceled. Manage or cancel in Google Play."
             } else {
                 "Does not renew automatically."
-            },
+            }
         )
-    }.joinToString(" ")
+    }
+        .joinToString(" ")
     return SubscriptionPricingSummary(price, terms, autoRenewing)
 }
 
 private fun describeIntroductoryPhase(phase: SubscriptionPricingPhase): String? {
-    val duration = billingPeriodDuration(
-        period = phase.billingPeriod,
-        cycles = phase.billingCycleCount.coerceAtLeast(1),
-    ) ?: return null
+    val duration =
+        billingPeriodDuration(
+            period = phase.billingPeriod,
+            cycles = phase.billingCycleCount.coerceAtLeast(1),
+        ) ?: return null
     return if (phase.priceAmountMicros == 0L) {
         "$duration free"
     } else if (phase.recurrence == PricingRecurrence.FINITE && phase.billingCycleCount > 1) {
@@ -278,19 +293,22 @@ private data class BillingDuration(
     val count: Int,
     val unit: String,
 ) {
-    val priceUnit: String get() = if (count == 1) unit else toString()
+    val priceUnit: String
+        get() = if (count == 1) unit else toString()
 
     override fun toString(): String = "$count ${if (count == 1) unit else "${unit}s"}"
 }
 
 private fun billingPeriodDuration(period: String, cycles: Int): BillingDuration? {
     val match = BILLING_PERIOD.matchEntire(period) ?: return null
-    val components = listOf(
-        "year" to match.groupValues[1],
-        "month" to match.groupValues[2],
-        "week" to match.groupValues[3],
-        "day" to match.groupValues[4],
-    ).filter { (_, value) -> value.isNotEmpty() }
+    val components =
+        listOf(
+                "year" to match.groupValues[1],
+                "month" to match.groupValues[2],
+                "week" to match.groupValues[3],
+                "day" to match.groupValues[4],
+            )
+            .filter { (_, value) -> value.isNotEmpty() }
     if (components.size != 1) return null
     val (unit, value) = components.single()
     return BillingDuration(value.toInt() * cycles, unit)

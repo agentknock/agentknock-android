@@ -38,72 +38,77 @@ internal class HttpRelayClaimClient(
         deviceId: String,
         addressId: String,
         deviceToken: String,
-    ): RelayClaimResult = withContext(dispatcher) {
-        val claimBody = json.encodeToString(
-            DeviceClaimRequest.serializer(),
-            DeviceClaimRequest(
-                deviceToken = deviceToken,
-                attestation = attestationProvider.attest(deviceId, deviceToken),
-            ),
-        )
-        when (
-            val claimResult = transport.post(
-                path = "v1/device/$deviceId/claim",
-                body = claimBody,
-            ).decodeSuccess { body ->
-                val response = json.decodeFromString<DeviceClaimResponse>(body)
-                require(response.claimed && response.deviceId == deviceId)
+    ): RelayClaimResult =
+        withContext(dispatcher) {
+            val claimBody =
+                json.encodeToString(
+                    DeviceClaimRequest.serializer(),
+                    DeviceClaimRequest(
+                        deviceToken = deviceToken,
+                        attestation = attestationProvider.attest(deviceId, deviceToken),
+                    ),
+                )
+            when (
+                val claimResult =
+                    transport
+                        .post(
+                            path = "v1/device/$deviceId/claim",
+                            body = claimBody,
+                        )
+                        .decodeSuccess { body ->
+                            val response = json.decodeFromString<DeviceClaimResponse>(body)
+                            require(response.claimed && response.deviceId == deviceId)
+                        }
+            ) {
+                is RelayEndpointResult.Success -> Unit
+                is RelayEndpointResult.Rejected -> return@withContext claimResult
+                is RelayEndpointResult.Unavailable -> return@withContext claimResult
+                RelayEndpointResult.InvalidResponse ->
+                    return@withContext RelayEndpointResult.InvalidResponse
             }
-        ) {
-            is RelayEndpointResult.Success -> Unit
-            is RelayEndpointResult.Rejected -> return@withContext claimResult
-            is RelayEndpointResult.Unavailable -> return@withContext claimResult
-            RelayEndpointResult.InvalidResponse ->
-                return@withContext RelayEndpointResult.InvalidResponse
-        }
 
-        setAddress(deviceId, addressId, deviceToken)
-    }
+            setAddress(deviceId, addressId, deviceToken)
+        }
 
     override suspend fun setAddress(
         deviceId: String,
         addressId: String,
         deviceToken: String,
-    ): RelayClaimResult = withContext(dispatcher) {
-        val addressBody = json.encodeToString(DeviceAddressRequest(addressId))
-        val addressResult = transport.post(
-            path = "v1/device/$deviceId/address",
-            body = addressBody,
-            bearerToken = deviceToken,
-        )
-        if (
-            addressResult is RelayEndpointResult.Rejected &&
-            addressResult.status == 409 &&
-            addressResult.code == ADDRESS_ALREADY_CLAIMED
-        ) {
-            RelayEndpointResult.Success(RelayClaimOutcome.ADDRESS_UNAVAILABLE)
-        } else {
-            addressResult.decodeSuccess { body ->
-                val response = json.decodeFromString<DeviceAddressResponse>(body)
-                require(response.addressId == addressId)
-                RelayClaimOutcome.CLAIMED
+    ): RelayClaimResult =
+        withContext(dispatcher) {
+            val addressBody = json.encodeToString(DeviceAddressRequest(addressId))
+            val addressResult =
+                transport.post(
+                    path = "v1/device/$deviceId/address",
+                    body = addressBody,
+                    bearerToken = deviceToken,
+                )
+            if (
+                addressResult is RelayEndpointResult.Rejected &&
+                    addressResult.status == 409 &&
+                    addressResult.code == ADDRESS_ALREADY_CLAIMED
+            ) {
+                RelayEndpointResult.Success(RelayClaimOutcome.ADDRESS_UNAVAILABLE)
+            } else {
+                addressResult.decodeSuccess { body ->
+                    val response = json.decodeFromString<DeviceAddressResponse>(body)
+                    require(response.addressId == addressId)
+                    RelayClaimOutcome.CLAIMED
+                }
             }
         }
-    }
 }
 
 @Serializable
 private data class DeviceClaimRequest(
-    @SerialName("device_token")
-    val deviceToken: String,
+    @SerialName("device_token") val deviceToken: String,
     val attestation: AndroidKeyAttestation? = null,
 )
 
 @Serializable
 internal data class AndroidKeyAttestation(
     val type: String,
-    @SerialName("certificate_chain")
-    val certificateChain: List<String>,
+    @SerialName("certificate_chain") val certificateChain: List<String>,
 )
 
 @Serializable

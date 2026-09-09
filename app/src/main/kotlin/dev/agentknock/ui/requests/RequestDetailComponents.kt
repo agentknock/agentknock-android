@@ -5,14 +5,14 @@ package dev.agentknock.ui.requests
 import androidx.compose.foundation.BorderStroke
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.BoxWithConstraints
-import androidx.compose.foundation.layout.IntrinsicSize
-import androidx.compose.foundation.layout.fillMaxHeight
-import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.FlowRow
+import androidx.compose.foundation.layout.IntrinsicSize
 import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.Spacer
+import androidx.compose.foundation.layout.fillMaxHeight
 import androidx.compose.foundation.layout.fillMaxWidth
+import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.heightIn
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
@@ -34,16 +34,16 @@ import androidx.compose.material3.Surface
 import androidx.compose.material3.Text
 import androidx.compose.material3.TextButton
 import androidx.compose.runtime.Composable
-import androidx.compose.ui.Modifier
 import androidx.compose.ui.Alignment
-import androidx.compose.ui.text.rememberTextMeasurer
+import androidx.compose.ui.Modifier
 import androidx.compose.ui.platform.LocalDensity
+import androidx.compose.ui.semantics.clearAndSetSemantics
+import androidx.compose.ui.semantics.contentDescription
+import androidx.compose.ui.text.rememberTextMeasurer
 import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
-import androidx.compose.ui.semantics.clearAndSetSemantics
-import androidx.compose.ui.semantics.contentDescription
 import dev.agentknock.storage.approval.AiReview
 import dev.agentknock.storage.approval.AiReviewDecision
 import dev.agentknock.storage.approval.AiReviewFailure
@@ -53,53 +53,59 @@ import dev.agentknock.storage.request.ApprovalCompletionResult
 import dev.agentknock.storage.request.ApprovalDecision
 import dev.agentknock.storage.request.ApprovalRequestState
 import dev.agentknock.storage.secret.TemporaryAccessOperation
-import dev.agentknock.ui.components.rememberDateTimeFormatter
 import dev.agentknock.ui.components.DetailPage
 import dev.agentknock.ui.components.Notice
 import dev.agentknock.ui.components.NoticeTone
+import dev.agentknock.ui.components.rememberDateTimeFormatter
 import dev.agentknock.ui.theme.agentknockColors
 
 @Composable
 internal fun AiReviewNotice(review: AiReview?, reviewInFlight: Boolean) {
     val icon = Icons.Outlined.AutoAwesome
     when {
-        review?.decision == AiReviewDecision.APPROVE -> Notice(
-            "AI review approved its part",
-            review.explanationText() ?: "Another protected use still needs your decision.",
-            NoticeTone.SUCCESS,
-            icon,
-        )
-        review?.decision == AiReviewDecision.ASK_USER -> Notice(
-            "AI review asked you to decide",
-            review.explanationText() ?: "The reviewer could not decide safely.",
-            NoticeTone.ATTENTION,
-            icon,
-        )
-        review?.failure == AiReviewFailure.SUBSCRIPTION_REQUIRED -> Notice(
-            "AI review is inactive",
-            "This request needs your decision.",
-            NoticeTone.NEUTRAL,
-            icon,
-        )
-        review?.failure != null -> Notice(
-            "AI review couldn’t complete",
-            "Please decide this request.",
-            NoticeTone.NEUTRAL,
-            icon,
-        )
-        reviewInFlight -> Notice(
-            "No action needed yet",
-            "AI review is checking this request against your instructions. It can approve " +
-                "or deny it, or ask you to decide.",
-            NoticeTone.NEUTRAL,
-            icon,
-        )
-        else -> Notice(
-            "AI review was interrupted",
-            "Decide this request yourself.",
-            NoticeTone.ATTENTION,
-            icon,
-        )
+        review?.decision == AiReviewDecision.APPROVE ->
+            Notice(
+                "AI review approved its part",
+                review.explanationText() ?: "Another protected use still needs your decision.",
+                NoticeTone.SUCCESS,
+                icon,
+            )
+        review?.decision == AiReviewDecision.ASK_USER ->
+            Notice(
+                "AI review asked you to decide",
+                review.explanationText() ?: "The reviewer could not decide safely.",
+                NoticeTone.ATTENTION,
+                icon,
+            )
+        review?.failure == AiReviewFailure.SUBSCRIPTION_REQUIRED ->
+            Notice(
+                "AI review is inactive",
+                "This request needs your decision.",
+                NoticeTone.NEUTRAL,
+                icon,
+            )
+        review?.failure != null ->
+            Notice(
+                "AI review couldn’t complete",
+                "Please decide this request.",
+                NoticeTone.NEUTRAL,
+                icon,
+            )
+        reviewInFlight ->
+            Notice(
+                "No action needed yet",
+                "AI review is checking this request against your instructions. It can approve " +
+                    "or deny it, or ask you to decide.",
+                NoticeTone.NEUTRAL,
+                icon,
+            )
+        else ->
+            Notice(
+                "AI review was interrupted",
+                "Decide this request yourself.",
+                NoticeTone.ATTENTION,
+                icon,
+            )
     }
 }
 
@@ -124,7 +130,11 @@ internal fun ClientReason(reason: String?) {
                 SelectionContainer {
                     Text(
                         it,
-                        style = MaterialTheme.typography.bodyLarge.copy(fontSize = 18.sp, lineHeight = 26.sp),
+                        style =
+                            MaterialTheme.typography.bodyLarge.copy(
+                                fontSize = 18.sp,
+                                lineHeight = 26.sp,
+                            ),
                     )
                 }
             }
@@ -153,9 +163,10 @@ internal fun RequestIdentity(
                 dates.timestamp(requestedAt),
                 style = MaterialTheme.typography.bodySmall,
                 color = MaterialTheme.colorScheme.onSurfaceVariant,
-                modifier = Modifier.clearAndSetSemantics {
-                    contentDescription = "Requested ${dates.timestamp(requestedAt)}"
-                },
+                modifier =
+                    Modifier.clearAndSetSemantics {
+                        contentDescription = "Requested ${dates.timestamp(requestedAt)}"
+                    },
             )
         }
     }
@@ -172,16 +183,18 @@ internal fun RequestParticipants(
     val density = LocalDensity.current
     BoxWithConstraints(Modifier.fillMaxWidth()) {
         val columnWidth = with(density) { ((maxWidth - 16.dp) / 2).roundToPx() }
-        val stackFields = (listOf(clientName) + secretNames).any { name ->
-            textMeasurer.measure(name, nameStyle, softWrap = false).size.width > columnWidth
-        }
+        val stackFields =
+            (listOf(clientName) + secretNames).any { name ->
+                textMeasurer.measure(name, nameStyle, softWrap = false).size.width > columnWidth
+            }
         if (stackFields) {
             Column(verticalArrangement = Arrangement.spacedBy(8.dp)) {
                 RequestParticipant("Client", clientName, maxLines)
                 if (secretNames.isNotEmpty()) {
                     RequestParticipant(
                         if (secretNames.size == 1) "Secret" else "Secrets",
-                        secretNames.joinToString(", "), maxLines,
+                        secretNames.joinToString(", "),
+                        maxLines,
                     )
                 }
             }
@@ -191,7 +204,9 @@ internal fun RequestParticipants(
                 if (secretNames.isNotEmpty()) {
                     RequestParticipant(
                         if (secretNames.size == 1) "Secret" else "Secrets",
-                        secretNames.joinToString(", "), maxLines, Modifier.weight(1f),
+                        secretNames.joinToString(", "),
+                        maxLines,
+                        Modifier.weight(1f),
                     )
                 }
             }
@@ -200,7 +215,12 @@ internal fun RequestParticipants(
 }
 
 @Composable
-private fun RequestParticipant(label: String, name: String, maxLines: Int, modifier: Modifier = Modifier) {
+private fun RequestParticipant(
+    label: String,
+    name: String,
+    maxLines: Int,
+    modifier: Modifier = Modifier,
+) {
     Column(modifier, verticalArrangement = Arrangement.spacedBy(2.dp)) {
         Text(
             label,
@@ -235,9 +255,10 @@ internal fun RequestDecisionButtons(
             OutlinedButton(
                 onClick = onDeny,
                 modifier = Modifier.weight(1f).fillMaxHeight().heightIn(min = 48.dp),
-                colors = ButtonDefaults.outlinedButtonColors(
-                    contentColor = MaterialTheme.agentknockColors.danger,
-                ),
+                colors =
+                    ButtonDefaults.outlinedButtonColors(
+                        contentColor = MaterialTheme.agentknockColors.danger
+                    ),
                 border = BorderStroke(1.dp, MaterialTheme.agentknockColors.danger),
             ) {
                 Text("Deny once", textAlign = TextAlign.Center)
@@ -246,10 +267,11 @@ internal fun RequestDecisionButtons(
                 onClick = onApprove,
                 enabled = approveEnabled,
                 modifier = Modifier.weight(1f).fillMaxHeight().heightIn(min = 48.dp),
-                colors = ButtonDefaults.buttonColors(
-                    containerColor = MaterialTheme.agentknockColors.success,
-                    contentColor = MaterialTheme.agentknockColors.onSuccess,
-                ),
+                colors =
+                    ButtonDefaults.buttonColors(
+                        containerColor = MaterialTheme.agentknockColors.success,
+                        contentColor = MaterialTheme.agentknockColors.onSuccess,
+                    ),
             ) {
                 Text("Allow once", textAlign = TextAlign.Center)
             }
@@ -293,17 +315,18 @@ internal fun TemporaryAccessConfirmation(
                     shape = MaterialTheme.shapes.medium,
                 ) {
                     Column(
-                        modifier = Modifier
-                            .heightIn(max = 144.dp)
-                            .verticalScroll(rememberScrollState())
-                            .padding(horizontal = 12.dp, vertical = 10.dp),
+                        modifier =
+                            Modifier.heightIn(max = 144.dp)
+                                .verticalScroll(rememberScrollState())
+                                .padding(horizontal = 12.dp, vertical = 10.dp),
                         verticalArrangement = Arrangement.spacedBy(6.dp),
                     ) {
                         secretNames.forEach { secretName ->
                             Row(
-                                modifier = Modifier.clearAndSetSemantics {
-                                    contentDescription = "Secret $secretName"
-                                },
+                                modifier =
+                                    Modifier.clearAndSetSemantics {
+                                        contentDescription = "Secret $secretName"
+                                    },
                                 horizontalArrangement = Arrangement.spacedBy(8.dp),
                                 verticalAlignment = Alignment.Top,
                             ) {
@@ -339,28 +362,33 @@ internal fun TemporaryAccessConfirmation(
 private fun temporaryAccessScope(
     clientName: String,
     operation: TemporaryAccessOperation,
-): String = when (operation) {
-    TemporaryAccessOperation.INVOCATION ->
-        "For any command, $clientName can receive protected values from:"
-    TemporaryAccessOperation.GIT_SIGN ->
-        "For any repository, $clientName can request Git signatures from:"
-    TemporaryAccessOperation.SSH_AUTHENTICATE ->
-        "For any SSH server, $clientName can request SSH authentication from:"
-}
+): String =
+    when (operation) {
+        TemporaryAccessOperation.INVOCATION ->
+            "For any command, $clientName can receive protected values from:"
+        TemporaryAccessOperation.GIT_SIGN ->
+            "For any repository, $clientName can request Git signatures from:"
+        TemporaryAccessOperation.SSH_AUTHENTICATE ->
+            "For any SSH server, $clientName can request SSH authentication from:"
+    }
 
 internal fun ApprovalEvaluation?.temporaryGrantSecretNames(
-    aiReviewInFlight: Boolean,
+    aiReviewInFlight: Boolean
 ): List<String> {
     val evaluation = this ?: return emptyList()
     if (aiReviewInFlight) return emptyList()
-    val aiCanEscalate = evaluation.aiReview?.decision == AiReviewDecision.ASK_USER ||
-        evaluation.aiReview?.failure != null ||
-        evaluation.aiReview == null
-    return evaluation.secrets.filter { secret ->
-        secret.temporaryAccessEligible && secret.temporaryAccessExpiresAt == null &&
-            (secret.action == ApprovalAction.ASK_ME ||
-                (secret.action == ApprovalAction.ASK_AI && aiCanEscalate))
-    }.map { it.secretName }
+    val aiCanEscalate =
+        evaluation.aiReview?.decision == AiReviewDecision.ASK_USER ||
+            evaluation.aiReview?.failure != null ||
+            evaluation.aiReview == null
+    return evaluation.secrets
+        .filter { secret ->
+            secret.temporaryAccessEligible &&
+                secret.temporaryAccessExpiresAt == null &&
+                (secret.action == ApprovalAction.ASK_ME ||
+                    (secret.action == ApprovalAction.ASK_AI && aiCanEscalate))
+        }
+        .map { it.secretName }
 }
 
 @Composable
@@ -372,59 +400,67 @@ internal fun HistoricalAiReview(
     review ?: return
     val explanation = review.explanationText()
     when (review.decision) {
-        AiReviewDecision.APPROVE -> Notice(
-            "AI review approved",
-            explanation ?: "AI review allowed its part of this use.",
-            NoticeTone.SUCCESS,
-        )
-        AiReviewDecision.DENY -> Notice(
-            "AI review denied",
-            explanation ?: "AI review denied its part of this use.",
-            NoticeTone.SUBDUED,
-        )
+        AiReviewDecision.APPROVE ->
+            Notice(
+                "AI review approved",
+                explanation ?: "AI review allowed its part of this use.",
+                NoticeTone.SUCCESS,
+            )
+        AiReviewDecision.DENY ->
+            Notice(
+                "AI review denied",
+                explanation ?: "AI review denied its part of this use.",
+                NoticeTone.SUBDUED,
+            )
         AiReviewDecision.ASK_USER -> {
-            val resolution = humanResolution ?: when (decision) {
-                ApprovalDecision.APPROVED -> "You approved it once."
-                ApprovalDecision.DENIED -> "You denied it."
-                null -> null
-            }
+            val resolution =
+                humanResolution
+                    ?: when (decision) {
+                        ApprovalDecision.APPROVED -> "You approved it once."
+                        ApprovalDecision.DENIED -> "You denied it."
+                        null -> null
+                    }
             Notice(
                 "AI review asked you to decide",
-                listOfNotNull(explanation, resolution).joinToString(" ")
-                    .ifBlank { "You made the final decision." },
-                NoticeTone.NEUTRAL,
-            )
-        }
-        null -> if (review.failure != null) {
-            Notice(
-                if (review.failure == AiReviewFailure.SUBSCRIPTION_REQUIRED) {
-                    "AI review was inactive"
-                } else {
-                    "AI review couldn’t complete"
+                listOfNotNull(explanation, resolution).joinToString(" ").ifBlank {
+                    "You made the final decision."
                 },
-                humanResolution ?: "You made the final decision.",
                 NoticeTone.NEUTRAL,
             )
         }
+        null ->
+            if (review.failure != null) {
+                Notice(
+                    if (review.failure == AiReviewFailure.SUBSCRIPTION_REQUIRED) {
+                        "AI review was inactive"
+                    } else {
+                        "AI review couldn’t complete"
+                    },
+                    humanResolution ?: "You made the final decision.",
+                    NoticeTone.NEUTRAL,
+                )
+            }
     }
 }
 
-internal fun AiReview.explanationText(): String? = explanation
-    ?.trim()
-    ?.let { text ->
-        val labels = when (decision) {
-            AiReviewDecision.APPROVE -> listOf("Approve:", "Approved:")
-            AiReviewDecision.DENY -> listOf("Deny:", "Denied:")
-            AiReviewDecision.ASK_USER -> listOf("Ask:", "Ask user:")
-            null -> emptyList()
+internal fun AiReview.explanationText(): String? =
+    explanation
+        ?.trim()
+        ?.let { text ->
+            val labels =
+                when (decision) {
+                    AiReviewDecision.APPROVE -> listOf("Approve:", "Approved:")
+                    AiReviewDecision.DENY -> listOf("Deny:", "Denied:")
+                    AiReviewDecision.ASK_USER -> listOf("Ask:", "Ask user:")
+                    null -> emptyList()
+                }
+            labels
+                .firstOrNull { text.startsWith(it, ignoreCase = true) }
+                ?.let { text.drop(it.length).trimStart() } ?: text
         }
-        labels.firstOrNull { text.startsWith(it, ignoreCase = true) }
-            ?.let { text.drop(it.length).trimStart() }
-            ?: text
-    }
-    ?.replace("**", "")
-    ?.replace("`", "")
-    ?.takeIf(String::isNotEmpty)
+        ?.replace("**", "")
+        ?.replace("`", "")
+        ?.takeIf(String::isNotEmpty)
 
 @Composable
 internal fun MissingRequestDetail(
@@ -450,58 +486,67 @@ internal fun secretUseStatusLabel(
     state: ApprovalRequestState,
     result: ApprovalCompletionResult?,
     completionReason: String?,
-): String = when (state) {
-    ApprovalRequestState.APPROVAL_PENDING -> "Needs approval"
-    ApprovalRequestState.WAITING_FOR_COMPLETION -> "Waiting for client"
-    ApprovalRequestState.VERIFICATION_FAILED -> "Verification failed"
-    ApprovalRequestState.COMPLETED -> when (result) {
-        ApprovalCompletionResult.APPROVED -> "Delivered"
-        ApprovalCompletionResult.DENIED -> if (completionReason == "INVALID_REQUEST") {
-            "Invalid request"
-        } else {
-            "Denied"
-        }
-        ApprovalCompletionResult.ABORTED -> "Aborted"
-        null -> "Completed"
+): String =
+    when (state) {
+        ApprovalRequestState.APPROVAL_PENDING -> "Needs approval"
+        ApprovalRequestState.WAITING_FOR_COMPLETION -> "Waiting for client"
+        ApprovalRequestState.VERIFICATION_FAILED -> "Verification failed"
+        ApprovalRequestState.COMPLETED ->
+            when (result) {
+                ApprovalCompletionResult.APPROVED -> "Delivered"
+                ApprovalCompletionResult.DENIED ->
+                    if (completionReason == "INVALID_REQUEST") {
+                        "Invalid request"
+                    } else {
+                        "Denied"
+                    }
+                ApprovalCompletionResult.ABORTED -> "Aborted"
+                null -> "Completed"
+            }
     }
-}
 
 internal fun gitSignStatusLabel(
     state: ApprovalRequestState,
     result: ApprovalCompletionResult?,
     completionReason: String?,
-): String = when (state) {
-    ApprovalRequestState.APPROVAL_PENDING -> "Needs approval"
-    ApprovalRequestState.WAITING_FOR_COMPLETION -> "Waiting for client"
-    ApprovalRequestState.VERIFICATION_FAILED -> "Verification failed"
-    ApprovalRequestState.COMPLETED -> when (result) {
-        ApprovalCompletionResult.APPROVED -> "Signed"
-        ApprovalCompletionResult.DENIED -> if (completionReason == "INVALID_REQUEST") {
-            "Invalid request"
-        } else {
-            "Denied"
-        }
-        ApprovalCompletionResult.ABORTED -> "Aborted"
-        null -> "Completed"
+): String =
+    when (state) {
+        ApprovalRequestState.APPROVAL_PENDING -> "Needs approval"
+        ApprovalRequestState.WAITING_FOR_COMPLETION -> "Waiting for client"
+        ApprovalRequestState.VERIFICATION_FAILED -> "Verification failed"
+        ApprovalRequestState.COMPLETED ->
+            when (result) {
+                ApprovalCompletionResult.APPROVED -> "Signed"
+                ApprovalCompletionResult.DENIED ->
+                    if (completionReason == "INVALID_REQUEST") {
+                        "Invalid request"
+                    } else {
+                        "Denied"
+                    }
+                ApprovalCompletionResult.ABORTED -> "Aborted"
+                null -> "Completed"
+            }
     }
-}
 
 internal fun sshAuthenticationStatusLabel(
     state: ApprovalRequestState,
     result: ApprovalCompletionResult?,
     completionReason: String?,
-): String = when (state) {
-    ApprovalRequestState.APPROVAL_PENDING -> "Needs approval"
-    ApprovalRequestState.WAITING_FOR_COMPLETION -> "Waiting for client"
-    ApprovalRequestState.VERIFICATION_FAILED -> "Verification failed"
-    ApprovalRequestState.COMPLETED -> when (result) {
-        ApprovalCompletionResult.APPROVED -> "Authenticated"
-        ApprovalCompletionResult.DENIED -> if (completionReason == "INVALID_REQUEST") {
-            "Invalid request"
-        } else {
-            "Denied"
-        }
-        ApprovalCompletionResult.ABORTED -> "Aborted"
-        null -> "Completed"
+): String =
+    when (state) {
+        ApprovalRequestState.APPROVAL_PENDING -> "Needs approval"
+        ApprovalRequestState.WAITING_FOR_COMPLETION -> "Waiting for client"
+        ApprovalRequestState.VERIFICATION_FAILED -> "Verification failed"
+        ApprovalRequestState.COMPLETED ->
+            when (result) {
+                ApprovalCompletionResult.APPROVED -> "Authenticated"
+                ApprovalCompletionResult.DENIED ->
+                    if (completionReason == "INVALID_REQUEST") {
+                        "Invalid request"
+                    } else {
+                        "Denied"
+                    }
+                ApprovalCompletionResult.ABORTED -> "Aborted"
+                null -> "Completed"
+            }
     }
-}

@@ -10,14 +10,14 @@ import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.Spacer
 import androidx.compose.foundation.layout.WindowInsets
+import androidx.compose.foundation.layout.consumeWindowInsets
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
-import androidx.compose.foundation.layout.navigationBars
-import androidx.compose.foundation.layout.systemBars
-import androidx.compose.foundation.layout.padding
-import androidx.compose.foundation.layout.consumeWindowInsets
 import androidx.compose.foundation.layout.imePadding
+import androidx.compose.foundation.layout.navigationBars
+import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
+import androidx.compose.foundation.layout.systemBars
 import androidx.compose.foundation.layout.width
 import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.shape.CircleShape
@@ -91,13 +91,14 @@ internal fun DeviceSetupScreen(
     var welcomeComplete by rememberSaveable {
         mutableStateOf(changeAddressInitially || active != null || candidate != null)
     }
-    var address by rememberSaveable(active?.id, candidate?.id, changeAddressInitially) {
-        mutableStateOf(
-            candidate?.address
-                ?: active?.address?.takeIf { changeAddressInitially }
-                ?: viewModel.generateAddress(),
-        )
-    }
+    var address by
+        rememberSaveable(active?.id, candidate?.id, changeAddressInitially) {
+            mutableStateOf(
+                candidate?.address
+                    ?: active?.address?.takeIf { changeAddressInitially }
+                    ?: viewModel.generateAddress()
+            )
+        }
     LaunchedEffect(candidate?.address) {
         candidate?.address?.let { candidateAddress ->
             if (result == null) address = candidateAddress
@@ -122,8 +123,12 @@ internal fun DeviceSetupScreen(
     }
 
     DeviceSetupContent(
-        active = active, candidate = candidate, address = address,
-        claiming = claiming, result = result, changeAddressInitially = changeAddressInitially,
+        active = active,
+        candidate = candidate,
+        address = address,
+        claiming = claiming,
+        result = result,
+        changeAddressInitially = changeAddressInitially,
         authenticationMode = authenticationMode,
         onAuthenticationModeChange = onAuthenticationModeChange,
         onBack = (::leaveAddressEditor).takeIf { onDone != null },
@@ -176,17 +181,22 @@ internal fun DeviceSetupContent(
                     }
                 },
                 actions = {
-                    onOpenSettings?.takeIf { active != null }?.let { openSettings ->
-                        IconButton(onClick = openSettings) {
-                            Icon(Icons.Outlined.Settings, contentDescription = "Settings")
+                    onOpenSettings
+                        ?.takeIf { active != null }
+                        ?.let { openSettings ->
+                            IconButton(onClick = openSettings) {
+                                Icon(Icons.Outlined.Settings, contentDescription = "Settings")
+                            }
                         }
-                    }
                 },
             )
             Column(
-                modifier = Modifier.fillMaxSize().consumeWindowInsets(padding).imePadding()
-                    .verticalScroll(rememberScrollState())
-                    .padding(horizontal = 20.dp, vertical = 12.dp),
+                modifier =
+                    Modifier.fillMaxSize()
+                        .consumeWindowInsets(padding)
+                        .imePadding()
+                        .verticalScroll(rememberScrollState())
+                        .padding(horizontal = 20.dp, vertical = 12.dp),
                 verticalArrangement = Arrangement.spacedBy(20.dp),
             ) {
                 if (active != null && !active.credentialsAvailable) {
@@ -206,8 +216,11 @@ internal fun DeviceSetupContent(
                     onSubmit = onSubmit,
                     beforeSubmit = {
                         if (active == null) {
-                            Text("Device authentication", style = MaterialTheme.typography.titleLarge,
-                                modifier = Modifier.padding(top = 8.dp))
+                            Text(
+                                "Device authentication",
+                                style = MaterialTheme.typography.titleLarge,
+                                modifier = Modifier.padding(top = 8.dp),
+                            )
                             Surface(
                                 color = MaterialTheme.colorScheme.surfaceContainer,
                                 shape = MaterialTheme.shapes.large,
@@ -224,7 +237,6 @@ internal fun DeviceSetupContent(
             }
         }
     }
-
 }
 
 @Composable
@@ -232,8 +244,11 @@ internal fun WelcomeScreen(onContinue: () -> Unit) {
     // No top bar here, so the status bar inset must come from the scaffold.
     Scaffold(contentWindowInsets = WindowInsets.systemBars) { padding ->
         Column(
-            modifier = Modifier.fillMaxSize().padding(padding).verticalScroll(rememberScrollState())
-                .padding(horizontal = 24.dp, vertical = 32.dp),
+            modifier =
+                Modifier.fillMaxSize()
+                    .padding(padding)
+                    .verticalScroll(rememberScrollState())
+                    .padding(horizontal = 24.dp, vertical = 32.dp),
             verticalArrangement = Arrangement.spacedBy(24.dp),
         ) {
             Column(verticalArrangement = Arrangement.spacedBy(14.dp)) {
@@ -363,28 +378,34 @@ internal fun PairingAddressEditor(
             supportingText = {
                 Text(
                     when {
-                        address == activeAddress -> stringResource(R.string.pairing_address_unchanged)
+                        address == activeAddress ->
+                            stringResource(R.string.pairing_address_unchanged)
                         addressUnavailable -> result.explanation()
                         else -> stringResource(R.string.pairing_address_format)
-                    },
+                    }
                 )
             },
-            isError = addressUnavailable ||
-                (address.isNotEmpty() && !DeviceProtocol.validPairingAddress(address)),
+            isError =
+                addressUnavailable ||
+                    (address.isNotEmpty() && !DeviceProtocol.validPairingAddress(address)),
             enabled = !claiming,
             singleLine = true,
-            keyboardOptions = KeyboardOptions(
-                capitalization = KeyboardCapitalization.None,
-                autoCorrectEnabled = false,
-                keyboardType = KeyboardType.Ascii,
-                imeAction = ImeAction.Done,
-            ),
+            keyboardOptions =
+                KeyboardOptions(
+                    capitalization = KeyboardCapitalization.None,
+                    autoCorrectEnabled = false,
+                    keyboardType = KeyboardType.Ascii,
+                    imeAction = ImeAction.Done,
+                ),
         )
-        result?.takeUnless {
-            it == ClaimPairingAddressResult.Claimed || it == ClaimPairingAddressResult.AddressUnavailable
-        }?.let {
-            Text(it.explanation(), color = MaterialTheme.colorScheme.onSurfaceVariant)
-        }
+        result
+            ?.takeUnless {
+                it == ClaimPairingAddressResult.Claimed ||
+                    it == ClaimPairingAddressResult.AddressUnavailable
+            }
+            ?.let {
+                Text(it.explanation(), color = MaterialTheme.colorScheme.onSurfaceVariant)
+            }
         Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.End) {
             OutlinedButton(onClick = onGenerate, enabled = !claiming) {
                 Icon(
@@ -408,11 +429,12 @@ internal fun PairingAddressEditor(
             }
             Text(
                 when {
-                    claiming -> if (activeAddress == null) "Claiming address…" else "Changing address…"
+                    claiming ->
+                        if (activeAddress == null) "Claiming address…" else "Changing address…"
                     candidateAddress == address && result != null -> "Try again"
                     activeAddress == null -> stringResource(R.string.claim_pairing_address)
                     else -> stringResource(R.string.change_pairing_address)
-                },
+                }
             )
         }
     }
@@ -421,10 +443,11 @@ internal fun PairingAddressEditor(
 @Composable
 private fun WarningCard(title: String, message: String) {
     Card(
-        colors = CardDefaults.cardColors(
-            containerColor = MaterialTheme.agentknockColors.dangerContainer,
-            contentColor = MaterialTheme.agentknockColors.onDangerContainer,
-        ),
+        colors =
+            CardDefaults.cardColors(
+                containerColor = MaterialTheme.agentknockColors.dangerContainer,
+                contentColor = MaterialTheme.agentknockColors.onDangerContainer,
+            )
     ) {
         Column(Modifier.padding(20.dp), verticalArrangement = Arrangement.spacedBy(6.dp)) {
             Text(title, style = MaterialTheme.typography.titleMedium)
@@ -433,19 +456,21 @@ private fun WarningCard(title: String, message: String) {
     }
 }
 
-private fun ClaimPairingAddressResult.explanation(): String = when (this) {
-    ClaimPairingAddressResult.Claimed -> "Pairing address claimed."
-    ClaimPairingAddressResult.AddressUnavailable ->
-        "That pairing address is already in use. Edit it or choose another suggestion."
-    ClaimPairingAddressResult.SameAddress -> "This is already your pairing address."
-    ClaimPairingAddressResult.NoCandidate -> "The claim could not be resumed. Try again."
-    ClaimPairingAddressResult.CredentialsCorrupted -> "The device credentials could not be read."
-    ClaimPairingAddressResult.UnsupportedEncryption ->
-        "The device credentials use an unsupported encryption format."
-    is ClaimPairingAddressResult.RelayRejected ->
-        message ?: "The relay rejected the claim (${code ?: status})."
-    is ClaimPairingAddressResult.RelayUnavailable ->
-        message ?: "The relay could not be reached. Try again."
-    ClaimPairingAddressResult.InvalidRelayResponse ->
-        "The relay returned an invalid response. Try again."
-}
+private fun ClaimPairingAddressResult.explanation(): String =
+    when (this) {
+        ClaimPairingAddressResult.Claimed -> "Pairing address claimed."
+        ClaimPairingAddressResult.AddressUnavailable ->
+            "That pairing address is already in use. Edit it or choose another suggestion."
+        ClaimPairingAddressResult.SameAddress -> "This is already your pairing address."
+        ClaimPairingAddressResult.NoCandidate -> "The claim could not be resumed. Try again."
+        ClaimPairingAddressResult.CredentialsCorrupted ->
+            "The device credentials could not be read."
+        ClaimPairingAddressResult.UnsupportedEncryption ->
+            "The device credentials use an unsupported encryption format."
+        is ClaimPairingAddressResult.RelayRejected ->
+            message ?: "The relay rejected the claim (${code ?: status})."
+        is ClaimPairingAddressResult.RelayUnavailable ->
+            message ?: "The relay could not be reached. Try again."
+        ClaimPairingAddressResult.InvalidRelayResponse ->
+            "The relay returned an invalid response. Try again."
+    }

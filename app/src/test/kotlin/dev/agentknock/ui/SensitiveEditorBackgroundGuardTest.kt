@@ -38,7 +38,7 @@ class SensitiveEditorBackgroundGuardTest {
     @Test
     fun `ordinary backgrounding clears the editor immediately`() {
         assertTrue(
-            SensitiveDataBackgroundGuard({ 1_000L }).onStop(authenticationInProgress = false),
+            SensitiveDataBackgroundGuard({ 1_000L }).onStop(authenticationInProgress = false)
         )
     }
 }

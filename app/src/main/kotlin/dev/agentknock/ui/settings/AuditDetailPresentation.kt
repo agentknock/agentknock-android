@@ -30,23 +30,33 @@ internal fun AuditEvent.summaryFields(): List<AuditDetailField> = buildList {
     if (context != null && presentation.contextLabel != "Command") {
         add(AuditDetailField(presentation.contextLabel ?: "Context", context))
     }
-    if (type in setOf(
-            AuditEventType.SECRET_APPROVAL_MODE_CHANGED,
-            AuditEventType.CLIENT_APPROVAL_OVERRIDE_CHANGED,
-            AuditEventType.TEMPORARY_ACCESS_ALLOWED,
-            AuditEventType.TEMPORARY_ACCESS_ENDED,
-        )) {
+    if (
+        type in
+            setOf(
+                AuditEventType.SECRET_APPROVAL_MODE_CHANGED,
+                AuditEventType.CLIENT_APPROVAL_OVERRIDE_CHANGED,
+                AuditEventType.TEMPORARY_ACCESS_ALLOWED,
+                AuditEventType.TEMPORARY_ACCESS_ENDED,
+            )
+    ) {
         detail?.let { add(AuditDetailField(presentation.detailLabel ?: "Change", it)) }
     }
 }
 
-internal fun AuditEvent.displayDetailFields(formatTimestamp: (Long) -> String): List<AuditDetailField> = buildList {
+internal fun AuditEvent.displayDetailFields(
+    formatTimestamp: (Long) -> String
+): List<AuditDetailField> = buildList {
     val presentation = presentation()
     val relevant = relevantDetailFields().toMutableList()
     clientField(abbreviateId = false)?.let(::add)
     subject?.let {
-        add(AuditDetailField(presentation.subjectLabel ?: "Subject", it,
-            presentation.subjectLabel in setOf("Pairing address", "Environment variable")))
+        add(
+            AuditDetailField(
+                presentation.subjectLabel ?: "Subject",
+                it,
+                presentation.subjectLabel in setOf("Pairing address", "Environment variable"),
+            )
+        )
     }
     commandField()?.let { command ->
         add(command)
@@ -55,22 +65,34 @@ internal fun AuditEvent.displayDetailFields(formatTimestamp: (Long) -> String): 
     if (context != null && presentation.contextLabel != "Command") {
         add(AuditDetailField(presentation.contextLabel ?: "Context", context))
     }
-    val (reviewFields, otherFields) = relevant.partition {
-        it.label in setOf("AI decision", "AI explanation", "AI review problem", "Applied decision", "Applied explanation")
-    }
+    val (reviewFields, otherFields) =
+        relevant.partition {
+            it.label in
+                setOf(
+                    "AI decision",
+                    "AI explanation",
+                    "AI review problem",
+                    "Applied decision",
+                    "Applied explanation",
+                )
+        }
     addAll(reviewFields)
     detail?.let { add(AuditDetailField(presentation.detailLabel ?: "Details", it)) }
-    decisionSource?.takeUnless { it == AuditDecisionSource.AI_REVIEW }?.let {
-        add(AuditDetailField("Decision source", it.displayName()))
-    }
+    decisionSource
+        ?.takeUnless { it == AuditDecisionSource.AI_REVIEW }
+        ?.let {
+            add(AuditDetailField("Decision source", it.displayName()))
+        }
     expiresAt?.let { add(AuditDetailField("Valid until", formatTimestamp(it))) }
     addAll(otherFields)
 }
 
 private fun AuditEvent.commandField(): AuditDetailField? {
     if (presentation().contextLabel != "Command") return null
-    val command = data.text("command")?.let { renderShellCommand(it, data.stringArray("arguments")) }
-        ?: context ?: return null
+    val command =
+        data.text("command")?.let { renderShellCommand(it, data.stringArray("arguments")) }
+            ?: context
+            ?: return null
     return AuditDetailField("Command", command, monospace = true)
 }
 
@@ -80,8 +102,11 @@ private fun AuditEvent.clientField(abbreviateId: Boolean): AuditDetailField? {
         return AuditDetailField("Client", it)
     }
     val id = clientId ?: return null
-    return AuditDetailField("Client ID", if (abbreviateId && id.length > 8) "…${id.takeLast(6)}" else id,
-        monospace = true)
+    return AuditDetailField(
+        "Client ID",
+        if (abbreviateId && id.length > 8) "…${id.takeLast(6)}" else id,
+        monospace = true,
+    )
 }
 
 internal fun AuditEvent.relevantDetailFields(): List<AuditDetailField> = buildList {
@@ -89,31 +114,26 @@ internal fun AuditEvent.relevantDetailFields(): List<AuditDetailField> = buildLi
         AuditEventType.SECRET_USE_RECEIVED,
         AuditEventType.SECRET_USE_AI_REVIEWED,
         AuditEventType.SECRET_USE_DECIDED,
-        AuditEventType.SECRET_USE_COMPLETED,
-        -> addInvocationFields(data)
+        AuditEventType.SECRET_USE_COMPLETED -> addInvocationFields(data)
 
         AuditEventType.GIT_SIGN_RECEIVED,
         AuditEventType.GIT_SIGN_AI_REVIEWED,
         AuditEventType.GIT_SIGN_DECIDED,
-        AuditEventType.GIT_SIGN_COMPLETED,
-        -> addGitSigningFields(data)
+        AuditEventType.GIT_SIGN_COMPLETED -> addGitSigningFields(data)
 
         AuditEventType.SSH_AUTHENTICATION_RECEIVED,
         AuditEventType.SSH_AUTHENTICATION_AI_REVIEWED,
         AuditEventType.SSH_AUTHENTICATION_DECIDED,
-        AuditEventType.SSH_AUTHENTICATION_COMPLETED,
-        -> addSshAuthenticationFields(data)
+        AuditEventType.SSH_AUTHENTICATION_COMPLETED -> addSshAuthenticationFields(data)
 
         AuditEventType.SECRET_UPLOAD_RECEIVED,
         AuditEventType.SECRET_UPLOAD_DECIDED,
-        AuditEventType.SECRET_UPLOAD_COMPLETED,
-        -> addSecretUploadFields(data)
+        AuditEventType.SECRET_UPLOAD_COMPLETED -> addSecretUploadFields(data)
 
         AuditEventType.PAIRING_REQUESTED,
         AuditEventType.PAIRING_DECIDED,
         AuditEventType.PAIRING_COMPLETED,
-        AuditEventType.PAIRING_CONFIRMATION_RECEIVED,
-        -> addPairingFields(data)
+        AuditEventType.PAIRING_CONFIRMATION_RECEIVED -> addPairingFields(data)
 
         AuditEventType.CLIENT_RESUMED,
         AuditEventType.CLIENT_SUSPENDED,
@@ -123,8 +143,7 @@ internal fun AuditEvent.relevantDetailFields(): List<AuditDetailField> = buildLi
         AuditEventType.CLIENT_RENAMED,
         AuditEventType.CLIENT_INSTRUCTIONS_CHANGED,
         AuditEventType.CLIENT_REMOVAL_CONFIRMATION_FAILED,
-        AuditEventType.CLIENT_UNPAIRED_ITSELF,
-        -> addClientFields(data)
+        AuditEventType.CLIENT_UNPAIRED_ITSELF -> addClientFields(data)
 
         AuditEventType.SECRET_APPROVAL_MODE_CHANGED,
         AuditEventType.SECRET_INSTRUCTIONS_CHANGED,
@@ -139,19 +158,16 @@ internal fun AuditEvent.relevantDetailFields(): List<AuditDetailField> = buildLi
         AuditEventType.SECRET_DELETED,
         AuditEventType.ENVIRONMENT_VARIABLE_ADDED,
         AuditEventType.ENVIRONMENT_VARIABLE_UPDATED,
-        AuditEventType.ENVIRONMENT_VARIABLE_DELETED,
-        -> addSecretFields(data)
+        AuditEventType.ENVIRONMENT_VARIABLE_DELETED -> addSecretFields(data)
 
         AuditEventType.NEW_PAIRINGS_RESUMED,
         AuditEventType.NEW_PAIRINGS_PAUSED,
         AuditEventType.PAIRING_ADDRESS_CLAIMED,
         AuditEventType.PAIRING_ADDRESS_CHANGED,
-        AuditEventType.GENERAL_AI_REVIEW_INSTRUCTIONS_CHANGED,
-        -> addDeviceFields(type, data)
+        AuditEventType.GENERAL_AI_REVIEW_INSTRUCTIONS_CHANGED -> addDeviceFields(type, data)
 
         AuditEventType.SECRET_LIST_RECEIVED,
-        AuditEventType.SECRET_LIST_COMPLETED,
-        -> Unit
+        AuditEventType.SECRET_LIST_COMPLETED -> Unit
 
         AuditEventType.REQUEST_REJECTED -> {
             addText(data, "rejection_code", "Error code", transform = ::displayStoredValue)
@@ -159,26 +175,28 @@ internal fun AuditEvent.relevantDetailFields(): List<AuditDetailField> = buildLi
         }
     }
     addCompletionFields(data, detail)
-}.filterNot { it.value == subject || it.value == context || it.value == detail }
+}
+    .filterNot { it.value == subject || it.value == context || it.value == detail }
 
-internal fun AuditEvent.technicalJson(): String = auditJson.encodeToString(
-    JsonElement.serializer(),
-    buildJsonObject {
-        put("sequence", id)
-        put("occurred_at", occurredAt)
-        put("event_type", type.code)
-        put("outcome", outcome.code)
-        decisionSource?.let { put("decision_source", it.code) }
-        subject?.let { put("subject", it) }
-        context?.let { put("context", it) }
-        detail?.let { put("detail", it) }
-        expiresAt?.let { put("expires_at", it) }
-        clientId?.let { put("client_id", it) }
-        clientName?.let { put("client_name", it) }
-        relayRequestId?.let { put("request_id", it) }
-        put("data", data)
-    },
-)
+internal fun AuditEvent.technicalJson(): String =
+    auditJson.encodeToString(
+        JsonElement.serializer(),
+        buildJsonObject {
+            put("sequence", id)
+            put("occurred_at", occurredAt)
+            put("event_type", type.code)
+            put("outcome", outcome.code)
+            decisionSource?.let { put("decision_source", it.code) }
+            subject?.let { put("subject", it) }
+            context?.let { put("context", it) }
+            detail?.let { put("detail", it) }
+            expiresAt?.let { put("expires_at", it) }
+            clientId?.let { put("client_id", it) }
+            clientName?.let { put("client_name", it) }
+            relayRequestId?.let { put("request_id", it) }
+            put("data", data)
+        },
+    )
 
 private fun MutableList<AuditDetailField>.addInvocationFields(data: JsonObject) {
     val command = data.text("command")
@@ -188,7 +206,7 @@ private fun MutableList<AuditDetailField>.addInvocationFields(data: JsonObject) 
                 label = "Command",
                 value = renderShellCommand(command, data.stringArray("arguments")),
                 monospace = true,
-            ),
+            )
         )
     }
     addText(data, "working_directory", "Working directory", monospace = true)
@@ -221,7 +239,8 @@ private fun MutableList<AuditDetailField>.addSshAuthenticationFields(data: JsonO
 
 private fun MutableList<AuditDetailField>.addSecretUploadFields(data: JsonObject) {
     addText(data, "upload_mode", "Upload action", transform = ::displayStoredValue)
-    data.text("approved_name")
+    data
+        .text("approved_name")
         ?.takeUnless { it == data.text("uploaded_name") }
         ?.let { add(AuditDetailField("Saved as", it)) }
     addText(data, "secret_type", "Secret type", transform = ::displaySecretType)
@@ -249,7 +268,9 @@ private fun MutableList<AuditDetailField>.addClientFields(data: JsonObject) {
     val oldInstructions = data.text("previous_instructions")
     val newInstructions = data.text("instructions")
     if (oldInstructions != null || newInstructions != null) {
-        oldInstructions?.let { add(AuditDetailField("Previous instructions", it.ifEmpty { "None" })) }
+        oldInstructions?.let {
+            add(AuditDetailField("Previous instructions", it.ifEmpty { "None" }))
+        }
         newInstructions?.let { add(AuditDetailField("Instructions", it.ifEmpty { "None" })) }
     }
     addStateChange(data, "relay_state", "previous_relay_state", "Relay state")
@@ -284,7 +305,9 @@ private fun MutableList<AuditDetailField>.addSecretFields(data: JsonObject) {
     val oldInstructions = data.text("previous_instructions")
     val newInstructions = data.text("instructions")
     if (oldInstructions != null || newInstructions != null) {
-        oldInstructions?.let { add(AuditDetailField("Previous instructions", it.ifEmpty { "None" })) }
+        oldInstructions?.let {
+            add(AuditDetailField("Previous instructions", it.ifEmpty { "None" }))
+        }
         newInstructions?.let { add(AuditDetailField("Instructions", it.ifEmpty { "None" })) }
     }
     addText(data, "variable_name", "Environment variable", monospace = true)
@@ -295,9 +318,12 @@ private fun MutableList<AuditDetailField>.addSecretFields(data: JsonObject) {
             else -> value
         }
     }
-    data.boolean("value_replaced")?.takeIf { it }?.let {
-        add(AuditDetailField("Value", "Replaced"))
-    }
+    data
+        .boolean("value_replaced")
+        ?.takeIf { it }
+        ?.let {
+            add(AuditDetailField("Value", "Replaced"))
+        }
     formatEnvironmentVariables(data["environment_variables"])?.let {
         add(AuditDetailField("Environment variables", it, monospace = true))
     }
@@ -322,13 +348,15 @@ private fun MutableList<AuditDetailField>.addDeviceFields(
             }
         }
         AuditEventType.NEW_PAIRINGS_RESUMED,
-        AuditEventType.NEW_PAIRINGS_PAUSED,
-        -> addStateChange(
-            data,
-            "pairing_enabled",
-            "previous_pairing_enabled",
-            "New pairings",
-        ) { value -> if (value == "true") "Allowed" else "Paused" }
+        AuditEventType.NEW_PAIRINGS_PAUSED ->
+            addStateChange(
+                data,
+                "pairing_enabled",
+                "previous_pairing_enabled",
+                "New pairings",
+            ) { value ->
+                if (value == "true") "Allowed" else "Paused"
+            }
         AuditEventType.GENERAL_AI_REVIEW_INSTRUCTIONS_CHANGED -> {
             data.text("previous_instructions")?.let {
                 add(AuditDetailField("Previous instructions", it.ifEmpty { "None" }))
@@ -347,13 +375,16 @@ private fun MutableList<AuditDetailField>.addCompletionFields(
     displayedDetail: String?,
 ) {
     addText(data, "completion_result", "Client result", transform = ::displayStoredValue)
-    data.text("completion_reason")
+    data
+        .text("completion_reason")
         ?.takeUnless { it == displayedDetail }
         ?.let { add(AuditDetailField("Client reason", displayStoredValue(it))) }
-    data.text("completion_message")
+    data
+        .text("completion_message")
         ?.takeUnless { it == displayedDetail }
         ?.let { add(AuditDetailField("Client message", it)) }
-    data.text("transport_error")
+    data
+        .text("transport_error")
         ?.takeUnless { it == displayedDetail }
         ?.let { add(AuditDetailField("Transport error", it)) }
 }
@@ -364,23 +395,29 @@ private fun MutableList<AuditDetailField>.addAiReviewFields(data: JsonObject) {
     addText(data, "ai_failure", "AI review problem", transform = ::displayStoredValue)
     val reviewed = data.text("ai_decision")
     val explanation = data.text("ai_explanation")
-    data.text("resulting_review_decision")
+    data
+        .text("resulting_review_decision")
         ?.takeUnless { it == reviewed }
         ?.let { add(AuditDetailField("Applied decision", displayStoredValue(it))) }
-    data.text("resulting_review_explanation")
+    data
+        .text("resulting_review_explanation")
         ?.takeUnless { it == explanation }
         ?.let { add(AuditDetailField("Applied explanation", it)) }
 }
 
 private fun MutableList<AuditDetailField>.addClientSystem(data: JsonObject) {
     val hostname = data.text("hostname")
-    val system = listOfNotNull(
-        data.text("platform")?.let(::formatPlatformName),
-        data.text("os_version"),
-        data.text("architecture"),
-    ).joinToString(" · ").ifBlank { null }
+    val system =
+        listOfNotNull(
+                data.text("platform")?.let(::formatPlatformName),
+                data.text("os_version"),
+                data.text("architecture"),
+            )
+            .joinToString(" · ")
+            .ifBlank { null }
     when {
-        hostname != null && system != null -> add(AuditDetailField("Client system", "$hostname · $system"))
+        hostname != null && system != null ->
+            add(AuditDetailField("Client system", "$hostname · $system"))
         hostname != null -> add(AuditDetailField("Client system", hostname))
         system != null -> add(AuditDetailField("Client system", system))
     }
@@ -394,7 +431,7 @@ private fun MutableList<AuditDetailField>.addSshKeyFields(data: JsonObject) {
             AuditDetailField(
                 "Key type",
                 listOfNotNull(algorithm.uppercase(), bits?.let { "$it bit" }).joinToString(" · "),
-            ),
+            )
         )
     }
     addText(data, "fingerprint", "SHA-256 fingerprint", monospace = true)
@@ -416,11 +453,12 @@ private fun MutableList<AuditDetailField>.addStateChange(
     if (current == null && previous == null) return
     val displayedCurrent = current?.let(transform) ?: nullDisplay ?: "None"
     val displayedPrevious = previous?.let(transform) ?: nullDisplay
-    val value = if (displayedPrevious != null && displayedPrevious != displayedCurrent) {
-        "$displayedPrevious → $displayedCurrent"
-    } else {
-        displayedCurrent
-    }
+    val value =
+        if (displayedPrevious != null && displayedPrevious != displayedCurrent) {
+            "$displayedPrevious → $displayedCurrent"
+        } else {
+            displayedCurrent
+        }
     add(AuditDetailField(label, value))
 }
 
@@ -436,94 +474,106 @@ private fun MutableList<AuditDetailField>.addText(
 
 private fun formatSecretDelivery(value: JsonElement): String? {
     val secrets = value as? JsonObject ?: return null
-    return secrets.mapNotNull { (secretName, rawFacts) ->
-        val facts = rawFacts as? JsonObject ?: return@mapNotNull null
-        when (facts.text("type")) {
-            "ssh" -> "$secretName\n  SSH public key"
-            "environment" -> {
-                val variables = facts["variables"] as? JsonObject ?: return@mapNotNull secretName
-                val lines = variables.mapNotNull { (source, rawVariable) ->
-                    val variable = rawVariable as? JsonObject ?: return@mapNotNull null
-                    val valueSuffix = variable.text("value")?.let { " = $it" }.orEmpty()
-                    when (variable.text("delivery")) {
-                        "environment" -> {
-                            val target = variable.text("target") ?: return@mapNotNull null
-                            "  $source → $target$valueSuffix"
+    return secrets
+        .mapNotNull { (secretName, rawFacts) ->
+            val facts = rawFacts as? JsonObject ?: return@mapNotNull null
+            when (facts.text("type")) {
+                "ssh" -> "$secretName\n  SSH public key"
+                "environment" -> {
+                    val variables =
+                        facts["variables"] as? JsonObject ?: return@mapNotNull secretName
+                    val lines = variables.mapNotNull { (source, rawVariable) ->
+                        val variable = rawVariable as? JsonObject ?: return@mapNotNull null
+                        val valueSuffix = variable.text("value")?.let { " = $it" }.orEmpty()
+                        when (variable.text("delivery")) {
+                            "environment" -> {
+                                val target = variable.text("target") ?: return@mapNotNull null
+                                "  $source → $target$valueSuffix"
+                            }
+                            "standard_input" -> "  $source → standard input$valueSuffix"
+                            "omitted" -> "  $source · not delivered$valueSuffix"
+                            else -> null
                         }
-                        "standard_input" -> "  $source → standard input$valueSuffix"
-                        "omitted" -> "  $source · not delivered$valueSuffix"
-                        else -> null
                     }
+                    (listOf(secretName) + lines).joinToString("\n")
                 }
-                (listOf(secretName) + lines).joinToString("\n")
+                else -> secretName
             }
-            else -> secretName
         }
-    }.takeIf(List<String>::isNotEmpty)?.joinToString("\n")
+        .takeIf(List<String>::isNotEmpty)
+        ?.joinToString("\n")
 }
 
 private fun formatEnvironmentVariables(value: JsonElement?): String? {
     val variables = value as? JsonArray ?: return null
-    return variables.mapNotNull { rawVariable ->
-        val variable = rawVariable as? JsonObject ?: return@mapNotNull null
-        val name = variable.text("name") ?: variable.text("variable_name")
-            ?: return@mapNotNull null
-        when (variable.boolean("sensitive")) {
-            true -> "$name · sensitive"
-            false -> "$name · not sensitive"
-            null -> name
+    return variables
+        .mapNotNull { rawVariable ->
+            val variable = rawVariable as? JsonObject ?: return@mapNotNull null
+            val name =
+                variable.text("name") ?: variable.text("variable_name") ?: return@mapNotNull null
+            when (variable.boolean("sensitive")) {
+                true -> "$name · sensitive"
+                false -> "$name · not sensitive"
+                null -> name
+            }
         }
-    }.takeIf(List<String>::isNotEmpty)?.joinToString("\n")
+        .takeIf(List<String>::isNotEmpty)
+        ?.joinToString("\n")
 }
 
 private fun formatRepository(repository: JsonObject): String? {
     val head = repository["head"] as? JsonObject
-    val headText = when (head?.text("type")) {
-        "BRANCH" -> listOfNotNull(
-            head.text("name"),
-            head.text("upstream")?.let { "tracking $it" },
-        ).joinToString(" · ").ifBlank { null }
-        "DETACHED" -> "Detached HEAD"
-        else -> null
-    }
+    val headText =
+        when (head?.text("type")) {
+            "BRANCH" ->
+                listOfNotNull(
+                        head.text("name"),
+                        head.text("upstream")?.let { "tracking $it" },
+                    )
+                    .joinToString(" · ")
+                    .ifBlank { null }
+            "DETACHED" -> "Detached HEAD"
+            else -> null
+        }
     val changed = repository.text("changed_path_count")?.let { "$it changed paths" }
     return listOfNotNull(
-        repository.text("remote"),
-        repository.text("worktree"),
-        headText,
-        changed,
-    ).takeIf(List<String>::isNotEmpty)?.joinToString("\n")
+            repository.text("remote"),
+            repository.text("worktree"),
+            headText,
+            changed,
+        )
+        .takeIf(List<String>::isNotEmpty)
+        ?.joinToString("\n")
 }
 
-private fun JsonObject.text(key: String): String? =
-    (this[key] as? JsonPrimitive)?.contentOrNull
+private fun JsonObject.text(key: String): String? = (this[key] as? JsonPrimitive)?.contentOrNull
 
-private fun JsonObject.boolean(key: String): Boolean? = when (text(key)) {
-    "true" -> true
-    "false" -> false
-    else -> null
-}
+private fun JsonObject.boolean(key: String): Boolean? =
+    when (text(key)) {
+        "true" -> true
+        "false" -> false
+        else -> null
+    }
 
 private fun JsonObject.stringArray(key: String): List<String> =
     (this[key] as? JsonArray).orEmpty().mapNotNull { (it as? JsonPrimitive)?.contentOrNull }
 
-private fun displayStoredValue(value: String): String = value
-    .lowercase()
-    .split('_')
-    .joinToString(" ")
-    .replaceFirstChar(Char::uppercaseChar)
+private fun displayStoredValue(value: String): String =
+    value.lowercase().split('_').joinToString(" ").replaceFirstChar(Char::uppercaseChar)
 
-private fun displaySecretType(value: String): String = when (value) {
-    "environment" -> "Environment variables"
-    "ssh" -> "SSH key"
-    else -> displayStoredValue(value)
-}
+private fun displaySecretType(value: String): String =
+    when (value) {
+        "environment" -> "Environment variables"
+        "ssh" -> "SSH key"
+        else -> displayStoredValue(value)
+    }
 
-private fun displayOperation(value: String): String = when (value) {
-    "invocation" -> "Secret delivery"
-    "git_sign" -> "Git signing"
-    "ssh_authenticate" -> "SSH authentication"
-    else -> displayStoredValue(value)
-}
+private fun displayOperation(value: String): String =
+    when (value) {
+        "invocation" -> "Secret delivery"
+        "git_sign" -> "Git signing"
+        "ssh_authenticate" -> "SSH authentication"
+        else -> displayStoredValue(value)
+    }
 
 private val auditJson = Json { prettyPrint = true }

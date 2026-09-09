@@ -43,23 +43,32 @@ import org.junit.Test
 class DesignInteractionTest {
     @get:Rule val compose = createComposeRule()
 
-    @Test fun pairingSwitchRemainsTappableOnANarrowScreenWithLargeText() {
+    @Test
+    fun pairingSwitchRemainsTappableOnANarrowScreenWithLargeText() {
         val identity = mutableStateOf(testIdentity)
         val changes = mutableListOf<Boolean>()
         compose.setContent {
-            CompositionLocalProvider(LocalDensity provides Density(LocalDensity.current.density, 1.5f)) {
+            CompositionLocalProvider(
+                LocalDensity provides Density(LocalDensity.current.density, 1.5f)
+            ) {
                 AgentknockTheme(darkTheme = true, dynamicColor = false) {
                     Box(Modifier.width(360.dp).fillMaxHeight()) {
                         ClientList(
-                            clients = emptyList(), pendingPairings = emptyList(),
-                            selectedClientId = null, selectedPairingRequestId = null,
-                            identity = identity.value, onOpen = {}, onOpenPairing = {},
+                            clients = emptyList(),
+                            pendingPairings = emptyList(),
+                            selectedClientId = null,
+                            selectedPairingRequestId = null,
+                            identity = identity.value,
+                            onOpen = {},
+                            onOpenPairing = {},
                             onChangePairingAddress = {},
                             onSetPairingEnabled = {
                                 changes += it
                                 identity.value = identity.value.copy(pairingEnabled = it)
                             },
-                            onOpenSettings = {}, report = {}, modifier = Modifier.fillMaxSize(),
+                            onOpenSettings = {},
+                            report = {},
+                            modifier = Modifier.fillMaxSize(),
                         )
                     }
                 }
@@ -79,23 +88,31 @@ class DesignInteractionTest {
         compose.runOnIdle { assertEquals(listOf(false, true), changes) }
     }
 
-    @Test fun clientInformationRevealsAndHidesTheClientId() {
+    @Test
+    fun clientInformationRevealsAndHidesTheClientId() {
         showClientDetail()
 
         val information = compose.onNodeWithText("Client information")
-        information.assert(SemanticsMatcher.expectValue(SemanticsProperties.StateDescription, "Collapsed"))
+        information.assert(
+            SemanticsMatcher.expectValue(SemanticsProperties.StateDescription, "Collapsed")
+        )
         compose.onNodeWithText(testClient.clientId).assertDoesNotExist()
 
         information.performScrollTo().performClick()
-        information.assert(SemanticsMatcher.expectValue(SemanticsProperties.StateDescription, "Expanded"))
+        information.assert(
+            SemanticsMatcher.expectValue(SemanticsProperties.StateDescription, "Expanded")
+        )
         compose.onNodeWithText(testClient.clientId).performScrollTo().assertIsDisplayed()
 
         information.performScrollTo().performClick()
-        information.assert(SemanticsMatcher.expectValue(SemanticsProperties.StateDescription, "Collapsed"))
+        information.assert(
+            SemanticsMatcher.expectValue(SemanticsProperties.StateDescription, "Collapsed")
+        )
         compose.onNodeWithText(testClient.clientId).assertDoesNotExist()
     }
 
-    @Test fun suspendRequestsTheSuspendedState() {
+    @Test
+    fun suspendRequestsTheSuspendedState() {
         val changes = mutableListOf<RelayClientState>()
         showClientDetail(onSetState = { changes += it })
 
@@ -104,7 +121,8 @@ class DesignInteractionTest {
         compose.runOnIdle { assertEquals(listOf(RelayClientState.SUSPENDED), changes) }
     }
 
-    @Test fun revokeRequiresConfirmationAndCancelLeavesTheClientUnchanged() {
+    @Test
+    fun revokeRequiresConfirmationAndCancelLeavesTheClientUnchanged() {
         val changes = mutableListOf<RelayClientState>()
         showClientDetail(onSetState = { changes += it })
 
@@ -122,15 +140,20 @@ class DesignInteractionTest {
         compose.runOnIdle { assertEquals(listOf(RelayClientState.REVOKED), changes) }
     }
 
-    @Test fun authenticationChoicesExposeSelectionAndIgnoreTouchesWhileDisabled() {
+    @Test
+    fun authenticationChoicesExposeSelectionAndIgnoreTouchesWhileDisabled() {
         val selected = mutableStateOf(DeviceAuthenticationMode.DEVICE_LOCK)
         val enabled = mutableStateOf(true)
         val changes = mutableListOf<DeviceAuthenticationMode>()
         compose.setContent {
             AgentknockTheme(darkTheme = true, dynamicColor = false) {
                 DeviceAuthenticationChoices(
-                    selected = selected.value, enabled = enabled.value,
-                    onSelect = { changes += it; selected.value = it },
+                    selected = selected.value,
+                    enabled = enabled.value,
+                    onSelect = {
+                        changes += it
+                        selected.value = it
+                    },
                 )
             }
         }
@@ -140,7 +163,8 @@ class DesignInteractionTest {
         compose.onNodeWithText("Rely on device lock").assertIsNotSelected()
         compose.runOnIdle { enabled.value = false }
 
-        for (label in listOf("Rely on device lock", "Protect sensitive actions", "Lock Agentknock")) {
+        for (label in
+            listOf("Rely on device lock", "Protect sensitive actions", "Lock Agentknock")) {
             compose.onNodeWithText(label).assertIsNotEnabled()
         }
         compose.onNodeWithText("Protect sensitive actions").performTouchInput { click() }
@@ -152,26 +176,46 @@ class DesignInteractionTest {
         compose.setContent {
             AgentknockTheme(darkTheme = true, dynamicColor = false) {
                 ClientDetail(
-                    client = testClient, temporaryAccessGrants = emptyList(),
-                    aiReviewAccess = AiReviewAccess.ACTIVE, onBack = {}, showBack = true,
-                    onRename = {}, onSetState = onSetState, onSaveInstructions = {},
-                    onEndTemporaryAccess = {}, modifier = Modifier.fillMaxSize(),
+                    client = testClient,
+                    temporaryAccessGrants = emptyList(),
+                    aiReviewAccess = AiReviewAccess.ACTIVE,
+                    onBack = {},
+                    showBack = true,
+                    onRename = {},
+                    onSetState = onSetState,
+                    onSaveInstructions = {},
+                    onEndTemporaryAccess = {},
+                    modifier = Modifier.fillMaxSize(),
                 )
             }
         }
     }
 }
 
-private val testIdentity = DeviceIdentity(
-    id = "test-identity", address = "amber-river-maple", deviceId = "test-device",
-    credentialsAvailable = true, pairingEnabled = true, createdAt = 1_704_067_200_000,
-    instructions = "",
-)
+private val testIdentity =
+    DeviceIdentity(
+        id = "test-identity",
+        address = "amber-river-maple",
+        deviceId = "test-device",
+        credentialsAvailable = true,
+        pairingEnabled = true,
+        createdAt = 1_704_067_200_000,
+        instructions = "",
+    )
 
-private val testClient = ClientDetails(
-    clientId = "test-client-id", name = "Work laptop", hostname = "workstation",
-    platform = "linux", architecture = "x86_64", osVersion = "NixOS",
-    machineId = "test-machine", clientSoftware = null, instructions = "",
-    state = RelayClientState.ACTIVE, desiredState = null, pairedAt = 1_704_067_200_000,
-    lastRequestAt = null,
-)
+private val testClient =
+    ClientDetails(
+        clientId = "test-client-id",
+        name = "Work laptop",
+        hostname = "workstation",
+        platform = "linux",
+        architecture = "x86_64",
+        osVersion = "NixOS",
+        machineId = "test-machine",
+        clientSoftware = null,
+        instructions = "",
+        state = RelayClientState.ACTIVE,
+        desiredState = null,
+        pairedAt = 1_704_067_200_000,
+        lastRequestAt = null,
+    )

@@ -34,17 +34,19 @@ internal sealed interface RelayEndpointResult<out T> {
 }
 
 internal inline fun <T> RelayEndpointResult<String>.decodeSuccess(
-    crossinline decode: (String) -> T,
-): RelayEndpointResult<T> = when (this) {
-    is RelayEndpointResult.Success -> try {
-        RelayEndpointResult.Success<T>(decode(value))
-    } catch (_: Exception) {
-        RelayEndpointResult.InvalidResponse
+    crossinline decode: (String) -> T
+): RelayEndpointResult<T> =
+    when (this) {
+        is RelayEndpointResult.Success ->
+            try {
+                RelayEndpointResult.Success<T>(decode(value))
+            } catch (_: Exception) {
+                RelayEndpointResult.InvalidResponse
+            }
+        is RelayEndpointResult.Rejected -> this
+        is RelayEndpointResult.Unavailable -> this
+        RelayEndpointResult.InvalidResponse -> RelayEndpointResult.InvalidResponse
     }
-    is RelayEndpointResult.Rejected -> this
-    is RelayEndpointResult.Unavailable -> this
-    RelayEndpointResult.InvalidResponse -> RelayEndpointResult.InvalidResponse
-}
 
 internal class RelayHttpTransport(
     private val client: OkHttpClient,
@@ -58,13 +60,14 @@ internal class RelayHttpTransport(
         body: String,
         bearerToken: String? = null,
     ): RelayEndpointResult<String> {
-        val request = Request.Builder()
-            .url("$baseUrl/${path.trimStart('/')}")
-            .apply {
-                bearerToken?.let { header("Authorization", "Bearer $it") }
-            }
-            .post(body.toRequestBody(JSON_MEDIA_TYPE))
-            .build()
+        val request =
+            Request.Builder()
+                .url("$baseUrl/${path.trimStart('/')}")
+                .apply {
+                    bearerToken?.let { header("Authorization", "Bearer $it") }
+                }
+                .post(body.toRequestBody(JSON_MEDIA_TYPE))
+                .build()
         return client.newCall(request).awaitResult()
     }
 
@@ -74,22 +77,21 @@ internal class RelayHttpTransport(
             enqueue(
                 object : Callback {
                     override fun onFailure(call: Call, e: IOException) {
-                        continuation.resumeWith(
-                            Result.success(RelayEndpointResult.Unavailable(e)),
-                        )
+                        continuation.resumeWith(Result.success(RelayEndpointResult.Unavailable(e)))
                     }
 
                     override fun onResponse(call: Call, response: Response) {
-                        val result: Result<RelayEndpointResult<String>> = try {
-                            Result.success(response.toEndpointResult())
-                        } catch (exception: IOException) {
-                            Result.success(RelayEndpointResult.Unavailable(exception))
-                        } catch (failure: Exception) {
-                            Result.failure(failure)
-                        }
+                        val result: Result<RelayEndpointResult<String>> =
+                            try {
+                                Result.success(response.toEndpointResult())
+                            } catch (exception: IOException) {
+                                Result.success(RelayEndpointResult.Unavailable(exception))
+                            } catch (failure: Exception) {
+                                Result.failure(failure)
+                            }
                         continuation.resumeWith(result)
                     }
-                },
+                }
             )
         }
 
@@ -139,9 +141,7 @@ private fun JsonObject?.nonNegativeLongMember(name: String): Long? =
         ?.content
         ?.parseNonNegativeDecimalClamped()
 
-internal fun String.parseNonNegativeDecimalClamped(
-    maximum: Long = Long.MAX_VALUE,
-): Long? {
+internal fun String.parseNonNegativeDecimalClamped(maximum: Long = Long.MAX_VALUE): Long? {
     require(maximum >= 0)
     if (isEmpty() || any { it !in '0'..'9' }) return null
     val significant = trimStart('0').ifEmpty { "0" }

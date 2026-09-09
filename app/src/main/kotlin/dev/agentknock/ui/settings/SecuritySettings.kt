@@ -4,33 +4,33 @@ import android.app.KeyguardManager
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.PaddingValues
-import androidx.compose.foundation.lazy.LazyColumn
-import androidx.compose.foundation.lazy.LazyListState
-import androidx.compose.foundation.lazy.rememberLazyListState
-import androidx.compose.runtime.Composable
-import androidx.compose.ui.Modifier
-import androidx.compose.ui.platform.LocalContext
-import androidx.compose.ui.unit.dp
-import dev.agentknock.storage.crypto.EncryptionKeyBacking
-import dev.agentknock.storage.crypto.VaultKeyPurpose
-import dev.agentknock.storage.crypto.VaultProtection
-import dev.agentknock.ui.auth.DeviceAuthenticationMode
-import dev.agentknock.ui.components.Notice
-import dev.agentknock.ui.components.NoticeTone
-import dev.agentknock.ui.auth.DeviceAuthenticationChoices
 import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
+import androidx.compose.foundation.lazy.LazyColumn
+import androidx.compose.foundation.lazy.LazyListState
+import androidx.compose.foundation.lazy.rememberLazyListState
+import androidx.compose.foundation.text.selection.SelectionContainer
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.outlined.CloudDone
 import androidx.compose.material.icons.outlined.PhoneAndroid
 import androidx.compose.material3.Icon
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.Text
+import androidx.compose.runtime.Composable
 import androidx.compose.ui.Alignment
+import androidx.compose.ui.Modifier
 import androidx.compose.ui.graphics.vector.ImageVector
-import androidx.compose.foundation.text.selection.SelectionContainer
+import androidx.compose.ui.platform.LocalContext
+import androidx.compose.ui.unit.dp
+import dev.agentknock.storage.crypto.EncryptionKeyBacking
+import dev.agentknock.storage.crypto.VaultKeyPurpose
+import dev.agentknock.storage.crypto.VaultProtection
+import dev.agentknock.ui.auth.DeviceAuthenticationChoices
+import dev.agentknock.ui.auth.DeviceAuthenticationMode
+import dev.agentknock.ui.components.Notice
+import dev.agentknock.ui.components.NoticeTone
 
 @Composable
 internal fun SecuritySettings(
@@ -74,8 +74,9 @@ internal fun SecuritySettingsContent(
                 item {
                     Notice(
                         title = "Some stored data cannot be decrypted",
-                        detail = "This device does not have the keys for some stored data. " +
-                            unavailableStoredData.recoveryAction(),
+                        detail =
+                            "This device does not have the keys for some stored data. " +
+                                unavailableStoredData.recoveryAction(),
                         tone = NoticeTone.ATTENTION,
                     )
                 }
@@ -112,7 +113,8 @@ internal fun SecuritySettingsContent(
                         SettingsValueRow(
                             "Stored encrypted data",
                             protection.storedDataDescription(),
-                            attention = protection != null && protection.unavailableStoredData.isNotEmpty(),
+                            attention =
+                                protection != null && protection.unavailableStoredData.isNotEmpty(),
                         )
                     }
                 }
@@ -122,7 +124,9 @@ internal fun SecuritySettingsContent(
                     SettingsSectionLabel("Backup")
                     SettingsGroup {
                         Column(
-                            modifier = Modifier.fillMaxWidth().padding(horizontal = 16.dp, vertical = 12.dp),
+                            modifier =
+                                Modifier.fillMaxWidth()
+                                    .padding(horizontal = 16.dp, vertical = 12.dp),
                             verticalArrangement = Arrangement.spacedBy(8.dp),
                         ) {
                             Text(
@@ -146,7 +150,8 @@ internal fun SecuritySettingsContent(
                         SettingsGroupDivider()
                         SettingsValueRow(
                             label = "After a restore",
-                            value = "Metadata and history can return, but secret values cannot be recovered with this backup. You must replace those values and pair your clients again.",
+                            value =
+                                "Metadata and history can return, but secret values cannot be recovered with this backup. You must replace those values and pair your clients again.",
                         )
                     }
                 }
@@ -155,45 +160,50 @@ internal fun SecuritySettingsContent(
     }
 }
 
-private fun VaultProtection?.keyStorageDescription(): String = when (this) {
-    null -> "Checking this device…"
-    is VaultProtection.ActiveKeysAvailable -> backings.values.distinct().let { kinds ->
-        if (kinds.size != 1) {
-            "Mixed Android Keystore protection"
-        } else {
-            when (kinds.single()) {
-                EncryptionKeyBacking.STRONGBOX -> "Android StrongBox"
-                EncryptionKeyBacking.TRUSTED_ENVIRONMENT -> "Trusted execution environment"
-                EncryptionKeyBacking.SOFTWARE -> "Android Keystore, software-backed"
-                EncryptionKeyBacking.UNKNOWN_SECURE -> "Secure hardware"
-                EncryptionKeyBacking.UNKNOWN -> "Android Keystore, backing not reported"
+private fun VaultProtection?.keyStorageDescription(): String =
+    when (this) {
+        null -> "Checking this device…"
+        is VaultProtection.ActiveKeysAvailable ->
+            backings.values.distinct().let { kinds ->
+                if (kinds.size != 1) {
+                    "Mixed Android Keystore protection"
+                } else {
+                    when (kinds.single()) {
+                        EncryptionKeyBacking.STRONGBOX -> "Android StrongBox"
+                        EncryptionKeyBacking.TRUSTED_ENVIRONMENT -> "Trusted execution environment"
+                        EncryptionKeyBacking.SOFTWARE -> "Android Keystore, software-backed"
+                        EncryptionKeyBacking.UNKNOWN_SECURE -> "Secure hardware"
+                        EncryptionKeyBacking.UNKNOWN -> "Android Keystore, backing not reported"
+                    }
+                }
             }
-        }
+        is VaultProtection.ActiveKeysUnavailable -> "Current key unavailable on this device"
+        is VaultProtection.ActiveKeyProtectionUnknown -> "Android Keystore, protection not reported"
     }
-    is VaultProtection.ActiveKeysUnavailable -> "Current key unavailable on this device"
-    is VaultProtection.ActiveKeyProtectionUnknown -> "Android Keystore, protection not reported"
-}
 
-private fun VaultProtection?.storedDataDescription(): String = when {
-    this == null -> "Checking this device…"
-    unavailableStoredData.isEmpty() -> "Available on this device"
-    else -> unavailableStoredData.explanation()
-}
+private fun VaultProtection?.storedDataDescription(): String =
+    when {
+        this == null -> "Checking this device…"
+        unavailableStoredData.isEmpty() -> "Available on this device"
+        else -> unavailableStoredData.explanation()
+    }
 
 /** What the user can do about data this device can no longer decrypt. */
-private fun Set<VaultKeyPurpose>.recoveryAction(): String = when (this) {
-    setOf(VaultKeyPurpose.SECRET_VALUES) -> "Replace the affected secret values."
-    setOf(VaultKeyPurpose.DEVICE_STATE) -> "Pair your clients again."
-    else -> "Replace the affected secret values and pair your clients again."
-}
+private fun Set<VaultKeyPurpose>.recoveryAction(): String =
+    when (this) {
+        setOf(VaultKeyPurpose.SECRET_VALUES) -> "Replace the affected secret values."
+        setOf(VaultKeyPurpose.DEVICE_STATE) -> "Pair your clients again."
+        else -> "Replace the affected secret values and pair your clients again."
+    }
 
-private fun Set<VaultKeyPurpose>.explanation(): String = when (this) {
-    setOf(VaultKeyPurpose.SECRET_VALUES) ->
-        "Some secret values cannot be decrypted on this device."
-    setOf(VaultKeyPurpose.DEVICE_STATE) ->
-        "Some client pairings, device credentials, or in-progress requests cannot be decrypted on this device."
-    else -> "Some secret values or encrypted device state cannot be decrypted on this device."
-}
+private fun Set<VaultKeyPurpose>.explanation(): String =
+    when (this) {
+        setOf(VaultKeyPurpose.SECRET_VALUES) ->
+            "Some secret values cannot be decrypted on this device."
+        setOf(VaultKeyPurpose.DEVICE_STATE) ->
+            "Some client pairings, device credentials, or in-progress requests cannot be decrypted on this device."
+        else -> "Some secret values or encrypted device state cannot be decrypted on this device."
+    }
 
 /** One line of the backup explanation, led by an icon for what is or is not backed up. */
 @Composable

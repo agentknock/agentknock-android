@@ -17,9 +17,9 @@ import dev.agentknock.storage.crypto.EncryptionKeyStore
 import dev.agentknock.storage.crypto.GeneratedEncryptionKey
 import dev.agentknock.storage.crypto.VaultKeyManager
 import dev.agentknock.storage.device.DeviceIdentityEntity
-import dev.agentknock.storage.secret.SecretRepository
 import dev.agentknock.storage.secret.CreateSecretResult
 import dev.agentknock.storage.secret.SaveSecretResult
+import dev.agentknock.storage.secret.SecretRepository
 import dev.agentknock.storage.secret.SshKeyAlgorithm
 import javax.crypto.SecretKey
 import javax.crypto.spec.SecretKeySpec
@@ -48,49 +48,56 @@ class SecretManagementRequestsTest {
 
     @Before
     fun setUp() = runTest {
-        database = Room.inMemoryDatabaseBuilder(
-            InstrumentationRegistry.getInstrumentation().targetContext,
-            AgentknockDatabase::class.java,
-        ).build()
-        database.deviceIdentityDao().insertIdentity(
-            DeviceIdentityEntity(
-                id = DEVICE_IDENTITY_ID,
-                role = "active",
-                address = "amber-river-maple",
-                deviceId = DEVICE_ID,
-                createdAt = 1L,
-            ),
-        )
+        database =
+            Room.inMemoryDatabaseBuilder(
+                    InstrumentationRegistry.getInstrumentation().targetContext,
+                    AgentknockDatabase::class.java,
+                )
+                .build()
+        database
+            .deviceIdentityDao()
+            .insertIdentity(
+                DeviceIdentityEntity(
+                    id = DEVICE_IDENTITY_ID,
+                    role = "active",
+                    address = "amber-river-maple",
+                    deviceId = DEVICE_ID,
+                    createdAt = 1L,
+                )
+            )
         database.requestDao().insertClient(client())
         val keyStore = MemoryEncryptionKeyStore()
         var keyId = 0
-        val keyManager = VaultKeyManager(
-            dao = database.vaultKeyDao(),
-            keyStore = keyStore,
-            newKeyId = { "test-key-${keyId++}" },
-            currentTimeMillis = { NOW },
-            keyStoreDispatcher = Dispatchers.Unconfined,
-        )
+        val keyManager =
+            VaultKeyManager(
+                dao = database.vaultKeyDao(),
+                keyStore = keyStore,
+                newKeyId = { "test-key-${keyId++}" },
+                currentTimeMillis = { NOW },
+                keyStoreDispatcher = Dispatchers.Unconfined,
+            )
         val encryption = AesGcmEncryption(keyStore)
         audit = AuditRepository(database.auditDao(), currentTimeMillis = { NOW })
-        material = RequestMaterialStore(
-            dao = database.requestDao(),
-            keyManager = keyManager,
-            encryption = encryption,
-            newId = { "request-material-${materialId++}" },
-            currentTimeMillis = { NOW },
-            cryptographyDispatcher = Dispatchers.Unconfined,
-        )
-        secrets = SecretRepository(
-            dao = database.secretDao(),
-            keyManager = keyManager,
-            encryption = encryption,
-            audit = audit,
-            writeTransaction = RoomWriteTransaction(database),
-            newId = { SECRET_ID },
-            currentTimeMillis = { NOW },
-            cryptographyDispatcher = Dispatchers.Unconfined,
-        )
+        material =
+            RequestMaterialStore(
+                dao = database.requestDao(),
+                keyManager = keyManager,
+                encryption = encryption,
+                newId = { "request-material-${materialId++}" },
+                currentTimeMillis = { NOW },
+                cryptographyDispatcher = Dispatchers.Unconfined,
+            )
+        secrets =
+            SecretRepository(
+                dao = database.secretDao(),
+                keyManager = keyManager,
+                encryption = encryption,
+                audit = audit,
+                writeTransaction = RoomWriteTransaction(database),
+                newId = { SECRET_ID },
+                currentTimeMillis = { NOW },
+                cryptographyDispatcher = Dispatchers.Unconfined,
+            )
     }
 
     @After
@@ -114,7 +121,8 @@ class SecretManagementRequestsTest {
                     acceptedPsks = acceptedPsks,
                     sealResponse = { RESPONSE },
                 )
-            }.isFailure,
+            }
+                .isFailure
         )
         assertNull(database.requestDao().getRequestById(requestId))
         assertNull(database.requestDao().getRequestPsk(requestId))
@@ -123,14 +131,15 @@ class SecretManagementRequestsTest {
 
         assertEquals(
             RESPONSE,
-            requests(audit).receiveSecretList(
-                client = client(),
-                relayRequestId = requestId,
-                requestPayload = requestPayload(requestId),
-                plaintext = secretListPlaintext(),
-                acceptedPsks = acceptedPsks,
-                sealResponse = { RESPONSE },
-            ),
+            requests(audit)
+                .receiveSecretList(
+                    client = client(),
+                    relayRequestId = requestId,
+                    requestPayload = requestPayload(requestId),
+                    plaintext = secretListPlaintext(),
+                    acceptedPsks = acceptedPsks,
+                    sealResponse = { RESPONSE },
+                ),
         )
         assertNotNull(database.requestDao().getRequestById(requestId))
         assertNotNull(database.requestDao().getRequestPsk(requestId))
@@ -144,32 +153,34 @@ class SecretManagementRequestsTest {
     @Test
     fun invalidListCompletionUsesSafeFailureCategory() = runTest {
         val requestId = "list-invalid-completion"
-        requests(audit).receiveSecretList(
-            client = client(),
-            relayRequestId = requestId,
-            requestPayload = requestPayload(requestId),
-            plaintext = secretListPlaintext(),
-            acceptedPsks = acceptedPsks(requestId),
-            sealResponse = { RESPONSE },
-        )
+        requests(audit)
+            .receiveSecretList(
+                client = client(),
+                relayRequestId = requestId,
+                requestPayload = requestPayload(requestId),
+                plaintext = secretListPlaintext(),
+                acceptedPsks = acceptedPsks(requestId),
+                sealResponse = { RESPONSE },
+            )
         val request = checkNotNull(database.requestDao().getRequestById(requestId))
         val malicious = "raw-secret-list-parser-input"
 
         assertTrue(
-            requests(audit).completeSecretList(
-                request = request,
-                openCompletion = {
-                    CompletionOpenResult.Opened("{not-json-$malicious".encodeToByteArray())
-                },
-            ),
+            requests(audit)
+                .completeSecretList(
+                    request = request,
+                    openCompletion = {
+                        CompletionOpenResult.Opened("{not-json-$malicious".encodeToByteArray())
+                    },
+                )
         )
 
         assertEquals(
             "Secret list completion could not be verified.",
             database.requestDao().getRequestById(requestId)?.error,
         )
-        val completionAudit = audit.observeEvents().first()
-            .single { it.type == AuditEventType.SECRET_LIST_COMPLETED }
+        val completionAudit =
+            audit.observeEvents().first().single { it.type == AuditEventType.SECRET_LIST_COMPLETED }
         assertEquals("Secret list completion could not be verified.", completionAudit.detail)
         assertFalse(checkNotNull(completionAudit.detail).contains(malicious))
     }
@@ -181,7 +192,9 @@ class SecretManagementRequestsTest {
 
         val decrypted = material.decryptSecretUploadSshKey(request("ssh-upload"), encrypted)
         assertTrue(decrypted is DecryptionResult.Plaintext)
-        assertTrue((decrypted as DecryptionResult.Plaintext).value.contentEquals(ed25519.privateKey))
+        assertTrue(
+            (decrypted as DecryptionResult.Plaintext).value.contentEquals(ed25519.privateKey)
+        )
 
         val rsa = secrets.generateSshKey(SshKeyAlgorithm.RSA, "rsa@example")
         assertEquals(
@@ -196,11 +209,12 @@ class SecretManagementRequestsTest {
             ),
         )
 
-        val other = material.encryptSecretUploadSshKey(
-            "other-upload",
-            CLIENT_ID,
-            secrets.generateSshKey(SshKeyAlgorithm.ED25519, "other@example"),
-        )
+        val other =
+            material.encryptSecretUploadSshKey(
+                "other-upload",
+                CLIENT_ID,
+                secrets.generateSshKey(SshKeyAlgorithm.ED25519, "other@example"),
+            )
         assertEquals(
             DecryptionResult.AuthenticationFailed,
             material.decryptSecretUploadSshKey(
@@ -226,7 +240,8 @@ class SecretManagementRequestsTest {
                     acceptedPsks = acceptedPsks,
                     sealResponse = { RESPONSE },
                 )
-            }.isFailure,
+            }
+                .isFailure
         )
         assertNull(database.requestDao().getRequestById(requestId))
         assertNull(database.requestDao().getSecretUploadRequest(requestId))
@@ -237,14 +252,15 @@ class SecretManagementRequestsTest {
 
         assertEquals(
             RESPONSE,
-            requests(audit).receiveSecretUpload(
-                client = client(),
-                relayRequestId = requestId,
-                requestPayload = requestPayload(requestId),
-                plaintext = environmentUploadPlaintext(),
-                acceptedPsks = acceptedPsks,
-                sealResponse = { RESPONSE },
-            ),
+            requests(audit)
+                .receiveSecretUpload(
+                    client = client(),
+                    relayRequestId = requestId,
+                    requestPayload = requestPayload(requestId),
+                    plaintext = environmentUploadPlaintext(),
+                    acceptedPsks = acceptedPsks,
+                    sealResponse = { RESPONSE },
+                ),
         )
         assertNotNull(database.requestDao().getRequestById(requestId))
         assertNotNull(database.requestDao().getSecretUploadRequest(requestId))
@@ -268,11 +284,13 @@ class SecretManagementRequestsTest {
 
         assertTrue(
             runCatching {
-                requests(InsertThenFailAuditSink(audit)).approveSecretUpload(
-                    requestId,
-                    "uploaded-secret",
-                )
-            }.isFailure,
+                requests(InsertThenFailAuditSink(audit))
+                    .approveSecretUpload(
+                        requestId,
+                        "uploaded-secret",
+                    )
+            }
+                .isFailure
         )
         assertTrue(database.secretDao().getSecrets().isEmpty())
         assertNull(database.requestDao().getSecretUploadRequest(requestId)?.decision)
@@ -295,9 +313,7 @@ class SecretManagementRequestsTest {
             SecretUploadRequestState.APPROVED.storedName,
             database.requestDao().getSecretUploadRequest(requestId)?.decision,
         )
-        assertTrue(
-            database.requestDao().getSecretUploadEnvironmentVariables(requestId).isEmpty(),
-        )
+        assertTrue(database.requestDao().getSecretUploadEnvironmentVariables(requestId).isEmpty())
         assertEquals(
             listOf(
                 AuditEventType.SECRET_UPLOAD_DECIDED,
@@ -314,14 +330,15 @@ class SecretManagementRequestsTest {
         check(created is CreateSecretResult.Created)
         assertEquals(
             RESPONSE,
-            requests(audit).receiveSecretUpload(
-                client = client(),
-                relayRequestId = requestId,
-                requestPayload = requestPayload(requestId),
-                plaintext = environmentUploadPlaintext("UPDATE", "production"),
-                acceptedPsks = acceptedPsks(requestId),
-                sealResponse = { RESPONSE },
-            ),
+            requests(audit)
+                .receiveSecretUpload(
+                    client = client(),
+                    relayRequestId = requestId,
+                    requestPayload = requestPayload(requestId),
+                    plaintext = environmentUploadPlaintext("UPDATE", "production"),
+                    acceptedPsks = acceptedPsks(requestId),
+                    sealResponse = { RESPONSE },
+                ),
         )
         assertEquals(
             SaveSecretResult.SAVED,
@@ -330,7 +347,7 @@ class SecretManagementRequestsTest {
 
         assertEquals(
             SecretUploadDecisionResult.Invalidated(
-                "The target secret changed before the upload was approved.",
+                "The target secret changed before the upload was approved."
             ),
             requests(audit).approveSecretUpload(requestId, "production"),
         )
@@ -345,9 +362,7 @@ class SecretManagementRequestsTest {
     fun pendingUploadSensitivityControlsProtectedValueAccess() = runTest {
         val requestId = "upload-protected-value"
         receiveEnvironmentUpload(requestId)
-        val variable = database.requestDao()
-            .getSecretUploadEnvironmentVariables(requestId)
-            .single()
+        val variable = database.requestDao().getSecretUploadEnvironmentVariables(requestId).single()
         val target = requests(audit)
 
         assertEquals(
@@ -368,7 +383,7 @@ class SecretManagementRequestsTest {
             ),
         )
         assertTrue(
-            database.requestDao().getSecretUploadEnvironmentVariables(requestId).single().sensitive,
+            database.requestDao().getSecretUploadEnvironmentVariables(requestId).single().sensitive
         )
 
         assertEquals(
@@ -399,10 +414,11 @@ class SecretManagementRequestsTest {
 
         assertTrue(
             runCatching {
-                requests(InsertThenFailAuditSink(audit)).completeSecretUpload(
-                    request,
-                ) { CompletionOpenResult.Opened(uploadCompletionPlaintext()) }
-            }.isFailure,
+                requests(InsertThenFailAuditSink(audit)).completeSecretUpload(request) {
+                    CompletionOpenResult.Opened(uploadCompletionPlaintext())
+                }
+            }
+                .isFailure
         )
         assertEquals(eventCount, audit.observeEvents().first().size)
 
@@ -410,7 +426,7 @@ class SecretManagementRequestsTest {
         assertTrue(
             regular.completeSecretUpload(request) {
                 CompletionOpenResult.Opened(uploadCompletionPlaintext())
-            },
+            }
         )
         val completedTransport = checkNotNull(database.requestDao().getRequestById(requestId))
         assertEquals(InboxRequestState.ACTION_REQUIRED.storedName, completedTransport.state)
@@ -418,7 +434,7 @@ class SecretManagementRequestsTest {
         assertTrue(
             regular.completeSecretUpload(completedTransport) {
                 error("A completed upload must not reopen its transport completion")
-            },
+            }
         )
         assertEquals(eventCount + 1, audit.observeEvents().first().size)
 
@@ -437,97 +453,106 @@ class SecretManagementRequestsTest {
         val malicious = "raw-secret-upload-parser-input"
 
         assertTrue(
-            requests(audit).completeSecretUpload(
-                request = request,
-                openCompletion = {
-                    CompletionOpenResult.Opened("{not-json-$malicious".encodeToByteArray())
-                },
-            ),
+            requests(audit)
+                .completeSecretUpload(
+                    request = request,
+                    openCompletion = {
+                        CompletionOpenResult.Opened("{not-json-$malicious".encodeToByteArray())
+                    },
+                )
         )
 
         assertEquals(
             "Secret upload completion could not be verified.",
             database.requestDao().getRequestById(requestId)?.error,
         )
-        val completionAudit = audit.observeEvents().first()
-            .single { it.type == AuditEventType.SECRET_UPLOAD_COMPLETED }
+        val completionAudit =
+            audit.observeEvents().first().single {
+                it.type == AuditEventType.SECRET_UPLOAD_COMPLETED
+            }
         assertEquals("Secret upload completion could not be verified.", completionAudit.detail)
         assertFalse(checkNotNull(completionAudit.detail).contains(malicious))
     }
 
-    private fun requests(auditSink: AuditSink) = SecretManagementRequests(
-        dao = database.requestDao(),
-        material = material,
-        secrets = secrets,
-        audit = auditSink,
-        writeTransaction = RoomWriteTransaction(database),
-        currentTimeMillis = { NOW },
-        cryptographyDispatcher = Dispatchers.Unconfined,
-    )
+    private fun requests(auditSink: AuditSink) =
+        SecretManagementRequests(
+            dao = database.requestDao(),
+            material = material,
+            secrets = secrets,
+            audit = auditSink,
+            writeTransaction = RoomWriteTransaction(database),
+            currentTimeMillis = { NOW },
+            cryptographyDispatcher = Dispatchers.Unconfined,
+        )
 
     private suspend fun receiveEnvironmentUpload(requestId: String) {
         assertEquals(
             RESPONSE,
-            requests(audit).receiveSecretUpload(
-                client = client(),
-                relayRequestId = requestId,
-                requestPayload = requestPayload(requestId),
-                plaintext = environmentUploadPlaintext(),
-                acceptedPsks = acceptedPsks(requestId),
-                sealResponse = { RESPONSE },
-            ),
+            requests(audit)
+                .receiveSecretUpload(
+                    client = client(),
+                    relayRequestId = requestId,
+                    requestPayload = requestPayload(requestId),
+                    plaintext = environmentUploadPlaintext(),
+                    acceptedPsks = acceptedPsks(requestId),
+                    sealResponse = { RESPONSE },
+                ),
         )
     }
 
-    private suspend fun acceptedPsks(requestId: String) = AcceptedRequestPsks(
-        requestPsk = material.encryptRequestPsk(
-            deviceIdentityId = DEVICE_IDENTITY_ID,
-            clientId = CLIENT_ID,
-            relayRequestId = requestId,
-            clientPsk = ByteArray(32) { it.toByte() },
-        ),
-        currentClientPsk = null,
-        previousClientPsk = null,
-    )
+    private suspend fun acceptedPsks(requestId: String) =
+        AcceptedRequestPsks(
+            requestPsk =
+                material.encryptRequestPsk(
+                    deviceIdentityId = DEVICE_IDENTITY_ID,
+                    clientId = CLIENT_ID,
+                    relayRequestId = requestId,
+                    clientPsk = ByteArray(32) { it.toByte() },
+                ),
+            currentClientPsk = null,
+            previousClientPsk = null,
+        )
 
-    private fun client() = ClientEntity(
-        clientId = CLIENT_ID,
-        deviceIdentityId = DEVICE_IDENTITY_ID,
-        name = "Workstation",
-        instructions = "",
-        desiredRelayClientState = null,
-        relayClientState = RelayClientState.ACTIVE.wireName,
-        clientSoftwareJson = null,
-        platform = "linux",
-        architecture = "x86_64",
-        hostname = "host",
-        machineId = "machine",
-        osVersion = "NixOS",
-        pairedAt = 2L,
-        lastSeenAt = 3L,
-    )
+    private fun client() =
+        ClientEntity(
+            clientId = CLIENT_ID,
+            deviceIdentityId = DEVICE_IDENTITY_ID,
+            name = "Workstation",
+            instructions = "",
+            desiredRelayClientState = null,
+            relayClientState = RelayClientState.ACTIVE.wireName,
+            clientSoftwareJson = null,
+            platform = "linux",
+            architecture = "x86_64",
+            hostname = "host",
+            machineId = "machine",
+            osVersion = "NixOS",
+            pairedAt = 2L,
+            lastSeenAt = 3L,
+        )
 
     private fun requestPayload(requestId: String): JsonElement =
         Json.parseToJsonElement("""{"request":"$requestId"}""")
 
-    private fun request(id: String) = InboxRequestEntity(
-        id = id,
-        parentRequestId = null,
-        deviceIdentityId = DEVICE_IDENTITY_ID,
-        clientId = CLIENT_ID,
-        clientNameSnapshot = "Workstation",
-        clientSoftwareJson = null,
-        kind = "secret_upload",
-        state = "pending",
-        listed = false,
-        requestJson = "{}",
-        responseJson = null,
-        error = null,
-        receivedAt = NOW,
-        completedAt = null,
-        exchangeEndedAt = null,
-        responseOutboxFinished = false,
-    )
+    private fun request(id: String) =
+        InboxRequestEntity(
+            id = id,
+            parentRequestId = null,
+            deviceIdentityId = DEVICE_IDENTITY_ID,
+            clientId = CLIENT_ID,
+            clientNameSnapshot = "Workstation",
+            clientSoftwareJson = null,
+            kind = "secret_upload",
+            state = "pending",
+            listed = false,
+            requestJson = "{}",
+            responseJson = null,
+            error = null,
+            receivedAt = NOW,
+            completedAt = null,
+            exchangeEndedAt = null,
+            responseOutboxFinished = false,
+        )
 
     private fun secretListPlaintext(): ByteArray =
         """{${clientSoftwareFields()},"method":"SecretList"}""".encodeToByteArray()
@@ -545,9 +570,7 @@ class SecretManagementRequestsTest {
     private fun clientSoftwareFields(): String =
         """"app_info":{"name":"agentknock-cli","version":"0.3.0"},"lib_info":{"name":"agentknock","version":"0.3.0"}"""
 
-    private class InsertThenFailAuditSink(
-        private val delegate: AuditSink,
-    ) : AuditSink {
+    private class InsertThenFailAuditSink(private val delegate: AuditSink) : AuditSink {
         override suspend fun record(record: AuditRecord) {
             delegate.record(record)
             error("Injected audit failure")

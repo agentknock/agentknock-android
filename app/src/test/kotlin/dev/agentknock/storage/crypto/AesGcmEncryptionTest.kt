@@ -11,10 +11,11 @@ import org.junit.Assert.assertTrue
 import org.junit.Test
 
 class AesGcmEncryptionTest {
-    private val key = KeyGenerator.getInstance("AES").run {
-        init(128)
-        generateKey()
-    }
+    private val key =
+        KeyGenerator.getInstance("AES").run {
+            init(128)
+            generateKey()
+        }
     private val keys = MapKeySource(mapOf(KEY_ID to key))
     private val encryption = AesGcmEncryption(keys)
     private val location = EncryptionLocation("stored_secret", "secret-id", "value")
@@ -56,13 +57,15 @@ class AesGcmEncryptionTest {
 
     @Test
     fun `rejects changes to authenticated record metadata`() {
-        val boundLocation = location.copy(
-            bindings = listOf(
-                EncryptionBinding("name", "AWS_SECRET_ACCESS_KEY"),
-                EncryptionBinding("secret_id", "aws-read-only"),
-                EncryptionBinding("sensitive", "true"),
-            ),
-        )
+        val boundLocation =
+            location.copy(
+                bindings =
+                    listOf(
+                        EncryptionBinding("name", "AWS_SECRET_ACCESS_KEY"),
+                        EncryptionBinding("secret_id", "aws-read-only"),
+                        EncryptionBinding("sensitive", "true"),
+                    )
+            )
         val encrypted = encryption.encrypt(KEY_ID, boundLocation, byteArrayOf(1, 2, 3))
 
         assertEquals(
@@ -70,13 +73,14 @@ class AesGcmEncryptionTest {
             encryption.decrypt(
                 encrypted,
                 boundLocation.copy(
-                    bindings = boundLocation.bindings.map { binding ->
-                        if (binding.name == "name") {
-                            binding.copy(value = "AWS_ACCESS_KEY_ID")
-                        } else {
-                            binding
+                    bindings =
+                        boundLocation.bindings.map { binding ->
+                            if (binding.name == "name") {
+                                binding.copy(value = "AWS_ACCESS_KEY_ID")
+                            } else {
+                                binding
+                            }
                         }
-                    },
                 ),
             ),
         )
@@ -107,14 +111,15 @@ class AesGcmEncryptionTest {
     @Test
     fun `rejects unsupported encryption metadata before key lookup`() {
         var lookedUp = false
-        val guarded = AesGcmEncryption(
-            object : EncryptionKeySource {
-                override fun get(keyId: String): SecretKey? {
-                    lookedUp = true
-                    return key
+        val guarded =
+            AesGcmEncryption(
+                object : EncryptionKeySource {
+                    override fun get(keyId: String): SecretKey? {
+                        lookedUp = true
+                        return key
+                    }
                 }
-            },
-        )
+            )
         val valid = encryption.encrypt(KEY_ID, location, byteArrayOf(1))
 
         assertEquals(
@@ -139,14 +144,15 @@ class AesGcmEncryptionTest {
     @Test
     fun `rejects truncated ciphertext before key lookup`() {
         var lookedUp = false
-        val guarded = AesGcmEncryption(
-            object : EncryptionKeySource {
-                override fun get(keyId: String): SecretKey? {
-                    lookedUp = true
-                    return key
+        val guarded =
+            AesGcmEncryption(
+                object : EncryptionKeySource {
+                    override fun get(keyId: String): SecretKey? {
+                        lookedUp = true
+                        return key
+                    }
                 }
-            },
-        )
+            )
         val encrypted = encryption.encrypt(KEY_ID, location, byteArrayOf(1))
 
         assertEquals(
@@ -158,13 +164,14 @@ class AesGcmEncryptionTest {
 
     @Test
     fun `maps an unrecoverable key lookup to unavailable`() {
-        val unavailable = AesGcmEncryption(
-            object : EncryptionKeySource {
-                override fun get(keyId: String): SecretKey? {
-                    throw UnrecoverableKeyException("restored key is gone")
+        val unavailable =
+            AesGcmEncryption(
+                object : EncryptionKeySource {
+                    override fun get(keyId: String): SecretKey? {
+                        throw UnrecoverableKeyException("restored key is gone")
+                    }
                 }
-            },
-        )
+            )
         val encrypted = encryption.encrypt(KEY_ID, location, byteArrayOf(1))
 
         assertEquals(DecryptionResult.KeyUnavailable, unavailable.decrypt(encrypted, location))
@@ -172,11 +179,12 @@ class AesGcmEncryptionTest {
 
     @Test
     fun `does not hide unexpected key source failures`() {
-        val broken = AesGcmEncryption(
-            object : EncryptionKeySource {
-                override fun get(keyId: String): SecretKey? = error("provider bug")
-            },
-        )
+        val broken =
+            AesGcmEncryption(
+                object : EncryptionKeySource {
+                    override fun get(keyId: String): SecretKey? = error("provider bug")
+                }
+            )
         val encrypted = encryption.encrypt(KEY_ID, location, byteArrayOf(1))
 
         assertThrows(IllegalStateException::class.java) {
@@ -184,9 +192,7 @@ class AesGcmEncryptionTest {
         }
     }
 
-    private class MapKeySource(
-        private val keys: Map<String, SecretKey>,
-    ) : EncryptionKeySource {
+    private class MapKeySource(private val keys: Map<String, SecretKey>) : EncryptionKeySource {
         override fun get(keyId: String): SecretKey? = keys[keyId]
     }
 

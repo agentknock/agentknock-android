@@ -68,7 +68,12 @@ internal fun SecretList(
 ) {
     Column(modifier) {
         TopAppBar(
-            title = { Text(stringResource(R.string.secrets), style = MaterialTheme.typography.headlineMedium) },
+            title = {
+                Text(
+                    stringResource(R.string.secrets),
+                    style = MaterialTheme.typography.headlineMedium,
+                )
+            },
             actions = {
                 IconButton(onClick = onOpenSettings) {
                     Icon(Icons.Outlined.Settings, contentDescription = "Settings")
@@ -83,7 +88,8 @@ internal fun SecretList(
                         value = generalInstructions,
                         access = aiReviewAccess,
                         onEdit = onEditGeneralInstructions,
-                        modifier = Modifier.padding(start = 16.dp, end = 16.dp, top = 4.dp, bottom = 6.dp),
+                        modifier =
+                            Modifier.padding(start = 16.dp, end = 16.dp, top = 4.dp, bottom = 6.dp),
                     )
                     EmptyMessage(
                         title = stringResource(R.string.no_secrets),
@@ -95,7 +101,8 @@ internal fun SecretList(
             } else {
                 LazyColumn(
                     modifier = Modifier.fillMaxSize(),
-                    contentPadding = PaddingValues(start = 16.dp, end = 16.dp, top = 4.dp, bottom = 96.dp),
+                    contentPadding =
+                        PaddingValues(start = 16.dp, end = 16.dp, top = 4.dp, bottom = 96.dp),
                     verticalArrangement = Arrangement.spacedBy(2.dp),
                 ) {
                     item(key = "global_instructions") {
@@ -169,11 +176,12 @@ private fun SecretRow(
 ) {
     val dates = rememberDateTimeFormatter()
     Surface(
-        color = if (selected) {
-            MaterialTheme.colorScheme.secondaryContainer
-        } else {
-            MaterialTheme.colorScheme.surfaceContainerLow
-        },
+        color =
+            if (selected) {
+                MaterialTheme.colorScheme.secondaryContainer
+            } else {
+                MaterialTheme.colorScheme.surfaceContainerLow
+            },
         shape = shape,
         onClick = onClick,
         modifier = Modifier.fillMaxWidth().semantics { this.selected = selected },
@@ -216,7 +224,8 @@ private fun SecretRow(
                                 ?: "SSH key unavailable"
                         SecretType.ENVIRONMENT ->
                             "${secret.environmentVariableCount} environment " +
-                                if (secret.environmentVariableCount == 1) "variable" else "variables"
+                                if (secret.environmentVariableCount == 1) "variable"
+                                else "variables"
                     },
                     style = MaterialTheme.typography.labelMedium,
                     color = MaterialTheme.colorScheme.onSurfaceVariant,
@@ -226,9 +235,10 @@ private fun SecretRow(
                 )
                 if (secret.temporaryAccessGrants.isNotEmpty()) {
                     val clientIds = secret.temporaryAccessGrants.map { it.clientId }.distinct()
-                    val singleClient = clientIds.singleOrNull()?.let { id ->
-                        clients.firstOrNull { it.clientId == id }?.name
-                    }
+                    val singleClient =
+                        clientIds.singleOrNull()?.let { id ->
+                            clients.firstOrNull { it.clientId == id }?.name
+                        }
                     Row(
                         modifier = Modifier.padding(top = 2.dp),
                         horizontalArrangement = Arrangement.spacedBy(4.dp),
@@ -275,12 +285,15 @@ private fun PendingSecretUploadRow(
     val actionRequired = request.state == InboxRequestState.ACTION_REQUIRED
     val secretName = request.secretNames.singleOrNull() ?: "Unnamed secret"
     Surface(
-        color = when {
-            selected -> MaterialTheme.colorScheme.secondaryContainer
-            actionRequired -> MaterialTheme.colorScheme.primary.copy(alpha = 0.08f)
-                .compositeOver(MaterialTheme.colorScheme.surfaceContainerLow)
-            else -> MaterialTheme.colorScheme.surfaceContainerLow
-        },
+        color =
+            when {
+                selected -> MaterialTheme.colorScheme.secondaryContainer
+                actionRequired ->
+                    MaterialTheme.colorScheme.primary
+                        .copy(alpha = 0.08f)
+                        .compositeOver(MaterialTheme.colorScheme.surfaceContainerLow)
+                else -> MaterialTheme.colorScheme.surfaceContainerLow
+            },
         shape = shape,
         onClick = onClick,
         modifier = Modifier.fillMaxWidth().semantics { this.selected = selected },
@@ -294,11 +307,12 @@ private fun PendingSecretUploadRow(
                 if (request.uploadSecretType == SecretType.SSH.storedName) Icons.Outlined.Key
                 else Icons.Outlined.DataObject,
                 contentDescription = null,
-                tint = if (actionRequired) {
-                    MaterialTheme.colorScheme.primary
-                } else {
-                    MaterialTheme.colorScheme.onSurfaceVariant
-                },
+                tint =
+                    if (actionRequired) {
+                        MaterialTheme.colorScheme.primary
+                    } else {
+                        MaterialTheme.colorScheme.onSurfaceVariant
+                    },
                 modifier = Modifier.size(24.dp),
             )
             Column(
@@ -339,11 +353,16 @@ private fun PendingSecretUploadRow(
 @Composable
 private fun SectionHeading(title: String, count: Int) {
     Row(
-        modifier = Modifier.fillMaxWidth().padding(start = 4.dp, end = 4.dp, top = 14.dp, bottom = 6.dp),
+        modifier =
+            Modifier.fillMaxWidth().padding(start = 4.dp, end = 4.dp, top = 14.dp, bottom = 6.dp),
         horizontalArrangement = Arrangement.spacedBy(8.dp),
         verticalAlignment = Alignment.CenterVertically,
     ) {
-        Text(title, style = MaterialTheme.typography.titleSmall, color = MaterialTheme.colorScheme.primary)
+        Text(
+            title,
+            style = MaterialTheme.typography.titleSmall,
+            color = MaterialTheme.colorScheme.primary,
+        )
         Text(
             count.toString(),
             style = MaterialTheme.typography.labelMedium,

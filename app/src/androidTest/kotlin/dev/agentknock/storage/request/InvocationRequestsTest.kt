@@ -11,10 +11,10 @@ import dev.agentknock.relay.RelayApprovalReviewResult
 import dev.agentknock.review.ApprovalReviewRequest
 import dev.agentknock.storage.AgentknockDatabase
 import dev.agentknock.storage.RoomWriteTransaction
-import dev.agentknock.storage.approval.ApprovalAction
-import dev.agentknock.storage.approval.ApprovalEvaluation
 import dev.agentknock.storage.approval.AiReview
 import dev.agentknock.storage.approval.AiReviewDecision
+import dev.agentknock.storage.approval.ApprovalAction
+import dev.agentknock.storage.approval.ApprovalEvaluation
 import dev.agentknock.storage.approval.SecretApprovalEvaluation
 import dev.agentknock.storage.audit.AuditDecisionSource
 import dev.agentknock.storage.audit.AuditEventType
@@ -30,10 +30,10 @@ import dev.agentknock.storage.crypto.GeneratedEncryptionKey
 import dev.agentknock.storage.crypto.VaultKeyEntity
 import dev.agentknock.storage.crypto.VaultKeyManager
 import dev.agentknock.storage.crypto.VaultKeyPurpose
+import dev.agentknock.storage.device.DeviceCredentialResult
 import dev.agentknock.storage.device.DeviceIdentityEntity
 import dev.agentknock.storage.device.RelayDeviceCredentialSource
 import dev.agentknock.storage.device.RelayDeviceCredentials
-import dev.agentknock.storage.device.DeviceCredentialResult
 import dev.agentknock.storage.secret.CreateEnvironmentVariableResult
 import dev.agentknock.storage.secret.CreateSecretResult
 import dev.agentknock.storage.secret.SaveSecretResult
@@ -71,49 +71,57 @@ class InvocationRequestsTest {
 
     @Before
     fun setUp() = runTest {
-        database = Room.inMemoryDatabaseBuilder(
-            InstrumentationRegistry.getInstrumentation().targetContext,
-            AgentknockDatabase::class.java,
-        ).build()
+        database =
+            Room.inMemoryDatabaseBuilder(
+                    InstrumentationRegistry.getInstrumentation().targetContext,
+                    AgentknockDatabase::class.java,
+                )
+                .build()
         val keyStore = MemoryEncryptionKeyStore()
         keyStore.generate(KEY_ID)
-        database.vaultKeyDao().activate(
-            VaultKeyEntity(
-                id = KEY_ID,
-                purpose = VaultKeyPurpose.DEVICE_STATE.storedName,
-                active = true,
-                createdAt = 1,
-                backing = EncryptionKeyBacking.SOFTWARE.storedName,
-            ),
-        )
-        database.deviceIdentityDao().insertIdentity(
-            DeviceIdentityEntity(
-                id = DEVICE_IDENTITY_ID,
-                role = "active",
-                address = "quiet-river-maple",
-                deviceId = DEVICE_ID,
-                createdAt = 1,
-            ),
-        )
+        database
+            .vaultKeyDao()
+            .activate(
+                VaultKeyEntity(
+                    id = KEY_ID,
+                    purpose = VaultKeyPurpose.DEVICE_STATE.storedName,
+                    active = true,
+                    createdAt = 1,
+                    backing = EncryptionKeyBacking.SOFTWARE.storedName,
+                )
+            )
+        database
+            .deviceIdentityDao()
+            .insertIdentity(
+                DeviceIdentityEntity(
+                    id = DEVICE_IDENTITY_ID,
+                    role = "active",
+                    address = "quiet-river-maple",
+                    deviceId = DEVICE_ID,
+                    createdAt = 1,
+                )
+            )
         database.requestDao().insertClient(client())
-        val keyManager = VaultKeyManager(
-            dao = database.vaultKeyDao(),
-            keyStore = keyStore,
-            newKeyId = { "unused-key" },
-            currentTimeMillis = { NOW },
-            keyStoreDispatcher = Dispatchers.Unconfined,
-        )
+        val keyManager =
+            VaultKeyManager(
+                dao = database.vaultKeyDao(),
+                keyStore = keyStore,
+                newKeyId = { "unused-key" },
+                currentTimeMillis = { NOW },
+                keyStoreDispatcher = Dispatchers.Unconfined,
+            )
         audit = AuditRepository(database.auditDao(), currentTimeMillis = { NOW })
-        secrets = SecretRepository(
-            dao = database.secretDao(),
-            keyManager = keyManager,
-            encryption = AesGcmEncryption(keyStore),
-            audit = audit,
-            writeTransaction = RoomWriteTransaction(database),
-            newId = { "secret-id" },
-            currentTimeMillis = { NOW },
-            cryptographyDispatcher = Dispatchers.Unconfined,
-        )
+        secrets =
+            SecretRepository(
+                dao = database.secretDao(),
+                keyManager = keyManager,
+                encryption = AesGcmEncryption(keyStore),
+                audit = audit,
+                writeTransaction = RoomWriteTransaction(database),
+                newId = { "secret-id" },
+                currentTimeMillis = { NOW },
+                cryptographyDispatcher = Dispatchers.Unconfined,
+            )
     }
 
     @After
@@ -123,8 +131,10 @@ class InvocationRequestsTest {
 
     @Test
     fun aiDenialReturnsTheVerbatimExplanationToTheClient() = runTest {
-        val secretId = (secrets.createEnvironmentSecret("github", "GitHub credentials")
-            as CreateSecretResult.Created).id
+        val secretId =
+            (secrets.createEnvironmentSecret("github", "GitHub credentials")
+                    as CreateSecretResult.Created)
+                .id
         assertTrue(
             secrets.createEnvironmentVariable(
                 secretId = secretId,
@@ -132,31 +142,33 @@ class InvocationRequestsTest {
                 value = "sensitive-value",
                 sensitive = true,
                 nonSensitiveCreationAuthorized = true,
-            ) is CreateEnvironmentVariableResult.Created,
+            ) is CreateEnvironmentVariableResult.Created
         )
         assertEquals(
             SaveSecretResult.SAVED,
             secrets.saveApprovalMode(secretId, SecretApprovalMode.ASK_AI),
         )
-        val credentials = RelayDeviceCredentials(
-            deviceIdentityId = DEVICE_IDENTITY_ID,
-            address = "quiet-river-maple",
-            addressId = "address-id",
-            deviceId = DEVICE_ID,
-            devicePublicKey = ByteArray(32),
-            devicePrivateKey = ByteArray(32),
-            deviceToken = "device-token",
-        )
-        val target = requests(
-            audit,
-            object : RelayDeviceCredentialSource {
-                override suspend fun activeDeviceCredentials() =
-                    DeviceCredentialResult.Available(credentials)
+        val credentials =
+            RelayDeviceCredentials(
+                deviceIdentityId = DEVICE_IDENTITY_ID,
+                address = "quiet-river-maple",
+                addressId = "address-id",
+                deviceId = DEVICE_ID,
+                devicePublicKey = ByteArray(32),
+                devicePrivateKey = ByteArray(32),
+                deviceToken = "device-token",
+            )
+        val target =
+            requests(
+                audit,
+                object : RelayDeviceCredentialSource {
+                    override suspend fun activeDeviceCredentials() =
+                        DeviceCredentialResult.Available(credentials)
 
-                override suspend fun deviceCredentials(deviceIdentityId: String) =
-                    DeviceCredentialResult.Available(credentials)
-            },
-        )
+                    override suspend fun deviceCredentials(deviceIdentityId: String) =
+                        DeviceCredentialResult.Available(credentials)
+                },
+            )
         val requestId = "invocation-ai-denied"
         val plaintext =
             """{$SOFTWARE_FIELDS,"method":"Invocation","secrets":{"github":{}},"operation":{"type":"exec","command":"deploy","arguments":[],"working_directory":"/tmp","executable_path":"/usr/bin/deploy","executable_mode":"BINARY","stdin":"TERMINAL","stdout":"TERMINAL","stderr":"TERMINAL"},"launcher_chain":[],"invocation_token":"AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA="}"""
@@ -182,17 +194,17 @@ class InvocationRequestsTest {
                 },
             ),
         )
-        val explanation = "  The command \"deploy\" could disclose this secret.\nIts behavior is opaque — access denied.  "
+        val explanation =
+            "  The command \"deploy\" could disclose this secret.\nIts behavior is opaque — access denied.  "
         checkNotNull(completeReview)(
             AiReviewAttempt(
                 review = AiReview(decision = AiReviewDecision.DENY, explanation = explanation),
                 request = null,
-            ),
+            )
         )
 
-        val response = Json.parseToJsonElement(
-            checkNotNull(responsePlaintext).decodeToString(),
-        ).jsonObject
+        val response =
+            Json.parseToJsonElement(checkNotNull(responsePlaintext).decodeToString()).jsonObject
         assertEquals("DENIED", response.getValue("result").jsonPrimitive.content)
         assertEquals("POLICY_DENIED", response.getValue("reason").jsonPrimitive.content)
         assertEquals(explanation, response.getValue("message").jsonPrimitive.content)
@@ -218,7 +230,8 @@ class InvocationRequestsTest {
                     authorization = null,
                     automaticDecisionAudit = null,
                 )
-            }.isFailure,
+            }
+                .isFailure
         )
         assertNull(database.requestDao().getRequestById(requestId))
         assertNull(database.requestDao().getSecretUseRequest(requestId))
@@ -227,14 +240,15 @@ class InvocationRequestsTest {
 
         assertEquals(
             ConditionalRequestUpdate.APPLIED,
-            requests(audit).receive(
-                request = request(requestId),
-                secretUseRequest = secretUse(requestId),
-                client = client(),
-                acceptedPsks = acceptedPsks(requestId),
-                authorization = null,
-                automaticDecisionAudit = null,
-            ),
+            requests(audit)
+                .receive(
+                    request = request(requestId),
+                    secretUseRequest = secretUse(requestId),
+                    client = client(),
+                    acceptedPsks = acceptedPsks(requestId),
+                    authorization = null,
+                    automaticDecisionAudit = null,
+                ),
         )
         assertNotNull(database.requestDao().getRequestById(requestId))
         assertNotNull(database.requestDao().getSecretUseRequest(requestId))
@@ -261,18 +275,19 @@ class InvocationRequestsTest {
             ),
         )
         val auditCount = audit.observeEvents().first().size
-        val seal: suspend (InboxRequestEntity, ByteArray) -> JsonElement? =
-            { _, _ -> Json.parseToJsonElement(RESPONSE_JSON) }
+        val seal: suspend (InboxRequestEntity, ByteArray) -> JsonElement? = { _, _ ->
+            Json.parseToJsonElement(RESPONSE_JSON)
+        }
 
         assertTrue(
             runCatching {
                 requests(InsertThenFailAuditSink(audit)).deny(requestId, seal)
-            }.isFailure,
+            }
+                .isFailure
         )
         val rolledBackRequest = checkNotNull(database.requestDao().getRequestById(requestId))
-        val rolledBackInvocation = checkNotNull(
-            database.requestDao().getSecretUseRequest(requestId),
-        )
+        val rolledBackInvocation =
+            checkNotNull(database.requestDao().getSecretUseRequest(requestId))
         assertEquals(InboxRequestState.ACTION_REQUIRED.storedName, rolledBackRequest.state)
         assertNull(rolledBackRequest.responseJson)
         assertNull(rolledBackInvocation.decision)
@@ -284,7 +299,10 @@ class InvocationRequestsTest {
         assertEquals(InboxRequestState.WAITING.storedName, decidedRequest.state)
         assertEquals(RESPONSE_JSON, decidedRequest.responseJson)
         assertEquals(ApprovalDecision.DENIED.storedName, decidedInvocation.decision)
-        assertEquals(InvocationDenialReason.USER_DENIED.wireName, decidedInvocation.completionReason)
+        assertEquals(
+            InvocationDenialReason.USER_DENIED.wireName,
+            decidedInvocation.completionReason,
+        )
         assertEquals(SECRET_USE_DENIAL_MESSAGE, decidedInvocation.completionMessage)
         assertEquals(auditCount + 1, audit.observeEvents().first().size)
     }
@@ -330,18 +348,21 @@ class InvocationRequestsTest {
         val regular = requests(audit)
         val auditCount = audit.observeEvents().first().size
         val open: suspend (InboxRequestEntity) -> ByteArray? = { pending.plaintext }
-        val seal: suspend (InboxRequestEntity, ByteArray) -> JsonElement? =
-            { _, _ -> Json.parseToJsonElement(RESPONSE_JSON) }
+        val seal: suspend (InboxRequestEntity, ByteArray) -> JsonElement? = { _, _ ->
+            Json.parseToJsonElement(RESPONSE_JSON)
+        }
 
         assertTrue(
             runCatching {
-                requests(InsertThenFailAuditSink(audit)).approve(
-                    requestId = requestId,
-                    allowTemporaryAccess = true,
-                    openRequest = open,
-                    sealResponse = seal,
-                )
-            }.isFailure,
+                requests(InsertThenFailAuditSink(audit))
+                    .approve(
+                        requestId = requestId,
+                        allowTemporaryAccess = true,
+                        openRequest = open,
+                        sealResponse = seal,
+                    )
+            }
+                .isFailure
         )
         val rolledBack = checkNotNull(database.requestDao().getSecretUseRequest(requestId))
         assertNull(rolledBack.decision)
@@ -361,9 +382,10 @@ class InvocationRequestsTest {
         assertEquals(ApprovalDecision.APPROVED.storedName, decided.decision)
         assertEquals(DECISION_SOURCE_TEMPORARY_ACCESS, decided.decisionSource)
         assertNotNull(
-            Json.decodeFromString<ApprovalEvaluation>(
-                checkNotNull(decided.approvalEvaluationJson),
-            ).secrets.single().temporaryAccessExpiresAt,
+            Json.decodeFromString<ApprovalEvaluation>(checkNotNull(decided.approvalEvaluationJson))
+                .secrets
+                .single()
+                .temporaryAccessExpiresAt
         )
         assertEquals(1, secrets.observeTemporaryAccessGrants().first().size)
         val appendedTypes = audit.observeEvents().first().take(2).map { it.type }.toSet()
@@ -384,17 +406,18 @@ class InvocationRequestsTest {
         for (allowTemporaryAccess in listOf(false, true)) {
             assertEquals(
                 RequestDecisionResult.SecretChanged,
-                requests(audit).approve(
-                    requestId,
-                    allowTemporaryAccess,
-                    openRequest = { pending.plaintext },
-                    sealResponse = { _, _ ->
-                        database.requestDao().updateClient(
-                            client().copy(desiredRelayClientState = "revoked"),
-                        )
-                        Json.parseToJsonElement(RESPONSE_JSON)
-                    },
-                ),
+                requests(audit)
+                    .approve(
+                        requestId,
+                        allowTemporaryAccess,
+                        openRequest = { pending.plaintext },
+                        sealResponse = { _, _ ->
+                            database
+                                .requestDao()
+                                .updateClient(client().copy(desiredRelayClientState = "revoked"))
+                            Json.parseToJsonElement(RESPONSE_JSON)
+                        },
+                    ),
             )
             assertNull(database.requestDao().getRequestById(requestId)?.responseJson)
             assertNull(database.requestDao().getSecretUseRequest(requestId)?.decision)
@@ -407,32 +430,38 @@ class InvocationRequestsTest {
     @Test
     fun automaticDecisionRacePersistsActionableRequestWithoutResponse() = runTest {
         val requestId = "invocation-authorization-race"
-        val authorization = AuthorizationCommitment(
-            secretRevisions = emptyMap(),
-            policies = emptyMap(),
-            expectedAbsentSecretNames = setOf("appeared"),
-        )
+        val authorization =
+            AuthorizationCommitment(
+                secretRevisions = emptyMap(),
+                policies = emptyMap(),
+                expectedAbsentSecretNames = setOf("appeared"),
+            )
         database.secretDao().insertSecret(secret("appeared"))
 
         assertEquals(
             ConditionalRequestUpdate.ACTION_REQUIRED,
-            requests(audit).receive(
-                request = request(requestId).copy(
-                    state = InboxRequestState.WAITING.storedName,
-                    responseJson = RESPONSE_JSON,
+            requests(audit)
+                .receive(
+                    request =
+                        request(requestId)
+                            .copy(
+                                state = InboxRequestState.WAITING.storedName,
+                                responseJson = RESPONSE_JSON,
+                            ),
+                    secretUseRequest =
+                        secretUse(requestId)
+                            .copy(
+                                decision = ApprovalDecision.DENIED.storedName,
+                                decisionSource = DECISION_SOURCE_POLICY,
+                                completionReason = "INVALID_REQUEST",
+                                completionMessage = "Missing secrets: appeared",
+                                decidedAt = NOW,
+                            ),
+                    client = client(),
+                    acceptedPsks = acceptedPsks(requestId),
+                    authorization = authorization,
+                    automaticDecisionAudit = decisionAudit(requestId, AuditOutcome.REJECTED),
                 ),
-                secretUseRequest = secretUse(requestId).copy(
-                    decision = ApprovalDecision.DENIED.storedName,
-                    decisionSource = DECISION_SOURCE_POLICY,
-                    completionReason = "INVALID_REQUEST",
-                    completionMessage = "Missing secrets: appeared",
-                    decidedAt = NOW,
-                ),
-                client = client(),
-                acceptedPsks = acceptedPsks(requestId),
-                authorization = authorization,
-                automaticDecisionAudit = decisionAudit(requestId, AuditOutcome.REJECTED),
-            ),
         )
 
         val storedRequest = checkNotNull(database.requestDao().getRequestById(requestId))
@@ -465,21 +494,24 @@ class InvocationRequestsTest {
         val reviewing = checkNotNull(database.requestDao().getRequestById(requestId))
         val invocation = checkNotNull(database.requestDao().getSecretUseRequest(requestId))
         val aiAudit = aiReviewAudit(requestId, AuditOutcome.APPROVED)
-        val finalRequest = reviewing.copy(
-            state = InboxRequestState.ACTION_REQUIRED.storedName,
-            responseJson = null,
-        )
+        val finalRequest =
+            reviewing.copy(
+                state = InboxRequestState.ACTION_REQUIRED.storedName,
+                responseJson = null,
+            )
 
         assertTrue(
             runCatching {
-                requests(InsertThenFailAuditSink(audit)).finishAiReview(
-                    request = finalRequest,
-                    secretUseRequest = invocation,
-                    authorization = authorizationCommitment(),
-                    aiReviewAudit = aiAudit,
-                    automaticDecisionAudit = null,
-                )
-            }.isFailure,
+                requests(InsertThenFailAuditSink(audit))
+                    .finishAiReview(
+                        request = finalRequest,
+                        secretUseRequest = invocation,
+                        authorization = authorizationCommitment(),
+                        aiReviewAudit = aiAudit,
+                        automaticDecisionAudit = null,
+                    )
+            }
+                .isFailure
         )
         assertEquals(
             InboxRequestState.REVIEWING.storedName,
@@ -487,27 +519,29 @@ class InvocationRequestsTest {
         )
         assertEquals(1, audit.observeEvents().first().size)
 
-        val staleAuthorization = AuthorizationCommitment(
-            secretRevisions = emptyMap(),
-            policies = emptyMap(),
-            instructions = AuthorizationInstructionsCommitment(
-                deviceIdentityId = DEVICE_IDENTITY_ID,
-                deviceInstructions = "",
-                clientId = CLIENT_ID,
-                clientName = "Old client name",
-                clientInstructions = "",
-            ),
-        )
+        val staleAuthorization =
+            AuthorizationCommitment(
+                secretRevisions = emptyMap(),
+                policies = emptyMap(),
+                instructions =
+                    AuthorizationInstructionsCommitment(
+                        deviceIdentityId = DEVICE_IDENTITY_ID,
+                        deviceInstructions = "",
+                        clientId = CLIENT_ID,
+                        clientName = "Old client name",
+                        clientInstructions = "",
+                    ),
+            )
         assertEquals(
             ConditionalRequestUpdate.ACTION_REQUIRED,
             regular.finishAiReview(
-                request = finalRequest.copy(
-                    state = InboxRequestState.WAITING.storedName,
-                    responseJson = RESPONSE_JSON,
-                ),
-                secretUseRequest = invocation.copy(
-                    approvalEvaluationJson = """{"stale":"ai-review"}""",
-                ),
+                request =
+                    finalRequest.copy(
+                        state = InboxRequestState.WAITING.storedName,
+                        responseJson = RESPONSE_JSON,
+                    ),
+                secretUseRequest =
+                    invocation.copy(approvalEvaluationJson = """{"stale":"ai-review"}"""),
                 authorization = staleAuthorization,
                 aiReviewAudit = aiAudit,
                 automaticDecisionAudit = null,
@@ -549,10 +583,11 @@ class InvocationRequestsTest {
         assertEquals(InvocationDenialReason.POLICY_DENIED.wireName, denied.completionReason)
         assertEquals(SECRET_USE_POLICY_DENIAL_MESSAGE, denied.completionMessage)
         val request = checkNotNull(database.requestDao().getRequestById(requestId))
-        val plaintext = deniedCompletionPlaintext(
-            InvocationDenialReason.POLICY_DENIED.wireName,
-            SECRET_USE_POLICY_DENIAL_MESSAGE,
-        )
+        val plaintext =
+            deniedCompletionPlaintext(
+                InvocationDenialReason.POLICY_DENIED.wireName,
+                SECRET_USE_POLICY_DENIAL_MESSAGE,
+            )
         val eventCount = audit.observeEvents().first().size
 
         assertTrue(
@@ -560,14 +595,13 @@ class InvocationRequestsTest {
                 requests(InsertThenFailAuditSink(audit)).complete(request) {
                     CompletionOpenResult.Opened(plaintext)
                 }
-            }.isFailure,
+            }
+                .isFailure
         )
         assertNotNull(database.requestDao().getRequestPsk(requestId))
         assertEquals(eventCount, audit.observeEvents().first().size)
 
-        assertTrue(
-            regular.complete(request) { CompletionOpenResult.Opened(plaintext) },
-        )
+        assertTrue(regular.complete(request) { CompletionOpenResult.Opened(plaintext) })
         val completed = checkNotNull(database.requestDao().getRequestById(requestId))
         assertNull(completed.error)
         assertEquals(
@@ -584,15 +618,13 @@ class InvocationRequestsTest {
         assertTrue(
             regular.complete(completed) {
                 error("A completion replay must not be reopened")
-            },
+            }
         )
         assertNull(database.requestDao().getRequestPsk(requestId))
         assertTrue(
-            regular.complete(
-                completed,
-            ) {
+            regular.complete(completed) {
                 error("A conflicting terminal completion must not be reopened")
-            },
+            }
         )
         assertEquals(auditCountAfterCompletion, audit.observeEvents().first().size)
     }
@@ -616,9 +648,9 @@ class InvocationRequestsTest {
         val malicious = "raw-client-controlled-secret"
 
         assertTrue(
-            regular.complete(
-                request,
-            ) { CompletionOpenResult.Opened(abortedCompletionPlaintext(malicious)) },
+            regular.complete(request) {
+                CompletionOpenResult.Opened(abortedCompletionPlaintext(malicious))
+            }
         )
 
         val completionAudit = audit.observeEvents().first().first()
@@ -649,9 +681,7 @@ class InvocationRequestsTest {
                 .encodeToByteArray()
 
         assertTrue(
-            regular.complete(
-                request,
-            ) { CompletionOpenResult.Opened(wrongSoftwareCompletion) },
+            regular.complete(request) { CompletionOpenResult.Opened(wrongSoftwareCompletion) }
         )
 
         val storedRequest = checkNotNull(database.requestDao().getRequestById(requestId))
@@ -682,11 +712,7 @@ class InvocationRequestsTest {
         )
         val request = checkNotNull(database.requestDao().getRequestById(requestId))
 
-        assertTrue(
-            regular.complete(
-                request,
-            ) { CompletionOpenResult.IrrecoverablyInvalid },
-        )
+        assertTrue(regular.complete(request) { CompletionOpenResult.IrrecoverablyInvalid })
 
         val ended = checkNotNull(database.requestDao().getRequestById(requestId))
         assertNotNull(ended.exchangeEndedAt)
@@ -715,7 +741,8 @@ class InvocationRequestsTest {
         assertTrue(
             runCatching {
                 requests(InsertThenFailAuditSink(audit)).expire(request, EXPIRY_MESSAGE, NOW)
-            }.isFailure,
+            }
+                .isFailure
         )
         assertNull(database.requestDao().getRequestById(requestId)?.completedAt)
         assertNotNull(database.requestDao().getRequestPsk(requestId))
@@ -738,7 +765,7 @@ class InvocationRequestsTest {
     }
 
     private suspend fun receivePendingEnvironmentInvocation(
-        requestId: String,
+        requestId: String
     ): PendingEnvironmentInvocation {
         val created = secrets.createEnvironmentSecret("github", "GitHub credentials")
         val secretId = (created as CreateSecretResult.Created).id
@@ -749,45 +776,54 @@ class InvocationRequestsTest {
                 value = "sensitive-value",
                 sensitive = true,
                 nonSensitiveCreationAuthorized = true,
-            ) is CreateEnvironmentVariableResult.Created,
+            ) is CreateEnvironmentVariableResult.Created
         )
         val plaintext =
             """{$SOFTWARE_FIELDS,"method":"Invocation","secrets":{"github":{}},"operation":{"type":"exec","command":"deploy","arguments":[],"working_directory":"/tmp","executable_path":"/usr/bin/deploy","executable_mode":"BINARY","stdin":"TERMINAL","stdout":"TERMINAL","stderr":"TERMINAL"},"launcher_chain":[],"invocation_token":"AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA="}"""
                 .encodeToByteArray()
         val contents = InvocationProtocol().decodeRequest(plaintext)
         val description = secrets.resolveRequestedSecrets(contents.secrets, emptyMap()).description
-        val policy = secrets.approvalPoliciesForNames(
-            names = listOf("github"),
-            clientId = CLIENT_ID,
-            operation = TemporaryAccessOperation.INVOCATION,
-        ).single()
-        val evaluation = ApprovalEvaluation(
-            secrets = listOf(
-                SecretApprovalEvaluation(
-                    secretId = policy.secretId,
-                    secretName = policy.secretName,
-                    action = ApprovalAction.ASK_ME,
-                    temporaryAccessEligible = true,
-                    revision = policy.revision,
-                ),
-            ),
-        )
+        val policy =
+            secrets
+                .approvalPoliciesForNames(
+                    names = listOf("github"),
+                    clientId = CLIENT_ID,
+                    operation = TemporaryAccessOperation.INVOCATION,
+                )
+                .single()
+        val evaluation =
+            ApprovalEvaluation(
+                secrets =
+                    listOf(
+                        SecretApprovalEvaluation(
+                            secretId = policy.secretId,
+                            secretName = policy.secretName,
+                            action = ApprovalAction.ASK_ME,
+                            temporaryAccessEligible = true,
+                            revision = policy.revision,
+                        )
+                    )
+            )
         assertEquals(
             ConditionalRequestUpdate.APPLIED,
-            requests(audit).receive(
-                request = request(requestId),
-                secretUseRequest = secretUse(requestId).copy(
-                    containsSensitiveMaterial = description.containsSensitiveMaterial,
-                    secretsJson = Json.encodeToString(contents.secrets),
-                    secretDetailsJson = Json.encodeToString(description.secrets),
-                    missingSecretsJson = Json.encodeToString(description.missingSecrets),
-                    approvalEvaluationJson = Json.encodeToString(evaluation),
+            requests(audit)
+                .receive(
+                    request = request(requestId),
+                    secretUseRequest =
+                        secretUse(requestId)
+                            .copy(
+                                containsSensitiveMaterial = description.containsSensitiveMaterial,
+                                secretsJson = Json.encodeToString(contents.secrets),
+                                secretDetailsJson = Json.encodeToString(description.secrets),
+                                missingSecretsJson =
+                                    Json.encodeToString(description.missingSecrets),
+                                approvalEvaluationJson = Json.encodeToString(evaluation),
+                            ),
+                    client = client(),
+                    acceptedPsks = acceptedPsks(requestId),
+                    authorization = null,
+                    automaticDecisionAudit = null,
                 ),
-                client = client(),
-                acceptedPsks = acceptedPsks(requestId),
-                authorization = null,
-                automaticDecisionAudit = null,
-            ),
         )
         return PendingEnvironmentInvocation(secretId, contents, plaintext)
     }
@@ -795,16 +831,17 @@ class InvocationRequestsTest {
     private fun requests(
         auditSink: AuditSink,
         credentialSource: RelayDeviceCredentialSource = MissingDeviceCredentials,
-    ) = InvocationRequests(
-        dao = database.requestDao(),
-        secrets = secrets,
-        deviceCredentials = credentialSource,
-        approvalReviewer = UnexpectedApprovalReviewer,
-        subscription = subscription.repository,
-        audit = auditSink,
-        writeTransaction = RoomWriteTransaction(database),
-        currentTimeMillis = { NOW },
-    )
+    ) =
+        InvocationRequests(
+            dao = database.requestDao(),
+            secrets = secrets,
+            deviceCredentials = credentialSource,
+            approvalReviewer = UnexpectedApprovalReviewer,
+            subscription = subscription.repository,
+            audit = auditSink,
+            writeTransaction = RoomWriteTransaction(database),
+            currentTimeMillis = { NOW },
+        )
 
     private data class PendingEnvironmentInvocation(
         val secretId: String,
@@ -816,129 +853,139 @@ class InvocationRequestsTest {
         AuthorizationCommitment(
             secretRevisions = emptyMap(),
             policies = emptyMap(),
-            instructions = AuthorizationInstructionsCommitment(
-                deviceIdentityId = DEVICE_IDENTITY_ID,
-                deviceInstructions = "",
-                clientId = CLIENT_ID,
-                clientName = clientName,
-                clientInstructions = "",
-            ),
+            instructions =
+                AuthorizationInstructionsCommitment(
+                    deviceIdentityId = DEVICE_IDENTITY_ID,
+                    deviceInstructions = "",
+                    clientId = CLIENT_ID,
+                    clientName = clientName,
+                    clientInstructions = "",
+                ),
         )
 
-    private fun request(requestId: String) = InboxRequestEntity(
-        id = requestId,
-        parentRequestId = null,
-        deviceIdentityId = DEVICE_IDENTITY_ID,
-        clientId = CLIENT_ID,
-        clientNameSnapshot = "Test client",
-        clientSoftwareJson = SOFTWARE_JSON,
-        kind = RequestKind.SECRET_USE.storedName,
-        state = InboxRequestState.ACTION_REQUIRED.storedName,
-        listed = true,
-        requestJson = "{}",
-        responseJson = null,
-        error = null,
-        receivedAt = NOW,
-        completedAt = null,
-        exchangeEndedAt = null,
-        responseOutboxFinished = false,
-    )
+    private fun request(requestId: String) =
+        InboxRequestEntity(
+            id = requestId,
+            parentRequestId = null,
+            deviceIdentityId = DEVICE_IDENTITY_ID,
+            clientId = CLIENT_ID,
+            clientNameSnapshot = "Test client",
+            clientSoftwareJson = SOFTWARE_JSON,
+            kind = RequestKind.SECRET_USE.storedName,
+            state = InboxRequestState.ACTION_REQUIRED.storedName,
+            listed = true,
+            requestJson = "{}",
+            responseJson = null,
+            error = null,
+            receivedAt = NOW,
+            completedAt = null,
+            exchangeEndedAt = null,
+            responseOutboxFinished = false,
+        )
 
-    private fun secretUse(requestId: String) = SecretUseRequestEntity(
-        requestId = requestId,
-        hostname = "test",
-        platform = "linux",
-        architecture = "x86_64",
-        machineId = null,
-        osVersion = null,
-        invocationTokenHash = ByteArray(32),
-        containsSensitiveMaterial = true,
-        secretsJson = "[\"github\"]",
-        secretDetailsJson = "[]",
-        providedSecretsJson = null,
-        missingSecretsJson = "[]",
-        reason = null,
-        command = "env",
-        argumentsJson = "[]",
-        workingDirectory = "/tmp",
-        executablePath = "/usr/bin/env",
-        executableHash = null,
-        executableMode = "BINARY",
-        stdinKind = "TERMINAL",
-        stdoutKind = "TERMINAL",
-        stderrKind = "TERMINAL",
-        launcherChainJson = "[]",
-        decision = null,
-        decisionSource = null,
-        approvalEvaluationJson = null,
-        completionResult = null,
-        completionReason = null,
-        completionMessage = null,
-        decidedAt = null,
-    )
-
-    private fun client() = ClientEntity(
-        clientId = CLIENT_ID,
-        deviceIdentityId = DEVICE_IDENTITY_ID,
-        name = "Test client",
-        instructions = "",
-        desiredRelayClientState = null,
-        relayClientState = "active",
-        clientSoftwareJson = SOFTWARE_JSON,
-        platform = "linux",
-        architecture = "x86_64",
-        hostname = "test",
-        machineId = null,
-        osVersion = null,
-        pairedAt = 2,
-        lastSeenAt = 2,
-    )
-
-    private fun acceptedPsks(requestId: String) = AcceptedRequestPsks(
-        requestPsk = RequestPskEntity(
+    private fun secretUse(requestId: String) =
+        SecretUseRequestEntity(
             requestId = requestId,
-            encryptedPsk = EncryptedValue(
-                formatVersion = 1,
-                keyId = KEY_ID,
-                nonce = ByteArray(12),
-                ciphertext = byteArrayOf(1),
-            ),
-        ),
-        currentClientPsk = null,
-        previousClientPsk = null,
-    )
+            hostname = "test",
+            platform = "linux",
+            architecture = "x86_64",
+            machineId = null,
+            osVersion = null,
+            invocationTokenHash = ByteArray(32),
+            containsSensitiveMaterial = true,
+            secretsJson = "[\"github\"]",
+            secretDetailsJson = "[]",
+            providedSecretsJson = null,
+            missingSecretsJson = "[]",
+            reason = null,
+            command = "env",
+            argumentsJson = "[]",
+            workingDirectory = "/tmp",
+            executablePath = "/usr/bin/env",
+            executableHash = null,
+            executableMode = "BINARY",
+            stdinKind = "TERMINAL",
+            stdoutKind = "TERMINAL",
+            stderrKind = "TERMINAL",
+            launcherChainJson = "[]",
+            decision = null,
+            decisionSource = null,
+            approvalEvaluationJson = null,
+            completionResult = null,
+            completionReason = null,
+            completionMessage = null,
+            decidedAt = null,
+        )
 
-    private fun secret(name: String) = SecretEntity(
-        id = "secret-$name",
-        name = name,
-        description = "",
-        type = "environment",
-        createdAt = 1,
-        updatedAt = 1,
-        revision = 1,
-        approvalMode = "approve",
-    )
+    private fun client() =
+        ClientEntity(
+            clientId = CLIENT_ID,
+            deviceIdentityId = DEVICE_IDENTITY_ID,
+            name = "Test client",
+            instructions = "",
+            desiredRelayClientState = null,
+            relayClientState = "active",
+            clientSoftwareJson = SOFTWARE_JSON,
+            platform = "linux",
+            architecture = "x86_64",
+            hostname = "test",
+            machineId = null,
+            osVersion = null,
+            pairedAt = 2,
+            lastSeenAt = 2,
+        )
 
-    private fun decisionAudit(requestId: String, outcome: AuditOutcome) = AuditRecord(
-        type = AuditEventType.SECRET_USE_DECIDED,
-        outcome = outcome,
-        decisionSource = AuditDecisionSource.APPROVAL_SETTINGS,
-        subject = "github",
-        clientId = CLIENT_ID,
-        clientName = "Test client",
-        relayRequestId = requestId,
-    )
+    private fun acceptedPsks(requestId: String) =
+        AcceptedRequestPsks(
+            requestPsk =
+                RequestPskEntity(
+                    requestId = requestId,
+                    encryptedPsk =
+                        EncryptedValue(
+                            formatVersion = 1,
+                            keyId = KEY_ID,
+                            nonce = ByteArray(12),
+                            ciphertext = byteArrayOf(1),
+                        ),
+                ),
+            currentClientPsk = null,
+            previousClientPsk = null,
+        )
 
-    private fun aiReviewAudit(requestId: String, outcome: AuditOutcome) = AuditRecord(
-        type = AuditEventType.SECRET_USE_AI_REVIEWED,
-        outcome = outcome,
-        decisionSource = AuditDecisionSource.AI_REVIEW,
-        subject = "github",
-        detail = "Reviewed request.",
-        clientId = CLIENT_ID,
-        clientName = "Test client",
-        relayRequestId = requestId,
-    )
+    private fun secret(name: String) =
+        SecretEntity(
+            id = "secret-$name",
+            name = name,
+            description = "",
+            type = "environment",
+            createdAt = 1,
+            updatedAt = 1,
+            revision = 1,
+            approvalMode = "approve",
+        )
+
+    private fun decisionAudit(requestId: String, outcome: AuditOutcome) =
+        AuditRecord(
+            type = AuditEventType.SECRET_USE_DECIDED,
+            outcome = outcome,
+            decisionSource = AuditDecisionSource.APPROVAL_SETTINGS,
+            subject = "github",
+            clientId = CLIENT_ID,
+            clientName = "Test client",
+            relayRequestId = requestId,
+        )
+
+    private fun aiReviewAudit(requestId: String, outcome: AuditOutcome) =
+        AuditRecord(
+            type = AuditEventType.SECRET_USE_AI_REVIEWED,
+            outcome = outcome,
+            decisionSource = AuditDecisionSource.AI_REVIEW,
+            subject = "github",
+            detail = "Reviewed request.",
+            clientId = CLIENT_ID,
+            clientName = "Test client",
+            relayRequestId = requestId,
+        )
 
     private fun deniedCompletionPlaintext(reason: String, message: String): ByteArray =
         """{$SOFTWARE_FIELDS,"result":"DENIED","reason":"$reason","message":"$message"}"""
@@ -948,9 +995,7 @@ class InvocationRequestsTest {
         """{$SOFTWARE_FIELDS,"result":"ABORTED","reason":"CANCELLED","message":"$message"}"""
             .encodeToByteArray()
 
-    private class InsertThenFailAuditSink(
-        private val delegate: AuditSink,
-    ) : AuditSink {
+    private class InsertThenFailAuditSink(private val delegate: AuditSink) : AuditSink {
         override suspend fun record(record: AuditRecord) {
             delegate.record(record)
             error("Injected audit failure")
@@ -994,11 +1039,11 @@ class InvocationRequestsTest {
 }
 
 private data object MissingDeviceCredentials : RelayDeviceCredentialSource {
-    override suspend fun activeDeviceCredentials(): DeviceCredentialResult<RelayDeviceCredentials>? =
-        null
+    override suspend fun activeDeviceCredentials():
+        DeviceCredentialResult<RelayDeviceCredentials>? = null
 
     override suspend fun deviceCredentials(
-        deviceIdentityId: String,
+        deviceIdentityId: String
     ): DeviceCredentialResult<RelayDeviceCredentials>? = null
 }
 

@@ -12,20 +12,22 @@ internal class RelayRetryDeadline(
     private val currentTimeMillis: () -> Long = System::currentTimeMillis,
     private val elapsedRealtimeMillis: () -> Long,
 ) {
-    private var elapsedRealtimeNotBeforeMillis = readState().let { stored ->
-        if (bootCount != null && stored.bootCount == bootCount) {
-            stored.elapsedRealtimeNotBeforeMillis
-        } else {
-            val remainingMillis = remainingUntil(
-                stored.wallNotBeforeMillis,
-                currentTimeMillis(),
-            )
-            deadlineAfter(
-                elapsedRealtimeMillis(),
-                remainingMillis,
-            )
+    private var elapsedRealtimeNotBeforeMillis =
+        readState().let { stored ->
+            if (bootCount != null && stored.bootCount == bootCount) {
+                stored.elapsedRealtimeNotBeforeMillis
+            } else {
+                val remainingMillis =
+                    remainingUntil(
+                        stored.wallNotBeforeMillis,
+                        currentTimeMillis(),
+                    )
+                deadlineAfter(
+                    elapsedRealtimeMillis(),
+                    remainingMillis,
+                )
+            }
         }
-    }
 
     @Synchronized
     fun remainingMillis(): Long {
@@ -47,18 +49,21 @@ internal class RelayRetryDeadline(
     fun deferFor(delayMillis: Long) {
         require(delayMillis >= 0)
         val elapsedNow = elapsedRealtimeMillis()
-        elapsedRealtimeNotBeforeMillis = maxOf(
-            elapsedRealtimeNotBeforeMillis,
-            deadlineAfter(elapsedNow, delayMillis),
-        )
-        val updated = RelayRetryDeadlineState(
-            wallNotBeforeMillis = deadlineAfter(
-                currentTimeMillis(),
-                remainingUntil(elapsedRealtimeNotBeforeMillis, elapsedNow),
-            ),
-            elapsedRealtimeNotBeforeMillis = elapsedRealtimeNotBeforeMillis,
-            bootCount = bootCount,
-        )
+        elapsedRealtimeNotBeforeMillis =
+            maxOf(
+                elapsedRealtimeNotBeforeMillis,
+                deadlineAfter(elapsedNow, delayMillis),
+            )
+        val updated =
+            RelayRetryDeadlineState(
+                wallNotBeforeMillis =
+                    deadlineAfter(
+                        currentTimeMillis(),
+                        remainingUntil(elapsedRealtimeNotBeforeMillis, elapsedNow),
+                    ),
+                elapsedRealtimeNotBeforeMillis = elapsedRealtimeNotBeforeMillis,
+                bootCount = bootCount,
+            )
         if (updated != readState()) writeState(updated)
     }
 }
@@ -73,21 +78,25 @@ private val EMPTY_RETRY_DEADLINE_STATE = RelayRetryDeadlineState()
 
 internal fun persistentRelayRetryDeadline(context: Context): RelayRetryDeadline {
     val preferences = context.getSharedPreferences(PREFERENCES_NAME, Context.MODE_PRIVATE)
-    fun readState() = RelayRetryDeadlineState(
-        wallNotBeforeMillis = preferences.getLong(WALL_NOT_BEFORE_KEY, 0),
-        elapsedRealtimeNotBeforeMillis = preferences.getLong(ELAPSED_NOT_BEFORE_KEY, 0),
-        bootCount = if (preferences.contains(BOOT_COUNT_KEY)) {
-            preferences.getInt(BOOT_COUNT_KEY, 0)
-        } else {
-            null
-        },
-    )
+    fun readState() =
+        RelayRetryDeadlineState(
+            wallNotBeforeMillis = preferences.getLong(WALL_NOT_BEFORE_KEY, 0),
+            elapsedRealtimeNotBeforeMillis = preferences.getLong(ELAPSED_NOT_BEFORE_KEY, 0),
+            bootCount =
+                if (preferences.contains(BOOT_COUNT_KEY)) {
+                    preferences.getInt(BOOT_COUNT_KEY, 0)
+                } else {
+                    null
+                },
+        )
     return RelayRetryDeadline(
         readState = ::readState,
         writeState = { state ->
-            val editor = preferences.edit()
-                .putLong(WALL_NOT_BEFORE_KEY, state.wallNotBeforeMillis)
-                .putLong(ELAPSED_NOT_BEFORE_KEY, state.elapsedRealtimeNotBeforeMillis)
+            val editor =
+                preferences
+                    .edit()
+                    .putLong(WALL_NOT_BEFORE_KEY, state.wallNotBeforeMillis)
+                    .putLong(ELAPSED_NOT_BEFORE_KEY, state.elapsedRealtimeNotBeforeMillis)
             if (state.bootCount == null) {
                 editor.remove(BOOT_COUNT_KEY)
             } else {
@@ -96,8 +105,9 @@ internal fun persistentRelayRetryDeadline(context: Context): RelayRetryDeadline 
             check(editor.commit()) { "Could not persist the relay retry deadline" }
         },
         bootCount = runCatching {
-            Settings.Global.getInt(context.contentResolver, Settings.Global.BOOT_COUNT)
-        }.getOrNull(),
+                Settings.Global.getInt(context.contentResolver, Settings.Global.BOOT_COUNT)
+            }
+                .getOrNull(),
         elapsedRealtimeMillis = SystemClock::elapsedRealtime,
     )
 }

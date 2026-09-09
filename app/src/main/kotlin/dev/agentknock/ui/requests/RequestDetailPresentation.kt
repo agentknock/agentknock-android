@@ -64,9 +64,10 @@ internal fun StatusHeader(status: StatusSummary, requestedAt: String) {
                 requestedAt,
                 style = MaterialTheme.typography.bodySmall,
                 color = MaterialTheme.colorScheme.onSurfaceVariant,
-                modifier = Modifier.clearAndSetSemantics {
-                    contentDescription = "Requested $requestedAt"
-                },
+                modifier =
+                    Modifier.clearAndSetSemantics {
+                        contentDescription = "Requested $requestedAt"
+                    },
             )
         }
         status.detail?.let {
@@ -82,18 +83,22 @@ internal fun StatusHeader(status: StatusSummary, requestedAt: String) {
 @Composable
 private fun StatusChip(status: StatusSummary, modifier: Modifier = Modifier) {
     val semanticColors = MaterialTheme.agentknockColors
-    val container = when (status.tone) {
-        NoticeTone.NEUTRAL, NoticeTone.SUBDUED -> MaterialTheme.colorScheme.surfaceContainerHighest
-        NoticeTone.ATTENTION -> semanticColors.attentionContainer
-        NoticeTone.SUCCESS -> semanticColors.successContainer
-        NoticeTone.DANGER -> semanticColors.dangerContainer
-    }
-    val content = when (status.tone) {
-        NoticeTone.NEUTRAL, NoticeTone.SUBDUED -> MaterialTheme.colorScheme.onSurfaceVariant
-        NoticeTone.ATTENTION -> semanticColors.onAttentionContainer
-        NoticeTone.SUCCESS -> semanticColors.onSuccessContainer
-        NoticeTone.DANGER -> semanticColors.onDangerContainer
-    }
+    val container =
+        when (status.tone) {
+            NoticeTone.NEUTRAL,
+            NoticeTone.SUBDUED -> MaterialTheme.colorScheme.surfaceContainerHighest
+            NoticeTone.ATTENTION -> semanticColors.attentionContainer
+            NoticeTone.SUCCESS -> semanticColors.successContainer
+            NoticeTone.DANGER -> semanticColors.dangerContainer
+        }
+    val content =
+        when (status.tone) {
+            NoticeTone.NEUTRAL,
+            NoticeTone.SUBDUED -> MaterialTheme.colorScheme.onSurfaceVariant
+            NoticeTone.ATTENTION -> semanticColors.onAttentionContainer
+            NoticeTone.SUCCESS -> semanticColors.onSuccessContainer
+            NoticeTone.DANGER -> semanticColors.onDangerContainer
+        }
     Surface(
         color = container,
         contentColor = content,
@@ -101,7 +106,13 @@ private fun StatusChip(status: StatusSummary, modifier: Modifier = Modifier) {
         modifier = modifier,
     ) {
         Row(
-            modifier = Modifier.padding(start = if (status.icon == null) 12.dp else 10.dp, end = 12.dp, top = 6.dp, bottom = 6.dp),
+            modifier =
+                Modifier.padding(
+                    start = if (status.icon == null) 12.dp else 10.dp,
+                    end = 12.dp,
+                    top = 6.dp,
+                    bottom = 6.dp,
+                ),
             horizontalArrangement = Arrangement.spacedBy(6.dp),
             verticalAlignment = Alignment.CenterVertically,
         ) {
@@ -124,8 +135,8 @@ internal fun SectionTitle(text: String) {
 }
 
 /**
- * Client and secret identities side by side, or stacked when a name would not fit half the
- * width. [secretRole] names the secret's part in this request, such as "Signing key".
+ * Client and secret identities side by side, or stacked when a name would not fit half the width.
+ * [secretRole] names the secret's part in this request, such as "Signing key".
  */
 @Composable
 internal fun IdentityColumns(
@@ -140,9 +151,10 @@ internal fun IdentityColumns(
     val secretLabel = if (secretNames.size == 1) secretRole else secretsRole
     BoxWithConstraints(Modifier.fillMaxWidth()) {
         val columnWidth = with(density) { ((maxWidth - 16.dp) / 2 - 26.dp).roundToPx() }
-        val stack = (listOf(clientName) + secretNames).any { name ->
-            textMeasurer.measure(name, nameStyle, softWrap = false).size.width > columnWidth
-        }
+        val stack =
+            (listOf(clientName) + secretNames).any { name ->
+                textMeasurer.measure(name, nameStyle, softWrap = false).size.width > columnWidth
+            }
         if (stack) {
             Column(verticalArrangement = Arrangement.spacedBy(12.dp)) {
                 Identity(Icons.Outlined.Computer, "Client", listOf(clientName))
@@ -168,9 +180,10 @@ internal fun Identity(
     modifier: Modifier = Modifier,
 ) {
     Row(
-        modifier = modifier.clearAndSetSemantics {
-            contentDescription = "$role ${names.joinToString(", ")}"
-        },
+        modifier =
+            modifier.clearAndSetSemantics {
+                contentDescription = "$role ${names.joinToString(", ")}"
+            },
         horizontalArrangement = Arrangement.spacedBy(8.dp),
         verticalAlignment = Alignment.Top,
     ) {
@@ -200,11 +213,10 @@ internal fun ReasonQuote(reason: String, clientName: String) {
         horizontalArrangement = Arrangement.spacedBy(12.dp),
     ) {
         Box(
-            Modifier
-                .padding(vertical = 2.dp)
+            Modifier.padding(vertical = 2.dp)
                 .width(3.dp)
                 .fillMaxHeight()
-                .background(MaterialTheme.colorScheme.outlineVariant, RoundedCornerShape(2.dp)),
+                .background(MaterialTheme.colorScheme.outlineVariant, RoundedCornerShape(2.dp))
         )
         Column(verticalArrangement = Arrangement.spacedBy(4.dp)) {
             SelectionContainer {
@@ -221,8 +233,8 @@ internal fun ReasonQuote(reason: String, clientName: String) {
 
 /**
  * A value taken from signed or verified content, with an icon and a label beneath. Unlike
- * [Identity] the exact string stays selectable and copyable: no wrap hints are inserted and
- * the text keeps its own semantics, so the label is read after the value.
+ * [Identity] the exact string stays selectable and copyable: no wrap hints are inserted and the
+ * text keeps its own semantics, so the label is read after the value.
  */
 @Composable
 internal fun SelectableFact(
@@ -247,11 +259,14 @@ internal fun SelectableFact(
             SelectionContainer {
                 Text(
                     value,
-                    style = if (monospace) {
-                        MaterialTheme.typography.bodyMedium.copy(fontFamily = FontFamily.Monospace)
-                    } else {
-                        MaterialTheme.typography.titleMedium
-                    },
+                    style =
+                        if (monospace) {
+                            MaterialTheme.typography.bodyMedium.copy(
+                                fontFamily = FontFamily.Monospace
+                            )
+                        } else {
+                            MaterialTheme.typography.titleMedium
+                        },
                 )
             }
             Text(

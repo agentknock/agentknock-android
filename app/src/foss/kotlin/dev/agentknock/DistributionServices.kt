@@ -25,14 +25,16 @@ internal fun createPushRegistration(
 ): PushRegistration = ForegroundOnlyPushRegistration
 
 private object ForegroundOnlyPushRegistration : PushRegistration {
-    override val registrationState = MutableStateFlow<RelayPushRegistrationState?>(null).asStateFlow()
+    override val registrationState =
+        MutableStateFlow<RelayPushRegistrationState?>(null).asStateFlow()
 
     // The relay still reports its push state, but this build has no push transport to register.
     override fun updateRelayState(state: RelayPushRegistrationState) = Unit
 }
 
-internal fun createSubscriptionBilling(@Suppress("UNUSED_PARAMETER") context: Context): PlaySubscriptionBilling =
-    UnsupportedPlayBilling
+internal fun createSubscriptionBilling(
+    @Suppress("UNUSED_PARAMETER") context: Context
+): PlaySubscriptionBilling = UnsupportedPlayBilling
 
 private object UnsupportedPlayBilling : PlaySubscriptionBilling {
     override val updates = emptyFlow<PlaySubscriptionUpdate>()

@@ -42,33 +42,33 @@ import androidx.compose.ui.text.style.TextIndent
 import androidx.compose.ui.text.withStyle
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
-import dev.agentknock.presentation.formatPlatformName
 import dev.agentknock.presentation.approvalSummary
+import dev.agentknock.presentation.formatPlatformName
 import dev.agentknock.presentation.renderShellCommand
 import dev.agentknock.presentation.renderShellWord
 import dev.agentknock.presentation.renderSoftware
+import dev.agentknock.protocol.relayRequestTimestamp
 import dev.agentknock.review.ApprovalReviewEnvironmentDelivery
 import dev.agentknock.review.ApprovalReviewEnvironmentSecretFacts
 import dev.agentknock.storage.approval.AiReview
 import dev.agentknock.storage.approval.ApprovalAction
 import dev.agentknock.storage.approval.ApprovalEvaluation
+import dev.agentknock.storage.request.ApprovalCompletionResult
+import dev.agentknock.storage.request.ApprovalDecision
+import dev.agentknock.storage.request.ApprovalRequestState
 import dev.agentknock.storage.request.InboxRequestContent
 import dev.agentknock.storage.request.InboxRequestDetails
 import dev.agentknock.storage.request.InboxRequestState
-import dev.agentknock.storage.request.ApprovalCompletionResult
-import dev.agentknock.storage.request.ApprovalDecision
 import dev.agentknock.storage.request.SecretUseRequestDetails
-import dev.agentknock.protocol.relayRequestTimestamp
-import dev.agentknock.storage.request.ApprovalRequestState
 import dev.agentknock.storage.secret.SecretMetadata
 import dev.agentknock.storage.secret.TemporaryAccessOperation
-import dev.agentknock.ui.components.rememberDateTimeFormatter
 import dev.agentknock.ui.components.DetailPage
 import dev.agentknock.ui.components.DetailValue
 import dev.agentknock.ui.components.Disclosure
 import dev.agentknock.ui.components.Notice
 import dev.agentknock.ui.components.NoticeTone
 import dev.agentknock.ui.components.TonalIcon
+import dev.agentknock.ui.components.rememberDateTimeFormatter
 
 @Composable
 internal fun InvocationRequestDetail(
@@ -83,13 +83,11 @@ internal fun InvocationRequestDetail(
     val dates = rememberDateTimeFormatter()
     val secretUse = (request.content as InboxRequestContent.SecretUse).details
     var confirmTemporaryAccess by remember(request.id) { mutableStateOf(false) }
-    val aiReviewRequested = secretUse.approvalEvaluation
-        ?.secrets
-        ?.any { it.action == ApprovalAction.ASK_AI } == true
+    val aiReviewRequested =
+        secretUse.approvalEvaluation?.secrets?.any { it.action == ApprovalAction.ASK_AI } == true
     val aiReviewInFlight = request.state == InboxRequestState.REVIEWING && aiReviewRequested
-    val temporarySecretNames = secretUse.approvalEvaluation.temporaryGrantSecretNames(
-        aiReviewInFlight,
-    )
+    val temporarySecretNames =
+        secretUse.approvalEvaluation.temporaryGrantSecretNames(aiReviewInFlight)
     val requestedAt = relayRequestTimestamp(request.id) ?: request.receivedAt
     DetailPage(
         title = "Secret use",
@@ -97,58 +95,68 @@ internal fun InvocationRequestDetail(
         modifier = modifier,
         showBack = showBack,
         scrollResetKey = secretUse.state to secretUse.completionResult,
-        bottomContent = if (request.state == InboxRequestState.ACTION_REQUIRED) {
-            {
-                Surface(
-                    color = MaterialTheme.colorScheme.surfaceContainer,
-                    tonalElevation = 3.dp,
-                ) {
-                    RequestDecisionButtons(
-                        approveEnabled = secretUse.missingSecrets.isEmpty(),
-                        temporaryAccessAvailable = temporarySecretNames.isNotEmpty() &&
-                            secretUse.missingSecrets.isEmpty(),
-                        onDeny = onDeny,
-                        onApprove = onApprove,
-                        onAllowTemporarily = { confirmTemporaryAccess = true },
-                    )
-                }
-            }
-        } else {
-            null
-        },
-    ) {
-        val status = if (secretUse.state == ApprovalRequestState.APPROVAL_PENDING) {
-            when {
-                aiReviewInFlight -> StatusSummary(
-                    "AI review in progress",
-                    tone = NoticeTone.SUBDUED,
-                    icon = Icons.Outlined.AutoAwesome,
-                )
-                secretUse.isError() -> StatusSummary(
-                    secretUse.statusLabel(),
-                    tone = NoticeTone.DANGER,
-                    icon = Icons.Outlined.ErrorOutline,
-                )
-                request.state == InboxRequestState.ACTION_REQUIRED -> StatusSummary(
-                    secretUse.statusLabel(),
-                    tone = NoticeTone.ATTENTION,
-                )
-                else -> StatusSummary(
-                    secretUse.statusLabel(),
-                    tone = if (
-                        secretUse.decision == ApprovalDecision.DENIED ||
-                        secretUse.completionResult == ApprovalCompletionResult.DENIED ||
-                        secretUse.completionResult == ApprovalCompletionResult.ABORTED
+        bottomContent =
+            if (request.state == InboxRequestState.ACTION_REQUIRED) {
+                {
+                    Surface(
+                        color = MaterialTheme.colorScheme.surfaceContainer,
+                        tonalElevation = 3.dp,
                     ) {
-                        NoticeTone.SUBDUED
-                    } else {
-                        NoticeTone.SUCCESS
-                    },
-                )
+                        RequestDecisionButtons(
+                            approveEnabled = secretUse.missingSecrets.isEmpty(),
+                            temporaryAccessAvailable =
+                                temporarySecretNames.isNotEmpty() &&
+                                    secretUse.missingSecrets.isEmpty(),
+                            onDeny = onDeny,
+                            onApprove = onApprove,
+                            onAllowTemporarily = { confirmTemporaryAccess = true },
+                        )
+                    }
+                }
+            } else {
+                null
+            },
+    ) {
+        val status =
+            if (secretUse.state == ApprovalRequestState.APPROVAL_PENDING) {
+                when {
+                    aiReviewInFlight ->
+                        StatusSummary(
+                            "AI review in progress",
+                            tone = NoticeTone.SUBDUED,
+                            icon = Icons.Outlined.AutoAwesome,
+                        )
+                    secretUse.isError() ->
+                        StatusSummary(
+                            secretUse.statusLabel(),
+                            tone = NoticeTone.DANGER,
+                            icon = Icons.Outlined.ErrorOutline,
+                        )
+                    request.state == InboxRequestState.ACTION_REQUIRED ->
+                        StatusSummary(
+                            secretUse.statusLabel(),
+                            tone = NoticeTone.ATTENTION,
+                        )
+                    else ->
+                        StatusSummary(
+                            secretUse.statusLabel(),
+                            tone =
+                                if (
+                                    secretUse.decision == ApprovalDecision.DENIED ||
+                                        secretUse.completionResult ==
+                                            ApprovalCompletionResult.DENIED ||
+                                        secretUse.completionResult ==
+                                            ApprovalCompletionResult.ABORTED
+                                ) {
+                                    NoticeTone.SUBDUED
+                                } else {
+                                    NoticeTone.SUCCESS
+                                },
+                        )
+                }
+            } else {
+                secretUse.outcome()
             }
-        } else {
-            secretUse.outcome()
-        }
         StatusHeader(status, dates.timestamp(requestedAt))
 
         RequestTicket(
@@ -174,13 +182,14 @@ internal fun InvocationRequestDetail(
                 decision = secretUse.decision,
                 decisionSource = secretUse.decisionSource,
                 aiReview = secretUse.approvalEvaluation?.aiReview,
-                temporaryAccessScopes = secretUse.approvalEvaluation.temporaryAccessHistory(dates::timestamp),
+                temporaryAccessScopes =
+                    secretUse.approvalEvaluation.temporaryAccessHistory(dates::timestamp),
             )
         }
 
         if (
             secretUse.missingSecrets.isNotEmpty() &&
-            secretUse.completionResult != ApprovalCompletionResult.DENIED
+                secretUse.completionResult != ApprovalCompletionResult.DENIED
         ) {
             Notice(
                 "Secrets are unavailable",
@@ -192,7 +201,8 @@ internal fun InvocationRequestDetail(
         if (secretUse.secretDetails.isNotEmpty()) {
             Column(verticalArrangement = Arrangement.spacedBy(8.dp)) {
                 SectionTitle(
-                    if (secretUse.secretDetails.size == 1) "Requested secret" else "Requested secrets",
+                    if (secretUse.secretDetails.size == 1) "Requested secret"
+                    else "Requested secrets"
                 )
                 Surface(
                     color = MaterialTheme.colorScheme.surfaceContainerLow,
@@ -234,7 +244,8 @@ internal fun InvocationRequestDetail(
                 DetailValue("Platform reported by client", formatPlatformName(it))
             }
             secretUse.architecture?.let { DetailValue("Architecture reported by client", it) }
-            secretUse.hostname?.takeIf { it != secretUse.clientName }
+            secretUse.hostname
+                ?.takeIf { it != secretUse.clientName }
                 ?.let { DetailValue("Hostname reported by client", it) }
             secretUse.osVersion?.let { DetailValue("OS version", it) }
             secretUse.clientSoftware?.let { software ->
@@ -249,8 +260,12 @@ internal fun InvocationRequestDetail(
             HorizontalDivider()
             DetailValue("Client ID", secretUse.clientId, true)
             DetailValue("Request ID", request.id, true)
-            secretUse.decidedAt?.let { DetailValue("Decided", dates.timestamp(it, includeSeconds = true)) }
-            request.completedAt?.let { DetailValue("Completed", dates.timestamp(it, includeSeconds = true)) }
+            secretUse.decidedAt?.let {
+                DetailValue("Decided", dates.timestamp(it, includeSeconds = true))
+            }
+            request.completedAt?.let {
+                DetailValue("Completed", dates.timestamp(it, includeSeconds = true))
+            }
         }
     }
     if (confirmTemporaryAccess) {
@@ -258,11 +273,9 @@ internal fun InvocationRequestDetail(
             clientName = secretUse.clientName,
             secretNames = temporarySecretNames,
             operation = TemporaryAccessOperation.INVOCATION,
-            approvesOtherUsesOnce = secretUse.approvalEvaluation
-                ?.secrets
-                ?.any {
-                    it.secretName !in temporarySecretNames &&
-                        it.action != ApprovalAction.APPROVE
+            approvesOtherUsesOnce =
+                secretUse.approvalEvaluation?.secrets?.any {
+                    it.secretName !in temporarySecretNames && it.action != ApprovalAction.APPROVE
                 } == true,
             onConfirm = {
                 confirmTemporaryAccess = false
@@ -305,14 +318,16 @@ private const val INLINE_COMMAND_MAX_ARGUMENTS = 6
 @Composable
 private fun CommandBlock(command: String, arguments: List<String>) {
     val renderedCommand = renderShellCommand(command, arguments)
-    val listed = renderedCommand.length > INLINE_COMMAND_MAX_LENGTH ||
-        arguments.size > INLINE_COMMAND_MAX_ARGUMENTS
-    val style = MaterialTheme.typography.bodyLarge.copy(
-        fontFamily = FontFamily.Monospace,
-        fontSize = if (listed) 15.sp else 16.sp,
-        lineHeight = if (listed) 22.sp else 24.sp,
-        textIndent = if (listed) TextIndent(restLine = 16.sp) else TextIndent.None,
-    )
+    val listed =
+        renderedCommand.length > INLINE_COMMAND_MAX_LENGTH ||
+            arguments.size > INLINE_COMMAND_MAX_ARGUMENTS
+    val style =
+        MaterialTheme.typography.bodyLarge.copy(
+            fontFamily = FontFamily.Monospace,
+            fontSize = if (listed) 15.sp else 16.sp,
+            lineHeight = if (listed) 22.sp else 24.sp,
+            textIndent = if (listed) TextIndent(restLine = 16.sp) else TextIndent.None,
+        )
     Surface(
         color = MaterialTheme.colorScheme.surfaceContainerLowest,
         contentColor = MaterialTheme.colorScheme.onSurface,
@@ -360,7 +375,9 @@ private fun CommandBlock(command: String, arguments: List<String>) {
 /** Shell line continuation, so a copied multi-line listing still pastes as one command. */
 internal const val COMMAND_LINE_CONTINUATION = " \\\n"
 
-/** The shell-rendered executable word split after its last slash: directory (may be empty) and name. */
+/**
+ * The shell-rendered executable word split after its last slash: directory (may be empty) and name.
+ */
 internal fun renderedExecutable(command: String): Pair<String, String> {
     val executable = renderShellWord(command)
     val directoryLength = executable.lastIndexOf('/') + 1
@@ -368,12 +385,11 @@ internal fun renderedExecutable(command: String): Pair<String, String> {
 }
 
 /**
- * The same words as [renderShellCommand]. When [listed], each argument starts a new line and
- * the previous line ends with a backslash continuation, so selecting and copying the block
- * yields an equivalent shell command. The executable's directory and the continuation marks
- * are muted so the program name and arguments stand out; option-like words are tinted.
- * Nothing is removed or reordered unless [includeDirectory] is false, which lets a summary
- * show the directory separately.
+ * The same words as [renderShellCommand]. When [listed], each argument starts a new line and the
+ * previous line ends with a backslash continuation, so selecting and copying the block yields an
+ * equivalent shell command. The executable's directory and the continuation marks are muted so the
+ * program name and arguments stand out; option-like words are tinted. Nothing is removed or
+ * reordered unless [includeDirectory] is false, which lets a summary show the directory separately.
  */
 internal fun annotatedCommand(
     command: String,
@@ -406,64 +422,77 @@ internal fun annotatedCommand(
     }
 }
 
-private fun SecretUseRequestDetails.outcome(): StatusSummary = when (state) {
-    ApprovalRequestState.WAITING_FOR_COMPLETION -> if (decision == ApprovalDecision.APPROVED) {
-        StatusSummary(
-            "Approved",
-            NoticeTone.SUCCESS,
-            Icons.Outlined.HourglassTop,
-            "Waiting for the client to finish.",
-        )
-    } else {
-        StatusSummary(
-            "Denied",
-            NoticeTone.SUBDUED,
-            Icons.Outlined.HourglassTop,
-            "Waiting for the client to finish.",
-        )
-    }
-    ApprovalRequestState.COMPLETED -> when (completionResult) {
-        ApprovalCompletionResult.APPROVED -> StatusSummary(
-            "Delivered",
-            NoticeTone.SUCCESS,
-            Icons.Outlined.CheckCircle,
-            "The client received the requested data.",
-        )
-        ApprovalCompletionResult.DENIED -> if (completionReason == "INVALID_REQUEST") {
+private fun SecretUseRequestDetails.outcome(): StatusSummary =
+    when (state) {
+        ApprovalRequestState.WAITING_FOR_COMPLETION ->
+            if (decision == ApprovalDecision.APPROVED) {
+                StatusSummary(
+                    "Approved",
+                    NoticeTone.SUCCESS,
+                    Icons.Outlined.HourglassTop,
+                    "Waiting for the client to finish.",
+                )
+            } else {
+                StatusSummary(
+                    "Denied",
+                    NoticeTone.SUBDUED,
+                    Icons.Outlined.HourglassTop,
+                    "Waiting for the client to finish.",
+                )
+            }
+        ApprovalRequestState.COMPLETED ->
+            when (completionResult) {
+                ApprovalCompletionResult.APPROVED ->
+                    StatusSummary(
+                        "Delivered",
+                        NoticeTone.SUCCESS,
+                        Icons.Outlined.CheckCircle,
+                        "The client received the requested data.",
+                    )
+                ApprovalCompletionResult.DENIED ->
+                    if (completionReason == "INVALID_REQUEST") {
+                        StatusSummary(
+                            "Request rejected",
+                            NoticeTone.DANGER,
+                            Icons.Outlined.ErrorOutline,
+                            completionMessage ?: "The request was invalid.",
+                        )
+                    } else {
+                        StatusSummary(
+                            "Denied",
+                            NoticeTone.SUBDUED,
+                            Icons.Outlined.Block,
+                            "No requested values were released.",
+                        )
+                    }
+                ApprovalCompletionResult.ABORTED ->
+                    StatusSummary(
+                        "Aborted",
+                        NoticeTone.SUBDUED,
+                        Icons.Outlined.Block,
+                        completionMessage ?: "The client stopped this request.",
+                    )
+                null ->
+                    if (error != null) {
+                        StatusSummary("Request ended", NoticeTone.NEUTRAL, null, error)
+                    } else {
+                        StatusSummary(
+                            "Completed",
+                            NoticeTone.NEUTRAL,
+                            null,
+                            "The request is complete.",
+                        )
+                    }
+            }
+        ApprovalRequestState.VERIFICATION_FAILED ->
             StatusSummary(
-                "Request rejected",
+                "Could not verify request",
                 NoticeTone.DANGER,
                 Icons.Outlined.ErrorOutline,
-                completionMessage ?: "The request was invalid.",
+                error ?: "The cryptographic message was invalid.",
             )
-        } else {
-            StatusSummary(
-                "Denied",
-                NoticeTone.SUBDUED,
-                Icons.Outlined.Block,
-                "No requested values were released.",
-            )
-        }
-        ApprovalCompletionResult.ABORTED -> StatusSummary(
-            "Aborted",
-            NoticeTone.SUBDUED,
-            Icons.Outlined.Block,
-            completionMessage ?: "The client stopped this request.",
-        )
-        null -> if (error != null) {
-            StatusSummary("Request ended", NoticeTone.NEUTRAL, null, error)
-        } else {
-            StatusSummary("Completed", NoticeTone.NEUTRAL, null, "The request is complete.")
-        }
+        ApprovalRequestState.APPROVAL_PENDING -> StatusSummary(statusLabel(), NoticeTone.ATTENTION)
     }
-    ApprovalRequestState.VERIFICATION_FAILED -> StatusSummary(
-        "Could not verify request",
-        NoticeTone.DANGER,
-        Icons.Outlined.ErrorOutline,
-        error ?: "The cryptographic message was invalid.",
-    )
-    ApprovalRequestState.APPROVAL_PENDING -> StatusSummary(statusLabel(), NoticeTone.ATTENTION)
-}
 
 @Composable
 private fun ApprovalDecisionHistory(
@@ -507,14 +536,15 @@ private fun ApprovalDecisionHistory(
     }
 }
 
-private fun ApprovalEvaluation?.temporaryAccessHistory(formatTimestamp: (Long) -> String): String = this?.secrets
-    ?.mapNotNull { secret ->
-        secret.temporaryAccessExpiresAt?.let { expiresAt ->
-            "${secret.secretName} until ${formatTimestamp(expiresAt)}"
+private fun ApprovalEvaluation?.temporaryAccessHistory(formatTimestamp: (Long) -> String): String =
+    this?.secrets
+        ?.mapNotNull { secret ->
+            secret.temporaryAccessExpiresAt?.let { expiresAt ->
+                "${secret.secretName} until ${formatTimestamp(expiresAt)}"
+            }
         }
-    }
-    ?.joinToString("; ")
-    .orEmpty()
+        ?.joinToString("; ")
+        .orEmpty()
 
 @Composable
 private fun SecretSummary(
@@ -534,9 +564,10 @@ private fun SecretSummary(
             Text(secret.name.breakableAtHyphens(), style = MaterialTheme.typography.titleMedium)
             Text(
                 listOfNotNull(
-                    if (secret.type == "ssh") "SSH key" else "Environment variables",
-                    secret.description.takeIf(String::isNotBlank),
-                ).joinToString(" · "),
+                        if (secret.type == "ssh") "SSH key" else "Environment variables",
+                        secret.description.takeIf(String::isNotBlank),
+                    )
+                    .joinToString(" · "),
                 style = MaterialTheme.typography.bodySmall,
                 color = MaterialTheme.colorScheme.onSurfaceVariant,
             )
@@ -552,16 +583,21 @@ private fun SecretSummary(
                     verticalArrangement = Arrangement.spacedBy(4.dp),
                 ) {
                     environmentVariables.variables.forEach { (source, variable) ->
-                        val label = when (variable.delivery) {
-                            ApprovalReviewEnvironmentDelivery.ENVIRONMENT ->
-                                if (variable.target == source) source else "$source → ${variable.target}"
-                            ApprovalReviewEnvironmentDelivery.STANDARD_INPUT -> "$source → standard input"
-                            ApprovalReviewEnvironmentDelivery.OMITTED -> "$source · Not provided"
-                        }
+                        val label =
+                            when (variable.delivery) {
+                                ApprovalReviewEnvironmentDelivery.ENVIRONMENT ->
+                                    if (variable.target == source) source
+                                    else "$source → ${variable.target}"
+                                ApprovalReviewEnvironmentDelivery.STANDARD_INPUT ->
+                                    "$source → standard input"
+                                ApprovalReviewEnvironmentDelivery.OMITTED ->
+                                    "$source · Not provided"
+                            }
                         EnvironmentVariableFact(
                             name = label,
                             value = variable.value,
-                            omitted = variable.delivery == ApprovalReviewEnvironmentDelivery.OMITTED,
+                            omitted =
+                                variable.delivery == ApprovalReviewEnvironmentDelivery.OMITTED,
                         )
                     }
                 }
@@ -574,11 +610,12 @@ private fun SecretSummary(
                         val deliveredName = secret.environmentVariableRename[name] ?: name
                         val sentToStdin = secret.environmentVariableStdin == name
                         Text(
-                            text = when {
-                                sentToStdin -> "$name → standard input"
-                                deliveredName != name -> "$name → $deliveredName"
-                                else -> name
-                            },
+                            text =
+                                when {
+                                    sentToStdin -> "$name → standard input"
+                                    deliveredName != name -> "$name → $deliveredName"
+                                    else -> name
+                                },
                             style = MaterialTheme.typography.bodyMedium,
                             fontFamily = FontFamily.Monospace,
                         )
@@ -602,12 +639,13 @@ private fun EnvironmentVariableFact(name: String, value: String?, omitted: Boole
     BoxWithConstraints(Modifier.fillMaxWidth()) {
         val availableWidth = with(density) { maxWidth.roundToPx() }
         val gap = with(density) { 12.dp.roundToPx() }
-        val fitsOnOneLine = value == null || (
-            '\n' !in value && '\r' !in value &&
-                textMeasurer.measure(name, style = style, maxLines = 1).size.width +
-                textMeasurer.measure(value, style = style, maxLines = 1).size.width + gap <=
-                availableWidth
-            )
+        val fitsOnOneLine =
+            value == null ||
+                ('\n' !in value &&
+                    '\r' !in value &&
+                    textMeasurer.measure(name, style = style, maxLines = 1).size.width +
+                        textMeasurer.measure(value, style = style, maxLines = 1).size.width +
+                        gap <= availableWidth)
         if (fitsOnOneLine) {
             Row(
                 modifier = Modifier.fillMaxWidth(),
@@ -644,17 +682,19 @@ private fun HiddenSensitiveValue(style: TextStyle) {
         "••••••••",
         style = style,
         color = MaterialTheme.colorScheme.onSurfaceVariant,
-        modifier = Modifier.clearAndSetSemantics {
-            contentDescription = "Sensitive value hidden"
-        },
+        modifier =
+            Modifier.clearAndSetSemantics {
+                contentDescription = "Sensitive value hidden"
+            },
     )
 }
 
-private fun SecretUseRequestDetails.statusLabel(): String = secretUseStatusLabel(
-    state,
-    completionResult,
-    completionReason,
-)
+private fun SecretUseRequestDetails.statusLabel(): String =
+    secretUseStatusLabel(
+        state,
+        completionResult,
+        completionReason,
+    )
 
 private fun SecretUseRequestDetails.isError(): Boolean =
     state == ApprovalRequestState.VERIFICATION_FAILED || completionReason == "INVALID_REQUEST"

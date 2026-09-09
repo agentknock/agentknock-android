@@ -88,7 +88,7 @@ class RequestLifecycleTest {
         assertNull(
             decodeWireCompletionOrNull<String> {
                 throw SerializationException("malformed completion")
-            },
+            }
         )
 
         val internalFailure = runCatching {

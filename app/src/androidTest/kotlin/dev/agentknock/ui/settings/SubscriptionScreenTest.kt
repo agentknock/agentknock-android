@@ -1,12 +1,12 @@
 package dev.agentknock.ui.settings
 
-import dev.agentknock.subscription.AiReviewAccess
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.ui.test.assertIsDisplayed
 import androidx.compose.ui.test.junit4.v2.createComposeRule
 import androidx.compose.ui.test.onNodeWithText
 import androidx.compose.ui.test.performClick
 import androidx.compose.ui.test.performScrollTo
+import dev.agentknock.subscription.AiReviewAccess
 import dev.agentknock.subscription.GOOGLE_PLAY_SUBSCRIPTION_PRODUCT_ID
 import dev.agentknock.subscription.PlaySubscriptionOffer
 import dev.agentknock.subscription.PlaySubscriptionOfferId
@@ -18,15 +18,20 @@ import org.junit.Test
 class SubscriptionScreenTest {
     @get:Rule val compose = createComposeRule()
 
-    @Test fun anUnavailableStatusDoesNotClaimTheSubscriptionNeedsAttentionOrOfferAnotherPurchase() {
+    @Test
+    fun anUnavailableStatusDoesNotClaimTheSubscriptionNeedsAttentionOrOfferAnotherPurchase() {
         compose.setContent {
             AgentknockTheme {
                 SubscriptionAndBillingScreen(
-                    state = SubscriptionUiState(
-                        access = AiReviewAccess.UNAVAILABLE,
-                        googlePlayPurchase = GooglePlayPurchaseState.PURCHASED,
-                    ),
-                    onBack = {}, onRefresh = {}, onSubscribe = {}, onManageSubscription = {},
+                    state =
+                        SubscriptionUiState(
+                            access = AiReviewAccess.UNAVAILABLE,
+                            googlePlayPurchase = GooglePlayPurchaseState.PURCHASED,
+                        ),
+                    onBack = {},
+                    onRefresh = {},
+                    onSubscribe = {},
+                    onManageSubscription = {},
                     onOpenSecrets = {},
                 )
             }
@@ -36,19 +41,24 @@ class SubscriptionScreenTest {
         compose.onNodeWithText("Subscribe").assertDoesNotExist()
     }
 
-    @Test fun purchaseActivationShowsProgressUntilAccessIsConfirmed() {
-        val state = mutableStateOf(
-            SubscriptionUiState(
-                access = AiReviewAccess.INACTIVE,
-                googlePlayPurchase = GooglePlayPurchaseState.PURCHASED,
-                refreshing = true,
-            ),
-        )
+    @Test
+    fun purchaseActivationShowsProgressUntilAccessIsConfirmed() {
+        val state =
+            mutableStateOf(
+                SubscriptionUiState(
+                    access = AiReviewAccess.INACTIVE,
+                    googlePlayPurchase = GooglePlayPurchaseState.PURCHASED,
+                    refreshing = true,
+                )
+            )
         compose.setContent {
             AgentknockTheme {
                 SubscriptionAndBillingScreen(
                     state = state.value,
-                    onBack = {}, onRefresh = {}, onSubscribe = {}, onManageSubscription = {},
+                    onBack = {},
+                    onRefresh = {},
+                    onSubscribe = {},
+                    onManageSubscription = {},
                     onOpenSecrets = {},
                 )
             }
@@ -66,19 +76,24 @@ class SubscriptionScreenTest {
         compose.onNodeWithText("Subscription needs attention").assertDoesNotExist()
     }
 
-    @Test fun purchaseWithoutAccessShowsAttentionOnlyAfterCheckingFinishes() {
-        val state = mutableStateOf(
-            SubscriptionUiState(
-                access = AiReviewAccess.UNAVAILABLE,
-                googlePlayPurchase = GooglePlayPurchaseState.PURCHASED,
-                refreshing = true,
-            ),
-        )
+    @Test
+    fun purchaseWithoutAccessShowsAttentionOnlyAfterCheckingFinishes() {
+        val state =
+            mutableStateOf(
+                SubscriptionUiState(
+                    access = AiReviewAccess.UNAVAILABLE,
+                    googlePlayPurchase = GooglePlayPurchaseState.PURCHASED,
+                    refreshing = true,
+                )
+            )
         compose.setContent {
             AgentknockTheme {
                 SubscriptionAndBillingScreen(
                     state = state.value,
-                    onBack = {}, onRefresh = {}, onSubscribe = {}, onManageSubscription = {},
+                    onBack = {},
+                    onRefresh = {},
+                    onSubscribe = {},
+                    onManageSubscription = {},
                     onOpenSecrets = {},
                 )
             }
@@ -94,13 +109,17 @@ class SubscriptionScreenTest {
         compose.onNodeWithText("Activating AI review…").assertDoesNotExist()
     }
 
-    @Test fun activeAccessOffersSecretSettingsWithoutInventingAPlayPurchase() {
+    @Test
+    fun activeAccessOffersSecretSettingsWithoutInventingAPlayPurchase() {
         var opened = 0
         compose.setContent {
             AgentknockTheme {
                 SubscriptionAndBillingScreen(
                     state = SubscriptionUiState(access = AiReviewAccess.ACTIVE),
-                    onBack = {}, onRefresh = {}, onSubscribe = {}, onManageSubscription = {},
+                    onBack = {},
+                    onRefresh = {},
+                    onSubscribe = {},
+                    onManageSubscription = {},
                     onOpenSecrets = { opened++ },
                 )
             }
@@ -111,24 +130,40 @@ class SubscriptionScreenTest {
         compose.onNodeWithText("Subscribe").assertDoesNotExist()
     }
 
-    @Test fun freePlanShowsPriceTermsAndStartsTheSelectedOffer() {
+    @Test
+    fun freePlanShowsPriceTermsAndStartsTheSelectedOffer() {
         val id = PlaySubscriptionOfferId(GOOGLE_PLAY_SUBSCRIPTION_PRODUCT_ID, "monthly", null)
         var selected: PlaySubscriptionOfferId? = null
         compose.setContent {
             AgentknockTheme {
                 SubscriptionAndBillingScreen(
-                    state = SubscriptionUiState(access = AiReviewAccess.INACTIVE,
-                        playStore = PlayStoreAvailability.AVAILABLE,
-                        offers = listOf(PlaySubscriptionOffer(id, "€4.99/month",
-                            "Renews automatically until canceled. Manage or cancel in Google Play.", true))),
-                    onBack = {}, onRefresh = {}, onSubscribe = { selected = it },
-                    onManageSubscription = {}, onOpenSecrets = {},
+                    state =
+                        SubscriptionUiState(
+                            access = AiReviewAccess.INACTIVE,
+                            playStore = PlayStoreAvailability.AVAILABLE,
+                            offers =
+                                listOf(
+                                    PlaySubscriptionOffer(
+                                        id,
+                                        "€4.99/month",
+                                        "Renews automatically until canceled. Manage or cancel in Google Play.",
+                                        true,
+                                    )
+                                ),
+                        ),
+                    onBack = {},
+                    onRefresh = {},
+                    onSubscribe = { selected = it },
+                    onManageSubscription = {},
+                    onOpenSecrets = {},
                 )
             }
         }
         compose.onNodeWithText("€4.99/month").assertIsDisplayed()
-        compose.onNodeWithText("Renews automatically until canceled. Manage or cancel in Google Play.")
-            .performScrollTo().assertIsDisplayed()
+        compose
+            .onNodeWithText("Renews automatically until canceled. Manage or cancel in Google Play.")
+            .performScrollTo()
+            .assertIsDisplayed()
         compose.onNodeWithText("Subscribe").performScrollTo().performClick()
         assertEquals(id, selected)
     }

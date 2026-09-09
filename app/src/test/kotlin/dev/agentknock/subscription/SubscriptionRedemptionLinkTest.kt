@@ -9,7 +9,7 @@ class SubscriptionRedemptionLinkTest {
         assertEquals(
             SubscriptionRedemptionLink.Valid(TOKEN),
             SubscriptionRedemptionLink.parse(
-                "https://agentknock.dev/subscription/redeem#token=$TOKEN",
+                "https://agentknock.dev/subscription/redeem#token=$TOKEN"
             ),
         )
     }
@@ -19,19 +19,17 @@ class SubscriptionRedemptionLinkTest {
         assertEquals(
             SubscriptionRedemptionLink.Invalid,
             SubscriptionRedemptionLink.parse(
-                "https://agentknock.dev/subscription/redeem#token=short",
+                "https://agentknock.dev/subscription/redeem#token=short"
             ),
         )
         assertEquals(
             SubscriptionRedemptionLink.Invalid,
-            SubscriptionRedemptionLink.parse(
-                "https://agentknock.dev/subscription/redeem",
-            ),
+            SubscriptionRedemptionLink.parse("https://agentknock.dev/subscription/redeem"),
         )
         assertEquals(
             SubscriptionRedemptionLink.Invalid,
             SubscriptionRedemptionLink.parse(
-                "https://agentknock.dev/subscription/redeem?token=$TOKEN",
+                "https://agentknock.dev/subscription/redeem?token=$TOKEN"
             ),
         )
     }
@@ -39,16 +37,17 @@ class SubscriptionRedemptionLinkTest {
     @Test
     fun `ignores URLs outside the subscription redemption route`() {
         listOf(
-            null,
-            "https://example.com/subscription/redeem#token=$TOKEN",
-            "http://agentknock.dev/subscription/redeem#token=$TOKEN",
-            "https://agentknock.dev/subscription#token=$TOKEN",
-        ).forEach { value ->
-            assertEquals(
-                SubscriptionRedemptionLink.Unrelated,
-                SubscriptionRedemptionLink.parse(value),
+                null,
+                "https://example.com/subscription/redeem#token=$TOKEN",
+                "http://agentknock.dev/subscription/redeem#token=$TOKEN",
+                "https://agentknock.dev/subscription#token=$TOKEN",
             )
-        }
+            .forEach { value ->
+                assertEquals(
+                    SubscriptionRedemptionLink.Unrelated,
+                    SubscriptionRedemptionLink.parse(value),
+                )
+            }
     }
 
     private companion object {

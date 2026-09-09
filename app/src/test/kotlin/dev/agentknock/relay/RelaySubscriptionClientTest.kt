@@ -91,12 +91,14 @@ class RelaySubscriptionClientTest {
         }
     }
 
-    private fun client(server: MockWebServer) = HttpRelaySubscriptionClient(
-        transport = RelayHttpTransport(
-            client = OkHttpClient(),
-            relayUrl = server.url("/").toString(),
-        ),
-    )
+    private fun client(server: MockWebServer) =
+        HttpRelaySubscriptionClient(
+            transport =
+                RelayHttpTransport(
+                    client = OkHttpClient(),
+                    relayUrl = server.url("/").toString(),
+                )
+        )
 
     private companion object {
         const val DEVICE_ID = "01K2ENXDTW1P3XAR4J7V7C9D0H"

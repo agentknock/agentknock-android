@@ -113,13 +113,15 @@ internal fun RequestList(
     val newestRequestId = requests.firstOrNull()?.id
     LaunchedEffect(newestRequestId) {
         val previousNewest = previousNewestRequestId
-        if (newestRequestId != null && previousNewest != null && newestRequestId != previousNewest) {
+        if (
+            newestRequestId != null && previousNewest != null && newestRequestId != previousNewest
+        ) {
             val previousNewestIndex = entries.indexOfFirst { entry ->
                 entry is InboxEntry.Row && entry.request.id == previousNewest
             }
             if (
                 listState.firstVisibleItemIndex == 0 ||
-                listState.firstVisibleItemIndex == previousNewestIndex
+                    listState.firstVisibleItemIndex == previousNewestIndex
             ) {
                 listState.animateScrollToItem(0)
             }
@@ -175,28 +177,35 @@ internal fun RequestList(
             LazyColumn(
                 modifier = Modifier.fillMaxSize(),
                 state = listState,
-                contentPadding = PaddingValues(
-                    start = 16.dp,
-                    end = 16.dp,
-                    top = 4.dp,
-                    bottom = 24.dp,
-                ),
+                contentPadding =
+                    PaddingValues(
+                        start = 16.dp,
+                        end = 16.dp,
+                        top = 4.dp,
+                        bottom = 24.dp,
+                    ),
                 verticalArrangement = Arrangement.spacedBy(2.dp),
             ) {
                 items(entries, key = { it.key }, contentType = { it::class }) { entry ->
                     when (entry) {
-                        is InboxEntry.Header -> SectionHeading(
-                            entry.section.title,
-                            entry.count,
-                            modifier = Modifier.padding(top = if (entry.first) 4.dp else 18.dp, bottom = 6.dp),
-                        )
-                        is InboxEntry.Row -> RequestRow(
-                            request = entry.request,
-                            selected = entry.request.id == selectedRequestId,
-                            shape = entry.position.shape(),
-                            onClick = { onOpen(entry.request.id) },
-                            onDecision = { decision -> onDecision(entry.request.id, decision) },
-                        )
+                        is InboxEntry.Header ->
+                            SectionHeading(
+                                entry.section.title,
+                                entry.count,
+                                modifier =
+                                    Modifier.padding(
+                                        top = if (entry.first) 4.dp else 18.dp,
+                                        bottom = 6.dp,
+                                    ),
+                            )
+                        is InboxEntry.Row ->
+                            RequestRow(
+                                request = entry.request,
+                                selected = entry.request.id == selectedRequestId,
+                                shape = entry.position.shape(),
+                                onClick = { onOpen(entry.request.id) },
+                                onDecision = { decision -> onDecision(entry.request.id, decision) },
+                            )
                     }
                 }
             }
@@ -210,9 +219,8 @@ private fun SyncProblemBanner(problem: String, syncing: Boolean, onRetry: () -> 
         color = MaterialTheme.agentknockColors.attentionContainer,
         contentColor = MaterialTheme.agentknockColors.onAttentionContainer,
         shape = MaterialTheme.shapes.large,
-        modifier = Modifier
-            .fillMaxWidth()
-            .padding(start = 16.dp, end = 16.dp, top = 4.dp, bottom = 10.dp),
+        modifier =
+            Modifier.fillMaxWidth().padding(start = 16.dp, end = 16.dp, top = 4.dp, bottom = 10.dp),
     ) {
         Row(
             modifier = Modifier.padding(start = 16.dp, end = 8.dp, top = 6.dp, bottom = 6.dp),
@@ -233,7 +241,9 @@ private fun SyncProblemBanner(problem: String, syncing: Boolean, onRetry: () -> 
                 onClick = onRetry,
                 enabled = !syncing,
                 colors = ButtonDefaults.textButtonColors(contentColor = LocalContentColor.current),
-            ) { Text("Retry") }
+            ) {
+                Text("Retry")
+            }
         }
     }
 }
@@ -253,7 +263,11 @@ private fun EmptyInbox(onPairClient: (() -> Unit)?) {
                 modifier = Modifier.size(96.dp),
             ) {
                 Box(contentAlignment = Alignment.Center) {
-                    Icon(Icons.Outlined.Inbox, contentDescription = null, modifier = Modifier.size(40.dp))
+                    Icon(
+                        Icons.Outlined.Inbox,
+                        contentDescription = null,
+                        modifier = Modifier.size(40.dp),
+                    )
                 }
             }
             Spacer(Modifier.height(12.dp))
@@ -305,24 +319,26 @@ private fun RequestRow(
     onDecision: (RequestDecision) -> Unit,
 ) {
     val approval = request.status as? InboxRequestStatus.Approval
-    val canDecide = request.state == InboxRequestState.ACTION_REQUIRED &&
-        approval?.state == ApprovalRequestState.APPROVAL_PENDING
+    val canDecide =
+        request.state == InboxRequestState.ACTION_REQUIRED &&
+            approval?.state == ApprovalRequestState.APPROVAL_PENDING
     val rejectLabel = "Deny once"
     val statusLabel = request.statusLabel()
-    val swipeState = rememberSwipeToDismissBoxState(
-        positionalThreshold = { distance -> distance * 0.65f },
-    )
+    val swipeState =
+        rememberSwipeToDismissBoxState(positionalThreshold = { distance -> distance * 0.65f })
     LaunchedEffect(swipeState.currentValue) {
         val completedSwipe = swipeState.currentValue
         if (completedSwipe == SwipeToDismissBoxValue.Settled) return@LaunchedEffect
 
         when (completedSwipe) {
-            SwipeToDismissBoxValue.StartToEnd -> if (canDecide) {
-                onDecision(RequestDecision.APPROVE)
-            }
-            SwipeToDismissBoxValue.EndToStart -> if (canDecide) {
-                onDecision(RequestDecision.DENY)
-            }
+            SwipeToDismissBoxValue.StartToEnd ->
+                if (canDecide) {
+                    onDecision(RequestDecision.APPROVE)
+                }
+            SwipeToDismissBoxValue.EndToStart ->
+                if (canDecide) {
+                    onDecision(RequestDecision.DENY)
+                }
             SwipeToDismissBoxValue.Settled -> return@LaunchedEffect
         }
         // The view model owns the decision job. Snap back synchronously while it starts;
@@ -331,22 +347,24 @@ private fun RequestRow(
     }
     SwipeToDismissBox(
         state = swipeState,
-        modifier = Modifier
-            .fillMaxWidth()
-            .clip(shape)
-            .semantics {
+        modifier =
+            Modifier.fillMaxWidth().clip(shape).semantics {
                 this.selected = selected
                 stateDescription = statusLabel
                 customActions = buildList {
                     if (canDecide) {
-                        add(CustomAccessibilityAction("Allow once") {
-                            onDecision(RequestDecision.APPROVE)
-                            true
-                        })
-                        add(CustomAccessibilityAction(rejectLabel) {
-                            onDecision(RequestDecision.DENY)
-                            true
-                        })
+                        add(
+                            CustomAccessibilityAction("Allow once") {
+                                onDecision(RequestDecision.APPROVE)
+                                true
+                            }
+                        )
+                        add(
+                            CustomAccessibilityAction(rejectLabel) {
+                                onDecision(RequestDecision.DENY)
+                                true
+                            }
+                        )
                     }
                 }
             },
@@ -356,21 +374,21 @@ private fun RequestRow(
             val direction = swipeState.dismissDirection
             val approving = direction == SwipeToDismissBoxValue.StartToEnd
             val semanticColors = MaterialTheme.agentknockColors
-            val backgroundColor = when (direction) {
-                SwipeToDismissBoxValue.StartToEnd -> semanticColors.successContainer
-                SwipeToDismissBoxValue.EndToStart -> semanticColors.dangerContainer
-                SwipeToDismissBoxValue.Settled -> MaterialTheme.colorScheme.surfaceVariant
-            }
-            val contentColor = when (direction) {
-                SwipeToDismissBoxValue.StartToEnd -> semanticColors.onSuccessContainer
-                SwipeToDismissBoxValue.EndToStart -> semanticColors.onDangerContainer
-                SwipeToDismissBoxValue.Settled -> MaterialTheme.colorScheme.onSurfaceVariant
-            }
+            val backgroundColor =
+                when (direction) {
+                    SwipeToDismissBoxValue.StartToEnd -> semanticColors.successContainer
+                    SwipeToDismissBoxValue.EndToStart -> semanticColors.dangerContainer
+                    SwipeToDismissBoxValue.Settled -> MaterialTheme.colorScheme.surfaceVariant
+                }
+            val contentColor =
+                when (direction) {
+                    SwipeToDismissBoxValue.StartToEnd -> semanticColors.onSuccessContainer
+                    SwipeToDismissBoxValue.EndToStart -> semanticColors.onDangerContainer
+                    SwipeToDismissBoxValue.Settled -> MaterialTheme.colorScheme.onSurfaceVariant
+                }
             Box(
-                modifier = Modifier
-                    .fillMaxSize()
-                    .background(backgroundColor)
-                    .padding(horizontal = 24.dp),
+                modifier =
+                    Modifier.fillMaxSize().background(backgroundColor).padding(horizontal = 24.dp),
                 contentAlignment = if (approving) Alignment.CenterStart else Alignment.CenterEnd,
             ) {
                 if (direction != SwipeToDismissBoxValue.Settled) {
@@ -408,37 +426,42 @@ private fun RequestRowContent(
     val dates = rememberDateTimeFormatter()
     val actionRequired = request.state == InboxRequestState.ACTION_REQUIRED
     val subdued = request.wasRejected() || request.wasAborted() || request.hasVerificationFailure()
-    val containerColor = when {
-        selected -> MaterialTheme.colorScheme.secondaryContainer
-        actionRequired -> MaterialTheme.colorScheme.primary.copy(alpha = 0.07f)
-            .compositeOver(MaterialTheme.colorScheme.surfaceContainerLow)
-        else -> MaterialTheme.colorScheme.surfaceContainerLow
-    }
+    val containerColor =
+        when {
+            selected -> MaterialTheme.colorScheme.secondaryContainer
+            actionRequired ->
+                MaterialTheme.colorScheme.primary
+                    .copy(alpha = 0.07f)
+                    .compositeOver(MaterialTheme.colorScheme.surfaceContainerLow)
+            else -> MaterialTheme.colorScheme.surfaceContainerLow
+        }
     Surface(
         color = containerColor,
-        contentColor = when {
-            subdued && !selected -> MaterialTheme.colorScheme.onSurfaceVariant
-            else -> MaterialTheme.colorScheme.onSurface
-        },
+        contentColor =
+            when {
+                subdued && !selected -> MaterialTheme.colorScheme.onSurfaceVariant
+                else -> MaterialTheme.colorScheme.onSurface
+            },
         shape = shape,
         onClick = onClick,
         modifier = Modifier.fillMaxWidth(),
     ) {
         Row(
-            modifier = Modifier
-                .fillMaxWidth()
-                .padding(start = 16.dp, end = 16.dp, top = 14.dp, bottom = 14.dp),
+            modifier =
+                Modifier.fillMaxWidth()
+                    .padding(start = 16.dp, end = 16.dp, top = 14.dp, bottom = 14.dp),
             horizontalArrangement = Arrangement.spacedBy(16.dp),
             verticalAlignment = Alignment.Top,
         ) {
             Icon(
                 request.kindIcon(),
                 contentDescription = null,
-                tint = if (actionRequired) {
-                    MaterialTheme.colorScheme.primary
-                } else {
-                    MaterialTheme.colorScheme.onSurfaceVariant
-                },
+                tint =
+                    if (actionRequired) {
+                        MaterialTheme.colorScheme.primary
+                    } else {
+                        MaterialTheme.colorScheme.onSurfaceVariant
+                    },
                 modifier = Modifier.size(24.dp),
             )
             Column(
@@ -463,9 +486,11 @@ private fun RequestRowContent(
                         style = MaterialTheme.typography.bodySmall,
                         color = MaterialTheme.colorScheme.onSurfaceVariant,
                         maxLines = 1,
-                        modifier = Modifier.clearAndSetSemantics {
-                            contentDescription = "Received ${dates.timestamp(request.receivedAt)}"
-                        },
+                        modifier =
+                            Modifier.clearAndSetSemantics {
+                                contentDescription =
+                                    "Received ${dates.timestamp(request.receivedAt)}"
+                            },
                     )
                 }
                 RequestHeadline(request)
@@ -484,18 +509,20 @@ private fun RequestHeadline(request: InboxRequestSummary) {
     val command = request.command?.takeIf { request.kind == InboxRequestKind.SECRET_USE }
     when {
         command != null -> CommandHeadline(command, request.arguments)
-        request.kind == InboxRequestKind.SECRET_UPLOAD -> Text(
-            listOfNotNull(request.title, request.secretNames.firstOrNull()).joinToString(" "),
-            style = MaterialTheme.typography.titleMedium,
-            maxLines = 2,
-            overflow = TextOverflow.Ellipsis,
-        )
-        else -> Text(
-            request.listSummary ?: request.title,
-            style = MaterialTheme.typography.titleMedium,
-            maxLines = 2,
-            overflow = TextOverflow.Ellipsis,
-        )
+        request.kind == InboxRequestKind.SECRET_UPLOAD ->
+            Text(
+                listOfNotNull(request.title, request.secretNames.firstOrNull()).joinToString(" "),
+                style = MaterialTheme.typography.titleMedium,
+                maxLines = 2,
+                overflow = TextOverflow.Ellipsis,
+            )
+        else ->
+            Text(
+                request.listSummary ?: request.title,
+                style = MaterialTheme.typography.titleMedium,
+                maxLines = 2,
+                overflow = TextOverflow.Ellipsis,
+            )
     }
 }
 
@@ -503,14 +530,14 @@ private fun RequestHeadline(request: InboxRequestSummary) {
 private const val SPLIT_EXECUTABLE_MIN_LENGTH = 24
 
 /**
- * The executable's directory sits on its own muted line so the program name leads the
- * command; the text order is unchanged and the full path remains in the detail.
+ * The executable's directory sits on its own muted line so the program name leads the command; the
+ * text order is unchanged and the full path remains in the detail.
  */
 @Composable
 private fun CommandHeadline(command: String, arguments: List<String>) {
     val (directory, name) = renderedExecutable(command)
-    val splitDirectory = directory.isNotEmpty() &&
-        directory.length + name.length >= SPLIT_EXECUTABLE_MIN_LENGTH
+    val splitDirectory =
+        directory.isNotEmpty() && directory.length + name.length >= SPLIT_EXECUTABLE_MIN_LENGTH
     Column(verticalArrangement = Arrangement.spacedBy(2.dp)) {
         if (splitDirectory) {
             Text(
@@ -531,11 +558,12 @@ private fun CommandHeadline(command: String, arguments: List<String>) {
                 optionColor = MaterialTheme.colorScheme.tertiary,
                 includeDirectory = !splitDirectory,
             ),
-            style = MaterialTheme.typography.bodyLarge.copy(
-                fontFamily = FontFamily.Monospace,
-                fontSize = 15.sp,
-                lineHeight = 21.sp,
-            ),
+            style =
+                MaterialTheme.typography.bodyLarge.copy(
+                    fontFamily = FontFamily.Monospace,
+                    fontSize = 15.sp,
+                    lineHeight = 21.sp,
+                ),
             maxLines = 3,
             overflow = TextOverflow.Ellipsis,
         )
@@ -546,41 +574,43 @@ private fun CommandHeadline(command: String, arguments: List<String>) {
 private fun RequestSupportingText(request: InboxRequestSummary) {
     val color = MaterialTheme.colorScheme.onSurfaceVariant
     when (request.kind) {
-        InboxRequestKind.GIT_SIGN -> request.repository?.let {
-            Text(
-                it,
-                style = MaterialTheme.typography.bodySmall,
-                color = color,
-                maxLines = 1,
-                overflow = TextOverflow.Ellipsis,
-            )
-        }
-        InboxRequestKind.SSH_AUTHENTICATE -> request.command?.let { command ->
-            Text(
-                buildAnnotatedString {
-                    append("Triggered by ")
-                    withStyle(SpanStyle(fontFamily = FontFamily.Monospace)) {
-                        append(renderShellCommand(command, request.arguments))
-                    }
-                },
-                style = MaterialTheme.typography.bodySmall,
-                color = color,
-                maxLines = 2,
-                overflow = TextOverflow.Ellipsis,
-            )
-        }
-        InboxRequestKind.SECRET_UPLOAD -> request.listSummary?.let {
-            Text(
-                it,
-                style = MaterialTheme.typography.bodySmall,
-                color = color,
-                maxLines = 2,
-                overflow = TextOverflow.Ellipsis,
-            )
-        }
+        InboxRequestKind.GIT_SIGN ->
+            request.repository?.let {
+                Text(
+                    it,
+                    style = MaterialTheme.typography.bodySmall,
+                    color = color,
+                    maxLines = 1,
+                    overflow = TextOverflow.Ellipsis,
+                )
+            }
+        InboxRequestKind.SSH_AUTHENTICATE ->
+            request.command?.let { command ->
+                Text(
+                    buildAnnotatedString {
+                        append("Triggered by ")
+                        withStyle(SpanStyle(fontFamily = FontFamily.Monospace)) {
+                            append(renderShellCommand(command, request.arguments))
+                        }
+                    },
+                    style = MaterialTheme.typography.bodySmall,
+                    color = color,
+                    maxLines = 2,
+                    overflow = TextOverflow.Ellipsis,
+                )
+            }
+        InboxRequestKind.SECRET_UPLOAD ->
+            request.listSummary?.let {
+                Text(
+                    it,
+                    style = MaterialTheme.typography.bodySmall,
+                    color = color,
+                    maxLines = 2,
+                    overflow = TextOverflow.Ellipsis,
+                )
+            }
         InboxRequestKind.PAIRING,
-        InboxRequestKind.SECRET_USE,
-        -> Unit
+        InboxRequestKind.SECRET_USE -> Unit
     }
 }
 
@@ -633,7 +663,12 @@ private fun RequestStatusLine(request: InboxRequestSummary, statusLabel: String)
         verticalAlignment = Alignment.CenterVertically,
     ) {
         status.icon?.let {
-            Icon(it, contentDescription = null, tint = status.color, modifier = Modifier.size(14.dp))
+            Icon(
+                it,
+                contentDescription = null,
+                tint = status.color,
+                modifier = Modifier.size(14.dp),
+            )
         }
         Text(
             listOfNotNull(statusLabel, request.decisionSummary).joinToString(" · "),
@@ -656,9 +691,15 @@ private fun InboxRequestSummary.statusPresentation(): StatusPresentation {
         state == InboxRequestState.ACTION_REQUIRED ->
             StatusPresentation(semanticColors.attentionAccent, null)
         state == InboxRequestState.REVIEWING ->
-            StatusPresentation(MaterialTheme.colorScheme.onSurfaceVariant, Icons.Outlined.AutoAwesome)
+            StatusPresentation(
+                MaterialTheme.colorScheme.onSurfaceVariant,
+                Icons.Outlined.AutoAwesome,
+            )
         state == InboxRequestState.WAITING ->
-            StatusPresentation(MaterialTheme.colorScheme.onSurfaceVariant, Icons.Outlined.HourglassTop)
+            StatusPresentation(
+                MaterialTheme.colorScheme.onSurfaceVariant,
+                Icons.Outlined.HourglassTop,
+            )
         wasAccepted() -> StatusPresentation(semanticColors.success, Icons.Outlined.CheckCircle)
         wasRejected() || wasAborted() ->
             StatusPresentation(MaterialTheme.colorScheme.onSurfaceVariant, Icons.Outlined.Block)
@@ -666,18 +707,20 @@ private fun InboxRequestSummary.statusPresentation(): StatusPresentation {
     }
 }
 
-private fun InboxRequestSummary.kindIcon(): ImageVector = when (kind) {
-    InboxRequestKind.PAIRING -> Icons.Outlined.Computer
-    InboxRequestKind.SECRET_USE -> Icons.Outlined.Terminal
-    InboxRequestKind.GIT_SIGN -> Icons.Outlined.Edit
-    InboxRequestKind.SSH_AUTHENTICATE -> Icons.Outlined.Key
-    InboxRequestKind.SECRET_UPLOAD -> Icons.Outlined.CloudUpload
-}
+private fun InboxRequestSummary.kindIcon(): ImageVector =
+    when (kind) {
+        InboxRequestKind.PAIRING -> Icons.Outlined.Computer
+        InboxRequestKind.SECRET_USE -> Icons.Outlined.Terminal
+        InboxRequestKind.GIT_SIGN -> Icons.Outlined.Edit
+        InboxRequestKind.SSH_AUTHENTICATE -> Icons.Outlined.Key
+        InboxRequestKind.SECRET_UPLOAD -> Icons.Outlined.CloudUpload
+    }
 
-private fun InboxRequestSummary.kindLabel(): String = when (kind) {
-    InboxRequestKind.SECRET_UPLOAD -> "Secret upload"
-    else -> title
-}
+private fun InboxRequestSummary.kindLabel(): String =
+    when (kind) {
+        InboxRequestKind.SECRET_UPLOAD -> "Secret upload"
+        else -> title
+    }
 
 private enum class InboxSection(val title: String) {
     WAITING_FOR_YOU("Waiting for you"),
@@ -698,13 +741,21 @@ private fun GroupPosition.shape(): Shape {
     val inner = 4.dp
     return when (this) {
         GroupPosition.SINGLE -> RoundedCornerShape(outer)
-        GroupPosition.FIRST -> RoundedCornerShape(
-            topStart = outer, topEnd = outer, bottomStart = inner, bottomEnd = inner,
-        )
+        GroupPosition.FIRST ->
+            RoundedCornerShape(
+                topStart = outer,
+                topEnd = outer,
+                bottomStart = inner,
+                bottomEnd = inner,
+            )
         GroupPosition.MIDDLE -> RoundedCornerShape(inner)
-        GroupPosition.LAST -> RoundedCornerShape(
-            topStart = inner, topEnd = inner, bottomStart = outer, bottomEnd = outer,
-        )
+        GroupPosition.LAST ->
+            RoundedCornerShape(
+                topStart = inner,
+                topEnd = inner,
+                bottomStart = outer,
+                bottomEnd = outer,
+            )
     }
 }
 
@@ -712,21 +763,23 @@ private sealed interface InboxEntry {
     val key: String
 
     data class Header(val section: InboxSection, val count: Int, val first: Boolean) : InboxEntry {
-        override val key: String get() = "section_${section.name}"
+        override val key: String
+            get() = "section_${section.name}"
     }
 
     data class Row(val request: InboxRequestSummary, val position: GroupPosition) : InboxEntry {
-        override val key: String get() = "request_${request.id}"
+        override val key: String
+            get() = "request_${request.id}"
     }
 }
 
-private fun InboxRequestSummary.section(): InboxSection = when (state) {
-    InboxRequestState.ACTION_REQUIRED -> InboxSection.WAITING_FOR_YOU
-    InboxRequestState.REVIEWING,
-    InboxRequestState.WAITING,
-    -> InboxSection.IN_PROGRESS
-    InboxRequestState.COMPLETED -> InboxSection.EARLIER
-}
+private fun InboxRequestSummary.section(): InboxSection =
+    when (state) {
+        InboxRequestState.ACTION_REQUIRED -> InboxSection.WAITING_FOR_YOU
+        InboxRequestState.REVIEWING,
+        InboxRequestState.WAITING -> InboxSection.IN_PROGRESS
+        InboxRequestState.COMPLETED -> InboxSection.EARLIER
+    }
 
 private fun List<InboxRequestSummary>.toInboxEntries(): List<InboxEntry> {
     val grouped = groupBy { it.section() }
@@ -736,33 +789,38 @@ private fun List<InboxRequestSummary>.toInboxEntries(): List<InboxEntry> {
             if (rows.isEmpty()) return@forEach
             add(InboxEntry.Header(section, rows.size, first = isEmpty()))
             rows.forEachIndexed { index, request ->
-                val position = when {
-                    rows.size == 1 -> GroupPosition.SINGLE
-                    index == 0 -> GroupPosition.FIRST
-                    index == rows.lastIndex -> GroupPosition.LAST
-                    else -> GroupPosition.MIDDLE
-                }
+                val position =
+                    when {
+                        rows.size == 1 -> GroupPosition.SINGLE
+                        index == 0 -> GroupPosition.FIRST
+                        index == rows.lastIndex -> GroupPosition.LAST
+                        else -> GroupPosition.MIDDLE
+                    }
                 add(InboxEntry.Row(request, position))
             }
         }
     }
 }
 
-private fun InboxRequestSummary.statusLabel(): String = when {
-    state == InboxRequestState.REVIEWING -> "AI reviewing"
-    kind == InboxRequestKind.SECRET_USE -> requiredApprovalStatus().let {
-        secretUseStatusLabel(it.state, it.completionResult, it.completionReason)
+private fun InboxRequestSummary.statusLabel(): String =
+    when {
+        state == InboxRequestState.REVIEWING -> "AI reviewing"
+        kind == InboxRequestKind.SECRET_USE ->
+            requiredApprovalStatus().let {
+                secretUseStatusLabel(it.state, it.completionResult, it.completionReason)
+            }
+        kind == InboxRequestKind.GIT_SIGN ->
+            requiredApprovalStatus().let {
+                gitSignStatusLabel(it.state, it.completionResult, it.completionReason)
+            }
+        kind == InboxRequestKind.SSH_AUTHENTICATE ->
+            requiredApprovalStatus().let {
+                sshAuthenticationStatusLabel(it.state, it.completionResult, it.completionReason)
+            }
+        state == InboxRequestState.ACTION_REQUIRED -> "Needs attention"
+        state == InboxRequestState.WAITING -> "Waiting"
+        else -> "Completed"
     }
-    kind == InboxRequestKind.GIT_SIGN -> requiredApprovalStatus().let {
-        gitSignStatusLabel(it.state, it.completionResult, it.completionReason)
-    }
-    kind == InboxRequestKind.SSH_AUTHENTICATE -> requiredApprovalStatus().let {
-        sshAuthenticationStatusLabel(it.state, it.completionResult, it.completionReason)
-    }
-    state == InboxRequestState.ACTION_REQUIRED -> "Needs attention"
-    state == InboxRequestState.WAITING -> "Waiting"
-    else -> "Completed"
-}
 
 private fun InboxRequestSummary.wasRejected(): Boolean =
     approvalStatus()?.let {

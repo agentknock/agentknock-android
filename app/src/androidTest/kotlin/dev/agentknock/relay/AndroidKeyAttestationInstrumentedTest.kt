@@ -24,19 +24,19 @@ class AndroidKeyAttestationInstrumentedTest {
         assertTrue(
             attestation.certificateChain.all { certificate ->
                 Base64.getDecoder().decode(certificate).isNotEmpty()
-            },
+            }
         )
         assertEquals(aliasesBefore, attestationAliases())
     }
 
-    private fun attestationAliases(): Set<String> = KeyStore
-        .getInstance("AndroidKeyStore")
-        .apply { load(null) }
-        .aliases()
-        .toList()
-        .filterTo(mutableSetOf()) { alias ->
-            alias.startsWith("dev.agentknock.claim-attestation.")
-        }
+    private fun attestationAliases(): Set<String> =
+        KeyStore.getInstance("AndroidKeyStore")
+            .apply { load(null) }
+            .aliases()
+            .toList()
+            .filterTo(mutableSetOf()) { alias ->
+                alias.startsWith("dev.agentknock.claim-attestation.")
+            }
 
     private companion object {
         const val DEVICE_ID = "01K2ENXDTW1P3XAR4J7V7C9D0H"

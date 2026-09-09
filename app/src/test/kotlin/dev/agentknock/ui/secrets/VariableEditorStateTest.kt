@@ -37,30 +37,36 @@ class VariableEditorStateTest {
     @Test
     fun `changing sensitivity does not make an originally sensitive draft safe to retain`() {
         assertTrue(editor.copy(sensitive = false).containsSensitiveData)
-        assertTrue(editor.copy(variable = editor.variable!!.copy(sensitive = false)).containsSensitiveData)
+        assertTrue(
+            editor.copy(variable = editor.variable!!.copy(sensitive = false)).containsSensitiveData
+        )
         assertFalse(
-            editor.copy(
-                variable = editor.variable.copy(sensitive = false),
-                sensitive = false,
-            ).containsSensitiveData,
+            editor
+                .copy(
+                    variable = editor.variable.copy(sensitive = false),
+                    sensitive = false,
+                )
+                .containsSensitiveData
         )
     }
 
-    private val editor = VariableEditorState(
-        secretId = "secret-id",
-        secretName = "secret",
-        variable = EnvironmentVariableMetadata(
-            id = "variable-id",
+    private val editor =
+        VariableEditorState(
             secretId = "secret-id",
+            secretName = "secret",
+            variable =
+                EnvironmentVariableMetadata(
+                    id = "variable-id",
+                    secretId = "secret-id",
+                    name = "VARIABLE",
+                    sensitive = true,
+                    valueAvailable = true,
+                    valueUpdatedAt = 1L,
+                ),
+            currentValue = "original",
             name = "VARIABLE",
+            value = "original",
+            valueEdited = false,
             sensitive = true,
-            valueAvailable = true,
-            valueUpdatedAt = 1L,
-        ),
-        currentValue = "original",
-        name = "VARIABLE",
-        value = "original",
-        valueEdited = false,
-        sensitive = true,
-    )
+        )
 }

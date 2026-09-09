@@ -13,8 +13,9 @@ class SecretUploadProtocolTest {
 
     @Test
     fun `decodes an environment secret upload`() {
-        val request = protocol.decodeRequest(
-            """
+        val request =
+            protocol.decodeRequest(
+                """
             {
               ${testClientSoftwareFields("0.2.0", "0.1.0")},
               "method":"SecretUpload",
@@ -29,8 +30,10 @@ class SecretUploadProtocolTest {
                 }
               }
             }
-            """.trimIndent().encodeToByteArray(),
-        )
+            """
+                    .trimIndent()
+                    .encodeToByteArray()
+            )
 
         assertEquals(testClientSoftware("0.2.0", "0.1.0"), request.clientSoftware)
         assertEquals(SecretUploadMode.UPDATE, request.mode)
@@ -46,16 +49,19 @@ class SecretUploadProtocolTest {
 
     @Test
     fun `distinguishes an omitted description`() {
-        val request = protocol.decodeRequest(
-            """
+        val request =
+            protocol.decodeRequest(
+                """
             {
               ${testClientSoftwareFields("0.2.0", "0.1.0")},
               "method":"SecretUpload",
               "mode":"CREATE",
               "secret":{"name":"new","type":"environment","variables":{"TOKEN":{"value":"value"}}}
             }
-            """.trimIndent().encodeToByteArray(),
-        )
+            """
+                    .trimIndent()
+                    .encodeToByteArray()
+            )
 
         assertFalse(request.descriptionProvided)
         assertNull(request.description)
@@ -63,8 +69,9 @@ class SecretUploadProtocolTest {
 
     @Test
     fun `decodes an SSH private key upload without treating it as environment data`() {
-        val request = protocol.decodeRequest(
-            """
+        val request =
+            protocol.decodeRequest(
+                """
             {
               ${testClientSoftwareFields("0.2.0", "0.1.0")},
               "method":"SecretUpload",
@@ -75,8 +82,10 @@ class SecretUploadProtocolTest {
                 "private_key":"-----BEGIN OPENSSH PRIVATE KEY-----\nexample\n-----END OPENSSH PRIVATE KEY-----"
               }
             }
-            """.trimIndent().encodeToByteArray(),
-        )
+            """
+                    .trimIndent()
+                    .encodeToByteArray()
+            )
 
         assertEquals(
             "-----BEGIN OPENSSH PRIVATE KEY-----\nexample\n-----END OPENSSH PRIVATE KEY-----",
@@ -86,8 +95,9 @@ class SecretUploadProtocolTest {
 
     @Test
     fun `decodes an explicit null description without turning it into text`() {
-        val request = protocol.decodeRequest(
-            """
+        val request =
+            protocol.decodeRequest(
+                """
             {
               ${testClientSoftwareFields("0.2.0", "0.1.0")},
               "method":"SecretUpload",
@@ -99,8 +109,10 @@ class SecretUploadProtocolTest {
                 "variables":{"TOKEN":{"value":"value"}}
               }
             }
-            """.trimIndent().encodeToByteArray(),
-        )
+            """
+                    .trimIndent()
+                    .encodeToByteArray()
+            )
 
         assertTrue(request.descriptionProvided)
         assertNull(request.description)
@@ -108,11 +120,12 @@ class SecretUploadProtocolTest {
 
     @Test
     fun `rejects non-string fields instead of coercing them`() {
-        val invalidRequests = listOf(
-            """{"app_info":{"name":"agentknock","version":2},"lib_info":{"name":"agentknock","version":"0.1.0"},"method":"SecretUpload","mode":"CREATE","secret":{"name":"new","type":"environment","variables":{"TOKEN":{"value":"value"}}}}""",
-            """{${testClientSoftwareFields("0.2.0", "0.1.0")},"method":"SecretUpload","mode":"CREATE","secret":{"name":"new","type":"environment","variables":{"TOKEN":{"value":false}}}}""",
-            """{${testClientSoftwareFields("0.2.0", "0.1.0")},"method":"SecretUpload","mode":"CREATE","secret":{"name":"new","description":3,"type":"environment","variables":{"TOKEN":{"value":"value"}}}}""",
-        )
+        val invalidRequests =
+            listOf(
+                """{"app_info":{"name":"agentknock","version":2},"lib_info":{"name":"agentknock","version":"0.1.0"},"method":"SecretUpload","mode":"CREATE","secret":{"name":"new","type":"environment","variables":{"TOKEN":{"value":"value"}}}}""",
+                """{${testClientSoftwareFields("0.2.0", "0.1.0")},"method":"SecretUpload","mode":"CREATE","secret":{"name":"new","type":"environment","variables":{"TOKEN":{"value":false}}}}""",
+                """{${testClientSoftwareFields("0.2.0", "0.1.0")},"method":"SecretUpload","mode":"CREATE","secret":{"name":"new","description":3,"type":"environment","variables":{"TOKEN":{"value":"value"}}}}""",
+            )
 
         invalidRequests.forEach { request ->
             assertTrue(
@@ -124,11 +137,12 @@ class SecretUploadProtocolTest {
 
     @Test
     fun `rejects structurally empty uploads`() {
-        val invalidRequests = listOf(
-            """{${testClientSoftwareFields("0.3.0", "0.1.0")},"method":"SecretUpload","mode":"UPDATE","secret":{"name":"environment","type":"environment","variables":{}}}""",
-            """{${testClientSoftwareFields("0.3.0", "0.1.0")},"method":"SecretUpload","mode":"UPDATE","secret":{"name":"ssh","type":"ssh"}}""",
-            """{${testClientSoftwareFields("0.3.0", "0.1.0")},"method":"SecretUpload","mode":"UPDATE","secret":{"name":"ssh","type":"ssh","private_key":null}}""",
-        )
+        val invalidRequests =
+            listOf(
+                """{${testClientSoftwareFields("0.3.0", "0.1.0")},"method":"SecretUpload","mode":"UPDATE","secret":{"name":"environment","type":"environment","variables":{}}}""",
+                """{${testClientSoftwareFields("0.3.0", "0.1.0")},"method":"SecretUpload","mode":"UPDATE","secret":{"name":"ssh","type":"ssh"}}""",
+                """{${testClientSoftwareFields("0.3.0", "0.1.0")},"method":"SecretUpload","mode":"UPDATE","secret":{"name":"ssh","type":"ssh","private_key":null}}""",
+            )
 
         invalidRequests.forEach { request ->
             assertTrue(
@@ -145,12 +159,8 @@ class SecretUploadProtocolTest {
             json.parseToJsonElement(protocol.receivedResponse().decodeToString()),
         )
         assertEquals(
-            json.parseToJsonElement(
-                """{"result":"REJECTED","message":"Invalid upload."}""",
-            ),
-            json.parseToJsonElement(
-                protocol.rejectedResponse("Invalid upload.").decodeToString(),
-            ),
+            json.parseToJsonElement("""{"result":"REJECTED","message":"Invalid upload."}"""),
+            json.parseToJsonElement(protocol.rejectedResponse("Invalid upload.").decodeToString()),
         )
     }
 
@@ -164,7 +174,7 @@ class SecretUploadProtocolTest {
             ),
             protocol.decodeCompletion(
                 """{${testClientSoftwareFields("0.2.0", "0.1.0")},"result":"RECEIVED"}"""
-                    .encodeToByteArray(),
+                    .encodeToByteArray()
             ),
         )
     }
@@ -179,7 +189,7 @@ class SecretUploadProtocolTest {
             ),
             protocol.decodeCompletion(
                 """{${testClientSoftwareFields("0.2.0", "0.1.0")},"result":"REJECTED","message":"The upload cannot be accepted."}"""
-                    .encodeToByteArray(),
+                    .encodeToByteArray()
             ),
         )
     }
@@ -187,14 +197,18 @@ class SecretUploadProtocolTest {
     @Test
     fun `rejects a rejected completion without a useful message`() {
         listOf(
-            """{${testClientSoftwareFields("0.2.0", "0.1.0")},"result":"REJECTED"}""",
-            """{${testClientSoftwareFields("0.2.0", "0.1.0")},"result":"REJECTED","message":null}""",
-            """{${testClientSoftwareFields("0.2.0", "0.1.0")},"result":"REJECTED","message":""}""",
-            """{${testClientSoftwareFields("0.2.0", "0.1.0")},"result":"REJECTED","message":"   "}""",
-        ).forEach { completion ->
-            assertTrue(runCatching {
-                protocol.decodeCompletion(completion.encodeToByteArray())
-            }.isFailure)
-        }
+                """{${testClientSoftwareFields("0.2.0", "0.1.0")},"result":"REJECTED"}""",
+                """{${testClientSoftwareFields("0.2.0", "0.1.0")},"result":"REJECTED","message":null}""",
+                """{${testClientSoftwareFields("0.2.0", "0.1.0")},"result":"REJECTED","message":""}""",
+                """{${testClientSoftwareFields("0.2.0", "0.1.0")},"result":"REJECTED","message":"   "}""",
+            )
+            .forEach { completion ->
+                assertTrue(
+                    runCatching {
+                        protocol.decodeCompletion(completion.encodeToByteArray())
+                    }
+                        .isFailure
+                )
+            }
     }
 }

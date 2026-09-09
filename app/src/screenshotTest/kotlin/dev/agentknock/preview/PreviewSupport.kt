@@ -19,7 +19,10 @@ import java.util.TimeZone
 @Composable
 internal fun PreviewScreen(content: @Composable () -> Unit) {
     val locale = LocalConfiguration.current.locales[0]
-    val dates = remember(locale) { UiDateTimeFormatter(locale, use24Hour = true, TimeZone.getTimeZone("UTC")) }
+    val dates =
+        remember(locale) {
+            UiDateTimeFormatter(locale, use24Hour = true, TimeZone.getTimeZone("UTC"))
+        }
     CompositionLocalProvider(LocalDateTimeFormatter provides dates) {
         AgentknockTheme(dynamicColor = false) {
             Surface(Modifier.fillMaxSize(), content = content)
@@ -34,11 +37,24 @@ internal fun previewDialogModifier(): Modifier =
     Modifier.widthIn(max = LocalConfiguration.current.screenWidthDp.dp - 40.dp)
 
 @Composable
-internal fun PreviewNavigation(section: MainSection, empty: Boolean = false, content: @Composable (Modifier) -> Unit) {
+internal fun PreviewNavigation(
+    section: MainSection,
+    empty: Boolean = false,
+    content: @Composable (Modifier) -> Unit,
+) {
     MainNavigationScaffold(
         section = section,
-        actionRequiredCounts = if (empty) emptyMap() else mapOf(MainSection.REQUESTS to 2, MainSection.SECRETS to 1, MainSection.CLIENTS to 1),
-        showNavigation = true, onSelect = {}, content = content,
+        actionRequiredCounts =
+            if (empty) emptyMap()
+            else
+                mapOf(
+                    MainSection.REQUESTS to 2,
+                    MainSection.SECRETS to 1,
+                    MainSection.CLIENTS to 1,
+                ),
+        showNavigation = true,
+        onSelect = {},
+        content = content,
     )
 }
 

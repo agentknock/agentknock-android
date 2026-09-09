@@ -34,20 +34,27 @@ class SecretDetailPresentationTest {
         compose.setContent {
             AgentknockTheme(dynamicColor = false) {
                 SecretList(
-                    secrets = emptyList(), clients = emptyList(), pendingUploads = emptyList(),
-                    selectedSecretId = null, selectedUploadRequestId = null,
-                    onSelect = {}, onSelectUpload = {}, onCreate = {},
-                    generalInstructions = instructions, aiReviewAccess = AiReviewAccess.INACTIVE,
-                    onEditGeneralInstructions = { edits++ }, onOpenSettings = {},
+                    secrets = emptyList(),
+                    clients = emptyList(),
+                    pendingUploads = emptyList(),
+                    selectedSecretId = null,
+                    selectedUploadRequestId = null,
+                    onSelect = {},
+                    onSelectUpload = {},
+                    onCreate = {},
+                    generalInstructions = instructions,
+                    aiReviewAccess = AiReviewAccess.INACTIVE,
+                    onEditGeneralInstructions = { edits++ },
+                    onOpenSettings = {},
                     modifier = Modifier.fillMaxSize(),
                 )
             }
         }
 
         compose.onNodeWithText("Global AI instructions").assertIsDisplayed()
-        compose.onNodeWithText(
-            "Applies to every secret and client. Used when AI review is active.",
-        ).assertIsDisplayed()
+        compose
+            .onNodeWithText("Applies to every secret and client. Used when AI review is active.")
+            .assertIsDisplayed()
         compose.onNodeWithText(instructions).assertIsDisplayed()
         compose.onNodeWithContentDescription("Edit instructions").performClick()
         compose.runOnIdle { assertEquals(1, edits) }
@@ -59,39 +66,58 @@ class SecretDetailPresentationTest {
         compose.setContent {
             AgentknockTheme(dynamicColor = false) {
                 SecretDetail(
-                    secret = sshSecret, clients = emptyList(), revealedValues = emptyMap(),
-                    showBack = true, aiReviewAccess = AiReviewAccess.INACTIVE, onOpenPlan = {},
-                    actions = SecretDetailActions(
-                        onBack = {}, onEditSecret = { actions += "edit secret" },
-                        onDeleteSecret = {}, onAddVariable = {}, onReplaceSshKey = {},
-                        onSaveSshComment = { actions += "save comment: $it" },
-                        onCopyPublicKey = { actions += "copy public key" },
-                        onEditVariable = {}, onReveal = {}, onReadValue = { null }, onCopy = {},
-                        onSetApprovalMode = {}, onSetClientApprovalOverride = { _, _ -> },
-                        onSaveInstructions = {}, onEndTemporaryAccess = {},
-                    ),
+                    secret = sshSecret,
+                    clients = emptyList(),
+                    revealedValues = emptyMap(),
+                    showBack = true,
+                    aiReviewAccess = AiReviewAccess.INACTIVE,
+                    onOpenPlan = {},
+                    actions =
+                        SecretDetailActions(
+                            onBack = {},
+                            onEditSecret = { actions += "edit secret" },
+                            onDeleteSecret = {},
+                            onAddVariable = {},
+                            onReplaceSshKey = {},
+                            onSaveSshComment = { actions += "save comment: $it" },
+                            onCopyPublicKey = { actions += "copy public key" },
+                            onEditVariable = {},
+                            onReveal = {},
+                            onReadValue = { null },
+                            onCopy = {},
+                            onSetApprovalMode = {},
+                            onSetClientApprovalOverride = { _, _ -> },
+                            onSaveInstructions = {},
+                            onEndTemporaryAccess = {},
+                        ),
                     modifier = Modifier.fillMaxSize(),
                 )
             }
         }
 
         compose.onNodeWithText(keyComment).assertIsDisplayed()
-        compose.onNodeWithText("Details").assert(
-            SemanticsMatcher.expectValue(SemanticsProperties.StateDescription, "Collapsed"),
-        )
+        compose
+            .onNodeWithText("Details")
+            .assert(SemanticsMatcher.expectValue(SemanticsProperties.StateDescription, "Collapsed"))
         compose.onNodeWithText("OpenSSH public key").assertDoesNotExist()
 
         compose.onNodeWithText("Edit secret").performClick()
         compose.onNodeWithText("Copy public key").performScrollTo().performClick()
         compose.runOnIdle { assertEquals(listOf("edit secret", "copy public key"), actions) }
 
-        compose.onNodeWithContentDescription("Edit public key comment").performScrollTo().performClick()
+        compose
+            .onNodeWithContentDescription("Edit public key comment")
+            .performScrollTo()
+            .performClick()
         compose.onNodeWithText("Edit public key comment").assertIsDisplayed()
         compose.onNodeWithText("Comment (optional)").performTextReplacement("deploy@new-host")
         compose.onNodeWithText("Save").performClick()
         compose.onNodeWithText("Comment (optional)").assertDoesNotExist()
         compose.runOnIdle {
-            assertEquals(listOf("edit secret", "copy public key", "save comment: deploy@new-host"), actions)
+            assertEquals(
+                listOf("edit secret", "copy public key", "save comment: deploy@new-host"),
+                actions,
+            )
         }
 
         compose.onNodeWithText("Details").performScrollTo().performClick()
@@ -100,19 +126,35 @@ class SecretDetailPresentationTest {
     }
 
     private val keyComment = "deploy@build-host"
-    private val publicKey = SshKeyCodec().publicKey(
-        SshKeyAlgorithm.ED25519, ByteArray(32) { 1 }, keyComment,
-    )
-    private val sshSecret = SecretDetails(
-        id = "test-ssh-secret", name = "deployment-key", description = "Deployment signing key.",
-        type = SecretType.SSH, environmentVariables = emptyList(),
-        sshKey = SshKeyMetadata(
-            algorithm = SshKeyAlgorithm.ED25519, bits = 256,
-            publicKey = publicKey.line, fingerprint = publicKey.fingerprint,
-            fingerprintHex = publicKey.fingerprintHex, comment = keyComment, privateKeyAvailable = true,
-        ),
-        approvalMode = SecretApprovalMode.ASK_ME, instructions = "",
-        clientApprovalOverrides = emptyList(), temporaryAccessGrants = emptyList(),
-        createdAt = 1_704_110_400_000L, updatedAt = 1_704_110_400_000L,
-    )
+    private val publicKey =
+        SshKeyCodec()
+            .publicKey(
+                SshKeyAlgorithm.ED25519,
+                ByteArray(32) { 1 },
+                keyComment,
+            )
+    private val sshSecret =
+        SecretDetails(
+            id = "test-ssh-secret",
+            name = "deployment-key",
+            description = "Deployment signing key.",
+            type = SecretType.SSH,
+            environmentVariables = emptyList(),
+            sshKey =
+                SshKeyMetadata(
+                    algorithm = SshKeyAlgorithm.ED25519,
+                    bits = 256,
+                    publicKey = publicKey.line,
+                    fingerprint = publicKey.fingerprint,
+                    fingerprintHex = publicKey.fingerprintHex,
+                    comment = keyComment,
+                    privateKeyAvailable = true,
+                ),
+            approvalMode = SecretApprovalMode.ASK_ME,
+            instructions = "",
+            clientApprovalOverrides = emptyList(),
+            temporaryAccessGrants = emptyList(),
+            createdAt = 1_704_110_400_000L,
+            updatedAt = 1_704_110_400_000L,
+        )
 }

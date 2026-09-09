@@ -1,7 +1,7 @@
 package dev.agentknock.storage.request
 
-import dev.agentknock.storage.approval.ApprovalAction
 import dev.agentknock.storage.approval.AiReviewDecision
+import dev.agentknock.storage.approval.ApprovalAction
 import dev.agentknock.storage.approval.ApprovalEvaluation
 import dev.agentknock.storage.secret.SecretApprovalMode
 import dev.agentknock.storage.secret.SecretApprovalPolicy
@@ -31,9 +31,9 @@ internal data class TemporaryAccessPlan(
 )
 
 /**
- * Derives only the approval outcome metadata shared by invocation and signing operations.
- * Producing a response, validating request contents, and deciding why an unrelated failure was
- * denied remain responsibilities of each operation handler.
+ * Derives only the approval outcome metadata shared by invocation and signing operations. Producing
+ * a response, validating request contents, and deciding why an unrelated failure was denied remain
+ * responsibilities of each operation handler.
  */
 internal fun planAutomaticApproval(
     outcome: AutomaticApprovalOutcome,
@@ -48,30 +48,35 @@ internal fun planAutomaticApproval(
     require(outcome == AutomaticApprovalOutcome.DENIED || denialSource == null) {
         "Only a denied request can have a denial source"
     }
-    val temporaryAccessUsed = evaluation?.secrets
-        ?.any { it.temporaryAccessExpiresAt != null } == true
-    val aiApprovalUsed = aiDecision == AiReviewDecision.APPROVE &&
-        evaluation?.secrets?.any { it.action == ApprovalAction.ASK_AI } == true
-    val decision = when (outcome) {
-        AutomaticApprovalOutcome.APPROVED -> ApprovalDecision.APPROVED
-        AutomaticApprovalOutcome.DENIED -> ApprovalDecision.DENIED
-        AutomaticApprovalOutcome.ACTION_REQUIRED -> null
-    }
-    val decisionSource = when (outcome) {
-        AutomaticApprovalOutcome.APPROVED -> when {
-            nonSensitive -> DECISION_SOURCE_NON_SENSITIVE
-            temporaryAccessUsed && aiApprovalUsed -> DECISION_SOURCE_MIXED
-            temporaryAccessUsed -> DECISION_SOURCE_TEMPORARY_ACCESS
-            aiApprovalUsed -> DECISION_SOURCE_AI
-            else -> DECISION_SOURCE_POLICY
+    val temporaryAccessUsed =
+        evaluation?.secrets?.any { it.temporaryAccessExpiresAt != null } == true
+    val aiApprovalUsed =
+        aiDecision == AiReviewDecision.APPROVE &&
+            evaluation?.secrets?.any { it.action == ApprovalAction.ASK_AI } == true
+    val decision =
+        when (outcome) {
+            AutomaticApprovalOutcome.APPROVED -> ApprovalDecision.APPROVED
+            AutomaticApprovalOutcome.DENIED -> ApprovalDecision.DENIED
+            AutomaticApprovalOutcome.ACTION_REQUIRED -> null
         }
-        AutomaticApprovalOutcome.DENIED -> when (denialSource) {
-            AutomaticApprovalDenialSource.POLICY -> DECISION_SOURCE_POLICY
-            AutomaticApprovalDenialSource.AI -> DECISION_SOURCE_AI
-            null -> null
+    val decisionSource =
+        when (outcome) {
+            AutomaticApprovalOutcome.APPROVED ->
+                when {
+                    nonSensitive -> DECISION_SOURCE_NON_SENSITIVE
+                    temporaryAccessUsed && aiApprovalUsed -> DECISION_SOURCE_MIXED
+                    temporaryAccessUsed -> DECISION_SOURCE_TEMPORARY_ACCESS
+                    aiApprovalUsed -> DECISION_SOURCE_AI
+                    else -> DECISION_SOURCE_POLICY
+                }
+            AutomaticApprovalOutcome.DENIED ->
+                when (denialSource) {
+                    AutomaticApprovalDenialSource.POLICY -> DECISION_SOURCE_POLICY
+                    AutomaticApprovalDenialSource.AI -> DECISION_SOURCE_AI
+                    null -> null
+                }
+            AutomaticApprovalOutcome.ACTION_REQUIRED -> null
         }
-        AutomaticApprovalOutcome.ACTION_REQUIRED -> null
-    }
     return AutomaticApprovalPlan(
         decision = decision,
         decisionSource = decisionSource,
@@ -80,8 +85,8 @@ internal fun planAutomaticApproval(
 }
 
 /**
- * Plans the grants represented by a user's "allow temporarily" decision. Callers still persist
- * the grants and request decision together so current policy revisions can be checked atomically.
+ * Plans the grants represented by a user's "allow temporarily" decision. Callers still persist the
+ * grants and request decision together so current policy revisions can be checked atomically.
  */
 internal fun planTemporaryAccess(
     policies: List<SecretApprovalPolicy>,
@@ -98,41 +103,46 @@ internal fun planTemporaryAccess(
             storedEvaluation.aiReview == null
     val grantablePolicies = policies.filter { policy ->
         val evaluation = evaluationsById[policy.secretId]
-        evaluation?.temporaryAccessExpiresAt == null && when (policy.mode) {
-            SecretApprovalMode.ASK_ME -> evaluation?.action == ApprovalAction.ASK_ME
-            SecretApprovalMode.ASK_AI ->
-                evaluation?.action == ApprovalAction.ASK_AI &&
-                    aiCanEscalateToTemporaryAccess
-            else -> false
-        }
+        evaluation?.temporaryAccessExpiresAt == null &&
+            when (policy.mode) {
+                SecretApprovalMode.ASK_ME -> evaluation?.action == ApprovalAction.ASK_ME
+                SecretApprovalMode.ASK_AI ->
+                    evaluation?.action == ApprovalAction.ASK_AI && aiCanEscalateToTemporaryAccess
+                else -> false
+            }
     }
     if (grantablePolicies.isEmpty()) return null
 
     val expiresAt = now + TEMPORARY_ACCESS_DURATION_MILLIS
     val grantedIds = grantablePolicies.map(SecretApprovalPolicy::secretId).toSet()
-    val alsoApprovedByAi = storedEvaluation.aiReview?.decision == AiReviewDecision.APPROVE &&
+    val alsoApprovedByAi =
+        storedEvaluation.aiReview?.decision == AiReviewDecision.APPROVE &&
+            storedEvaluation.secrets.any { evaluation ->
+                evaluation.action == ApprovalAction.ASK_AI && evaluation.secretId !in grantedIds
+            }
+    val alsoApprovedOnce =
         storedEvaluation.secrets.any { evaluation ->
-            evaluation.action == ApprovalAction.ASK_AI && evaluation.secretId !in grantedIds
+            evaluation.action == ApprovalAction.ASK_ME && evaluation.secretId !in grantedIds
         }
-    val alsoApprovedOnce = storedEvaluation.secrets.any { evaluation ->
-        evaluation.action == ApprovalAction.ASK_ME && evaluation.secretId !in grantedIds
-    }
     return TemporaryAccessPlan(
         policies = grantablePolicies,
         expiresAt = expiresAt,
-        evaluation = storedEvaluation.copy(
-            secrets = storedEvaluation.secrets.map { evaluation ->
-                if (evaluation.secretId in grantedIds) {
-                    evaluation.copy(temporaryAccessExpiresAt = expiresAt)
-                } else {
-                    evaluation
-                }
+        evaluation =
+            storedEvaluation.copy(
+                secrets =
+                    storedEvaluation.secrets.map { evaluation ->
+                        if (evaluation.secretId in grantedIds) {
+                            evaluation.copy(temporaryAccessExpiresAt = expiresAt)
+                        } else {
+                            evaluation
+                        }
+                    }
+            ),
+        decisionSource =
+            if (alsoApprovedByAi || alsoApprovedOnce) {
+                DECISION_SOURCE_MIXED
+            } else {
+                DECISION_SOURCE_TEMPORARY_ACCESS
             },
-        ),
-        decisionSource = if (alsoApprovedByAi || alsoApprovedOnce) {
-            DECISION_SOURCE_MIXED
-        } else {
-            DECISION_SOURCE_TEMPORARY_ACCESS
-        },
     )
 }

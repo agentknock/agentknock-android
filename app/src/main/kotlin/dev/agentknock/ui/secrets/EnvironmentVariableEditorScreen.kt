@@ -6,12 +6,12 @@ import androidx.activity.compose.BackHandler
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
+import androidx.compose.foundation.layout.consumeWindowInsets
 import androidx.compose.foundation.layout.fillMaxHeight
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
-import androidx.compose.foundation.layout.padding
-import androidx.compose.foundation.layout.consumeWindowInsets
 import androidx.compose.foundation.layout.imePadding
+import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.widthIn
 import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.text.KeyboardOptions
@@ -71,13 +71,12 @@ internal fun EnvironmentVariableEditorScreen(
     var nameInvalid by rememberSaveable(editorKey) { mutableStateOf(false) }
     var menuExpanded by rememberSaveable(editorKey) { mutableStateOf(false) }
     var confirmDiscard by rememberSaveable(editorKey) { mutableStateOf(false) }
-    val dirty = if (variable == null) {
-        name.isNotEmpty() || value.isNotEmpty() || !sensitive
-    } else {
-        name != variable.name ||
-            sensitive != variable.sensitive ||
-            editor.valueChanged
-    }
+    val dirty =
+        if (variable == null) {
+            name.isNotEmpty() || value.isNotEmpty() || !sensitive
+        } else {
+            name != variable.name || sensitive != variable.sensitive || editor.valueChanged
+        }
     fun requestDismiss() {
         if (!enabled) return
         if (dirty) confirmDiscard = true else onDismiss()
@@ -95,8 +94,8 @@ internal fun EnvironmentVariableEditorScreen(
                                     R.string.new_environment_variable
                                 } else {
                                     R.string.edit_environment_variable
-                                },
-                            ),
+                                }
+                            )
                         )
                     },
                     navigationIcon = {
@@ -141,10 +140,8 @@ internal fun EnvironmentVariableEditorScreen(
     ) { padding ->
         Box(Modifier.fillMaxSize().padding(padding).consumeWindowInsets(padding).imePadding()) {
             LazyColumn(
-                modifier = Modifier
-                    .fillMaxHeight()
-                    .widthIn(max = 720.dp)
-                    .align(Alignment.TopCenter),
+                modifier =
+                    Modifier.fillMaxHeight().widthIn(max = 720.dp).align(Alignment.TopCenter),
                 contentPadding = androidx.compose.foundation.layout.PaddingValues(20.dp),
                 verticalArrangement = Arrangement.spacedBy(16.dp),
             ) {
@@ -162,19 +159,24 @@ internal fun EnvironmentVariableEditorScreen(
                         enabled = enabled,
                         singleLine = true,
                         isError = nameInvalid,
-                        supportingText = if (nameInvalid) {
-                            { Text(stringResource(R.string.variable_name_invalid)) }
-                        } else {
-                            null
-                        },
-                        keyboardOptions = KeyboardOptions(
-                            capitalization = KeyboardCapitalization.Characters,
-                            autoCorrectEnabled = false,
-                            keyboardType = KeyboardType.Ascii,
-                            imeAction = ImeAction.Next,
-                        ),
+                        supportingText =
+                            if (nameInvalid) {
+                                { Text(stringResource(R.string.variable_name_invalid)) }
+                            } else {
+                                null
+                            },
+                        keyboardOptions =
+                            KeyboardOptions(
+                                capitalization = KeyboardCapitalization.Characters,
+                                autoCorrectEnabled = false,
+                                keyboardType = KeyboardType.Ascii,
+                                imeAction = ImeAction.Next,
+                            ),
                         modifier = Modifier.fillMaxWidth(),
-                        textStyle = MaterialTheme.typography.bodyLarge.copy(fontFamily = FontFamily.Monospace),
+                        textStyle =
+                            MaterialTheme.typography.bodyLarge.copy(
+                                fontFamily = FontFamily.Monospace
+                            ),
                     )
                 }
                 if (variable != null && currentValue == null) {
@@ -210,8 +212,10 @@ internal fun EnvironmentVariableEditorScreen(
                             nameInvalid = !environmentVariableName.matches(name)
                             if (!nameInvalid) onSave()
                         },
-                        enabled = enabled && environmentVariableName.matches(name) &&
-                            (variable == null || dirty),
+                        enabled =
+                            enabled &&
+                                environmentVariableName.matches(name) &&
+                                (variable == null || dirty),
                         modifier = Modifier.fillMaxWidth(),
                     ) {
                         Text(
@@ -220,8 +224,8 @@ internal fun EnvironmentVariableEditorScreen(
                                     R.string.create_variable
                                 } else {
                                     R.string.save_variable
-                                },
-                            ),
+                                }
+                            )
                         )
                     }
                 }

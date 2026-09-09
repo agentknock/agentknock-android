@@ -38,19 +38,25 @@ internal data class PlaySubscriptionSnapshot(
 
 internal sealed interface PlaySubscriptionQueryResult {
     data class Success(val snapshot: PlaySubscriptionSnapshot) : PlaySubscriptionQueryResult
+
     data object Unavailable : PlaySubscriptionQueryResult
+
     data object NotSupported : PlaySubscriptionQueryResult
 }
 
 internal sealed interface PlaySubscriptionLaunchResult {
     data object Started : PlaySubscriptionLaunchResult
+
     data object AlreadyOwned : PlaySubscriptionLaunchResult
+
     data object Unavailable : PlaySubscriptionLaunchResult
 }
 
 internal sealed interface PlaySubscriptionUpdate {
     data object Changed : PlaySubscriptionUpdate
+
     data object Canceled : PlaySubscriptionUpdate
+
     data object Failed : PlaySubscriptionUpdate
 }
 

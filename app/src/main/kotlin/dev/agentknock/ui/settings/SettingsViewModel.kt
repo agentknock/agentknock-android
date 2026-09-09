@@ -2,10 +2,10 @@ package dev.agentknock.ui.settings
 
 import androidx.lifecycle.ViewModel
 import androidx.lifecycle.viewModelScope
-import dev.agentknock.storage.crypto.VaultProtection
-import dev.agentknock.storage.crypto.VaultKeyManager
-import dev.agentknock.storage.device.DeviceConfiguration
 import dev.agentknock.push.PushRegistration
+import dev.agentknock.storage.crypto.VaultKeyManager
+import dev.agentknock.storage.crypto.VaultProtection
+import dev.agentknock.storage.device.DeviceConfiguration
 import dev.agentknock.ui.auth.DeviceAuthenticationMode
 import dev.agentknock.ui.auth.DeviceAuthenticationResult
 import dev.agentknock.ui.auth.ProtectedActionAuthorizer
@@ -20,8 +20,11 @@ import kotlinx.coroutines.launch
 
 internal sealed interface FactoryResetUiState {
     data object Idle : FactoryResetUiState
+
     data object Working : FactoryResetUiState
+
     data object ConfirmLocalClear : FactoryResetUiState
+
     data object ClearFailed : FactoryResetUiState
 }
 
@@ -57,13 +60,14 @@ internal class SettingsViewModel(
         if (_factoryReset.value != FactoryResetUiState.Idle) return
         _factoryReset.value = FactoryResetUiState.Working
         viewModelScope.launch {
-            val remoteDeleted = try {
-                beginFactoryReset()
-            } catch (cancelled: CancellationException) {
-                throw cancelled
-            } catch (_: Exception) {
-                false
-            }
+            val remoteDeleted =
+                try {
+                    beginFactoryReset()
+                } catch (cancelled: CancellationException) {
+                    throw cancelled
+                } catch (_: Exception) {
+                    false
+                }
             if (remoteDeleted) requestApplicationDataClear()
             else _factoryReset.value = FactoryResetUiState.ConfirmLocalClear
         }
@@ -103,5 +107,4 @@ internal class SettingsViewModel(
         cancelFactoryReset()
         _factoryReset.value = FactoryResetUiState.ClearFailed
     }
-
 }

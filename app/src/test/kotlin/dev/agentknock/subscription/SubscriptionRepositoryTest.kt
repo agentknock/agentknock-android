@@ -4,8 +4,8 @@ import dev.agentknock.relay.RelayEndpointResult
 import dev.agentknock.relay.RelaySubscriptionClient
 import dev.agentknock.relay.RelaySubscriptionResult
 import dev.agentknock.relay.RelaySubscriptionStatus
-import dev.agentknock.storage.device.RelayDeviceAuthorization
 import dev.agentknock.storage.device.DeviceCredentialResult
+import dev.agentknock.storage.device.RelayDeviceAuthorization
 import dev.agentknock.storage.device.RelayDeviceAuthorizationSource
 import kotlinx.coroutines.test.runTest
 import org.junit.Assert.assertEquals
@@ -41,28 +41,33 @@ class SubscriptionRepositoryTest {
     }
 
     @Test
-    fun `review rejection deactivates access but an old device cannot change the current one`() = runTest {
-        val relay = FakeRelay(
-            statusResult = RelayEndpointResult.Success(RelaySubscriptionStatus(active = true)),
-        )
-        val repository = SubscriptionRepository(availableAuthorization, relay)
-        repository.status()
-        repository.recordInactiveReviewAccess("old-device")
-        assertEquals(AiReviewAccess.ACTIVE, repository.access.value)
-        repository.recordInactiveReviewAccess(DEVICE_ID)
-        assertEquals(AiReviewAccess.INACTIVE, repository.access.value)
-    }
+    fun `review rejection deactivates access but an old device cannot change the current one`() =
+        runTest {
+            val relay =
+                FakeRelay(
+                    statusResult =
+                        RelayEndpointResult.Success(RelaySubscriptionStatus(active = true))
+                )
+            val repository = SubscriptionRepository(availableAuthorization, relay)
+            repository.status()
+            repository.recordInactiveReviewAccess("old-device")
+            assertEquals(AiReviewAccess.ACTIVE, repository.access.value)
+            repository.recordInactiveReviewAccess(DEVICE_ID)
+            assertEquals(AiReviewAccess.INACTIVE, repository.access.value)
+        }
 
     @Test
     fun `switching devices discards the previous entitlement even when status fails`() = runTest {
         var authorization = RelayDeviceAuthorization("identity", DEVICE_ID, DEVICE_TOKEN)
-        val relay = FakeRelay(
-            statusResult = RelayEndpointResult.Success(RelaySubscriptionStatus(active = true)),
-        )
-        val repository = SubscriptionRepository(
-            RelayDeviceAuthorizationSource { DeviceCredentialResult.Available(authorization) },
-            relay,
-        )
+        val relay =
+            FakeRelay(
+                statusResult = RelayEndpointResult.Success(RelaySubscriptionStatus(active = true))
+            )
+        val repository =
+            SubscriptionRepository(
+                RelayDeviceAuthorizationSource { DeviceCredentialResult.Available(authorization) },
+                relay,
+            )
         repository.status()
         authorization = RelayDeviceAuthorization("new-identity", "new-device", "new-token")
         relay.statusResult = RelayEndpointResult.InvalidResponse
@@ -72,9 +77,10 @@ class SubscriptionRepositoryTest {
 
     @Test
     fun `gets status with active device credentials`() = runTest {
-        val relay = FakeRelay(
-            statusResult = RelayEndpointResult.Success(RelaySubscriptionStatus(active = true)),
-        )
+        val relay =
+            FakeRelay(
+                statusResult = RelayEndpointResult.Success(RelaySubscriptionStatus(active = true))
+            )
         val repository = SubscriptionRepository(availableAuthorization, relay)
 
         assertEquals(SubscriptionResult.Status(active = true), repository.status())
@@ -83,9 +89,10 @@ class SubscriptionRepositoryTest {
 
     @Test
     fun `redeems with active device credentials`() = runTest {
-        val relay = FakeRelay(
-            redeemResult = RelayEndpointResult.Success(RelaySubscriptionStatus(active = true)),
-        )
+        val relay =
+            FakeRelay(
+                redeemResult = RelayEndpointResult.Success(RelaySubscriptionStatus(active = true))
+            )
         val repository = SubscriptionRepository(availableAuthorization, relay)
 
         assertEquals(
@@ -97,9 +104,11 @@ class SubscriptionRepositoryTest {
 
     @Test
     fun `submits a Google Play purchase with active device credentials`() = runTest {
-        val relay = FakeRelay(
-            googlePlayResult = RelayEndpointResult.Success(RelaySubscriptionStatus(active = true)),
-        )
+        val relay =
+            FakeRelay(
+                googlePlayResult =
+                    RelayEndpointResult.Success(RelaySubscriptionStatus(active = true))
+            )
         val repository = SubscriptionRepository(availableAuthorization, relay)
 
         assertEquals(
@@ -127,7 +136,7 @@ class SubscriptionRepositoryTest {
                 deviceIdentityId = "identity",
                 deviceId = DEVICE_ID,
                 deviceToken = DEVICE_TOKEN,
-            ),
+            )
         )
     }
 
@@ -159,7 +168,6 @@ class SubscriptionRepositoryTest {
             redemption = Triple(deviceId, deviceToken, redemptionToken)
             return redeemResult
         }
-
 
         override suspend fun updateFromGooglePlay(
             deviceId: String,

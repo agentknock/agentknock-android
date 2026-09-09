@@ -1,7 +1,13 @@
 package dev.agentknock.relay
 
-import kotlinx.coroutines.CompletableDeferred
+import java.time.Instant
+import java.time.ZoneOffset
+import java.time.ZonedDateTime
+import java.time.format.DateTimeFormatter
+import java.util.Locale
+import java.util.concurrent.atomic.AtomicBoolean
 import kotlinx.coroutines.CancellationException
+import kotlinx.coroutines.CompletableDeferred
 import kotlinx.coroutines.NonCancellable
 import kotlinx.coroutines.channels.Channel
 import kotlinx.coroutines.channels.ReceiveChannel
@@ -9,8 +15,8 @@ import kotlinx.coroutines.withContext
 import kotlinx.coroutines.withTimeoutOrNull
 import kotlinx.serialization.json.Json
 import kotlinx.serialization.json.JsonElement
-import kotlinx.serialization.json.JsonObject
 import kotlinx.serialization.json.JsonNull
+import kotlinx.serialization.json.JsonObject
 import kotlinx.serialization.json.JsonPrimitive
 import kotlinx.serialization.json.booleanOrNull
 import kotlinx.serialization.json.buildJsonObject
@@ -22,12 +28,6 @@ import okhttp3.Response
 import okhttp3.WebSocket
 import okhttp3.WebSocketListener
 import okio.ByteString
-import java.time.Instant
-import java.time.ZoneOffset
-import java.time.ZonedDateTime
-import java.time.format.DateTimeFormatter
-import java.util.Locale
-import java.util.concurrent.atomic.AtomicBoolean
 
 internal enum class RelayMessageKind(val wireName: String) {
     REQUEST("request"),
@@ -135,9 +135,7 @@ internal sealed interface RelayDeviceEvent {
         val state: RelayClientState,
     ) : RelayDeviceEvent
 
-    data class PushRegistration(
-        val state: RelayPushRegistrationState,
-    ) : RelayDeviceEvent
+    data class PushRegistration(val state: RelayPushRegistrationState) : RelayDeviceEvent
 
     data class Error(
         val code: String,
@@ -207,10 +205,12 @@ internal class WebSocketRelayDeviceClient(
     private val eventBufferCapacity: Int = MAXIMUM_PENDING_EVENTS,
     private val currentTimeMillis: () -> Long = System::currentTimeMillis,
 ) : RelayDeviceClient {
-    private val client = client.newBuilder()
-        // The application connection manager owns retry timing.
-        .retryOnConnectionFailure(false)
-        .build()
+    private val client =
+        client
+            .newBuilder()
+            // The application connection manager owns retry timing.
+            .retryOnConnectionFailure(false)
+            .build()
 
     override suspend fun connect(
         deviceId: String,
@@ -220,65 +220,71 @@ internal class WebSocketRelayDeviceClient(
         val terminated = CompletableDeferred<Unit>()
         val events = RelayEventBuffer(eventBufferCapacity)
         lateinit var connection: OkHttpRelayDeviceConnection
-        val request = Request.Builder()
-            .url("${relayUrl.trimEnd('/')}/v1/device/$deviceId")
-            .header("Authorization", "Bearer $deviceToken")
-            .build()
-        val listener = object : WebSocketListener() {
-            override fun onOpen(webSocket: WebSocket, response: Response) {
-                connection = OkHttpRelayDeviceConnection(
-                    socket = webSocket,
-                    events = events.events,
-                    codec = codec,
-                    terminated = terminated,
-                )
-                opened.complete(RelayDeviceConnectionResult.Connected(connection))
-            }
-
-            override fun onMessage(webSocket: WebSocket, text: String) {
-                if (text.encodeToByteArray().size > MAXIMUM_FRAME_BYTES) {
-                    webSocket.close(1009, "frame too large")
-                    events.offer(
-                        RelayDeviceEvent.Failed("Relay frame was too large."),
-                    ) { abortOverflow(webSocket, terminated) }
-                    return
+        val request =
+            Request.Builder()
+                .url("${relayUrl.trimEnd('/')}/v1/device/$deviceId")
+                .header("Authorization", "Bearer $deviceToken")
+                .build()
+        val listener =
+            object : WebSocketListener() {
+                override fun onOpen(webSocket: WebSocket, response: Response) {
+                    connection =
+                        OkHttpRelayDeviceConnection(
+                            socket = webSocket,
+                            events = events.events,
+                            codec = codec,
+                            terminated = terminated,
+                        )
+                    opened.complete(RelayDeviceConnectionResult.Connected(connection))
                 }
-                val event = runCatching { codec.decode(text) }.getOrElse {
-                    webSocket.close(1008, "invalid frame")
-                    RelayDeviceEvent.Failed("Relay sent an invalid frame.")
+
+                override fun onMessage(webSocket: WebSocket, text: String) {
+                    if (text.encodeToByteArray().size > MAXIMUM_FRAME_BYTES) {
+                        webSocket.close(1009, "frame too large")
+                        events.offer(RelayDeviceEvent.Failed("Relay frame was too large.")) {
+                            abortOverflow(webSocket, terminated)
+                        }
+                        return
+                    }
+                    val event = runCatching {
+                        codec.decode(text)
+                    }
+                        .getOrElse {
+                            webSocket.close(1008, "invalid frame")
+                            RelayDeviceEvent.Failed("Relay sent an invalid frame.")
+                        }
+                    events.offer(event) { abortOverflow(webSocket, terminated) }
                 }
-                events.offer(event) { abortOverflow(webSocket, terminated) }
-            }
 
-            override fun onMessage(webSocket: WebSocket, bytes: ByteString) {
-                webSocket.close(1008, "text frames required")
-                events.offer(
-                    RelayDeviceEvent.Failed("Relay sent a binary frame."),
-                ) { abortOverflow(webSocket, terminated) }
-            }
+                override fun onMessage(webSocket: WebSocket, bytes: ByteString) {
+                    webSocket.close(1008, "text frames required")
+                    events.offer(RelayDeviceEvent.Failed("Relay sent a binary frame.")) {
+                        abortOverflow(webSocket, terminated)
+                    }
+                }
 
-            override fun onClosing(webSocket: WebSocket, code: Int, reason: String) {
-                webSocket.close(code, reason)
-            }
+                override fun onClosing(webSocket: WebSocket, code: Int, reason: String) {
+                    webSocket.close(code, reason)
+                }
 
-            override fun onClosed(webSocket: WebSocket, code: Int, reason: String) {
-                terminated.complete(Unit)
-                events.finish(
-                    RelayDeviceEvent.Closed(code, reason),
-                ) { abortOverflow(webSocket, terminated) }
-            }
+                override fun onClosed(webSocket: WebSocket, code: Int, reason: String) {
+                    terminated.complete(Unit)
+                    events.finish(RelayDeviceEvent.Closed(code, reason)) {
+                        abortOverflow(webSocket, terminated)
+                    }
+                }
 
-            override fun onFailure(webSocket: WebSocket, t: Throwable, response: Response?) {
-                terminated.complete(Unit)
-                if (!opened.isCompleted) {
-                    opened.complete(connectionFailure(t, response))
-                } else {
-                    events.finish(
-                        RelayDeviceEvent.Failed(t.message),
-                    ) { abortOverflow(webSocket, terminated) }
+                override fun onFailure(webSocket: WebSocket, t: Throwable, response: Response?) {
+                    terminated.complete(Unit)
+                    if (!opened.isCompleted) {
+                        opened.complete(connectionFailure(t, response))
+                    } else {
+                        events.finish(RelayDeviceEvent.Failed(t.message)) {
+                            abortOverflow(webSocket, terminated)
+                        }
+                    }
                 }
             }
-        }
         val socket = client.newWebSocket(request, listener)
         return try {
             opened.await()
@@ -296,19 +302,20 @@ internal class WebSocketRelayDeviceClient(
     ): RelayDeviceConnectionResult {
         if (response == null) {
             return RelayDeviceConnectionResult.Unavailable(
-                throwable.message ?: "Could not connect to the relay.",
+                throwable.message ?: "Could not connect to the relay."
             )
         }
         val body = runCatching { response.body.string() }.getOrNull()
         val error = body?.let(::decodeRelayError)
         if (response.code.isTransientRelayStatus()) {
             return RelayDeviceConnectionResult.Unavailable(
-                message = error?.message
-                    ?: "Relay is temporarily unavailable (HTTP ${response.code}).",
-                retryAfterMillis = maximumRetryDelay(
-                    error?.retryAfterMillis,
-                    response.header("Retry-After")?.toRetryAfterMillis(currentTimeMillis()),
-                ),
+                message =
+                    error?.message ?: "Relay is temporarily unavailable (HTTP ${response.code}).",
+                retryAfterMillis =
+                    maximumRetryDelay(
+                        error?.retryAfterMillis,
+                        response.header("Retry-After")?.toRetryAfterMillis(currentTimeMillis()),
+                    ),
             )
         }
         return RelayDeviceConnectionResult.Rejected(
@@ -342,9 +349,11 @@ internal class RelayEventBuffer(capacity: Int) {
         if (channel.trySend(event).isFailure) {
             drain()
             check(
-                channel.trySend(
-                    RelayDeviceEvent.Failed("Relay event backlog exceeded its safe limit."),
-                ).isSuccess,
+                channel
+                    .trySend(
+                        RelayDeviceEvent.Failed("Relay event backlog exceeded its safe limit.")
+                    )
+                    .isSuccess
             )
             onOverflow()
         }
@@ -355,9 +364,9 @@ internal class RelayEventBuffer(capacity: Int) {
         if (!finished.compareAndSet(false, true)) return
         drain()
         check(
-            channel.trySend(
-                RelayDeviceEvent.Failed("Relay event backlog exceeded its safe limit."),
-            ).isSuccess,
+            channel
+                .trySend(RelayDeviceEvent.Failed("Relay event backlog exceeded its safe limit."))
+                .isSuccess
         )
         channel.close()
         onOverflow()
@@ -402,10 +411,11 @@ private suspend fun closeWebSocket(
     if (!terminated.isCompleted) {
         socket.close(1000, "client disconnect")
     }
-    val completed = withTimeoutOrNull(WEBSOCKET_CLOSE_TIMEOUT_MILLIS) {
-        terminated.await()
-        true
-    } == true
+    val completed =
+        withTimeoutOrNull(WEBSOCKET_CLOSE_TIMEOUT_MILLIS) {
+            terminated.await()
+            true
+        } == true
     if (!completed) socket.cancel()
 }
 
@@ -417,9 +427,7 @@ private fun abortOverflow(
     terminated.complete(Unit)
 }
 
-internal class RelayFrameCodec(
-    private val json: Json = Json { ignoreUnknownKeys = true },
-) {
+internal class RelayFrameCodec(private val json: Json = Json { ignoreUnknownKeys = true }) {
     fun encode(frame: RelayDeviceFrame): String = buildJsonObject {
         when (frame) {
             is RelayDeviceFrame.Response -> {
@@ -443,39 +451,46 @@ internal class RelayFrameCodec(
                 put("state", JsonPrimitive(frame.state.wireName))
             }
         }
-    }.toString()
+    }
+        .toString()
 
     fun decode(encoded: String): RelayDeviceEvent {
         val frame = json.parseToJsonElement(encoded).jsonObject
         return when (frame.requiredString("type")) {
-            "message" -> RelayDeviceEvent.Message(
-                clientId = frame.requiredString("client_id"),
-                requestId = frame.requiredString("request_id"),
-                kind = frame.requiredMessageKind(),
-                payload = frame["payload"] ?: error("Missing relay payload"),
-                addressId = frame.optionalString("address_id"),
-            )
-            "ack" -> RelayDeviceEvent.Acknowledgement(
-                frame.requiredString("client_id"),
-                frame.requiredString("request_id"),
-                frame.requiredMessageKind(),
-            )
-            "receipt" -> RelayDeviceEvent.Receipt(
-                frame.requiredString("client_id"),
-                frame.requiredString("request_id"),
-                frame.requiredMessageKind(),
-            )
+            "message" ->
+                RelayDeviceEvent.Message(
+                    clientId = frame.requiredString("client_id"),
+                    requestId = frame.requiredString("request_id"),
+                    kind = frame.requiredMessageKind(),
+                    payload = frame["payload"] ?: error("Missing relay payload"),
+                    addressId = frame.optionalString("address_id"),
+                )
+            "ack" ->
+                RelayDeviceEvent.Acknowledgement(
+                    frame.requiredString("client_id"),
+                    frame.requiredString("request_id"),
+                    frame.requiredMessageKind(),
+                )
+            "receipt" ->
+                RelayDeviceEvent.Receipt(
+                    frame.requiredString("client_id"),
+                    frame.requiredString("request_id"),
+                    frame.requiredMessageKind(),
+                )
             "state" -> {
-                val exchange = frame.requiredEnum("exchange", RelayExchangeState.entries) {
-                    it.wireName
-                }
+                val exchange =
+                    frame.requiredEnum("exchange", RelayExchangeState.entries) {
+                        it.wireName
+                    }
                 frame.requiredEnum("request", RelayMessageState.entries) { it.wireName }
                 val response =
                     frame.requiredEnum("response", RelayMessageState.entries) { it.wireName }
                 frame.requiredEnum(
                     "completion",
                     RelayMessageState.entries,
-                ) { it.wireName }
+                ) {
+                    it.wireName
+                }
                 RelayDeviceEvent.State(
                     clientId = frame.requiredString("client_id"),
                     requestId = frame.requiredString("request_id"),
@@ -483,26 +498,31 @@ internal class RelayFrameCodec(
                     response = response,
                 )
             }
-            "inactive" -> RelayDeviceEvent.Inactive(
-                frame.requiredString("client_id"),
-                frame.requiredString("request_id"),
-                frame.optionalString("kind")?.toMessageKind(),
-            )
-            "client_state" -> RelayDeviceEvent.ClientState(
-                frame.requiredString("client_id"),
-                frame.requiredEnum("state", RelayClientState.entries) { it.wireName },
-            )
-            "push_registration" -> RelayDeviceEvent.PushRegistration(
-                frame.requiredEnum("state", RelayPushRegistrationState.entries) { it.wireName },
-            )
-            "error" -> RelayDeviceEvent.Error(
-                code = frame.requiredString("error"),
-                message = frame.requiredString("message"),
-                retryable = frame["retryable"]?.jsonPrimitive?.booleanOrNull
-                    ?: error("Missing relay retryable flag"),
-                scope = frame.errorScope(),
-                retryAfterMillis = frame.optionalNonNegativeLong("retry_after_ms"),
-            )
+            "inactive" ->
+                RelayDeviceEvent.Inactive(
+                    frame.requiredString("client_id"),
+                    frame.requiredString("request_id"),
+                    frame.optionalString("kind")?.toMessageKind(),
+                )
+            "client_state" ->
+                RelayDeviceEvent.ClientState(
+                    frame.requiredString("client_id"),
+                    frame.requiredEnum("state", RelayClientState.entries) { it.wireName },
+                )
+            "push_registration" ->
+                RelayDeviceEvent.PushRegistration(
+                    frame.requiredEnum("state", RelayPushRegistrationState.entries) { it.wireName }
+                )
+            "error" ->
+                RelayDeviceEvent.Error(
+                    code = frame.requiredString("error"),
+                    message = frame.requiredString("message"),
+                    retryable =
+                        frame["retryable"]?.jsonPrimitive?.booleanOrNull
+                            ?: error("Missing relay retryable flag"),
+                    scope = frame.errorScope(),
+                    retryAfterMillis = frame.optionalNonNegativeLong("retry_after_ms"),
+                )
             "caught_up" -> RelayDeviceEvent.CaughtUp
             else -> error("Unknown relay frame type")
         }
@@ -533,9 +553,10 @@ internal class RelayFrameCodec(
         name: String,
         values: Iterable<T>,
         wireName: (T) -> String,
-    ): T = requiredString(name).let { encoded ->
-        values.find { wireName(it) == encoded } ?: error("Invalid relay $name")
-    }
+    ): T =
+        requiredString(name).let { encoded ->
+            values.find { wireName(it) == encoded } ?: error("Invalid relay $name")
+        }
 
     private fun kotlinx.serialization.json.JsonObjectBuilder.putIdentity(
         clientId: String,
@@ -549,23 +570,24 @@ internal class RelayFrameCodec(
 private fun JsonObject.requiredString(name: String): String =
     optionalString(name) ?: error("Missing relay $name")
 
-private fun JsonObject.optionalString(name: String): String? = when (val value = this[name]) {
-    null, JsonNull -> null
-    is JsonPrimitive -> value.takeIf(JsonPrimitive::isString)?.content
-        ?: error("Relay $name must be a string")
-    else -> error("Relay $name must be a string")
-}
+private fun JsonObject.optionalString(name: String): String? =
+    when (val value = this[name]) {
+        null,
+        JsonNull -> null
+        is JsonPrimitive ->
+            value.takeIf(JsonPrimitive::isString)?.content ?: error("Relay $name must be a string")
+        else -> error("Relay $name must be a string")
+    }
 
-private fun JsonObject.optionalNonNegativeLong(name: String): Long? = when (
-    val value = this[name]
-) {
-    null, JsonNull -> null
-    is JsonPrimitive -> value.takeUnless(JsonPrimitive::isString)
-        ?.content
-        ?.parseNonNegativeDecimalClamped()
-        ?: error("Relay $name must be a non-negative integer")
-    else -> error("Relay $name must be a non-negative integer")
-}
+private fun JsonObject.optionalNonNegativeLong(name: String): Long? =
+    when (val value = this[name]) {
+        null,
+        JsonNull -> null
+        is JsonPrimitive ->
+            value.takeUnless(JsonPrimitive::isString)?.content?.parseNonNegativeDecimalClamped()
+                ?: error("Relay $name must be a non-negative integer")
+        else -> error("Relay $name must be a non-negative integer")
+    }
 
 private fun String.toRetryAfterMillis(nowMillis: Long): Long? {
     val encoded = trim()
@@ -582,47 +604,50 @@ private fun String.toRetryAfterMillis(nowMillis: Long): Long? {
 
 private fun String.httpDateMillis(nowMillis: Long): Long? {
     runCatching {
-        ZonedDateTime.parse(this, DateTimeFormatter.RFC_1123_DATE_TIME)
-            .toInstant()
-            .toEpochMilli()
-    }.getOrNull()?.let { return it }
+        ZonedDateTime.parse(this, DateTimeFormatter.RFC_1123_DATE_TIME).toInstant().toEpochMilli()
+    }
+        .getOrNull()
+        ?.let {
+            return it
+        }
 
     if (',' in this && '-' in this) {
         runCatching {
             ZonedDateTime.parse(substringAfter(',').trim(), RFC_850_DATE_TIME)
-        }.getOrNull()?.let { parsed ->
-            val fiftyYearsFromNow = Instant.ofEpochMilli(nowMillis)
-                .atZone(ZoneOffset.UTC)
-                .plusYears(50)
-            val candidate = parsed.withYear(
-                (fiftyYearsFromNow.year / 100) * 100 + parsed.year % 100,
-            )
-            return candidate
-                .let { if (it.isAfter(fiftyYearsFromNow)) it.minusYears(100) else it }
-                .toInstant()
-                .toEpochMilli()
         }
+            .getOrNull()
+            ?.let { parsed ->
+                val fiftyYearsFromNow =
+                    Instant.ofEpochMilli(nowMillis).atZone(ZoneOffset.UTC).plusYears(50)
+                val candidate =
+                    parsed.withYear((fiftyYearsFromNow.year / 100) * 100 + parsed.year % 100)
+                return candidate
+                    .let { if (it.isAfter(fiftyYearsFromNow)) it.minusYears(100) else it }
+                    .toInstant()
+                    .toEpochMilli()
+            }
     }
 
     return runCatching {
         val withoutWeekday = substringAfter(' ').trim().replace(WHITESPACE, " ")
-        ZonedDateTime.parse("$withoutWeekday GMT", ASCTIME_DATE_TIME)
-            .toInstant()
-            .toEpochMilli()
-    }.getOrNull()
+        ZonedDateTime.parse("$withoutWeekday GMT", ASCTIME_DATE_TIME).toInstant().toEpochMilli()
+    }
+        .getOrNull()
 }
 
 private fun maximumRetryDelay(first: Long?, second: Long?): Long? =
     listOfNotNull(first, second).maxOrNull()
 
-private val RFC_850_DATE_TIME = DateTimeFormatter.ofPattern(
-    "dd-MMM-yy HH:mm:ss zzz",
-    Locale.US,
-)
-private val ASCTIME_DATE_TIME = DateTimeFormatter.ofPattern(
-    "MMM d HH:mm:ss yyyy zzz",
-    Locale.US,
-)
+private val RFC_850_DATE_TIME =
+    DateTimeFormatter.ofPattern(
+        "dd-MMM-yy HH:mm:ss zzz",
+        Locale.US,
+    )
+private val ASCTIME_DATE_TIME =
+    DateTimeFormatter.ofPattern(
+        "MMM d HH:mm:ss yyyy zzz",
+        Locale.US,
+    )
 private val WHITESPACE = Regex(" +")
 
 private const val MAXIMUM_FRAME_BYTES = 256 * 1024

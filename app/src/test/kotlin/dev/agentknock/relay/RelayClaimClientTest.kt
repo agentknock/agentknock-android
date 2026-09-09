@@ -1,7 +1,7 @@
 package dev.agentknock.relay
 
-import kotlinx.coroutines.test.UnconfinedTestDispatcher
 import kotlinx.coroutines.ExperimentalCoroutinesApi
+import kotlinx.coroutines.test.UnconfinedTestDispatcher
 import kotlinx.coroutines.test.runTest
 import kotlinx.serialization.json.Json
 import kotlinx.serialization.json.jsonArray
@@ -12,7 +12,6 @@ import mockwebserver3.MockWebServer
 import okhttp3.OkHttpClient
 import org.junit.Assert.assertEquals
 import org.junit.Assert.assertFalse
-import org.junit.Assert.assertTrue
 import org.junit.Test
 
 @OptIn(ExperimentalCoroutinesApi::class)
@@ -25,25 +24,24 @@ class RelayClaimClientTest {
                 MockResponse.Builder()
                     .code(200)
                     .body("{\"claimed\":true,\"device_id\":\"$DEVICE_ID\"}")
-                    .build(),
+                    .build()
             )
             server.enqueue(
-                MockResponse.Builder()
-                    .code(200)
-                    .body("{\"address_id\":\"$ADDRESS_ID\"}")
-                    .build(),
+                MockResponse.Builder().code(200).body("{\"address_id\":\"$ADDRESS_ID\"}").build()
             )
-            val client = HttpRelayClaimClient(
-                transport = transport(server),
-                dispatcher = UnconfinedTestDispatcher(testScheduler),
-                attestationProvider = attestationProvider(),
-            )
+            val client =
+                HttpRelayClaimClient(
+                    transport = transport(server),
+                    dispatcher = UnconfinedTestDispatcher(testScheduler),
+                    attestationProvider = attestationProvider(),
+                )
 
-            val result = client.claimAndSetAddress(
-                DEVICE_ID,
-                ADDRESS_ID,
-                DEVICE_TOKEN,
-            )
+            val result =
+                client.claimAndSetAddress(
+                    DEVICE_ID,
+                    ADDRESS_ID,
+                    DEVICE_TOKEN,
+                )
 
             assertEquals(
                 RelayEndpointResult.Success(RelayClaimOutcome.CLAIMED),
@@ -73,9 +71,8 @@ class RelayClaimClientTest {
                 "Bearer $DEVICE_TOKEN",
                 addressRequest.headers["Authorization"],
             )
-            val addressBody = Json.parseToJsonElement(
-                checkNotNull(addressRequest.body).utf8(),
-            ).jsonObject
+            val addressBody =
+                Json.parseToJsonElement(checkNotNull(addressRequest.body).utf8()).jsonObject
             assertEquals(ADDRESS_ID, addressBody.getValue("address_id").jsonPrimitive.content)
         }
     }
@@ -88,19 +85,20 @@ class RelayClaimClientTest {
                 MockResponse.Builder()
                     .code(200)
                     .body("{\"claimed\":true,\"device_id\":\"$DEVICE_ID\"}")
-                    .build(),
+                    .build()
             )
             server.enqueue(
                 MockResponse.Builder()
                     .code(409)
                     .body("{\"error\":\"ADDRESS_ALREADY_CLAIMED\",\"message\":\"claimed\"}")
-                    .build(),
+                    .build()
             )
-            val client = HttpRelayClaimClient(
-                transport = transport(server),
-                dispatcher = UnconfinedTestDispatcher(testScheduler),
-                attestationProvider = attestationProvider(),
-            )
+            val client =
+                HttpRelayClaimClient(
+                    transport = transport(server),
+                    dispatcher = UnconfinedTestDispatcher(testScheduler),
+                    attestationProvider = attestationProvider(),
+                )
 
             assertEquals(
                 RelayEndpointResult.Success(RelayClaimOutcome.ADDRESS_UNAVAILABLE),
@@ -121,19 +119,17 @@ class RelayClaimClientTest {
                 MockResponse.Builder()
                     .code(200)
                     .body("{\"claimed\":true,\"device_id\":\"another-device\"}")
-                    .build(),
+                    .build()
             )
             server.enqueue(
-                MockResponse.Builder()
-                    .code(200)
-                    .body("{\"address_id\":\"$ADDRESS_ID\"}")
-                    .build(),
+                MockResponse.Builder().code(200).body("{\"address_id\":\"$ADDRESS_ID\"}").build()
             )
-            val client = HttpRelayClaimClient(
-                transport = transport(server),
-                dispatcher = UnconfinedTestDispatcher(testScheduler),
-                attestationProvider = attestationProvider(),
-            )
+            val client =
+                HttpRelayClaimClient(
+                    transport = transport(server),
+                    dispatcher = UnconfinedTestDispatcher(testScheduler),
+                    attestationProvider = attestationProvider(),
+                )
 
             assertEquals(
                 RelayEndpointResult.InvalidResponse,
@@ -151,18 +147,17 @@ class RelayClaimClientTest {
         MockWebServer().use { server ->
             server.start()
             server.enqueue(
-                MockResponse.Builder()
-                    .code(200)
-                    .body("{\"address_id\":\"$ADDRESS_ID\"}")
-                    .build(),
+                MockResponse.Builder().code(200).body("{\"address_id\":\"$ADDRESS_ID\"}").build()
             )
-            val client = HttpRelayClaimClient(
-                transport = transport(server),
-                dispatcher = UnconfinedTestDispatcher(testScheduler),
-                attestationProvider = DeviceAttestationProvider { _, _ ->
-                    error("Attestation provider must not be called")
-                },
-            )
+            val client =
+                HttpRelayClaimClient(
+                    transport = transport(server),
+                    dispatcher = UnconfinedTestDispatcher(testScheduler),
+                    attestationProvider =
+                        DeviceAttestationProvider { _, _ ->
+                            error("Attestation provider must not be called")
+                        },
+                )
 
             assertEquals(
                 RelayEndpointResult.Success(RelayClaimOutcome.CLAIMED),
@@ -183,10 +178,11 @@ class RelayClaimClientTest {
         }
     }
 
-    private fun transport(server: MockWebServer) = RelayHttpTransport(
-        client = OkHttpClient(),
-        relayUrl = server.url("/").toString(),
-    )
+    private fun transport(server: MockWebServer) =
+        RelayHttpTransport(
+            client = OkHttpClient(),
+            relayUrl = server.url("/").toString(),
+        )
 
     private fun attestationProvider() = DeviceAttestationProvider { deviceId, deviceToken ->
         assertEquals(DEVICE_ID, deviceId)

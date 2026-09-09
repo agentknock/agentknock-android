@@ -17,8 +17,7 @@ class RelayDeviceManagementClientTest {
         MockWebServer().use { server ->
             server.start()
             server.enqueue(
-                MockResponse.Builder().code(200)
-                    .body("""{"pairing_enabled":false}""").build(),
+                MockResponse.Builder().code(200).body("""{"pairing_enabled":false}""").build()
             )
             val client = client(server)
 
@@ -40,9 +39,7 @@ class RelayDeviceManagementClientTest {
     fun `deletes the authenticated relay device`() = runTest {
         MockWebServer().use { server ->
             server.start()
-            server.enqueue(
-                MockResponse.Builder().code(200).body("""{"deleted":true}""").build(),
-            )
+            server.enqueue(MockResponse.Builder().code(200).body("""{"deleted":true}""").build())
             val client = client(server)
 
             assertEquals(
@@ -63,8 +60,7 @@ class RelayDeviceManagementClientTest {
         MockWebServer().use { server ->
             server.start()
             server.enqueue(
-                MockResponse.Builder().code(200)
-                    .body("""{"pairing_enabled":true}""").build(),
+                MockResponse.Builder().code(200).body("""{"pairing_enabled":true}""").build()
             )
 
             assertEquals(
@@ -74,12 +70,14 @@ class RelayDeviceManagementClientTest {
         }
     }
 
-    private fun client(server: MockWebServer) = HttpRelayDeviceManagementClient(
-        transport = RelayHttpTransport(
-            client = OkHttpClient(),
-            relayUrl = server.url("/").toString(),
-        ),
-    )
+    private fun client(server: MockWebServer) =
+        HttpRelayDeviceManagementClient(
+            transport =
+                RelayHttpTransport(
+                    client = OkHttpClient(),
+                    relayUrl = server.url("/").toString(),
+                )
+        )
 
     private companion object {
         const val DEVICE_ID = "01K2ENXDTW1P3XAR4J7V7C9D0H"

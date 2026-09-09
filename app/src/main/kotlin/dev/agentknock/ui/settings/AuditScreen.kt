@@ -33,7 +33,6 @@ import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.outlined.ContentCopy
 import androidx.compose.material3.CircularProgressIndicator
 import androidx.compose.material3.FilterChip
-import androidx.compose.material3.HorizontalDivider
 import androidx.compose.material3.Icon
 import androidx.compose.material3.IconButton
 import androidx.compose.material3.MaterialTheme
@@ -58,12 +57,12 @@ import androidx.compose.ui.unit.dp
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import dev.agentknock.storage.audit.AuditEvent
 import dev.agentknock.storage.audit.AuditOutcome
-import dev.agentknock.ui.components.rememberDateTimeFormatter
 import dev.agentknock.ui.components.AdaptiveListDetail
 import dev.agentknock.ui.components.Disclosure
 import dev.agentknock.ui.components.ExactText
 import dev.agentknock.ui.components.InformationRow
 import dev.agentknock.ui.components.InformationSurface
+import dev.agentknock.ui.components.rememberDateTimeFormatter
 import dev.agentknock.ui.theme.agentknockColors
 
 private enum class AuditFilter(val label: String) {
@@ -138,27 +137,30 @@ internal fun AuditBrowser(
         },
         detail = { showBack, detailModifier ->
             when {
-                selected != null -> key(selected.id) {
-                    AuditDetail(
-                        event = selected,
-                        report = report,
+                selected != null ->
+                    key(selected.id) {
+                        AuditDetail(
+                            event = selected,
+                            report = report,
+                            onBack = onBack,
+                            showBack = showBack,
+                            modifier = detailModifier,
+                        )
+                    }
+                !detailLoaded ->
+                    AuditDetailPlaceholder(
+                        loading = true,
                         onBack = onBack,
                         showBack = showBack,
                         modifier = detailModifier,
                     )
-                }
-                !detailLoaded -> AuditDetailPlaceholder(
-                    loading = true,
-                    onBack = onBack,
-                    showBack = showBack,
-                    modifier = detailModifier,
-                )
-                else -> AuditDetailPlaceholder(
-                    loading = false,
-                    onBack = onBack,
-                    showBack = showBack,
-                    modifier = detailModifier,
-                )
+                else ->
+                    AuditDetailPlaceholder(
+                        loading = false,
+                        onBack = onBack,
+                        showBack = showBack,
+                        modifier = detailModifier,
+                    )
             }
         },
     )
@@ -197,18 +199,18 @@ private fun AuditList(
         } else if (visibleEvents.isNullOrEmpty()) {
             Box(Modifier.fillMaxSize(), contentAlignment = Alignment.Center) {
                 Text(
-                    if (events.isEmpty()) "No security activity recorded yet" else "No matching activity",
+                    if (events.isEmpty()) "No security activity recorded yet"
+                    else "No matching activity",
                     color = MaterialTheme.colorScheme.onSurfaceVariant,
                 )
             }
         } else {
-            LazyColumn(
-                contentPadding = PaddingValues(start = 16.dp, end = 16.dp, bottom = 24.dp),
-            ) {
+            LazyColumn(contentPadding = PaddingValues(start = 16.dp, end = 16.dp, bottom = 24.dp)) {
                 dayGroups.forEach { (day, dayEvents) ->
                     stickyHeader(key = "day_$day") {
                         Row(
-                            Modifier.fillMaxWidth().background(MaterialTheme.colorScheme.background)
+                            Modifier.fillMaxWidth()
+                                .background(MaterialTheme.colorScheme.background)
                                 .padding(horizontal = 8.dp, vertical = 8.dp),
                             horizontalArrangement = Arrangement.SpaceBetween,
                             verticalAlignment = Alignment.CenterVertically,
@@ -262,15 +264,17 @@ private fun AuditTimelineRow(
     val timeline = MaterialTheme.colorScheme.outlineVariant
     val rowShape: Shape = RoundedCornerShape(12.dp)
     Row(
-        modifier = Modifier.fillMaxWidth()
-            .background(
-                if (selected) MaterialTheme.colorScheme.secondaryContainer.copy(alpha = 0.42f)
-                else Color.Transparent,
-                rowShape,
-            )
-            .height(IntrinsicSize.Min).clickable(onClick = onClick)
-            .semantics { this.selected = selected }
-            .padding(horizontal = 8.dp),
+        modifier =
+            Modifier.fillMaxWidth()
+                .background(
+                    if (selected) MaterialTheme.colorScheme.secondaryContainer.copy(alpha = 0.42f)
+                    else Color.Transparent,
+                    rowShape,
+                )
+                .height(IntrinsicSize.Min)
+                .clickable(onClick = onClick)
+                .semantics { this.selected = selected }
+                .padding(horizontal = 8.dp),
         horizontalArrangement = Arrangement.spacedBy(12.dp),
         verticalAlignment = Alignment.Top,
     ) {
@@ -285,14 +289,26 @@ private fun AuditTimelineRow(
         Canvas(Modifier.width(12.dp).fillMaxHeight()) {
             val markerY = 22.dp.toPx().coerceAtMost(size.height / 2f)
             if (!firstInDay) {
-                drawLine(timeline, start = androidx.compose.ui.geometry.Offset(size.width / 2f, 0f),
-                    end = androidx.compose.ui.geometry.Offset(size.width / 2f, markerY), strokeWidth = 2.dp.toPx())
+                drawLine(
+                    timeline,
+                    start = androidx.compose.ui.geometry.Offset(size.width / 2f, 0f),
+                    end = androidx.compose.ui.geometry.Offset(size.width / 2f, markerY),
+                    strokeWidth = 2.dp.toPx(),
+                )
             }
             if (!lastInDay) {
-                drawLine(timeline, start = androidx.compose.ui.geometry.Offset(size.width / 2f, markerY),
-                    end = androidx.compose.ui.geometry.Offset(size.width / 2f, size.height), strokeWidth = 2.dp.toPx())
+                drawLine(
+                    timeline,
+                    start = androidx.compose.ui.geometry.Offset(size.width / 2f, markerY),
+                    end = androidx.compose.ui.geometry.Offset(size.width / 2f, size.height),
+                    strokeWidth = 2.dp.toPx(),
+                )
             }
-            drawCircle(accent, radius = 4.dp.toPx(), center = androidx.compose.ui.geometry.Offset(size.width / 2f, markerY))
+            drawCircle(
+                accent,
+                radius = 4.dp.toPx(),
+                center = androidx.compose.ui.geometry.Offset(size.width / 2f, markerY),
+            )
         }
         Column(
             Modifier.weight(1f).padding(top = 10.dp, bottom = 12.dp),
@@ -354,9 +370,9 @@ private fun AuditDetail(
     val fields = event.displayDetailFields { dates.timestamp(it, includeSeconds = true) }
     val technicalJson = event.technicalJson()
     fun copy(label: String, value: String) {
-        context.getSystemService(ClipboardManager::class.java).setPrimaryClip(
-            ClipData.newPlainText(label, value),
-        )
+        context
+            .getSystemService(ClipboardManager::class.java)
+            .setPrimaryClip(ClipData.newPlainText(label, value))
         report("$label copied")
     }
 
@@ -401,9 +417,12 @@ private fun AuditDetail(
                     }
                 }
                 Disclosure("Technical information · JSON") {
-                    ExactText(technicalJson, trailingAction = {
-                        CopyIconButton("Copy event JSON") { copy("Event JSON", technicalJson) }
-                    })
+                    ExactText(
+                        technicalJson,
+                        trailingAction = {
+                            CopyIconButton("Copy event JSON") { copy("Event JSON", technicalJson) }
+                        },
+                    )
                 }
             }
         }
@@ -417,31 +436,30 @@ private fun CopyIconButton(description: String, onClick: () -> Unit) {
     }
 }
 
-
-private fun AuditOutcome.displayName(): String = when (this) {
-    AuditOutcome.RECEIVED -> "Received"
-    AuditOutcome.APPROVED -> "Approved"
-    AuditOutcome.DENIED -> "Denied"
-    AuditOutcome.REJECTED -> "Rejected"
-    AuditOutcome.ABORTED -> "Aborted"
-    AuditOutcome.COMPLETED -> "Completed"
-    AuditOutcome.CHANGED -> "Changed"
-    AuditOutcome.FAILED -> "Failed"
-    AuditOutcome.DEFERRED -> "Needs user review"
-}
+private fun AuditOutcome.displayName(): String =
+    when (this) {
+        AuditOutcome.RECEIVED -> "Received"
+        AuditOutcome.APPROVED -> "Approved"
+        AuditOutcome.DENIED -> "Denied"
+        AuditOutcome.REJECTED -> "Rejected"
+        AuditOutcome.ABORTED -> "Aborted"
+        AuditOutcome.COMPLETED -> "Completed"
+        AuditOutcome.CHANGED -> "Changed"
+        AuditOutcome.FAILED -> "Failed"
+        AuditOutcome.DEFERRED -> "Needs user review"
+    }
 
 @Composable
-private fun AuditOutcome.accentColor(): Color = when (this) {
-    AuditOutcome.APPROVED,
-    AuditOutcome.COMPLETED,
-    -> MaterialTheme.agentknockColors.success
-    AuditOutcome.DENIED,
-    AuditOutcome.REJECTED,
-    AuditOutcome.FAILED,
-    -> MaterialTheme.agentknockColors.danger
-    AuditOutcome.DEFERRED -> MaterialTheme.agentknockColors.attentionAccent
-    else -> MaterialTheme.colorScheme.onSurfaceVariant
-}
+private fun AuditOutcome.accentColor(): Color =
+    when (this) {
+        AuditOutcome.APPROVED,
+        AuditOutcome.COMPLETED -> MaterialTheme.agentknockColors.success
+        AuditOutcome.DENIED,
+        AuditOutcome.REJECTED,
+        AuditOutcome.FAILED -> MaterialTheme.agentknockColors.danger
+        AuditOutcome.DEFERRED -> MaterialTheme.agentknockColors.attentionAccent
+        else -> MaterialTheme.colorScheme.onSurfaceVariant
+    }
 
 private fun AuditFilter.matches(event: AuditEvent): Boolean {
     val presentation = event.presentation()
@@ -450,9 +468,10 @@ private fun AuditFilter.matches(event: AuditEvent): Boolean {
         AuditFilter.SECRET_USE -> presentation.sensitiveUse
         AuditFilter.UPLOADS -> presentation.category == AuditCategory.SECRET_UPLOAD
         AuditFilter.PAIRINGS -> presentation.category == AuditCategory.PAIRING
-        AuditFilter.CHANGES -> presentation.category == AuditCategory.SECRET ||
-            presentation.category == AuditCategory.CLIENT ||
-            presentation.category == AuditCategory.DEVICE ||
-            presentation.category == AuditCategory.APPROVAL
+        AuditFilter.CHANGES ->
+            presentation.category == AuditCategory.SECRET ||
+                presentation.category == AuditCategory.CLIENT ||
+                presentation.category == AuditCategory.DEVICE ||
+                presentation.category == AuditCategory.APPROVAL
     }
 }

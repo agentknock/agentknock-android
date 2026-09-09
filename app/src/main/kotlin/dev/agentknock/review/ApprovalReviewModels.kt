@@ -36,23 +36,17 @@ internal data class ApprovalReviewParentFacts(
 
 @Serializable
 internal enum class ApprovalReviewOperation {
-    @SerialName("invocation")
-    INVOCATION,
-
-    @SerialName("git_sign")
-    GIT_SIGN,
-
-    @SerialName("ssh_authenticate")
-    SSH_AUTHENTICATE,
+    @SerialName("invocation") INVOCATION,
+    @SerialName("git_sign") GIT_SIGN,
+    @SerialName("ssh_authenticate") SSH_AUTHENTICATE,
 }
 
-@Serializable
-internal sealed interface ApprovalReviewSecretFacts
+@Serializable internal sealed interface ApprovalReviewSecretFacts
 
 @Serializable
 @SerialName("environment")
 internal data class ApprovalReviewEnvironmentSecretFacts(
-    val variables: Map<String, ApprovalReviewEnvironmentVariableFacts>,
+    val variables: Map<String, ApprovalReviewEnvironmentVariableFacts>
 ) : ApprovalReviewSecretFacts
 
 @Serializable
@@ -70,14 +64,9 @@ internal data class ApprovalReviewEnvironmentVariableFacts(
 
 @Serializable
 internal enum class ApprovalReviewEnvironmentDelivery {
-    @SerialName("environment")
-    ENVIRONMENT,
-
-    @SerialName("standard_input")
-    STANDARD_INPUT,
-
-    @SerialName("omitted")
-    OMITTED,
+    @SerialName("environment") ENVIRONMENT,
+    @SerialName("standard_input") STANDARD_INPUT,
+    @SerialName("omitted") OMITTED,
 }
 
 @Serializable
@@ -117,7 +106,8 @@ internal data class ApprovalReviewGitRepositoryEvidence(
     val worktree: String? = null,
     val head: ApprovalReviewGitHeadEvidence? = null,
     @SerialName("changed_path_count") val changedPathCount: Long? = null,
-    @SerialName("changed_paths") val changedPaths: List<ApprovalReviewGitChangedPathEvidence>? = null,
+    @SerialName("changed_paths")
+    val changedPaths: List<ApprovalReviewGitChangedPathEvidence>? = null,
 )
 
 @Serializable

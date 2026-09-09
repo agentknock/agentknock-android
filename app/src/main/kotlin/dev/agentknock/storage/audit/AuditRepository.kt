@@ -20,36 +20,28 @@ internal enum class AuditEventType(val code: String) {
     CLIENT_INSTRUCTIONS_CHANGED("client_instructions_changed"),
     CLIENT_REMOVAL_CONFIRMATION_FAILED("client_removal_confirmation_failed"),
     CLIENT_UNPAIRED_ITSELF("client_unpaired_itself"),
-
     PAIRING_DECIDED("pairing_decided"),
     PAIRING_REQUESTED("pairing_requested"),
     PAIRING_COMPLETED("pairing_completed"),
     PAIRING_CONFIRMATION_RECEIVED("pairing_confirmation_received"),
-
     SECRET_USE_RECEIVED("secret_use_received"),
     SECRET_USE_AI_REVIEWED("secret_use_ai_reviewed"),
     SECRET_USE_DECIDED("secret_use_decided"),
     SECRET_USE_COMPLETED("secret_use_completed"),
-
     GIT_SIGN_RECEIVED("git_sign_received"),
     GIT_SIGN_AI_REVIEWED("git_sign_ai_reviewed"),
     GIT_SIGN_DECIDED("git_sign_decided"),
     GIT_SIGN_COMPLETED("git_sign_completed"),
-
     SSH_AUTHENTICATION_RECEIVED("ssh_authentication_received"),
     SSH_AUTHENTICATION_AI_REVIEWED("ssh_authentication_ai_reviewed"),
     SSH_AUTHENTICATION_DECIDED("ssh_authentication_decided"),
     SSH_AUTHENTICATION_COMPLETED("ssh_authentication_completed"),
-
     SECRET_LIST_RECEIVED("secret_list_received"),
     SECRET_LIST_COMPLETED("secret_list_completed"),
-
     SECRET_UPLOAD_RECEIVED("secret_upload_received"),
     SECRET_UPLOAD_DECIDED("secret_upload_decided"),
     SECRET_UPLOAD_COMPLETED("secret_upload_completed"),
-
     REQUEST_REJECTED("request_rejected"),
-
     SECRET_APPROVAL_MODE_CHANGED("secret_approval_mode_changed"),
     SECRET_INSTRUCTIONS_CHANGED("secret_instructions_changed"),
     CLIENT_APPROVAL_OVERRIDE_CHANGED("client_approval_override_changed"),
@@ -64,13 +56,11 @@ internal enum class AuditEventType(val code: String) {
     ENVIRONMENT_VARIABLE_ADDED("environment_variable_added"),
     ENVIRONMENT_VARIABLE_UPDATED("environment_variable_updated"),
     ENVIRONMENT_VARIABLE_DELETED("environment_variable_deleted"),
-
     NEW_PAIRINGS_RESUMED("new_pairings_resumed"),
     NEW_PAIRINGS_PAUSED("new_pairings_paused"),
     PAIRING_ADDRESS_CLAIMED("pairing_address_claimed"),
     PAIRING_ADDRESS_CHANGED("pairing_address_changed"),
-    GENERAL_AI_REVIEW_INSTRUCTIONS_CHANGED("general_ai_review_instructions_changed"),
-    ;
+    GENERAL_AI_REVIEW_INSTRUCTIONS_CHANGED("general_ai_review_instructions_changed");
 
     companion object {
         fun fromCode(code: String): AuditEventType =
@@ -87,8 +77,7 @@ internal enum class AuditOutcome(val code: String) {
     COMPLETED("completed"),
     CHANGED("changed"),
     FAILED("failed"),
-    DEFERRED("deferred"),
-    ;
+    DEFERRED("deferred");
 
     companion object {
         fun fromCode(code: String): AuditOutcome =
@@ -103,12 +92,13 @@ internal enum class AuditDecisionSource(val code: String) {
     TEMPORARY_ACCESS("temporary_access"),
     MIXED("mixed"),
     NON_SENSITIVE("non_sensitive"),
-    VALIDATION("validation"),
-    ;
+    VALIDATION("validation");
 
     companion object {
         fun fromCode(code: String): AuditDecisionSource =
-            checkNotNull(entries.find { it.code == code }) { "Unknown audit decision source: $code" }
+            checkNotNull(entries.find { it.code == code }) {
+                "Unknown audit decision source: $code"
+            }
     }
 }
 
@@ -143,26 +133,32 @@ internal data class AuditEvent(
 )
 
 internal fun auditDataOf(vararg values: Pair<String, Any?>): Map<String, JsonElement> =
-    values.mapNotNull { (name, value) ->
-        val json = when (value) {
-            null -> null
-            is String -> JsonPrimitive(value)
-            is Boolean -> JsonPrimitive(value)
-            is Number -> JsonPrimitive(value)
-            is JsonElement -> value
-            is List<*> -> kotlinx.serialization.json.JsonArray(value.map { item ->
-                when (item) {
-                    null -> JsonNull
-                    is String -> JsonPrimitive(item)
-                    is Boolean -> JsonPrimitive(item)
-                    is Number -> JsonPrimitive(item)
+    values
+        .mapNotNull { (name, value) ->
+            val json =
+                when (value) {
+                    null -> null
+                    is String -> JsonPrimitive(value)
+                    is Boolean -> JsonPrimitive(value)
+                    is Number -> JsonPrimitive(value)
+                    is JsonElement -> value
+                    is List<*> ->
+                        kotlinx.serialization.json.JsonArray(
+                            value.map { item ->
+                                when (item) {
+                                    null -> JsonNull
+                                    is String -> JsonPrimitive(item)
+                                    is Boolean -> JsonPrimitive(item)
+                                    is Number -> JsonPrimitive(item)
+                                    else -> error("Unsupported audit field value for $name")
+                                }
+                            }
+                        )
                     else -> error("Unsupported audit field value for $name")
                 }
-            })
-            else -> error("Unsupported audit field value for $name")
+            json?.let { name to it }
         }
-        json?.let { name to it }
-    }.toMap()
+        .toMap()
 
 internal interface AuditSink {
     suspend fun record(record: AuditRecord)
@@ -180,14 +176,14 @@ internal class AuditRepository(
     private val dao: AuditDao,
     private val currentTimeMillis: () -> Long = System::currentTimeMillis,
 ) : AuditSink {
-    fun observeEvents(): Flow<List<AuditEvent>> = dao.observeEvents().map { events ->
-        events.map { event -> event.toModel() }
-    }
+    fun observeEvents(): Flow<List<AuditEvent>> =
+        dao.observeEvents().map { events ->
+            events.map { event -> event.toModel() }
+        }
 
     fun observeEvent(id: Long): Flow<AuditEvent?> = dao.observeEvent(id).map { it?.toModel() }
 
-    suspend fun pruneExpired(): Int =
-        dao.deleteBefore(currentTimeMillis() - RETENTION_MILLIS)
+    suspend fun pruneExpired(): Int = dao.deleteBefore(currentTimeMillis() - RETENTION_MILLIS)
 
     override suspend fun record(record: AuditRecord) {
         append(listOf(record), currentTimeMillis())
@@ -201,18 +197,20 @@ internal class AuditRepository(
         )
     }
 
-    private fun AuditRecord.toEntity(occurredAt: Long) = AuditEventEntity(
-        occurredAt = occurredAt,
-        eventType = type.code,
-        outcome = outcome.code,
-        decisionSource = decisionSource?.code,
-        clientId = clientId,
-        relayRequestId = relayRequestId,
-        bodyJson = auditJson.encodeToString(
-            JsonObject.serializer(),
-            auditBody(subject, context, detail, expiresAt, clientName, data),
-        ),
-    )
+    private fun AuditRecord.toEntity(occurredAt: Long) =
+        AuditEventEntity(
+            occurredAt = occurredAt,
+            eventType = type.code,
+            outcome = outcome.code,
+            decisionSource = decisionSource?.code,
+            clientId = clientId,
+            relayRequestId = relayRequestId,
+            bodyJson =
+                auditJson.encodeToString(
+                    JsonObject.serializer(),
+                    auditBody(subject, context, detail, expiresAt, clientName, data),
+                ),
+        )
 
     private fun AuditEventEntity.toModel(): AuditEvent {
         val body = auditJson.decodeFromString(JsonObject.serializer(), bodyJson)
@@ -259,13 +257,13 @@ internal fun auditBody(
     }
 }
 
-private fun JsonObject.string(name: String): String? =
-    get(name)?.jsonPrimitive?.content
+private fun JsonObject.string(name: String): String? = get(name)?.jsonPrimitive?.content
 
-private val auditDisplayFields = setOf(
-    "subject",
-    "context",
-    "detail",
-    "expires_at",
-    "client_name",
-)
+private val auditDisplayFields =
+    setOf(
+        "subject",
+        "context",
+        "detail",
+        "expires_at",
+        "client_name",
+    )

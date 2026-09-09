@@ -6,9 +6,9 @@ import android.content.pm.PackageManager
 import android.os.Build
 import android.os.Bundle
 import android.view.WindowManager
-import androidx.activity.result.contract.ActivityResultContracts
 import androidx.activity.compose.setContent
 import androidx.activity.enableEdgeToEdge
+import androidx.activity.result.contract.ActivityResultContracts
 import androidx.fragment.app.FragmentActivity
 import androidx.lifecycle.Lifecycle
 import androidx.lifecycle.lifecycleScope
@@ -43,32 +43,35 @@ internal class MainActivityNavigationState {
 
     fun consume(target: ExternalNavigation): Boolean = _target.compareAndSet(target, null)
 
-    fun save(): Bundle = Bundle().apply {
-        when (val target = _target.value) {
-            is ExternalNavigation.Request -> {
-                putString(TARGET_KIND_KEY, REQUEST_KIND)
-                putBoolean(REQUEST_HAS_ID_KEY, target.requestId != null)
-                target.requestId?.let { putString(REQUEST_ID_KEY, it) }
+    fun save(): Bundle =
+        Bundle().apply {
+            when (val target = _target.value) {
+                is ExternalNavigation.Request -> {
+                    putString(TARGET_KIND_KEY, REQUEST_KIND)
+                    putBoolean(REQUEST_HAS_ID_KEY, target.requestId != null)
+                    target.requestId?.let { putString(REQUEST_ID_KEY, it) }
+                }
+                is ExternalNavigation.SubscriptionRedemption -> Unit
+                ExternalNavigation.InvalidSubscriptionLink -> {
+                    putString(TARGET_KIND_KEY, SUBSCRIPTION_INVALID_LINK_KIND)
+                }
+                null -> Unit
             }
-            is ExternalNavigation.SubscriptionRedemption -> Unit
-            ExternalNavigation.InvalidSubscriptionLink -> {
-                putString(TARGET_KIND_KEY, SUBSCRIPTION_INVALID_LINK_KIND)
-            }
-            null -> Unit
         }
-    }
 
     fun restore(savedState: Bundle?) {
         if (savedState == null) return
-        _target.value = when (savedState.getString(TARGET_KIND_KEY)) {
-            REQUEST_KIND -> ExternalNavigation.Request(
-                savedState.getString(REQUEST_ID_KEY).takeIf {
-                    savedState.getBoolean(REQUEST_HAS_ID_KEY)
-                },
-            )
-            SUBSCRIPTION_INVALID_LINK_KIND -> ExternalNavigation.InvalidSubscriptionLink
-            else -> null
-        }
+        _target.value =
+            when (savedState.getString(TARGET_KIND_KEY)) {
+                REQUEST_KIND ->
+                    ExternalNavigation.Request(
+                        savedState.getString(REQUEST_ID_KEY).takeIf {
+                            savedState.getBoolean(REQUEST_HAS_ID_KEY)
+                        }
+                    )
+                SUBSCRIPTION_INVALID_LINK_KIND -> ExternalNavigation.InvalidSubscriptionLink
+                else -> null
+            }
     }
 
     private companion object {
@@ -83,16 +86,15 @@ internal class MainActivityNavigationState {
 class MainActivity : FragmentActivity() {
     private val navigation = MainActivityNavigationState()
     private val notificationStateGeneration = MutableStateFlow(0L)
-    private val notificationPermissionRequestLauncher = registerForActivityResult(
-        ActivityResultContracts.RequestPermission(),
-    ) { granted ->
-        notificationStateGeneration.value += 1
-        lifecycleScope.launch {
-            val notifications =
-                (application as AgentknockApplication).container.requestNotifications
-            if (granted) notifications.redisplay() else notifications.reconcile()
+    private val notificationPermissionRequestLauncher =
+        registerForActivityResult(ActivityResultContracts.RequestPermission()) { granted ->
+            notificationStateGeneration.value += 1
+            lifecycleScope.launch {
+                val notifications =
+                    (application as AgentknockApplication).container.requestNotifications
+                if (granted) notifications.redisplay() else notifications.reconcile()
+            }
         }
-    }
 
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
@@ -162,8 +164,8 @@ class MainActivity : FragmentActivity() {
     private fun requestNotificationPermission() {
         if (
             Build.VERSION.SDK_INT >= Build.VERSION_CODES.TIRAMISU &&
-            checkSelfPermission(Manifest.permission.POST_NOTIFICATIONS) !=
-            PackageManager.PERMISSION_GRANTED
+                checkSelfPermission(Manifest.permission.POST_NOTIFICATIONS) !=
+                    PackageManager.PERMISSION_GRANTED
         ) {
             notificationPermissionRequestLauncher.launch(Manifest.permission.POST_NOTIFICATIONS)
         }
@@ -190,12 +192,12 @@ class MainActivity : FragmentActivity() {
         }
         if (
             intent.action == RequestNotifications.OPEN_REQUESTS_ACTION ||
-            intent.action == RequestNotifications.OPEN_REQUEST_ACTION
+                intent.action == RequestNotifications.OPEN_REQUEST_ACTION
         ) {
             navigation.open(
                 ExternalNavigation.Request(
-                    intent.getStringExtra(RequestNotifications.REQUEST_ID_EXTRA),
-                ),
+                    intent.getStringExtra(RequestNotifications.REQUEST_ID_EXTRA)
+                )
             )
             intent.action = null
         }

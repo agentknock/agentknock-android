@@ -4,10 +4,10 @@ import dev.agentknock.protocol.GitSignHead
 import dev.agentknock.protocol.GitSignRequestMessage
 import dev.agentknock.protocol.InvocationRequestMessage
 import dev.agentknock.protocol.SshAuthenticationMessageDetails
-import dev.agentknock.storage.request.ClientEntity
-import dev.agentknock.storage.request.SecretUseRequestEntity
 import dev.agentknock.storage.approval.ApprovalAction
 import dev.agentknock.storage.approval.ApprovalEvaluation
+import dev.agentknock.storage.request.ClientEntity
+import dev.agentknock.storage.request.SecretUseRequestEntity
 import dev.agentknock.storage.secret.ENVIRONMENT_SECRET_TYPE
 import dev.agentknock.storage.secret.EnvironmentVariableReviewDestination
 import dev.agentknock.storage.secret.RequestedSecretDescription
@@ -26,33 +26,38 @@ internal fun approvalReviewRequest(
     policies: List<SecretApprovalPolicy>,
     deviceInstructions: String,
 ): ApprovalReviewRequest {
-    val secrets = approvalReviewSecretFacts(
-        description,
-        values,
-        nonSensitiveEnvironmentValues,
-    )
+    val secrets =
+        approvalReviewSecretFacts(
+            description,
+            values,
+            nonSensitiveEnvironmentValues,
+        )
     return ApprovalReviewRequest(
-        instructions = approvalReviewInstructions(
-            client = client,
-            deviceInstructions = deviceInstructions,
-            decisionSecretNames = secrets.keys,
-            evaluation = evaluation,
-            policies = policies,
-        ),
-        facts = ApprovalReviewFacts(
-            client = client.name,
-            operation = ApprovalReviewOperation.INVOCATION,
-            secrets = secrets,
-        ),
-        evidence = ApprovalReviewEvidence(
-            reason = contents.reason,
-            command = ApprovalReviewCommandEvidence(
-                argv = listOf(contents.operation.command) + contents.operation.arguments,
-                workingDirectory = contents.operation.workingDirectory,
-                resolvedExecutable = contents.operation.executablePath,
-                launcherChain = contents.launcherChain,
+        instructions =
+            approvalReviewInstructions(
+                client = client,
+                deviceInstructions = deviceInstructions,
+                decisionSecretNames = secrets.keys,
+                evaluation = evaluation,
+                policies = policies,
             ),
-        ),
+        facts =
+            ApprovalReviewFacts(
+                client = client.name,
+                operation = ApprovalReviewOperation.INVOCATION,
+                secrets = secrets,
+            ),
+        evidence =
+            ApprovalReviewEvidence(
+                reason = contents.reason,
+                command =
+                    ApprovalReviewCommandEvidence(
+                        argv = listOf(contents.operation.command) + contents.operation.arguments,
+                        workingDirectory = contents.operation.workingDirectory,
+                        resolvedExecutable = contents.operation.executablePath,
+                        launcherChain = contents.launcherChain,
+                    ),
+            ),
     )
 }
 
@@ -72,59 +77,70 @@ internal fun approvalReviewGitSignRequest(
     }
     require(parentElapsedSeconds >= 0) { "Parent elapsed time is negative" }
     return ApprovalReviewRequest(
-        instructions = approvalReviewInstructions(
-            client = client,
-            deviceInstructions = deviceInstructions,
-            decisionSecretNames = setOf(contents.secret),
-            evaluation = evaluation,
-            policies = policies,
-        ),
-        facts = ApprovalReviewFacts(
-            client = client.name,
-            operation = ApprovalReviewOperation.GIT_SIGN,
-            secret = contents.secret,
-        ),
-        parentFacts = ApprovalReviewParentFacts(
-            operation = ApprovalReviewOperation.INVOCATION,
-            elapsedSeconds = parentElapsedSeconds,
-            secrets = invocationSecrets,
-        ),
-        evidence = ApprovalReviewEvidence(
-            signedContent = signedContent,
-            repository = contents.repository?.let { repository ->
-                ApprovalReviewGitRepositoryEvidence(
-                    remote = repository.remote,
-                    worktree = repository.worktree,
-                    head = repository.head?.let { head ->
-                        when (head) {
-                            is GitSignHead.Branch -> ApprovalReviewGitHeadEvidence(
-                                type = "BRANCH",
-                                name = head.name,
-                                upstream = head.upstream,
-                            )
-                            GitSignHead.Detached ->
-                                ApprovalReviewGitHeadEvidence(type = "DETACHED")
-                        }
-                    },
-                    changedPathCount = repository.changedPathCount,
-                    changedPaths = repository.changedPaths?.map { path ->
-                        ApprovalReviewGitChangedPathEvidence(
-                            status = path.status.name,
-                            path = path.path,
+        instructions =
+            approvalReviewInstructions(
+                client = client,
+                deviceInstructions = deviceInstructions,
+                decisionSecretNames = setOf(contents.secret),
+                evaluation = evaluation,
+                policies = policies,
+            ),
+        facts =
+            ApprovalReviewFacts(
+                client = client.name,
+                operation = ApprovalReviewOperation.GIT_SIGN,
+                secret = contents.secret,
+            ),
+        parentFacts =
+            ApprovalReviewParentFacts(
+                operation = ApprovalReviewOperation.INVOCATION,
+                elapsedSeconds = parentElapsedSeconds,
+                secrets = invocationSecrets,
+            ),
+        evidence =
+            ApprovalReviewEvidence(
+                signedContent = signedContent,
+                repository =
+                    contents.repository?.let { repository ->
+                        ApprovalReviewGitRepositoryEvidence(
+                            remote = repository.remote,
+                            worktree = repository.worktree,
+                            head =
+                                repository.head?.let { head ->
+                                    when (head) {
+                                        is GitSignHead.Branch ->
+                                            ApprovalReviewGitHeadEvidence(
+                                                type = "BRANCH",
+                                                name = head.name,
+                                                upstream = head.upstream,
+                                            )
+                                        GitSignHead.Detached ->
+                                            ApprovalReviewGitHeadEvidence(type = "DETACHED")
+                                    }
+                                },
+                            changedPathCount = repository.changedPathCount,
+                            changedPaths =
+                                repository.changedPaths?.map { path ->
+                                    ApprovalReviewGitChangedPathEvidence(
+                                        status = path.status.name,
+                                        path = path.path,
+                                    )
+                                },
                         )
                     },
-                )
-            },
-        ),
-        parentEvidence = ApprovalReviewEvidence(
-            reason = invocation.reason,
-            command = ApprovalReviewCommandEvidence(
-                argv = listOf(invocation.command) + decodeStringList(invocation.argumentsJson),
-                workingDirectory = invocation.workingDirectory,
-                resolvedExecutable = invocation.executablePath,
-                launcherChain = decodeStringList(invocation.launcherChainJson),
             ),
-        ),
+        parentEvidence =
+            ApprovalReviewEvidence(
+                reason = invocation.reason,
+                command =
+                    ApprovalReviewCommandEvidence(
+                        argv =
+                            listOf(invocation.command) + decodeStringList(invocation.argumentsJson),
+                        workingDirectory = invocation.workingDirectory,
+                        resolvedExecutable = invocation.executablePath,
+                        launcherChain = decodeStringList(invocation.launcherChainJson),
+                    ),
+            ),
     )
 }
 
@@ -144,41 +160,49 @@ internal fun approvalReviewSshAuthenticationRequest(
     }
     require(parentElapsedSeconds >= 0) { "Parent elapsed time is negative" }
     return ApprovalReviewRequest(
-        instructions = approvalReviewInstructions(
-            client = client,
-            deviceInstructions = deviceInstructions,
-            decisionSecretNames = setOf(secretName),
-            evaluation = evaluation,
-            policies = policies,
-        ),
-        facts = ApprovalReviewFacts(
-            client = client.name,
-            operation = ApprovalReviewOperation.SSH_AUTHENTICATE,
-            secret = secretName,
-        ),
-        parentFacts = ApprovalReviewParentFacts(
-            operation = ApprovalReviewOperation.INVOCATION,
-            elapsedSeconds = parentElapsedSeconds,
-            secrets = invocationSecrets,
-        ),
-        evidence = ApprovalReviewEvidence(
-            sshAuthentication = ApprovalReviewSshAuthenticationEvidence(
-                username = details.username,
-                method = details.method.wireName,
-                algorithm = details.algorithm.wireName,
-                hostKeyAlgorithm = details.hostKeyAlgorithm,
-                hostKeyFingerprint = details.hostKeyFingerprint,
+        instructions =
+            approvalReviewInstructions(
+                client = client,
+                deviceInstructions = deviceInstructions,
+                decisionSecretNames = setOf(secretName),
+                evaluation = evaluation,
+                policies = policies,
             ),
-        ),
-        parentEvidence = ApprovalReviewEvidence(
-            reason = invocation.reason,
-            command = ApprovalReviewCommandEvidence(
-                argv = listOf(invocation.command) + decodeStringList(invocation.argumentsJson),
-                workingDirectory = invocation.workingDirectory,
-                resolvedExecutable = invocation.executablePath,
-                launcherChain = decodeStringList(invocation.launcherChainJson),
+        facts =
+            ApprovalReviewFacts(
+                client = client.name,
+                operation = ApprovalReviewOperation.SSH_AUTHENTICATE,
+                secret = secretName,
             ),
-        ),
+        parentFacts =
+            ApprovalReviewParentFacts(
+                operation = ApprovalReviewOperation.INVOCATION,
+                elapsedSeconds = parentElapsedSeconds,
+                secrets = invocationSecrets,
+            ),
+        evidence =
+            ApprovalReviewEvidence(
+                sshAuthentication =
+                    ApprovalReviewSshAuthenticationEvidence(
+                        username = details.username,
+                        method = details.method.wireName,
+                        algorithm = details.algorithm.wireName,
+                        hostKeyAlgorithm = details.hostKeyAlgorithm,
+                        hostKeyFingerprint = details.hostKeyFingerprint,
+                    )
+            ),
+        parentEvidence =
+            ApprovalReviewEvidence(
+                reason = invocation.reason,
+                command =
+                    ApprovalReviewCommandEvidence(
+                        argv =
+                            listOf(invocation.command) + decodeStringList(invocation.argumentsJson),
+                        workingDirectory = invocation.workingDirectory,
+                        resolvedExecutable = invocation.executablePath,
+                        launcherChain = decodeStringList(invocation.launcherChainJson),
+                    ),
+            ),
     )
 }
 
@@ -190,17 +214,18 @@ private fun approvalReviewInstructions(
     policies: List<SecretApprovalPolicy>,
 ): ApprovalReviewInstructions {
     val policiesById = policies.associateBy(SecretApprovalPolicy::secretId)
-    val secretInstructions = evaluation.secrets
-        .filter {
-            it.secretName in decisionSecretNames &&
-                it.action == ApprovalAction.ASK_AI
-        }
-        .associateTo(linkedMapOf()) { secret ->
-            val policy = checkNotNull(policiesById[secret.secretId]) {
-                "Missing approval policy for ${secret.secretName}"
+    val secretInstructions =
+        evaluation.secrets
+            .filter {
+                it.secretName in decisionSecretNames && it.action == ApprovalAction.ASK_AI
             }
-            secret.secretName to policy.instructions
-        }
+            .associateTo(linkedMapOf()) { secret ->
+                val policy =
+                    checkNotNull(policiesById[secret.secretId]) {
+                        "Missing approval policy for ${secret.secretName}"
+                    }
+                secret.secretName to policy.instructions
+            }
     require(secretInstructions.isNotEmpty()) { "AI review has no secrets to review" }
 
     return ApprovalReviewInstructions(
@@ -219,59 +244,66 @@ internal fun approvalReviewSecretFacts(
         "Review metadata does not match requested secret values"
     }
     return description.reviewMetadata.associateTo(linkedMapOf()) { secret ->
-        secret.name to when (secret.type) {
-            ENVIRONMENT_SECRET_TYPE -> {
-                val environment = checkNotNull(values[secret.name] as? SecretValues.Environment) {
-                    "Missing environment values for ${secret.name}"
-                }.environment
-                val metadata = secret.environmentVariables.associateBy { it.name }
-                val deliveredSources = metadata.mapNotNullTo(linkedSetOf()) { (source, variable) ->
-                    source.takeUnless {
-                        variable.destination == EnvironmentVariableReviewDestination.Omitted
+        secret.name to
+            when (secret.type) {
+                ENVIRONMENT_SECRET_TYPE -> {
+                    val environment =
+                        checkNotNull(values[secret.name] as? SecretValues.Environment) {
+                                "Missing environment values for ${secret.name}"
+                            }
+                            .environment
+                    val metadata = secret.environmentVariables.associateBy { it.name }
+                    val deliveredSources =
+                        metadata.mapNotNullTo(linkedSetOf()) { (source, variable) ->
+                            source.takeUnless {
+                                variable.destination == EnvironmentVariableReviewDestination.Omitted
+                            }
+                        }
+                    require(environment.keys == deliveredSources) {
+                        "Review metadata does not match delivered environment values for ${secret.name}"
                     }
+                    val safeValues = nonSensitiveEnvironmentValues[secret.name].orEmpty()
+                    val variables =
+                        metadata.mapValuesTo(linkedMapOf()) { (source, variable) ->
+                            val destination = variable.destination
+                            val value = if (variable.sensitive) null else safeValues[source]
+                            if (
+                                !variable.sensitive &&
+                                    destination != EnvironmentVariableReviewDestination.Omitted
+                            ) {
+                                require(value != null) {
+                                    "Missing non-sensitive environment value $source"
+                                }
+                            }
+                            when (destination) {
+                                is EnvironmentVariableReviewDestination.Environment ->
+                                    ApprovalReviewEnvironmentVariableFacts(
+                                        delivery = ApprovalReviewEnvironmentDelivery.ENVIRONMENT,
+                                        target = destination.name,
+                                        value = value,
+                                    )
+                                EnvironmentVariableReviewDestination.Omitted ->
+                                    ApprovalReviewEnvironmentVariableFacts(
+                                        delivery = ApprovalReviewEnvironmentDelivery.OMITTED,
+                                        value = value,
+                                    )
+                                EnvironmentVariableReviewDestination.StandardInput ->
+                                    ApprovalReviewEnvironmentVariableFacts(
+                                        delivery = ApprovalReviewEnvironmentDelivery.STANDARD_INPUT,
+                                        value = value,
+                                    )
+                            }
+                        }
+                    ApprovalReviewEnvironmentSecretFacts(variables)
                 }
-                require(environment.keys == deliveredSources) {
-                    "Review metadata does not match delivered environment values for ${secret.name}"
-                }
-                val safeValues = nonSensitiveEnvironmentValues[secret.name].orEmpty()
-                val variables = metadata.mapValuesTo(linkedMapOf()) { (source, variable) ->
-                    val destination = variable.destination
-                    val value = if (variable.sensitive) null else safeValues[source]
-                    if (
-                        !variable.sensitive &&
-                        destination != EnvironmentVariableReviewDestination.Omitted
-                    ) {
-                        require(value != null) { "Missing non-sensitive environment value $source" }
+                SSH_SECRET_TYPE -> {
+                    require(values[secret.name] is SecretValues.Ssh) {
+                        "Missing SSH values for ${secret.name}"
                     }
-                    when (destination) {
-                        is EnvironmentVariableReviewDestination.Environment ->
-                            ApprovalReviewEnvironmentVariableFacts(
-                                delivery = ApprovalReviewEnvironmentDelivery.ENVIRONMENT,
-                                target = destination.name,
-                                value = value,
-                            )
-                        EnvironmentVariableReviewDestination.Omitted ->
-                            ApprovalReviewEnvironmentVariableFacts(
-                                delivery = ApprovalReviewEnvironmentDelivery.OMITTED,
-                                value = value,
-                            )
-                        EnvironmentVariableReviewDestination.StandardInput ->
-                            ApprovalReviewEnvironmentVariableFacts(
-                                delivery = ApprovalReviewEnvironmentDelivery.STANDARD_INPUT,
-                                value = value,
-                            )
-                    }
+                    ApprovalReviewSshSecretFacts
                 }
-                ApprovalReviewEnvironmentSecretFacts(variables)
+                else -> error("Unsupported review secret type")
             }
-            SSH_SECRET_TYPE -> {
-                require(values[secret.name] is SecretValues.Ssh) {
-                    "Missing SSH values for ${secret.name}"
-                }
-                ApprovalReviewSshSecretFacts
-            }
-            else -> error("Unsupported review secret type")
-        }
     }
 }
 

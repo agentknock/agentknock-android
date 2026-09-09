@@ -3,8 +3,6 @@
 package dev.agentknock.ui.secrets
 
 import androidx.compose.foundation.BorderStroke
-import androidx.compose.foundation.clickable
-import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.FlowRow
@@ -19,6 +17,7 @@ import androidx.compose.foundation.layout.width
 import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.LazyListState
 import androidx.compose.foundation.lazy.rememberLazyListState
+import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.foundation.text.selection.SelectionContainer
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.outlined.Add
@@ -65,10 +64,6 @@ import androidx.compose.ui.semantics.stateDescription
 import androidx.compose.ui.text.font.FontFamily
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
-import dev.agentknock.subscription.AiReviewAccess
-import dev.agentknock.ui.components.rememberDateTimeFormatter
-import dev.agentknock.ui.components.InstructionsCard
-import dev.agentknock.ui.components.AiInstructionsScope
 import dev.agentknock.R
 import dev.agentknock.relay.RelayClientState
 import dev.agentknock.storage.request.ClientSummary
@@ -79,16 +74,19 @@ import dev.agentknock.storage.secret.SecretType
 import dev.agentknock.storage.secret.SshKeyMetadata
 import dev.agentknock.storage.secret.TemporaryAccessGrant
 import dev.agentknock.storage.secret.TemporaryAccessOperation
-import dev.agentknock.ui.components.InformationRow
+import dev.agentknock.subscription.AiReviewAccess
+import dev.agentknock.ui.components.AiInstructionsScope
+import dev.agentknock.ui.components.ExactText
 import dev.agentknock.ui.components.InformationSurface
+import dev.agentknock.ui.components.InstructionsCard
 import dev.agentknock.ui.components.NavigationBackButton
 import dev.agentknock.ui.components.Notice
 import dev.agentknock.ui.components.NoticeTone
 import dev.agentknock.ui.components.ProseEditorScreen
-import dev.agentknock.ui.components.ExactText
 import dev.agentknock.ui.components.TonalIcon
-import dev.agentknock.ui.theme.agentknockColors
+import dev.agentknock.ui.components.rememberDateTimeFormatter
 import dev.agentknock.ui.requests.SelectableFact
+import dev.agentknock.ui.theme.agentknockColors
 
 internal data class SecretDetailActions(
     val onBack: () -> Unit,
@@ -123,17 +121,18 @@ internal fun SecretDetail(
     val dates = rememberDateTimeFormatter()
     var menuExpanded by remember(secret.id) { mutableStateOf(false) }
     var editingSshComment by rememberSaveable(secret.id) { mutableStateOf(false) }
-    var sshComment by rememberSaveable(secret.id, secret.sshKey?.comment) {
-        mutableStateOf(secret.sshKey?.comment.orEmpty())
-    }
+    var sshComment by
+        rememberSaveable(secret.id, secret.sshKey?.comment) {
+            mutableStateOf(secret.sshKey?.comment.orEmpty())
+        }
     var editingInstructions by rememberSaveable(secret.id) { mutableStateOf(false) }
-    var instructions by rememberSaveable(secret.id, secret.instructions) {
-        mutableStateOf(secret.instructions)
-    }
+    var instructions by
+        rememberSaveable(secret.id, secret.instructions) {
+            mutableStateOf(secret.instructions)
+        }
     val overrides = secret.clientApprovalOverrides.associateBy { it.clientId }
-    val duplicateClientNames = clients.groupingBy(ClientSummary::name).eachCount()
-        .filterValues { it > 1 }
-        .keys
+    val duplicateClientNames =
+        clients.groupingBy(ClientSummary::name).eachCount().filterValues { it > 1 }.keys
     if (editingInstructions) {
         ProseEditorScreen(
             title = "Secret instructions",
@@ -190,12 +189,13 @@ internal fun SecretDetail(
         LazyColumn(
             state = listState,
             modifier = Modifier.fillMaxSize(),
-            contentPadding = PaddingValues(
-                start = 16.dp,
-                end = 16.dp,
-                top = 8.dp,
-                bottom = 20.dp,
-            ),
+            contentPadding =
+                PaddingValues(
+                    start = 16.dp,
+                    end = 16.dp,
+                    top = 8.dp,
+                    bottom = 20.dp,
+                ),
             verticalArrangement = Arrangement.spacedBy(12.dp),
         ) {
             item {
@@ -223,11 +223,16 @@ internal fun SecretDetail(
                             )
                             TextButton(
                                 onClick = actions.onAddVariable,
-                                modifier = Modifier.semantics {
-                                    contentDescription = "Add environment variable"
-                                },
+                                modifier =
+                                    Modifier.semantics {
+                                        contentDescription = "Add environment variable"
+                                    },
                             ) {
-                                Icon(Icons.Outlined.Add, contentDescription = null, modifier = Modifier.size(18.dp))
+                                Icon(
+                                    Icons.Outlined.Add,
+                                    contentDescription = null,
+                                    modifier = Modifier.size(18.dp),
+                                )
                                 Spacer(Modifier.width(6.dp))
                                 Text("Add")
                             }
@@ -237,8 +242,9 @@ internal fun SecretDetail(
                         item {
                             Notice(
                                 title = "Some values are unavailable on this device",
-                                detail = "They cannot be recovered here. Edit each affected variable " +
-                                    "to enter a replacement value.",
+                                detail =
+                                    "They cannot be recovered here. Edit each affected variable " +
+                                        "to enter a replacement value.",
                                 tone = NoticeTone.ATTENTION,
                             )
                         }
@@ -277,7 +283,11 @@ internal fun SecretDetail(
                 SecretType.SSH -> {
                     secret.sshKey?.let { key ->
                         item {
-                            Text("SSH key", style = MaterialTheme.typography.titleSmall, color = MaterialTheme.colorScheme.primary)
+                            Text(
+                                "SSH key",
+                                style = MaterialTheme.typography.titleSmall,
+                                color = MaterialTheme.colorScheme.primary,
+                            )
                         }
                         item {
                             SshPublicKeyCard(
@@ -290,13 +300,15 @@ internal fun SecretDetail(
                                 onReplace = actions.onReplaceSshKey,
                             )
                         }
-                    } ?: item {
-                        EmptyMessage(
-                            title = "SSH key unavailable",
-                            description = "The encrypted private key could not be recovered on this device.",
-                            modifier = Modifier.fillMaxWidth().padding(vertical = 24.dp),
-                        )
                     }
+                        ?: item {
+                            EmptyMessage(
+                                title = "SSH key unavailable",
+                                description =
+                                    "The encrypted private key could not be recovered on this device.",
+                                modifier = Modifier.fillMaxWidth().padding(vertical = 24.dp),
+                            )
+                        }
                 }
             }
             item {
@@ -313,7 +325,12 @@ internal fun SecretDetail(
             item {
                 Column(verticalArrangement = Arrangement.spacedBy(4.dp)) {
                     Row(Modifier.fillMaxWidth(), verticalAlignment = Alignment.CenterVertically) {
-                        Text("Client access", Modifier.weight(1f), style = MaterialTheme.typography.titleSmall, color = MaterialTheme.colorScheme.primary)
+                        Text(
+                            "Client access",
+                            Modifier.weight(1f),
+                            style = MaterialTheme.typography.titleSmall,
+                            color = MaterialTheme.colorScheme.primary,
+                        )
                         ApprovalModeHelp()
                     }
                     Text(
@@ -337,7 +354,9 @@ internal fun SecretDetail(
                 }
             }
             item {
-                InformationSurface(contentPadding = PaddingValues(horizontal = 16.dp, vertical = 4.dp)) {
+                InformationSurface(
+                    contentPadding = PaddingValues(horizontal = 16.dp, vertical = 4.dp)
+                ) {
                     Column {
                         ApprovalModeRow(
                             title = "Default for all clients",
@@ -349,7 +368,9 @@ internal fun SecretDetail(
                             onSelect = actions.onSetApprovalMode,
                         )
                         clients.forEach { client ->
-                            HorizontalDivider(color = MaterialTheme.colorScheme.outlineVariant.copy(alpha = 0.5f))
+                            HorizontalDivider(
+                                color = MaterialTheme.colorScheme.outlineVariant.copy(alpha = 0.5f)
+                            )
                             val override = overrides[client.clientId]
                             ApprovalModeRow(
                                 title = client.approvalLabel(duplicateClientNames),
@@ -362,9 +383,15 @@ internal fun SecretDetail(
                                 onSelect = { mode ->
                                     actions.onSetClientApprovalOverride(client.clientId, mode)
                                 },
-                                onUseDefault = override?.let {
-                                    { actions.onSetClientApprovalOverride(client.clientId, null) }
-                                },
+                                onUseDefault =
+                                    override?.let {
+                                        {
+                                            actions.onSetClientApprovalOverride(
+                                                client.clientId,
+                                                null,
+                                            )
+                                        }
+                                    },
                             )
                         }
                     }
@@ -376,12 +403,16 @@ internal fun SecretDetail(
                     modifier = Modifier.padding(horizontal = 16.dp, vertical = 8.dp),
                     verticalArrangement = Arrangement.spacedBy(4.dp),
                 ) {
-                    Text("Created ${dates.timestamp(secret.createdAt)}",
+                    Text(
+                        "Created ${dates.timestamp(secret.createdAt)}",
                         style = MaterialTheme.typography.bodySmall,
-                        color = MaterialTheme.colorScheme.onSurfaceVariant)
-                    Text("Updated ${dates.timestamp(secret.updatedAt)}",
+                        color = MaterialTheme.colorScheme.onSurfaceVariant,
+                    )
+                    Text(
+                        "Updated ${dates.timestamp(secret.updatedAt)}",
                         style = MaterialTheme.typography.bodySmall,
-                        color = MaterialTheme.colorScheme.onSurfaceVariant)
+                        color = MaterialTheme.colorScheme.onSurfaceVariant,
+                    )
                 }
             }
         }
@@ -409,7 +440,9 @@ internal fun SecretDetail(
                         editingSshComment = false
                         actions.onSaveSshComment(sshComment)
                     },
-                ) { Text("Save") }
+                ) {
+                    Text("Save")
+                }
             },
         )
     }
@@ -432,8 +465,10 @@ private fun SecretTemporaryApprovals(
             grants.forEachIndexed { index, grant ->
                 if (index > 0) HorizontalDivider()
                 val client = clients.firstOrNull { it.clientId == grant.clientId }
-                val paused = client == null || client.state != RelayClientState.ACTIVE ||
-                    client.desiredState?.let { it != RelayClientState.ACTIVE } == true
+                val paused =
+                    client == null ||
+                        client.state != RelayClientState.ACTIVE ||
+                        client.desiredState?.let { it != RelayClientState.ACTIVE } == true
                 Row(
                     modifier = Modifier.fillMaxWidth(),
                     horizontalArrangement = Arrangement.spacedBy(12.dp),
@@ -491,11 +526,12 @@ private fun SecretTemporaryApprovals(
 private fun ClientSummary.approvalLabel(duplicateNames: Set<String>): String =
     if (name in duplicateNames) "$name · ${clientId.takeLast(6)}" else name
 
-private fun TemporaryAccessOperation.displayName(): String = when (this) {
-    TemporaryAccessOperation.INVOCATION -> "Secret values for any command"
-    TemporaryAccessOperation.GIT_SIGN -> "Git signing for any repository"
-    TemporaryAccessOperation.SSH_AUTHENTICATE -> "SSH authentication for any server"
-}
+private fun TemporaryAccessOperation.displayName(): String =
+    when (this) {
+        TemporaryAccessOperation.INVOCATION -> "Secret values for any command"
+        TemporaryAccessOperation.GIT_SIGN -> "Git signing for any repository"
+        TemporaryAccessOperation.SSH_AUTHENTICATE -> "SSH authentication for any server"
+    }
 
 @Composable
 private fun SshPublicKeyCard(
@@ -543,8 +579,11 @@ private fun SshPublicKeyCard(
             monospace = true,
         )
         if (!key.privateKeyAvailable) {
-            Text("Private key unavailable", color = MaterialTheme.colorScheme.error,
-                style = MaterialTheme.typography.bodyMedium)
+            Text(
+                "Private key unavailable",
+                color = MaterialTheme.colorScheme.error,
+                style = MaterialTheme.typography.bodyMedium,
+            )
         }
         FlowRow(
             modifier = Modifier.fillMaxWidth(),
@@ -552,26 +591,37 @@ private fun SshPublicKeyCard(
             itemVerticalAlignment = Alignment.CenterVertically,
         ) {
             FilledTonalButton(onClick = onCopy) {
-                Icon(Icons.Outlined.ContentCopy, contentDescription = null, modifier = Modifier.size(18.dp))
+                Icon(
+                    Icons.Outlined.ContentCopy,
+                    contentDescription = null,
+                    modifier = Modifier.size(18.dp),
+                )
                 Spacer(Modifier.width(8.dp))
                 Text("Copy public key")
             }
             TextButton(
                 onClick = { expanded = !expanded },
-                modifier = Modifier.semantics {
-                    stateDescription = if (expanded) "Expanded" else "Collapsed"
-                },
+                modifier =
+                    Modifier.semantics {
+                        stateDescription = if (expanded) "Expanded" else "Collapsed"
+                    },
             ) {
                 Text("Details")
                 Spacer(Modifier.width(4.dp))
-                Icon(if (expanded) Icons.Outlined.ExpandLess else Icons.Outlined.ExpandMore,
-                    contentDescription = null, modifier = Modifier.size(18.dp))
+                Icon(
+                    if (expanded) Icons.Outlined.ExpandLess else Icons.Outlined.ExpandMore,
+                    contentDescription = null,
+                    modifier = Modifier.size(18.dp),
+                )
             }
         }
         if (expanded) {
             HorizontalDivider(color = MaterialTheme.colorScheme.outlineVariant)
-            Text("OpenSSH public key", style = MaterialTheme.typography.labelMedium,
-                color = MaterialTheme.colorScheme.onSurfaceVariant)
+            Text(
+                "OpenSSH public key",
+                style = MaterialTheme.typography.labelMedium,
+                color = MaterialTheme.colorScheme.onSurfaceVariant,
+            )
             ExactText(key.publicKey)
             TextButton(onClick = onReplace) { Text("Replace key") }
         }
@@ -588,18 +638,29 @@ private fun EnvironmentVariableCard(
     onEdit: () -> Unit,
     embedded: Boolean = false,
 ) {
-    var publicValue by remember(
-        variable.id,
-        variable.valueUpdatedAt,
-        variable.sensitive,
-    ) { mutableStateOf<String?>(null) }
-    var publicValueUnavailable by remember(
-        variable.id,
-        variable.valueUpdatedAt,
-        variable.sensitive,
-    ) { mutableStateOf(false) }
+    var publicValue by
+        remember(
+            variable.id,
+            variable.valueUpdatedAt,
+            variable.sensitive,
+        ) {
+            mutableStateOf<String?>(null)
+        }
+    var publicValueUnavailable by
+        remember(
+            variable.id,
+            variable.valueUpdatedAt,
+            variable.sensitive,
+        ) {
+            mutableStateOf(false)
+        }
 
-    LaunchedEffect(variable.id, variable.valueUpdatedAt, variable.sensitive, variable.valueAvailable) {
+    LaunchedEffect(
+        variable.id,
+        variable.valueUpdatedAt,
+        variable.sensitive,
+        variable.valueAvailable,
+    ) {
         if (!variable.sensitive && variable.valueAvailable) {
             publicValue = onReadValue()
             publicValueUnavailable = publicValue == null
@@ -608,16 +669,18 @@ private fun EnvironmentVariableCard(
 
     val displayedValue = if (variable.sensitive) revealedValue else publicValue
     Surface(
-        color = if (embedded) androidx.compose.ui.graphics.Color.Transparent else {
-            MaterialTheme.colorScheme.surfaceContainerLow
-        },
-        shape = if (embedded) androidx.compose.ui.graphics.RectangleShape else MaterialTheme.shapes.medium,
+        color =
+            if (embedded) androidx.compose.ui.graphics.Color.Transparent
+            else {
+                MaterialTheme.colorScheme.surfaceContainerLow
+            },
+        shape =
+            if (embedded) androidx.compose.ui.graphics.RectangleShape
+            else MaterialTheme.shapes.medium,
         tonalElevation = if (embedded) 0.dp else 1.dp,
     ) {
         Column(
-            modifier = Modifier
-                .fillMaxWidth()
-                .padding(start = 16.dp, top = 12.dp, bottom = 6.dp),
+            modifier = Modifier.fillMaxWidth().padding(start = 16.dp, top = 12.dp, bottom = 6.dp),
             verticalArrangement = Arrangement.spacedBy(4.dp),
         ) {
             Row(
@@ -673,9 +736,10 @@ private fun EnvironmentVariableCard(
                                 stringResource(R.string.masked_value),
                                 style = MaterialTheme.typography.titleMedium,
                                 color = MaterialTheme.colorScheme.onSurfaceVariant,
-                                modifier = Modifier.clearAndSetSemantics {
-                                    contentDescription = "Value hidden"
-                                },
+                                modifier =
+                                    Modifier.clearAndSetSemantics {
+                                        contentDescription = "Value hidden"
+                                    },
                             )
                         } else {
                             Text(
@@ -702,9 +766,10 @@ private fun EnvironmentVariableCard(
                             } else {
                                 Icons.Outlined.VisibilityOff
                             },
-                            contentDescription = stringResource(
-                                if (revealedValue == null) R.string.show else R.string.hide,
-                            ) + " ${variable.name}",
+                            contentDescription =
+                                stringResource(
+                                    if (revealedValue == null) R.string.show else R.string.hide
+                                ) + " ${variable.name}",
                         )
                     }
                 }

@@ -4,7 +4,8 @@ internal fun isFreshRelayRequestId(requestId: String, now: Long): Boolean = runC
     val timestamp = relayRequestTimestamp(requestId) ?: return@runCatching false
     timestamp >= now - REQUEST_ID_MAX_AGE_MILLIS &&
         timestamp <= now + REQUEST_ID_FUTURE_TOLERANCE_MILLIS
-}.getOrDefault(false)
+}
+    .getOrDefault(false)
 
 internal fun relayRequestTimestamp(requestId: String): Long? = runCatching {
     val bytes = requestId.ulidBytes()
@@ -14,7 +15,8 @@ internal fun relayRequestTimestamp(requestId: String): Long? = runCatching {
         timestamp = (timestamp shl 8) or (bytes[index].toLong() and 0xff)
     }
     timestamp
-}.getOrNull()
+}
+    .getOrNull()
 
 private const val REQUEST_ID_MAX_AGE_MILLIS = 24 * 60 * 60 * 1_000L
 private const val REQUEST_ID_FUTURE_TOLERANCE_MILLIS = 5 * 60 * 1_000L

@@ -33,9 +33,9 @@ import androidx.compose.material3.Text
 import androidx.compose.material3.TextButton
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.LaunchedEffect
-import androidx.compose.runtime.remember
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
+import androidx.compose.runtime.remember
 import androidx.compose.runtime.saveable.rememberSaveable
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
@@ -54,14 +54,14 @@ import dev.agentknock.storage.request.SecretUploadRequestDetails
 import dev.agentknock.storage.request.SecretUploadRequestState
 import dev.agentknock.storage.request.SecretUploadVariableDetails
 import dev.agentknock.storage.secret.SshKeyCodec
-import dev.agentknock.ui.components.rememberDateTimeFormatter
 import dev.agentknock.ui.components.DetailPage
 import dev.agentknock.ui.components.DetailValue
 import dev.agentknock.ui.components.Disclosure
 import dev.agentknock.ui.components.ExactText
-import dev.agentknock.ui.components.TonalIcon
 import dev.agentknock.ui.components.Notice
 import dev.agentknock.ui.components.NoticeTone
+import dev.agentknock.ui.components.TonalIcon
+import dev.agentknock.ui.components.rememberDateTimeFormatter
 import dev.agentknock.ui.requests.SelectableFact
 import dev.agentknock.ui.requests.StatusHeader
 import dev.agentknock.ui.requests.StatusSummary
@@ -81,9 +81,10 @@ internal fun SecretUploadRequestDetail(
 ) {
     val dates = rememberDateTimeFormatter()
     val upload = (request.content as InboxRequestContent.SecretUpload).details
-    var approvedName by rememberSaveable(request.id, upload.uploadedName, upload.approvedName) {
-        mutableStateOf(upload.approvedName ?: upload.uploadedName)
-    }
+    var approvedName by
+        rememberSaveable(request.id, upload.uploadedName, upload.approvedName) {
+            mutableStateOf(upload.approvedName ?: upload.uploadedName)
+        }
     var editingName by rememberSaveable(request.id) { mutableStateOf(false) }
     DetailPage(
         title = "Secret upload",
@@ -91,46 +92,50 @@ internal fun SecretUploadRequestDetail(
         modifier = modifier,
         showBack = showBack,
         scrollResetKey = upload.state,
-        bottomContent = if (upload.state == SecretUploadRequestState.REVIEW_PENDING) {
-            {
-                Surface(
-                    color = MaterialTheme.colorScheme.surfaceContainer,
-                    tonalElevation = 3.dp,
-                ) {
-                    Row(
-                        modifier = Modifier.fillMaxWidth().padding(12.dp),
-                        horizontalArrangement = Arrangement.spacedBy(10.dp),
+        bottomContent =
+            if (upload.state == SecretUploadRequestState.REVIEW_PENDING) {
+                {
+                    Surface(
+                        color = MaterialTheme.colorScheme.surfaceContainer,
+                        tonalElevation = 3.dp,
                     ) {
-                        OutlinedButton(
-                            onClick = onReject,
-                            modifier = Modifier.weight(1f),
-                            colors = ButtonDefaults.outlinedButtonColors(
-                                contentColor = MaterialTheme.agentknockColors.danger,
-                            ),
-                            border = BorderStroke(
-                                1.dp,
-                                MaterialTheme.agentknockColors.danger,
-                            ),
+                        Row(
+                            modifier = Modifier.fillMaxWidth().padding(12.dp),
+                            horizontalArrangement = Arrangement.spacedBy(10.dp),
                         ) {
-                            Text("Reject")
-                        }
-                        Button(
-                            onClick = { onApprove(approvedName.trim()) },
-                            enabled = approvedName.isNotBlank(),
-                            modifier = Modifier.weight(1f),
-                            colors = ButtonDefaults.buttonColors(
-                                containerColor = MaterialTheme.agentknockColors.success,
-                                contentColor = MaterialTheme.agentknockColors.onSuccess,
-                            ),
-                        ) {
-                            Text("Approve")
+                            OutlinedButton(
+                                onClick = onReject,
+                                modifier = Modifier.weight(1f),
+                                colors =
+                                    ButtonDefaults.outlinedButtonColors(
+                                        contentColor = MaterialTheme.agentknockColors.danger
+                                    ),
+                                border =
+                                    BorderStroke(
+                                        1.dp,
+                                        MaterialTheme.agentknockColors.danger,
+                                    ),
+                            ) {
+                                Text("Reject")
+                            }
+                            Button(
+                                onClick = { onApprove(approvedName.trim()) },
+                                enabled = approvedName.isNotBlank(),
+                                modifier = Modifier.weight(1f),
+                                colors =
+                                    ButtonDefaults.buttonColors(
+                                        containerColor = MaterialTheme.agentknockColors.success,
+                                        contentColor = MaterialTheme.agentknockColors.onSuccess,
+                                    ),
+                            ) {
+                                Text("Approve")
+                            }
                         }
                     }
                 }
-            }
-        } else {
-            null
-        },
+            } else {
+                null
+            },
     ) {
         StatusHeader(
             StatusSummary(
@@ -138,7 +143,8 @@ internal fun SecretUploadRequestDetail(
                 when (upload.state) {
                     SecretUploadRequestState.VERIFICATION_FAILED -> NoticeTone.DANGER
                     SecretUploadRequestState.REVIEW_PENDING -> NoticeTone.ATTENTION
-                    SecretUploadRequestState.REJECTED, SecretUploadRequestState.ENDED -> NoticeTone.SUBDUED
+                    SecretUploadRequestState.REJECTED,
+                    SecretUploadRequestState.ENDED -> NoticeTone.SUBDUED
                     SecretUploadRequestState.APPROVED -> NoticeTone.SUCCESS
                 },
             ),
@@ -164,7 +170,7 @@ internal fun SecretUploadRequestDetail(
                     )
                     if (
                         upload.mode == SecretUploadMode.CREATE &&
-                        upload.state == SecretUploadRequestState.REVIEW_PENDING
+                            upload.state == SecretUploadRequestState.REVIEW_PENDING
                     ) {
                         IconButton(onClick = { editingName = true }) {
                             Icon(Icons.Outlined.Edit, contentDescription = "Rename secret")
@@ -177,7 +183,8 @@ internal fun SecretUploadRequestDetail(
                 ) {
                     Text(
                         (if (upload.secretType == "ssh") "SSH key" else "Environment variables") +
-                            " · " + when (upload.mode) {
+                            " · " +
+                            when (upload.mode) {
                                 SecretUploadMode.CREATE -> "New secret"
                                 SecretUploadMode.UPDATE -> "Update"
                                 SecretUploadMode.REPLACE -> "Replace"
@@ -209,9 +216,11 @@ internal fun SecretUploadRequestDetail(
         }
 
         if (upload.state != SecretUploadRequestState.REVIEW_PENDING) {
-            upload.approvedName?.takeIf { it != upload.uploadedName }?.let {
-                DetailValue("Uploaded name", upload.uploadedName)
-            }
+            upload.approvedName
+                ?.takeIf { it != upload.uploadedName }
+                ?.let {
+                    DetailValue("Uploaded name", upload.uploadedName)
+                }
             if (upload.state == SecretUploadRequestState.APPROVED) {
                 val name = upload.approvedName ?: upload.uploadedName
                 Notice(
@@ -226,26 +235,30 @@ internal fun SecretUploadRequestDetail(
             }
             upload.error?.let { error ->
                 when (upload.state) {
-                    SecretUploadRequestState.VERIFICATION_FAILED -> Notice(
-                        "Upload could not be verified",
-                        error,
-                        NoticeTone.DANGER,
-                    )
-                    SecretUploadRequestState.APPROVED -> Notice(
-                        "Client confirmation could not be verified",
-                        error,
-                        NoticeTone.NEUTRAL,
-                    )
-                    SecretUploadRequestState.REJECTED -> Notice(
-                        "Upload rejected",
-                        error,
-                        NoticeTone.DANGER,
-                    )
-                    SecretUploadRequestState.ENDED -> Notice(
-                        "Request ended",
-                        error,
-                        NoticeTone.NEUTRAL,
-                    )
+                    SecretUploadRequestState.VERIFICATION_FAILED ->
+                        Notice(
+                            "Upload could not be verified",
+                            error,
+                            NoticeTone.DANGER,
+                        )
+                    SecretUploadRequestState.APPROVED ->
+                        Notice(
+                            "Client confirmation could not be verified",
+                            error,
+                            NoticeTone.NEUTRAL,
+                        )
+                    SecretUploadRequestState.REJECTED ->
+                        Notice(
+                            "Upload rejected",
+                            error,
+                            NoticeTone.DANGER,
+                        )
+                    SecretUploadRequestState.ENDED ->
+                        Notice(
+                            "Request ended",
+                            error,
+                            NoticeTone.NEUTRAL,
+                        )
                     SecretUploadRequestState.REVIEW_PENDING -> Unit
                 }
             }
@@ -263,9 +276,10 @@ internal fun SecretUploadRequestDetail(
         }
     }
     if (editingName) {
-        var editedName by rememberSaveable(request.id, approvedName) {
-            mutableStateOf(approvedName)
-        }
+        var editedName by
+            rememberSaveable(request.id, approvedName) {
+                mutableStateOf(approvedName)
+            }
         AlertDialog(
             onDismissRequest = { editingName = false },
             title = { Text("Secret name") },
@@ -284,7 +298,9 @@ internal fun SecretUploadRequestDetail(
                         approvedName = editedName.trim()
                         editingName = false
                     },
-                ) { Text("Save") }
+                ) {
+                    Text("Save")
+                }
             },
             dismissButton = {
                 TextButton(onClick = { editingName = false }) { Text("Cancel") }
@@ -304,7 +320,11 @@ private fun EnvironmentVariableUploadDetails(
         if (upload.state == SecretUploadRequestState.APPROVED) "Removed" else "Proposed removals",
         upload.removedVariables,
     )
-    ChangeGroup("Not changed", upload.unchangedVariables - upload.variableNames.toSet(), subdued = true)
+    ChangeGroup(
+        "Not changed",
+        upload.unchangedVariables - upload.variableNames.toSet(),
+        subdued = true,
+    )
 
     Text(
         if (upload.state == SecretUploadRequestState.REVIEW_PENDING) {
@@ -345,16 +365,18 @@ private fun EnvironmentVariableUploadDetails(
                     shape = uploadGroupShape(index, upload.variables.lastIndex),
                 ) {
                     Column(
-                        Modifier.fillMaxWidth().padding(start = 16.dp, end = 12.dp, top = 12.dp, bottom = 12.dp),
+                        Modifier.fillMaxWidth()
+                            .padding(start = 16.dp, end = 12.dp, top = 12.dp, bottom = 12.dp),
                         verticalArrangement = Arrangement.spacedBy(8.dp),
                     ) {
                         val value = revealedValues[variable.id]
-                        val changeLabel = when {
-                            upload.mode == SecretUploadMode.CREATE -> null
-                            variable.name in upload.addedVariables -> "New"
-                            variable.name in upload.changedVariables -> "Will update"
-                            else -> "Unchanged"
-                        }
+                        val changeLabel =
+                            when {
+                                upload.mode == SecretUploadMode.CREATE -> null
+                                variable.name in upload.addedVariables -> "New"
+                                variable.name in upload.changedVariables -> "Will update"
+                                else -> "Unchanged"
+                            }
                         Row(
                             modifier = Modifier.fillMaxWidth(),
                             verticalAlignment = Alignment.CenterVertically,
@@ -375,7 +397,8 @@ private fun EnvironmentVariableUploadDetails(
                                     Text(
                                         it,
                                         style = MaterialTheme.typography.labelSmall,
-                                        modifier = Modifier.padding(horizontal = 8.dp, vertical = 4.dp),
+                                        modifier =
+                                            Modifier.padding(horizontal = 8.dp, vertical = 4.dp),
                                     )
                                 }
                             }
@@ -401,10 +424,11 @@ private fun EnvironmentVariableUploadDetails(
                                 onCheckedChange = { sensitive ->
                                     onSensitivityChange(variable, sensitive)
                                 },
-                                modifier = Modifier.semantics {
-                                    contentDescription =
-                                        "Sensitive handling for ${variable.name}"
-                                },
+                                modifier =
+                                    Modifier.semantics {
+                                        contentDescription =
+                                            "Sensitive handling for ${variable.name}"
+                                    },
                             )
                         }
                         Row(
@@ -412,19 +436,26 @@ private fun EnvironmentVariableUploadDetails(
                             verticalAlignment = Alignment.CenterVertically,
                         ) {
                             Column(Modifier.weight(1f)) {
-                                Text("Uploaded value", style = MaterialTheme.typography.labelMedium,
-                                    color = MaterialTheme.colorScheme.onSurfaceVariant)
+                                Text(
+                                    "Uploaded value",
+                                    style = MaterialTheme.typography.labelMedium,
+                                    color = MaterialTheme.colorScheme.onSurfaceVariant,
+                                )
                                 SelectionContainer {
-                                    Text(value ?: if (variable.sensitive) "••••••••" else "Value unavailable",
+                                    Text(
+                                        value
+                                            ?: if (variable.sensitive) "••••••••"
+                                            else "Value unavailable",
                                         fontFamily = FontFamily.Monospace,
-                                        style = MaterialTheme.typography.bodyLarge)
+                                        style = MaterialTheme.typography.bodyLarge,
+                                    )
                                 }
                             }
                             if (variable.sensitive) {
                                 IconButton(
                                     onClick = {
                                         onReveal(variable)
-                                    },
+                                    }
                                 ) {
                                     Icon(
                                         if (value == null) {
@@ -432,11 +463,12 @@ private fun EnvironmentVariableUploadDetails(
                                         } else {
                                             Icons.Outlined.VisibilityOff
                                         },
-                                        contentDescription = if (value == null) {
-                                            "Show uploaded value for ${variable.name}"
-                                        } else {
-                                            "Hide uploaded value for ${variable.name}"
-                                        },
+                                        contentDescription =
+                                            if (value == null) {
+                                                "Show uploaded value for ${variable.name}"
+                                            } else {
+                                                "Hide uploaded value for ${variable.name}"
+                                            },
                                     )
                                 }
                             }
@@ -464,9 +496,10 @@ private fun uploadGroupShape(index: Int, lastIndex: Int): androidx.compose.ui.gr
 private fun SshKeyUploadDetails(upload: SecretUploadRequestDetails) {
     if (upload.mode != SecretUploadMode.CREATE) {
         Card(
-            colors = CardDefaults.cardColors(
-                containerColor = MaterialTheme.colorScheme.secondaryContainer,
-            ),
+            colors =
+                CardDefaults.cardColors(
+                    containerColor = MaterialTheme.colorScheme.secondaryContainer
+                )
         ) {
             Column(
                 Modifier.fillMaxWidth().padding(16.dp),
@@ -526,7 +559,10 @@ private fun SshKeyUploadDetails(upload: SecretUploadRequestDetails) {
                 ) {
                     TonalIcon(Icons.Outlined.Key, contentDescription = null)
                     Column(Modifier.weight(1f), verticalArrangement = Arrangement.spacedBy(2.dp)) {
-                        Text(key.algorithm.displayName(), style = MaterialTheme.typography.titleMedium)
+                        Text(
+                            key.algorithm.displayName(),
+                            style = MaterialTheme.typography.titleMedium,
+                        )
                         Text(
                             "${SshKeyCodec().bitLength(key)}-bit SSH key",
                             style = MaterialTheme.typography.bodySmall,
@@ -553,10 +589,11 @@ private fun SshKeyUploadDetails(upload: SecretUploadRequestDetails) {
                 }
             }
         }
-    } ?: Text(
-        "No replacement key was included.",
-        color = MaterialTheme.colorScheme.onSurfaceVariant,
-    )
+    }
+        ?: Text(
+            "No replacement key was included.",
+            color = MaterialTheme.colorScheme.onSurfaceVariant,
+        )
 }
 
 @Composable
@@ -571,19 +608,21 @@ private fun ChangeGroup(label: String, names: List<String>, subdued: Boolean = f
         Text(
             names.joinToString("\n"),
             fontFamily = FontFamily.Monospace,
-            color = if (subdued) {
-                MaterialTheme.colorScheme.onSurfaceVariant
-            } else {
-                Color.Unspecified
-            },
+            color =
+                if (subdued) {
+                    MaterialTheme.colorScheme.onSurfaceVariant
+                } else {
+                    Color.Unspecified
+                },
         )
     }
 }
 
-private fun SecretUploadRequestState.label(): String = when (this) {
-    SecretUploadRequestState.REVIEW_PENDING -> "Needs review"
-    SecretUploadRequestState.APPROVED -> "Approved"
-    SecretUploadRequestState.REJECTED -> "Rejected"
-    SecretUploadRequestState.ENDED -> "Ended"
-    SecretUploadRequestState.VERIFICATION_FAILED -> "Verification failed"
-}
+private fun SecretUploadRequestState.label(): String =
+    when (this) {
+        SecretUploadRequestState.REVIEW_PENDING -> "Needs review"
+        SecretUploadRequestState.APPROVED -> "Approved"
+        SecretUploadRequestState.REJECTED -> "Rejected"
+        SecretUploadRequestState.ENDED -> "Ended"
+        SecretUploadRequestState.VERIFICATION_FAILED -> "Verification failed"
+    }

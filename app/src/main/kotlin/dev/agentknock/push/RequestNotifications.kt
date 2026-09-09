@@ -4,13 +4,13 @@ import android.app.Notification
 import android.app.NotificationChannel
 import android.app.NotificationManager
 import android.app.PendingIntent
-import android.content.Context
 import android.content.BroadcastReceiver
+import android.content.Context
 import android.content.Intent
 import android.content.pm.PackageManager
+import android.graphics.Typeface
 import android.net.Uri
 import android.os.Build
-import android.graphics.Typeface
 import android.text.SpannableStringBuilder
 import android.text.Spanned
 import android.text.style.StyleSpan
@@ -29,33 +29,34 @@ import androidx.work.await
 import dev.agentknock.AgentknockApplication
 import dev.agentknock.MainActivity
 import dev.agentknock.R
-import dev.agentknock.storage.request.RequestSyncResult
+import dev.agentknock.storage.request.RequestDecision
 import dev.agentknock.storage.request.RequestNotification
 import dev.agentknock.storage.request.RequestNotificationDetail
-import dev.agentknock.storage.request.RequestDecision
+import dev.agentknock.storage.request.RequestSyncResult
+import java.util.concurrent.TimeUnit
 import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.SupervisorJob
 import kotlinx.coroutines.launch
-import java.util.concurrent.TimeUnit
 
 class PushSynchronizationWorker(
     applicationContext: Context,
     parameters: WorkerParameters,
 ) : CoroutineWorker(applicationContext, parameters) {
-    override suspend fun getForegroundInfo(): ForegroundInfo = ForegroundInfo(
-        FOREGROUND_NOTIFICATION_ID,
-        Notification.Builder(applicationContext, RequestNotifications.BACKGROUND_CHANNEL_ID)
-            .setSmallIcon(R.drawable.ic_notification)
-            .setColor(applicationContext.getColor(R.color.notification_accent))
-            .setContentTitle(applicationContext.getString(R.string.app_name))
-            .setContentText(applicationContext.getString(R.string.checking_for_requests))
-            .setCategory(Notification.CATEGORY_SERVICE)
-            .setVisibility(Notification.VISIBILITY_SECRET)
-            .setOngoing(true)
-            .build(),
-    )
+    override suspend fun getForegroundInfo(): ForegroundInfo =
+        ForegroundInfo(
+            FOREGROUND_NOTIFICATION_ID,
+            Notification.Builder(applicationContext, RequestNotifications.BACKGROUND_CHANNEL_ID)
+                .setSmallIcon(R.drawable.ic_notification)
+                .setColor(applicationContext.getColor(R.color.notification_accent))
+                .setContentTitle(applicationContext.getString(R.string.app_name))
+                .setContentText(applicationContext.getString(R.string.checking_for_requests))
+                .setCategory(Notification.CATEGORY_SERVICE)
+                .setVisibility(Notification.VISIBILITY_SECRET)
+                .setOngoing(true)
+                .build(),
+        )
 
     override suspend fun doWork(): Result {
         val container = (applicationContext as AgentknockApplication).container
@@ -66,41 +67,40 @@ class PushSynchronizationWorker(
             dev.agentknock.storage.request.OneShotSynchronizationResult.Covered -> Result.success()
             is dev.agentknock.storage.request.OneShotSynchronizationResult.Deferred ->
                 enqueueDeadlineRetry(applicationContext, synchronization.retryAfterMillis)
-            is dev.agentknock.storage.request.OneShotSynchronizationResult.Completed -> when (
-                synchronization.result
-            ) {
-                RequestSyncResult.Success,
-                RequestSyncResult.NoDevice,
-                RequestSyncResult.DeviceCredentialsUnavailable,
-                RequestSyncResult.DeviceCredentialsCorrupted,
-                RequestSyncResult.UnsupportedDeviceCredentialEncryption,
-                -> {
-                    container.requestNotifications.reconcile()
-                    Result.success()
+            is dev.agentknock.storage.request.OneShotSynchronizationResult.Completed ->
+                when (synchronization.result) {
+                    RequestSyncResult.Success,
+                    RequestSyncResult.NoDevice,
+                    RequestSyncResult.DeviceCredentialsUnavailable,
+                    RequestSyncResult.DeviceCredentialsCorrupted,
+                    RequestSyncResult.UnsupportedDeviceCredentialEncryption -> {
+                        container.requestNotifications.reconcile()
+                        Result.success()
+                    }
+                    is RequestSyncResult.RelayUnavailable -> {
+                        synchronization.result.retryAfterMillis
+                            ?.takeIf { it > 0 }
+                            ?.let { enqueueDeadlineRetry(applicationContext, it) } ?: Result.retry()
+                    }
+                    is RequestSyncResult.InternalFailure -> {
+                        Log.e(
+                            TAG,
+                            "Request synchronization stopped after an internal " +
+                                synchronization.result.type,
+                        )
+                        // This worker must not fail an APPEND_OR_REPLACE chain: a later push can
+                        // represent valid new work after a transient local problem is fixed.
+                        Result.success()
+                    }
+                    is RequestSyncResult.RelayRejected -> {
+                        // The domain failure is already exposed by RequestConnectionManager. Mark
+                        // the
+                        // scheduling attempt complete so APPEND_OR_REPLACE successors are not
+                        // failed
+                        // merely because an earlier synchronization was rejected.
+                        Result.success()
+                    }
                 }
-                is RequestSyncResult.RelayUnavailable -> {
-                    synchronization.result.retryAfterMillis
-                        ?.takeIf { it > 0 }
-                        ?.let { enqueueDeadlineRetry(applicationContext, it) }
-                        ?: Result.retry()
-                }
-                is RequestSyncResult.InternalFailure -> {
-                    Log.e(
-                        TAG,
-                        "Request synchronization stopped after an internal " +
-                            synchronization.result.type,
-                    )
-                    // This worker must not fail an APPEND_OR_REPLACE chain: a later push can
-                    // represent valid new work after a transient local problem is fixed.
-                    Result.success()
-                }
-                is RequestSyncResult.RelayRejected -> {
-                    // The domain failure is already exposed by RequestConnectionManager. Mark the
-                    // scheduling attempt complete so APPEND_OR_REPLACE successors are not failed
-                    // merely because an earlier synchronization was rejected.
-                    Result.success()
-                }
-            }
         }
     }
 
@@ -111,42 +111,49 @@ class PushSynchronizationWorker(
         private const val TAG = "AgentknockPush"
 
         fun enqueue(context: Context) {
-            WorkManager.getInstance(context).enqueueUniqueWork(
-                WORK_NAME,
-                ExistingWorkPolicy.APPEND_OR_REPLACE,
-                workRequest(),
-            )
+            WorkManager.getInstance(context)
+                .enqueueUniqueWork(
+                    WORK_NAME,
+                    ExistingWorkPolicy.APPEND_OR_REPLACE,
+                    workRequest(),
+                )
         }
 
         internal suspend fun enqueueAndAwait(context: Context) {
-            WorkManager.getInstance(context).enqueueUniqueWork(
-                WORK_NAME,
-                ExistingWorkPolicy.APPEND_OR_REPLACE,
-                workRequest(),
-            ).await()
+            WorkManager.getInstance(context)
+                .enqueueUniqueWork(
+                    WORK_NAME,
+                    ExistingWorkPolicy.APPEND_OR_REPLACE,
+                    workRequest(),
+                )
+                .await()
         }
 
-        private fun workRequest() = OneTimeWorkRequestBuilder<PushSynchronizationWorker>()
-            .setConstraints(networkConstraints())
-            .setBackoffCriteria(BackoffPolicy.EXPONENTIAL, 10, TimeUnit.SECONDS)
-            .setExpedited(OutOfQuotaPolicy.RUN_AS_NON_EXPEDITED_WORK_REQUEST)
-            .build()
-
-        private suspend fun enqueueDeadlineRetry(context: Context, delayMillis: Long): Result {
-            val request = OneTimeWorkRequestBuilder<RelayRetryWorker>()
-                .setInitialDelay(
-                    deadlineRetryWorkDelayMillis(delayMillis),
-                    TimeUnit.MILLISECONDS,
-                )
+        private fun workRequest() =
+            OneTimeWorkRequestBuilder<PushSynchronizationWorker>()
                 .setConstraints(networkConstraints())
                 .setBackoffCriteria(BackoffPolicy.EXPONENTIAL, 10, TimeUnit.SECONDS)
+                .setExpedited(OutOfQuotaPolicy.RUN_AS_NON_EXPEDITED_WORK_REQUEST)
                 .build()
+
+        private suspend fun enqueueDeadlineRetry(context: Context, delayMillis: Long): Result {
+            val request =
+                OneTimeWorkRequestBuilder<RelayRetryWorker>()
+                    .setInitialDelay(
+                        deadlineRetryWorkDelayMillis(delayMillis),
+                        TimeUnit.MILLISECONDS,
+                    )
+                    .setConstraints(networkConstraints())
+                    .setBackoffCriteria(BackoffPolicy.EXPONENTIAL, 10, TimeUnit.SECONDS)
+                    .build()
             return try {
-                WorkManager.getInstance(context).enqueueUniqueWork(
-                    DEADLINE_WORK_NAME,
-                    ExistingWorkPolicy.REPLACE,
-                    request,
-                ).await()
+                WorkManager.getInstance(context)
+                    .enqueueUniqueWork(
+                        DEADLINE_WORK_NAME,
+                        ExistingWorkPolicy.REPLACE,
+                        request,
+                    )
+                    .await()
                 Result.success()
             } catch (cancelled: CancellationException) {
                 throw cancelled
@@ -155,7 +162,6 @@ class PushSynchronizationWorker(
                 Result.retry()
             }
         }
-
     }
 }
 
@@ -206,27 +212,33 @@ internal object RequestNotifications {
     private const val REQUEST_INTENT_SCHEME = "agentknock-request"
 
     fun createChannel(context: Context) {
-        val actionChannel = NotificationChannel(
-            ACTION_CHANNEL_ID,
-            context.getString(R.string.request_notification_channel),
-            NotificationManager.IMPORTANCE_HIGH,
-        ).apply {
-            description = context.getString(R.string.request_notification_channel_description)
-            lockscreenVisibility = Notification.VISIBILITY_PUBLIC
-        }
-        val backgroundChannel = NotificationChannel(
-            BACKGROUND_CHANNEL_ID,
-            context.getString(R.string.background_notification_channel),
-            NotificationManager.IMPORTANCE_LOW,
-        ).apply {
-            description = context.getString(R.string.background_notification_channel_description)
-            lockscreenVisibility = Notification.VISIBILITY_SECRET
-            setSound(null, null)
-            enableVibration(false)
-        }
-        context.getSystemService(NotificationManager::class.java).createNotificationChannels(
-            listOf(actionChannel, backgroundChannel),
-        )
+        val actionChannel =
+            NotificationChannel(
+                    ACTION_CHANNEL_ID,
+                    context.getString(R.string.request_notification_channel),
+                    NotificationManager.IMPORTANCE_HIGH,
+                )
+                .apply {
+                    description =
+                        context.getString(R.string.request_notification_channel_description)
+                    lockscreenVisibility = Notification.VISIBILITY_PUBLIC
+                }
+        val backgroundChannel =
+            NotificationChannel(
+                    BACKGROUND_CHANNEL_ID,
+                    context.getString(R.string.background_notification_channel),
+                    NotificationManager.IMPORTANCE_LOW,
+                )
+                .apply {
+                    description =
+                        context.getString(R.string.background_notification_channel_description)
+                    lockscreenVisibility = Notification.VISIBILITY_SECRET
+                    setSound(null, null)
+                    enableVibration(false)
+                }
+        context
+            .getSystemService(NotificationManager::class.java)
+            .createNotificationChannels(listOf(actionChannel, backgroundChannel))
     }
 
     fun appNotificationsEnabled(context: Context): Boolean =
@@ -238,38 +250,42 @@ internal object RequestNotifications {
     fun channelNotificationsEnabled(context: Context, channelId: String): Boolean {
         val manager = context.getSystemService(NotificationManager::class.java)
         return manager.areNotificationsEnabled() &&
-            manager.getNotificationChannel(channelId)?.importance != NotificationManager.IMPORTANCE_NONE
+            manager.getNotificationChannel(channelId)?.importance !=
+                NotificationManager.IMPORTANCE_NONE
     }
 
     fun showWake(context: Context) {
         if (
             Build.VERSION.SDK_INT >= Build.VERSION_CODES.TIRAMISU &&
-            context.checkSelfPermission(android.Manifest.permission.POST_NOTIFICATIONS) !=
-            PackageManager.PERMISSION_GRANTED
+                context.checkSelfPermission(android.Manifest.permission.POST_NOTIFICATIONS) !=
+                    PackageManager.PERMISSION_GRANTED
         ) {
             return
         }
-        val openApp = PendingIntent.getActivity(
-            context,
-            0,
-            Intent(context, MainActivity::class.java).apply {
-                action = OPEN_REQUESTS_ACTION
-                flags = Intent.FLAG_ACTIVITY_CLEAR_TOP or Intent.FLAG_ACTIVITY_SINGLE_TOP
-            },
-            PendingIntent.FLAG_UPDATE_CURRENT or PendingIntent.FLAG_IMMUTABLE,
-        )
-        val notification = Notification.Builder(context, BACKGROUND_CHANNEL_ID)
-            .setSmallIcon(R.drawable.ic_notification)
-            .setColor(context.getColor(R.color.notification_accent))
-            .setContentTitle(context.getString(R.string.app_name))
-            .setContentText(context.getString(R.string.request_waiting))
-            .setContentIntent(openApp)
-            .setAutoCancel(true)
-            .setOnlyAlertOnce(true)
-            .setCategory(Notification.CATEGORY_SERVICE)
-            .setVisibility(Notification.VISIBILITY_SECRET)
-            .build()
-        context.getSystemService(NotificationManager::class.java)
+        val openApp =
+            PendingIntent.getActivity(
+                context,
+                0,
+                Intent(context, MainActivity::class.java).apply {
+                    action = OPEN_REQUESTS_ACTION
+                    flags = Intent.FLAG_ACTIVITY_CLEAR_TOP or Intent.FLAG_ACTIVITY_SINGLE_TOP
+                },
+                PendingIntent.FLAG_UPDATE_CURRENT or PendingIntent.FLAG_IMMUTABLE,
+            )
+        val notification =
+            Notification.Builder(context, BACKGROUND_CHANNEL_ID)
+                .setSmallIcon(R.drawable.ic_notification)
+                .setColor(context.getColor(R.color.notification_accent))
+                .setContentTitle(context.getString(R.string.app_name))
+                .setContentText(context.getString(R.string.request_waiting))
+                .setContentIntent(openApp)
+                .setAutoCancel(true)
+                .setOnlyAlertOnce(true)
+                .setCategory(Notification.CATEGORY_SERVICE)
+                .setVisibility(Notification.VISIBILITY_SECRET)
+                .build()
+        context
+            .getSystemService(NotificationManager::class.java)
             .notify(WAKE_NOTIFICATION_ID, notification)
     }
 
@@ -280,37 +296,39 @@ internal object RequestNotifications {
         val activeTags = requests.mapTo(mutableSetOf(), RequestNotification::requestId)
         manager.activeNotifications
             .filter {
-                it.id == REQUEST_NOTIFICATION_ID &&
-                    it.tag != null &&
-                    it.tag !in activeTags
+                it.id == REQUEST_NOTIFICATION_ID && it.tag != null && it.tag !in activeTags
             }
             .forEach { manager.cancel(it.tag, REQUEST_NOTIFICATION_ID) }
         requests.forEach { request ->
             val openRequest = openRequestPendingIntent(context, request.requestId)
-            val publicVersion = Notification.Builder(context, ACTION_CHANNEL_ID)
-                .setSmallIcon(R.drawable.ic_notification)
-                .setColor(context.getColor(R.color.notification_accent))
-                .setContentTitle(context.getString(R.string.app_name))
-                .setContentText(context.getString(R.string.request_waiting))
-                .setContentIntent(openRequest)
-                .setCategory(Notification.CATEGORY_MESSAGE)
-                .build()
-            val builder = Notification.Builder(context, ACTION_CHANNEL_ID)
-                .setSmallIcon(R.drawable.ic_notification)
-                .setColor(context.getColor(R.color.notification_accent))
-                .setContentTitle(request.title)
-                .setContentText(request.summary)
-                .setStyle(Notification.BigTextStyle().bigText(styledDetails(request.details)))
-                .setContentIntent(openRequest)
-                .setAutoCancel(true)
-                .setOnlyAlertOnce(true)
-                .setCategory(Notification.CATEGORY_MESSAGE)
-                .setVisibility(Notification.VISIBILITY_PRIVATE)
-                .setPublicVersion(publicVersion)
+            val publicVersion =
+                Notification.Builder(context, ACTION_CHANNEL_ID)
+                    .setSmallIcon(R.drawable.ic_notification)
+                    .setColor(context.getColor(R.color.notification_accent))
+                    .setContentTitle(context.getString(R.string.app_name))
+                    .setContentText(context.getString(R.string.request_waiting))
+                    .setContentIntent(openRequest)
+                    .setCategory(Notification.CATEGORY_MESSAGE)
+                    .build()
+            val builder =
+                Notification.Builder(context, ACTION_CHANNEL_ID)
+                    .setSmallIcon(R.drawable.ic_notification)
+                    .setColor(context.getColor(R.color.notification_accent))
+                    .setContentTitle(request.title)
+                    .setContentText(request.summary)
+                    .setStyle(Notification.BigTextStyle().bigText(styledDetails(request.details)))
+                    .setContentIntent(openRequest)
+                    .setAutoCancel(true)
+                    .setOnlyAlertOnce(true)
+                    .setCategory(Notification.CATEGORY_MESSAGE)
+                    .setVisibility(Notification.VISIBILITY_PRIVATE)
+                    .setPublicVersion(publicVersion)
             if (request.decisionAvailable) {
-                builder.addAction(decisionAction(context, request.requestId, DENY_DECISION, "Deny once"))
                 builder.addAction(
-                    decisionAction(context, request.requestId, APPROVE_DECISION, "Allow once"),
+                    decisionAction(context, request.requestId, DENY_DECISION, "Deny once")
+                )
+                builder.addAction(
+                    decisionAction(context, request.requestId, APPROVE_DECISION, "Allow once")
                 )
             }
             manager.notify(request.requestId, REQUEST_NOTIFICATION_ID, builder.build())
@@ -328,44 +346,48 @@ internal object RequestNotifications {
             return Notification.Action.Builder(null, title, openRequest).build()
         }
         val intent = decisionPendingIntent(context, requestId, decision)
-        return Notification.Action.Builder(null, title, intent).apply {
-            if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.S) {
-                setAuthenticationRequired(true)
+        return Notification.Action.Builder(null, title, intent)
+            .apply {
+                if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.S) {
+                    setAuthenticationRequired(true)
+                }
             }
-        }.build()
+            .build()
     }
 
     internal fun openRequestPendingIntent(
         context: Context,
         requestId: String,
         intentAction: String = OPEN_INTENT_ACTION,
-    ): PendingIntent = PendingIntent.getActivity(
-        context,
-        0,
-        Intent(context, MainActivity::class.java).apply {
-            action = OPEN_REQUEST_ACTION
-            data = requestIntentData(requestId, intentAction)
-            putExtra(REQUEST_ID_EXTRA, requestId)
-            flags = Intent.FLAG_ACTIVITY_CLEAR_TOP or Intent.FLAG_ACTIVITY_SINGLE_TOP
-        },
-        PendingIntent.FLAG_UPDATE_CURRENT or PendingIntent.FLAG_IMMUTABLE,
-    )
+    ): PendingIntent =
+        PendingIntent.getActivity(
+            context,
+            0,
+            Intent(context, MainActivity::class.java).apply {
+                action = OPEN_REQUEST_ACTION
+                data = requestIntentData(requestId, intentAction)
+                putExtra(REQUEST_ID_EXTRA, requestId)
+                flags = Intent.FLAG_ACTIVITY_CLEAR_TOP or Intent.FLAG_ACTIVITY_SINGLE_TOP
+            },
+            PendingIntent.FLAG_UPDATE_CURRENT or PendingIntent.FLAG_IMMUTABLE,
+        )
 
     internal fun decisionPendingIntent(
         context: Context,
         requestId: String,
         decision: String,
-    ): PendingIntent = PendingIntent.getBroadcast(
-        context,
-        0,
-        Intent(context, RequestNotificationActionReceiver::class.java).apply {
-            action = DECIDE_REQUEST_ACTION
-            data = requestIntentData(requestId, decision)
-            putExtra(REQUEST_ID_EXTRA, requestId)
-            putExtra(DECISION_EXTRA, decision)
-        },
-        PendingIntent.FLAG_UPDATE_CURRENT or PendingIntent.FLAG_IMMUTABLE,
-    )
+    ): PendingIntent =
+        PendingIntent.getBroadcast(
+            context,
+            0,
+            Intent(context, RequestNotificationActionReceiver::class.java).apply {
+                action = DECIDE_REQUEST_ACTION
+                data = requestIntentData(requestId, decision)
+                putExtra(REQUEST_ID_EXTRA, requestId)
+                putExtra(DECISION_EXTRA, decision)
+            },
+            PendingIntent.FLAG_UPDATE_CURRENT or PendingIntent.FLAG_IMMUTABLE,
+        )
 
     private fun requestIntentData(requestId: String, intentAction: String): Uri =
         Uri.fromParts(
@@ -393,12 +415,11 @@ internal object RequestNotifications {
             }
         }
 
-    private fun canNotify(context: Context): Boolean = actionNotificationsEnabled(context) &&
-        (
-            Build.VERSION.SDK_INT < Build.VERSION_CODES.TIRAMISU ||
+    private fun canNotify(context: Context): Boolean =
+        actionNotificationsEnabled(context) &&
+            (Build.VERSION.SDK_INT < Build.VERSION_CODES.TIRAMISU ||
                 context.checkSelfPermission(android.Manifest.permission.POST_NOTIFICATIONS) ==
-                PackageManager.PERMISSION_GRANTED
-        )
+                    PackageManager.PERMISSION_GRANTED)
 }
 
 class RequestNotificationActionReceiver : BroadcastReceiver() {
@@ -431,6 +452,5 @@ class RequestNotificationActionReceiver : BroadcastReceiver() {
     }
 }
 
-internal fun networkConstraints(): Constraints = Constraints.Builder()
-    .setRequiredNetworkType(NetworkType.CONNECTED)
-    .build()
+internal fun networkConstraints(): Constraints =
+    Constraints.Builder().setRequiredNetworkType(NetworkType.CONNECTED).build()

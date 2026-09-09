@@ -19,21 +19,24 @@ class RequestNotificationIdentityTest {
         val context = InstrumentationRegistry.getInstrumentation().targetContext
         val firstOpen = RequestNotifications.openRequestPendingIntent(context, FIRST_REQUEST_ID)
         val secondOpen = RequestNotifications.openRequestPendingIntent(context, SECOND_REQUEST_ID)
-        val firstApprove = RequestNotifications.decisionPendingIntent(
-            context,
-            FIRST_REQUEST_ID,
-            RequestNotifications.APPROVE_DECISION,
-        )
-        val secondApprove = RequestNotifications.decisionPendingIntent(
-            context,
-            SECOND_REQUEST_ID,
-            RequestNotifications.APPROVE_DECISION,
-        )
-        val firstDeny = RequestNotifications.decisionPendingIntent(
-            context,
-            FIRST_REQUEST_ID,
-            RequestNotifications.DENY_DECISION,
-        )
+        val firstApprove =
+            RequestNotifications.decisionPendingIntent(
+                context,
+                FIRST_REQUEST_ID,
+                RequestNotifications.APPROVE_DECISION,
+            )
+        val secondApprove =
+            RequestNotifications.decisionPendingIntent(
+                context,
+                SECOND_REQUEST_ID,
+                RequestNotifications.APPROVE_DECISION,
+            )
+        val firstDeny =
+            RequestNotifications.decisionPendingIntent(
+                context,
+                FIRST_REQUEST_ID,
+                RequestNotifications.DENY_DECISION,
+            )
 
         try {
             assertNotEquals(firstOpen, secondOpen)

@@ -103,18 +103,19 @@ private fun RequestSelectionDetail(
 ) {
     when (selection) {
         RequestPaneState.Empty,
-        is RequestPaneState.Loading,
-        -> Box(modifier, contentAlignment = Alignment.Center) { CircularProgressIndicator() }
+        is RequestPaneState.Loading ->
+            Box(modifier, contentAlignment = Alignment.Center) { CircularProgressIndicator() }
         is RequestPaneState.Missing -> MissingRequestDetail(onBack, showBack, modifier)
-        is RequestPaneState.Ready -> key(selection.requestId) {
-            RequestDetail(
-                request = selection.request,
-                onDecision = onDecision,
-                onBack = onBack,
-                showBack = showBack,
-                modifier = modifier,
-            )
-        }
+        is RequestPaneState.Ready ->
+            key(selection.requestId) {
+                RequestDetail(
+                    request = selection.request,
+                    onDecision = onDecision,
+                    onBack = onBack,
+                    showBack = showBack,
+                    modifier = modifier,
+                )
+            }
     }
 }
 
@@ -127,39 +128,42 @@ private fun RequestDetail(
     modifier: Modifier,
 ) {
     when (request.content) {
-        is InboxRequestContent.SecretUse -> InvocationRequestDetail(
-            request = request,
-            onBack = onBack,
-            showBack = showBack,
-            onApprove = { onDecision(request.id, RequestDecision.APPROVE) },
-            onDeny = { onDecision(request.id, RequestDecision.DENY) },
-            onAllowTemporarily = {
-                onDecision(request.id, RequestDecision.ALLOW_TEMPORARILY)
-            },
-            modifier = modifier,
-        )
-        is InboxRequestContent.GitSign -> GitSignRequestDetail(
-            request = request,
-            onBack = onBack,
-            showBack = showBack,
-            onApprove = { onDecision(request.id, RequestDecision.APPROVE) },
-            onDeny = { onDecision(request.id, RequestDecision.DENY) },
-            onAllowTemporarily = {
-                onDecision(request.id, RequestDecision.ALLOW_TEMPORARILY)
-            },
-            modifier = modifier,
-        )
-        is InboxRequestContent.SshAuthentication -> SshAuthenticationRequestDetail(
-            request = request,
-            onBack = onBack,
-            showBack = showBack,
-            onApprove = { onDecision(request.id, RequestDecision.APPROVE) },
-            onDeny = { onDecision(request.id, RequestDecision.DENY) },
-            onAllowTemporarily = {
-                onDecision(request.id, RequestDecision.ALLOW_TEMPORARILY)
-            },
-            modifier = modifier,
-        )
+        is InboxRequestContent.SecretUse ->
+            InvocationRequestDetail(
+                request = request,
+                onBack = onBack,
+                showBack = showBack,
+                onApprove = { onDecision(request.id, RequestDecision.APPROVE) },
+                onDeny = { onDecision(request.id, RequestDecision.DENY) },
+                onAllowTemporarily = {
+                    onDecision(request.id, RequestDecision.ALLOW_TEMPORARILY)
+                },
+                modifier = modifier,
+            )
+        is InboxRequestContent.GitSign ->
+            GitSignRequestDetail(
+                request = request,
+                onBack = onBack,
+                showBack = showBack,
+                onApprove = { onDecision(request.id, RequestDecision.APPROVE) },
+                onDeny = { onDecision(request.id, RequestDecision.DENY) },
+                onAllowTemporarily = {
+                    onDecision(request.id, RequestDecision.ALLOW_TEMPORARILY)
+                },
+                modifier = modifier,
+            )
+        is InboxRequestContent.SshAuthentication ->
+            SshAuthenticationRequestDetail(
+                request = request,
+                onBack = onBack,
+                showBack = showBack,
+                onApprove = { onDecision(request.id, RequestDecision.APPROVE) },
+                onDeny = { onDecision(request.id, RequestDecision.DENY) },
+                onAllowTemporarily = {
+                    onDecision(request.id, RequestDecision.ALLOW_TEMPORARILY)
+                },
+                modifier = modifier,
+            )
         else -> MissingRequestDetail(onBack, showBack, modifier)
     }
 }
@@ -174,14 +178,17 @@ private fun EmptyRequestSelection(modifier: Modifier = Modifier) {
     }
 }
 
-private fun RequestSyncResult?.problemMessage(): String? = when (this) {
-    null, RequestSyncResult.Success, RequestSyncResult.NoDevice -> null
-    RequestSyncResult.DeviceCredentialsUnavailable -> "Device keys are unavailable"
-    RequestSyncResult.DeviceCredentialsCorrupted -> "Device keys could not be verified"
-    RequestSyncResult.UnsupportedDeviceCredentialEncryption ->
-        "Device keys use unsupported encryption"
-    is RequestSyncResult.RelayRejected -> "The relay rejected the connection"
-    is RequestSyncResult.RelayUnavailable ->
-        "Couldn't connect to the relay. Check your connection and try again."
-    is RequestSyncResult.InternalFailure -> "Agentknock couldn't process relay messages"
-}
+private fun RequestSyncResult?.problemMessage(): String? =
+    when (this) {
+        null,
+        RequestSyncResult.Success,
+        RequestSyncResult.NoDevice -> null
+        RequestSyncResult.DeviceCredentialsUnavailable -> "Device keys are unavailable"
+        RequestSyncResult.DeviceCredentialsCorrupted -> "Device keys could not be verified"
+        RequestSyncResult.UnsupportedDeviceCredentialEncryption ->
+            "Device keys use unsupported encryption"
+        is RequestSyncResult.RelayRejected -> "The relay rejected the connection"
+        is RequestSyncResult.RelayUnavailable ->
+            "Couldn't connect to the relay. Check your connection and try again."
+        is RequestSyncResult.InternalFailure -> "Agentknock couldn't process relay messages"
+    }

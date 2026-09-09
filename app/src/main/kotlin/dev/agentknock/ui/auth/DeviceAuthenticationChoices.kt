@@ -1,13 +1,13 @@
 package dev.agentknock.ui.auth
 
 import androidx.compose.foundation.background
-import androidx.compose.foundation.selection.selectable
-import androidx.compose.foundation.selection.selectableGroup
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.padding
+import androidx.compose.foundation.selection.selectable
+import androidx.compose.foundation.selection.selectableGroup
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.RadioButton
 import androidx.compose.material3.Text
@@ -31,23 +31,23 @@ internal fun DeviceAuthenticationChoices(
     ) {
         DeviceAuthenticationMode.entries.forEach { mode ->
             Row(
-                modifier = Modifier
-                    .fillMaxWidth()
-                    .clip(MaterialTheme.shapes.medium)
-                    .background(
-                        if (mode == selected) {
-                            MaterialTheme.colorScheme.primary.copy(alpha = 0.10f)
-                        } else {
-                            Color.Transparent
-                        },
-                    )
-                    .selectable(
-                        selected = mode == selected,
-                        enabled = enabled,
-                        role = Role.RadioButton,
-                        onClick = { if (mode != selected) onSelect(mode) },
-                    )
-                    .padding(horizontal = 12.dp, vertical = 12.dp),
+                modifier =
+                    Modifier.fillMaxWidth()
+                        .clip(MaterialTheme.shapes.medium)
+                        .background(
+                            if (mode == selected) {
+                                MaterialTheme.colorScheme.primary.copy(alpha = 0.10f)
+                            } else {
+                                Color.Transparent
+                            }
+                        )
+                        .selectable(
+                            selected = mode == selected,
+                            enabled = enabled,
+                            role = Role.RadioButton,
+                            onClick = { if (mode != selected) onSelect(mode) },
+                        )
+                        .padding(horizontal = 12.dp, vertical = 12.dp),
                 horizontalArrangement = Arrangement.spacedBy(16.dp),
                 verticalAlignment = Alignment.CenterVertically,
             ) {
@@ -72,17 +72,17 @@ internal fun DeviceAuthenticationChoices(
     }
 }
 
-internal fun DeviceAuthenticationMode.displayLabel(): String = when (this) {
-    DeviceAuthenticationMode.DEVICE_LOCK -> "Rely on device lock"
-    DeviceAuthenticationMode.SENSITIVE_VALUES_AND_PAIRING -> "Protect sensitive actions"
-    DeviceAuthenticationMode.APP_LOCK -> "Lock Agentknock"
-}
+internal fun DeviceAuthenticationMode.displayLabel(): String =
+    when (this) {
+        DeviceAuthenticationMode.DEVICE_LOCK -> "Rely on device lock"
+        DeviceAuthenticationMode.SENSITIVE_VALUES_AND_PAIRING -> "Protect sensitive actions"
+        DeviceAuthenticationMode.APP_LOCK -> "Lock Agentknock"
+    }
 
-internal fun DeviceAuthenticationMode.explanation(): String = when (this) {
-    DeviceAuthenticationMode.DEVICE_LOCK ->
-        "Use Android's screen lock, with no extra prompts."
-    DeviceAuthenticationMode.SENSITIVE_VALUES_AND_PAIRING ->
-        "Authenticate to view, copy or edit sensitive values, or pair a client."
-    DeviceAuthenticationMode.APP_LOCK ->
-        "Authenticate each time you return to Agentknock."
-}
+internal fun DeviceAuthenticationMode.explanation(): String =
+    when (this) {
+        DeviceAuthenticationMode.DEVICE_LOCK -> "Use Android's screen lock, with no extra prompts."
+        DeviceAuthenticationMode.SENSITIVE_VALUES_AND_PAIRING ->
+            "Authenticate to view, copy or edit sensitive values, or pair a client."
+        DeviceAuthenticationMode.APP_LOCK -> "Authenticate each time you return to Agentknock."
+    }

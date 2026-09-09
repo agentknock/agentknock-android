@@ -15,21 +15,24 @@ import org.junit.Test
 class StoredJsonTest {
     @Test
     fun `stored request snapshots ignore obsolete fields and apply new defaults`() {
-        val secrets = storedJson.decodeFromString<List<SecretMetadata>>(
-            """[{"name":"Deployment","description":"","type":"environment","future":true}]""",
-        )
-        val repository = storedJson.decodeFromString<GitSignRepository>(
-            """{"remote":"git@example.test:repo.git","future":{"nested":true}}""",
-        )
-        val evaluation = storedJson.decodeFromString<ApprovalEvaluation>(
-            """{"secrets":[],"future":"ignored"}""",
-        )
-        val clientSoftware = storedJson.decodeFromString<ClientSoftware>(
-            """{"app_info":{"name":"agentknock","version":"0.3.0","future":1},"lib_info":{"name":"agentknock","version":"0.3.0"},"future":true}""",
-        )
-        val upload = storedJson.decodeFromString<SecretUploadSummarySnapshot>(
-            """{"variableNames":["TOKEN"],"future":true}""",
-        )
+        val secrets =
+            storedJson.decodeFromString<List<SecretMetadata>>(
+                """[{"name":"Deployment","description":"","type":"environment","future":true}]"""
+            )
+        val repository =
+            storedJson.decodeFromString<GitSignRepository>(
+                """{"remote":"git@example.test:repo.git","future":{"nested":true}}"""
+            )
+        val evaluation =
+            storedJson.decodeFromString<ApprovalEvaluation>("""{"secrets":[],"future":"ignored"}""")
+        val clientSoftware =
+            storedJson.decodeFromString<ClientSoftware>(
+                """{"app_info":{"name":"agentknock","version":"0.3.0","future":1},"lib_info":{"name":"agentknock","version":"0.3.0"},"future":true}"""
+            )
+        val upload =
+            storedJson.decodeFromString<SecretUploadSummarySnapshot>(
+                """{"variableNames":["TOKEN"],"future":true}"""
+            )
 
         assertEquals("Deployment", secrets.single().name)
         assertTrue(secrets.single().environmentVariableNames.isEmpty())
@@ -42,13 +45,16 @@ class StoredJsonTest {
 
     @Test
     fun `stored approval facts ignore obsolete fields`() {
-        val decoded = decodeStoredApprovalReviewSecretFacts(
-            """{"Deployment":{"type":"environment","environment_variables":{"TOKEN":{"destination":{"type":"environment","name":"API_TOKEN"},"value":null}},"future":true}}""",
-        )
+        val decoded =
+            decodeStoredApprovalReviewSecretFacts(
+                """{"Deployment":{"type":"environment","environment_variables":{"TOKEN":{"destination":{"type":"environment","name":"API_TOKEN"},"value":null}},"future":true}}"""
+            )
 
         assertNotNull(decoded)
-        val variable = (decoded?.get("Deployment") as ApprovalReviewEnvironmentSecretFacts)
-            .variables.getValue("TOKEN")
+        val variable =
+            (decoded?.get("Deployment") as ApprovalReviewEnvironmentSecretFacts)
+                .variables
+                .getValue("TOKEN")
         assertEquals(ApprovalReviewEnvironmentDelivery.ENVIRONMENT, variable.delivery)
         assertEquals("API_TOKEN", variable.target)
         assertEquals(null, variable.value)

@@ -11,8 +11,7 @@ import kotlinx.coroutines.flow.asStateFlow
 internal enum class DeviceAuthenticationMode(val storedName: String) {
     DEVICE_LOCK("device_lock"),
     SENSITIVE_VALUES_AND_PAIRING("sensitive_values_and_pairing"),
-    APP_LOCK("app_lock"),
-    ;
+    APP_LOCK("app_lock");
 
     companion object {
         val default = DEVICE_LOCK
@@ -84,8 +83,8 @@ internal class AuthenticationSession(context: Context) {
     }
 
     private fun readMode(): DeviceAuthenticationMode {
-        val storedName = preferences.getString(MODE_KEY, null)
-            ?: return DeviceAuthenticationMode.default
+        val storedName =
+            preferences.getString(MODE_KEY, null) ?: return DeviceAuthenticationMode.default
         return DeviceAuthenticationMode.fromStoredName(storedName)
     }
 

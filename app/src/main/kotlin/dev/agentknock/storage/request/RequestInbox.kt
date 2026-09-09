@@ -1,8 +1,8 @@
 package dev.agentknock.storage.request
 
-import dev.agentknock.presentation.describeGitSigningContent
 import dev.agentknock.presentation.aiReviewLabel
 import dev.agentknock.presentation.approvalSummary
+import dev.agentknock.presentation.describeGitSigningContent
 import dev.agentknock.presentation.renderShellCommand
 import dev.agentknock.presentation.renderSingleLineText
 import dev.agentknock.protocol.ClientSoftware
@@ -13,7 +13,6 @@ import dev.agentknock.protocol.SshAuthenticationMethod
 import dev.agentknock.protocol.SshSignatureAlgorithm
 import dev.agentknock.review.ApprovalReviewEnvironmentSecretFacts
 import dev.agentknock.storage.approval.ApprovalEvaluation
-import dev.agentknock.storage.secret.ENVIRONMENT_SECRET_TYPE
 import dev.agentknock.storage.secret.SSH_SECRET_TYPE
 import dev.agentknock.storage.secret.SecretMetadata
 import kotlinx.coroutines.flow.Flow
@@ -121,36 +120,36 @@ internal fun String.toRequestKind(): RequestKind =
 internal fun approvalRequestState(
     state: InboxRequestState,
     failureKind: String?,
-): ApprovalRequestState = when (state) {
-    InboxRequestState.REVIEWING,
-    InboxRequestState.ACTION_REQUIRED,
-    -> ApprovalRequestState.APPROVAL_PENDING
-    InboxRequestState.WAITING -> ApprovalRequestState.WAITING_FOR_COMPLETION
-    InboxRequestState.COMPLETED -> if (
-        failureKind == RequestFailureKind.VERIFICATION.storedName
-    ) {
-        ApprovalRequestState.VERIFICATION_FAILED
-    } else {
-        ApprovalRequestState.COMPLETED
+): ApprovalRequestState =
+    when (state) {
+        InboxRequestState.REVIEWING,
+        InboxRequestState.ACTION_REQUIRED -> ApprovalRequestState.APPROVAL_PENDING
+        InboxRequestState.WAITING -> ApprovalRequestState.WAITING_FOR_COMPLETION
+        InboxRequestState.COMPLETED ->
+            if (failureKind == RequestFailureKind.VERIFICATION.storedName) {
+                ApprovalRequestState.VERIFICATION_FAILED
+            } else {
+                ApprovalRequestState.COMPLETED
+            }
     }
-}
 
 internal fun secretUploadRequestState(
     state: InboxRequestState,
     failureKind: String?,
     decision: String?,
-): SecretUploadRequestState = when {
-    decision == SecretUploadRequestState.APPROVED.storedName ->
-        SecretUploadRequestState.APPROVED
-    decision == SecretUploadRequestState.REJECTED.storedName ->
-        SecretUploadRequestState.REJECTED
-    state == InboxRequestState.COMPLETED &&
-        failureKind == RequestFailureKind.VERIFICATION.storedName ->
-        SecretUploadRequestState.VERIFICATION_FAILED
-    state == InboxRequestState.COMPLETED -> SecretUploadRequestState.ENDED
-    decision == null -> SecretUploadRequestState.REVIEW_PENDING
-    else -> error("Unknown secret upload decision: $decision")
-}
+): SecretUploadRequestState =
+    when {
+        decision == SecretUploadRequestState.APPROVED.storedName ->
+            SecretUploadRequestState.APPROVED
+        decision == SecretUploadRequestState.REJECTED.storedName ->
+            SecretUploadRequestState.REJECTED
+        state == InboxRequestState.COMPLETED &&
+            failureKind == RequestFailureKind.VERIFICATION.storedName ->
+            SecretUploadRequestState.VERIFICATION_FAILED
+        state == InboxRequestState.COMPLETED -> SecretUploadRequestState.ENDED
+        decision == null -> SecretUploadRequestState.REVIEW_PENDING
+        else -> error("Unknown secret upload decision: $decision")
+    }
 
 internal data class InboxRequestSummary(
     val id: String,
@@ -212,9 +211,13 @@ internal data class InboxRequestDetails(
 
 internal sealed interface InboxRequestContent {
     data class Pairing(val details: PairingRequestDetails) : InboxRequestContent
+
     data class SecretUse(val details: SecretUseRequestDetails) : InboxRequestContent
+
     data class SecretUpload(val details: SecretUploadRequestDetails) : InboxRequestContent
+
     data class GitSign(val details: GitSignRequestDetails) : InboxRequestContent
+
     data class SshAuthentication(val details: SshAuthenticationRequestDetails) : InboxRequestContent
 }
 
@@ -361,20 +364,24 @@ internal class RequestInbox(
         dao.getRequestById(id)?.kind?.toInboxRequestKind()
 
     fun observeRequests(): Flow<List<InboxRequestSummary>> {
-        val visibleRequests = combine(
-            dao.observeListedRequests(),
-            dao.observePendingPairingRequests(),
-            dao.observePendingSecretUploadRequests(),
-        ) { history, pairings, uploads ->
-            (history + pairings + uploads).sortedWith(
-                compareByDescending<InboxRequestEntity> { it.receivedAt }
-                    .thenByDescending { it.id },
-            )
-        }
-        val signatureRequests = combine(
-            dao.observeGitSignRequests(),
-            dao.observeSshAuthenticationRequests(),
-        ) { gitSign, sshAuthentication -> gitSign to sshAuthentication }
+        val visibleRequests =
+            combine(
+                dao.observeListedRequests(),
+                dao.observePendingPairingRequests(),
+                dao.observePendingSecretUploadRequests(),
+            ) { history, pairings, uploads ->
+                (history + pairings + uploads).sortedWith(
+                    compareByDescending<InboxRequestEntity> { it.receivedAt }
+                        .thenByDescending { it.id }
+                )
+            }
+        val signatureRequests =
+            combine(
+                dao.observeGitSignRequests(),
+                dao.observeSshAuthenticationRequests(),
+            ) { gitSign, sshAuthentication ->
+                gitSign to sshAuthentication
+            }
         return combine(
             visibleRequests,
             dao.observePairingAttempts(),
@@ -384,14 +391,13 @@ internal class RequestInbox(
         ) { requests, pairingAttempts, secretUseRequests, signatures, secretUploadRequests ->
             val (gitSignRequests, sshAuthenticationRequests) = signatures
             val pairingByRequest = pairingAttempts.associateBy(PairingAttemptEntity::requestId)
-            val secretUseByRequest = secretUseRequests.associateBy(SecretUseRequestEntity::requestId)
+            val secretUseByRequest =
+                secretUseRequests.associateBy(SecretUseRequestEntity::requestId)
             val gitSignByRequest = gitSignRequests.associateBy(GitSignRequestEntity::requestId)
-            val sshAuthenticationByRequest = sshAuthenticationRequests.associateBy(
-                SshAuthenticationRequestEntity::requestId,
-            )
-            val secretUploadByRequest = secretUploadRequests.associateBy(
-                SecretUploadRequestEntity::requestId,
-            )
+            val sshAuthenticationByRequest =
+                sshAuthenticationRequests.associateBy(SshAuthenticationRequestEntity::requestId)
+            val secretUploadByRequest =
+                secretUploadRequests.associateBy(SecretUploadRequestEntity::requestId)
             requests.mapNotNull { request ->
                 when (request.kind) {
                     RequestKind.PAIRING.storedName -> {
@@ -402,8 +408,11 @@ internal class RequestInbox(
                             state = request.state.toInboxRequestState(),
                             status = InboxRequestStatus.Pairing(pairing.state.toPairingState()),
                             title = "Pairing",
-                            clientName = pairing.friendlyName ?: pairing.hostname
-                                ?: pairing.platform ?: "Unknown client",
+                            clientName =
+                                pairing.friendlyName
+                                    ?: pairing.hostname
+                                    ?: pairing.platform
+                                    ?: "Unknown client",
                             secretNames = emptyList(),
                             listSummary = null,
                             command = null,
@@ -419,23 +428,27 @@ internal class RequestInbox(
                             id = request.id,
                             kind = InboxRequestKind.SECRET_USE,
                             state = request.state.toInboxRequestState(),
-                            status = InboxRequestStatus.Approval(
-                                state = request.toApprovalRequestState(),
-                                decision = secretUse.decision?.toApprovalDecision(),
-                                completionResult = secretUse.completionResult
-                                    ?.toApprovalCompletionResult(),
-                                completionReason = secretUse.completionReason,
-                            ),
+                            status =
+                                InboxRequestStatus.Approval(
+                                    state = request.toApprovalRequestState(),
+                                    decision = secretUse.decision?.toApprovalDecision(),
+                                    completionResult =
+                                        secretUse.completionResult?.toApprovalCompletionResult(),
+                                    completionReason = secretUse.completionReason,
+                                ),
                             title = "Secret use",
                             clientName = request.clientNameSnapshot,
                             secretNames = requestedSecrets,
                             listSummary = null,
                             command = secretUse.command,
-                            decisionSummary = approvalSummary(
-                                secretUse.approvalEvaluationJson?.let(::decodeApprovalEvaluation)?.aiReview,
-                                secretUse.decision?.toApprovalDecision(),
-                                secretUse.decisionSource,
-                            ),
+                            decisionSummary =
+                                approvalSummary(
+                                    secretUse.approvalEvaluationJson
+                                        ?.let(::decodeApprovalEvaluation)
+                                        ?.aiReview,
+                                    secretUse.decision?.toApprovalDecision(),
+                                    secretUse.decisionSource,
+                                ),
                             arguments = decodeStringList(secretUse.argumentsJson),
                             receivedAt = request.receivedAt,
                             completedAt = request.completedAt,
@@ -443,30 +456,41 @@ internal class RequestInbox(
                     }
                     RequestKind.GIT_SIGN.storedName -> {
                         val gitSign = gitSignByRequest[request.id] ?: return@mapNotNull null
-                        val invocation = request.parentRequestId?.let(secretUseByRequest::get)
-                            ?: return@mapNotNull null
+                        val invocation =
+                            request.parentRequestId?.let(secretUseByRequest::get)
+                                ?: return@mapNotNull null
                         val signingContent = describeGitSigningContent(gitSign.message)
                         InboxRequestSummary(
                             id = request.id,
                             kind = InboxRequestKind.GIT_SIGN,
                             state = request.state.toInboxRequestState(),
-                            status = InboxRequestStatus.Approval(
-                                state = request.toApprovalRequestState(),
-                                decision = gitSign.decision?.toApprovalDecision(),
-                                completionResult = gitSign.completionResult
-                                    ?.toApprovalCompletionResult(),
-                                completionReason = gitSign.completionReason,
-                            ),
+                            status =
+                                InboxRequestStatus.Approval(
+                                    state = request.toApprovalRequestState(),
+                                    decision = gitSign.decision?.toApprovalDecision(),
+                                    completionResult =
+                                        gitSign.completionResult?.toApprovalCompletionResult(),
+                                    completionReason = gitSign.completionReason,
+                                ),
                             title = signingContent.requestTitle,
                             clientName = request.clientNameSnapshot,
                             secretNames = listOf(gitSign.secretName),
                             listSummary = signingContent.message?.substringBefore('\n'),
-                            repository = gitSign.repositoryJson?.let {
-                                runCatching { storedJson.decodeFromString<GitSignRepository>(it) }
-                                    .getOrNull()?.let { repository -> repository.remote ?: repository.worktree }
-                            },
-                            decisionSummary = gitSign.approvalEvaluationJson
-                                ?.let(::decodeApprovalEvaluation)?.aiReview?.let(::aiReviewLabel),
+                            repository =
+                                gitSign.repositoryJson?.let {
+                                    runCatching {
+                                        storedJson.decodeFromString<GitSignRepository>(it)
+                                    }
+                                        .getOrNull()
+                                        ?.let { repository ->
+                                            repository.remote ?: repository.worktree
+                                        }
+                                },
+                            decisionSummary =
+                                gitSign.approvalEvaluationJson
+                                    ?.let(::decodeApprovalEvaluation)
+                                    ?.aiReview
+                                    ?.let(::aiReviewLabel),
                             command = invocation.command,
                             arguments = decodeStringList(invocation.argumentsJson),
                             receivedAt = request.receivedAt,
@@ -474,27 +498,33 @@ internal class RequestInbox(
                         )
                     }
                     RequestKind.SSH_AUTHENTICATE.storedName -> {
-                        val authentication = sshAuthenticationByRequest[request.id]
-                            ?: return@mapNotNull null
-                        val invocation = request.parentRequestId?.let(secretUseByRequest::get)
-                            ?: return@mapNotNull null
+                        val authentication =
+                            sshAuthenticationByRequest[request.id] ?: return@mapNotNull null
+                        val invocation =
+                            request.parentRequestId?.let(secretUseByRequest::get)
+                                ?: return@mapNotNull null
                         InboxRequestSummary(
                             id = request.id,
                             kind = InboxRequestKind.SSH_AUTHENTICATE,
                             state = request.state.toInboxRequestState(),
-                            status = InboxRequestStatus.Approval(
-                                state = request.toApprovalRequestState(),
-                                decision = authentication.decision?.toApprovalDecision(),
-                                completionResult = authentication.completionResult
-                                    ?.toApprovalCompletionResult(),
-                                completionReason = authentication.completionReason,
-                            ),
+                            status =
+                                InboxRequestStatus.Approval(
+                                    state = request.toApprovalRequestState(),
+                                    decision = authentication.decision?.toApprovalDecision(),
+                                    completionResult =
+                                        authentication.completionResult
+                                            ?.toApprovalCompletionResult(),
+                                    completionReason = authentication.completionReason,
+                                ),
                             title = "SSH authentication",
                             clientName = request.clientNameSnapshot,
                             secretNames = listOf(authentication.secretName),
                             listSummary = "Remote account: ${authentication.username}",
-                            decisionSummary = authentication.approvalEvaluationJson
-                                ?.let(::decodeApprovalEvaluation)?.aiReview?.let(::aiReviewLabel),
+                            decisionSummary =
+                                authentication.approvalEvaluationJson
+                                    ?.let(::decodeApprovalEvaluation)
+                                    ?.aiReview
+                                    ?.let(::aiReviewLabel),
                             command = invocation.command,
                             arguments = decodeStringList(invocation.argumentsJson),
                             receivedAt = request.receivedAt,
@@ -507,16 +537,18 @@ internal class RequestInbox(
                             id = request.id,
                             kind = InboxRequestKind.SECRET_UPLOAD,
                             state = request.state.toInboxRequestState(),
-                            status = InboxRequestStatus.SecretUpload(
-                                request.toSecretUploadRequestState(upload.decision),
-                            ),
-                            title = when (
-                                SecretUploadMode.entries.single { it.wireName == upload.mode }
-                            ) {
-                                SecretUploadMode.CREATE -> "Create"
-                                SecretUploadMode.REPLACE -> "Replace"
-                                SecretUploadMode.UPDATE -> "Update"
-                            },
+                            status =
+                                InboxRequestStatus.SecretUpload(
+                                    request.toSecretUploadRequestState(upload.decision)
+                                ),
+                            title =
+                                when (
+                                    SecretUploadMode.entries.single { it.wireName == upload.mode }
+                                ) {
+                                    SecretUploadMode.CREATE -> "Create"
+                                    SecretUploadMode.REPLACE -> "Replace"
+                                    SecretUploadMode.UPDATE -> "Update"
+                                },
                             clientName = request.clientNameSnapshot,
                             secretNames = listOf(upload.uploadedName),
                             listSummary = upload.listSummary(),
@@ -534,15 +566,16 @@ internal class RequestInbox(
     }
 
     fun observeRequest(id: String): Flow<InboxRequestDetails?> {
-        val rows = combine(
-            dao.observePairingAttempt(id),
-            dao.observeSecretUseRequest(id),
-            dao.observeSecretUploadRequest(id),
-            dao.observeGitSignRequest(id),
-            dao.observeSshAuthenticationRequest(id),
-        ) { pairing, secretUse, secretUpload, gitSign, sshAuthentication ->
-            RequestDetailRows(pairing, secretUse, secretUpload, gitSign, sshAuthentication)
-        }
+        val rows =
+            combine(
+                dao.observePairingAttempt(id),
+                dao.observeSecretUseRequest(id),
+                dao.observeSecretUploadRequest(id),
+                dao.observeGitSignRequest(id),
+                dao.observeSshAuthenticationRequest(id),
+            ) { pairing, secretUse, secretUpload, gitSign, sshAuthentication ->
+                RequestDetailRows(pairing, secretUse, secretUpload, gitSign, sshAuthentication)
+            }
         return combine(
             dao.observeRequest(id),
             rows,
@@ -551,187 +584,201 @@ internal class RequestInbox(
             request ?: return@combine null
             val state = request.state.toInboxRequestState()
             val clientSoftware = request.clientSoftwareJson?.let(::decodeStoredClientSoftware)
-            val content = when (request.kind) {
-                RequestKind.PAIRING.storedName -> {
-                    val pairing = detailRows.pairing ?: return@combine null
-                    InboxRequestContent.Pairing(
-                        PairingRequestDetails(
-                            pairingState = pairing.state.toPairingState(),
-                            clientName = pairing.friendlyName ?: pairing.hostname
-                                ?: pairing.platform ?: "Unknown client",
-                            pairingAddress = pairing.pairingAddress,
-                            clientId = pairing.clientId,
-                            sasOptions = listOfNotNull(
-                                pairing.sasOption0,
-                                pairing.sasOption1,
-                                pairing.sasOption2,
-                            ).map(pairingProtocol::formatSas),
-                            clientSoftware = clientSoftware,
-                            platform = pairing.platform,
-                            architecture = pairing.architecture,
-                            hostname = pairing.hostname,
-                            machineId = pairing.machineId,
-                            osVersion = pairing.osVersion,
-                            error = request.error,
-                            decidedAt = pairing.decidedAt,
-                        ),
-                    )
+            val content =
+                when (request.kind) {
+                    RequestKind.PAIRING.storedName -> {
+                        val pairing = detailRows.pairing ?: return@combine null
+                        InboxRequestContent.Pairing(
+                            PairingRequestDetails(
+                                pairingState = pairing.state.toPairingState(),
+                                clientName =
+                                    pairing.friendlyName
+                                        ?: pairing.hostname
+                                        ?: pairing.platform
+                                        ?: "Unknown client",
+                                pairingAddress = pairing.pairingAddress,
+                                clientId = pairing.clientId,
+                                sasOptions =
+                                    listOfNotNull(
+                                            pairing.sasOption0,
+                                            pairing.sasOption1,
+                                            pairing.sasOption2,
+                                        )
+                                        .map(pairingProtocol::formatSas),
+                                clientSoftware = clientSoftware,
+                                platform = pairing.platform,
+                                architecture = pairing.architecture,
+                                hostname = pairing.hostname,
+                                machineId = pairing.machineId,
+                                osVersion = pairing.osVersion,
+                                error = request.error,
+                                decidedAt = pairing.decidedAt,
+                            )
+                        )
+                    }
+                    RequestKind.SECRET_USE.storedName -> {
+                        val secretUse = detailRows.secretUse ?: return@combine null
+                        InboxRequestContent.SecretUse(
+                            SecretUseRequestDetails(
+                                state = request.toApprovalRequestState(),
+                                decision = secretUse.decision?.toApprovalDecision(),
+                                decisionSource = secretUse.decisionSource,
+                                approvalEvaluation =
+                                    secretUse.approvalEvaluationJson?.let(
+                                        ::decodeApprovalEvaluation
+                                    ),
+                                completionResult =
+                                    secretUse.completionResult?.toApprovalCompletionResult(),
+                                completionReason = secretUse.completionReason,
+                                completionMessage = secretUse.completionMessage,
+                                secrets = decodeStringList(secretUse.secretsJson),
+                                secretDetails =
+                                    storedJson.decodeFromString(secretUse.secretDetailsJson),
+                                environmentVariables =
+                                    decodeEnvironmentReviewFacts(secretUse.providedSecretsJson),
+                                missingSecrets = decodeStringList(secretUse.missingSecretsJson),
+                                reason = secretUse.reason,
+                                command = secretUse.command,
+                                arguments = decodeStringList(secretUse.argumentsJson),
+                                workingDirectory = secretUse.workingDirectory,
+                                executablePath = secretUse.executablePath,
+                                executableHash = secretUse.executableHash,
+                                executableMode = secretUse.executableMode,
+                                stdinKind = secretUse.stdinKind,
+                                stdoutKind = secretUse.stdoutKind,
+                                stderrKind = secretUse.stderrKind,
+                                launcherChain = decodeStringList(secretUse.launcherChainJson),
+                                clientId = request.clientId,
+                                clientName = request.clientNameSnapshot,
+                                hostname = secretUse.hostname,
+                                platform = secretUse.platform,
+                                architecture = secretUse.architecture,
+                                machineId = secretUse.machineId,
+                                osVersion = secretUse.osVersion,
+                                clientSoftware = clientSoftware,
+                                error = request.error,
+                                decidedAt = secretUse.decidedAt,
+                            )
+                        )
+                    }
+                    RequestKind.SECRET_UPLOAD.storedName -> {
+                        val upload = detailRows.secretUpload ?: return@combine null
+                        val summary = decodeUploadSummary(upload.summaryJson)
+                        InboxRequestContent.SecretUpload(
+                            SecretUploadRequestDetails(
+                                state = request.toSecretUploadRequestState(upload.decision),
+                                mode =
+                                    SecretUploadMode.entries.single {
+                                        it.wireName == upload.mode
+                                    },
+                                uploadedName = upload.uploadedName,
+                                approvedName = upload.approvedName,
+                                descriptionProvided = upload.descriptionProvided,
+                                description = upload.description,
+                                secretType = upload.secretType,
+                                variableNames = summary.variableNames,
+                                variables =
+                                    uploadVariables.map {
+                                        SecretUploadVariableDetails(it.id, it.name, it.sensitive)
+                                    },
+                                addedVariables = summary.addedVariables,
+                                changedVariables = summary.changedVariables,
+                                unchangedVariables = summary.unchangedVariables,
+                                removedVariables = summary.removedVariables,
+                                publicKey = summary.publicKey,
+                                fingerprint = summary.fingerprint,
+                                previousPublicKey = summary.previousPublicKey,
+                                previousFingerprint = summary.previousFingerprint,
+                                keyChanged = summary.keyChanged,
+                                clientName = request.clientNameSnapshot,
+                                clientId = request.clientId,
+                                clientSoftware = clientSoftware,
+                                error = request.error ?: upload.intakeError,
+                                decidedAt = upload.decidedAt,
+                            )
+                        )
+                    }
+                    RequestKind.GIT_SIGN.storedName -> {
+                        val gitSign = detailRows.gitSign ?: return@combine null
+                        val parentId = request.parentRequestId ?: return@combine null
+                        val invocation = dao.getSecretUseRequest(parentId) ?: return@combine null
+                        val invocationRequest = dao.getRequestById(parentId) ?: return@combine null
+                        InboxRequestContent.GitSign(
+                            GitSignRequestDetails(
+                                state = request.toApprovalRequestState(),
+                                decision = gitSign.decision?.toApprovalDecision(),
+                                completionResult =
+                                    gitSign.completionResult?.toApprovalCompletionResult(),
+                                completionReason = gitSign.completionReason,
+                                completionMessage = gitSign.completionMessage,
+                                secretName = gitSign.secretName,
+                                message = gitSign.message,
+                                repository =
+                                    gitSign.repositoryJson?.let {
+                                        runCatching {
+                                            storedJson.decodeFromString<GitSignRepository>(it)
+                                        }
+                                            .getOrNull()
+                                    },
+                                approvalEvaluation =
+                                    gitSign.approvalEvaluationJson?.let(::decodeApprovalEvaluation),
+                                invocationRequestId = invocationRequest.id,
+                                invocationReceivedAt = invocationRequest.receivedAt,
+                                command = invocation.command,
+                                arguments = decodeStringList(invocation.argumentsJson),
+                                reason = invocation.reason,
+                                clientId = invocationRequest.clientId,
+                                clientName = invocationRequest.clientNameSnapshot,
+                                clientSoftware = clientSoftware,
+                                error = request.error,
+                                decidedAt = gitSign.decidedAt,
+                            )
+                        )
+                    }
+                    RequestKind.SSH_AUTHENTICATE.storedName -> {
+                        val authentication = detailRows.sshAuthentication ?: return@combine null
+                        val parentId = request.parentRequestId ?: return@combine null
+                        val invocation = dao.getSecretUseRequest(parentId) ?: return@combine null
+                        val invocationRequest = dao.getRequestById(parentId) ?: return@combine null
+                        InboxRequestContent.SshAuthentication(
+                            SshAuthenticationRequestDetails(
+                                state = request.toApprovalRequestState(),
+                                decision = authentication.decision?.toApprovalDecision(),
+                                completionResult =
+                                    authentication.completionResult?.toApprovalCompletionResult(),
+                                completionReason = authentication.completionReason,
+                                completionMessage = authentication.completionMessage,
+                                secretName = authentication.secretName,
+                                username = authentication.username,
+                                method =
+                                    SshAuthenticationMethod.entries.single {
+                                        it.wireName == authentication.method
+                                    },
+                                algorithm =
+                                    SshSignatureAlgorithm.entries.single {
+                                        it.wireName == authentication.algorithm
+                                    },
+                                hostKeyAlgorithm = authentication.hostKeyAlgorithm,
+                                hostKeyFingerprint = authentication.hostKeyFingerprint,
+                                approvalEvaluation =
+                                    authentication.approvalEvaluationJson?.let(
+                                        ::decodeApprovalEvaluation
+                                    ),
+                                invocationRequestId = invocationRequest.id,
+                                invocationReceivedAt = invocationRequest.receivedAt,
+                                command = invocation.command,
+                                arguments = decodeStringList(invocation.argumentsJson),
+                                reason = invocation.reason,
+                                clientId = invocationRequest.clientId,
+                                clientName = invocationRequest.clientNameSnapshot,
+                                clientSoftware = clientSoftware,
+                                error = request.error,
+                                decidedAt = authentication.decidedAt,
+                            )
+                        )
+                    }
+                    else -> return@combine null
                 }
-                RequestKind.SECRET_USE.storedName -> {
-                    val secretUse = detailRows.secretUse ?: return@combine null
-                    InboxRequestContent.SecretUse(
-                        SecretUseRequestDetails(
-                            state = request.toApprovalRequestState(),
-                            decision = secretUse.decision?.toApprovalDecision(),
-                            decisionSource = secretUse.decisionSource,
-                            approvalEvaluation = secretUse.approvalEvaluationJson
-                                ?.let(::decodeApprovalEvaluation),
-                            completionResult = secretUse.completionResult
-                                ?.toApprovalCompletionResult(),
-                            completionReason = secretUse.completionReason,
-                            completionMessage = secretUse.completionMessage,
-                            secrets = decodeStringList(secretUse.secretsJson),
-                            secretDetails = storedJson.decodeFromString(
-                                secretUse.secretDetailsJson,
-                            ),
-                            environmentVariables = decodeEnvironmentReviewFacts(
-                                secretUse.providedSecretsJson,
-                            ),
-                            missingSecrets = decodeStringList(secretUse.missingSecretsJson),
-                            reason = secretUse.reason,
-                            command = secretUse.command,
-                            arguments = decodeStringList(secretUse.argumentsJson),
-                            workingDirectory = secretUse.workingDirectory,
-                            executablePath = secretUse.executablePath,
-                            executableHash = secretUse.executableHash,
-                            executableMode = secretUse.executableMode,
-                            stdinKind = secretUse.stdinKind,
-                            stdoutKind = secretUse.stdoutKind,
-                            stderrKind = secretUse.stderrKind,
-                            launcherChain = decodeStringList(secretUse.launcherChainJson),
-                            clientId = request.clientId,
-                            clientName = request.clientNameSnapshot,
-                            hostname = secretUse.hostname,
-                            platform = secretUse.platform,
-                            architecture = secretUse.architecture,
-                            machineId = secretUse.machineId,
-                            osVersion = secretUse.osVersion,
-                            clientSoftware = clientSoftware,
-                            error = request.error,
-                            decidedAt = secretUse.decidedAt,
-                        ),
-                    )
-                }
-                RequestKind.SECRET_UPLOAD.storedName -> {
-                    val upload = detailRows.secretUpload ?: return@combine null
-                    val summary = decodeUploadSummary(upload.summaryJson)
-                    InboxRequestContent.SecretUpload(
-                        SecretUploadRequestDetails(
-                            state = request.toSecretUploadRequestState(upload.decision),
-                            mode = SecretUploadMode.entries.single {
-                                it.wireName == upload.mode
-                            },
-                            uploadedName = upload.uploadedName,
-                            approvedName = upload.approvedName,
-                            descriptionProvided = upload.descriptionProvided,
-                            description = upload.description,
-                            secretType = upload.secretType,
-                            variableNames = summary.variableNames,
-                            variables = uploadVariables.map {
-                                SecretUploadVariableDetails(it.id, it.name, it.sensitive)
-                            },
-                            addedVariables = summary.addedVariables,
-                            changedVariables = summary.changedVariables,
-                            unchangedVariables = summary.unchangedVariables,
-                            removedVariables = summary.removedVariables,
-                            publicKey = summary.publicKey,
-                            fingerprint = summary.fingerprint,
-                            previousPublicKey = summary.previousPublicKey,
-                            previousFingerprint = summary.previousFingerprint,
-                            keyChanged = summary.keyChanged,
-                            clientName = request.clientNameSnapshot,
-                            clientId = request.clientId,
-                            clientSoftware = clientSoftware,
-                            error = request.error ?: upload.intakeError,
-                            decidedAt = upload.decidedAt,
-                        ),
-                    )
-                }
-                RequestKind.GIT_SIGN.storedName -> {
-                    val gitSign = detailRows.gitSign ?: return@combine null
-                    val parentId = request.parentRequestId ?: return@combine null
-                    val invocation = dao.getSecretUseRequest(parentId) ?: return@combine null
-                    val invocationRequest = dao.getRequestById(parentId) ?: return@combine null
-                    InboxRequestContent.GitSign(
-                        GitSignRequestDetails(
-                            state = request.toApprovalRequestState(),
-                            decision = gitSign.decision?.toApprovalDecision(),
-                            completionResult = gitSign.completionResult
-                                ?.toApprovalCompletionResult(),
-                            completionReason = gitSign.completionReason,
-                            completionMessage = gitSign.completionMessage,
-                            secretName = gitSign.secretName,
-                            message = gitSign.message,
-                            repository = gitSign.repositoryJson?.let {
-                                runCatching {
-                                    storedJson.decodeFromString<GitSignRepository>(it)
-                                }.getOrNull()
-                            },
-                            approvalEvaluation = gitSign.approvalEvaluationJson
-                                ?.let(::decodeApprovalEvaluation),
-                            invocationRequestId = invocationRequest.id,
-                            invocationReceivedAt = invocationRequest.receivedAt,
-                            command = invocation.command,
-                            arguments = decodeStringList(invocation.argumentsJson),
-                            reason = invocation.reason,
-                            clientId = invocationRequest.clientId,
-                            clientName = invocationRequest.clientNameSnapshot,
-                            clientSoftware = clientSoftware,
-                            error = request.error,
-                            decidedAt = gitSign.decidedAt,
-                        ),
-                    )
-                }
-                RequestKind.SSH_AUTHENTICATE.storedName -> {
-                    val authentication = detailRows.sshAuthentication ?: return@combine null
-                    val parentId = request.parentRequestId ?: return@combine null
-                    val invocation = dao.getSecretUseRequest(parentId) ?: return@combine null
-                    val invocationRequest = dao.getRequestById(parentId) ?: return@combine null
-                    InboxRequestContent.SshAuthentication(
-                        SshAuthenticationRequestDetails(
-                            state = request.toApprovalRequestState(),
-                            decision = authentication.decision?.toApprovalDecision(),
-                            completionResult = authentication.completionResult
-                                ?.toApprovalCompletionResult(),
-                            completionReason = authentication.completionReason,
-                            completionMessage = authentication.completionMessage,
-                            secretName = authentication.secretName,
-                            username = authentication.username,
-                            method = SshAuthenticationMethod.entries.single {
-                                it.wireName == authentication.method
-                            },
-                            algorithm = SshSignatureAlgorithm.entries.single {
-                                it.wireName == authentication.algorithm
-                            },
-                            hostKeyAlgorithm = authentication.hostKeyAlgorithm,
-                            hostKeyFingerprint = authentication.hostKeyFingerprint,
-                            approvalEvaluation = authentication.approvalEvaluationJson
-                                ?.let(::decodeApprovalEvaluation),
-                            invocationRequestId = invocationRequest.id,
-                            invocationReceivedAt = invocationRequest.receivedAt,
-                            command = invocation.command,
-                            arguments = decodeStringList(invocation.argumentsJson),
-                            reason = invocation.reason,
-                            clientId = invocationRequest.clientId,
-                            clientName = invocationRequest.clientNameSnapshot,
-                            clientSoftware = clientSoftware,
-                            error = request.error,
-                            decidedAt = authentication.decidedAt,
-                        ),
-                    )
-                }
-                else -> return@combine null
-            }
             InboxRequestDetails(
                 id = request.id,
                 parentRequestId = request.parentRequestId,
@@ -750,26 +797,28 @@ internal class RequestInbox(
             requests.mapNotNull { notificationFor(it) }
         }
 
-    private suspend fun notificationFor(
-        request: InboxRequestEntity,
-    ): RequestNotification? = when (request.kind) {
-                RequestKind.SECRET_USE.storedName -> {
-                    val secretUse = dao.getSecretUseRequest(request.id) ?: return null
-                    if (secretUse.decision != null) return null
-                    val secrets = decodeStringList(secretUse.secretsJson)
-                    val command = renderShellCommand(
+    private suspend fun notificationFor(request: InboxRequestEntity): RequestNotification? =
+        when (request.kind) {
+            RequestKind.SECRET_USE.storedName -> {
+                val secretUse = dao.getSecretUseRequest(request.id) ?: return null
+                if (secretUse.decision != null) return null
+                val secrets = decodeStringList(secretUse.secretsJson)
+                val command =
+                    renderShellCommand(
                         secretUse.command,
                         decodeStringList(secretUse.argumentsJson),
                     )
-                    val clientName = renderSingleLineText(request.clientNameSnapshot)
-                    val secretNames = secrets.joinToString(transform = ::renderSingleLineText)
-                    val aiDetail = aiNotificationDetail(secretUse.approvalEvaluationJson)
-                    RequestNotification(
-                        requestId = request.id,
-                        title = "Secret use requested",
-                        summary = listOfNotNull(aiDetail?.label, clientName, command, secretNames)
+                val clientName = renderSingleLineText(request.clientNameSnapshot)
+                val secretNames = secrets.joinToString(transform = ::renderSingleLineText)
+                val aiDetail = aiNotificationDetail(secretUse.approvalEvaluationJson)
+                RequestNotification(
+                    requestId = request.id,
+                    title = "Secret use requested",
+                    summary =
+                        listOfNotNull(aiDetail?.label, clientName, command, secretNames)
                             .joinToString(" · "),
-                        details = listOfNotNull(
+                    details =
+                        listOfNotNull(
                             RequestNotificationDetail("Client", clientName),
                             RequestNotificationDetail("Secrets", secretNames),
                             RequestNotificationDetail("Command", command),
@@ -781,31 +830,37 @@ internal class RequestInbox(
                                 )
                             },
                         ),
-                        decisionAvailable = true,
-                    )
-                }
-                RequestKind.GIT_SIGN.storedName -> {
-                    val gitSign = dao.getGitSignRequest(request.id) ?: return null
-                    if (gitSign.decision != null) return null
-                    val parentId = request.parentRequestId ?: return null
-                    val invocation = dao.getSecretUseRequest(parentId) ?: return null
-                    val parentRequest = dao.getRequestById(parentId) ?: return null
-                    val command = renderShellCommand(
+                    decisionAvailable = true,
+                )
+            }
+            RequestKind.GIT_SIGN.storedName -> {
+                val gitSign = dao.getGitSignRequest(request.id) ?: return null
+                if (gitSign.decision != null) return null
+                val parentId = request.parentRequestId ?: return null
+                val invocation = dao.getSecretUseRequest(parentId) ?: return null
+                val parentRequest = dao.getRequestById(parentId) ?: return null
+                val command =
+                    renderShellCommand(
                         invocation.command,
                         decodeStringList(invocation.argumentsJson),
                     )
-                    val clientName = renderSingleLineText(parentRequest.clientNameSnapshot)
-                    val content = describeGitSigningContent(gitSign.message)
-                    val aiDetail = aiNotificationDetail(gitSign.approvalEvaluationJson)
-                    RequestNotification(
-                        requestId = request.id,
-                        title = "Git signature requested",
-                        summary = listOfNotNull(
-                            aiDetail?.label,
-                            clientName,
-                            renderSingleLineText(content.message?.substringBefore('\n') ?: command),
-                        ).joinToString(" · "),
-                        details = listOfNotNull(
+                val clientName = renderSingleLineText(parentRequest.clientNameSnapshot)
+                val content = describeGitSigningContent(gitSign.message)
+                val aiDetail = aiNotificationDetail(gitSign.approvalEvaluationJson)
+                RequestNotification(
+                    requestId = request.id,
+                    title = "Git signature requested",
+                    summary =
+                        listOfNotNull(
+                                aiDetail?.label,
+                                clientName,
+                                renderSingleLineText(
+                                    content.message?.substringBefore('\n') ?: command
+                                ),
+                            )
+                            .joinToString(" · "),
+                    details =
+                        listOfNotNull(
                             RequestNotificationDetail("Client", clientName),
                             RequestNotificationDetail(
                                 "SSH key",
@@ -816,31 +871,36 @@ internal class RequestInbox(
                             RequestNotificationDetail(
                                 content.messageLabel ?: "Content",
                                 renderSingleLineText(
-                                    content.message ?: gitSign.message.decodeToString(throwOnInvalidSequence = false),
+                                    content.message
+                                        ?: gitSign.message.decodeToString(
+                                            throwOnInvalidSequence = false
+                                        )
                                 ),
                             ),
                         ),
-                        decisionAvailable = true,
-                    )
-                }
-                RequestKind.SSH_AUTHENTICATE.storedName -> {
-                    val authentication = dao.getSshAuthenticationRequest(request.id)
-                        ?: return null
-                    if (authentication.decision != null) return null
-                    val parentId = request.parentRequestId ?: return null
-                    val invocation = dao.getSecretUseRequest(parentId) ?: return null
-                    val parentRequest = dao.getRequestById(parentId) ?: return null
-                    val command = renderShellCommand(
+                    decisionAvailable = true,
+                )
+            }
+            RequestKind.SSH_AUTHENTICATE.storedName -> {
+                val authentication = dao.getSshAuthenticationRequest(request.id) ?: return null
+                if (authentication.decision != null) return null
+                val parentId = request.parentRequestId ?: return null
+                val invocation = dao.getSecretUseRequest(parentId) ?: return null
+                val parentRequest = dao.getRequestById(parentId) ?: return null
+                val command =
+                    renderShellCommand(
                         invocation.command,
                         decodeStringList(invocation.argumentsJson),
                     )
-                    val clientName = renderSingleLineText(parentRequest.clientNameSnapshot)
-                    val aiDetail = aiNotificationDetail(authentication.approvalEvaluationJson)
-                    RequestNotification(
-                        requestId = request.id,
-                        title = "SSH authentication requested",
-                        summary = listOfNotNull(aiDetail?.label, clientName, command).joinToString(" · "),
-                        details = listOfNotNull(
+                val clientName = renderSingleLineText(parentRequest.clientNameSnapshot)
+                val aiDetail = aiNotificationDetail(authentication.approvalEvaluationJson)
+                RequestNotification(
+                    requestId = request.id,
+                    title = "SSH authentication requested",
+                    summary =
+                        listOfNotNull(aiDetail?.label, clientName, command).joinToString(" · "),
+                    details =
+                        listOfNotNull(
                             RequestNotificationDetail("Client", clientName),
                             RequestNotificationDetail(
                                 "SSH key",
@@ -853,47 +913,54 @@ internal class RequestInbox(
                                 renderSingleLineText(authentication.username),
                             ),
                         ),
-                        decisionAvailable = true,
-                    )
-                }
-                RequestKind.PAIRING.storedName -> {
-                    val pairing = dao.getPairingAttempt(request.id) ?: return null
-                    RequestNotification(
-                        requestId = request.id,
-                        title = "Pairing requested",
-                        summary = renderSingleLineText(
-                            pairing.friendlyName ?: pairing.hostname
-                                ?: pairing.platform ?: "Unknown client",
+                    decisionAvailable = true,
+                )
+            }
+            RequestKind.PAIRING.storedName -> {
+                val pairing = dao.getPairingAttempt(request.id) ?: return null
+                RequestNotification(
+                    requestId = request.id,
+                    title = "Pairing requested",
+                    summary =
+                        renderSingleLineText(
+                            pairing.friendlyName
+                                ?: pairing.hostname
+                                ?: pairing.platform
+                                ?: "Unknown client"
                         ),
-                        details = listOf(
+                    details =
+                        listOf(
                             RequestNotificationDetail(
                                 null,
                                 when (pairing.state.toPairingState()) {
                                     PairingState.EXCHANGE_PENDING ->
                                         "Waiting for the client to complete the secure exchange."
-                                    PairingState.EXCHANGE_FAILED -> request.error
-                                        ?: "The secure exchange failed. Reject this pairing to continue."
+                                    PairingState.EXCHANGE_FAILED ->
+                                        request.error
+                                            ?: "The secure exchange failed. Reject this pairing to continue."
                                     PairingState.SAS_VERIFICATION_PENDING ->
                                         "Open Agentknock and compare the verification code."
-                                    PairingState.WAITING_FOR_FINISH,
-                                    -> "The pairing is still waiting for the client and can be rejected."
+                                    PairingState.WAITING_FOR_FINISH ->
+                                        "The pairing is still waiting for the client and can be rejected."
                                     else -> "Open Agentknock to review this pairing."
                                 },
-                            ),
+                            )
                         ),
-                        decisionAvailable = false,
-                    )
-                }
-                RequestKind.SECRET_UPLOAD.storedName -> {
-                    val upload = dao.getSecretUploadRequest(request.id) ?: return null
-                    if (upload.decision != null) return null
-                    val uploadSummary = decodeUploadSummary(upload.summaryJson)
-                    RequestNotification(
-                        requestId = request.id,
-                        title = "Secret upload received",
-                        summary = "${renderSingleLineText(request.clientNameSnapshot)} wants to " +
+                    decisionAvailable = false,
+                )
+            }
+            RequestKind.SECRET_UPLOAD.storedName -> {
+                val upload = dao.getSecretUploadRequest(request.id) ?: return null
+                if (upload.decision != null) return null
+                val uploadSummary = decodeUploadSummary(upload.summaryJson)
+                RequestNotification(
+                    requestId = request.id,
+                    title = "Secret upload received",
+                    summary =
+                        "${renderSingleLineText(request.clientNameSnapshot)} wants to " +
                             "${upload.mode.lowercase()} ${renderSingleLineText(upload.uploadedName)}",
-                        details = listOf(
+                    details =
+                        listOf(
                             RequestNotificationDetail(
                                 "Client",
                                 renderSingleLineText(request.clientNameSnapshot),
@@ -911,38 +978,43 @@ internal class RequestInbox(
                                     "Environment variables"
                                 },
                             ),
-                        ) + if (upload.secretType == SSH_SECRET_TYPE) {
-                            listOfNotNull(
-                                uploadSummary.fingerprint?.let {
-                                    RequestNotificationDetail("Fingerprint", it)
-                                },
-                            )
-                        } else {
-                            listOf(
-                                RequestNotificationDetail(
-                                    "Environment variables",
-                                    uploadSummary.variableNames
-                                        .joinToString(transform = ::renderSingleLineText),
-                                ),
-                            )
-                        },
-                        decisionAvailable = false,
-                    )
-                }
-                else -> null
+                        ) +
+                            if (upload.secretType == SSH_SECRET_TYPE) {
+                                listOfNotNull(
+                                    uploadSummary.fingerprint?.let {
+                                        RequestNotificationDetail("Fingerprint", it)
+                                    }
+                                )
+                            } else {
+                                listOf(
+                                    RequestNotificationDetail(
+                                        "Environment variables",
+                                        uploadSummary.variableNames.joinToString(
+                                            transform = ::renderSingleLineText
+                                        ),
+                                    )
+                                )
+                            },
+                    decisionAvailable = false,
+                )
             }
+            else -> null
+        }
 
     private fun SecretUploadRequestEntity.listSummary(): String {
         val summary = decodeUploadSummary(summaryJson)
         if (secretType == SSH_SECRET_TYPE) return "SSH key"
         if (mode == SecretUploadMode.UPDATE.wireName) {
             return buildList {
-                summary.addedVariables.size.takeIf { it > 0 }?.let { add("$it added") }
-                summary.changedVariables.size.takeIf { it > 0 }?.let { add("$it to update") }
-                summary.removedVariables.size.takeIf { it > 0 }?.let { add("$it removed") }
-            }.ifEmpty {
-                listOf("No environment variable changes")
-            }.joinToString(" · ").let { "Environment variables · $it" }
+                    summary.addedVariables.size.takeIf { it > 0 }?.let { add("$it added") }
+                    summary.changedVariables.size.takeIf { it > 0 }?.let { add("$it to update") }
+                    summary.removedVariables.size.takeIf { it > 0 }?.let { add("$it removed") }
+                }
+                .ifEmpty {
+                    listOf("No environment variable changes")
+                }
+                .joinToString(" · ")
+                .let { "Environment variables · $it" }
         }
         val count = summary.variableNames.size
         return "$count ${if (count == 1) "environment variable" else "environment variables"}"
@@ -961,12 +1033,13 @@ internal class RequestInbox(
         checkNotNull(ApprovalCompletionResult.entries.find { it.storedName == this })
 
     private fun InboxRequestEntity.toSecretUploadRequestState(
-        decision: String?,
-    ): SecretUploadRequestState = secretUploadRequestState(
-        state = state.toInboxRequestState(),
-        failureKind = failureKind,
-        decision = decision,
-    )
+        decision: String?
+    ): SecretUploadRequestState =
+        secretUploadRequestState(
+            state = state.toInboxRequestState(),
+            failureKind = failureKind,
+            decision = decision,
+        )
 
     private fun decodeStringList(value: String): List<String> =
         storedJson.decodeFromString(STRING_LIST_SERIALIZER, value)
@@ -984,26 +1057,31 @@ internal class RequestInbox(
         storedJson.decodeFromString(value)
 
     private fun decodeEnvironmentReviewFacts(
-        value: String?,
-    ): Map<String, ApprovalReviewEnvironmentSecretFacts> = value?.let { encoded ->
-        decodeStoredApprovalReviewSecretFacts(encoded)
-            ?.mapNotNull { (secretName, facts) ->
-                (facts as? ApprovalReviewEnvironmentSecretFacts)
-                    ?.let { environment -> secretName to environment }
+        value: String?
+    ): Map<String, ApprovalReviewEnvironmentSecretFacts> =
+        value
+            ?.let { encoded ->
+                decodeStoredApprovalReviewSecretFacts(encoded)
+                    ?.mapNotNull { (secretName, facts) ->
+                        (facts as? ApprovalReviewEnvironmentSecretFacts)?.let { environment ->
+                            secretName to environment
+                        }
+                    }
+                    ?.toMap()
             }
-            ?.toMap()
-    }.orEmpty()
+            .orEmpty()
 
     private companion object {
         val STRING_LIST_SERIALIZER = ListSerializer(String.serializer())
     }
 }
 
-private fun String.toInboxRequestKind(): InboxRequestKind? = when (this) {
-    RequestKind.PAIRING.storedName -> InboxRequestKind.PAIRING
-    RequestKind.SECRET_USE.storedName -> InboxRequestKind.SECRET_USE
-    RequestKind.GIT_SIGN.storedName -> InboxRequestKind.GIT_SIGN
-    RequestKind.SSH_AUTHENTICATE.storedName -> InboxRequestKind.SSH_AUTHENTICATE
-    RequestKind.SECRET_UPLOAD.storedName -> InboxRequestKind.SECRET_UPLOAD
-    else -> null
-}
+private fun String.toInboxRequestKind(): InboxRequestKind? =
+    when (this) {
+        RequestKind.PAIRING.storedName -> InboxRequestKind.PAIRING
+        RequestKind.SECRET_USE.storedName -> InboxRequestKind.SECRET_USE
+        RequestKind.GIT_SIGN.storedName -> InboxRequestKind.GIT_SIGN
+        RequestKind.SSH_AUTHENTICATE.storedName -> InboxRequestKind.SSH_AUTHENTICATE
+        RequestKind.SECRET_UPLOAD.storedName -> InboxRequestKind.SECRET_UPLOAD
+        else -> null
+    }

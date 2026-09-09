@@ -35,12 +35,13 @@ class RequestNotificationCoordinatorTest {
     fun `reconcile does not redisplay unchanged state in the same process`() = runTest {
         val current = listOf(notification("current"))
         val displayed = mutableListOf<List<RequestNotification>>()
-        val coordinator = RequestNotificationCoordinator(
-            scope = backgroundScope,
-            requests = MutableStateFlow(current),
-            displayRequests = { displayed += it },
-            displayWake = {},
-        )
+        val coordinator =
+            RequestNotificationCoordinator(
+                scope = backgroundScope,
+                requests = MutableStateFlow(current),
+                displayRequests = { displayed += it },
+                displayWake = {},
+            )
         runCurrent()
 
         coordinator.reconcile()
@@ -52,12 +53,13 @@ class RequestNotificationCoordinatorTest {
     fun `permission grant explicitly redisplays current state`() = runTest {
         val current = listOf(notification("current"))
         val displayed = mutableListOf<List<RequestNotification>>()
-        val coordinator = RequestNotificationCoordinator(
-            scope = backgroundScope,
-            requests = MutableStateFlow(current),
-            displayRequests = { displayed += it },
-            displayWake = {},
-        )
+        val coordinator =
+            RequestNotificationCoordinator(
+                scope = backgroundScope,
+                requests = MutableStateFlow(current),
+                displayRequests = { displayed += it },
+                displayWake = {},
+            )
         runCurrent()
 
         coordinator.redisplay()
@@ -71,18 +73,19 @@ class RequestNotificationCoordinatorTest {
         val displayStarted = CompletableDeferred<Unit>()
         val releaseDisplay = CompletableDeferred<Unit>()
         val effects = mutableListOf<String>()
-        val coordinator = RequestNotificationCoordinator(
-            scope = backgroundScope,
-            requests = requests,
-            displayRequests = {
-                effects += "display:${it.single().requestId}"
-                if (it.single().requestId == "current") {
-                    displayStarted.complete(Unit)
-                    releaseDisplay.await()
-                }
-            },
-            displayWake = {},
-        )
+        val coordinator =
+            RequestNotificationCoordinator(
+                scope = backgroundScope,
+                requests = requests,
+                displayRequests = {
+                    effects += "display:${it.single().requestId}"
+                    if (it.single().requestId == "current") {
+                        displayStarted.complete(Unit)
+                        releaseDisplay.await()
+                    }
+                },
+                displayWake = {},
+            )
 
         runCurrent()
         displayStarted.await()
@@ -106,11 +109,12 @@ class RequestNotificationCoordinatorTest {
         )
     }
 
-    private fun notification(id: String) = RequestNotification(
-        requestId = id,
-        title = id,
-        summary = "summary",
-        details = emptyList(),
-        decisionAvailable = true,
-    )
+    private fun notification(id: String) =
+        RequestNotification(
+            requestId = id,
+            title = id,
+            summary = "summary",
+            details = emptyList(),
+            decisionAvailable = true,
+        )
 }

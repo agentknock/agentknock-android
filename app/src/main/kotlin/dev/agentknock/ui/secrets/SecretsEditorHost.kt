@@ -4,8 +4,8 @@ package dev.agentknock.ui.secrets
 
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.outlined.DeleteForever
-import androidx.compose.material3.Icon
 import androidx.compose.material3.AlertDialog
+import androidx.compose.material3.Icon
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.SnackbarHostState
 import androidx.compose.material3.Text
@@ -14,8 +14,8 @@ import androidx.compose.runtime.Composable
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
-import androidx.compose.ui.Modifier
 import androidx.compose.runtime.setValue
+import androidx.compose.ui.Modifier
 import androidx.compose.ui.res.stringResource
 import dev.agentknock.R
 import dev.agentknock.storage.secret.EnvironmentVariableMetadata
@@ -32,9 +32,10 @@ internal fun SecretsEditorHost(
     snackbar: SnackbarHostState,
 ) {
     val activeEditor = editor as? SecretsEditor.Active ?: return
-    var variablePendingDeletion by remember(activeEditor.session) {
-        mutableStateOf<PendingVariableDeletion?>(null)
-    }
+    var variablePendingDeletion by
+        remember(activeEditor.session) {
+            mutableStateOf<PendingVariableDeletion?>(null)
+        }
 
     when (val editorState = activeEditor.draft) {
         is SecretEditorState -> {
@@ -66,9 +67,10 @@ internal fun SecretsEditorHost(
                 enabled = activeEditor.phase == EditorPhase.EDITING,
                 onEditorChange = { viewModel.updateVariableEditor(activeEditor.session, it) },
                 onDismiss = { viewModel.closeEditor(activeEditor.session) },
-                onDelete = variable?.let {
-                    { variablePendingDeletion = PendingVariableDeletion(it, activeEditor) }
-                },
+                onDelete =
+                    variable?.let {
+                        { variablePendingDeletion = PendingVariableDeletion(it, activeEditor) }
+                    },
                 onSave = { viewModel.saveVariableEditor(activeEditor) },
                 snackbar = snackbar,
             )
@@ -88,6 +90,7 @@ internal fun SecretsEditorHost(
         )
     }
 }
+
 @Composable
 internal fun DeleteDialog(
     title: String,

@@ -18,7 +18,10 @@ import androidx.compose.ui.unit.dp
 @Composable
 internal fun ExactText(value: String, trailingAction: (@Composable () -> Unit)? = null) {
     Column {
-        Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+        Row(
+            verticalAlignment = Alignment.CenterVertically,
+            horizontalArrangement = Arrangement.spacedBy(8.dp),
+        ) {
             Text(
                 "Scroll horizontally to read long lines. Select text to copy.",
                 modifier = Modifier.weight(1f),

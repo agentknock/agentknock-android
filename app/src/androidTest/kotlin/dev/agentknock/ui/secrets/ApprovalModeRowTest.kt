@@ -7,14 +7,14 @@ import androidx.compose.runtime.CompositionLocalProvider
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.platform.LocalDensity
-import androidx.compose.ui.semantics.SemanticsProperties
 import androidx.compose.ui.semantics.SemanticsActions
+import androidx.compose.ui.semantics.SemanticsProperties
 import androidx.compose.ui.test.SemanticsMatcher
 import androidx.compose.ui.test.assert
 import androidx.compose.ui.test.assertIsDisplayed
 import androidx.compose.ui.test.assertIsNotEnabled
-import androidx.compose.ui.test.assertIsSelected
 import androidx.compose.ui.test.assertIsNotSelected
+import androidx.compose.ui.test.assertIsSelected
 import androidx.compose.ui.test.junit4.v2.createComposeRule
 import androidx.compose.ui.test.onNodeWithText
 import androidx.compose.ui.test.performClick
@@ -33,22 +33,32 @@ import org.junit.Test
 class ApprovalModeRowTest {
     @get:Rule val compose = createComposeRule()
 
-    @Test fun freeUsersCanExploreAiWithoutChangingTheirApprovalMode() {
+    @Test
+    fun freeUsersCanExploreAiWithoutChangingTheirApprovalMode() {
         val access = mutableStateOf(AiReviewAccess.INACTIVE)
         val selected = mutableStateOf(SecretApprovalMode.ASK_ME)
         var plansOpened = 0
         compose.setContent {
             AgentknockTheme {
                 ApprovalModeRow(
-                    title = "Default for all clients", selected = selected.value, inherited = false,
-                    defaultMode = selected.value, aiReviewAccess = access.value,
-                    onSelect = { selected.value = it }, onOpenPlan = { plansOpened++ },
+                    title = "Default for all clients",
+                    selected = selected.value,
+                    inherited = false,
+                    defaultMode = selected.value,
+                    aiReviewAccess = access.value,
+                    onSelect = { selected.value = it },
+                    onOpenPlan = { plansOpened++ },
                 )
             }
         }
-        compose.onNodeWithText("AI").assert(
-            SemanticsMatcher.expectValue(SemanticsProperties.StateDescription, "Requires subscription"),
-        )
+        compose
+            .onNodeWithText("AI")
+            .assert(
+                SemanticsMatcher.expectValue(
+                    SemanticsProperties.StateDescription,
+                    "Requires subscription",
+                )
+            )
         compose.onNodeWithText("AI").performClick()
         compose.onNodeWithText("View plans").performClick()
         assertEquals(1, plansOpened)
@@ -60,21 +70,29 @@ class ApprovalModeRowTest {
         assertEquals(SecretApprovalMode.ASK_AI, selected.value)
     }
 
-    @Test fun expiryPreservesAiPreferenceButAnExplicitManualChoiceSurvivesRenewal() {
+    @Test
+    fun expiryPreservesAiPreferenceButAnExplicitManualChoiceSurvivesRenewal() {
         val access = mutableStateOf(AiReviewAccess.ACTIVE)
         val selected = mutableStateOf(SecretApprovalMode.ASK_AI)
         compose.setContent {
             AgentknockTheme {
                 ApprovalModeRow(
-                    title = "Default for all clients", selected = selected.value, inherited = false,
-                    defaultMode = selected.value, aiReviewAccess = access.value,
-                    onSelect = { selected.value = it }, onOpenPlan = {},
+                    title = "Default for all clients",
+                    selected = selected.value,
+                    inherited = false,
+                    defaultMode = selected.value,
+                    aiReviewAccess = access.value,
+                    onSelect = { selected.value = it },
+                    onOpenPlan = {},
                 )
             }
         }
         compose.runOnIdle { access.value = AiReviewAccess.INACTIVE }
         compose.onNodeWithText("AI").assertIsSelected()
-        compose.onNodeWithText("Requests will ask you instead. Your Ask AI setting will resume when AI review is active.")
+        compose
+            .onNodeWithText(
+                "Requests will ask you instead. Your Ask AI setting will resume when AI review is active."
+            )
             .assertIsDisplayed()
         compose.onNodeWithText("Ask").performClick()
         compose.runOnIdle { access.value = AiReviewAccess.ACTIVE }
@@ -82,36 +100,53 @@ class ApprovalModeRowTest {
         assertEquals(SecretApprovalMode.ASK_ME, selected.value)
     }
 
-    @Test fun unknownAndActivatingAccessNeverOfferAnUpgradeOrBlockManualChoices() {
+    @Test
+    fun unknownAndActivatingAccessNeverOfferAnUpgradeOrBlockManualChoices() {
         val access = mutableStateOf(AiReviewAccess.CHECKING)
         val selected = mutableStateOf(SecretApprovalMode.ASK_AI)
         compose.setContent {
             AgentknockTheme {
                 ApprovalModeRow(
-                    title = "Default for all clients", selected = selected.value, inherited = false,
-                    defaultMode = selected.value, aiReviewAccess = access.value,
-                    onSelect = { selected.value = it }, onOpenPlan = { error("No plan navigation") },
+                    title = "Default for all clients",
+                    selected = selected.value,
+                    inherited = false,
+                    defaultMode = selected.value,
+                    aiReviewAccess = access.value,
+                    onSelect = { selected.value = it },
+                    onOpenPlan = { error("No plan navigation") },
                 )
             }
         }
-        for (state in listOf(AiReviewAccess.CHECKING, AiReviewAccess.ACTIVATING, AiReviewAccess.UNAVAILABLE)) {
+        for (state in
+            listOf(
+                AiReviewAccess.CHECKING,
+                AiReviewAccess.ACTIVATING,
+                AiReviewAccess.UNAVAILABLE,
+            )) {
             compose.runOnIdle { access.value = state }
             compose.onNodeWithText("AI").assertIsNotEnabled()
-            compose.onNodeWithText("AI").assert(SemanticsMatcher.keyNotDefined(SemanticsProperties.StateDescription))
+            compose
+                .onNodeWithText("AI")
+                .assert(SemanticsMatcher.keyNotDefined(SemanticsProperties.StateDescription))
             compose.onNodeWithText("Deny").performClick()
             compose.onNodeWithText("Ask").performClick()
             assertEquals(SecretApprovalMode.ASK_ME, selected.value)
         }
     }
 
-    @Test fun aDismissedSubscriptionExplanationNeverReappearsOnLaterExpiry() {
+    @Test
+    fun aDismissedSubscriptionExplanationNeverReappearsOnLaterExpiry() {
         val access = mutableStateOf(AiReviewAccess.INACTIVE)
         compose.setContent {
             AgentknockTheme {
                 ApprovalModeRow(
-                    title = "Default for all clients", selected = SecretApprovalMode.ASK_ME,
-                    inherited = false, defaultMode = SecretApprovalMode.ASK_ME,
-                    aiReviewAccess = access.value, onSelect = {}, onOpenPlan = {},
+                    title = "Default for all clients",
+                    selected = SecretApprovalMode.ASK_ME,
+                    inherited = false,
+                    defaultMode = SecretApprovalMode.ASK_ME,
+                    aiReviewAccess = access.value,
+                    onSelect = {},
+                    onOpenPlan = {},
                 )
             }
         }
@@ -123,14 +158,20 @@ class ApprovalModeRowTest {
         compose.onNodeWithText("View plans").assertDoesNotExist()
     }
 
-    @Test fun inheritingAnAiDefaultUsesTheSameSubscriptionGate() {
+    @Test
+    fun inheritingAnAiDefaultUsesTheSameSubscriptionGate() {
         var defaultUsed = false
         compose.setContent {
             AgentknockTheme {
                 ApprovalModeRow(
-                    title = "Laptop", selected = SecretApprovalMode.ASK_ME, inherited = false,
-                    defaultMode = SecretApprovalMode.ASK_AI, aiReviewAccess = AiReviewAccess.INACTIVE,
-                    onSelect = {}, onOpenPlan = {}, onUseDefault = { defaultUsed = true },
+                    title = "Laptop",
+                    selected = SecretApprovalMode.ASK_ME,
+                    inherited = false,
+                    defaultMode = SecretApprovalMode.ASK_AI,
+                    aiReviewAccess = AiReviewAccess.INACTIVE,
+                    onSelect = {},
+                    onOpenPlan = {},
+                    onUseDefault = { defaultUsed = true },
                 )
             }
         }
@@ -139,18 +180,32 @@ class ApprovalModeRowTest {
         assertEquals(false, defaultUsed)
     }
 
-    @Test fun anInheritedSettingHighlightsTheDefaultAndStillAllowsAnExplicitMatchingOverride() {
+    @Test
+    fun anInheritedSettingHighlightsTheDefaultAndStillAllowsAnExplicitMatchingOverride() {
         val inherited = mutableStateOf(true)
         val selected = mutableStateOf(SecretApprovalMode.ASK_ME)
         compose.setContent {
             AgentknockTheme {
                 ApprovalModeRow(
-                    title = "Work laptop", isClient = true, selected = selected.value, inherited = inherited.value,
-                    defaultMode = SecretApprovalMode.ASK_ME, aiReviewAccess = AiReviewAccess.ACTIVE,
-                    onSelect = { selected.value = it; inherited.value = false }, onOpenPlan = {},
-                    onUseDefault = if (inherited.value) null else {
-                        { selected.value = SecretApprovalMode.ASK_ME; inherited.value = true }
+                    title = "Work laptop",
+                    isClient = true,
+                    selected = selected.value,
+                    inherited = inherited.value,
+                    defaultMode = SecretApprovalMode.ASK_ME,
+                    aiReviewAccess = AiReviewAccess.ACTIVE,
+                    onSelect = {
+                        selected.value = it
+                        inherited.value = false
                     },
+                    onOpenPlan = {},
+                    onUseDefault =
+                        if (inherited.value) null
+                        else {
+                            {
+                                selected.value = SecretApprovalMode.ASK_ME
+                                inherited.value = true
+                            }
+                        },
                 )
             }
         }
@@ -171,19 +226,26 @@ class ApprovalModeRowTest {
         compose.onNodeWithText("Use default").assertDoesNotExist()
     }
 
-    @Test fun narrowControlKeepsLabelsCentredAcrossAccessAndSelectionChanges() {
+    @Test
+    fun narrowControlKeepsLabelsCentredAcrossAccessAndSelectionChanges() {
         val access = mutableStateOf(AiReviewAccess.ACTIVE)
         val selected = mutableStateOf(SecretApprovalMode.ASK_ME)
         val fontScale = mutableStateOf(1f)
         compose.setContent {
-            CompositionLocalProvider(LocalDensity provides Density(LocalDensity.current.density, fontScale.value)) {
+            CompositionLocalProvider(
+                LocalDensity provides Density(LocalDensity.current.density, fontScale.value)
+            ) {
                 AgentknockTheme {
                     // A 320 dp phone, including the screen's 20 dp and card's 16 dp side padding.
                     Box(Modifier.width(320.dp).padding(horizontal = 36.dp)) {
                         ApprovalModeRow(
-                            title = "Default for all clients", selected = selected.value, inherited = false,
-                            defaultMode = selected.value, aiReviewAccess = access.value,
-                            onSelect = { selected.value = it }, onOpenPlan = {},
+                            title = "Default for all clients",
+                            selected = selected.value,
+                            inherited = false,
+                            defaultMode = selected.value,
+                            aiReviewAccess = access.value,
+                            onSelect = { selected.value = it },
+                            onOpenPlan = {},
                         )
                     }
                 }
@@ -204,21 +266,33 @@ class ApprovalModeRowTest {
             }
             for (state in AiReviewAccess.entries) {
                 for (mode in SecretApprovalMode.entries) {
-                    compose.runOnIdle { access.value = state; selected.value = mode }
+                    compose.runOnIdle {
+                        access.value = state
+                        selected.value = mode
+                    }
                     labels.forEachIndexed { index, label ->
                         val node = compose.onNodeWithText(label, useUnmergedTree = true)
                         node.assertIsDisplayed()
                         val bounds = node.fetchSemanticsNode().boundsInRoot
                         assertEquals(labelBounds[index], bounds)
-                        assertEquals(segmentBounds[index], compose.onNodeWithText(label).fetchSemanticsNode().boundsInRoot)
+                        assertEquals(
+                            segmentBounds[index],
+                            compose.onNodeWithText(label).fetchSemanticsNode().boundsInRoot,
+                        )
                         assertTrue(bounds.left >= segmentBounds[index].left)
                         assertTrue(bounds.right <= segmentBounds[index].right)
-                        assertEquals("$label is centred", segmentBounds[index].center.x, bounds.center.x, 1f)
+                        assertEquals(
+                            "$label is centred",
+                            segmentBounds[index].center.x,
+                            bounds.center.x,
+                            1f,
+                        )
                         val layouts = mutableListOf<TextLayoutResult>()
-                        node.performSemanticsAction(SemanticsActions.GetTextLayoutResult) { it(layouts) }
+                        node.performSemanticsAction(SemanticsActions.GetTextLayoutResult) {
+                            it(layouts)
+                        }
                         assertEquals(1, layouts.single().lineCount)
                     }
-
                 }
             }
         }

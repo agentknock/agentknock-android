@@ -16,14 +16,16 @@ internal fun ActionListSurface(
     content: @Composable () -> Unit,
 ) {
     Surface(
-        color = if (selected) {
-            MaterialTheme.colorScheme.secondaryContainer
-        } else if (actionRequired) {
-            MaterialTheme.colorScheme.primary.copy(alpha = 0.08f)
-                .compositeOver(MaterialTheme.colorScheme.surface)
-        } else {
-            MaterialTheme.colorScheme.surfaceContainer
-        },
+        color =
+            if (selected) {
+                MaterialTheme.colorScheme.secondaryContainer
+            } else if (actionRequired) {
+                MaterialTheme.colorScheme.primary
+                    .copy(alpha = 0.08f)
+                    .compositeOver(MaterialTheme.colorScheme.surface)
+            } else {
+                MaterialTheme.colorScheme.surfaceContainer
+            },
         shape = MaterialTheme.shapes.large,
         onClick = onClick,
         modifier = modifier.fillMaxWidth(),

@@ -1,9 +1,9 @@
 package dev.agentknock.ui.settings
 
-import dev.agentknock.subscription.AiReviewAccess
 import android.app.Activity
 import androidx.lifecycle.ViewModel
 import androidx.lifecycle.viewModelScope
+import dev.agentknock.subscription.AiReviewAccess
 import dev.agentknock.subscription.GOOGLE_PLAY_SUBSCRIPTION_PRODUCT_ID
 import dev.agentknock.subscription.PlayPurchaseState
 import dev.agentknock.subscription.PlaySubscriptionBilling
@@ -22,7 +22,6 @@ import kotlinx.coroutines.flow.update
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.sync.Mutex
 import kotlinx.coroutines.sync.withLock
-
 
 internal enum class PlayStoreAvailability {
     CHECKING,
@@ -56,10 +55,14 @@ internal data class SubscriptionUiState(
 )
 
 internal val SubscriptionUiState.aiReviewAccess: AiReviewAccess
-    get() = if (
-        access != AiReviewAccess.ACTIVE && (redeeming ||
-            (refreshing && googlePlayPurchase == GooglePlayPurchaseState.PURCHASED))
-    ) AiReviewAccess.ACTIVATING else access
+    get() =
+        if (
+            access != AiReviewAccess.ACTIVE &&
+                (redeeming ||
+                    (refreshing && googlePlayPurchase == GooglePlayPurchaseState.PURCHASED))
+        )
+            AiReviewAccess.ACTIVATING
+        else access
 
 internal class SubscriptionViewModel(
     private val repository: SubscriptionRepository,
@@ -81,18 +84,21 @@ internal class SubscriptionViewModel(
             billing.updates.collect { update ->
                 when (update) {
                     PlaySubscriptionUpdate.Changed -> refresh(purchaseUpdate = true)
-                    PlaySubscriptionUpdate.Canceled -> _state.update {
-                        it.copy(purchasing = false)
-                    }
-                    PlaySubscriptionUpdate.Failed -> _state.update {
-                        it.copy(
-                            purchasing = false,
-                            notice = SubscriptionNotice(
-                                message = "Google Play could not complete the purchase",
-                                successful = false,
-                            ),
-                        )
-                    }
+                    PlaySubscriptionUpdate.Canceled ->
+                        _state.update {
+                            it.copy(purchasing = false)
+                        }
+                    PlaySubscriptionUpdate.Failed ->
+                        _state.update {
+                            it.copy(
+                                purchasing = false,
+                                notice =
+                                    SubscriptionNotice(
+                                        message = "Google Play could not complete the purchase",
+                                        successful = false,
+                                    ),
+                            )
+                        }
                 }
             }
         }
@@ -108,20 +114,20 @@ internal class SubscriptionViewModel(
                 _state.update { it.copy(purchasing = true, notice = null) }
                 when (operation { billing.launchPurchase(activity, offerId) }) {
                     PlaySubscriptionLaunchResult.Started -> Unit
-                    PlaySubscriptionLaunchResult.AlreadyOwned -> refreshLocked(
-                        purchaseUpdate = false,
-                    )
+                    PlaySubscriptionLaunchResult.AlreadyOwned ->
+                        refreshLocked(purchaseUpdate = false)
                     PlaySubscriptionLaunchResult.Unavailable,
-                    null,
-                    -> _state.update {
-                        it.copy(
-                            purchasing = false,
-                            notice = SubscriptionNotice(
-                                message = "Google Play is not available right now",
-                                successful = false,
-                            ),
-                        )
-                    }
+                    null ->
+                        _state.update {
+                            it.copy(
+                                purchasing = false,
+                                notice =
+                                    SubscriptionNotice(
+                                        message = "Google Play is not available right now",
+                                        successful = false,
+                                    ),
+                            )
+                        }
                 }
             }
         }
@@ -134,27 +140,32 @@ internal class SubscriptionViewModel(
                 val result = operation { repository.redeem(redemptionToken) }
                 _state.update { current ->
                     when (result) {
-                        is SubscriptionResult.Status -> current.copy(
-                            access = repository.access.value,
-                            statusUnavailable = false,
-                            redeeming = false,
-                            notice = SubscriptionNotice(
-                                message = if (result.active) {
-                                    "AI access activated with a code"
-                                } else {
-                                    "AI access is not active"
-                                },
-                                successful = result.active,
-                            ),
-                        )
-                        else -> current.copy(
-                            access = repository.access.value,
-                            redeeming = false,
-                            notice = SubscriptionNotice(
-                                message = result.redemptionFailureMessage(),
-                                successful = false,
-                            ),
-                        )
+                        is SubscriptionResult.Status ->
+                            current.copy(
+                                access = repository.access.value,
+                                statusUnavailable = false,
+                                redeeming = false,
+                                notice =
+                                    SubscriptionNotice(
+                                        message =
+                                            if (result.active) {
+                                                "AI access activated with a code"
+                                            } else {
+                                                "AI access is not active"
+                                            },
+                                        successful = result.active,
+                                    ),
+                            )
+                        else ->
+                            current.copy(
+                                access = repository.access.value,
+                                redeeming = false,
+                                notice =
+                                    SubscriptionNotice(
+                                        message = result.redemptionFailureMessage(),
+                                        successful = false,
+                                    ),
+                            )
                     }
                 }
             }
@@ -164,10 +175,11 @@ internal class SubscriptionViewModel(
     fun reportInvalidLink() {
         _state.update {
             it.copy(
-                notice = SubscriptionNotice(
-                    message = "This subscription link is invalid or incomplete",
-                    successful = false,
-                ),
+                notice =
+                    SubscriptionNotice(
+                        message = "This subscription link is invalid or incomplete",
+                        successful = false,
+                    )
             )
         }
     }
@@ -190,113 +202,125 @@ internal class SubscriptionViewModel(
         val snapshot = (playResult as? PlaySubscriptionQueryResult.Success)?.snapshot
         _state.update { current -> current.withPlayResult(playResult) }
 
-        val purchased = snapshot?.purchases
-            ?.filter { it.state == PlayPurchaseState.PURCHASED }
-            ?.maxByOrNull { it.purchasedAtMillis }
+        val purchased =
+            snapshot
+                ?.purchases
+                ?.filter { it.state == PlayPurchaseState.PURCHASED }
+                ?.maxByOrNull { it.purchasedAtMillis }
         val activation = purchased?.let {
             operation { repository.updateFromGooglePlay(it.token) }
         }
-        val result = when (activation) {
-            is SubscriptionResult.Status -> activation
-            else -> operation { repository.status() }
-        }
+        val result =
+            when (activation) {
+                is SubscriptionResult.Status -> activation
+                else -> operation { repository.status() }
+            }
         val activationFailed = purchased != null && activation !is SubscriptionResult.Status
         _state.update { current ->
             current.copy(
                 access = repository.access.value,
-                statusUnavailable = result !is SubscriptionResult.Status &&
-                    result != SubscriptionResult.NoDevice,
+                statusUnavailable =
+                    result !is SubscriptionResult.Status && result != SubscriptionResult.NoDevice,
                 refreshing = false,
-                notice = when {
-                    activationFailed && result !is SubscriptionResult.Status ->
-                        SubscriptionNotice(
-                            message = activation.googlePlayFailureMessage(),
-                            successful = false,
-                        )
-                    purchaseUpdate && activation is SubscriptionResult.Status && activation.active ->
-                        SubscriptionNotice(
-                            message = "Subscription activated",
-                            successful = true,
-                        )
-                    else -> current.notice
-                },
+                notice =
+                    when {
+                        activationFailed && result !is SubscriptionResult.Status ->
+                            SubscriptionNotice(
+                                message = activation.googlePlayFailureMessage(),
+                                successful = false,
+                            )
+                        purchaseUpdate &&
+                            activation is SubscriptionResult.Status &&
+                            activation.active ->
+                            SubscriptionNotice(
+                                message = "Subscription activated",
+                                successful = true,
+                            )
+                        else -> current.notice
+                    },
             )
         }
     }
 
-    private suspend fun <T> operation(block: suspend () -> T): T? = try {
-        awaitStorageReady()
-        block()
-    } catch (cancelled: CancellationException) {
-        throw cancelled
-    } catch (_: Exception) {
-        null
-    }
+    private suspend fun <T> operation(block: suspend () -> T): T? =
+        try {
+            awaitStorageReady()
+            block()
+        } catch (cancelled: CancellationException) {
+            throw cancelled
+        } catch (_: Exception) {
+            null
+        }
 }
 
 private fun SubscriptionUiState.withPlayResult(
-    result: PlaySubscriptionQueryResult?,
+    result: PlaySubscriptionQueryResult?
 ): SubscriptionUiState {
     val snapshot = (result as? PlaySubscriptionQueryResult.Success)?.snapshot
-    val relevant = snapshot?.purchases
-        ?.filter { it.productId == GOOGLE_PLAY_SUBSCRIPTION_PRODUCT_ID }
-        .orEmpty()
-    val purchase = when {
-        relevant.any { it.state == PlayPurchaseState.PURCHASED } ->
-            GooglePlayPurchaseState.PURCHASED
-        relevant.any { it.state == PlayPurchaseState.PENDING } ->
-            GooglePlayPurchaseState.PENDING
-        else -> GooglePlayPurchaseState.NONE
-    }
+    val relevant =
+        snapshot
+            ?.purchases
+            ?.filter { it.productId == GOOGLE_PLAY_SUBSCRIPTION_PRODUCT_ID }
+            .orEmpty()
+    val purchase =
+        when {
+            relevant.any { it.state == PlayPurchaseState.PURCHASED } ->
+                GooglePlayPurchaseState.PURCHASED
+            relevant.any { it.state == PlayPurchaseState.PENDING } ->
+                GooglePlayPurchaseState.PENDING
+            else -> GooglePlayPurchaseState.NONE
+        }
     return copy(
-        playStore = when {
-            result == PlaySubscriptionQueryResult.NotSupported -> PlayStoreAvailability.NOT_SUPPORTED
-            snapshot?.offersAvailable == true -> PlayStoreAvailability.AVAILABLE
-            else -> PlayStoreAvailability.UNAVAILABLE
-        },
+        playStore =
+            when {
+                result == PlaySubscriptionQueryResult.NotSupported ->
+                    PlayStoreAvailability.NOT_SUPPORTED
+                snapshot?.offersAvailable == true -> PlayStoreAvailability.AVAILABLE
+                else -> PlayStoreAvailability.UNAVAILABLE
+            },
         offers = snapshot?.offers.orEmpty(),
         googlePlayPurchase = purchase,
         googlePlayProductId = relevant.maxByOrNull { it.purchasedAtMillis }?.productId,
     )
 }
 
-internal fun SubscriptionUiState.overviewLabel(): String = when (access) {
-    AiReviewAccess.CHECKING -> "Checking…"
-    AiReviewAccess.ACTIVATING -> "Activating…"
-    AiReviewAccess.SETUP_REQUIRED -> "Finish device setup"
-    AiReviewAccess.INACTIVE -> "Free"
-    AiReviewAccess.ACTIVE -> "AI review active"
-    AiReviewAccess.UNAVAILABLE -> "Status unavailable"
-}
-
-private fun SubscriptionResult?.redemptionFailureMessage(): String = when (this) {
-    is SubscriptionResult.Rejected -> if (status == 401) {
-        "This subscription link is invalid or no longer available"
-    } else {
-        "The subscription could not be updated"
+internal fun SubscriptionUiState.overviewLabel(): String =
+    when (access) {
+        AiReviewAccess.CHECKING -> "Checking…"
+        AiReviewAccess.ACTIVATING -> "Activating…"
+        AiReviewAccess.SETUP_REQUIRED -> "Finish device setup"
+        AiReviewAccess.INACTIVE -> "Free"
+        AiReviewAccess.ACTIVE -> "AI review active"
+        AiReviewAccess.UNAVAILABLE -> "Status unavailable"
     }
-    SubscriptionResult.NoDevice -> "Finish device setup before activating a subscription"
-    SubscriptionResult.DeviceCredentialsUnavailable,
-    SubscriptionResult.DeviceCredentialsCorrupted,
-    SubscriptionResult.UnsupportedEncryption,
-    -> "Device authentication is unavailable"
-    is SubscriptionResult.Unavailable,
-    SubscriptionResult.InvalidRelayResponse,
-    null,
-    -> "The subscription could not be updated"
-    is SubscriptionResult.Status -> error("A status is not a failure")
-}
 
-private fun SubscriptionResult?.googlePlayFailureMessage(): String = when (this) {
-    SubscriptionResult.NoDevice -> "Finish device setup before subscribing"
-    SubscriptionResult.DeviceCredentialsUnavailable,
-    SubscriptionResult.DeviceCredentialsCorrupted,
-    SubscriptionResult.UnsupportedEncryption,
-    -> "Device authentication is unavailable"
-    is SubscriptionResult.Rejected -> "Google Play could not verify this subscription"
-    is SubscriptionResult.Unavailable,
-    SubscriptionResult.InvalidRelayResponse,
-    null,
-    -> "The Google Play purchase could not be verified right now"
-    is SubscriptionResult.Status -> error("A status is not a failure")
-}
+private fun SubscriptionResult?.redemptionFailureMessage(): String =
+    when (this) {
+        is SubscriptionResult.Rejected ->
+            if (status == 401) {
+                "This subscription link is invalid or no longer available"
+            } else {
+                "The subscription could not be updated"
+            }
+        SubscriptionResult.NoDevice -> "Finish device setup before activating a subscription"
+        SubscriptionResult.DeviceCredentialsUnavailable,
+        SubscriptionResult.DeviceCredentialsCorrupted,
+        SubscriptionResult.UnsupportedEncryption -> "Device authentication is unavailable"
+        is SubscriptionResult.Unavailable,
+        SubscriptionResult.InvalidRelayResponse,
+        null -> "The subscription could not be updated"
+        is SubscriptionResult.Status -> error("A status is not a failure")
+    }
+
+private fun SubscriptionResult?.googlePlayFailureMessage(): String =
+    when (this) {
+        SubscriptionResult.NoDevice -> "Finish device setup before subscribing"
+        SubscriptionResult.DeviceCredentialsUnavailable,
+        SubscriptionResult.DeviceCredentialsCorrupted,
+        SubscriptionResult.UnsupportedEncryption -> "Device authentication is unavailable"
+        is SubscriptionResult.Rejected -> "Google Play could not verify this subscription"
+        is SubscriptionResult.Unavailable,
+        SubscriptionResult.InvalidRelayResponse,
+        null -> "The Google Play purchase could not be verified right now"
+        is SubscriptionResult.Status -> error("A status is not a failure")
+    }

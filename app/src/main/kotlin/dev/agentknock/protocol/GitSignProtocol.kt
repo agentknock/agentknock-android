@@ -34,9 +34,7 @@ internal sealed interface GitSignHead {
         val upstream: String? = null,
     ) : GitSignHead
 
-    @Serializable
-    @SerialName("DETACHED")
-    data object Detached : GitSignHead
+    @Serializable @SerialName("DETACHED") data object Detached : GitSignHead
 }
 
 @Serializable
@@ -47,22 +45,13 @@ internal data class GitSignChangedPath(
 
 @Serializable
 internal enum class GitSignChangeStatus {
-    @SerialName("ADDED")
-    ADDED,
-
-    @SerialName("DELETED")
-    DELETED,
-
-    @SerialName("MODIFIED")
-    MODIFIED,
-
-    @SerialName("TYPE_CHANGED")
-    TYPE_CHANGED,
+    @SerialName("ADDED") ADDED,
+    @SerialName("DELETED") DELETED,
+    @SerialName("MODIFIED") MODIFIED,
+    @SerialName("TYPE_CHANGED") TYPE_CHANGED,
 }
 
-internal class GitSignProtocol(
-    private val json: Json = Json { ignoreUnknownKeys = true },
-) {
+internal class GitSignProtocol(private val json: Json = Json { ignoreUnknownKeys = true }) {
     fun decodeRequest(plaintext: ByteArray): GitSignRequestMessage {
         val clientSoftware = json.decodeClientSoftware(plaintext)
         val request = json.decodeFromString<GitSignRequestWire>(plaintext.decodeToString())
@@ -72,31 +61,37 @@ internal class GitSignProtocol(
         return GitSignRequestMessage(
             clientSoftware = clientSoftware,
             invocationId = request.invocationId,
-            invocationToken = decodeBase64(request.invocationToken, "invocation token").also {
-                require(it.size == INVOCATION_TOKEN_BYTES) {
-                    "Invocation token must be $INVOCATION_TOKEN_BYTES bytes"
-                }
-            },
+            invocationToken =
+                decodeBase64(request.invocationToken, "invocation token").also {
+                    require(it.size == INVOCATION_TOKEN_BYTES) {
+                        "Invocation token must be $INVOCATION_TOKEN_BYTES bytes"
+                    }
+                },
             secret = request.secret,
             message = decodeBase64(request.message, "Git signing message"),
             repository = request.repository,
         )
     }
 
-    fun approvedResponse(signature: String): ByteArray = json.encodeToString(
-        GitSignResultWire.serializer(),
-        GitSignResultWire(result = RESULT_APPROVED, signature = signature),
-    ).encodeToByteArray()
+    fun approvedResponse(signature: String): ByteArray =
+        json
+            .encodeToString(
+                GitSignResultWire.serializer(),
+                GitSignResultWire(result = RESULT_APPROVED, signature = signature),
+            )
+            .encodeToByteArray()
 
     fun deniedResponse(reason: InvocationDenialReason, message: String): ByteArray =
-        json.encodeToString(
-            GitSignResultWire.serializer(),
-            GitSignResultWire(
-                result = RESULT_DENIED,
-                reason = reason.wireName,
-                message = message,
-            ),
-        ).encodeToByteArray()
+        json
+            .encodeToString(
+                GitSignResultWire.serializer(),
+                GitSignResultWire(
+                    result = RESULT_DENIED,
+                    reason = reason.wireName,
+                    message = message,
+                ),
+            )
+            .encodeToByteArray()
 
     fun decodeCompletion(plaintext: ByteArray): ApprovalCompletion {
         val clientSoftware = json.decodeClientSoftware(plaintext)
@@ -105,32 +100,39 @@ internal class GitSignProtocol(
             RESULT_APPROVED -> {
                 if (completion.signature != null) {
                     throw SerializationException(
-                        "Approved Git signing completion contains a signature",
+                        "Approved Git signing completion contains a signature"
                     )
                 }
                 ApprovalCompletion.Approved(clientSoftware)
             }
-            RESULT_DENIED -> ApprovalCompletion.Denied(
-                clientSoftware = clientSoftware,
-                reason = completion.reason
-                    ?: throw SerializationException("Denied completion has no reason"),
-                message = completion.message
-                    ?: throw SerializationException("Denied completion has no message"),
-            )
-            RESULT_ABORTED -> ApprovalCompletion.Aborted(
-                clientSoftware = clientSoftware,
-                reason = completion.reason
-                    ?: throw SerializationException("Aborted completion has no reason"),
-                message = completion.message
-                    ?: throw SerializationException("Aborted completion has no message"),
-            )
+            RESULT_DENIED ->
+                ApprovalCompletion.Denied(
+                    clientSoftware = clientSoftware,
+                    reason =
+                        completion.reason
+                            ?: throw SerializationException("Denied completion has no reason"),
+                    message =
+                        completion.message
+                            ?: throw SerializationException("Denied completion has no message"),
+                )
+            RESULT_ABORTED ->
+                ApprovalCompletion.Aborted(
+                    clientSoftware = clientSoftware,
+                    reason =
+                        completion.reason
+                            ?: throw SerializationException("Aborted completion has no reason"),
+                    message =
+                        completion.message
+                            ?: throw SerializationException("Aborted completion has no message"),
+                )
             else -> throw SerializationException("Unsupported Git signing completion result")
         }
     }
 
     private fun decodeBase64(value: String, field: String): ByteArray = runCatching {
         Base64.getDecoder().decode(value)
-    }.getOrElse { throw IllegalArgumentException("Invalid $field", it) }
+    }
+        .getOrElse { throw IllegalArgumentException("Invalid $field", it) }
 
     companion object {
         const val METHOD = "GitSign"

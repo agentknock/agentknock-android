@@ -1,13 +1,13 @@
 package dev.agentknock.ui.auth
 
-import org.junit.Assert.assertFalse
-import org.junit.Assert.assertEquals
-import org.junit.Assert.assertTrue
-import org.junit.Test
 import kotlinx.coroutines.CoroutineStart
 import kotlinx.coroutines.async
 import kotlinx.coroutines.cancelAndJoin
 import kotlinx.coroutines.test.runTest
+import org.junit.Assert.assertEquals
+import org.junit.Assert.assertFalse
+import org.junit.Assert.assertTrue
+import org.junit.Test
 
 class AuthenticationPolicyTest {
     @Test
@@ -33,9 +33,10 @@ class AuthenticationPolicyTest {
     @Test
     fun `authentication result survives a host recreation`() = runTest {
         val coordinator = DeviceAuthenticationCoordinator()
-        val result = async(start = CoroutineStart.UNDISPATCHED) {
-            coordinator.authenticate("Reveal secret")
-        }
+        val result =
+            async(start = CoroutineStart.UNDISPATCHED) {
+                coordinator.authenticate("Reveal secret")
+            }
         val request = checkNotNull(coordinator.request.value)
         assertTrue(coordinator.claimForLaunch(request))
         assertFalse(coordinator.claimForLaunch(request))
@@ -51,14 +52,16 @@ class AuthenticationPolicyTest {
     @Test
     fun `late callback cannot complete a newer authentication`() = runTest {
         val coordinator = DeviceAuthenticationCoordinator()
-        val abandoned = async(start = CoroutineStart.UNDISPATCHED) {
-            coordinator.authenticate("Reveal secret")
-        }
+        val abandoned =
+            async(start = CoroutineStart.UNDISPATCHED) {
+                coordinator.authenticate("Reveal secret")
+            }
         val oldRequest = checkNotNull(coordinator.request.value)
         abandoned.cancelAndJoin()
-        val replacement = async(start = CoroutineStart.UNDISPATCHED) {
-            coordinator.authenticate("Copy secret")
-        }
+        val replacement =
+            async(start = CoroutineStart.UNDISPATCHED) {
+                coordinator.authenticate("Copy secret")
+            }
         val newRequest = checkNotNull(coordinator.request.value)
 
         coordinator.succeed(oldRequest.id)
@@ -72,9 +75,10 @@ class AuthenticationPolicyTest {
     @Test
     fun `cancelling the owner releases authentication for a new host`() = runTest {
         val coordinator = DeviceAuthenticationCoordinator()
-        val abandoned = async(start = CoroutineStart.UNDISPATCHED) {
-            coordinator.authenticate("Reveal secret")
-        }
+        val abandoned =
+            async(start = CoroutineStart.UNDISPATCHED) {
+                coordinator.authenticate("Reveal secret")
+            }
         val abandonedRequest = checkNotNull(coordinator.request.value)
         assertTrue(coordinator.claimForLaunch(abandonedRequest))
 
@@ -82,9 +86,10 @@ class AuthenticationPolicyTest {
 
         assertEquals(null, coordinator.request.value)
         assertEquals(null, coordinator.request.value)
-        val replacement = async(start = CoroutineStart.UNDISPATCHED) {
-            coordinator.authenticate("Copy secret")
-        }
+        val replacement =
+            async(start = CoroutineStart.UNDISPATCHED) {
+                coordinator.authenticate("Copy secret")
+            }
         coordinator.succeed(checkNotNull(coordinator.request.value).id)
         assertEquals(DeviceAuthenticationResult.Success, replacement.await())
     }
@@ -93,9 +98,7 @@ class AuthenticationPolicyTest {
     fun `device lock mode never adds an Agentknock gate`() {
         assertTrue(DeviceAuthenticationMode.DEVICE_LOCK.contentAvailable(authenticated = false))
         assertTrue(
-            DeviceAuthenticationMode.DEVICE_LOCK.protectedActionAvailable(
-                authenticated = false,
-            ),
+            DeviceAuthenticationMode.DEVICE_LOCK.protectedActionAvailable(authenticated = false)
         )
     }
 
@@ -103,18 +106,18 @@ class AuthenticationPolicyTest {
     fun `sensitive values mode leaves content visible but gates protected actions`() {
         assertTrue(
             DeviceAuthenticationMode.SENSITIVE_VALUES_AND_PAIRING.contentAvailable(
-                authenticated = false,
-            ),
+                authenticated = false
+            )
         )
         assertFalse(
             DeviceAuthenticationMode.SENSITIVE_VALUES_AND_PAIRING.protectedActionAvailable(
-                authenticated = false,
-            ),
+                authenticated = false
+            )
         )
         assertTrue(
             DeviceAuthenticationMode.SENSITIVE_VALUES_AND_PAIRING.protectedActionAvailable(
-                authenticated = true,
-            ),
+                authenticated = true
+            )
         )
     }
 
@@ -123,10 +126,8 @@ class AuthenticationPolicyTest {
         assertFalse(DeviceAuthenticationMode.APP_LOCK.contentAvailable(authenticated = false))
         assertTrue(DeviceAuthenticationMode.APP_LOCK.contentAvailable(authenticated = true))
         assertFalse(
-            DeviceAuthenticationMode.APP_LOCK.protectedActionAvailable(authenticated = false),
+            DeviceAuthenticationMode.APP_LOCK.protectedActionAvailable(authenticated = false)
         )
-        assertTrue(
-            DeviceAuthenticationMode.APP_LOCK.protectedActionAvailable(authenticated = true),
-        )
+        assertTrue(DeviceAuthenticationMode.APP_LOCK.protectedActionAvailable(authenticated = true))
     }
 }

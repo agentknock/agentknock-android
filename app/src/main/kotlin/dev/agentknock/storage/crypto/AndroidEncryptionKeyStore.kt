@@ -18,18 +18,16 @@ internal enum class EncryptionKeyBacking(val storedName: String) {
     TRUSTED_ENVIRONMENT("TRUSTED_ENVIRONMENT"),
     SOFTWARE("SOFTWARE"),
     UNKNOWN_SECURE("UNKNOWN_SECURE"),
-    UNKNOWN("UNKNOWN"),
-    ;
+    UNKNOWN("UNKNOWN");
 
     companion object {
-        fun fromStoredName(value: String): EncryptionKeyBacking? =
-            entries.find { it.storedName == value }
+        fun fromStoredName(value: String): EncryptionKeyBacking? = entries.find {
+            it.storedName == value
+        }
     }
 }
 
-internal data class GeneratedEncryptionKey(
-    val backing: EncryptionKeyBacking,
-)
+internal data class GeneratedEncryptionKey(val backing: EncryptionKeyBacking)
 
 internal interface EncryptionKeyStore : EncryptionKeySource {
     fun generate(keyId: String): GeneratedEncryptionKey
@@ -37,21 +35,22 @@ internal interface EncryptionKeyStore : EncryptionKeySource {
     fun delete(keyId: String)
 }
 
-internal class AndroidEncryptionKeyStore(
-    private val packageManager: PackageManager,
-) : EncryptionKeyStore {
-    private val keyStore by lazy(LazyThreadSafetyMode.SYNCHRONIZED) {
-        KeyStore.getInstance(ANDROID_KEY_STORE).apply { load(null) }
-    }
+internal class AndroidEncryptionKeyStore(private val packageManager: PackageManager) :
+    EncryptionKeyStore {
+    private val keyStore by
+        lazy(LazyThreadSafetyMode.SYNCHRONIZED) {
+            KeyStore.getInstance(ANDROID_KEY_STORE).apply { load(null) }
+        }
 
     @Synchronized
-    override fun get(keyId: String): SecretKey? = try {
-        keyStore.getKey(alias(keyId), null) as? SecretKey
-    } catch (_: UnrecoverableKeyException) {
-        null
-    } catch (_: KeyPermanentlyInvalidatedException) {
-        null
-    }
+    override fun get(keyId: String): SecretKey? =
+        try {
+            keyStore.getKey(alias(keyId), null) as? SecretKey
+        } catch (_: UnrecoverableKeyException) {
+            null
+        } catch (_: KeyPermanentlyInvalidatedException) {
+            null
+        }
 
     @Synchronized
     override fun delete(keyId: String) {
@@ -64,20 +63,24 @@ internal class AndroidEncryptionKeyStore(
         check(!keyStore.containsAlias(alias)) { "Encryption key already exists: $keyId" }
 
         return try {
-            val strongBoxRequested = Build.VERSION.SDK_INT >= Build.VERSION_CODES.P &&
-                packageManager.hasSystemFeature(PackageManager.FEATURE_STRONGBOX_KEYSTORE)
-            val (key, strongBoxUsed) = if (strongBoxRequested) {
-                try {
-                    generate(alias, useStrongBox = true) to true
-                } catch (_: StrongBoxUnavailableException) {
-                    keyStore.deleteEntry(alias)
+            val strongBoxRequested =
+                Build.VERSION.SDK_INT >= Build.VERSION_CODES.P &&
+                    packageManager.hasSystemFeature(PackageManager.FEATURE_STRONGBOX_KEYSTORE)
+            val (key, strongBoxUsed) =
+                if (strongBoxRequested) {
+                    try {
+                        generate(alias, useStrongBox = true) to true
+                    } catch (_: StrongBoxUnavailableException) {
+                        keyStore.deleteEntry(alias)
+                        generate(alias, useStrongBox = false) to false
+                    }
+                } else {
                     generate(alias, useStrongBox = false) to false
                 }
-            } else {
-                generate(alias, useStrongBox = false) to false
-            }
 
-            val backing = runCatching { determineBacking(key, strongBoxUsed) }
+            val backing = runCatching {
+                determineBacking(key, strongBoxUsed)
+            }
                 .getOrDefault(EncryptionKeyBacking.UNKNOWN)
             GeneratedEncryptionKey(backing = backing)
         } catch (failure: Throwable) {
@@ -89,21 +92,22 @@ internal class AndroidEncryptionKeyStore(
     }
 
     private fun generate(alias: String, useStrongBox: Boolean): SecretKey {
-        val parameters = KeyGenParameterSpec.Builder(
-            alias,
-            KeyProperties.PURPOSE_ENCRYPT or KeyProperties.PURPOSE_DECRYPT,
-        )
-            .setKeySize(KEY_SIZE_BITS)
-            .setBlockModes(KeyProperties.BLOCK_MODE_GCM)
-            .setEncryptionPaddings(KeyProperties.ENCRYPTION_PADDING_NONE)
-            .setRandomizedEncryptionRequired(true)
-            .setUserAuthenticationRequired(false)
-            .apply {
-                if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.P && useStrongBox) {
-                    setIsStrongBoxBacked(true)
+        val parameters =
+            KeyGenParameterSpec.Builder(
+                    alias,
+                    KeyProperties.PURPOSE_ENCRYPT or KeyProperties.PURPOSE_DECRYPT,
+                )
+                .setKeySize(KEY_SIZE_BITS)
+                .setBlockModes(KeyProperties.BLOCK_MODE_GCM)
+                .setEncryptionPaddings(KeyProperties.ENCRYPTION_PADDING_NONE)
+                .setRandomizedEncryptionRequired(true)
+                .setUserAuthenticationRequired(false)
+                .apply {
+                    if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.P && useStrongBox) {
+                        setIsStrongBoxBacked(true)
+                    }
                 }
-            }
-            .build()
+                .build()
 
         return KeyGenerator.getInstance(KeyProperties.KEY_ALGORITHM_AES, ANDROID_KEY_STORE).run {
             init(parameters)
@@ -115,9 +119,9 @@ internal class AndroidEncryptionKeyStore(
     private fun determineBacking(key: SecretKey, strongBoxUsed: Boolean): EncryptionKeyBacking {
         if (strongBoxUsed) return EncryptionKeyBacking.STRONGBOX
 
-        val keyInfo = SecretKeyFactory
-            .getInstance(key.algorithm, ANDROID_KEY_STORE)
-            .getKeySpec(key, KeyInfo::class.java) as KeyInfo
+        val keyInfo =
+            SecretKeyFactory.getInstance(key.algorithm, ANDROID_KEY_STORE)
+                .getKeySpec(key, KeyInfo::class.java) as KeyInfo
         if (Build.VERSION.SDK_INT < Build.VERSION_CODES.S) {
             return if (keyInfo.isInsideSecureHardware()) {
                 EncryptionKeyBacking.TRUSTED_ENVIRONMENT

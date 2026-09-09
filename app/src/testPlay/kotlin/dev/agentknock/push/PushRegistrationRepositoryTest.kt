@@ -14,14 +14,12 @@ class PushRegistrationRepositoryTest {
     fun `transient relay status classification is shared by push registration`() {
         listOf(408, 425, 429, 500, 503, 599).forEach { status ->
             assertTrue(
-                PushRegistrationResult.RelayRejected(status, null, null)
-                    .needsAutomaticRetry(),
+                PushRegistrationResult.RelayRejected(status, null, null).needsAutomaticRetry()
             )
         }
         listOf(400, 401, 403, 404, 409, 422, 600).forEach { status ->
             assertFalse(
-                PushRegistrationResult.RelayRejected(status, null, null)
-                    .needsAutomaticRetry(),
+                PushRegistrationResult.RelayRejected(status, null, null).needsAutomaticRetry()
             )
         }
     }
@@ -29,19 +27,23 @@ class PushRegistrationRepositoryTest {
     @Test
     fun `relay state is owned here and missing registration requests a refresh`() {
         var refreshes = 0
-        val repository = PushRegistrationRepository(
-            deviceAuthorization = RelayDeviceAuthorizationSource {
-                error("Registration is not part of this test")
-            },
-            relay = object : RelayPushRegistrationClient {
-                override suspend fun register(
-                    deviceId: String,
-                    deviceToken: String,
-                    firebaseInstallationId: String,
-                ): RelayPushRegistrationResult = error("Registration is not part of this test")
-            },
-            requestRegistration = { refreshes += 1 },
-        )
+        val repository =
+            PushRegistrationRepository(
+                deviceAuthorization =
+                    RelayDeviceAuthorizationSource {
+                        error("Registration is not part of this test")
+                    },
+                relay =
+                    object : RelayPushRegistrationClient {
+                        override suspend fun register(
+                            deviceId: String,
+                            deviceToken: String,
+                            firebaseInstallationId: String,
+                        ): RelayPushRegistrationResult =
+                            error("Registration is not part of this test")
+                    },
+                requestRegistration = { refreshes += 1 },
+            )
 
         repository.updateRelayState(RelayPushRegistrationState.MISSING)
         assertEquals(RelayPushRegistrationState.MISSING, repository.registrationState.value)

@@ -22,11 +22,10 @@ import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.unit.dp
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
-import dev.agentknock.subscription.AiReviewAccess
 import dev.agentknock.relay.RelayClientState
-import dev.agentknock.storage.request.InboxRequestContent
 import dev.agentknock.storage.request.InboxRequestDetails
 import dev.agentknock.storage.secret.TemporaryAccessGrant
+import dev.agentknock.subscription.AiReviewAccess
 import dev.agentknock.ui.components.AdaptiveListDetail
 import kotlinx.coroutines.flow.collectLatest
 import kotlinx.coroutines.launch
@@ -127,36 +126,38 @@ private fun ClientSelectionPane(
     when (pane) {
         ClientPaneState.Empty -> EmptyClientSelection(modifier)
         is ClientPaneState.Loading,
-        is ClientPaneState.Missing,
-        -> Box(modifier, contentAlignment = Alignment.Center) { CircularProgressIndicator() }
-        is ClientPaneState.Client -> key(pane.details.clientId) {
-            ClientDetail(
-                aiReviewAccess = aiReviewAccess,
-                client = pane.details,
-                temporaryAccessGrants = pane.temporaryAccess,
-                onRename = { name -> onRenameClient(pane.details.clientId, name) },
-                onSetState = { state -> onSetClientState(pane.details.clientId, state) },
-                onSaveInstructions = { instructions ->
-                    onSaveClientInstructions(pane.details.clientId, instructions)
-                },
-                onEndTemporaryAccess = { grant ->
-                    onEndTemporaryAccess(pane.details.clientId, grant)
-                },
-                onBack = onBack,
-                showBack = showBack,
-                modifier = modifier,
-            )
-        }
-        is ClientPaneState.Pairing -> key(pane.request.id) {
-            PairingRequestDetail(
-                request = pane.request,
-                onBack = onBack,
-                showBack = showBack,
-                onChooseSas = { choice -> onChooseSas(pane.request, choice) },
-                onReject = { onRejectPairing(pane.request.id) },
-                modifier = modifier,
-            )
-        }
+        is ClientPaneState.Missing ->
+            Box(modifier, contentAlignment = Alignment.Center) { CircularProgressIndicator() }
+        is ClientPaneState.Client ->
+            key(pane.details.clientId) {
+                ClientDetail(
+                    aiReviewAccess = aiReviewAccess,
+                    client = pane.details,
+                    temporaryAccessGrants = pane.temporaryAccess,
+                    onRename = { name -> onRenameClient(pane.details.clientId, name) },
+                    onSetState = { state -> onSetClientState(pane.details.clientId, state) },
+                    onSaveInstructions = { instructions ->
+                        onSaveClientInstructions(pane.details.clientId, instructions)
+                    },
+                    onEndTemporaryAccess = { grant ->
+                        onEndTemporaryAccess(pane.details.clientId, grant)
+                    },
+                    onBack = onBack,
+                    showBack = showBack,
+                    modifier = modifier,
+                )
+            }
+        is ClientPaneState.Pairing ->
+            key(pane.request.id) {
+                PairingRequestDetail(
+                    request = pane.request,
+                    onBack = onBack,
+                    showBack = showBack,
+                    onChooseSas = { choice -> onChooseSas(pane.request, choice) },
+                    onReject = { onRejectPairing(pane.request.id) },
+                    modifier = modifier,
+                )
+            }
     }
 }
 

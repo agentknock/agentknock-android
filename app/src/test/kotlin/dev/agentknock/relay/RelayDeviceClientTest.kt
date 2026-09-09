@@ -1,5 +1,7 @@
 package dev.agentknock.relay
 
+import java.net.ServerSocket
+import java.time.Instant
 import kotlinx.coroutines.CompletableDeferred
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.test.runTest
@@ -16,8 +18,6 @@ import org.junit.Assert.assertEquals
 import org.junit.Assert.assertFalse
 import org.junit.Assert.assertTrue
 import org.junit.Test
-import java.net.ServerSocket
-import java.time.Instant
 
 class RelayDeviceClientTest {
     @Test
@@ -55,12 +55,13 @@ class RelayDeviceClientTest {
                 MockResponse.Builder()
                     .code(401)
                     .body("""{"error":"UNAUTHORIZED","message":"bad token"}""")
-                    .build(),
+                    .build()
             )
-            val client = WebSocketRelayDeviceClient(
-                client = OkHttpClient(),
-                relayUrl = server.url("/").toString(),
-            )
+            val client =
+                WebSocketRelayDeviceClient(
+                    client = OkHttpClient(),
+                    relayUrl = server.url("/").toString(),
+                )
 
             assertEquals(
                 RelayDeviceConnectionResult.Rejected(
@@ -81,12 +82,13 @@ class RelayDeviceClientTest {
                 MockResponse.Builder()
                     .code(401)
                     .body("""{"error":7,"message":{"unexpected":true}}""")
-                    .build(),
+                    .build()
             )
-            val client = WebSocketRelayDeviceClient(
-                client = OkHttpClient(),
-                relayUrl = server.url("/").toString(),
-            )
+            val client =
+                WebSocketRelayDeviceClient(
+                    client = OkHttpClient(),
+                    relayUrl = server.url("/").toString(),
+                )
 
             assertEquals(
                 RelayDeviceConnectionResult.Rejected(401, null, null),
@@ -104,15 +106,16 @@ class RelayDeviceClientTest {
             listOf(408, 425, 500, 599).forEach { status ->
                 server.enqueue(MockResponse.Builder().code(status).build())
             }
-            val client = WebSocketRelayDeviceClient(
-                client = OkHttpClient(),
-                relayUrl = server.url("/").toString(),
-            )
+            val client =
+                WebSocketRelayDeviceClient(
+                    client = OkHttpClient(),
+                    relayUrl = server.url("/").toString(),
+                )
 
             listOf(408, 425, 500, 599).forEach { status ->
                 assertEquals(
                     RelayDeviceConnectionResult.Unavailable(
-                        message = "Relay is temporarily unavailable (HTTP $status).",
+                        message = "Relay is temporarily unavailable (HTTP $status)."
                     ),
                     withContext(Dispatchers.IO) {
                         withTimeout(5_000) { client.connect(DEVICE_ID, DEVICE_TOKEN) }
@@ -131,14 +134,15 @@ class RelayDeviceClientTest {
                     .code(429)
                     .addHeader("Retry-After", "17")
                     .body(
-                        """{"error":"RATE_LIMITED","message":"try again later","retry_after_ms":12345}""",
+                        """{"error":"RATE_LIMITED","message":"try again later","retry_after_ms":12345}"""
                     )
-                    .build(),
+                    .build()
             )
-            val client = WebSocketRelayDeviceClient(
-                client = OkHttpClient(),
-                relayUrl = server.url("/").toString(),
-            )
+            val client =
+                WebSocketRelayDeviceClient(
+                    client = OkHttpClient(),
+                    relayUrl = server.url("/").toString(),
+                )
 
             assertEquals(
                 RelayDeviceConnectionResult.Unavailable(
@@ -160,14 +164,15 @@ class RelayDeviceClientTest {
                 MockResponse.Builder()
                     .code(429)
                     .body(
-                        """{"error":"RATE_LIMITED","message":"wait","retryable":true,"retry_after_ms":60000}""",
+                        """{"error":"RATE_LIMITED","message":"wait","retryable":true,"retry_after_ms":60000}"""
                     )
-                    .build(),
+                    .build()
             )
-            val client = WebSocketRelayDeviceClient(
-                client = OkHttpClient(),
-                relayUrl = server.url("/").toString(),
-            )
+            val client =
+                WebSocketRelayDeviceClient(
+                    client = OkHttpClient(),
+                    relayUrl = server.url("/").toString(),
+                )
 
             assertEquals(
                 RelayDeviceConnectionResult.Unavailable(
@@ -190,15 +195,16 @@ class RelayDeviceClientTest {
                     .code(503)
                     .addHeader("Retry-After", "Wed, 21 Oct 2015 07:28:00 GMT")
                     .body("""{"error":"OVERLOADED","message":"wait"}""")
-                    .build(),
+                    .build()
             )
-            val client = WebSocketRelayDeviceClient(
-                client = OkHttpClient(),
-                relayUrl = server.url("/").toString(),
-                currentTimeMillis = {
-                    Instant.parse("2015-10-21T07:27:00Z").toEpochMilli()
-                },
-            )
+            val client =
+                WebSocketRelayDeviceClient(
+                    client = OkHttpClient(),
+                    relayUrl = server.url("/").toString(),
+                    currentTimeMillis = {
+                        Instant.parse("2015-10-21T07:27:00Z").toEpochMilli()
+                    },
+                )
 
             assertEquals(
                 RelayDeviceConnectionResult.Unavailable("wait", 60_000),
@@ -214,24 +220,26 @@ class RelayDeviceClientTest {
         MockWebServer().use { server ->
             server.start()
             listOf(
-                "Sunday, 06-Nov-94 08:49:37 GMT",
-                "Sun Nov  6 08:49:37 1994",
-            ).forEach { retryAfter ->
-                server.enqueue(
-                    MockResponse.Builder()
-                        .code(503)
-                        .addHeader("Retry-After", retryAfter)
-                        .body("""{"error":"OVERLOADED","message":"wait"}""")
-                        .build(),
+                    "Sunday, 06-Nov-94 08:49:37 GMT",
+                    "Sun Nov  6 08:49:37 1994",
                 )
-            }
-            val client = WebSocketRelayDeviceClient(
-                client = OkHttpClient(),
-                relayUrl = server.url("/").toString(),
-                currentTimeMillis = {
-                    Instant.parse("1994-11-06T08:48:37Z").toEpochMilli()
-                },
-            )
+                .forEach { retryAfter ->
+                    server.enqueue(
+                        MockResponse.Builder()
+                            .code(503)
+                            .addHeader("Retry-After", retryAfter)
+                            .body("""{"error":"OVERLOADED","message":"wait"}""")
+                            .build()
+                    )
+                }
+            val client =
+                WebSocketRelayDeviceClient(
+                    client = OkHttpClient(),
+                    relayUrl = server.url("/").toString(),
+                    currentTimeMillis = {
+                        Instant.parse("1994-11-06T08:48:37Z").toEpochMilli()
+                    },
+                )
 
             repeat(2) {
                 assertEquals(
@@ -253,15 +261,16 @@ class RelayDeviceClientTest {
                     .code(503)
                     .addHeader("Retry-After", "Friday, 31-Dec-76 23:59:59 GMT")
                     .body("""{"error":"OVERLOADED","message":"wait"}""")
-                    .build(),
+                    .build()
             )
-            val client = WebSocketRelayDeviceClient(
-                client = OkHttpClient(),
-                relayUrl = server.url("/").toString(),
-                currentTimeMillis = {
-                    Instant.parse("2026-01-01T00:00:00Z").toEpochMilli()
-                },
-            )
+            val client =
+                WebSocketRelayDeviceClient(
+                    client = OkHttpClient(),
+                    relayUrl = server.url("/").toString(),
+                    currentTimeMillis = {
+                        Instant.parse("2026-01-01T00:00:00Z").toEpochMilli()
+                    },
+                )
 
             assertEquals(
                 RelayDeviceConnectionResult.Unavailable("wait", 0),
@@ -281,15 +290,16 @@ class RelayDeviceClientTest {
                     .code(503)
                     .addHeader("Retry-After", "Friday, 01-Jan-20 00:00:00 GMT")
                     .body("""{"error":"OVERLOADED","message":"wait"}""")
-                    .build(),
+                    .build()
             )
             val now = Instant.parse("2076-01-01T00:00:00Z")
             val retryAt = Instant.parse("2120-01-01T00:00:00Z")
-            val client = WebSocketRelayDeviceClient(
-                client = OkHttpClient(),
-                relayUrl = server.url("/").toString(),
-                currentTimeMillis = now::toEpochMilli,
-            )
+            val client =
+                WebSocketRelayDeviceClient(
+                    client = OkHttpClient(),
+                    relayUrl = server.url("/").toString(),
+                    currentTimeMillis = now::toEpochMilli,
+                )
 
             assertEquals(
                 RelayDeviceConnectionResult.Unavailable(
@@ -312,12 +322,13 @@ class RelayDeviceClientTest {
                     .code(429)
                     .addHeader("Retry-After", "999999999999999999999999999999")
                     .body("""{"error":"RATE_LIMITED","message":"wait"}""")
-                    .build(),
+                    .build()
             )
-            val client = WebSocketRelayDeviceClient(
-                client = OkHttpClient(),
-                relayUrl = server.url("/").toString(),
-            )
+            val client =
+                WebSocketRelayDeviceClient(
+                    client = OkHttpClient(),
+                    relayUrl = server.url("/").toString(),
+                )
 
             assertEquals(
                 RelayDeviceConnectionResult.Unavailable(
@@ -339,15 +350,14 @@ class RelayDeviceClientTest {
                 MockResponse.Builder()
                     .code(429)
                     .addHeader("Retry-After", "-1")
-                    .body(
-                        """{"error":"RATE_LIMITED","message":"wait","retry_after_ms":-1}""",
-                    )
-                    .build(),
+                    .body("""{"error":"RATE_LIMITED","message":"wait","retry_after_ms":-1}""")
+                    .build()
             )
-            val client = WebSocketRelayDeviceClient(
-                client = OkHttpClient(),
-                relayUrl = server.url("/").toString(),
-            )
+            val client =
+                WebSocketRelayDeviceClient(
+                    client = OkHttpClient(),
+                    relayUrl = server.url("/").toString(),
+                )
 
             assertEquals(
                 RelayDeviceConnectionResult.Unavailable(message = "wait"),
@@ -361,17 +371,21 @@ class RelayDeviceClientTest {
     @Test
     fun `classifies a network failure before upgrade as unavailable`() = runTest {
         val unusedPort = ServerSocket(0).use { it.localPort }
-        val client = WebSocketRelayDeviceClient(
-            client = OkHttpClient(),
-            relayUrl = "http://127.0.0.1:$unusedPort",
-        )
+        val client =
+            WebSocketRelayDeviceClient(
+                client = OkHttpClient(),
+                relayUrl = "http://127.0.0.1:$unusedPort",
+            )
 
-        val result = withContext(Dispatchers.IO) {
-            withTimeout(5_000) { client.connect(DEVICE_ID, DEVICE_TOKEN) }
-        }
+        val result =
+            withContext(Dispatchers.IO) {
+                withTimeout(5_000) { client.connect(DEVICE_ID, DEVICE_TOKEN) }
+            }
 
         assertTrue(result is RelayDeviceConnectionResult.Unavailable)
-        assertTrue((result as RelayDeviceConnectionResult.Unavailable).message?.isNotBlank() == true)
+        assertTrue(
+            (result as RelayDeviceConnectionResult.Unavailable).message?.isNotBlank() == true
+        )
     }
 
     @Test
@@ -391,14 +405,15 @@ class RelayDeviceClientTest {
                             override fun onMessage(webSocket: WebSocket, text: String) {
                                 received.complete(text)
                             }
-                        },
+                        }
                     )
-                    .build(),
+                    .build()
             )
-            val client = WebSocketRelayDeviceClient(
-                client = OkHttpClient(),
-                relayUrl = server.url("/").toString(),
-            )
+            val client =
+                WebSocketRelayDeviceClient(
+                    client = OkHttpClient(),
+                    relayUrl = server.url("/").toString(),
+                )
 
             val result = client.connect(DEVICE_ID, DEVICE_TOKEN)
 
@@ -410,9 +425,7 @@ class RelayDeviceClientTest {
 
             assertEquals(
                 RelayFrameSendResult.Sent,
-                connection.send(
-                    RelayDeviceFrame.Resume(CLIENT_ID, REQUEST_ID),
-                ),
+                connection.send(RelayDeviceFrame.Resume(CLIENT_ID, REQUEST_ID)),
             )
             assertEquals(
                 """{"type":"resume","client_id":"$CLIENT_ID","request_id":"$REQUEST_ID"}""",
@@ -420,9 +433,7 @@ class RelayDeviceClientTest {
             )
 
             val socket = serverSocket.await()
-            socket.send(
-                """{"type":"client_state","client_id":"$CLIENT_ID","state":"active"}""",
-            )
+            socket.send("""{"type":"client_state","client_id":"$CLIENT_ID","state":"active"}""")
             assertEquals(
                 RelayDeviceEvent.ClientState(CLIENT_ID, RelayClientState.ACTIVE),
                 connection.events.receive(),
@@ -459,14 +470,15 @@ class RelayDeviceClientTest {
                             ) {
                                 webSocket.close(code, reason)
                             }
-                        },
+                        }
                     )
-                    .build(),
+                    .build()
             )
-            val client = WebSocketRelayDeviceClient(
-                client = OkHttpClient(),
-                relayUrl = server.url("/").toString(),
-            )
+            val client =
+                WebSocketRelayDeviceClient(
+                    client = OkHttpClient(),
+                    relayUrl = server.url("/").toString(),
+                )
             val result = client.connect(DEVICE_ID, DEVICE_TOKEN)
             val connection = (result as RelayDeviceConnectionResult.Connected).connection
 
@@ -477,7 +489,7 @@ class RelayDeviceClientTest {
                         clientId = CLIENT_ID,
                         requestId = REQUEST_ID,
                         payload = JsonPrimitive("x".repeat(256 * 1024)),
-                    ),
+                    )
                 ),
             )
             assertFalse(received.isCompleted)
@@ -500,20 +512,21 @@ class RelayDeviceClientTest {
                             override fun onOpen(webSocket: WebSocket, response: Response) {
                                 serverSocket.complete(webSocket)
                             }
-                        },
+                        }
                     )
-                    .build(),
+                    .build()
             )
-            val client = WebSocketRelayDeviceClient(
-                client = OkHttpClient(),
-                relayUrl = server.url("/").toString(),
-            )
+            val client =
+                WebSocketRelayDeviceClient(
+                    client = OkHttpClient(),
+                    relayUrl = server.url("/").toString(),
+                )
             val result = client.connect(DEVICE_ID, DEVICE_TOKEN)
             val connection = (result as RelayDeviceConnectionResult.Connected).connection
             val socket = serverSocket.await()
 
             socket.send(
-                """{"type":"error","client_id":"$CLIENT_ID","request_id":"$REQUEST_ID","kind":"response","error":"REQUEST_ID_CONFLICT","message":"conflict","retryable":false}""",
+                """{"type":"error","client_id":"$CLIENT_ID","request_id":"$REQUEST_ID","kind":"response","error":"REQUEST_ID_CONFLICT","message":"conflict","retryable":false}"""
             )
             socket.send("""{"type":"caught_up"}""")
 
@@ -522,11 +535,12 @@ class RelayDeviceClientTest {
                     code = "REQUEST_ID_CONFLICT",
                     message = "conflict",
                     retryable = false,
-                    scope = RelayDeviceErrorScope.Exchange(
-                        clientId = CLIENT_ID,
-                        requestId = REQUEST_ID,
-                        kind = RelayMessageKind.RESPONSE,
-                    ),
+                    scope =
+                        RelayDeviceErrorScope.Exchange(
+                            clientId = CLIENT_ID,
+                            requestId = REQUEST_ID,
+                            kind = RelayMessageKind.RESPONSE,
+                        ),
                 ),
                 connection.events.receive(),
             )
@@ -558,14 +572,15 @@ class RelayDeviceClientTest {
                                 closeReason.complete(reason)
                                 webSocket.close(code, reason)
                             }
-                        },
+                        }
                     )
-                    .build(),
+                    .build()
             )
-            val client = WebSocketRelayDeviceClient(
-                client = OkHttpClient(),
-                relayUrl = server.url("/").toString(),
-            )
+            val client =
+                WebSocketRelayDeviceClient(
+                    client = OkHttpClient(),
+                    relayUrl = server.url("/").toString(),
+                )
 
             val result = client.connect(DEVICE_ID, DEVICE_TOKEN)
 

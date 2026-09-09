@@ -13,522 +13,387 @@ import androidx.room3.Query
 import androidx.room3.Transaction
 import androidx.room3.Update
 import androidx.room3.Upsert
-import dev.agentknock.storage.crypto.VaultKeyEntity
 import dev.agentknock.storage.crypto.EncryptedValue
+import dev.agentknock.storage.crypto.VaultKeyEntity
+import dev.agentknock.storage.device.DeviceIdentityEntity
 import dev.agentknock.storage.secret.SecretClientApprovalOverrideEntity
 import dev.agentknock.storage.secret.SecretEntity
 import dev.agentknock.storage.secret.TemporaryAccessGrantEntity
-import dev.agentknock.storage.device.DeviceIdentityEntity
 import kotlinx.coroutines.flow.Flow
 
 @Entity(
     tableName = "inbox_requests",
-    foreignKeys = [
-        ForeignKey(
-            entity = InboxRequestEntity::class,
-            parentColumns = ["id"],
-            childColumns = ["parent_request_id"],
-            onDelete = ForeignKey.RESTRICT,
-            onUpdate = ForeignKey.NO_ACTION,
-        ),
-        ForeignKey(
-            entity = DeviceIdentityEntity::class,
-            parentColumns = ["id"],
-            childColumns = ["device_identity_id"],
-            onDelete = ForeignKey.RESTRICT,
-            onUpdate = ForeignKey.NO_ACTION,
-        ),
-    ],
-    indices = [
-        Index(value = ["parent_request_id"]),
-        Index(value = ["device_identity_id"]),
-        Index(value = ["listed", "received_at", "id"]),
-    ],
+    foreignKeys =
+        [
+            ForeignKey(
+                entity = InboxRequestEntity::class,
+                parentColumns = ["id"],
+                childColumns = ["parent_request_id"],
+                onDelete = ForeignKey.RESTRICT,
+                onUpdate = ForeignKey.NO_ACTION,
+            ),
+            ForeignKey(
+                entity = DeviceIdentityEntity::class,
+                parentColumns = ["id"],
+                childColumns = ["device_identity_id"],
+                onDelete = ForeignKey.RESTRICT,
+                onUpdate = ForeignKey.NO_ACTION,
+            ),
+        ],
+    indices =
+        [
+            Index(value = ["parent_request_id"]),
+            Index(value = ["device_identity_id"]),
+            Index(value = ["listed", "received_at", "id"]),
+        ],
 )
 internal data class InboxRequestEntity(
-    @PrimaryKey
-    @ColumnInfo(name = "id")
-    val id: String,
-    @ColumnInfo(name = "parent_request_id")
-    val parentRequestId: String?,
-    @ColumnInfo(name = "device_identity_id")
-    val deviceIdentityId: String,
-    @ColumnInfo(name = "client_id")
-    val clientId: String,
-    @ColumnInfo(name = "client_name_snapshot")
-    val clientNameSnapshot: String,
-    @ColumnInfo(name = "client_software_json")
-    val clientSoftwareJson: String?,
-    @ColumnInfo(name = "kind")
-    val kind: String,
-    @ColumnInfo(name = "state")
-    val state: String,
-    @ColumnInfo(name = "listed")
-    val listed: Boolean,
-    @ColumnInfo(name = "request_json")
-    val requestJson: String,
-    @ColumnInfo(name = "response_json")
-    val responseJson: String?,
-    @ColumnInfo(name = "error")
-    val error: String?,
-    @ColumnInfo(name = "failure_kind")
-    val failureKind: String? = null,
-    @ColumnInfo(name = "received_at")
-    val receivedAt: Long,
-    @ColumnInfo(name = "completed_at")
-    val completedAt: Long?,
-    @ColumnInfo(name = "exchange_ended_at")
-    val exchangeEndedAt: Long?,
-    @ColumnInfo(name = "response_outbox_finished")
-    val responseOutboxFinished: Boolean,
+    @PrimaryKey @ColumnInfo(name = "id") val id: String,
+    @ColumnInfo(name = "parent_request_id") val parentRequestId: String?,
+    @ColumnInfo(name = "device_identity_id") val deviceIdentityId: String,
+    @ColumnInfo(name = "client_id") val clientId: String,
+    @ColumnInfo(name = "client_name_snapshot") val clientNameSnapshot: String,
+    @ColumnInfo(name = "client_software_json") val clientSoftwareJson: String?,
+    @ColumnInfo(name = "kind") val kind: String,
+    @ColumnInfo(name = "state") val state: String,
+    @ColumnInfo(name = "listed") val listed: Boolean,
+    @ColumnInfo(name = "request_json") val requestJson: String,
+    @ColumnInfo(name = "response_json") val responseJson: String?,
+    @ColumnInfo(name = "error") val error: String?,
+    @ColumnInfo(name = "failure_kind") val failureKind: String? = null,
+    @ColumnInfo(name = "received_at") val receivedAt: Long,
+    @ColumnInfo(name = "completed_at") val completedAt: Long?,
+    @ColumnInfo(name = "exchange_ended_at") val exchangeEndedAt: Long?,
+    @ColumnInfo(name = "response_outbox_finished") val responseOutboxFinished: Boolean,
 )
 
 @Entity(
     tableName = "pairing_attempts",
-    foreignKeys = [
-        ForeignKey(
-            entity = InboxRequestEntity::class,
-            parentColumns = ["id"],
-            childColumns = ["request_id"],
-            onDelete = ForeignKey.CASCADE,
-            onUpdate = ForeignKey.NO_ACTION,
-        ),
-        ForeignKey(
-            entity = VaultKeyEntity::class,
-            parentColumns = ["id"],
-            childColumns = ["pending_psk_encryption_key_id"],
-            onDelete = ForeignKey.RESTRICT,
-            onUpdate = ForeignKey.NO_ACTION,
-        ),
-    ],
-    indices = [
-        Index(value = ["pending_psk_encryption_key_id"]),
-    ],
+    foreignKeys =
+        [
+            ForeignKey(
+                entity = InboxRequestEntity::class,
+                parentColumns = ["id"],
+                childColumns = ["request_id"],
+                onDelete = ForeignKey.CASCADE,
+                onUpdate = ForeignKey.NO_ACTION,
+            ),
+            ForeignKey(
+                entity = VaultKeyEntity::class,
+                parentColumns = ["id"],
+                childColumns = ["pending_psk_encryption_key_id"],
+                onDelete = ForeignKey.RESTRICT,
+                onUpdate = ForeignKey.NO_ACTION,
+            ),
+        ],
+    indices = [Index(value = ["pending_psk_encryption_key_id"])],
 )
 internal data class PairingAttemptEntity(
-    @PrimaryKey
-    @ColumnInfo(name = "request_id")
-    val requestId: String,
-    @ColumnInfo(name = "pairing_address")
-    val pairingAddress: String,
-    @ColumnInfo(name = "friendly_name")
-    val friendlyName: String?,
-    @ColumnInfo(name = "device_random")
-    val deviceRandom: ByteArray,
-    @ColumnInfo(name = "desired_relay_client_state")
-    val desiredRelayClientState: String?,
-    @ColumnInfo(name = "relay_client_state")
-    val relayClientState: String,
-    @ColumnInfo(name = "state")
-    val state: String,
-    @ColumnInfo(name = "sas_option_0")
-    val sasOption0: Long?,
-    @ColumnInfo(name = "sas_option_1")
-    val sasOption1: Long?,
-    @ColumnInfo(name = "sas_option_2")
-    val sasOption2: Long?,
-    @ColumnInfo(name = "correct_sas_index")
-    val correctSasIndex: Int?,
-    @ColumnInfo(name = "platform")
-    val platform: String?,
-    @ColumnInfo(name = "architecture")
-    val architecture: String?,
-    @ColumnInfo(name = "hostname")
-    val hostname: String?,
-    @ColumnInfo(name = "machine_id")
-    val machineId: String?,
-    @ColumnInfo(name = "os_version")
-    val osVersion: String?,
-    @Embedded(prefix = "pending_psk_")
-    val pendingPsk: EncryptedValue?,
-    @ColumnInfo(name = "decided_at")
-    val decidedAt: Long?,
+    @PrimaryKey @ColumnInfo(name = "request_id") val requestId: String,
+    @ColumnInfo(name = "pairing_address") val pairingAddress: String,
+    @ColumnInfo(name = "friendly_name") val friendlyName: String?,
+    @ColumnInfo(name = "device_random") val deviceRandom: ByteArray,
+    @ColumnInfo(name = "desired_relay_client_state") val desiredRelayClientState: String?,
+    @ColumnInfo(name = "relay_client_state") val relayClientState: String,
+    @ColumnInfo(name = "state") val state: String,
+    @ColumnInfo(name = "sas_option_0") val sasOption0: Long?,
+    @ColumnInfo(name = "sas_option_1") val sasOption1: Long?,
+    @ColumnInfo(name = "sas_option_2") val sasOption2: Long?,
+    @ColumnInfo(name = "correct_sas_index") val correctSasIndex: Int?,
+    @ColumnInfo(name = "platform") val platform: String?,
+    @ColumnInfo(name = "architecture") val architecture: String?,
+    @ColumnInfo(name = "hostname") val hostname: String?,
+    @ColumnInfo(name = "machine_id") val machineId: String?,
+    @ColumnInfo(name = "os_version") val osVersion: String?,
+    @Embedded(prefix = "pending_psk_") val pendingPsk: EncryptedValue?,
+    @ColumnInfo(name = "decided_at") val decidedAt: Long?,
 ) {
     @get:Ignore
     val clientId: String
         get() = requestId
 }
 
-private fun PairingAttemptEntity.hasCompletePendingPsk(): Boolean =
-    pendingPsk != null
+private fun PairingAttemptEntity.hasCompletePendingPsk(): Boolean = pendingPsk != null
 
-private fun PairingAttemptEntity.hasNoPendingPsk(): Boolean =
-    pendingPsk == null
+private fun PairingAttemptEntity.hasNoPendingPsk(): Boolean = pendingPsk == null
 
 @Entity(
     tableName = "clients",
-    foreignKeys = [
-        ForeignKey(
-            entity = DeviceIdentityEntity::class,
-            parentColumns = ["id"],
-            childColumns = ["device_identity_id"],
-            onDelete = ForeignKey.RESTRICT,
-            onUpdate = ForeignKey.NO_ACTION,
-        ),
-    ],
+    foreignKeys =
+        [
+            ForeignKey(
+                entity = DeviceIdentityEntity::class,
+                parentColumns = ["id"],
+                childColumns = ["device_identity_id"],
+                onDelete = ForeignKey.RESTRICT,
+                onUpdate = ForeignKey.NO_ACTION,
+            )
+        ],
     indices = [Index(value = ["device_identity_id"])],
 )
 internal data class ClientEntity(
-    @PrimaryKey
-    @ColumnInfo(name = "client_id")
-    val clientId: String,
-    @ColumnInfo(name = "device_identity_id")
-    val deviceIdentityId: String,
-    @ColumnInfo(name = "name")
-    val name: String,
-    @ColumnInfo(name = "instructions")
-    val instructions: String,
-    @ColumnInfo(name = "desired_relay_client_state")
-    val desiredRelayClientState: String?,
-    @ColumnInfo(name = "relay_client_state")
-    val relayClientState: String,
-    @ColumnInfo(name = "client_software_json")
-    val clientSoftwareJson: String?,
-    @ColumnInfo(name = "platform")
-    val platform: String?,
-    @ColumnInfo(name = "architecture")
-    val architecture: String?,
-    @ColumnInfo(name = "hostname")
-    val hostname: String?,
-    @ColumnInfo(name = "machine_id")
-    val machineId: String?,
-    @ColumnInfo(name = "os_version")
-    val osVersion: String?,
-    @ColumnInfo(name = "paired_at")
-    val pairedAt: Long,
-    @ColumnInfo(name = "last_seen_at")
-    val lastSeenAt: Long?,
+    @PrimaryKey @ColumnInfo(name = "client_id") val clientId: String,
+    @ColumnInfo(name = "device_identity_id") val deviceIdentityId: String,
+    @ColumnInfo(name = "name") val name: String,
+    @ColumnInfo(name = "instructions") val instructions: String,
+    @ColumnInfo(name = "desired_relay_client_state") val desiredRelayClientState: String?,
+    @ColumnInfo(name = "relay_client_state") val relayClientState: String,
+    @ColumnInfo(name = "client_software_json") val clientSoftwareJson: String?,
+    @ColumnInfo(name = "platform") val platform: String?,
+    @ColumnInfo(name = "architecture") val architecture: String?,
+    @ColumnInfo(name = "hostname") val hostname: String?,
+    @ColumnInfo(name = "machine_id") val machineId: String?,
+    @ColumnInfo(name = "os_version") val osVersion: String?,
+    @ColumnInfo(name = "paired_at") val pairedAt: Long,
+    @ColumnInfo(name = "last_seen_at") val lastSeenAt: Long?,
 )
 
 @Entity(
     tableName = "client_psks",
     primaryKeys = ["client_id", "slot"],
-    foreignKeys = [
-        ForeignKey(
-            entity = ClientEntity::class,
-            parentColumns = ["client_id"],
-            childColumns = ["client_id"],
-            onDelete = ForeignKey.CASCADE,
-            onUpdate = ForeignKey.NO_ACTION,
-        ),
-        ForeignKey(
-            entity = VaultKeyEntity::class,
-            parentColumns = ["id"],
-            childColumns = ["encryption_key_id"],
-            onDelete = ForeignKey.RESTRICT,
-            onUpdate = ForeignKey.NO_ACTION,
-        ),
-    ],
-    indices = [
-        Index(value = ["encryption_key_id"]),
-    ],
+    foreignKeys =
+        [
+            ForeignKey(
+                entity = ClientEntity::class,
+                parentColumns = ["client_id"],
+                childColumns = ["client_id"],
+                onDelete = ForeignKey.CASCADE,
+                onUpdate = ForeignKey.NO_ACTION,
+            ),
+            ForeignKey(
+                entity = VaultKeyEntity::class,
+                parentColumns = ["id"],
+                childColumns = ["encryption_key_id"],
+                onDelete = ForeignKey.RESTRICT,
+                onUpdate = ForeignKey.NO_ACTION,
+            ),
+        ],
+    indices = [Index(value = ["encryption_key_id"])],
 )
 internal data class ClientPskEntity(
-    @ColumnInfo(name = "client_id")
-    val clientId: String,
-    @ColumnInfo(name = "slot")
-    val slot: String,
-    @Embedded
-    val encryptedPsk: EncryptedValue,
-    @ColumnInfo(name = "stored_at")
-    val storedAt: Long,
+    @ColumnInfo(name = "client_id") val clientId: String,
+    @ColumnInfo(name = "slot") val slot: String,
+    @Embedded val encryptedPsk: EncryptedValue,
+    @ColumnInfo(name = "stored_at") val storedAt: Long,
 )
 
 @Entity(
     tableName = "request_psks",
-    foreignKeys = [
-        ForeignKey(
-            entity = InboxRequestEntity::class,
-            parentColumns = ["id"],
-            childColumns = ["request_id"],
-            onDelete = ForeignKey.CASCADE,
-            onUpdate = ForeignKey.NO_ACTION,
-        ),
-        ForeignKey(
-            entity = VaultKeyEntity::class,
-            parentColumns = ["id"],
-            childColumns = ["encryption_key_id"],
-            onDelete = ForeignKey.RESTRICT,
-            onUpdate = ForeignKey.NO_ACTION,
-        ),
-    ],
+    foreignKeys =
+        [
+            ForeignKey(
+                entity = InboxRequestEntity::class,
+                parentColumns = ["id"],
+                childColumns = ["request_id"],
+                onDelete = ForeignKey.CASCADE,
+                onUpdate = ForeignKey.NO_ACTION,
+            ),
+            ForeignKey(
+                entity = VaultKeyEntity::class,
+                parentColumns = ["id"],
+                childColumns = ["encryption_key_id"],
+                onDelete = ForeignKey.RESTRICT,
+                onUpdate = ForeignKey.NO_ACTION,
+            ),
+        ],
     indices = [Index(value = ["encryption_key_id"])],
 )
 internal data class RequestPskEntity(
-    @PrimaryKey
-    @ColumnInfo(name = "request_id")
-    val requestId: String,
-    @Embedded
-    val encryptedPsk: EncryptedValue,
+    @PrimaryKey @ColumnInfo(name = "request_id") val requestId: String,
+    @Embedded val encryptedPsk: EncryptedValue,
 )
 
 @Entity(
     tableName = "secret_use_requests",
-    foreignKeys = [
-        ForeignKey(
-            entity = InboxRequestEntity::class,
-            parentColumns = ["id"],
-            childColumns = ["request_id"],
-            onDelete = ForeignKey.CASCADE,
-            onUpdate = ForeignKey.NO_ACTION,
-        ),
-    ],
+    foreignKeys =
+        [
+            ForeignKey(
+                entity = InboxRequestEntity::class,
+                parentColumns = ["id"],
+                childColumns = ["request_id"],
+                onDelete = ForeignKey.CASCADE,
+                onUpdate = ForeignKey.NO_ACTION,
+            )
+        ],
 )
 internal data class SecretUseRequestEntity(
-    @PrimaryKey
-    @ColumnInfo(name = "request_id")
-    val requestId: String,
-    @ColumnInfo(name = "hostname")
-    val hostname: String?,
-    @ColumnInfo(name = "platform")
-    val platform: String?,
-    @ColumnInfo(name = "architecture")
-    val architecture: String?,
-    @ColumnInfo(name = "machine_id")
-    val machineId: String?,
-    @ColumnInfo(name = "os_version")
-    val osVersion: String?,
-    @ColumnInfo(name = "invocation_token_hash")
-    val invocationTokenHash: ByteArray,
-    @ColumnInfo(name = "contains_sensitive_material")
-    val containsSensitiveMaterial: Boolean,
-    @ColumnInfo(name = "secrets_json")
-    val secretsJson: String,
-    @ColumnInfo(name = "secret_details_json")
-    val secretDetailsJson: String,
-    @ColumnInfo(name = "provided_secrets_json")
-    val providedSecretsJson: String?,
-    @ColumnInfo(name = "missing_secrets_json")
-    val missingSecretsJson: String,
-    @ColumnInfo(name = "reason")
-    val reason: String?,
-    @ColumnInfo(name = "command")
-    val command: String,
-    @ColumnInfo(name = "arguments_json")
-    val argumentsJson: String,
-    @ColumnInfo(name = "working_directory")
-    val workingDirectory: String,
-    @ColumnInfo(name = "executable_path")
-    val executablePath: String,
-    @ColumnInfo(name = "executable_hash")
-    val executableHash: String?,
-    @ColumnInfo(name = "executable_mode")
-    val executableMode: String,
-    @ColumnInfo(name = "stdin_kind")
-    val stdinKind: String,
-    @ColumnInfo(name = "stdout_kind")
-    val stdoutKind: String,
-    @ColumnInfo(name = "stderr_kind")
-    val stderrKind: String,
-    @ColumnInfo(name = "launcher_chain_json")
-    val launcherChainJson: String,
-    @ColumnInfo(name = "decision")
-    val decision: String?,
-    @ColumnInfo(name = "decision_source")
-    val decisionSource: String?,
-    @ColumnInfo(name = "approval_evaluation_json")
-    val approvalEvaluationJson: String?,
-    @ColumnInfo(name = "completion_result")
-    val completionResult: String?,
-    @ColumnInfo(name = "completion_reason")
-    val completionReason: String?,
-    @ColumnInfo(name = "completion_message")
-    val completionMessage: String?,
-    @ColumnInfo(name = "decided_at")
-    val decidedAt: Long?,
+    @PrimaryKey @ColumnInfo(name = "request_id") val requestId: String,
+    @ColumnInfo(name = "hostname") val hostname: String?,
+    @ColumnInfo(name = "platform") val platform: String?,
+    @ColumnInfo(name = "architecture") val architecture: String?,
+    @ColumnInfo(name = "machine_id") val machineId: String?,
+    @ColumnInfo(name = "os_version") val osVersion: String?,
+    @ColumnInfo(name = "invocation_token_hash") val invocationTokenHash: ByteArray,
+    @ColumnInfo(name = "contains_sensitive_material") val containsSensitiveMaterial: Boolean,
+    @ColumnInfo(name = "secrets_json") val secretsJson: String,
+    @ColumnInfo(name = "secret_details_json") val secretDetailsJson: String,
+    @ColumnInfo(name = "provided_secrets_json") val providedSecretsJson: String?,
+    @ColumnInfo(name = "missing_secrets_json") val missingSecretsJson: String,
+    @ColumnInfo(name = "reason") val reason: String?,
+    @ColumnInfo(name = "command") val command: String,
+    @ColumnInfo(name = "arguments_json") val argumentsJson: String,
+    @ColumnInfo(name = "working_directory") val workingDirectory: String,
+    @ColumnInfo(name = "executable_path") val executablePath: String,
+    @ColumnInfo(name = "executable_hash") val executableHash: String?,
+    @ColumnInfo(name = "executable_mode") val executableMode: String,
+    @ColumnInfo(name = "stdin_kind") val stdinKind: String,
+    @ColumnInfo(name = "stdout_kind") val stdoutKind: String,
+    @ColumnInfo(name = "stderr_kind") val stderrKind: String,
+    @ColumnInfo(name = "launcher_chain_json") val launcherChainJson: String,
+    @ColumnInfo(name = "decision") val decision: String?,
+    @ColumnInfo(name = "decision_source") val decisionSource: String?,
+    @ColumnInfo(name = "approval_evaluation_json") val approvalEvaluationJson: String?,
+    @ColumnInfo(name = "completion_result") val completionResult: String?,
+    @ColumnInfo(name = "completion_reason") val completionReason: String?,
+    @ColumnInfo(name = "completion_message") val completionMessage: String?,
+    @ColumnInfo(name = "decided_at") val decidedAt: Long?,
 )
 
 @Entity(
     tableName = "git_sign_requests",
-    foreignKeys = [
-        ForeignKey(
-            entity = InboxRequestEntity::class,
-            parentColumns = ["id"],
-            childColumns = ["request_id"],
-            onDelete = ForeignKey.CASCADE,
-            onUpdate = ForeignKey.NO_ACTION,
-        ),
-    ],
+    foreignKeys =
+        [
+            ForeignKey(
+                entity = InboxRequestEntity::class,
+                parentColumns = ["id"],
+                childColumns = ["request_id"],
+                onDelete = ForeignKey.CASCADE,
+                onUpdate = ForeignKey.NO_ACTION,
+            )
+        ],
 )
 internal data class GitSignRequestEntity(
-    @PrimaryKey
-    @ColumnInfo(name = "request_id")
-    val requestId: String,
-    @ColumnInfo(name = "secret_name")
-    val secretName: String,
-    @ColumnInfo(name = "message")
-    val message: ByteArray,
-    @ColumnInfo(name = "repository_json")
-    val repositoryJson: String?,
-    @ColumnInfo(name = "approval_evaluation_json")
-    val approvalEvaluationJson: String?,
-    @ColumnInfo(name = "decision")
-    val decision: String?,
-    @ColumnInfo(name = "completion_result")
-    val completionResult: String?,
-    @ColumnInfo(name = "completion_reason")
-    val completionReason: String?,
-    @ColumnInfo(name = "completion_message")
-    val completionMessage: String?,
-    @ColumnInfo(name = "decided_at")
-    val decidedAt: Long?,
+    @PrimaryKey @ColumnInfo(name = "request_id") val requestId: String,
+    @ColumnInfo(name = "secret_name") val secretName: String,
+    @ColumnInfo(name = "message") val message: ByteArray,
+    @ColumnInfo(name = "repository_json") val repositoryJson: String?,
+    @ColumnInfo(name = "approval_evaluation_json") val approvalEvaluationJson: String?,
+    @ColumnInfo(name = "decision") val decision: String?,
+    @ColumnInfo(name = "completion_result") val completionResult: String?,
+    @ColumnInfo(name = "completion_reason") val completionReason: String?,
+    @ColumnInfo(name = "completion_message") val completionMessage: String?,
+    @ColumnInfo(name = "decided_at") val decidedAt: Long?,
 )
 
 @Entity(
     tableName = "ssh_authentication_requests",
-    foreignKeys = [
-        ForeignKey(
-            entity = InboxRequestEntity::class,
-            parentColumns = ["id"],
-            childColumns = ["request_id"],
-            onDelete = ForeignKey.CASCADE,
-            onUpdate = ForeignKey.NO_ACTION,
-        ),
-    ],
+    foreignKeys =
+        [
+            ForeignKey(
+                entity = InboxRequestEntity::class,
+                parentColumns = ["id"],
+                childColumns = ["request_id"],
+                onDelete = ForeignKey.CASCADE,
+                onUpdate = ForeignKey.NO_ACTION,
+            )
+        ],
 )
 internal data class SshAuthenticationRequestEntity(
-    @PrimaryKey
-    @ColumnInfo(name = "request_id")
-    val requestId: String,
-    @ColumnInfo(name = "secret_name")
-    val secretName: String,
-    @ColumnInfo(name = "message")
-    val message: ByteArray?,
-    @ColumnInfo(name = "username")
-    val username: String,
-    @ColumnInfo(name = "method")
-    val method: String,
-    @ColumnInfo(name = "algorithm")
-    val algorithm: String,
-    @ColumnInfo(name = "host_key_algorithm")
-    val hostKeyAlgorithm: String?,
-    @ColumnInfo(name = "host_key_fingerprint")
-    val hostKeyFingerprint: String?,
-    @ColumnInfo(name = "approval_evaluation_json")
-    val approvalEvaluationJson: String?,
-    @ColumnInfo(name = "decision")
-    val decision: String?,
-    @ColumnInfo(name = "completion_result")
-    val completionResult: String?,
-    @ColumnInfo(name = "completion_reason")
-    val completionReason: String?,
-    @ColumnInfo(name = "completion_message")
-    val completionMessage: String?,
-    @ColumnInfo(name = "decided_at")
-    val decidedAt: Long?,
+    @PrimaryKey @ColumnInfo(name = "request_id") val requestId: String,
+    @ColumnInfo(name = "secret_name") val secretName: String,
+    @ColumnInfo(name = "message") val message: ByteArray?,
+    @ColumnInfo(name = "username") val username: String,
+    @ColumnInfo(name = "method") val method: String,
+    @ColumnInfo(name = "algorithm") val algorithm: String,
+    @ColumnInfo(name = "host_key_algorithm") val hostKeyAlgorithm: String?,
+    @ColumnInfo(name = "host_key_fingerprint") val hostKeyFingerprint: String?,
+    @ColumnInfo(name = "approval_evaluation_json") val approvalEvaluationJson: String?,
+    @ColumnInfo(name = "decision") val decision: String?,
+    @ColumnInfo(name = "completion_result") val completionResult: String?,
+    @ColumnInfo(name = "completion_reason") val completionReason: String?,
+    @ColumnInfo(name = "completion_message") val completionMessage: String?,
+    @ColumnInfo(name = "decided_at") val decidedAt: Long?,
 )
 
 @Entity(
     tableName = "secret_upload_requests",
-    foreignKeys = [
-        ForeignKey(
-            entity = InboxRequestEntity::class,
-            parentColumns = ["id"],
-            childColumns = ["request_id"],
-            onDelete = ForeignKey.CASCADE,
-            onUpdate = ForeignKey.NO_ACTION,
-        ),
-    ],
+    foreignKeys =
+        [
+            ForeignKey(
+                entity = InboxRequestEntity::class,
+                parentColumns = ["id"],
+                childColumns = ["request_id"],
+                onDelete = ForeignKey.CASCADE,
+                onUpdate = ForeignKey.NO_ACTION,
+            )
+        ],
 )
 internal data class SecretUploadRequestEntity(
-    @PrimaryKey
-    @ColumnInfo(name = "request_id")
-    val requestId: String,
-    @ColumnInfo(name = "decision")
-    val decision: String?,
-    @ColumnInfo(name = "mode")
-    val mode: String,
-    @ColumnInfo(name = "uploaded_name")
-    val uploadedName: String,
-    @ColumnInfo(name = "approved_name")
-    val approvedName: String?,
-    @ColumnInfo(name = "description_provided")
-    val descriptionProvided: Boolean,
-    @ColumnInfo(name = "description")
-    val description: String?,
-    @ColumnInfo(name = "secret_type")
-    val secretType: String,
-    @ColumnInfo(name = "target_secret_id")
-    val targetSecretId: String?,
-    @ColumnInfo(name = "target_secret_revision")
-    val targetSecretRevision: Long?,
-    @ColumnInfo(name = "summary_json")
-    val summaryJson: String,
-    @ColumnInfo(name = "intake_error")
-    val intakeError: String?,
-    @ColumnInfo(name = "decided_at")
-    val decidedAt: Long?,
+    @PrimaryKey @ColumnInfo(name = "request_id") val requestId: String,
+    @ColumnInfo(name = "decision") val decision: String?,
+    @ColumnInfo(name = "mode") val mode: String,
+    @ColumnInfo(name = "uploaded_name") val uploadedName: String,
+    @ColumnInfo(name = "approved_name") val approvedName: String?,
+    @ColumnInfo(name = "description_provided") val descriptionProvided: Boolean,
+    @ColumnInfo(name = "description") val description: String?,
+    @ColumnInfo(name = "secret_type") val secretType: String,
+    @ColumnInfo(name = "target_secret_id") val targetSecretId: String?,
+    @ColumnInfo(name = "target_secret_revision") val targetSecretRevision: Long?,
+    @ColumnInfo(name = "summary_json") val summaryJson: String,
+    @ColumnInfo(name = "intake_error") val intakeError: String?,
+    @ColumnInfo(name = "decided_at") val decidedAt: Long?,
 )
 
 @Entity(
     tableName = "secret_upload_environment_variables",
-    foreignKeys = [
-        ForeignKey(
-            entity = SecretUploadRequestEntity::class,
-            parentColumns = ["request_id"],
-            childColumns = ["request_id"],
-            onDelete = ForeignKey.CASCADE,
-            onUpdate = ForeignKey.NO_ACTION,
-        ),
-        ForeignKey(
-            entity = VaultKeyEntity::class,
-            parentColumns = ["id"],
-            childColumns = ["encryption_key_id"],
-            onDelete = ForeignKey.RESTRICT,
-            onUpdate = ForeignKey.NO_ACTION,
-        ),
-    ],
-    indices = [
-        Index(value = ["request_id", "name"], unique = true),
-        Index(value = ["encryption_key_id"]),
-    ],
+    foreignKeys =
+        [
+            ForeignKey(
+                entity = SecretUploadRequestEntity::class,
+                parentColumns = ["request_id"],
+                childColumns = ["request_id"],
+                onDelete = ForeignKey.CASCADE,
+                onUpdate = ForeignKey.NO_ACTION,
+            ),
+            ForeignKey(
+                entity = VaultKeyEntity::class,
+                parentColumns = ["id"],
+                childColumns = ["encryption_key_id"],
+                onDelete = ForeignKey.RESTRICT,
+                onUpdate = ForeignKey.NO_ACTION,
+            ),
+        ],
+    indices =
+        [
+            Index(value = ["request_id", "name"], unique = true),
+            Index(value = ["encryption_key_id"]),
+        ],
 )
 internal data class SecretUploadEnvironmentVariableEntity(
-    @PrimaryKey
-    @ColumnInfo(name = "id")
-    val id: String,
-    @ColumnInfo(name = "request_id")
-    val requestId: String,
-    @ColumnInfo(name = "name")
-    val name: String,
-    @ColumnInfo(name = "sensitive")
-    val sensitive: Boolean,
-    @Embedded
-    val encryptedValue: EncryptedValue,
+    @PrimaryKey @ColumnInfo(name = "id") val id: String,
+    @ColumnInfo(name = "request_id") val requestId: String,
+    @ColumnInfo(name = "name") val name: String,
+    @ColumnInfo(name = "sensitive") val sensitive: Boolean,
+    @Embedded val encryptedValue: EncryptedValue,
 )
 
 @Entity(
     tableName = "secret_upload_ssh_keys",
-    foreignKeys = [
-        ForeignKey(
-            entity = SecretUploadRequestEntity::class,
-            parentColumns = ["request_id"],
-            childColumns = ["request_id"],
-            onDelete = ForeignKey.CASCADE,
-            onUpdate = ForeignKey.NO_ACTION,
-        ),
-        ForeignKey(
-            entity = VaultKeyEntity::class,
-            parentColumns = ["id"],
-            childColumns = ["encryption_key_id"],
-            onDelete = ForeignKey.RESTRICT,
-            onUpdate = ForeignKey.NO_ACTION,
-        ),
-    ],
+    foreignKeys =
+        [
+            ForeignKey(
+                entity = SecretUploadRequestEntity::class,
+                parentColumns = ["request_id"],
+                childColumns = ["request_id"],
+                onDelete = ForeignKey.CASCADE,
+                onUpdate = ForeignKey.NO_ACTION,
+            ),
+            ForeignKey(
+                entity = VaultKeyEntity::class,
+                parentColumns = ["id"],
+                childColumns = ["encryption_key_id"],
+                onDelete = ForeignKey.RESTRICT,
+                onUpdate = ForeignKey.NO_ACTION,
+            ),
+        ],
     indices = [Index(value = ["encryption_key_id"])],
 )
 internal data class SecretUploadSshKeyEntity(
-    @PrimaryKey
-    @ColumnInfo(name = "request_id")
-    val requestId: String,
-    @ColumnInfo(name = "algorithm")
-    val algorithm: String,
-    @ColumnInfo(name = "public_key")
-    val publicKey: ByteArray,
-    @ColumnInfo(name = "comment")
-    val comment: String,
-    @Embedded
-    val encryptedPrivateKey: EncryptedValue,
+    @PrimaryKey @ColumnInfo(name = "request_id") val requestId: String,
+    @ColumnInfo(name = "algorithm") val algorithm: String,
+    @ColumnInfo(name = "public_key") val publicKey: ByteArray,
+    @ColumnInfo(name = "comment") val comment: String,
+    @Embedded val encryptedPrivateKey: EncryptedValue,
 )
 
 internal data class AuthorizationPolicyCommitment(
@@ -561,9 +426,9 @@ internal enum class ConditionalRequestUpdate {
 internal interface RequestDao {
     @Query(
         "SELECT inbox_requests.* FROM inbox_requests " +
-        "WHERE inbox_requests.listed = 1 " +
+            "WHERE inbox_requests.listed = 1 " +
             "AND inbox_requests.kind IN ('secret_use', 'git_sign', 'ssh_authenticate') " +
-            "ORDER BY inbox_requests.received_at DESC, inbox_requests.id DESC",
+            "ORDER BY inbox_requests.received_at DESC, inbox_requests.id DESC"
     )
     fun observeListedRequests(): Flow<List<InboxRequestEntity>>
 
@@ -576,7 +441,7 @@ internal interface RequestDao {
             "AND pairing_attempts.state IN " +
             "('exchange_pending', 'exchange_failed', 'sas_verification_pending', " +
             "'waiting_for_finish') " +
-            "ORDER BY inbox_requests.received_at DESC, inbox_requests.id DESC",
+            "ORDER BY inbox_requests.received_at DESC, inbox_requests.id DESC"
     )
     fun observePendingPairingRequests(): Flow<List<InboxRequestEntity>>
 
@@ -588,7 +453,7 @@ internal interface RequestDao {
             "WHERE device_identities.role = 'active' " +
             "AND inbox_requests.completed_at IS NULL " +
             "AND secret_upload_requests.decision IS NULL " +
-            "ORDER BY inbox_requests.received_at DESC, inbox_requests.id DESC",
+            "ORDER BY inbox_requests.received_at DESC, inbox_requests.id DESC"
     )
     fun observePendingSecretUploadRequests(): Flow<List<InboxRequestEntity>>
 
@@ -597,7 +462,7 @@ internal interface RequestDao {
             "JOIN inbox_requests ON inbox_requests.id = pairing_attempts.request_id " +
             "JOIN device_identities ON device_identities.id = inbox_requests.device_identity_id " +
             "WHERE device_identities.role = 'active' " +
-            "ORDER BY inbox_requests.received_at DESC, pairing_attempts.request_id DESC",
+            "ORDER BY inbox_requests.received_at DESC, pairing_attempts.request_id DESC"
     )
     fun observePairingAttempts(): Flow<List<PairingAttemptEntity>>
 
@@ -605,7 +470,7 @@ internal interface RequestDao {
         "SELECT clients.* FROM clients " +
             "JOIN device_identities ON device_identities.id = clients.device_identity_id " +
             "WHERE device_identities.role = 'active' " +
-            "ORDER BY clients.name COLLATE NOCASE, clients.client_id",
+            "ORDER BY clients.name COLLATE NOCASE, clients.client_id"
     )
     fun observeClients(): Flow<List<ClientEntity>>
 
@@ -621,9 +486,7 @@ internal interface RequestDao {
     @Query("SELECT * FROM secret_upload_requests ORDER BY request_id DESC")
     fun observeSecretUploadRequests(): Flow<List<SecretUploadRequestEntity>>
 
-    @Query(
-        "SELECT * FROM inbox_requests WHERE id = :id",
-    )
+    @Query("SELECT * FROM inbox_requests WHERE id = :id")
     fun observeRequest(id: String): Flow<InboxRequestEntity?>
 
     @Query(
@@ -631,7 +494,7 @@ internal interface RequestDao {
             "JOIN inbox_requests ON inbox_requests.id = pairing_attempts.request_id " +
             "JOIN device_identities ON device_identities.id = inbox_requests.device_identity_id " +
             "WHERE pairing_attempts.request_id = :requestId " +
-            "AND device_identities.role = 'active'",
+            "AND device_identities.role = 'active'"
     )
     fun observePairingAttempt(requestId: String): Flow<PairingAttemptEntity?>
 
@@ -648,16 +511,16 @@ internal interface RequestDao {
     fun observeSecretUploadRequest(requestId: String): Flow<SecretUploadRequestEntity?>
 
     @Query(
-        "SELECT * FROM secret_upload_environment_variables WHERE request_id = :requestId ORDER BY name",
+        "SELECT * FROM secret_upload_environment_variables WHERE request_id = :requestId ORDER BY name"
     )
     fun observeSecretUploadEnvironmentVariables(
-        requestId: String,
+        requestId: String
     ): Flow<List<SecretUploadEnvironmentVariableEntity>>
 
     @Query(
         "SELECT clients.* FROM clients " +
             "JOIN device_identities ON device_identities.id = clients.device_identity_id " +
-            "WHERE clients.client_id = :clientId AND device_identities.role = 'active'",
+            "WHERE clients.client_id = :clientId AND device_identities.role = 'active'"
     )
     fun observeClient(clientId: String): Flow<ClientEntity?>
 
@@ -669,7 +532,7 @@ internal interface RequestDao {
         UPDATE inbox_requests
         SET state = 'action_required'
         WHERE state = 'reviewing'
-        """,
+        """
     )
     suspend fun recoverInterruptedAiReviews(): Int
 
@@ -678,7 +541,7 @@ internal interface RequestDao {
         UPDATE inbox_requests
         SET state = 'action_required'
         WHERE id = :requestId AND request_json = :requestJson AND state = 'reviewing'
-        """,
+        """
     )
     suspend fun recoverInterruptedAiReview(
         requestId: String,
@@ -694,7 +557,7 @@ internal interface RequestDao {
             "WHERE inbox_requests.id = :requestId " +
             "AND inbox_requests.device_identity_id = :deviceIdentityId " +
             "AND inbox_requests.completed_at IS NULL " +
-            "AND device_identities.role = 'active')",
+            "AND device_identities.role = 'active')"
     )
     suspend fun canAdvanceRequest(requestId: String, deviceIdentityId: String): Boolean
 
@@ -703,14 +566,14 @@ internal interface RequestDao {
             "JOIN inbox_requests ON inbox_requests.id = pairing_attempts.request_id " +
             "JOIN device_identities ON device_identities.id = inbox_requests.device_identity_id " +
             "WHERE pairing_attempts.request_id = :requestId " +
-            "AND device_identities.role = 'active'",
+            "AND device_identities.role = 'active'"
     )
     suspend fun getPairingAttempt(requestId: String): PairingAttemptEntity?
 
     @Query(
         "SELECT clients.* FROM clients " +
             "JOIN device_identities ON device_identities.id = clients.device_identity_id " +
-            "WHERE clients.client_id = :clientId AND device_identities.role = 'active'",
+            "WHERE clients.client_id = :clientId AND device_identities.role = 'active'"
     )
     suspend fun getClient(clientId: String): ClientEntity?
 
@@ -725,13 +588,13 @@ internal interface RequestDao {
 
     @Query(
         "SELECT instructions FROM device_identities " +
-            "WHERE id = :deviceIdentityId AND role = 'active'",
+            "WHERE id = :deviceIdentityId AND role = 'active'"
     )
     suspend fun getAuthorizationDeviceInstructions(deviceIdentityId: String): String?
 
     @Query(
         "SELECT * FROM secret_client_approval_overrides " +
-            "WHERE client_id = :clientId AND secret_id IN (:secretIds)",
+            "WHERE client_id = :clientId AND secret_id IN (:secretIds)"
     )
     suspend fun getAuthorizationOverrides(
         clientId: String,
@@ -740,7 +603,7 @@ internal interface RequestDao {
 
     @Query(
         "SELECT * FROM temporary_access_grants " +
-            "WHERE client_id = :clientId AND secret_id IN (:secretIds) AND operation = :operation",
+            "WHERE client_id = :clientId AND secret_id IN (:secretIds) AND operation = :operation"
     )
     suspend fun getAuthorizationGrants(
         clientId: String,
@@ -761,10 +624,10 @@ internal interface RequestDao {
     suspend fun getSecretUploadRequest(requestId: String): SecretUploadRequestEntity?
 
     @Query(
-        "SELECT * FROM secret_upload_environment_variables WHERE request_id = :requestId ORDER BY name",
+        "SELECT * FROM secret_upload_environment_variables WHERE request_id = :requestId ORDER BY name"
     )
     suspend fun getSecretUploadEnvironmentVariables(
-        requestId: String,
+        requestId: String
     ): List<SecretUploadEnvironmentVariableEntity>
 
     @Query("SELECT * FROM secret_upload_ssh_keys WHERE request_id = :requestId")
@@ -775,7 +638,7 @@ internal interface RequestDao {
             "JOIN inbox_requests ON inbox_requests.id = pairing_attempts.request_id " +
             "JOIN device_identities ON device_identities.id = inbox_requests.device_identity_id " +
             "WHERE device_identities.role = 'active' " +
-            "ORDER BY inbox_requests.received_at, pairing_attempts.request_id",
+            "ORDER BY inbox_requests.received_at, pairing_attempts.request_id"
     )
     suspend fun getPairingAttempts(): List<PairingAttemptEntity>
 
@@ -783,13 +646,11 @@ internal interface RequestDao {
         "SELECT clients.* FROM clients " +
             "JOIN device_identities ON device_identities.id = clients.device_identity_id " +
             "WHERE device_identities.role = 'active' " +
-            "ORDER BY clients.paired_at, clients.client_id",
+            "ORDER BY clients.paired_at, clients.client_id"
     )
     suspend fun getClients(): List<ClientEntity>
 
-    @Query(
-        "SELECT * FROM client_psks WHERE client_id = :clientId AND slot = :slot",
-    )
+    @Query("SELECT * FROM client_psks WHERE client_id = :clientId AND slot = :slot")
     suspend fun getClientPsk(clientId: String, slot: String): ClientPskEntity?
 
     @Query("SELECT * FROM request_psks WHERE request_id = :requestId")
@@ -803,7 +664,7 @@ internal interface RequestDao {
             SELECT 1 FROM inbox_requests
             WHERE id = :requestId AND exchange_ended_at IS NOT NULL
           )
-        """,
+        """
     )
     suspend fun deleteEndedRequestPsk(requestId: String): Int
 
@@ -813,7 +674,7 @@ internal interface RequestDao {
         WHERE request_id IN (
             SELECT id FROM inbox_requests WHERE exchange_ended_at IS NOT NULL
         )
-        """,
+        """
     )
     suspend fun deleteEndedRequestPsks(): Int
 
@@ -822,7 +683,7 @@ internal interface RequestDao {
             "JOIN device_identities ON device_identities.id = inbox_requests.device_identity_id " +
             "WHERE response_json IS NOT NULL AND response_outbox_finished = 0 " +
             "AND exchange_ended_at IS NULL AND device_identities.role = 'active' " +
-            "ORDER BY received_at, inbox_requests.id",
+            "ORDER BY received_at, inbox_requests.id"
     )
     suspend fun getUnfinishedResponseOutboxes(): List<InboxRequestEntity>
 
@@ -833,50 +694,38 @@ internal interface RequestDao {
         WHERE device_identities.role = 'active'
           AND exchange_ended_at IS NULL
         ORDER BY received_at, inbox_requests.id
-        """,
+        """
     )
     suspend fun getOpenExchanges(): List<InboxRequestEntity>
 
-    @Insert
-    suspend fun insertRequest(request: InboxRequestEntity)
+    @Insert suspend fun insertRequest(request: InboxRequestEntity)
 
-    @Insert
-    suspend fun insertPairingAttempt(attempt: PairingAttemptEntity)
+    @Insert suspend fun insertPairingAttempt(attempt: PairingAttemptEntity)
 
-    @Insert
-    suspend fun insertClient(client: ClientEntity)
+    @Insert suspend fun insertClient(client: ClientEntity)
 
-    @Insert
-    suspend fun insertClientPsk(psk: ClientPskEntity)
+    @Insert suspend fun insertClientPsk(psk: ClientPskEntity)
 
-    @Insert
-    suspend fun insertRequestPsk(psk: RequestPskEntity)
+    @Insert suspend fun insertRequestPsk(psk: RequestPskEntity)
 
-    @Insert
-    suspend fun insertSecretUseRequestRow(request: SecretUseRequestEntity)
+    @Insert suspend fun insertSecretUseRequestRow(request: SecretUseRequestEntity)
 
-    @Insert
-    suspend fun insertGitSignRequestRow(request: GitSignRequestEntity)
+    @Insert suspend fun insertGitSignRequestRow(request: GitSignRequestEntity)
 
-    @Insert
-    suspend fun insertSshAuthenticationRequestRow(request: SshAuthenticationRequestEntity)
+    @Insert suspend fun insertSshAuthenticationRequestRow(request: SshAuthenticationRequestEntity)
 
-    @Insert
-    suspend fun insertSecretUploadRequestRow(request: SecretUploadRequestEntity)
+    @Insert suspend fun insertSecretUploadRequestRow(request: SecretUploadRequestEntity)
 
     @Insert
     suspend fun insertSecretUploadEnvironmentVariables(
-        variables: List<SecretUploadEnvironmentVariableEntity>,
+        variables: List<SecretUploadEnvironmentVariableEntity>
     )
 
-    @Insert
-    suspend fun insertSecretUploadSshKey(key: SecretUploadSshKeyEntity)
+    @Insert suspend fun insertSecretUploadSshKey(key: SecretUploadSshKeyEntity)
 
-    @Upsert
-    suspend fun upsertClientPsk(psk: ClientPskEntity)
+    @Upsert suspend fun upsertClientPsk(psk: ClientPskEntity)
 
-    @Update
-    suspend fun updateRequest(request: InboxRequestEntity): Int
+    @Update suspend fun updateRequest(request: InboxRequestEntity): Int
 
     @Transaction
     suspend fun updateEndedRequest(request: InboxRequestEntity) {
@@ -886,27 +735,22 @@ internal interface RequestDao {
         trimCompletedHistory()
     }
 
-    @Update
-    suspend fun updatePairingAttempt(attempt: PairingAttemptEntity): Int
+    @Update suspend fun updatePairingAttempt(attempt: PairingAttemptEntity): Int
 
-    @Update
-    suspend fun updateClient(client: ClientEntity): Int
+    @Update suspend fun updateClient(client: ClientEntity): Int
 
-    @Update
-    suspend fun updateSecretUseRequestRow(request: SecretUseRequestEntity): Int
+    @Update suspend fun updateSecretUseRequestRow(request: SecretUseRequestEntity): Int
 
-    @Update
-    suspend fun updateGitSignRequestRow(request: GitSignRequestEntity): Int
+    @Update suspend fun updateGitSignRequestRow(request: GitSignRequestEntity): Int
 
     @Update
     suspend fun updateSshAuthenticationRequestRow(request: SshAuthenticationRequestEntity): Int
 
-    @Update
-    suspend fun updateSecretUploadRequestRow(request: SecretUploadRequestEntity): Int
+    @Update suspend fun updateSecretUploadRequestRow(request: SecretUploadRequestEntity): Int
 
     @Update
     suspend fun updateSecretUploadEnvironmentVariable(
-        variable: SecretUploadEnvironmentVariableEntity,
+        variable: SecretUploadEnvironmentVariableEntity
     ): Int
 
     @Query("DELETE FROM client_psks WHERE client_id = :clientId AND slot = :slot")
@@ -936,7 +780,7 @@ internal interface RequestDao {
         WHERE request_id IN (
             SELECT request_id FROM secret_upload_requests WHERE decision IS NOT NULL
         )
-        """,
+        """
     )
     suspend fun discardDecidedSecretUploadEnvironmentValues(): Int
 
@@ -946,7 +790,7 @@ internal interface RequestDao {
         WHERE request_id IN (
             SELECT request_id FROM secret_upload_requests WHERE decision IS NOT NULL
         )
-        """,
+        """
     )
     suspend fun discardDecidedSecretUploadSshKeys(): Int
 
@@ -979,7 +823,7 @@ internal interface RequestDao {
         WHERE id = :requestId
           AND response_json IS NOT NULL
           AND response_outbox_finished = 0
-        """,
+        """
     )
     suspend fun markResponseOutboxFinished(requestId: String): Int
 
@@ -990,7 +834,7 @@ internal interface RequestDao {
           AND response_json IS NOT NULL
           AND response_outbox_finished = 1
           AND exchange_ended_at IS NULL
-        """,
+        """
     )
     suspend fun reopenResponseOutbox(requestId: String): Int
 
@@ -1010,7 +854,7 @@ internal interface RequestDao {
               LIMIT 100
             )
           )
-        """,
+        """
     )
     suspend fun trimCompletedHistory(): Int
 
@@ -1033,7 +877,7 @@ internal interface RequestDao {
                 attempt.relay_client_state != attempt.desired_relay_client_state
               )
           )
-        """,
+        """
     )
     suspend fun deleteSettledHiddenRequests(endedBefore: Long): Int
 
@@ -1063,7 +907,7 @@ internal interface RequestDao {
           AND inbox_requests.state = 'action_required'
           AND device_identities.role = 'active'
         ORDER BY inbox_requests.received_at DESC, inbox_requests.id DESC
-        """,
+        """
     )
     fun observeActionRequiredRequests(): Flow<List<InboxRequestEntity>>
 
@@ -1293,18 +1137,18 @@ internal interface RequestDao {
             return ConditionalRequestUpdate.UNAVAILABLE
         }
         if (!authorizationMatches(authorization, clientId, operation, now)) {
-            val currentRequest = getRequestById(request.id)
-                ?: return ConditionalRequestUpdate.UNAVAILABLE
-            val currentSecretUseRequest = getSecretUseRequest(request.id)
-                ?: return ConditionalRequestUpdate.UNAVAILABLE
+            val currentRequest =
+                getRequestById(request.id) ?: return ConditionalRequestUpdate.UNAVAILABLE
+            val currentSecretUseRequest =
+                getSecretUseRequest(request.id) ?: return ConditionalRequestUpdate.UNAVAILABLE
             check(
                 updateRequest(
                     currentRequest.copy(
                         state = "action_required",
                         responseJson = null,
                         completedAt = null,
-                    ),
-                ) == 1,
+                    )
+                ) == 1
             )
             check(
                 updateSecretUseRequestRow(
@@ -1315,8 +1159,8 @@ internal interface RequestDao {
                         completionReason = null,
                         completionMessage = null,
                         decidedAt = null,
-                    ),
-                ) == 1,
+                    )
+                ) == 1
             )
             trimCompletedHistory()
             return ConditionalRequestUpdate.ACTION_REQUIRED
@@ -1351,14 +1195,11 @@ internal interface RequestDao {
         if (!canAdvanceRequest(request.id, request.deviceIdentityId)) {
             return ConditionalRequestUpdate.UNAVAILABLE
         }
-        val currentRequest = getRequestById(request.id)
-            ?: return ConditionalRequestUpdate.UNAVAILABLE
-        val currentGitSignRequest = getGitSignRequest(request.id)
-            ?: return ConditionalRequestUpdate.UNAVAILABLE
-        if (
-            currentRequest.state != expectedState ||
-            currentGitSignRequest.decision != null
-        ) {
+        val currentRequest =
+            getRequestById(request.id) ?: return ConditionalRequestUpdate.UNAVAILABLE
+        val currentGitSignRequest =
+            getGitSignRequest(request.id) ?: return ConditionalRequestUpdate.UNAVAILABLE
+        if (currentRequest.state != expectedState || currentGitSignRequest.decision != null) {
             return ConditionalRequestUpdate.UNAVAILABLE
         }
         if (!authorizationMatches(authorization, clientId, operation, now)) {
@@ -1368,8 +1209,8 @@ internal interface RequestDao {
                         state = "action_required",
                         responseJson = null,
                         completedAt = null,
-                    ),
-                ) == 1,
+                    )
+                ) == 1
             )
             check(
                 updateGitSignRequestRow(
@@ -1379,8 +1220,8 @@ internal interface RequestDao {
                         completionReason = null,
                         completionMessage = null,
                         decidedAt = null,
-                    ),
-                ) == 1,
+                    )
+                ) == 1
             )
             trimCompletedHistory()
             return ConditionalRequestUpdate.ACTION_REQUIRED
@@ -1390,7 +1231,6 @@ internal interface RequestDao {
         trimCompletedHistory()
         return ConditionalRequestUpdate.APPLIED
     }
-
 
     @Transaction
     suspend fun updateSshAuthenticationRequest(
@@ -1416,14 +1256,11 @@ internal interface RequestDao {
         if (!canAdvanceRequest(request.id, request.deviceIdentityId)) {
             return ConditionalRequestUpdate.UNAVAILABLE
         }
-        val currentRequest = getRequestById(request.id)
-            ?: return ConditionalRequestUpdate.UNAVAILABLE
-        val currentAuthentication = getSshAuthenticationRequest(request.id)
-            ?: return ConditionalRequestUpdate.UNAVAILABLE
-        if (
-            currentRequest.state != expectedState ||
-            currentAuthentication.decision != null
-        ) {
+        val currentRequest =
+            getRequestById(request.id) ?: return ConditionalRequestUpdate.UNAVAILABLE
+        val currentAuthentication =
+            getSshAuthenticationRequest(request.id) ?: return ConditionalRequestUpdate.UNAVAILABLE
+        if (currentRequest.state != expectedState || currentAuthentication.decision != null) {
             return ConditionalRequestUpdate.UNAVAILABLE
         }
         if (!authorizationMatches(authorization, clientId, operation, now)) {
@@ -1433,8 +1270,8 @@ internal interface RequestDao {
                         state = "action_required",
                         responseJson = null,
                         completedAt = null,
-                    ),
-                ) == 1,
+                    )
+                ) == 1
             )
             check(
                 updateSshAuthenticationRequestRow(
@@ -1444,8 +1281,8 @@ internal interface RequestDao {
                         completionReason = null,
                         completionMessage = null,
                         decidedAt = null,
-                    ),
-                ) == 1,
+                    )
+                ) == 1
             )
             trimCompletedHistory()
             return ConditionalRequestUpdate.ACTION_REQUIRED
@@ -1466,18 +1303,18 @@ internal interface RequestDao {
         val client = getClient(clientId) ?: return false
         if (
             client.relayClientState != "active" ||
-            client.desiredRelayClientState?.let { it != "active" } == true
+                client.desiredRelayClientState?.let { it != "active" } == true
         ) {
             return false
         }
         authorization.instructions?.let { expected ->
             if (
                 getAuthorizationDeviceInstructions(expected.deviceIdentityId) !=
-                expected.deviceInstructions ||
-                client.deviceIdentityId != expected.deviceIdentityId ||
-                expected.clientId != clientId ||
-                client.name != expected.clientName ||
-                client.instructions != expected.clientInstructions
+                    expected.deviceInstructions ||
+                    client.deviceIdentityId != expected.deviceIdentityId ||
+                    expected.clientId != clientId ||
+                    client.name != expected.clientName ||
+                    client.instructions != expected.clientInstructions
             ) {
                 return false
             }
@@ -1490,7 +1327,8 @@ internal interface RequestDao {
         if (secretIds.isEmpty()) return authorization.policies.isEmpty()
         val secrets = getAuthorizationSecrets(secretIds.toList()).associateBy(SecretEntity::id)
         if (secrets.size != secretIds.size) return false
-        if (authorization.secretRevisions.any { (id, revision) ->
+        if (
+            authorization.secretRevisions.any { (id, revision) ->
                 secrets.getValue(id).revision != revision
             }
         ) {
@@ -1498,14 +1336,16 @@ internal interface RequestDao {
         }
         if (authorization.policies.isEmpty()) return true
         val policyIds = authorization.policies.keys.toList()
-        val overrides = getAuthorizationOverrides(clientId, policyIds)
-            .associateBy(SecretClientApprovalOverrideEntity::secretId)
-        val activeGrants = getAuthorizationGrants(clientId, policyIds, operation)
-            .filter { it.expiresAt > now }
-            .associateBy(TemporaryAccessGrantEntity::secretId)
+        val overrides =
+            getAuthorizationOverrides(clientId, policyIds)
+                .associateBy(SecretClientApprovalOverrideEntity::secretId)
+        val activeGrants =
+            getAuthorizationGrants(clientId, policyIds, operation)
+                .filter { it.expiresAt > now }
+                .associateBy(TemporaryAccessGrantEntity::secretId)
         return authorization.policies.all { (secretId, expected) ->
-            val currentMode = overrides[secretId]?.approvalMode
-                ?: secrets.getValue(secretId).approvalMode
+            val currentMode =
+                overrides[secretId]?.approvalMode ?: secrets.getValue(secretId).approvalMode
             currentMode == expected.mode &&
                 activeGrants[secretId]?.expiresAt == expected.temporaryAccessExpiresAt
         }

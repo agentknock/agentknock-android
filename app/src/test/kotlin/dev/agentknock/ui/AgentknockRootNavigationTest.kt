@@ -13,7 +13,7 @@ class AgentknockRootNavigationTest {
                 originalIdentityId = IDENTITY_ID,
                 originalAddress = ORIGINAL_ADDRESS,
                 active = identity(),
-            ),
+            )
         )
     }
 
@@ -24,7 +24,7 @@ class AgentknockRootNavigationTest {
                 originalIdentityId = IDENTITY_ID,
                 originalAddress = ORIGINAL_ADDRESS,
                 active = identity(address = "silent-forest-cloud"),
-            ),
+            )
         )
     }
 
@@ -35,7 +35,7 @@ class AgentknockRootNavigationTest {
                 originalIdentityId = IDENTITY_ID,
                 originalAddress = ORIGINAL_ADDRESS,
                 active = identity(id = "replacement"),
-            ),
+            )
         )
     }
 
@@ -46,7 +46,7 @@ class AgentknockRootNavigationTest {
                 originalIdentityId = IDENTITY_ID,
                 originalAddress = ORIGINAL_ADDRESS,
                 active = null,
-            ),
+            )
         )
     }
 
@@ -57,22 +57,23 @@ class AgentknockRootNavigationTest {
                 originalIdentityId = null,
                 originalAddress = null,
                 active = identity(),
-            ),
+            )
         )
     }
 
     private fun identity(
         id: String = IDENTITY_ID,
         address: String = ORIGINAL_ADDRESS,
-    ) = DeviceIdentity(
-        id = id,
-        address = address,
-        deviceId = "device",
-        credentialsAvailable = true,
-        pairingEnabled = true,
-        createdAt = 1L,
-        instructions = "",
-    )
+    ) =
+        DeviceIdentity(
+            id = id,
+            address = address,
+            deviceId = "device",
+            credentialsAvailable = true,
+            pairingEnabled = true,
+            createdAt = 1L,
+            instructions = "",
+        )
 
     private companion object {
         const val IDENTITY_ID = "identity"

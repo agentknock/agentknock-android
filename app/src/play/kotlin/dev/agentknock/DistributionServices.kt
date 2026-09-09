@@ -15,11 +15,12 @@ internal fun createPushRegistration(
     context: Context,
     deviceAuthorization: RelayDeviceAuthorizationSource,
     transport: RelayHttpTransport,
-): PushRegistrationRepository = PushRegistrationRepository(
-    deviceAuthorization = deviceAuthorization,
-    relay = HttpRelayPushRegistrationClient(transport),
-    requestRegistration = { FirebaseRegistrationWorker.enqueue(context) },
-)
+): PushRegistrationRepository =
+    PushRegistrationRepository(
+        deviceAuthorization = deviceAuthorization,
+        relay = HttpRelayPushRegistrationClient(transport),
+        requestRegistration = { FirebaseRegistrationWorker.enqueue(context) },
+    )
 
 internal fun createSubscriptionBilling(context: Context): PlaySubscriptionBilling =
     GooglePlaySubscriptionBilling(context)

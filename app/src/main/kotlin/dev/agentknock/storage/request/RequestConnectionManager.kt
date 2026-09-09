@@ -4,6 +4,7 @@ import android.os.SystemClock
 import android.util.Log
 import androidx.lifecycle.DefaultLifecycleObserver
 import androidx.lifecycle.LifecycleOwner
+import kotlin.math.min
 import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.CompletableDeferred
 import kotlinx.coroutines.CoroutineScope
@@ -27,7 +28,6 @@ import kotlinx.coroutines.sync.Mutex
 import kotlinx.coroutines.sync.withLock
 import kotlinx.coroutines.withContext
 import kotlinx.coroutines.withTimeoutOrNull
-import kotlin.math.min
 
 @OptIn(ExperimentalCoroutinesApi::class)
 internal class RequestConnectionManager(
@@ -66,10 +66,7 @@ internal class RequestConnectionManager(
                     flow {
                         if (current.paused) {
                             emit(ConnectionTarget.Inactive)
-                        } else if (
-                            current.foregroundVisible &&
-                            !current.stoppedOnTerminalResult
-                        ) {
+                        } else if (current.foregroundVisible && !current.stoppedOnTerminalResult) {
                             emit(ConnectionTarget.Foreground(current.generation))
                         } else if (current.backgroundHandoffPending) {
                             delay(backgroundGracePeriodMillis)
@@ -116,8 +113,7 @@ internal class RequestConnectionManager(
                 foregroundVisible = true,
                 backgroundHandoffPending = false,
                 stoppedOnTerminalResult = false,
-                generation = current.generation +
-                    if (current.stoppedOnTerminalResult) 1 else 0,
+                generation = current.generation + if (current.stoppedOnTerminalResult) 1 else 0,
             )
         }
     }
@@ -167,9 +163,7 @@ internal class RequestConnectionManager(
                         stoppedOnTerminalResult = false,
                     )
                 } else {
-                    current.copy(
-                        synchronizationGeneration = current.synchronizationGeneration + 1,
-                    )
+                    current.copy(synchronizationGeneration = current.synchronizationGeneration + 1)
                 }
             }
         } else {
@@ -237,14 +231,10 @@ internal class RequestConnectionManager(
         if (scheduleReconciliation) scheduleBackgroundSynchronization()
     }
 
-    private suspend fun runOneShot(
-        session: ActiveSession,
-    ): OneShotSynchronizationResult {
+    private suspend fun runOneShot(session: ActiveSession): OneShotSynchronizationResult {
         try {
             _syncing.value = true
-            val result = rememberServerRetryDirective(
-                runOperation(synchronizeOnceOperation),
-            )
+            val result = rememberServerRetryDirective(runOperation(synchronizeOnceOperation))
             _lastSyncResult.value = result
             if (result == RequestSyncResult.Success) {
                 demand.update { current ->
@@ -300,13 +290,12 @@ internal class RequestConnectionManager(
                                 val current = demand.value
                                 if (
                                     activeSession !== session ||
-                                    current.generation != connectionGeneration
+                                        current.generation != connectionGeneration
                                 ) {
                                     break
                                 }
                                 if (
-                                    current.synchronizationGeneration !=
-                                    synchronizationGeneration
+                                    current.synchronizationGeneration != synchronizationGeneration
                                 ) {
                                     return@withLock true
                                 }
@@ -336,19 +325,19 @@ internal class RequestConnectionManager(
         }
     }
 
-    private suspend fun releaseSession(session: ActiveSession) = withContext(NonCancellable) {
-        sessionLock.withLock {
-            if (activeSession === session) activeSession = null
-            if (activeSession == null) _syncing.value = false
-            session.released.complete(Unit)
+    private suspend fun releaseSession(session: ActiveSession) =
+        withContext(NonCancellable) {
+            sessionLock.withLock {
+                if (activeSession === session) activeSession = null
+                if (activeSession == null) _syncing.value = false
+                session.released.complete(Unit)
+            }
         }
-    }
 
     private suspend fun waitForRetry(delayMillis: Long, synchronizationGeneration: Long) {
         val localRetryNotBefore = retryDeadline(delayMillis)
         awaitServerRetryWindow()
-        val remainingLocalDelay = (localRetryNotBefore - elapsedRealtimeMillis())
-            .coerceAtLeast(0)
+        val remainingLocalDelay = (localRetryNotBefore - elapsedRealtimeMillis()).coerceAtLeast(0)
         withTimeoutOrNull(remainingLocalDelay) {
             demand.first { current ->
                 current.synchronizationGeneration != synchronizationGeneration
@@ -357,10 +346,9 @@ internal class RequestConnectionManager(
     }
 
     private fun rememberServerRetryDirective(result: RequestSyncResult): RequestSyncResult {
-        val delayMillis = (result as? RequestSyncResult.RelayUnavailable)
-            ?.retryAfterMillis
-            ?.takeIf { it > 0 }
-            ?: return result
+        val delayMillis =
+            (result as? RequestSyncResult.RelayUnavailable)?.retryAfterMillis?.takeIf { it > 0 }
+                ?: return result
         return try {
             relayRetryDeadline.deferFor(delayMillis)
             result
@@ -389,11 +377,12 @@ internal class RequestConnectionManager(
                 if (demand.value.paused || !demand.value.foregroundVisible) {
                     return null
                 }
-                activeSession?.released ?: run {
-                    val session = ActiveSession(foregroundJob)
-                    activeSession = session
-                    return session
-                }
+                activeSession?.released
+                    ?: run {
+                        val session = ActiveSession(foregroundJob)
+                        activeSession = session
+                        return session
+                    }
             }
             existingSessionRelease.await()
         }
@@ -401,30 +390,32 @@ internal class RequestConnectionManager(
     }
 
     private suspend fun runOperation(
-        operation: suspend () -> RequestSyncResult,
-    ): RequestSyncResult = try {
-        operation()
-    } catch (cancelled: CancellationException) {
-        throw cancelled
-    } catch (failure: Exception) {
-        internalFailure(failure)
-    }
+        operation: suspend () -> RequestSyncResult
+    ): RequestSyncResult =
+        try {
+            operation()
+        } catch (cancelled: CancellationException) {
+            throw cancelled
+        } catch (failure: Exception) {
+            internalFailure(failure)
+        }
 
     private fun internalFailure(failure: Exception): RequestSyncResult.InternalFailure {
         runCatching { reportInternalFailure(failure) }
         return RequestSyncResult.InternalFailure(
-            failure::class.java.simpleName.ifBlank { "Exception" },
+            failure::class.java.simpleName.ifBlank { "Exception" }
         )
     }
 
-    private fun nextReconnectDelay(current: Long): Long = min(
-        maximumReconnectDelayMillis,
-        if (current > maximumReconnectDelayMillis / 2) {
-            maximumReconnectDelayMillis
-        } else {
-            current * 2
-        },
-    )
+    private fun nextReconnectDelay(current: Long): Long =
+        min(
+            maximumReconnectDelayMillis,
+            if (current > maximumReconnectDelayMillis / 2) {
+                maximumReconnectDelayMillis
+            } else {
+                current * 2
+            },
+        )
 
     private class ActiveSession(val ownerJob: Job) {
         val released = CompletableDeferred<Unit>()
@@ -444,7 +435,9 @@ internal class RequestConnectionManager(
 
     private sealed interface ConnectionTarget {
         data class Foreground(val generation: Long) : ConnectionTarget
+
         data object BackgroundHandoff : ConnectionTarget
+
         data object Inactive : ConnectionTarget
     }
 

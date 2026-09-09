@@ -12,6 +12,9 @@ class ApprovalCompletionStorageTest {
         val software = ClientSoftware(SoftwareInfo("client", "1"), SoftwareInfo("library", "1"))
         assertEquals("approved", ApprovalCompletion.Approved(software).storedResult)
         assertEquals("denied", ApprovalCompletion.Denied(software, "OTHER", "Denied").storedResult)
-        assertEquals("aborted", ApprovalCompletion.Aborted(software, "OTHER", "Aborted").storedResult)
+        assertEquals(
+            "aborted",
+            ApprovalCompletion.Aborted(software, "OTHER", "Aborted").storedResult,
+        )
     }
 }

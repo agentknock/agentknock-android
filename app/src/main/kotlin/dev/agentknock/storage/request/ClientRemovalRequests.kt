@@ -1,6 +1,5 @@
 package dev.agentknock.storage.request
 
-import dev.agentknock.protocol.ClientSoftware
 import dev.agentknock.protocol.PairingRemoveProtocol
 import dev.agentknock.relay.RelayClientState
 import dev.agentknock.storage.WriteTransaction
@@ -9,11 +8,10 @@ import dev.agentknock.storage.audit.AuditOutcome
 import dev.agentknock.storage.audit.AuditRecord
 import dev.agentknock.storage.audit.AuditSink
 import dev.agentknock.storage.audit.auditDataOf
-import kotlinx.serialization.decodeFromString
 import kotlinx.serialization.encodeToString
-import kotlinx.serialization.json.encodeToJsonElement
 import kotlinx.serialization.json.Json
 import kotlinx.serialization.json.JsonElement
+import kotlinx.serialization.json.encodeToJsonElement
 
 /** Owns durable client-removal transitions without owning relay transport or envelope crypto. */
 internal class ClientRemovalRequests(
@@ -32,34 +30,36 @@ internal class ClientRemovalRequests(
         requestPsk: RequestPskEntity,
         sealResponse: (ByteArray) -> JsonElement?,
     ): JsonElement? {
-        val clientSoftware = runCatching { protocol.decodeRequest(plaintext) }.getOrNull()
-            ?: return null
+        val clientSoftware =
+            runCatching { protocol.decodeRequest(plaintext) }.getOrNull() ?: return null
         val response = sealResponse(protocol.response()) ?: return null
         val now = currentTimeMillis()
         dao.insertPairingRemoval(
-            request = InboxRequestEntity(
-                id = relayRequestId,
-                parentRequestId = null,
-                deviceIdentityId = client.deviceIdentityId,
-                clientId = client.clientId,
-                clientNameSnapshot = client.name,
-                clientSoftwareJson = json.encodeToString(clientSoftware),
-                kind = RequestKind.PAIRING_REMOVE.storedName,
-                state = InboxRequestState.WAITING.storedName,
-                listed = false,
-                requestJson = requestPayload.toString(),
-                responseJson = response.toString(),
-                error = null,
-                receivedAt = now,
-                completedAt = null,
-                exchangeEndedAt = null,
-                responseOutboxFinished = false,
-            ),
+            request =
+                InboxRequestEntity(
+                    id = relayRequestId,
+                    parentRequestId = null,
+                    deviceIdentityId = client.deviceIdentityId,
+                    clientId = client.clientId,
+                    clientNameSnapshot = client.name,
+                    clientSoftwareJson = json.encodeToString(clientSoftware),
+                    kind = RequestKind.PAIRING_REMOVE.storedName,
+                    state = InboxRequestState.WAITING.storedName,
+                    listed = false,
+                    requestJson = requestPayload.toString(),
+                    responseJson = response.toString(),
+                    error = null,
+                    receivedAt = now,
+                    completedAt = null,
+                    exchangeEndedAt = null,
+                    responseOutboxFinished = false,
+                ),
             requestPsk = requestPsk,
-            client = client.copy(
-                desiredRelayClientState = RelayClientState.REVOKED.wireName,
-                lastSeenAt = now,
-            ),
+            client =
+                client.copy(
+                    desiredRelayClientState = RelayClientState.REVOKED.wireName,
+                    lastSeenAt = now,
+                ),
         )
         return response
     }
@@ -74,9 +74,10 @@ internal class ClientRemovalRequests(
         if (existing.exchangeEndedAt != null) return true
 
         val opened = openCompletion()
-        val decoded = (opened as? CompletionOpenResult.Opened)?.plaintext?.let {
-            decodeWireCompletionOrNull { protocol.decodeCompletion(it) }
-        }
+        val decoded =
+            (opened as? CompletionOpenResult.Opened)?.plaintext?.let {
+                decodeWireCompletionOrNull { protocol.decodeCompletion(it) }
+            }
         return writeTransaction.execute {
             val current = dao.getRequestById(request.id) ?: return@execute false
             if (current.kind != RequestKind.PAIRING_REMOVE.storedName) return@execute false
@@ -86,8 +87,8 @@ internal class ClientRemovalRequests(
             val expectedSoftware = current.clientSoftwareJson?.let(::decodeStoredClientSoftware)
             val priorError = current.error
             val valid = priorError == null && decoded != null && decoded == expectedSoftware
-            val error = priorError ?:
-                CLIENT_REMOVAL_COMPLETION_VERIFICATION_ERROR.takeUnless { valid }
+            val error =
+                priorError ?: CLIENT_REMOVAL_COMPLETION_VERIFICATION_ERROR.takeUnless { valid }
             val now = currentTimeMillis()
             dao.updateEndedRequest(
                 current.copy(
@@ -96,30 +97,35 @@ internal class ClientRemovalRequests(
                     error = error,
                     completedAt = current.completedAt ?: now,
                     exchangeEndedAt = now,
-                ),
+                )
             )
             audit.append(
-                records = listOf(
-                    AuditRecord(
-                        type = if (valid) {
-                            AuditEventType.CLIENT_UNPAIRED_ITSELF
-                        } else {
-                            AuditEventType.CLIENT_REMOVAL_CONFIRMATION_FAILED
-                        },
-                        outcome = if (valid) AuditOutcome.COMPLETED else AuditOutcome.FAILED,
-                        subject = current.clientNameSnapshot,
-                        detail = error,
-                        clientId = current.clientId,
-                        clientName = current.clientNameSnapshot,
-                        relayRequestId = current.id,
-                        data = current.requestAuditData() + auditDataOf(
-                            "completion_valid" to valid,
-                            "returned_client_software" to decoded?.let {
-                                storedJson.encodeToJsonElement(it)
-                            },
-                        ),
+                records =
+                    listOf(
+                        AuditRecord(
+                            type =
+                                if (valid) {
+                                    AuditEventType.CLIENT_UNPAIRED_ITSELF
+                                } else {
+                                    AuditEventType.CLIENT_REMOVAL_CONFIRMATION_FAILED
+                                },
+                            outcome = if (valid) AuditOutcome.COMPLETED else AuditOutcome.FAILED,
+                            subject = current.clientNameSnapshot,
+                            detail = error,
+                            clientId = current.clientId,
+                            clientName = current.clientNameSnapshot,
+                            relayRequestId = current.id,
+                            data =
+                                current.requestAuditData() +
+                                    auditDataOf(
+                                        "completion_valid" to valid,
+                                        "returned_client_software" to
+                                            decoded?.let {
+                                                storedJson.encodeToJsonElement(it)
+                                            },
+                                    ),
+                        )
                     ),
-                ),
                 occurredAt = now,
             )
             true
@@ -140,25 +146,28 @@ internal class ClientRemovalRequests(
                     error = current.error ?: message.takeIf { unconfirmed },
                     completedAt = current.completedAt ?: now,
                     exchangeEndedAt = now,
-                ),
+                )
             )
             if (unconfirmed) {
                 audit.append(
-                    records = listOf(
-                        AuditRecord(
-                            type = AuditEventType.CLIENT_REMOVAL_UNCONFIRMED,
-                            outcome = AuditOutcome.FAILED,
-                            subject = current.clientNameSnapshot,
-                            detail = message,
-                            clientId = current.clientId,
-                            clientName = current.clientNameSnapshot,
-                            relayRequestId = current.id,
-                            data = current.requestAuditData() + auditDataOf(
-                                "transport_error" to message,
-                                "completion_confirmed" to false,
-                            ),
+                    records =
+                        listOf(
+                            AuditRecord(
+                                type = AuditEventType.CLIENT_REMOVAL_UNCONFIRMED,
+                                outcome = AuditOutcome.FAILED,
+                                subject = current.clientNameSnapshot,
+                                detail = message,
+                                clientId = current.clientId,
+                                clientName = current.clientNameSnapshot,
+                                relayRequestId = current.id,
+                                data =
+                                    current.requestAuditData() +
+                                        auditDataOf(
+                                            "transport_error" to message,
+                                            "completion_confirmed" to false,
+                                        ),
+                            )
                         ),
-                    ),
                     occurredAt = now,
                 )
             }

@@ -33,9 +33,9 @@ internal enum class AiInstructionsScope(val title: String, val description: Stri
 }
 
 /**
- * A compact instructions card for list and detail pages: an icon, the scope title, the
- * instructions and the scope description as a caption. Collapsed until opened when there is
- * nothing to show and AI review is inactive, otherwise a tap edits.
+ * A compact instructions card for list and detail pages: an icon, the scope title, the instructions
+ * and the scope description as a caption. Collapsed until opened when there is nothing to show and
+ * AI review is inactive, otherwise a tap edits.
  */
 @Composable
 internal fun InstructionsCard(
@@ -92,7 +92,8 @@ internal fun InstructionsCard(
             }
             Icon(
                 if (showInstructions) Icons.Outlined.Edit else Icons.Outlined.ExpandMore,
-                contentDescription = if (showInstructions) "Edit instructions" else "Show instructions",
+                contentDescription =
+                    if (showInstructions) "Edit instructions" else "Show instructions",
                 tint = MaterialTheme.colorScheme.onSurfaceVariant,
                 modifier = Modifier.padding(top = 2.dp).size(20.dp),
             )

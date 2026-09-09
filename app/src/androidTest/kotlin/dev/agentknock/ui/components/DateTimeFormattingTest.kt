@@ -53,6 +53,9 @@ class DateTimeFormattingTest {
     @Test
     fun relativeDateFallbackUsesTheSameLocaleAndTimeZone() {
         val dates = UiDateTimeFormatter(Locale.UK, true, utc)
-        assertEquals("7 Dec 2026", dates.relativeTime(timestamp, timestamp + 31L * 24 * 60 * 60_000))
+        assertEquals(
+            "7 Dec 2026",
+            dates.relativeTime(timestamp, timestamp + 31L * 24 * 60 * 60_000),
+        )
     }
 }

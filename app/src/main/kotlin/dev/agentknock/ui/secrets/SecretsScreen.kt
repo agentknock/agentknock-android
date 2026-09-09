@@ -12,14 +12,20 @@ import android.os.PersistableBundle
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
+import androidx.compose.foundation.layout.Spacer
 import androidx.compose.foundation.layout.WindowInsets
 import androidx.compose.foundation.layout.fillMaxSize
+import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.padding
+import androidx.compose.foundation.layout.size
+import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.material3.CircularProgressIndicator
+import androidx.compose.material3.Icon
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.Scaffold
 import androidx.compose.material3.SnackbarHost
 import androidx.compose.material3.SnackbarHostState
+import androidx.compose.material3.Surface
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.LaunchedEffect
@@ -32,31 +38,25 @@ import androidx.compose.runtime.saveable.rememberSaveable
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.graphics.vector.ImageVector
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.platform.LocalResources
 import androidx.compose.ui.res.stringResource
+import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.unit.dp
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
-import dev.agentknock.subscription.AiReviewAccess
 import dev.agentknock.R
 import dev.agentknock.storage.secret.EnvironmentVariableMetadata
 import dev.agentknock.storage.secret.EnvironmentVariableValue
 import dev.agentknock.storage.secret.SecretDetails
 import dev.agentknock.storage.secret.SecretType
 import dev.agentknock.storage.secret.SshKeyAlgorithm
+import dev.agentknock.subscription.AiReviewAccess
 import dev.agentknock.ui.components.AdaptiveListDetail
 import dev.agentknock.ui.components.ProseEditorScreen
+import java.util.UUID
 import kotlinx.coroutines.flow.collectLatest
 import kotlinx.coroutines.launch
-import java.util.UUID
-import androidx.compose.foundation.layout.Spacer
-import androidx.compose.foundation.layout.height
-import androidx.compose.foundation.layout.size
-import androidx.compose.foundation.shape.CircleShape
-import androidx.compose.material3.Icon
-import androidx.compose.material3.Surface
-import androidx.compose.ui.graphics.vector.ImageVector
-import androidx.compose.ui.text.style.TextAlign
 
 @Composable
 internal fun SecretsScreen(
@@ -83,12 +83,13 @@ internal fun SecretsScreen(
     var editingGeneralInstructions by rememberSaveable { mutableStateOf(false) }
     var generalInstructions by rememberSaveable { mutableStateOf("") }
 
-    val target = when (val selected = content) {
-        SecretsContent.List -> null
-        is SecretsContent.Loading -> selected.target
-        is SecretsContent.Stored -> SecretTarget.Stored(selected.details.id)
-        is SecretsContent.Upload -> SecretTarget.Upload(selected.request.id)
-    }
+    val target =
+        when (val selected = content) {
+            SecretsContent.List -> null
+            is SecretsContent.Loading -> selected.target
+            is SecretsContent.Stored -> SecretTarget.Stored(selected.details.id)
+            is SecretsContent.Upload -> SecretTarget.Upload(selected.request.id)
+        }
     LaunchedEffect(target) {
         secretPendingDeletion = null
     }
@@ -103,7 +104,7 @@ internal fun SecretsScreen(
                 when (message) {
                     is SecretsUiMessage.Resource -> resources.getString(message.id)
                     is SecretsUiMessage.Text -> message.value
-                },
+                }
             )
         }
     }
@@ -120,7 +121,7 @@ internal fun SecretsScreen(
                     R.string.copied_to_clipboard
                 },
                 pending.label,
-            ),
+            )
         )
     }
 
@@ -130,8 +131,9 @@ internal fun SecretsScreen(
             title = "Global AI instructions",
             value = generalInstructions,
             originalValue = configuration?.active?.instructions.orEmpty(),
-            supportingText = "These instructions apply to every AI review. Secret and client " +
-                "instructions add more specific context. Used when AI review is active.",
+            supportingText =
+                "These instructions apply to every AI review. Secret and client " +
+                    "instructions add more specific context. Used when AI review is active.",
             onValueChange = { generalInstructions = it },
             onSave = {
                 viewModel.saveGeneralInstructions(generalInstructions.trim())
@@ -155,18 +157,22 @@ internal fun SecretsScreen(
         when (val value = viewModel.readEnvironmentVariableValue(variable.id)) {
             is EnvironmentVariableValue.Available -> value.value
             is EnvironmentVariableValue.AuthenticationRequired -> null
-            EnvironmentVariableValue.Unavailable -> null.also {
-                report(resources.getString(R.string.value_unavailable))
-            }
-            EnvironmentVariableValue.Corrupted -> null.also {
-                report(resources.getString(R.string.corrupted_value))
-            }
-            EnvironmentVariableValue.UnsupportedFormat -> null.also {
-                report(resources.getString(R.string.unsupported_value))
-            }
-            EnvironmentVariableValue.NotFound -> null.also {
-                report(resources.getString(R.string.missing_value))
-            }
+            EnvironmentVariableValue.Unavailable ->
+                null.also {
+                    report(resources.getString(R.string.value_unavailable))
+                }
+            EnvironmentVariableValue.Corrupted ->
+                null.also {
+                    report(resources.getString(R.string.corrupted_value))
+                }
+            EnvironmentVariableValue.UnsupportedFormat ->
+                null.also {
+                    report(resources.getString(R.string.unsupported_value))
+                }
+            EnvironmentVariableValue.NotFound ->
+                null.also {
+                    report(resources.getString(R.string.missing_value))
+                }
         }
 
     fun reveal(variable: EnvironmentVariableMetadata) {
@@ -190,29 +196,30 @@ internal fun SecretsScreen(
     fun secretDetailActions(
         secret: SecretDetails,
         onBack: () -> Unit,
-    ) = SecretDetailActions(
-        onBack = onBack,
-        onEditSecret = { viewModel.startEditingSecret(secret) },
-        onDeleteSecret = { secretPendingDeletion = secret },
-        onAddVariable = { viewModel.startNewEnvironmentVariable(secret) },
-        onReplaceSshKey = { viewModel.startReplacingSshKey(secret) },
-        onSaveSshComment = { comment -> viewModel.saveSshComment(secret.id, comment) },
-        onCopyPublicKey = { copyPublicKey(secret) },
-        onEditVariable = ::edit,
-        onReveal = ::reveal,
-        onReadValue = ::readValue,
-        onCopy = ::copy,
-        onSetApprovalMode = { mode -> viewModel.saveApprovalMode(secret.id, mode) },
-        onSetClientApprovalOverride = { clientId, mode ->
-            viewModel.setClientApprovalOverride(secret.id, clientId, mode)
-        },
-        onSaveInstructions = { instructions ->
-            viewModel.saveInstructions(secret.id, instructions)
-        },
-        onEndTemporaryAccess = { grant ->
-            viewModel.endTemporaryAccess(secret.id, grant.clientId, grant.operation)
-        },
-    )
+    ) =
+        SecretDetailActions(
+            onBack = onBack,
+            onEditSecret = { viewModel.startEditingSecret(secret) },
+            onDeleteSecret = { secretPendingDeletion = secret },
+            onAddVariable = { viewModel.startNewEnvironmentVariable(secret) },
+            onReplaceSshKey = { viewModel.startReplacingSshKey(secret) },
+            onSaveSshComment = { comment -> viewModel.saveSshComment(secret.id, comment) },
+            onCopyPublicKey = { copyPublicKey(secret) },
+            onEditVariable = ::edit,
+            onReveal = ::reveal,
+            onReadValue = ::readValue,
+            onCopy = ::copy,
+            onSetApprovalMode = { mode -> viewModel.saveApprovalMode(secret.id, mode) },
+            onSetClientApprovalOverride = { clientId, mode ->
+                viewModel.setClientApprovalOverride(secret.id, clientId, mode)
+            },
+            onSaveInstructions = { instructions ->
+                viewModel.saveInstructions(secret.id, instructions)
+            },
+            onEndTemporaryAccess = { grant ->
+                viewModel.endTemporaryAccess(secret.id, grant.clientId, grant.operation)
+            },
+        )
 
     fun clearSelection() {
         when (target) {
@@ -257,31 +264,34 @@ internal fun SecretsScreen(
                 when (val selected = content) {
                     SecretsContent.List -> EmptySecretSelection(detailModifier)
                     is SecretsContent.Loading -> Loading(detailModifier)
-                    is SecretsContent.Upload -> key(selected.request.id) {
-                        SecretUploadSelectionDetail(
-                            request = selected.request,
-                            revealedValues = revealedUploadValues,
-                            viewModel = viewModel,
-                            onBack = ::clearSelection,
-                            showBack = showBack,
-                            modifier = detailModifier,
-                        )
-                    }
-                    is SecretsContent.Stored -> key(selected.details.id) {
-                        SecretDetail(
-                            aiReviewAccess = aiReviewAccess,
-                            onOpenPlan = onOpenPlan,
-                            secret = selected.details,
-                            clients = clients,
-                            revealedValues = revealedValues,
-                            showBack = showBack,
-                            actions = secretDetailActions(
-                                selected.details,
-                                onBack = { if (showBack) clearSelection() },
-                            ),
-                            modifier = detailModifier,
-                        )
-                    }
+                    is SecretsContent.Upload ->
+                        key(selected.request.id) {
+                            SecretUploadSelectionDetail(
+                                request = selected.request,
+                                revealedValues = revealedUploadValues,
+                                viewModel = viewModel,
+                                onBack = ::clearSelection,
+                                showBack = showBack,
+                                modifier = detailModifier,
+                            )
+                        }
+                    is SecretsContent.Stored ->
+                        key(selected.details.id) {
+                            SecretDetail(
+                                aiReviewAccess = aiReviewAccess,
+                                onOpenPlan = onOpenPlan,
+                                secret = selected.details,
+                                clients = clients,
+                                revealedValues = revealedValues,
+                                showBack = showBack,
+                                actions =
+                                    secretDetailActions(
+                                        selected.details,
+                                        onBack = { if (showBack) clearSelection() },
+                                    ),
+                                modifier = detailModifier,
+                            )
+                        }
                 }
             },
         )
@@ -290,13 +300,14 @@ internal fun SecretsScreen(
     secretPendingDeletion?.let { secret ->
         DeleteDialog(
             title = stringResource(R.string.delete_secret_question, secret.name),
-            explanation = if (secret.type == SecretType.SSH) {
-                "This deletes the private key from Agentknock. It does not remove its public key " +
-                    "from servers or services where you have registered it."
-            } else {
-                "This permanently deletes the stored environment values. It does not revoke " +
-                    "credentials at the services that issued them."
-            },
+            explanation =
+                if (secret.type == SecretType.SSH) {
+                    "This deletes the private key from Agentknock. It does not remove its public key " +
+                        "from servers or services where you have registered it."
+                } else {
+                    "This permanently deletes the stored environment values. It does not revoke " +
+                        "credentials at the services that issued them."
+                },
             onDismiss = { secretPendingDeletion = null },
             onDelete = {
                 secretPendingDeletion = null
@@ -359,15 +370,17 @@ internal fun Loading(modifier: Modifier = Modifier) {
     }
 }
 
-internal fun SecretType.displayName(): String = when (this) {
-    SecretType.ENVIRONMENT -> "Environment variables"
-    SecretType.SSH -> "SSH key"
-}
+internal fun SecretType.displayName(): String =
+    when (this) {
+        SecretType.ENVIRONMENT -> "Environment variables"
+        SecretType.SSH -> "SSH key"
+    }
 
-internal fun SshKeyAlgorithm.displayName(): String = when (this) {
-    SshKeyAlgorithm.ED25519 -> "Ed25519"
-    SshKeyAlgorithm.RSA -> "RSA"
-}
+internal fun SshKeyAlgorithm.displayName(): String =
+    when (this) {
+        SshKeyAlgorithm.ED25519 -> "Ed25519"
+        SshKeyAlgorithm.RSA -> "RSA"
+    }
 
 private fun copyToClipboard(
     context: Context,
@@ -379,26 +392,31 @@ private fun copyToClipboard(
     var sensitiveClipId: String? = null
     if (sensitive) {
         sensitiveClipId = UUID.randomUUID().toString()
-        clip.description.extras = PersistableBundle().apply {
-            putBoolean("android.content.extra.IS_SENSITIVE", true)
-            putString(SENSITIVE_CLIP_ID, sensitiveClipId)
-        }
+        clip.description.extras =
+            PersistableBundle().apply {
+                putBoolean("android.content.extra.IS_SENSITIVE", true)
+                putString(SENSITIVE_CLIP_ID, sensitiveClipId)
+            }
     }
     val clipboard = context.getSystemService(Context.CLIPBOARD_SERVICE) as ClipboardManager
     clipboard.setPrimaryClip(clip)
     sensitiveClipId?.let { clipId ->
-        Handler(Looper.getMainLooper()).postDelayed(
-            {
-                if (clipboard.primaryClipDescription?.extras?.getString(SENSITIVE_CLIP_ID) == clipId) {
-                    if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.P) {
-                        clipboard.clearPrimaryClip()
-                    } else {
-                        clipboard.setPrimaryClip(ClipData.newPlainText("", ""))
+        Handler(Looper.getMainLooper())
+            .postDelayed(
+                {
+                    if (
+                        clipboard.primaryClipDescription?.extras?.getString(SENSITIVE_CLIP_ID) ==
+                            clipId
+                    ) {
+                        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.P) {
+                            clipboard.clearPrimaryClip()
+                        } else {
+                            clipboard.setPrimaryClip(ClipData.newPlainText("", ""))
+                        }
                     }
-                }
-            },
-            SENSITIVE_CLIP_LIFETIME_MILLIS,
-        )
+                },
+                SENSITIVE_CLIP_LIFETIME_MILLIS,
+            )
     }
 }
 

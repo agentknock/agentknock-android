@@ -20,7 +20,7 @@ class AiReviewCoordinatorTest {
             coordinator.launch("request") {
                 started.complete(Unit)
                 awaitCancellation()
-            },
+            }
         )
         runCurrent()
         started.await()

@@ -1,18 +1,17 @@
 package dev.agentknock.storage.secret
 
 import dev.agentknock.protocol.SecretUploadMode
-import dev.agentknock.protocol.SshSignatureAlgorithm
 import kotlinx.serialization.Serializable
 
 internal enum class SecretType(val storedName: String) {
     ENVIRONMENT("environment"),
-    SSH("ssh"),
-    ;
+    SSH("ssh");
 
     companion object {
-        fun fromStoredName(value: String): SecretType = requireNotNull(fromStoredNameOrNull(value)) {
-            "Unknown secret type: $value"
-        }
+        fun fromStoredName(value: String): SecretType =
+            requireNotNull(fromStoredNameOrNull(value)) {
+                "Unknown secret type: $value"
+            }
 
         fun fromStoredNameOrNull(value: String): SecretType? = entries.singleOrNull {
             it.storedName == value
@@ -25,10 +24,11 @@ internal val SSH_SECRET_TYPE = SecretType.SSH.storedName
 internal const val ED25519_PRIVATE_KEY_FORMAT = "ed25519_seed"
 internal const val RSA_PRIVATE_KEY_FORMAT = "rsa_pkcs8"
 
-internal fun SshKeyAlgorithm.canonicalPrivateKeyFormat(): String = when (this) {
-    SshKeyAlgorithm.ED25519 -> ED25519_PRIVATE_KEY_FORMAT
-    SshKeyAlgorithm.RSA -> RSA_PRIVATE_KEY_FORMAT
-}
+internal fun SshKeyAlgorithm.canonicalPrivateKeyFormat(): String =
+    when (this) {
+        SshKeyAlgorithm.ED25519 -> ED25519_PRIVATE_KEY_FORMAT
+        SshKeyAlgorithm.RSA -> RSA_PRIVATE_KEY_FORMAT
+    }
 
 internal enum class SecretApprovalMode(val storedName: String) {
     DENY("deny"),
@@ -212,8 +212,8 @@ internal data class EnvironmentSecretUploadSummary(
 )
 
 internal sealed interface EnvironmentSecretUploadResult {
-    data class Valid(val summary: EnvironmentSecretUploadSummary) :
-        EnvironmentSecretUploadResult
+    data class Valid(val summary: EnvironmentSecretUploadSummary) : EnvironmentSecretUploadResult
+
     data class Invalid(
         val message: String,
         val target: SecretUploadTarget? = null,
@@ -222,6 +222,7 @@ internal sealed interface EnvironmentSecretUploadResult {
 
 internal sealed interface ApplySecretUploadResult {
     data class Applied(val secretId: String) : ApplySecretUploadResult
+
     data class Invalid(val message: String) : ApplySecretUploadResult
 }
 
@@ -267,10 +268,11 @@ internal data class RequestedSecretDescription(
 )
 
 internal fun SecretReviewMetadata.containsSelectedSensitiveEnvironmentValue(): Boolean =
-    type == ENVIRONMENT_SECRET_TYPE && environmentVariables.any { variable ->
-        variable.sensitive &&
-            variable.destination != EnvironmentVariableReviewDestination.Omitted
-    }
+    type == ENVIRONMENT_SECRET_TYPE &&
+        environmentVariables.any { variable ->
+            variable.sensitive &&
+                variable.destination != EnvironmentVariableReviewDestination.Omitted
+        }
 
 internal data class SecretReviewMetadata(
     val id: String,

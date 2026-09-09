@@ -82,7 +82,7 @@ internal class SubscriptionRepository(
     }
 
     private suspend fun withAuthorization(
-        operation: suspend (deviceId: String, deviceToken: String) -> SubscriptionResult,
+        operation: suspend (deviceId: String, deviceToken: String) -> SubscriptionResult
     ): SubscriptionResult = operations.withLock {
         val authorization = deviceAuthorization.activeDeviceAuthorization()
         val deviceId = (authorization as? DeviceCredentialResult.Available)?.value?.deviceId
@@ -90,35 +90,43 @@ internal class SubscriptionRepository(
             accessDeviceId = deviceId
             _access.value = AiReviewAccess.CHECKING
         }
-        val result = when (authorization) {
-            is DeviceCredentialResult.Available -> try {
-                operation(authorization.value.deviceId, authorization.value.deviceToken)
-            } catch (cancelled: CancellationException) {
-                throw cancelled
-            } catch (failure: Exception) {
-                SubscriptionResult.Unavailable(failure.message)
+        val result =
+            when (authorization) {
+                is DeviceCredentialResult.Available ->
+                    try {
+                        operation(authorization.value.deviceId, authorization.value.deviceToken)
+                    } catch (cancelled: CancellationException) {
+                        throw cancelled
+                    } catch (failure: Exception) {
+                        SubscriptionResult.Unavailable(failure.message)
+                    }
+                null -> SubscriptionResult.NoDevice
+                DeviceCredentialResult.Unavailable ->
+                    SubscriptionResult.DeviceCredentialsUnavailable
+                DeviceCredentialResult.Corrupted -> SubscriptionResult.DeviceCredentialsCorrupted
+                DeviceCredentialResult.UnsupportedEncryption ->
+                    SubscriptionResult.UnsupportedEncryption
             }
-            null -> SubscriptionResult.NoDevice
-            DeviceCredentialResult.Unavailable -> SubscriptionResult.DeviceCredentialsUnavailable
-            DeviceCredentialResult.Corrupted -> SubscriptionResult.DeviceCredentialsCorrupted
-            DeviceCredentialResult.UnsupportedEncryption -> SubscriptionResult.UnsupportedEncryption
-        }
-        _access.value = when (result) {
-            is SubscriptionResult.Status ->
-                if (result.active) AiReviewAccess.ACTIVE else AiReviewAccess.INACTIVE
-            SubscriptionResult.NoDevice -> AiReviewAccess.SETUP_REQUIRED
-            else -> when (_access.value) {
-                AiReviewAccess.ACTIVE, AiReviewAccess.INACTIVE -> _access.value
-                else -> AiReviewAccess.UNAVAILABLE
+        _access.value =
+            when (result) {
+                is SubscriptionResult.Status ->
+                    if (result.active) AiReviewAccess.ACTIVE else AiReviewAccess.INACTIVE
+                SubscriptionResult.NoDevice -> AiReviewAccess.SETUP_REQUIRED
+                else ->
+                    when (_access.value) {
+                        AiReviewAccess.ACTIVE,
+                        AiReviewAccess.INACTIVE -> _access.value
+                        else -> AiReviewAccess.UNAVAILABLE
+                    }
             }
-        }
         result
     }
 }
 
-private fun RelaySubscriptionResult.toSubscriptionResult(): SubscriptionResult = when (this) {
-    is RelayEndpointResult.Success -> SubscriptionResult.Status(value.active)
-    is RelayEndpointResult.Rejected -> SubscriptionResult.Rejected(status, code, message)
-    is RelayEndpointResult.Unavailable -> SubscriptionResult.Unavailable(cause.message)
-    RelayEndpointResult.InvalidResponse -> SubscriptionResult.InvalidRelayResponse
-}
+private fun RelaySubscriptionResult.toSubscriptionResult(): SubscriptionResult =
+    when (this) {
+        is RelayEndpointResult.Success -> SubscriptionResult.Status(value.active)
+        is RelayEndpointResult.Rejected -> SubscriptionResult.Rejected(status, code, message)
+        is RelayEndpointResult.Unavailable -> SubscriptionResult.Unavailable(cause.message)
+        RelayEndpointResult.InvalidResponse -> SubscriptionResult.InvalidRelayResponse
+    }

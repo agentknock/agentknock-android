@@ -19,14 +19,17 @@ class ClientSoftwareTest {
 
     @Test
     fun `requires both software identities with string fields`() {
-        val invalidMessages = listOf(
-            """{"app_info":{"name":"agentknock","version":"0.1.0"}}""",
-            """{"lib_info":{"name":"agentknock","version":"0.1.0"}}""",
-            """{"app_info":{"name":"agentknock","version":1},"lib_info":{"name":"agentknock","version":"0.1.0"}}""",
-        )
+        val invalidMessages =
+            listOf(
+                """{"app_info":{"name":"agentknock","version":"0.1.0"}}""",
+                """{"lib_info":{"name":"agentknock","version":"0.1.0"}}""",
+                """{"app_info":{"name":"agentknock","version":1},"lib_info":{"name":"agentknock","version":"0.1.0"}}""",
+            )
 
         invalidMessages.forEach { message ->
-            assertTrue(runCatching { json.decodeClientSoftware(message.encodeToByteArray()) }.isFailure)
+            assertTrue(
+                runCatching { json.decodeClientSoftware(message.encodeToByteArray()) }.isFailure
+            )
         }
     }
 }

@@ -3,20 +3,19 @@ package dev.agentknock.storage.device
 import dev.agentknock.protocol.DeviceProtocol
 import dev.agentknock.relay.RelayClaimClient
 import dev.agentknock.relay.RelayClaimOutcome
-import dev.agentknock.relay.RelayClaimResult
 import dev.agentknock.relay.RelayEndpointResult
-import dev.agentknock.storage.crypto.AesGcmEncryption
-import dev.agentknock.storage.crypto.DecryptionResult
-import dev.agentknock.storage.crypto.EncryptionBinding
-import dev.agentknock.storage.crypto.EncryptionLocation
-import dev.agentknock.storage.crypto.VaultKeyManager
-import dev.agentknock.storage.crypto.VaultKeyPurpose
 import dev.agentknock.storage.WriteTransaction
 import dev.agentknock.storage.audit.AuditEventType
 import dev.agentknock.storage.audit.AuditOutcome
 import dev.agentknock.storage.audit.AuditRecord
 import dev.agentknock.storage.audit.AuditSink
 import dev.agentknock.storage.audit.auditDataOf
+import dev.agentknock.storage.crypto.AesGcmEncryption
+import dev.agentknock.storage.crypto.DecryptionResult
+import dev.agentknock.storage.crypto.EncryptionBinding
+import dev.agentknock.storage.crypto.EncryptionLocation
+import dev.agentknock.storage.crypto.VaultKeyManager
+import dev.agentknock.storage.crypto.VaultKeyPurpose
 import java.util.UUID
 import kotlinx.coroutines.CoroutineDispatcher
 import kotlinx.coroutines.Dispatchers
@@ -56,7 +55,9 @@ internal data class RelayDeviceAuthorization(
     val deviceToken: String,
 )
 
-/** Credential access for an existing identity. Source lookups return null for an absent identity. */
+/**
+ * Credential access for an existing identity. Source lookups return null for an absent identity.
+ */
 internal sealed interface DeviceCredentialResult<out T> {
     data class Available<T>(val value: T) : DeviceCredentialResult<T>
 
@@ -97,7 +98,7 @@ internal interface RelayDeviceCredentialSource {
     suspend fun activeDeviceCredentials(): DeviceCredentialResult<RelayDeviceCredentials>?
 
     suspend fun deviceCredentials(
-        deviceIdentityId: String,
+        deviceIdentityId: String
     ): DeviceCredentialResult<RelayDeviceCredentials>?
 }
 
@@ -119,38 +120,43 @@ internal class DeviceIdentityRepository(
     suspend fun pruneRetiredIdentities(): Int =
         dao.deleteOrphanedRetiredIdentities(DeviceIdentityRole.RETIRED.storedName)
 
-    fun observeConfiguration(): Flow<DeviceConfiguration> = combine(
-        dao.observeIdentities(),
-        dao.observeCredentials(),
-    ) { identities, credentials ->
-        val availability = credentials
-            .map { it.encryptedValue.keyId }
-            .distinct()
-            .associateWith { keyId -> keyManager.keyAvailable(keyId) }
-        val configuredIdentities = identities
-            .filter { identity ->
-                identity.role == DeviceIdentityRole.ACTIVE.storedName ||
-                    identity.role == DeviceIdentityRole.CANDIDATE.storedName
+    fun observeConfiguration(): Flow<DeviceConfiguration> =
+        combine(
+            dao.observeIdentities(),
+            dao.observeCredentials(),
+        ) { identities, credentials ->
+            val availability =
+                credentials
+                    .map { it.encryptedValue.keyId }
+                    .distinct()
+                    .associateWith { keyId -> keyManager.keyAvailable(keyId) }
+            val configuredIdentities =
+                identities
+                    .filter { identity ->
+                        identity.role == DeviceIdentityRole.ACTIVE.storedName ||
+                            identity.role == DeviceIdentityRole.CANDIDATE.storedName
+                    }
+                    .groupBy(DeviceIdentityEntity::role)
+            configuredIdentities.forEach { (role, matches) ->
+                check(matches.size == 1) { "Multiple $role device identities exist" }
             }
-            .groupBy(DeviceIdentityEntity::role)
-        configuredIdentities.forEach { (role, matches) ->
-            check(matches.size == 1) { "Multiple $role device identities exist" }
-        }
-        val identityModels = configuredIdentities.mapValues { (_, matches) ->
-            val identity = matches.single()
-            val identityCredentials = credentials.filter { it.identityId == identity.id }
-            identity.toModel(
-                credentialsAvailable = DeviceCredentialKind.entries.all { kind ->
-                    identityCredentials.singleOrNull { it.kind == kind.storedName }
-                        ?.let { availability.getValue(it.encryptedValue.keyId) } == true
-                },
+            val identityModels = configuredIdentities.mapValues { (_, matches) ->
+                val identity = matches.single()
+                val identityCredentials = credentials.filter { it.identityId == identity.id }
+                identity.toModel(
+                    credentialsAvailable =
+                        DeviceCredentialKind.entries.all { kind ->
+                            identityCredentials
+                                .singleOrNull { it.kind == kind.storedName }
+                                ?.let { availability.getValue(it.encryptedValue.keyId) } == true
+                        }
+                )
+            }
+            DeviceConfiguration(
+                active = identityModels[DeviceIdentityRole.ACTIVE.storedName],
+                candidate = identityModels[DeviceIdentityRole.CANDIDATE.storedName],
             )
         }
-        DeviceConfiguration(
-            active = identityModels[DeviceIdentityRole.ACTIVE.storedName],
-            candidate = identityModels[DeviceIdentityRole.CANDIDATE.storedName],
-        )
-    }
 
     suspend fun stageAndClaim(address: String): ClaimPairingAddressResult {
         require(DeviceProtocol.validPairingAddress(address)) { "Invalid pairing address" }
@@ -167,24 +173,26 @@ internal class DeviceIdentityRepository(
                         candidateId = candidate.id,
                         address = address,
                         candidateRole = DeviceIdentityRole.CANDIDATE.storedName,
-                    ) == 1,
+                    ) == 1
                 )
             }
             return claimCandidate()
         }
 
-        val device = if (active == null) {
-            newDeviceMaterial()
-        } else {
-            when (val result = deviceMaterial(active)) {
-                is DeviceCredentialResult.Available -> result.value
-                DeviceCredentialResult.Unavailable -> newDeviceMaterial()
-                DeviceCredentialResult.Corrupted -> return ClaimPairingAddressResult.CredentialsCorrupted
-                DeviceCredentialResult.UnsupportedEncryption -> {
-                    return ClaimPairingAddressResult.UnsupportedEncryption
+        val device =
+            if (active == null) {
+                newDeviceMaterial()
+            } else {
+                when (val result = deviceMaterial(active)) {
+                    is DeviceCredentialResult.Available -> result.value
+                    DeviceCredentialResult.Unavailable -> newDeviceMaterial()
+                    DeviceCredentialResult.Corrupted ->
+                        return ClaimPairingAddressResult.CredentialsCorrupted
+                    DeviceCredentialResult.UnsupportedEncryption -> {
+                        return ClaimPairingAddressResult.UnsupportedEncryption
+                    }
                 }
             }
-        }
         stageCandidate(
             address = address,
             device = device,
@@ -200,32 +208,34 @@ internal class DeviceIdentityRepository(
     ): DeviceIdentityEntity {
         val encryptionKey = keyManager.activeKey(VaultKeyPurpose.DEVICE_STATE)
         val now = currentTimeMillis()
-        val identity = DeviceIdentityEntity(
-            id = newId(),
-            role = DeviceIdentityRole.CANDIDATE.storedName,
-            address = address,
-            deviceId = device.deviceId,
-            createdAt = now,
-            claimAttemptedAt = null,
-            pairingEnabled = settings?.pairingEnabled
-                ?.takeIf { settings.deviceId == device.deviceId }
-                ?: true,
-            instructions = settings?.instructions.orEmpty(),
-        )
-        val credentials = listOf(
-            newCredential(
-                identity = identity,
-                kind = DeviceCredentialKind.DEVICE_PRIVATE_KEY,
-                value = device.keyPair.privateKey,
-                encryptionKeyId = encryptionKey.id,
-            ),
-            newCredential(
-                identity = identity,
-                kind = DeviceCredentialKind.DEVICE_TOKEN,
-                value = device.deviceToken,
-                encryptionKeyId = encryptionKey.id,
-            ),
-        )
+        val identity =
+            DeviceIdentityEntity(
+                id = newId(),
+                role = DeviceIdentityRole.CANDIDATE.storedName,
+                address = address,
+                deviceId = device.deviceId,
+                createdAt = now,
+                claimAttemptedAt = null,
+                pairingEnabled =
+                    settings?.pairingEnabled?.takeIf { settings.deviceId == device.deviceId }
+                        ?: true,
+                instructions = settings?.instructions.orEmpty(),
+            )
+        val credentials =
+            listOf(
+                newCredential(
+                    identity = identity,
+                    kind = DeviceCredentialKind.DEVICE_PRIVATE_KEY,
+                    value = device.keyPair.privateKey,
+                    encryptionKeyId = encryptionKey.id,
+                ),
+                newCredential(
+                    identity = identity,
+                    kind = DeviceCredentialKind.DEVICE_TOKEN,
+                    value = device.deviceToken,
+                    encryptionKeyId = encryptionKey.id,
+                ),
+            )
         dao.replaceCandidate(
             identity = identity,
             credentials = credentials,
@@ -235,52 +245,59 @@ internal class DeviceIdentityRepository(
     }
 
     suspend fun claimCandidate(): ClaimPairingAddressResult {
-        var candidate = dao.getIdentity(DeviceIdentityRole.CANDIDATE.storedName)
-            ?: return ClaimPairingAddressResult.NoCandidate
+        var candidate =
+            dao.getIdentity(DeviceIdentityRole.CANDIDATE.storedName)
+                ?: return ClaimPairingAddressResult.NoCandidate
         val previous = dao.getIdentity(DeviceIdentityRole.ACTIVE.storedName)
         val now = currentTimeMillis()
         if (
             previous == null &&
-            candidate.claimAttemptedAt == null &&
-            candidate.createdAt < now - DEVICE_ID_REFRESH_AGE_MILLIS
+                candidate.claimAttemptedAt == null &&
+                candidate.createdAt < now - DEVICE_ID_REFRESH_AGE_MILLIS
         ) {
-            candidate = stageCandidate(
-                address = candidate.address,
-                device = newDeviceMaterial(),
-                settings = candidate,
-            )
-        }
-        val material = when (val result = deviceMaterial(candidate)) {
-            is DeviceCredentialResult.Available -> result.value
-            DeviceCredentialResult.Corrupted -> {
-                return ClaimPairingAddressResult.CredentialsCorrupted
-            }
-            DeviceCredentialResult.UnsupportedEncryption -> {
-                return ClaimPairingAddressResult.UnsupportedEncryption
-            }
-            DeviceCredentialResult.Unavailable -> {
-                val (replacement, replacementSettings) = if (previous == null) {
-                    newDeviceMaterial() to candidate
-                } else {
-                    when (val activeMaterial = deviceMaterial(previous)) {
-                        is DeviceCredentialResult.Available -> activeMaterial.value to previous
-                        DeviceCredentialResult.Unavailable -> newDeviceMaterial() to candidate
-                        DeviceCredentialResult.Corrupted -> {
-                            return ClaimPairingAddressResult.CredentialsCorrupted
-                        }
-                        DeviceCredentialResult.UnsupportedEncryption -> {
-                            return ClaimPairingAddressResult.UnsupportedEncryption
-                        }
-                    }
-                }
-                candidate = stageCandidate(
+            candidate =
+                stageCandidate(
                     address = candidate.address,
-                    device = replacement,
-                    settings = replacementSettings,
+                    device = newDeviceMaterial(),
+                    settings = candidate,
                 )
-                replacement
-            }
         }
+        val material =
+            when (val result = deviceMaterial(candidate)) {
+                is DeviceCredentialResult.Available -> result.value
+                DeviceCredentialResult.Corrupted -> {
+                    return ClaimPairingAddressResult.CredentialsCorrupted
+                }
+                DeviceCredentialResult.UnsupportedEncryption -> {
+                    return ClaimPairingAddressResult.UnsupportedEncryption
+                }
+                DeviceCredentialResult.Unavailable -> {
+                    val (replacement, replacementSettings) =
+                        if (previous == null) {
+                            newDeviceMaterial() to candidate
+                        } else {
+                            when (val activeMaterial = deviceMaterial(previous)) {
+                                is DeviceCredentialResult.Available ->
+                                    activeMaterial.value to previous
+                                DeviceCredentialResult.Unavailable ->
+                                    newDeviceMaterial() to candidate
+                                DeviceCredentialResult.Corrupted -> {
+                                    return ClaimPairingAddressResult.CredentialsCorrupted
+                                }
+                                DeviceCredentialResult.UnsupportedEncryption -> {
+                                    return ClaimPairingAddressResult.UnsupportedEncryption
+                                }
+                            }
+                        }
+                    candidate =
+                        stageCandidate(
+                            address = candidate.address,
+                            device = replacement,
+                            settings = replacementSettings,
+                        )
+                    replacement
+                }
+            }
         val deviceMustBeClaimed = previous?.deviceId != candidate.deviceId
         if (deviceMustBeClaimed && candidate.claimAttemptedAt == null) {
             val attemptedAt = currentTimeMillis()
@@ -297,75 +314,81 @@ internal class DeviceIdentityRepository(
         }
 
         val deviceToken = DeviceProtocol.encodeDeviceToken(material.deviceToken)
-        val result = if (deviceMustBeClaimed) {
-            relay.claimAndSetAddress(
-                deviceId = candidate.deviceId,
-                addressId = DeviceProtocol.addressId(candidate.address),
-                deviceToken = deviceToken,
-            )
-        } else {
-            relay.setAddress(
-                deviceId = candidate.deviceId,
-                addressId = DeviceProtocol.addressId(candidate.address),
-                deviceToken = deviceToken,
-            )
-        }
+        val result =
+            if (deviceMustBeClaimed) {
+                relay.claimAndSetAddress(
+                    deviceId = candidate.deviceId,
+                    addressId = DeviceProtocol.addressId(candidate.address),
+                    deviceToken = deviceToken,
+                )
+            } else {
+                relay.setAddress(
+                    deviceId = candidate.deviceId,
+                    addressId = DeviceProtocol.addressId(candidate.address),
+                    deviceToken = deviceToken,
+                )
+            }
         return when (result) {
-            is RelayEndpointResult.Success -> when (result.value) {
-                RelayClaimOutcome.CLAIMED -> {
-                    writeTransaction.execute {
-                        if (
-                            dao.promoteCandidate(
-                                candidateId = candidate.id,
-                                now = currentTimeMillis(),
-                                activeRole = DeviceIdentityRole.ACTIVE.storedName,
-                                candidateRole = DeviceIdentityRole.CANDIDATE.storedName,
-                                retiredRole = DeviceIdentityRole.RETIRED.storedName,
-                            )
-                        ) {
-                            audit.record(
-                                AuditRecord(
-                                    type = if (previous == null) {
-                                        AuditEventType.PAIRING_ADDRESS_CLAIMED
-                                    } else {
-                                        AuditEventType.PAIRING_ADDRESS_CHANGED
-                                    },
-                                    outcome = AuditOutcome.CHANGED,
-                                    subject = candidate.address,
-                                    data = auditDataOf(
-                                        "device_identity_id" to candidate.id,
-                                        "device_id" to candidate.deviceId,
-                                        "pairing_address" to candidate.address,
-                                        "previous_device_identity_id" to previous?.id,
-                                        "previous_device_id" to previous?.deviceId,
-                                        "previous_pairing_address" to previous?.address,
-                                        "previous_pairing_enabled" to previous?.pairingEnabled,
-                                        "previous_instructions" to previous?.instructions,
-                                        "identity_role" to DeviceIdentityRole.ACTIVE.storedName,
-                                        "pairing_enabled" to candidate.pairingEnabled,
-                                        "instructions" to candidate.instructions,
-                                        "created_at" to candidate.createdAt,
-                                        "claim_attempted_at" to candidate.claimAttemptedAt,
-                                    ),
-                                ),
-                            )
-                            ClaimPairingAddressResult.Claimed
-                        } else {
-                            ClaimPairingAddressResult.NoCandidate
+            is RelayEndpointResult.Success ->
+                when (result.value) {
+                    RelayClaimOutcome.CLAIMED -> {
+                        writeTransaction.execute {
+                            if (
+                                dao.promoteCandidate(
+                                    candidateId = candidate.id,
+                                    now = currentTimeMillis(),
+                                    activeRole = DeviceIdentityRole.ACTIVE.storedName,
+                                    candidateRole = DeviceIdentityRole.CANDIDATE.storedName,
+                                    retiredRole = DeviceIdentityRole.RETIRED.storedName,
+                                )
+                            ) {
+                                audit.record(
+                                    AuditRecord(
+                                        type =
+                                            if (previous == null) {
+                                                AuditEventType.PAIRING_ADDRESS_CLAIMED
+                                            } else {
+                                                AuditEventType.PAIRING_ADDRESS_CHANGED
+                                            },
+                                        outcome = AuditOutcome.CHANGED,
+                                        subject = candidate.address,
+                                        data =
+                                            auditDataOf(
+                                                "device_identity_id" to candidate.id,
+                                                "device_id" to candidate.deviceId,
+                                                "pairing_address" to candidate.address,
+                                                "previous_device_identity_id" to previous?.id,
+                                                "previous_device_id" to previous?.deviceId,
+                                                "previous_pairing_address" to previous?.address,
+                                                "previous_pairing_enabled" to
+                                                    previous?.pairingEnabled,
+                                                "previous_instructions" to previous?.instructions,
+                                                "identity_role" to
+                                                    DeviceIdentityRole.ACTIVE.storedName,
+                                                "pairing_enabled" to candidate.pairingEnabled,
+                                                "instructions" to candidate.instructions,
+                                                "created_at" to candidate.createdAt,
+                                                "claim_attempted_at" to candidate.claimAttemptedAt,
+                                            ),
+                                    )
+                                )
+                                ClaimPairingAddressResult.Claimed
+                            } else {
+                                ClaimPairingAddressResult.NoCandidate
+                            }
                         }
                     }
+                    RelayClaimOutcome.ADDRESS_UNAVAILABLE ->
+                        ClaimPairingAddressResult.AddressUnavailable
                 }
-                RelayClaimOutcome.ADDRESS_UNAVAILABLE ->
-                    ClaimPairingAddressResult.AddressUnavailable
-            }
-            is RelayEndpointResult.Rejected -> ClaimPairingAddressResult.RelayRejected(
-                status = result.status,
-                code = result.code,
-                message = result.message,
-            )
-            is RelayEndpointResult.Unavailable -> ClaimPairingAddressResult.RelayUnavailable(
-                result.cause.message,
-            )
+            is RelayEndpointResult.Rejected ->
+                ClaimPairingAddressResult.RelayRejected(
+                    status = result.status,
+                    code = result.code,
+                    message = result.message,
+                )
+            is RelayEndpointResult.Unavailable ->
+                ClaimPairingAddressResult.RelayUnavailable(result.cause.message)
             RelayEndpointResult.InvalidResponse -> ClaimPairingAddressResult.InvalidRelayResponse
         }
     }
@@ -377,46 +400,47 @@ internal class DeviceIdentityRepository(
     suspend fun saveInstructions(instructions: String): Boolean {
         val normalized = instructions.trim()
         return writeTransaction.execute {
-            val active = dao.getIdentity(DeviceIdentityRole.ACTIVE.storedName)
-                ?: return@execute false
-            val updated = dao.updateActiveInstructions(
-                activeRole = DeviceIdentityRole.ACTIVE.storedName,
-                instructions = normalized,
-            ) == 1
+            val active =
+                dao.getIdentity(DeviceIdentityRole.ACTIVE.storedName) ?: return@execute false
+            val updated =
+                dao.updateActiveInstructions(
+                    activeRole = DeviceIdentityRole.ACTIVE.storedName,
+                    instructions = normalized,
+                ) == 1
             if (updated) {
                 audit.record(
                     AuditRecord(
                         type = AuditEventType.GENERAL_AI_REVIEW_INSTRUCTIONS_CHANGED,
                         outcome = AuditOutcome.CHANGED,
-                        data = auditDataOf(
-                            "device_identity_id" to active.id,
-                            "device_id" to active.deviceId,
-                            "pairing_address" to active.address,
-                            "previous_instructions" to active.instructions,
-                            "instructions" to normalized,
-                        ),
-                    ),
+                        data =
+                            auditDataOf(
+                                "device_identity_id" to active.id,
+                                "device_id" to active.deviceId,
+                                "pairing_address" to active.address,
+                                "previous_instructions" to active.instructions,
+                                "instructions" to normalized,
+                            ),
+                    )
                 )
             }
             updated
         }
     }
 
-    override suspend fun activeDeviceCredentials(): DeviceCredentialResult<RelayDeviceCredentials>? {
-        val identity = dao.getIdentity(DeviceIdentityRole.ACTIVE.storedName)
-            ?: return null
+    override suspend fun activeDeviceCredentials():
+        DeviceCredentialResult<RelayDeviceCredentials>? {
+        val identity = dao.getIdentity(DeviceIdentityRole.ACTIVE.storedName) ?: return null
         return deviceCredentials(identity)
     }
 
-    override suspend fun activeDeviceAuthorization(): DeviceCredentialResult<RelayDeviceAuthorization>? {
-        val identity = dao.getIdentity(DeviceIdentityRole.ACTIVE.storedName)
-            ?: return null
-        val deviceToken = when (
-            val result = decryptCredential(identity, DeviceCredentialKind.DEVICE_TOKEN)
-        ) {
-            is DeviceCredentialResult.Available -> result.value
-            is DeviceCredentialResult.Failure -> return result
-        }
+    override suspend fun activeDeviceAuthorization():
+        DeviceCredentialResult<RelayDeviceAuthorization>? {
+        val identity = dao.getIdentity(DeviceIdentityRole.ACTIVE.storedName) ?: return null
+        val deviceToken =
+            when (val result = decryptCredential(identity, DeviceCredentialKind.DEVICE_TOKEN)) {
+                is DeviceCredentialResult.Available -> result.value
+                is DeviceCredentialResult.Failure -> return result
+            }
         if (deviceToken.size != DEVICE_TOKEN_BYTES) {
             return DeviceCredentialResult.Corrupted
         }
@@ -425,25 +449,25 @@ internal class DeviceIdentityRepository(
                 deviceIdentityId = identity.id,
                 deviceId = identity.deviceId,
                 deviceToken = DeviceProtocol.encodeDeviceToken(deviceToken),
-            ),
+            )
         )
     }
 
     override suspend fun deviceCredentials(
-        deviceIdentityId: String,
+        deviceIdentityId: String
     ): DeviceCredentialResult<RelayDeviceCredentials>? {
-        val identity = dao.getIdentityById(deviceIdentityId)
-            ?: return null
+        val identity = dao.getIdentityById(deviceIdentityId) ?: return null
         return deviceCredentials(identity)
     }
 
     private suspend fun deviceCredentials(
-        identity: DeviceIdentityEntity,
+        identity: DeviceIdentityEntity
     ): DeviceCredentialResult<RelayDeviceCredentials> {
-        val material = when (val result = deviceMaterial(identity)) {
-            is DeviceCredentialResult.Available -> result.value
-            is DeviceCredentialResult.Failure -> return result
-        }
+        val material =
+            when (val result = deviceMaterial(identity)) {
+                is DeviceCredentialResult.Available -> result.value
+                is DeviceCredentialResult.Failure -> return result
+            }
         return DeviceCredentialResult.Available(
             RelayDeviceCredentials(
                 deviceIdentityId = identity.id,
@@ -454,7 +478,7 @@ internal class DeviceIdentityRepository(
                 devicePrivateKey = material.keyPair.privateKey,
                 deviceToken = DeviceProtocol.encodeDeviceToken(material.deviceToken),
                 instructions = identity.instructions,
-            ),
+            )
         )
     }
 
@@ -464,13 +488,14 @@ internal class DeviceIdentityRepository(
         value: ByteArray,
         encryptionKeyId: String,
     ): DeviceCredentialEntity {
-        val encrypted = withContext(cryptographyDispatcher) {
-            encryption.encrypt(
-                keyId = encryptionKeyId,
-                location = location(identity, kind),
-                plaintext = value,
-            )
-        }
+        val encrypted =
+            withContext(cryptographyDispatcher) {
+                encryption.encrypt(
+                    keyId = encryptionKeyId,
+                    location = location(identity, kind),
+                    plaintext = value,
+                )
+            }
         return DeviceCredentialEntity(
             identityId = identity.id,
             kind = kind.storedName,
@@ -478,53 +503,54 @@ internal class DeviceIdentityRepository(
         )
     }
 
-    private fun newDeviceMaterial() = DeviceMaterial(
-        deviceId = DeviceProtocol.generateDeviceId(
-            timestampMillis = currentTimeMillis(),
-        ),
-        keyPair = DeviceProtocol.generateDeviceKeyPair(),
-        deviceToken = DeviceProtocol.generateDeviceToken(),
-    )
+    private fun newDeviceMaterial() =
+        DeviceMaterial(
+            deviceId = DeviceProtocol.generateDeviceId(timestampMillis = currentTimeMillis()),
+            keyPair = DeviceProtocol.generateDeviceKeyPair(),
+            deviceToken = DeviceProtocol.generateDeviceToken(),
+        )
 
     private suspend fun deviceMaterial(
-        identity: DeviceIdentityEntity,
+        identity: DeviceIdentityEntity
     ): DeviceCredentialResult<DeviceMaterial> {
         val credentials = dao.getCredentials(identity.id)
-        val privateKey = when (
-            val result = decryptCredential(
-                identity,
-                credentials,
-                DeviceCredentialKind.DEVICE_PRIVATE_KEY,
-            )
-        ) {
-            is DeviceCredentialResult.Available -> result.value
-            is DeviceCredentialResult.Failure -> return result
-        }
-        val deviceToken = when (
-            val result = decryptCredential(
-                identity,
-                credentials,
-                DeviceCredentialKind.DEVICE_TOKEN,
-            )
-        ) {
-            is DeviceCredentialResult.Available -> result.value
-            is DeviceCredentialResult.Failure -> return result
-        }
-        if (
-            privateKey.size != DEVICE_PRIVATE_KEY_BYTES ||
-            deviceToken.size != DEVICE_TOKEN_BYTES
-        ) {
+        val privateKey =
+            when (
+                val result =
+                    decryptCredential(
+                        identity,
+                        credentials,
+                        DeviceCredentialKind.DEVICE_PRIVATE_KEY,
+                    )
+            ) {
+                is DeviceCredentialResult.Available -> result.value
+                is DeviceCredentialResult.Failure -> return result
+            }
+        val deviceToken =
+            when (
+                val result =
+                    decryptCredential(
+                        identity,
+                        credentials,
+                        DeviceCredentialKind.DEVICE_TOKEN,
+                    )
+            ) {
+                is DeviceCredentialResult.Available -> result.value
+                is DeviceCredentialResult.Failure -> return result
+            }
+        if (privateKey.size != DEVICE_PRIVATE_KEY_BYTES || deviceToken.size != DEVICE_TOKEN_BYTES) {
             return DeviceCredentialResult.Corrupted
         }
         return DeviceCredentialResult.Available(
             DeviceMaterial(
                 deviceId = identity.deviceId,
-                keyPair = dev.agentknock.protocol.DeviceKeyPair(
-                    privateKey = privateKey,
-                    publicKey = DeviceProtocol.deriveDevicePublicKey(privateKey),
-                ),
+                keyPair =
+                    dev.agentknock.protocol.DeviceKeyPair(
+                        privateKey = privateKey,
+                        publicKey = DeviceProtocol.deriveDevicePublicKey(privateKey),
+                    ),
                 deviceToken = deviceToken,
-            ),
+            )
         )
     }
 
@@ -532,20 +558,22 @@ internal class DeviceIdentityRepository(
         identity: DeviceIdentityEntity,
         credentials: List<DeviceCredentialEntity>,
         kind: DeviceCredentialKind,
-    ): DeviceCredentialResult<ByteArray> = decryptCredential(
-        identity = identity,
-        credential = credentials.singleOrNull { it.kind == kind.storedName },
-        kind = kind,
-    )
+    ): DeviceCredentialResult<ByteArray> =
+        decryptCredential(
+            identity = identity,
+            credential = credentials.singleOrNull { it.kind == kind.storedName },
+            kind = kind,
+        )
 
     private suspend fun decryptCredential(
         identity: DeviceIdentityEntity,
         kind: DeviceCredentialKind,
-    ): DeviceCredentialResult<ByteArray> = decryptCredential(
-        identity = identity,
-        credential = dao.getCredential(identity.id, kind.storedName),
-        kind = kind,
-    )
+    ): DeviceCredentialResult<ByteArray> =
+        decryptCredential(
+            identity = identity,
+            credential = dao.getCredential(identity.id, kind.storedName),
+            kind = kind,
+        )
 
     private suspend fun decryptCredential(
         identity: DeviceIdentityEntity,
@@ -553,12 +581,13 @@ internal class DeviceIdentityRepository(
         kind: DeviceCredentialKind,
     ): DeviceCredentialResult<ByteArray> {
         credential ?: return DeviceCredentialResult.Corrupted
-        val result = withContext(cryptographyDispatcher) {
-            encryption.decrypt(
-                encrypted = credential.encryptedValue,
-                location = location(identity, kind),
-            )
-        }
+        val result =
+            withContext(cryptographyDispatcher) {
+                encryption.decrypt(
+                    encrypted = credential.encryptedValue,
+                    location = location(identity, kind),
+                )
+            }
         return when (result) {
             is DecryptionResult.Plaintext -> DeviceCredentialResult.Available(result.value)
             DecryptionResult.KeyUnavailable -> DeviceCredentialResult.Unavailable
@@ -570,24 +599,24 @@ internal class DeviceIdentityRepository(
     private fun location(
         identity: DeviceIdentityEntity,
         kind: DeviceCredentialKind,
-    ) = EncryptionLocation(
-        recordType = "device_credential",
-        recordId = identity.id,
-        fieldName = kind.storedName,
-        bindings = listOf(
-            EncryptionBinding("device_id", identity.deviceId),
-        ),
-    )
+    ) =
+        EncryptionLocation(
+            recordType = "device_credential",
+            recordId = identity.id,
+            fieldName = kind.storedName,
+            bindings = listOf(EncryptionBinding("device_id", identity.deviceId)),
+        )
 
-    private fun DeviceIdentityEntity.toModel(credentialsAvailable: Boolean) = DeviceIdentity(
-        id = id,
-        address = address,
-        deviceId = deviceId,
-        credentialsAvailable = credentialsAvailable,
-        createdAt = createdAt,
-        pairingEnabled = pairingEnabled,
-        instructions = instructions,
-    )
+    private fun DeviceIdentityEntity.toModel(credentialsAvailable: Boolean) =
+        DeviceIdentity(
+            id = id,
+            address = address,
+            deviceId = deviceId,
+            credentialsAvailable = credentialsAvailable,
+            createdAt = createdAt,
+            pairingEnabled = pairingEnabled,
+            instructions = instructions,
+        )
 
     private companion object {
         const val DEVICE_TOKEN_BYTES = 32

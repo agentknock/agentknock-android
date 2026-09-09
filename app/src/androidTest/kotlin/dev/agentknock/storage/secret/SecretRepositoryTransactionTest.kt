@@ -32,10 +32,12 @@ class SecretRepositoryTransactionTest {
 
     @Before
     fun setUp() {
-        database = Room.inMemoryDatabaseBuilder(
-            InstrumentationRegistry.getInstrumentation().targetContext,
-            AgentknockDatabase::class.java,
-        ).build()
+        database =
+            Room.inMemoryDatabaseBuilder(
+                    InstrumentationRegistry.getInstrumentation().targetContext,
+                    AgentknockDatabase::class.java,
+                )
+                .build()
     }
 
     @After
@@ -64,23 +66,25 @@ class SecretRepositoryTransactionTest {
     fun auditFailureRollsBackSecretCreation() = runTest {
         val failure = IllegalStateException("audit failed")
         val audit = AuditRepository(database.auditDao(), currentTimeMillis = { 5L })
-        val repository = repository(
-            object : AuditSink {
-                override suspend fun record(record: AuditRecord) {
-                    audit.record(record)
-                    throw failure
-                }
+        val repository =
+            repository(
+                object : AuditSink {
+                    override suspend fun record(record: AuditRecord) {
+                        audit.record(record)
+                        throw failure
+                    }
 
-                override suspend fun append(records: List<AuditRecord>, occurredAt: Long) {
-                    audit.append(records, occurredAt)
-                    throw failure
+                    override suspend fun append(records: List<AuditRecord>, occurredAt: Long) {
+                        audit.append(records, occurredAt)
+                        throw failure
+                    }
                 }
-            },
-        )
+            )
 
         val thrown = runCatching {
             repository.createEnvironmentSecret("production", "Deployment credentials")
-        }.exceptionOrNull()
+        }
+            .exceptionOrNull()
 
         assertEquals(failure, thrown)
         assertTrue(database.secretDao().getSecrets().isEmpty())
@@ -89,51 +93,57 @@ class SecretRepositoryTransactionTest {
 
     @Test
     fun temporaryGrantsAndAuditEventsCommitOrRollBackAsOneBatch() = runTest {
-        database.deviceIdentityDao().insertIdentity(
-            DeviceIdentityEntity(
-                id = "device-identity",
-                role = "active",
-                address = "amber-river-maple",
-                deviceId = "01JDEVICE000000000000000000",
-                createdAt = 1L,
-            ),
-        )
-        database.requestDao().insertClient(
-            ClientEntity(
-                clientId = "workstation",
-                deviceIdentityId = "device-identity",
-                name = "Workstation",
-                instructions = "",
-                desiredRelayClientState = null,
-                relayClientState = "active",
-                clientSoftwareJson = null,
-                platform = null,
-                architecture = null,
-                hostname = null,
-                machineId = null,
-                osVersion = null,
-                pairedAt = 2L,
-                lastSeenAt = null,
-            ),
-        )
+        database
+            .deviceIdentityDao()
+            .insertIdentity(
+                DeviceIdentityEntity(
+                    id = "device-identity",
+                    role = "active",
+                    address = "amber-river-maple",
+                    deviceId = "01JDEVICE000000000000000000",
+                    createdAt = 1L,
+                )
+            )
+        database
+            .requestDao()
+            .insertClient(
+                ClientEntity(
+                    clientId = "workstation",
+                    deviceIdentityId = "device-identity",
+                    name = "Workstation",
+                    instructions = "",
+                    desiredRelayClientState = null,
+                    relayClientState = "active",
+                    clientSoftwareJson = null,
+                    platform = null,
+                    architecture = null,
+                    hostname = null,
+                    machineId = null,
+                    osVersion = null,
+                    pairedAt = 2L,
+                    lastSeenAt = null,
+                )
+            )
         database.secretDao().insertSecret(environmentSecret("first", "First"))
         database.secretDao().insertSecret(environmentSecret("second", "Second"))
         val audit = AuditRepository(database.auditDao(), currentTimeMillis = { 5L })
-        val failing = repository(
-            object : AuditSink {
-                override suspend fun record(record: AuditRecord) = audit.record(record)
+        val failing =
+            repository(
+                object : AuditSink {
+                    override suspend fun record(record: AuditRecord) = audit.record(record)
 
-                override suspend fun append(records: List<AuditRecord>, occurredAt: Long) {
-                    audit.append(records, occurredAt)
-                    error("audit failed")
+                    override suspend fun append(records: List<AuditRecord>, occurredAt: Long) {
+                        audit.append(records, occurredAt)
+                        error("audit failed")
+                    }
                 }
-            },
-        )
-        val policies = failing.approvalPoliciesForNames(
-            names = listOf("First", "Second"),
-            clientId = "workstation",
-            operation = TemporaryAccessOperation.INVOCATION,
-        )
+            )
+        val policies =
+            failing.approvalPoliciesForNames(
+                names = listOf("First", "Second"),
+                clientId = "workstation",
+                operation = TemporaryAccessOperation.INVOCATION,
+            )
 
         assertTrue(
             runCatching {
@@ -143,34 +153,42 @@ class SecretRepositoryTransactionTest {
                     operation = TemporaryAccessOperation.INVOCATION,
                     expiresAt = 1_000L,
                 )
-            }.isFailure,
+            }
+                .isFailure
         )
         assertTrue(
-            database.secretDao().getActiveTemporaryAccessGrants(
-                clientId = "workstation",
-                secretIds = listOf("first", "second"),
-                operation = TemporaryAccessOperation.INVOCATION.storedName,
-                now = 5L,
-            ).isEmpty(),
+            database
+                .secretDao()
+                .getActiveTemporaryAccessGrants(
+                    clientId = "workstation",
+                    secretIds = listOf("first", "second"),
+                    operation = TemporaryAccessOperation.INVOCATION.storedName,
+                    now = 5L,
+                )
+                .isEmpty()
         )
         assertTrue(database.auditDao().observeEvents().first().isEmpty())
 
         assertTrue(
-            repository(audit).allowTemporaryAccess(
-                policies = policies,
-                clientId = "workstation",
-                operation = TemporaryAccessOperation.INVOCATION,
-                expiresAt = 1_000L,
-            ),
+            repository(audit)
+                .allowTemporaryAccess(
+                    policies = policies,
+                    clientId = "workstation",
+                    operation = TemporaryAccessOperation.INVOCATION,
+                    expiresAt = 1_000L,
+                )
         )
         assertEquals(
             2,
-            database.secretDao().getActiveTemporaryAccessGrants(
-                clientId = "workstation",
-                secretIds = listOf("first", "second"),
-                operation = TemporaryAccessOperation.INVOCATION.storedName,
-                now = 5L,
-            ).size,
+            database
+                .secretDao()
+                .getActiveTemporaryAccessGrants(
+                    clientId = "workstation",
+                    secretIds = listOf("first", "second"),
+                    operation = TemporaryAccessOperation.INVOCATION.storedName,
+                    now = 5L,
+                )
+                .size,
         )
         val summaries = repository(audit).observeSecrets().first()
         assertEquals(2, summaries.size)
@@ -191,34 +209,40 @@ class SecretRepositoryTransactionTest {
         assertEquals("Workstation", database.secretDao().getClientName("workstation"))
         assertEquals(
             SaveSecretResult.SAVED,
-            repository(audit).setClientApprovalOverride("first", "workstation", SecretApprovalMode.ASK_AI),
+            repository(audit)
+                .setClientApprovalOverride("first", "workstation", SecretApprovalMode.ASK_AI),
         )
         assertEquals("Workstation", audit.observeEvents().first().first().clientName)
-        assertTrue(repository(audit).endTemporaryAccess("second", "workstation", TemporaryAccessOperation.INVOCATION))
+        assertTrue(
+            repository(audit)
+                .endTemporaryAccess("second", "workstation", TemporaryAccessOperation.INVOCATION)
+        )
         assertEquals("Workstation", audit.observeEvents().first().first().clientName)
         val client = checkNotNull(database.requestDao().getClient("workstation"))
         database.requestDao().updateClient(client.copy(name = "Renamed workstation"))
         assertTrue(audit.observeEvents().first().all { it.clientName == "Workstation" })
     }
 
-    private fun repository(audit: AuditSink) = SecretRepository(
-        dao = database.secretDao(),
-        keyManager = VaultKeyManager(database.vaultKeyDao(), UnusedEncryptionKeyStore),
-        encryption = AesGcmEncryption(UnusedEncryptionKeyStore),
-        audit = audit,
-        writeTransaction = RoomWriteTransaction(database),
-        newId = { "secret-id" },
-        currentTimeMillis = { 5L },
-    )
+    private fun repository(audit: AuditSink) =
+        SecretRepository(
+            dao = database.secretDao(),
+            keyManager = VaultKeyManager(database.vaultKeyDao(), UnusedEncryptionKeyStore),
+            encryption = AesGcmEncryption(UnusedEncryptionKeyStore),
+            audit = audit,
+            writeTransaction = RoomWriteTransaction(database),
+            newId = { "secret-id" },
+            currentTimeMillis = { 5L },
+        )
 
-    private fun environmentSecret(id: String, name: String) = SecretEntity(
-        id = id,
-        name = name,
-        description = "",
-        type = ENVIRONMENT_SECRET_TYPE,
-        createdAt = 1L,
-        updatedAt = 1L,
-    )
+    private fun environmentSecret(id: String, name: String) =
+        SecretEntity(
+            id = id,
+            name = name,
+            description = "",
+            type = ENVIRONMENT_SECRET_TYPE,
+            createdAt = 1L,
+            updatedAt = 1L,
+        )
 
     private object UnusedEncryptionKeyStore : EncryptionKeyStore {
         override fun get(keyId: String): SecretKey? = null

@@ -32,19 +32,23 @@ class ClientRepositoryTest {
 
     @Before
     fun setUp() = runTest {
-        database = Room.inMemoryDatabaseBuilder(
-            InstrumentationRegistry.getInstrumentation().targetContext,
-            AgentknockDatabase::class.java,
-        ).build()
-        database.deviceIdentityDao().insertIdentity(
-            DeviceIdentityEntity(
-                id = DEVICE_IDENTITY_ID,
-                role = "active",
-                address = "amber-river-maple",
-                deviceId = "01JDEVICE000000000000000000",
-                createdAt = 1L,
-            ),
-        )
+        database =
+            Room.inMemoryDatabaseBuilder(
+                    InstrumentationRegistry.getInstrumentation().targetContext,
+                    AgentknockDatabase::class.java,
+                )
+                .build()
+        database
+            .deviceIdentityDao()
+            .insertIdentity(
+                DeviceIdentityEntity(
+                    id = DEVICE_IDENTITY_ID,
+                    role = "active",
+                    address = "amber-river-maple",
+                    deviceId = "01JDEVICE000000000000000000",
+                    createdAt = 1L,
+                )
+            )
         audit = AuditRepository(database.auditDao(), currentTimeMillis = { 10L })
         grants = MutableStateFlow(emptyList())
     }
@@ -57,15 +61,16 @@ class ClientRepositoryTest {
     @Test
     fun projectionsExposeDurableClientMetadataAndHideRevocation() = runTest {
         database.requestDao().insertClient(client())
-        grants.value = listOf(
-            TemporaryAccessGrant(
-                secretId = "secret",
-                secretName = "Deployment",
-                clientId = CLIENT_ID,
-                operation = TemporaryAccessOperation.INVOCATION,
-                expiresAt = 1_000L,
-            ),
-        )
+        grants.value =
+            listOf(
+                TemporaryAccessGrant(
+                    secretId = "secret",
+                    secretName = "Deployment",
+                    clientId = CLIENT_ID,
+                    operation = TemporaryAccessOperation.INVOCATION,
+                    expiresAt = 1_000L,
+                )
+            )
         val repository = repository(audit)
 
         grants.value += grants.value.single().copy(operation = TemporaryAccessOperation.GIT_SIGN)
@@ -86,9 +91,7 @@ class ClientRepositoryTest {
 
     @Test
     fun desiredRevocationCannotBeOverwrittenBeforeRelayAcknowledgesIt() = runTest {
-        database.requestDao().insertClient(
-            client(desiredState = RelayClientState.REVOKED.wireName),
-        )
+        database.requestDao().insertClient(client(desiredState = RelayClientState.REVOKED.wireName))
         val repository = repository(audit)
 
         assertEquals(
@@ -154,15 +157,14 @@ class ClientRepositoryTest {
 
     @Test
     fun appliedRelayStateAndItsAuditRollBackTogether() = runTest {
-        database.requestDao().insertClient(
-            client(desiredState = RelayClientState.REVOKED.wireName),
-        )
+        database.requestDao().insertClient(client(desiredState = RelayClientState.REVOKED.wireName))
         val failingRepository = repository(InsertThenFailAuditSink(audit))
 
         assertTrue(
             runCatching {
                 failingRepository.applyRelayState(CLIENT_ID, RelayClientState.REVOKED)
-            }.isFailure,
+            }
+                .isFailure
         )
         assertEquals("active", database.requestDao().getClient(CLIENT_ID)?.relayClientState)
         assertTrue(audit.observeEvents().first().isEmpty())
@@ -175,37 +177,37 @@ class ClientRepositoryTest {
         )
     }
 
-    private fun repository(auditSink: AuditSink) = ClientRepository(
-        dao = database.requestDao(),
-        temporaryAccessGrants = grants,
-        audit = auditSink,
-        writeTransaction = RoomWriteTransaction(database),
-    )
+    private fun repository(auditSink: AuditSink) =
+        ClientRepository(
+            dao = database.requestDao(),
+            temporaryAccessGrants = grants,
+            audit = auditSink,
+            writeTransaction = RoomWriteTransaction(database),
+        )
 
     private fun client(
         instructions: String = "",
         desiredState: String? = null,
-    ) = ClientEntity(
-        clientId = CLIENT_ID,
-        deviceIdentityId = DEVICE_IDENTITY_ID,
-        name = "Workstation",
-        instructions = instructions,
-        desiredRelayClientState = desiredState,
-        relayClientState = RelayClientState.ACTIVE.wireName,
-        clientSoftwareJson =
-            """{"app_info":{"name":"agentknock","version":"0.3.0"},"lib_info":{"name":"agentknock","version":"0.3.0"}}""",
-        platform = "linux",
-        architecture = "x86_64",
-        hostname = "host",
-        machineId = "machine",
-        osVersion = "NixOS",
-        pairedAt = 2L,
-        lastSeenAt = 3L,
-    )
+    ) =
+        ClientEntity(
+            clientId = CLIENT_ID,
+            deviceIdentityId = DEVICE_IDENTITY_ID,
+            name = "Workstation",
+            instructions = instructions,
+            desiredRelayClientState = desiredState,
+            relayClientState = RelayClientState.ACTIVE.wireName,
+            clientSoftwareJson =
+                """{"app_info":{"name":"agentknock","version":"0.3.0"},"lib_info":{"name":"agentknock","version":"0.3.0"}}""",
+            platform = "linux",
+            architecture = "x86_64",
+            hostname = "host",
+            machineId = "machine",
+            osVersion = "NixOS",
+            pairedAt = 2L,
+            lastSeenAt = 3L,
+        )
 
-    private class InsertThenFailAuditSink(
-        private val delegate: AuditSink,
-    ) : AuditSink {
+    private class InsertThenFailAuditSink(private val delegate: AuditSink) : AuditSink {
         override suspend fun record(record: AuditRecord) {
             delegate.record(record)
             error("Injected audit failure")

@@ -24,14 +24,10 @@ internal data class EncryptionBinding(
 )
 
 internal data class EncryptedValue(
-    @ColumnInfo(name = "encryption_format")
-    val formatVersion: Int,
-    @ColumnInfo(name = "encryption_key_id")
-    val keyId: String,
-    @ColumnInfo(name = "nonce")
-    val nonce: ByteArray,
-    @ColumnInfo(name = "ciphertext")
-    val ciphertext: ByteArray,
+    @ColumnInfo(name = "encryption_format") val formatVersion: Int,
+    @ColumnInfo(name = "encryption_key_id") val keyId: String,
+    @ColumnInfo(name = "nonce") val nonce: ByteArray,
+    @ColumnInfo(name = "ciphertext") val ciphertext: ByteArray,
 )
 
 internal sealed interface DecryptionResult {
@@ -48,9 +44,7 @@ internal interface EncryptionKeySource {
     fun get(keyId: String): SecretKey?
 }
 
-internal class AesGcmEncryption(
-    private val keys: EncryptionKeySource,
-) {
+internal class AesGcmEncryption(private val keys: EncryptionKeySource) {
     fun encrypt(
         keyId: String,
         location: EncryptionLocation,
@@ -80,21 +74,22 @@ internal class AesGcmEncryption(
     ): DecryptionResult {
         if (
             encrypted.formatVersion != FORMAT_VERSION ||
-            encrypted.keyId.isBlank() ||
-            encrypted.nonce.size != NONCE_BYTES
+                encrypted.keyId.isBlank() ||
+                encrypted.nonce.size != NONCE_BYTES
         ) {
             return DecryptionResult.UnsupportedFormat
         }
         if (encrypted.ciphertext.size < AUTHENTICATION_TAG_BYTES) {
             return DecryptionResult.AuthenticationFailed
         }
-        val key = try {
-            keys.get(encrypted.keyId)
-        } catch (_: UnrecoverableKeyException) {
-            null
-        } catch (_: KeyPermanentlyInvalidatedException) {
-            null
-        } ?: return DecryptionResult.KeyUnavailable
+        val key =
+            try {
+                keys.get(encrypted.keyId)
+            } catch (_: UnrecoverableKeyException) {
+                null
+            } catch (_: KeyPermanentlyInvalidatedException) {
+                null
+            } ?: return DecryptionResult.KeyUnavailable
         return try {
             val cipher = Cipher.getInstance(TRANSFORMATION)
             cipher.init(
@@ -117,26 +112,27 @@ internal class AesGcmEncryption(
         formatVersion: Int,
         keyId: String,
         location: EncryptionLocation,
-    ): ByteArray = ByteArrayOutputStream().use { bytes ->
-        DataOutputStream(bytes).use { output ->
-            output.writeInt(formatVersion)
-            output.writeLengthPrefixed(DOMAIN)
-            output.writeLengthPrefixed(keyId)
-            output.writeLengthPrefixed(location.recordType)
-            output.writeLengthPrefixed(location.recordId)
-            output.writeLengthPrefixed(location.fieldName)
-            val bindings = location.bindings.sortedBy(EncryptionBinding::name)
-            require(bindings.map(EncryptionBinding::name).distinct().size == bindings.size) {
-                "Encryption binding names must be unique"
+    ): ByteArray =
+        ByteArrayOutputStream().use { bytes ->
+            DataOutputStream(bytes).use { output ->
+                output.writeInt(formatVersion)
+                output.writeLengthPrefixed(DOMAIN)
+                output.writeLengthPrefixed(keyId)
+                output.writeLengthPrefixed(location.recordType)
+                output.writeLengthPrefixed(location.recordId)
+                output.writeLengthPrefixed(location.fieldName)
+                val bindings = location.bindings.sortedBy(EncryptionBinding::name)
+                require(bindings.map(EncryptionBinding::name).distinct().size == bindings.size) {
+                    "Encryption binding names must be unique"
+                }
+                output.writeInt(bindings.size)
+                bindings.forEach { binding ->
+                    output.writeLengthPrefixed(binding.name)
+                    output.writeLengthPrefixed(binding.value)
+                }
             }
-            output.writeInt(bindings.size)
-            bindings.forEach { binding ->
-                output.writeLengthPrefixed(binding.name)
-                output.writeLengthPrefixed(binding.value)
-            }
+            bytes.toByteArray()
         }
-        bytes.toByteArray()
-    }
 
     private fun DataOutputStream.writeLengthPrefixed(value: String) {
         val encoded = value.toByteArray(Charsets.UTF_8)

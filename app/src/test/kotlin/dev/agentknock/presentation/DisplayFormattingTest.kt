@@ -11,25 +11,43 @@ class DisplayFormattingTest {
         assertEquals("just now", formatRelativeTime(now - 20_000, now, unusedDate))
         assertEquals("7 minutes ago", formatRelativeTime(now - 7 * 60_000, now, unusedDate))
         assertEquals("5 hours ago", formatRelativeTime(now - 5 * 60 * 60_000, now, unusedDate))
-        assertEquals("12 days ago", formatRelativeTime(now - 12 * 24 * 60 * 60_000L, now, unusedDate))
+        assertEquals(
+            "12 days ago",
+            formatRelativeTime(now - 12 * 24 * 60 * 60_000L, now, unusedDate),
+        )
     }
 
     @Test
     fun relativeTime_usesTheUiDateFormatterForOlderActivity() {
         val timestamp = 1_000_000L
         val now = timestamp + 30 * 24 * 60 * 60_000L
-        assertEquals("7 Dec 2026", formatRelativeTime(timestamp, now) {
-            assertEquals(timestamp, it)
-            "7 Dec 2026"
-        })
+        assertEquals(
+            "7 Dec 2026",
+            formatRelativeTime(timestamp, now) {
+                assertEquals(timestamp, it)
+                "7 Dec 2026"
+            },
+        )
     }
 
     @Test
     fun parentAge_usesRelativeReceiptTimeRatherThanTheCurrentClock() {
-        assertEquals("Parent request received less than a minute earlier", formatParentRequestAge(1_000, 30_000))
-        assertEquals("Parent request received 1 minute earlier", formatParentRequestAge(1_000, 61_000))
-        assertEquals("Parent request received 4 hours earlier", formatParentRequestAge(1_000, 14_401_000))
-        assertEquals("Parent request received 2 days earlier", formatParentRequestAge(1_000, 172_801_000))
+        assertEquals(
+            "Parent request received less than a minute earlier",
+            formatParentRequestAge(1_000, 30_000),
+        )
+        assertEquals(
+            "Parent request received 1 minute earlier",
+            formatParentRequestAge(1_000, 61_000),
+        )
+        assertEquals(
+            "Parent request received 4 hours earlier",
+            formatParentRequestAge(1_000, 14_401_000),
+        )
+        assertEquals(
+            "Parent request received 2 days earlier",
+            formatParentRequestAge(1_000, 172_801_000),
+        )
     }
 
     @Test
@@ -78,7 +96,7 @@ class DisplayFormattingTest {
             ),
             describeGitSigningContent(
                 "tree abc\nauthor Example\n\nExplain the change\n\nWith useful detail\n"
-                    .encodeToByteArray(),
+                    .encodeToByteArray()
             ),
         )
     }
@@ -94,7 +112,8 @@ class DisplayFormattingTest {
                 objectLabel = "Tag",
             ),
             describeGitSigningContent(
-                "object abc\ntype commit\ntag v1.0\ntagger Example\n\nRelease 1.0\n".encodeToByteArray(),
+                "object abc\ntype commit\ntag v1.0\ntagger Example\n\nRelease 1.0\n"
+                    .encodeToByteArray()
             ),
         )
     }
@@ -109,16 +128,22 @@ class DisplayFormattingTest {
 
     @Test
     fun gitIdentities_comeFromSignedHeadersAndKeepDifferentAuthorAndCommitter() {
-        val content = (
-            "tree abc\n" +
-                "author Alex Example <alex@example.com> 1780000000 +0300\n" +
-                "committer CI <build@example.com> 1780000010 +0000\n" +
-                "\nFix checks\n\nauthor Not a header"
-            ).encodeToByteArray()
+        val content =
+            ("tree abc\n" +
+                    "author Alex Example <alex@example.com> 1780000000 +0300\n" +
+                    "committer CI <build@example.com> 1780000010 +0000\n" +
+                    "\nFix checks\n\nauthor Not a header")
+                .encodeToByteArray()
         assertEquals(
-            listOf("Author" to "Alex Example <alex@example.com>", "Committer" to "CI <build@example.com>"),
+            listOf(
+                "Author" to "Alex Example <alex@example.com>",
+                "Committer" to "CI <build@example.com>",
+            ),
             describeGitSigningContent(content).identities,
         )
-        assertEquals("Fix checks\n\nauthor Not a header", describeGitSigningContent(content).message)
+        assertEquals(
+            "Fix checks\n\nauthor Not a header",
+            describeGitSigningContent(content).message,
+        )
     }
 }

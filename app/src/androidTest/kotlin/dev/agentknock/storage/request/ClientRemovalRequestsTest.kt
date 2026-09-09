@@ -37,51 +37,61 @@ class ClientRemovalRequestsTest {
 
     @Before
     fun setUp() = runTest {
-        database = Room.inMemoryDatabaseBuilder(
-            InstrumentationRegistry.getInstrumentation().targetContext,
-            AgentknockDatabase::class.java,
-        ).build()
-        database.vaultKeyDao().activate(
-            VaultKeyEntity(
-                id = KEY_ID,
-                purpose = VaultKeyPurpose.DEVICE_STATE.storedName,
-                active = true,
-                createdAt = 1L,
-                backing = "SOFTWARE",
-            ),
-        )
-        database.deviceIdentityDao().insertIdentity(
-            DeviceIdentityEntity(
-                id = DEVICE_IDENTITY_ID,
-                role = "active",
-                address = "amber-river-maple",
-                deviceId = DEVICE_ID,
-                createdAt = 1L,
-            ),
-        )
+        database =
+            Room.inMemoryDatabaseBuilder(
+                    InstrumentationRegistry.getInstrumentation().targetContext,
+                    AgentknockDatabase::class.java,
+                )
+                .build()
+        database
+            .vaultKeyDao()
+            .activate(
+                VaultKeyEntity(
+                    id = KEY_ID,
+                    purpose = VaultKeyPurpose.DEVICE_STATE.storedName,
+                    active = true,
+                    createdAt = 1L,
+                    backing = "SOFTWARE",
+                )
+            )
+        database
+            .deviceIdentityDao()
+            .insertIdentity(
+                DeviceIdentityEntity(
+                    id = DEVICE_IDENTITY_ID,
+                    role = "active",
+                    address = "amber-river-maple",
+                    deviceId = DEVICE_ID,
+                    createdAt = 1L,
+                )
+            )
         database.requestDao().insertClient(client())
         database.requestDao().insertClientPsk(clientPsk("current", byteArrayOf(1)))
         database.requestDao().insertClientPsk(clientPsk("previous", byteArrayOf(2)))
-        database.secretDao().insertSecret(
-            SecretEntity(
-                id = SECRET_ID,
-                name = "Deployment",
-                description = "",
-                type = "environment",
-                createdAt = 1L,
-                updatedAt = 1L,
-            ),
-        )
-        database.secretDao().upsertTemporaryAccessGrants(
-            listOf(
-                TemporaryAccessGrantEntity(
-                    secretId = SECRET_ID,
-                    clientId = CLIENT_ID,
-                    operation = "invocation",
-                    expiresAt = 1_000L,
-                ),
-            ),
-        )
+        database
+            .secretDao()
+            .insertSecret(
+                SecretEntity(
+                    id = SECRET_ID,
+                    name = "Deployment",
+                    description = "",
+                    type = "environment",
+                    createdAt = 1L,
+                    updatedAt = 1L,
+                )
+            )
+        database
+            .secretDao()
+            .upsertTemporaryAccessGrants(
+                listOf(
+                    TemporaryAccessGrantEntity(
+                        secretId = SECRET_ID,
+                        clientId = CLIENT_ID,
+                        operation = "invocation",
+                        expiresAt = 1_000L,
+                    )
+                )
+            )
         audit = AuditRepository(database.auditDao(), currentTimeMillis = { AUDIT_CLOCK })
     }
 
@@ -122,7 +132,7 @@ class ClientRemovalRequestsTest {
             requests(audit).complete(request) {
                 openCount += 1
                 CompletionOpenResult.Opened(completionPlaintext())
-            },
+            }
         )
 
         val completed = checkNotNull(database.requestDao().getRequestById(REQUEST_ID))
@@ -140,7 +150,7 @@ class ClientRemovalRequestsTest {
         assertTrue(
             requests(audit).complete(completed) {
                 error("A terminal removal completion must not be reopened")
-            },
+            }
         )
         assertEquals(1, audit.observeEvents().first().size)
     }
@@ -153,7 +163,7 @@ class ClientRemovalRequestsTest {
         assertTrue(
             requests(audit).complete(request) {
                 CompletionOpenResult.Opened(completionPlaintext(version = "9.9.9"))
-            },
+            }
         )
 
         val completed = checkNotNull(database.requestDao().getRequestById(REQUEST_ID))
@@ -170,9 +180,7 @@ class ClientRemovalRequestsTest {
         receive()
         val before = checkNotNull(database.requestDao().getRequestById(REQUEST_ID))
 
-        assertFalse(
-            requests(audit).complete(before) { CompletionOpenResult.RetryLater },
-        )
+        assertFalse(requests(audit).complete(before) { CompletionOpenResult.RetryLater })
 
         assertEquals(before, database.requestDao().getRequestById(REQUEST_ID))
         assertNotNull(database.requestDao().getRequestPsk(REQUEST_ID))
@@ -187,7 +195,7 @@ class ClientRemovalRequestsTest {
         assertTrue(
             requests(audit).complete(request) {
                 CompletionOpenResult.IrrecoverablyInvalid
-            },
+            }
         )
 
         val completed = checkNotNull(database.requestDao().getRequestById(REQUEST_ID))
@@ -204,12 +212,15 @@ class ClientRemovalRequestsTest {
     fun invalidCompletionCannotMatchAMissingStoredSoftwareSnapshot() = runTest {
         receive()
         val request = checkNotNull(database.requestDao().getRequestById(REQUEST_ID))
-        assertEquals(1, database.requestDao().updateRequest(request.copy(clientSoftwareJson = null)))
+        assertEquals(
+            1,
+            database.requestDao().updateRequest(request.copy(clientSoftwareJson = null)),
+        )
 
         assertTrue(
             requests(audit).complete(request) {
                 CompletionOpenResult.IrrecoverablyInvalid
-            },
+            }
         )
 
         val completed = checkNotNull(database.requestDao().getRequestById(REQUEST_ID))
@@ -230,7 +241,8 @@ class ClientRemovalRequestsTest {
                 requests(InsertThenFailAuditSink(audit)).complete(before) {
                     CompletionOpenResult.Opened(completionPlaintext())
                 }
-            }.isFailure,
+            }
+                .isFailure
         )
         assertEquals(before, database.requestDao().getRequestById(REQUEST_ID))
         assertNotNull(database.requestDao().getRequestPsk(REQUEST_ID))
@@ -239,7 +251,7 @@ class ClientRemovalRequestsTest {
         assertTrue(
             requests(audit).complete(before) {
                 CompletionOpenResult.Opened(completionPlaintext())
-            },
+            }
         )
         assertNull(database.requestDao().getRequestPsk(REQUEST_ID))
         assertEquals(1, audit.observeEvents().first().size)
@@ -255,7 +267,8 @@ class ClientRemovalRequestsTest {
                 requests(InsertThenFailAuditSink(audit)).complete(before) {
                     CompletionOpenResult.IrrecoverablyInvalid
                 }
-            }.isFailure,
+            }
+                .isFailure
         )
 
         assertEquals(before, database.requestDao().getRequestById(REQUEST_ID))
@@ -270,12 +283,14 @@ class ClientRemovalRequestsTest {
 
         assertTrue(
             runCatching {
-                requests(InsertThenFailAuditSink(audit)).expire(
-                    before,
-                    EXPIRY_MESSAGE,
-                    EXPIRY_TIME,
-                )
-            }.isFailure,
+                requests(InsertThenFailAuditSink(audit))
+                    .expire(
+                        before,
+                        EXPIRY_MESSAGE,
+                        EXPIRY_TIME,
+                    )
+            }
+                .isFailure
         )
         assertEquals(before, database.requestDao().getRequestById(REQUEST_ID))
         assertNotNull(database.requestDao().getRequestPsk(REQUEST_ID))
@@ -299,65 +314,75 @@ class ClientRemovalRequestsTest {
         assertEquals(EXPIRY_MESSAGE, database.requestDao().getRequestById(REQUEST_ID)?.error)
     }
 
-    private fun requests(auditSink: AuditSink) = ClientRemovalRequests(
-        dao = database.requestDao(),
-        audit = auditSink,
-        writeTransaction = RoomWriteTransaction(database),
-        json = Json,
-        currentTimeMillis = { NOW },
-    )
+    private fun requests(auditSink: AuditSink) =
+        ClientRemovalRequests(
+            dao = database.requestDao(),
+            audit = auditSink,
+            writeTransaction = RoomWriteTransaction(database),
+            json = Json,
+            currentTimeMillis = { NOW },
+        )
 
-    private suspend fun receive(): JsonElement? = requests(audit).receive(
-        client = client(),
-        relayRequestId = REQUEST_ID,
-        requestPayload = REQUEST,
-        plaintext = requestPlaintext(),
-        requestPsk = requestPsk(),
-        sealResponse = { RESPONSE },
-    )
+    private suspend fun receive(): JsonElement? =
+        requests(audit)
+            .receive(
+                client = client(),
+                relayRequestId = REQUEST_ID,
+                requestPayload = REQUEST,
+                plaintext = requestPlaintext(),
+                requestPsk = requestPsk(),
+                sealResponse = { RESPONSE },
+            )
 
-    private suspend fun activeGrants() = database.secretDao().getActiveTemporaryAccessGrants(
-        CLIENT_ID,
-        listOf(SECRET_ID),
-        "invocation",
-        0L,
-    )
+    private suspend fun activeGrants() =
+        database
+            .secretDao()
+            .getActiveTemporaryAccessGrants(
+                CLIENT_ID,
+                listOf(SECRET_ID),
+                "invocation",
+                0L,
+            )
 
-    private fun client() = ClientEntity(
-        clientId = CLIENT_ID,
-        deviceIdentityId = DEVICE_IDENTITY_ID,
-        name = "Workstation",
-        instructions = "",
-        desiredRelayClientState = null,
-        relayClientState = RelayClientState.ACTIVE.wireName,
-        clientSoftwareJson = null,
-        platform = "linux",
-        architecture = "x86_64",
-        hostname = "host",
-        machineId = "machine",
-        osVersion = "NixOS",
-        pairedAt = 2L,
-        lastSeenAt = 3L,
-    )
+    private fun client() =
+        ClientEntity(
+            clientId = CLIENT_ID,
+            deviceIdentityId = DEVICE_IDENTITY_ID,
+            name = "Workstation",
+            instructions = "",
+            desiredRelayClientState = null,
+            relayClientState = RelayClientState.ACTIVE.wireName,
+            clientSoftwareJson = null,
+            platform = "linux",
+            architecture = "x86_64",
+            hostname = "host",
+            machineId = "machine",
+            osVersion = "NixOS",
+            pairedAt = 2L,
+            lastSeenAt = 3L,
+        )
 
-    private fun clientPsk(slot: String, ciphertext: ByteArray) = ClientPskEntity(
-        clientId = CLIENT_ID,
-        slot = slot,
-        encryptedPsk = encryptedValue(ciphertext),
-        storedAt = 3L,
-    )
+    private fun clientPsk(slot: String, ciphertext: ByteArray) =
+        ClientPskEntity(
+            clientId = CLIENT_ID,
+            slot = slot,
+            encryptedPsk = encryptedValue(ciphertext),
+            storedAt = 3L,
+        )
 
-    private fun requestPsk() = RequestPskEntity(
-        requestId = REQUEST_ID,
-        encryptedPsk = encryptedValue(byteArrayOf(3)),
-    )
+    private fun requestPsk() =
+        RequestPskEntity(
+            requestId = REQUEST_ID,
+            encryptedPsk = encryptedValue(byteArrayOf(3)),
+        )
 
-    private fun encryptedValue(ciphertext: ByteArray) = EncryptedValue(
-        formatVersion = 1,
-        keyId = KEY_ID,
-        nonce = ByteArray(12),
-        ciphertext = ciphertext,
-    )
+    private fun encryptedValue(ciphertext: ByteArray) =
+        EncryptedValue(
+            formatVersion = 1,
+            keyId = KEY_ID,
+            nonce = ByteArray(12),
+            ciphertext = ciphertext,
+        )
 
     private fun requestPlaintext(): ByteArray =
         """{${clientSoftwareFields()},"method":"PairingRemove"}""".encodeToByteArray()
@@ -368,9 +393,7 @@ class ClientRemovalRequestsTest {
     private fun clientSoftwareFields(version: String = SOFTWARE_VERSION): String =
         """"app_info":{"name":"agentknock-cli","version":"$version"},"lib_info":{"name":"agentknock","version":"$version"}"""
 
-    private class InsertThenFailAuditSink(
-        private val delegate: AuditSink,
-    ) : AuditSink {
+    private class InsertThenFailAuditSink(private val delegate: AuditSink) : AuditSink {
         override suspend fun record(record: AuditRecord) {
             delegate.record(record)
             error("Injected audit failure")

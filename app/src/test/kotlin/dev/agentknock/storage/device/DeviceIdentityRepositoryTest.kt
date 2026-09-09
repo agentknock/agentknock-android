@@ -5,8 +5,8 @@ import dev.agentknock.relay.RelayClaimClient
 import dev.agentknock.relay.RelayClaimOutcome
 import dev.agentknock.relay.RelayClaimResult
 import dev.agentknock.relay.RelayEndpointResult
-import dev.agentknock.storage.audit.NoOpAuditSink
 import dev.agentknock.storage.ImmediateWriteTransaction
+import dev.agentknock.storage.audit.NoOpAuditSink
 import dev.agentknock.storage.crypto.AesGcmEncryption
 import dev.agentknock.storage.crypto.FakeEncryptionKeyStore
 import dev.agentknock.storage.crypto.FakeVaultKeyDao
@@ -20,8 +20,8 @@ import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.first
 import kotlinx.coroutines.test.UnconfinedTestDispatcher
 import kotlinx.coroutines.test.runTest
-import org.junit.Assert.assertEquals
 import org.junit.Assert.assertArrayEquals
+import org.junit.Assert.assertEquals
 import org.junit.Assert.assertFalse
 import org.junit.Assert.assertNotEquals
 import org.junit.Assert.assertTrue
@@ -52,9 +52,11 @@ class DeviceIdentityRepositoryTest {
         assertTrue(credentials.all { it.encryptedValue.ciphertext.size > 32 })
         assertEquals(
             setOf(VaultKeyPurpose.DEVICE_STATE.storedName),
-            credentials.map { credential ->
-                fixture.encryptionMetadata.getKey(credential.encryptedValue.keyId)?.purpose
-            }.toSet(),
+            credentials
+                .map { credential ->
+                    fixture.encryptionMetadata.getKey(credential.encryptedValue.keyId)?.purpose
+                }
+                .toSet(),
         )
         assertEquals(1, fixture.relay.claims.size)
         assertEquals(
@@ -72,8 +74,8 @@ class DeviceIdentityRepositoryTest {
         fixture.relay.results += RelayEndpointResult.Success(RelayClaimOutcome.CLAIMED)
 
         assertTrue(
-            fixture.repository.stageAndClaim("amber-river-maple") is
-                ClaimPairingAddressResult.RelayUnavailable,
+            fixture.repository.stageAndClaim("amber-river-maple")
+                is ClaimPairingAddressResult.RelayUnavailable
         )
         val candidateId = fixture.dao.identities.value.single().id
         val firstClaim = fixture.relay.claims.single()
@@ -86,7 +88,10 @@ class DeviceIdentityRepositoryTest {
         )
 
         assertEquals(candidateId, fixture.dao.identities.value.single().id)
-        assertEquals(DeviceIdentityRole.ACTIVE.storedName, fixture.dao.identities.value.single().role)
+        assertEquals(
+            DeviceIdentityRole.ACTIVE.storedName,
+            fixture.dao.identities.value.single().role,
+        )
         assertEquals(2, fixture.relay.claims.size)
         assertEquals(firstClaim, fixture.relay.claims.last())
     }
@@ -94,9 +99,7 @@ class DeviceIdentityRepositoryTest {
     @Test
     fun `a different address reuses the existing candidate material`() = runTest {
         val fixture = Fixture(UnconfinedTestDispatcher(testScheduler))
-        fixture.relay.results += RelayEndpointResult.Success(
-            RelayClaimOutcome.ADDRESS_UNAVAILABLE,
-        )
+        fixture.relay.results += RelayEndpointResult.Success(RelayClaimOutcome.ADDRESS_UNAVAILABLE)
 
         assertEquals(
             ClaimPairingAddressResult.AddressUnavailable,
@@ -132,9 +135,7 @@ class DeviceIdentityRepositoryTest {
             fixture.repository.stageAndClaim("amber-river-maple"),
         )
         val active = fixture.dao.identities.value.single()
-        fixture.relay.results += RelayEndpointResult.Success(
-            RelayClaimOutcome.ADDRESS_UNAVAILABLE,
-        )
+        fixture.relay.results += RelayEndpointResult.Success(RelayClaimOutcome.ADDRESS_UNAVAILABLE)
         assertEquals(
             ClaimPairingAddressResult.AddressUnavailable,
             fixture.repository.stageAndClaim("silent-forest-cloud"),
@@ -153,9 +154,7 @@ class DeviceIdentityRepositoryTest {
     @Test
     fun `an undecryptable restored candidate is replaced even after a claim attempt`() = runTest {
         val fixture = Fixture(UnconfinedTestDispatcher(testScheduler))
-        fixture.relay.results += RelayEndpointResult.Success(
-            RelayClaimOutcome.ADDRESS_UNAVAILABLE,
-        )
+        fixture.relay.results += RelayEndpointResult.Success(RelayClaimOutcome.ADDRESS_UNAVAILABLE)
         assertEquals(
             ClaimPairingAddressResult.AddressUnavailable,
             fixture.repository.stageAndClaim("amber-river-maple"),
@@ -165,27 +164,27 @@ class DeviceIdentityRepositoryTest {
         assertTrue(originalCandidate.claimAttemptedAt != null)
 
         val restoredKeyStore = FakeEncryptionKeyStore()
-        val restoredKeyIds = ArrayDeque(
-            listOf("replacement-secret-key", "replacement-device-key"),
-        )
-        val restoredKeyManager = VaultKeyManager(
-            dao = fixture.encryptionMetadata,
-            keyStore = restoredKeyStore,
-            newKeyId = { restoredKeyIds.removeFirst() },
-            currentTimeMillis = { 10_000L },
-        )
+        val restoredKeyIds = ArrayDeque(listOf("replacement-secret-key", "replacement-device-key"))
+        val restoredKeyManager =
+            VaultKeyManager(
+                dao = fixture.encryptionMetadata,
+                keyStore = restoredKeyStore,
+                newKeyId = { restoredKeyIds.removeFirst() },
+                currentTimeMillis = { 10_000L },
+            )
         restoredKeyManager.initialize()
-        val restored = DeviceIdentityRepository(
-            dao = fixture.dao,
-            keyManager = restoredKeyManager,
-            encryption = AesGcmEncryption(restoredKeyStore),
-            relay = fixture.relay,
-            audit = NoOpAuditSink,
-            writeTransaction = ImmediateWriteTransaction,
-            newId = { "restored-candidate" },
-            currentTimeMillis = { 10_001L },
-            cryptographyDispatcher = UnconfinedTestDispatcher(testScheduler),
-        )
+        val restored =
+            DeviceIdentityRepository(
+                dao = fixture.dao,
+                keyManager = restoredKeyManager,
+                encryption = AesGcmEncryption(restoredKeyStore),
+                relay = fixture.relay,
+                audit = NoOpAuditSink,
+                writeTransaction = ImmediateWriteTransaction,
+                newId = { "restored-candidate" },
+                currentTimeMillis = { 10_001L },
+                cryptographyDispatcher = UnconfinedTestDispatcher(testScheduler),
+            )
 
         assertEquals(
             ClaimPairingAddressResult.Claimed,
@@ -207,14 +206,12 @@ class DeviceIdentityRepositoryTest {
         fixture.relay.results += RelayEndpointResult.Unavailable(IOException("offline"))
 
         assertTrue(
-            fixture.repository.stageAndClaim("amber-river-maple") is
-                ClaimPairingAddressResult.RelayUnavailable,
+            fixture.repository.stageAndClaim("amber-river-maple")
+                is ClaimPairingAddressResult.RelayUnavailable
         )
         val originalCandidate = fixture.dao.identities.value.single()
         val originalClaim = fixture.relay.claims.single()
-        fixture.dao.identities.value = listOf(
-            originalCandidate.copy(claimAttemptedAt = null),
-        )
+        fixture.dao.identities.value = listOf(originalCandidate.copy(claimAttemptedAt = null))
         fixture.advanceTimeBy(5 * 60 * 1_000L)
 
         assertEquals(
@@ -239,21 +236,21 @@ class DeviceIdentityRepositoryTest {
             fixture.repository.stageAndClaim("amber-river-maple"),
         )
         val activeId = fixture.dao.identities.value.single().id
-        fixture.relay.results += RelayEndpointResult.Success(
-            RelayClaimOutcome.ADDRESS_UNAVAILABLE,
-        )
+        fixture.relay.results += RelayEndpointResult.Success(RelayClaimOutcome.ADDRESS_UNAVAILABLE)
 
         assertEquals(
             ClaimPairingAddressResult.AddressUnavailable,
             fixture.repository.stageAndClaim("silent-forest-cloud"),
         )
 
-        val active = fixture.dao.identities.value.single {
-            it.role == DeviceIdentityRole.ACTIVE.storedName
-        }
-        val candidate = fixture.dao.identities.value.single {
-            it.role == DeviceIdentityRole.CANDIDATE.storedName
-        }
+        val active =
+            fixture.dao.identities.value.single {
+                it.role == DeviceIdentityRole.ACTIVE.storedName
+            }
+        val candidate =
+            fixture.dao.identities.value.single {
+                it.role == DeviceIdentityRole.CANDIDATE.storedName
+            }
         assertEquals(activeId, active.id)
         assertEquals("amber-river-maple", active.address)
         assertEquals("silent-forest-cloud", candidate.address)
@@ -273,19 +270,19 @@ class DeviceIdentityRepositoryTest {
             ClaimPairingAddressResult.Claimed,
             fixture.repository.stageAndClaim("amber-river-maple"),
         )
-        val before = (
-            fixture.repository.activeDeviceCredentials() as
-                DeviceCredentialResult.Available<RelayDeviceCredentials>
-            ).value
+        val before =
+            (fixture.repository.activeDeviceCredentials()
+                    as DeviceCredentialResult.Available<RelayDeviceCredentials>)
+                .value
 
         assertEquals(
             ClaimPairingAddressResult.Claimed,
             fixture.repository.stageAndClaim("silent-forest-cloud"),
         )
-        val after = (
-            fixture.repository.activeDeviceCredentials() as
-                DeviceCredentialResult.Available<RelayDeviceCredentials>
-            ).value
+        val after =
+            (fixture.repository.activeDeviceCredentials()
+                    as DeviceCredentialResult.Available<RelayDeviceCredentials>)
+                .value
 
         assertEquals(before.deviceIdentityId, after.deviceIdentityId)
         assertEquals(before.deviceId, after.deviceId)
@@ -309,9 +306,10 @@ class DeviceIdentityRepositoryTest {
     fun `relay authorization does not depend on the device private key`() = runTest {
         val fixture = Fixture(UnconfinedTestDispatcher(testScheduler))
         fixture.repository.stageAndClaim("amber-river-maple")
-        fixture.dao.credentials.value = fixture.dao.credentials.value.filterNot {
-            it.kind == DeviceCredentialKind.DEVICE_PRIVATE_KEY.storedName
-        }
+        fixture.dao.credentials.value =
+            fixture.dao.credentials.value.filterNot {
+                it.kind == DeviceCredentialKind.DEVICE_PRIVATE_KEY.storedName
+            }
 
         val authorization = fixture.repository.activeDeviceAuthorization()
 
@@ -329,22 +327,24 @@ class DeviceIdentityRepositoryTest {
 
         val replacementKeys = FakeEncryptionKeyStore()
         val replacementIds = ArrayDeque(listOf("replacement-secret-key", "replacement-device-key"))
-        val replacementManager = VaultKeyManager(
-            dao = fixture.encryptionMetadata,
-            keyStore = replacementKeys,
-            newKeyId = { replacementIds.removeFirst() },
-            currentTimeMillis = { 999L },
-        )
+        val replacementManager =
+            VaultKeyManager(
+                dao = fixture.encryptionMetadata,
+                keyStore = replacementKeys,
+                newKeyId = { replacementIds.removeFirst() },
+                currentTimeMillis = { 999L },
+            )
         replacementManager.initialize()
-        val restored = DeviceIdentityRepository(
-            dao = fixture.dao,
-            keyManager = replacementManager,
-            encryption = AesGcmEncryption(replacementKeys),
-            relay = fixture.relay,
-            audit = NoOpAuditSink,
-            writeTransaction = ImmediateWriteTransaction,
-            cryptographyDispatcher = UnconfinedTestDispatcher(testScheduler),
-        )
+        val restored =
+            DeviceIdentityRepository(
+                dao = fixture.dao,
+                keyManager = replacementManager,
+                encryption = AesGcmEncryption(replacementKeys),
+                relay = fixture.relay,
+                audit = NoOpAuditSink,
+                writeTransaction = ImmediateWriteTransaction,
+                cryptographyDispatcher = UnconfinedTestDispatcher(testScheduler),
+            )
 
         val configuration = restored.observeConfiguration().first()
 
@@ -361,35 +361,39 @@ class DeviceIdentityRepositoryTest {
 
         val replacementKeys = FakeEncryptionKeyStore()
         val replacementIds = ArrayDeque(listOf("replacement-secret-key", "replacement-device-key"))
-        val replacementManager = VaultKeyManager(
-            dao = fixture.encryptionMetadata,
-            keyStore = replacementKeys,
-            newKeyId = { replacementIds.removeFirst() },
-            currentTimeMillis = { 999L },
-        )
+        val replacementManager =
+            VaultKeyManager(
+                dao = fixture.encryptionMetadata,
+                keyStore = replacementKeys,
+                newKeyId = { replacementIds.removeFirst() },
+                currentTimeMillis = { 999L },
+            )
         replacementManager.initialize()
-        val restored = DeviceIdentityRepository(
-            dao = fixture.dao,
-            keyManager = replacementManager,
-            encryption = AesGcmEncryption(replacementKeys),
-            relay = fixture.relay,
-            audit = NoOpAuditSink,
-            writeTransaction = ImmediateWriteTransaction,
-            currentTimeMillis = { 1_000L },
-            cryptographyDispatcher = UnconfinedTestDispatcher(testScheduler),
-        )
+        val restored =
+            DeviceIdentityRepository(
+                dao = fixture.dao,
+                keyManager = replacementManager,
+                encryption = AesGcmEncryption(replacementKeys),
+                relay = fixture.relay,
+                audit = NoOpAuditSink,
+                writeTransaction = ImmediateWriteTransaction,
+                currentTimeMillis = { 1_000L },
+                cryptographyDispatcher = UnconfinedTestDispatcher(testScheduler),
+            )
 
         assertEquals(
             ClaimPairingAddressResult.Claimed,
             restored.stageAndClaim("silent-forest-cloud"),
         )
 
-        val replacement = fixture.dao.identities.value.single {
-            it.role == DeviceIdentityRole.ACTIVE.storedName
-        }
-        val retired = fixture.dao.identities.value.single {
-            it.role == DeviceIdentityRole.RETIRED.storedName
-        }
+        val replacement =
+            fixture.dao.identities.value.single {
+                it.role == DeviceIdentityRole.ACTIVE.storedName
+            }
+        val retired =
+            fixture.dao.identities.value.single {
+                it.role == DeviceIdentityRole.RETIRED.storedName
+            }
         assertEquals(DeviceIdentityRole.ACTIVE.storedName, replacement.role)
         assertEquals("silent-forest-cloud", replacement.address)
         assertNotEquals(original.id, replacement.id)
@@ -421,40 +425,46 @@ class DeviceIdentityRepositoryTest {
     fun `a replacement mailbox starts with pairing enabled`() = runTest {
         val fixture = Fixture(UnconfinedTestDispatcher(testScheduler))
         fixture.repository.stageAndClaim("amber-river-maple")
-        val original = fixture.dao.identities.value.single().copy(
-            pairingEnabled = false,
-            instructions = "Only approve work requests.",
-        )
+        val original =
+            fixture.dao.identities.value
+                .single()
+                .copy(
+                    pairingEnabled = false,
+                    instructions = "Only approve work requests.",
+                )
         fixture.dao.identities.value = listOf(original)
 
         val replacementKeys = FakeEncryptionKeyStore()
         val replacementIds = ArrayDeque(listOf("replacement-secret-key", "replacement-device-key"))
-        val replacementManager = VaultKeyManager(
-            dao = fixture.encryptionMetadata,
-            keyStore = replacementKeys,
-            newKeyId = { replacementIds.removeFirst() },
-            currentTimeMillis = { 999L },
-        )
+        val replacementManager =
+            VaultKeyManager(
+                dao = fixture.encryptionMetadata,
+                keyStore = replacementKeys,
+                newKeyId = { replacementIds.removeFirst() },
+                currentTimeMillis = { 999L },
+            )
         replacementManager.initialize()
-        val restored = DeviceIdentityRepository(
-            dao = fixture.dao,
-            keyManager = replacementManager,
-            encryption = AesGcmEncryption(replacementKeys),
-            relay = fixture.relay,
-            audit = NoOpAuditSink,
-            writeTransaction = ImmediateWriteTransaction,
-            currentTimeMillis = { 1_000L },
-            cryptographyDispatcher = UnconfinedTestDispatcher(testScheduler),
-        )
+        val restored =
+            DeviceIdentityRepository(
+                dao = fixture.dao,
+                keyManager = replacementManager,
+                encryption = AesGcmEncryption(replacementKeys),
+                relay = fixture.relay,
+                audit = NoOpAuditSink,
+                writeTransaction = ImmediateWriteTransaction,
+                currentTimeMillis = { 1_000L },
+                cryptographyDispatcher = UnconfinedTestDispatcher(testScheduler),
+            )
 
         assertEquals(
             ClaimPairingAddressResult.Claimed,
             restored.stageAndClaim("silent-forest-cloud"),
         )
 
-        val replacement = fixture.dao.identities.value.single {
-            it.role == DeviceIdentityRole.ACTIVE.storedName
-        }
+        val replacement =
+            fixture.dao.identities.value.single {
+                it.role == DeviceIdentityRole.ACTIVE.storedName
+            }
         assertNotEquals(original.deviceId, replacement.deviceId)
         assertTrue(replacement.pairingEnabled)
         assertEquals(original.instructions, replacement.instructions)
@@ -468,23 +478,25 @@ class DeviceIdentityRepositoryTest {
         private var id = 0
         private var time = 100L
         private val keyIds = ArrayDeque(listOf("secret-storage-key", "device-storage-key"))
-        private val keyManager = VaultKeyManager(
-            dao = encryptionMetadata,
-            keyStore = keyStore,
-            newKeyId = { keyIds.removeFirst() },
-            currentTimeMillis = { ++time },
-        )
-        val repository = DeviceIdentityRepository(
-            dao = dao,
-            keyManager = keyManager,
-            encryption = AesGcmEncryption(keyStore),
-            relay = relay,
-            audit = NoOpAuditSink,
-            writeTransaction = ImmediateWriteTransaction,
-            newId = { "id-${++id}" },
-            currentTimeMillis = { ++time },
-            cryptographyDispatcher = dispatcher,
-        )
+        private val keyManager =
+            VaultKeyManager(
+                dao = encryptionMetadata,
+                keyStore = keyStore,
+                newKeyId = { keyIds.removeFirst() },
+                currentTimeMillis = { ++time },
+            )
+        val repository =
+            DeviceIdentityRepository(
+                dao = dao,
+                keyManager = keyManager,
+                encryption = AesGcmEncryption(keyStore),
+                relay = relay,
+                audit = NoOpAuditSink,
+                writeTransaction = ImmediateWriteTransaction,
+                newId = { "id-${++id}" },
+                currentTimeMillis = { ++time },
+                cryptographyDispatcher = dispatcher,
+            )
 
         fun advanceTimeBy(milliseconds: Long) {
             time += milliseconds
@@ -553,16 +565,18 @@ private class FakeDeviceIdentityDao : DeviceIdentityDao {
     override suspend fun getCredential(
         identityId: String,
         kind: String,
-    ): DeviceCredentialEntity? = credentials.value.singleOrNull {
-        it.identityId == identityId && it.kind == kind
-    }
+    ): DeviceCredentialEntity? =
+        credentials.value.singleOrNull {
+            it.identityId == identityId && it.kind == kind
+        }
 
     override suspend fun deleteIdentity(role: String): Int {
         val removed = identities.value.filter { it.role == role }
         identities.value = identities.value.filterNot { it.role == role }
-        credentials.value = credentials.value.filterNot { credential ->
-            removed.any { identity -> identity.id == credential.identityId }
-        }
+        credentials.value =
+            credentials.value.filterNot { credential ->
+                removed.any { identity -> identity.id == credential.identityId }
+            }
         return removed.size
     }
 
@@ -573,7 +587,7 @@ private class FakeDeviceIdentityDao : DeviceIdentityDao {
         check(identities.value.none { it.id == identity.id })
         check(
             identity.role == DeviceIdentityRole.RETIRED.storedName ||
-                identities.value.none { it.role == identity.role },
+                identities.value.none { it.role == identity.role }
         )
         identities.value += identity
     }
@@ -584,7 +598,7 @@ private class FakeDeviceIdentityDao : DeviceIdentityDao {
                 this.credentials.value.any {
                     it.identityId == inserted.identityId && it.kind == inserted.kind
                 }
-            },
+            }
         )
         this.credentials.value += credentials
     }
@@ -595,13 +609,14 @@ private class FakeDeviceIdentityDao : DeviceIdentityDao {
         candidateRole: String,
     ): Int {
         if (identities.value.none { it.id == candidateId && it.role == candidateRole }) return 0
-        identities.value = identities.value.map { identity ->
-            if (identity.id == candidateId && identity.role == candidateRole) {
-                identity.copy(role = activeRole)
-            } else {
-                identity
+        identities.value =
+            identities.value.map { identity ->
+                if (identity.id == candidateId && identity.role == candidateRole) {
+                    identity.copy(role = activeRole)
+                } else {
+                    identity
+                }
             }
-        }
         return 1
     }
 
@@ -611,20 +626,21 @@ private class FakeDeviceIdentityDao : DeviceIdentityDao {
         retiredRole: String,
     ): Int {
         if (identities.value.none { it.id == activeId && it.role == activeRole }) return 0
-        identities.value = identities.value.map { identity ->
-            if (identity.id == activeId && identity.role == activeRole) {
-                identity.copy(
-                    role = retiredRole,
-                    address = "",
-                    deviceId = "",
-                    claimAttemptedAt = null,
-                    pairingEnabled = false,
-                    instructions = "",
-                )
-            } else {
-                identity
+        identities.value =
+            identities.value.map { identity ->
+                if (identity.id == activeId && identity.role == activeRole) {
+                    identity.copy(
+                        role = retiredRole,
+                        address = "",
+                        deviceId = "",
+                        claimAttemptedAt = null,
+                        pairingEnabled = false,
+                        instructions = "",
+                    )
+                } else {
+                    identity
+                }
             }
-        }
         return 1
     }
 
@@ -667,13 +683,14 @@ private class FakeDeviceIdentityDao : DeviceIdentityDao {
         activeRole: String,
     ): Int {
         if (identities.value.none { it.id == activeId && it.role == activeRole }) return 0
-        identities.value = identities.value.map { identity ->
-            if (identity.id == activeId && identity.role == activeRole) {
-                identity.copy(address = address)
-            } else {
-                identity
+        identities.value =
+            identities.value.map { identity ->
+                if (identity.id == activeId && identity.role == activeRole) {
+                    identity.copy(address = address)
+                } else {
+                    identity
+                }
             }
-        }
         return 1
     }
 
@@ -683,13 +700,14 @@ private class FakeDeviceIdentityDao : DeviceIdentityDao {
         candidateRole: String,
     ): Int {
         if (identities.value.none { it.id == candidateId && it.role == candidateRole }) return 0
-        identities.value = identities.value.map { identity ->
-            if (identity.id == candidateId && identity.role == candidateRole) {
-                identity.copy(address = address)
-            } else {
-                identity
+        identities.value =
+            identities.value.map { identity ->
+                if (identity.id == candidateId && identity.role == candidateRole) {
+                    identity.copy(address = address)
+                } else {
+                    identity
+                }
             }
-        }
         return 1
     }
 
@@ -699,28 +717,30 @@ private class FakeDeviceIdentityDao : DeviceIdentityDao {
         candidateRole: String,
     ): Int {
         if (identities.value.none { it.id == candidateId && it.role == candidateRole }) return 0
-        identities.value = identities.value.map { identity ->
-            if (identity.id == candidateId && identity.role == candidateRole) {
-                identity.copy(
-                    pairingEnabled = true,
-                    instructions = instructions,
-                )
-            } else {
-                identity
+        identities.value =
+            identities.value.map { identity ->
+                if (identity.id == candidateId && identity.role == candidateRole) {
+                    identity.copy(
+                        pairingEnabled = true,
+                        instructions = instructions,
+                    )
+                } else {
+                    identity
+                }
             }
-        }
         return 1
     }
 
     override suspend fun updateActiveInstructions(activeRole: String, instructions: String): Int {
         if (identities.value.none { it.role == activeRole }) return 0
-        identities.value = identities.value.map { identity ->
-            if (identity.role == activeRole) {
-                identity.copy(instructions = instructions)
-            } else {
-                identity
+        identities.value =
+            identities.value.map { identity ->
+                if (identity.role == activeRole) {
+                    identity.copy(instructions = instructions)
+                } else {
+                    identity
+                }
             }
-        }
         return 1
     }
 
@@ -730,13 +750,14 @@ private class FakeDeviceIdentityDao : DeviceIdentityDao {
         activeRole: String,
     ): Int {
         if (identities.value.none { it.id == identityId && it.role == activeRole }) return 0
-        identities.value = identities.value.map { identity ->
-            if (identity.id == identityId && identity.role == activeRole) {
-                identity.copy(pairingEnabled = enabled)
-            } else {
-                identity
+        identities.value =
+            identities.value.map { identity ->
+                if (identity.id == identityId && identity.role == activeRole) {
+                    identity.copy(pairingEnabled = enabled)
+                } else {
+                    identity
+                }
             }
-        }
         return 1
     }
 
@@ -747,20 +768,19 @@ private class FakeDeviceIdentityDao : DeviceIdentityDao {
     ): Int {
         if (
             identities.value.none {
-                it.id == candidateId &&
-                    it.role == candidateRole &&
-                    it.claimAttemptedAt == null
+                it.id == candidateId && it.role == candidateRole && it.claimAttemptedAt == null
             }
         ) {
             return 0
         }
-        identities.value = identities.value.map { identity ->
-            if (identity.id == candidateId && identity.role == candidateRole) {
-                identity.copy(claimAttemptedAt = attemptedAt)
-            } else {
-                identity
+        identities.value =
+            identities.value.map { identity ->
+                if (identity.id == candidateId && identity.role == candidateRole) {
+                    identity.copy(claimAttemptedAt = attemptedAt)
+                } else {
+                    identity
+                }
             }
-        }
         return 1
     }
 }

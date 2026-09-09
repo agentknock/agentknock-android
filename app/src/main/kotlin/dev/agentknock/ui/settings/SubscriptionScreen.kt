@@ -2,7 +2,6 @@
 
 package dev.agentknock.ui.settings
 
-import dev.agentknock.subscription.AiReviewAccess
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.Row
@@ -24,18 +23,19 @@ import androidx.compose.material.icons.outlined.WorkspacePremium
 import androidx.compose.material3.Button
 import androidx.compose.material3.CircularProgressIndicator
 import androidx.compose.material3.Icon
+import androidx.compose.material3.LocalContentColor
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.OutlinedButton
 import androidx.compose.material3.Surface
 import androidx.compose.material3.Text
 import androidx.compose.material3.TextButton
-import androidx.compose.material3.LocalContentColor
 import androidx.compose.runtime.Composable
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.semantics.heading
 import androidx.compose.ui.semantics.semantics
 import androidx.compose.ui.unit.dp
+import dev.agentknock.subscription.AiReviewAccess
 import dev.agentknock.subscription.PlaySubscriptionOffer
 import dev.agentknock.subscription.PlaySubscriptionOfferId
 import dev.agentknock.ui.theme.agentknockColors
@@ -63,14 +63,17 @@ internal fun SubscriptionAndBillingScreen(
 
             AccessCard(
                 title = "AI review",
-                status = if (activating) "Activating" else when (state.access) {
-                    AiReviewAccess.ACTIVE -> "Active"
-                    AiReviewAccess.CHECKING -> "Checking"
-                    AiReviewAccess.ACTIVATING -> "Activating"
-                    AiReviewAccess.SETUP_REQUIRED -> "Finish device setup"
-                    AiReviewAccess.INACTIVE -> "Not active"
-                    AiReviewAccess.UNAVAILABLE -> "Status unavailable"
-                },
+                status =
+                    if (activating) "Activating"
+                    else
+                        when (state.access) {
+                            AiReviewAccess.ACTIVE -> "Active"
+                            AiReviewAccess.CHECKING -> "Checking"
+                            AiReviewAccess.ACTIVATING -> "Activating"
+                            AiReviewAccess.SETUP_REQUIRED -> "Finish device setup"
+                            AiReviewAccess.INACTIVE -> "Not active"
+                            AiReviewAccess.UNAVAILABLE -> "Status unavailable"
+                        },
                 highlighted = active,
                 warning = state.access == AiReviewAccess.UNAVAILABLE && !activating,
             ) {
@@ -128,23 +131,26 @@ internal fun SubscriptionAndBillingScreen(
                 state.googlePlayPurchase == GooglePlayPurchaseState.PENDING ->
                     PurchaseStatusCard(
                         title = "Payment pending",
-                        body = if (active) {
-                            "Google Play has not confirmed the payment. Your existing AI access is still active."
-                        } else {
-                            "AI review will activate after Google Play confirms the payment."
-                        },
+                        body =
+                            if (active) {
+                                "Google Play has not confirmed the payment. Your existing AI access is still active."
+                            } else {
+                                "AI review will activate after Google Play confirms the payment."
+                            },
                         icon = { Icon(Icons.Outlined.HourglassTop, contentDescription = null) },
                     )
-                active -> state.googlePlayProductId?.let { productId ->
-                    ManageSubscriptionButton(
-                        onClick = { onManageSubscription(productId) },
-                        enabled = !busy,
-                    )
-                }
+                active ->
+                    state.googlePlayProductId?.let { productId ->
+                        ManageSubscriptionButton(
+                            onClick = { onManageSubscription(productId) },
+                            enabled = !busy,
+                        )
+                    }
                 state.googlePlayPurchase == GooglePlayPurchaseState.PURCHASED -> {
                     PurchaseStatusCard(
                         title = "Subscription needs attention",
-                        body = "Google Play reports a subscription, but AI review access is not active.",
+                        body =
+                            "Google Play reports a subscription, but AI review access is not active.",
                         icon = { Icon(Icons.Outlined.CloudOff, contentDescription = null) },
                     )
                     state.googlePlayProductId?.let { productId ->
@@ -311,11 +317,12 @@ private fun ManageSubscriptionButton(onClick: () -> Unit, enabled: Boolean) {
 /** A store or access status line; [attention] marks a problem the user may need to act on. */
 @Composable
 private fun StoreStatus(text: String, showProgress: Boolean = false, attention: Boolean = false) {
-    val color = if (attention) {
-        MaterialTheme.agentknockColors.attentionAccent
-    } else {
-        MaterialTheme.colorScheme.onSurfaceVariant
-    }
+    val color =
+        if (attention) {
+            MaterialTheme.agentknockColors.attentionAccent
+        } else {
+            MaterialTheme.colorScheme.onSurfaceVariant
+        }
     Row(
         Modifier.fillMaxWidth().padding(vertical = 8.dp),
         horizontalArrangement = Arrangement.spacedBy(12.dp),
@@ -338,16 +345,18 @@ private fun AccessCard(
     warning: Boolean = false,
     content: @Composable () -> Unit,
 ) {
-    val container = when {
-        warning -> MaterialTheme.agentknockColors.attentionContainer
-        highlighted -> MaterialTheme.agentknockColors.successContainer
-        else -> MaterialTheme.colorScheme.surfaceContainerLow
-    }
-    val contentColor = when {
-        warning -> MaterialTheme.agentknockColors.onAttentionContainer
-        highlighted -> MaterialTheme.agentknockColors.onSuccessContainer
-        else -> MaterialTheme.colorScheme.onSurface
-    }
+    val container =
+        when {
+            warning -> MaterialTheme.agentknockColors.attentionContainer
+            highlighted -> MaterialTheme.agentknockColors.successContainer
+            else -> MaterialTheme.colorScheme.surfaceContainerLow
+        }
+    val contentColor =
+        when {
+            warning -> MaterialTheme.agentknockColors.onAttentionContainer
+            highlighted -> MaterialTheme.agentknockColors.onSuccessContainer
+            else -> MaterialTheme.colorScheme.onSurface
+        }
     Surface(
         color = container,
         contentColor = contentColor,
@@ -365,7 +374,9 @@ private fun AccessCard(
                 Icon(
                     Icons.Outlined.AutoAwesome,
                     contentDescription = null,
-                    tint = if (highlighted || warning) LocalContentColor.current else MaterialTheme.colorScheme.primary,
+                    tint =
+                        if (highlighted || warning) LocalContentColor.current
+                        else MaterialTheme.colorScheme.primary,
                 )
                 Column(Modifier.weight(1f)) {
                     Text(
@@ -385,19 +396,25 @@ private fun AccessCard(
 @Composable
 private fun SubscriptionNoticeSurface(notice: SubscriptionNotice) {
     Surface(
-        color = if (notice.successful) {
-            MaterialTheme.agentknockColors.successContainer
-        } else {
-            MaterialTheme.agentknockColors.dangerContainer
-        },
-        contentColor = if (notice.successful) {
-            MaterialTheme.agentknockColors.onSuccessContainer
-        } else {
-            MaterialTheme.agentknockColors.onDangerContainer
-        },
+        color =
+            if (notice.successful) {
+                MaterialTheme.agentknockColors.successContainer
+            } else {
+                MaterialTheme.agentknockColors.dangerContainer
+            },
+        contentColor =
+            if (notice.successful) {
+                MaterialTheme.agentknockColors.onSuccessContainer
+            } else {
+                MaterialTheme.agentknockColors.onDangerContainer
+            },
         shape = MaterialTheme.shapes.large,
         modifier = Modifier.fillMaxWidth(),
     ) {
-        Text(notice.message, style = MaterialTheme.typography.titleMedium, modifier = Modifier.padding(16.dp))
+        Text(
+            notice.message,
+            style = MaterialTheme.typography.titleMedium,
+            modifier = Modifier.padding(16.dp),
+        )
     }
 }

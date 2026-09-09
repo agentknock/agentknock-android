@@ -37,24 +37,27 @@ internal class HttpRelayApprovalReviewClient(
         deviceId: String,
         deviceToken: String,
         request: ApprovalReviewRequest,
-    ): RelayApprovalReviewResult = transport.post(
-        path = "v1/device/$deviceId/review",
-        body = json.encodeToString(request),
-        bearerToken = deviceToken,
-    )
-        .decodeSuccess { encoded ->
-            val value = json.decodeFromString<ApprovalReviewResponse>(encoded)
-            val decision = when (value.decision) {
-                "approve" -> RelayApprovalReviewDecision.APPROVE
-                "deny" -> RelayApprovalReviewDecision.DENY
-                "ask_user" -> RelayApprovalReviewDecision.ASK_USER
-                else -> error("Unknown approval review decision")
+    ): RelayApprovalReviewResult =
+        transport
+            .post(
+                path = "v1/device/$deviceId/review",
+                body = json.encodeToString(request),
+                bearerToken = deviceToken,
+            )
+            .decodeSuccess { encoded ->
+                val value = json.decodeFromString<ApprovalReviewResponse>(encoded)
+                val decision =
+                    when (value.decision) {
+                        "approve" -> RelayApprovalReviewDecision.APPROVE
+                        "deny" -> RelayApprovalReviewDecision.DENY
+                        "ask_user" -> RelayApprovalReviewDecision.ASK_USER
+                        else -> error("Unknown approval review decision")
+                    }
+                require(value.explanation.isNotBlank()) {
+                    "Approval review explanation is empty"
+                }
+                RelayApprovalReview(decision, value.explanation)
             }
-            require(value.explanation.isNotBlank()) {
-                "Approval review explanation is empty"
-            }
-            RelayApprovalReview(decision, value.explanation)
-        }
 }
 
 @Serializable

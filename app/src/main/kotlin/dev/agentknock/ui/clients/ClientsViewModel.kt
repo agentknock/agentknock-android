@@ -6,19 +6,19 @@ import androidx.lifecycle.viewModelScope
 import dev.agentknock.AgentknockActions
 import dev.agentknock.ProtectedActionResult
 import dev.agentknock.relay.RelayClientState
+import dev.agentknock.storage.device.DeviceConfiguration
+import dev.agentknock.storage.device.DeviceManagementResult
+import dev.agentknock.storage.device.DeviceSettingsCoordinator
 import dev.agentknock.storage.request.ClientChangeResult
 import dev.agentknock.storage.request.ClientDetails
 import dev.agentknock.storage.request.ClientSummary
 import dev.agentknock.storage.request.InboxRequestContent
 import dev.agentknock.storage.request.InboxRequestDetails
 import dev.agentknock.storage.request.InboxRequestSummary
-import dev.agentknock.storage.request.PairingState
 import dev.agentknock.storage.request.PairingDecisionResult
-import dev.agentknock.storage.device.DeviceConfiguration
-import dev.agentknock.storage.device.DeviceManagementResult
-import dev.agentknock.storage.device.DeviceSettingsCoordinator
-import dev.agentknock.storage.request.RequestRepository
+import dev.agentknock.storage.request.PairingState
 import dev.agentknock.storage.request.RequestInbox
+import dev.agentknock.storage.request.RequestRepository
 import dev.agentknock.storage.secret.SecretRepository
 import dev.agentknock.storage.secret.TemporaryAccessGrant
 import dev.agentknock.storage.secret.TemporaryAccessOperation
@@ -85,94 +85,101 @@ internal class ClientsViewModel(
     val configuration: StateFlow<DeviceConfiguration?>,
     private val deviceManagement: DeviceSettingsCoordinator,
 ) : ViewModel() {
-    private val selected = MutableStateFlow(
-        savedStateHandle.get<String>(SELECTED_CLIENT)?.let(ClientSelection::Client)
-            ?: savedStateHandle.get<String>(SELECTED_PAIRING)?.let { requestId ->
-                ClientSelection.Pairing(
-                    requestId = requestId,
-                    retainResolved = savedStateHandle[RETAIN_RESOLVED_PAIRING] ?: false,
-                )
-            }
-            ?: ClientSelection.None,
-    )
+    private val selected =
+        MutableStateFlow(
+            savedStateHandle.get<String>(SELECTED_CLIENT)?.let(ClientSelection::Client)
+                ?: savedStateHandle.get<String>(SELECTED_PAIRING)?.let { requestId ->
+                    ClientSelection.Pairing(
+                        requestId = requestId,
+                        retainResolved = savedStateHandle[RETAIN_RESOLVED_PAIRING] ?: false,
+                    )
+                }
+                ?: ClientSelection.None
+        )
     private val messageEvents = Channel<String>(Channel.BUFFERED)
 
     val clients: StateFlow<List<ClientSummary>> = clientSummaries
     val messages: Flow<String> = messageEvents.receiveAsFlow()
-    val pane: StateFlow<ClientPaneState> = selected
-        .flatMapLatest { selection ->
-            when (selection) {
-                ClientSelection.None -> flowOf(ClientPaneState.Empty)
-                is ClientSelection.Client -> combine(
-                    requests.observeClient(selection.clientId),
-                    secrets.observeTemporaryAccessGrants(),
-                ) { details, grants ->
-                    if (details == null) {
-                        ClientPaneState.Missing(selection)
-                    } else {
-                        ClientPaneState.Client(
-                            selection = selection,
-                            details = details,
-                            temporaryAccess = grants.filter { it.clientId == selection.clientId },
-                        )
-                    }
+    val pane: StateFlow<ClientPaneState> =
+        selected
+            .flatMapLatest { selection ->
+                when (selection) {
+                    ClientSelection.None -> flowOf(ClientPaneState.Empty)
+                    is ClientSelection.Client ->
+                        combine(
+                                requests.observeClient(selection.clientId),
+                                secrets.observeTemporaryAccessGrants(),
+                            ) { details, grants ->
+                                if (details == null) {
+                                    ClientPaneState.Missing(selection)
+                                } else {
+                                    ClientPaneState.Client(
+                                        selection = selection,
+                                        details = details,
+                                        temporaryAccess =
+                                            grants.filter { it.clientId == selection.clientId },
+                                    )
+                                }
+                            }
+                            .onStart { emit(ClientPaneState.Loading(selection)) }
+                    is ClientSelection.Pairing ->
+                        inbox
+                            .observeRequest(selection.requestId)
+                            .map { request ->
+                                if (request?.content is InboxRequestContent.Pairing) {
+                                    ClientPaneState.Pairing(selection, request)
+                                } else {
+                                    ClientPaneState.Missing(selection)
+                                }
+                            }
+                            .onStart { emit(ClientPaneState.Loading(selection)) }
                 }
-                    .onStart { emit(ClientPaneState.Loading(selection)) }
-                is ClientSelection.Pairing -> inbox.observeRequest(selection.requestId)
-                    .map { request ->
-                        if (request?.content is InboxRequestContent.Pairing) {
-                            ClientPaneState.Pairing(selection, request)
-                        } else {
-                            ClientPaneState.Missing(selection)
+            }
+            .onEach { pane ->
+                when (pane) {
+                    is ClientPaneState.Missing ->
+                        compareAndSetSelection(pane.selection, ClientSelection.None)
+                    is ClientPaneState.Pairing -> {
+                        val pairing = (pane.request.content as InboxRequestContent.Pairing).details
+                        if (!pane.selection.retainResolved) {
+                            when (pairing.pairingState) {
+                                PairingState.COMPLETED ->
+                                    compareAndSetSelection(
+                                        pane.selection,
+                                        ClientSelection.Client(pairing.clientId),
+                                    )
+                                PairingState.REJECTED ->
+                                    compareAndSetSelection(pane.selection, ClientSelection.None)
+                                else -> Unit
+                            }
                         }
                     }
-                    .onStart { emit(ClientPaneState.Loading(selection)) }
-            }
-        }
-        .onEach { pane ->
-            when (pane) {
-                is ClientPaneState.Missing ->
-                    compareAndSetSelection(pane.selection, ClientSelection.None)
-                is ClientPaneState.Pairing -> {
-                    val pairing = (pane.request.content as InboxRequestContent.Pairing).details
-                    if (!pane.selection.retainResolved) {
-                        when (pairing.pairingState) {
-                            PairingState.COMPLETED -> compareAndSetSelection(
-                                pane.selection,
-                                ClientSelection.Client(pairing.clientId),
-                            )
-                            PairingState.REJECTED ->
-                                compareAndSetSelection(pane.selection, ClientSelection.None)
-                            else -> Unit
-                        }
-                    }
+                    ClientPaneState.Empty,
+                    is ClientPaneState.Loading,
+                    is ClientPaneState.Client -> Unit
                 }
-                ClientPaneState.Empty,
-                is ClientPaneState.Loading,
-                is ClientPaneState.Client,
-                -> Unit
             }
-        }
-        .stateIn(
-            scope = viewModelScope,
-            started = SharingStarted.Eagerly,
-            initialValue = ClientPaneState.Empty,
-        )
-    val pendingPairings: StateFlow<List<InboxRequestSummary>> = requestSummaries
-        .map(List<InboxRequestSummary>::pendingPairings)
-        .stateIn(
-            scope = viewModelScope,
-            started = SharingStarted.WhileSubscribed(READ_MODEL_STOP_TIMEOUT_MILLIS),
-            initialValue = emptyList(),
-        )
+            .stateIn(
+                scope = viewModelScope,
+                started = SharingStarted.Eagerly,
+                initialValue = ClientPaneState.Empty,
+            )
+    val pendingPairings: StateFlow<List<InboxRequestSummary>> =
+        requestSummaries
+            .map(List<InboxRequestSummary>::pendingPairings)
+            .stateIn(
+                scope = viewModelScope,
+                started = SharingStarted.WhileSubscribed(READ_MODEL_STOP_TIMEOUT_MILLIS),
+                initialValue = emptyList(),
+            )
+
     fun selectClient(clientId: String?) {
         setSelection(clientId?.let(ClientSelection::Client) ?: ClientSelection.None)
     }
 
     fun selectPairing(requestId: String?, retainResolved: Boolean = false) {
         setSelection(
-            requestId?.let { ClientSelection.Pairing(it, retainResolved) }
-                ?: ClientSelection.None,
+            requestId?.let { ClientSelection.Pairing(it, retainResolved) } ?: ClientSelection.None
         )
     }
 
@@ -189,8 +196,7 @@ internal class ClientsViewModel(
             when (requests.renameClient(clientId, name.trim())) {
                 ClientChangeResult.CHANGED -> "Client renamed"
                 ClientChangeResult.NOT_FOUND,
-                ClientChangeResult.INVALID_STATE,
-                -> "Client is no longer available"
+                ClientChangeResult.INVALID_STATE -> "Client is no longer available"
             }
         }
     }
@@ -200,8 +206,7 @@ internal class ClientsViewModel(
             when (requests.saveClientInstructions(clientId, instructions)) {
                 ClientChangeResult.CHANGED -> "Instructions updated"
                 ClientChangeResult.NOT_FOUND,
-                ClientChangeResult.INVALID_STATE,
-                -> "Instructions could not be updated"
+                ClientChangeResult.INVALID_STATE -> "Instructions could not be updated"
             }
         }
     }
@@ -219,8 +224,7 @@ internal class ClientsViewModel(
                     state.successMessage()
                 }
                 ClientChangeResult.NOT_FOUND,
-                ClientChangeResult.INVALID_STATE,
-                -> "Client state could not be changed"
+                ClientChangeResult.INVALID_STATE -> "Client state could not be changed"
             }
         }
     }
@@ -295,20 +299,23 @@ internal class ClientsViewModel(
     }
 }
 
-private fun DeviceManagementResult.message(enabled: Boolean): String = when (this) {
-    DeviceManagementResult.Changed -> if (enabled) "New pairings resumed" else "New pairings paused"
-    DeviceManagementResult.NoDevice -> "Device setup is incomplete"
-    DeviceManagementResult.CredentialsUnavailable -> "Device keys are unavailable"
-    DeviceManagementResult.CredentialsCorrupted -> "Device keys could not be verified"
-    DeviceManagementResult.UnsupportedEncryption -> "Device keys use unsupported encryption"
-    is DeviceManagementResult.Rejected -> message ?: "The relay rejected the change"
-    is DeviceManagementResult.Unavailable -> message ?: "The relay is unavailable"
-    DeviceManagementResult.InvalidResponse -> "The relay returned an invalid response"
-}
+private fun DeviceManagementResult.message(enabled: Boolean): String =
+    when (this) {
+        DeviceManagementResult.Changed ->
+            if (enabled) "New pairings resumed" else "New pairings paused"
+        DeviceManagementResult.NoDevice -> "Device setup is incomplete"
+        DeviceManagementResult.CredentialsUnavailable -> "Device keys are unavailable"
+        DeviceManagementResult.CredentialsCorrupted -> "Device keys could not be verified"
+        DeviceManagementResult.UnsupportedEncryption -> "Device keys use unsupported encryption"
+        is DeviceManagementResult.Rejected -> message ?: "The relay rejected the change"
+        is DeviceManagementResult.Unavailable -> message ?: "The relay is unavailable"
+        DeviceManagementResult.InvalidResponse -> "The relay returned an invalid response"
+    }
 
-private fun PairingDecisionResult.message(): String = when (this) {
-    PairingDecisionResult.VERIFIED -> "Verification code confirmed"
-    PairingDecisionResult.REJECTED -> "Pairing rejected"
-    PairingDecisionResult.NOT_PENDING -> "This pairing no longer needs a decision"
-    PairingDecisionResult.NOT_FOUND -> "Request is no longer available"
-}
+private fun PairingDecisionResult.message(): String =
+    when (this) {
+        PairingDecisionResult.VERIFIED -> "Verification code confirmed"
+        PairingDecisionResult.REJECTED -> "Pairing rejected"
+        PairingDecisionResult.NOT_PENDING -> "This pairing no longer needs a decision"
+        PairingDecisionResult.NOT_FOUND -> "Request is no longer available"
+    }

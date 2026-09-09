@@ -14,9 +14,15 @@ import dev.agentknock.storage.secret.SshKeyAlgorithm
 import dev.agentknock.storage.secret.SshKeyMetadata
 import dev.agentknock.storage.secret.SshPrivateKey
 
-internal enum class SshKeyInputMode { GENERATE, IMPORT }
+internal enum class SshKeyInputMode {
+    GENERATE,
+    IMPORT,
+}
 
-internal enum class EditorPhase { EDITING, COMMITTING }
+internal enum class EditorPhase {
+    EDITING,
+    COMMITTING,
+}
 
 internal sealed interface SecretsEditorDraft {
     val containsSensitiveData: Boolean
@@ -34,11 +40,12 @@ internal data class SshKeyDraft(
     val containsPrivateKeyMaterial: Boolean
         get() = privateKeyText.isNotEmpty() || preparedKey != null
 
-    fun withoutPreparation(): SshKeyDraft = copy(
-        preparedKey = null,
-        preparing = false,
-        error = null,
-    )
+    fun withoutPreparation(): SshKeyDraft =
+        copy(
+            preparedKey = null,
+            preparing = false,
+            error = null,
+        )
 }
 
 internal data class SecretEditorState(
@@ -50,8 +57,10 @@ internal data class SecretEditorState(
     val environmentVariables: List<EnvironmentVariableDraft> = listOf(EnvironmentVariableDraft()),
 ) : SecretsEditorDraft {
     override val containsSensitiveData: Boolean
-        get() = sshKeyDraft.containsPrivateKeyMaterial ||
-            (secret == null && environmentVariables.any { it.sensitive && it.value.isNotEmpty() })
+        get() =
+            sshKeyDraft.containsPrivateKeyMaterial ||
+                (secret == null &&
+                    environmentVariables.any { it.sensitive && it.value.isNotEmpty() })
 }
 
 internal data class EnvironmentVariableDraft(
@@ -85,11 +94,12 @@ internal data class VariableEditorState(
         get() = variable?.sensitive == true || sensitive
 
     val valueChanged: Boolean
-        get() = when {
-            variable == null -> true
-            currentValue != null -> value != currentValue
-            else -> valueEdited
-        }
+        get() =
+            when {
+                variable == null -> true
+                currentValue != null -> value != currentValue
+                else -> valueEdited
+            }
 }
 
 @Composable

@@ -25,26 +25,29 @@ class SecretDaoTransactionTest {
 
     @Before
     fun setUp() {
-        database = Room.inMemoryDatabaseBuilder(
-            InstrumentationRegistry.getInstrumentation().targetContext,
-            AgentknockDatabase::class.java,
-        ).build()
+        database =
+            Room.inMemoryDatabaseBuilder(
+                    InstrumentationRegistry.getInstrumentation().targetContext,
+                    AgentknockDatabase::class.java,
+                )
+                .build()
         dao = database.secretDao()
         kotlinx.coroutines.runBlocking {
-            database.vaultKeyDao().activate(
-                VaultKeyEntity(
-                    id = KEY_ID,
-                    purpose = VaultKeyPurpose.SECRET_VALUES.storedName,
-                    active = true,
-                    createdAt = 1,
-                    backing = "SOFTWARE",
-                ),
-            )
+            database
+                .vaultKeyDao()
+                .activate(
+                    VaultKeyEntity(
+                        id = KEY_ID,
+                        purpose = VaultKeyPurpose.SECRET_VALUES.storedName,
+                        active = true,
+                        createdAt = 1,
+                        backing = "SOFTWARE",
+                    )
+                )
         }
     }
 
-    @After
-    fun tearDown() = database.close()
+    @After fun tearDown() = database.close()
 
     @Test
     fun subtypeWritesRequireTheOwningSecretType() = runTest {
@@ -72,14 +75,15 @@ class SecretDaoTransactionTest {
         assertTrue(dao.insertEnvironmentVariableIfCurrent(variable("environment"), 1, 2))
         val stored = checkNotNull(dao.getEnvironmentVariable(VARIABLE_ID))
 
-        val staleUpdate = dao.updateEnvironmentVariableIfCurrent(
-            stored.copy(
-                encryptedValue = encrypted(byteArrayOf(9, 9, 9)),
-                valueUpdatedAt = 3,
-            ),
-            expectedSecretRevision = 1,
-            secretUpdatedAt = 3,
-        )
+        val staleUpdate =
+            dao.updateEnvironmentVariableIfCurrent(
+                stored.copy(
+                    encryptedValue = encrypted(byteArrayOf(9, 9, 9)),
+                    valueUpdatedAt = 3,
+                ),
+                expectedSecretRevision = 1,
+                secretUpdatedAt = 3,
+            )
 
         assertFalse(staleUpdate)
         assertArrayEquals(
@@ -114,38 +118,42 @@ class SecretDaoTransactionTest {
         assertArrayEquals(key.encryptedPrivateKey.ciphertext, stored.encryptedPrivateKey.ciphertext)
     }
 
-    private fun secret(id: String, type: SecretType) = SecretEntity(
-        id = id,
-        name = id,
-        description = "",
-        type = type.storedName,
-        createdAt = 1,
-        updatedAt = 1,
-    )
+    private fun secret(id: String, type: SecretType) =
+        SecretEntity(
+            id = id,
+            name = id,
+            description = "",
+            type = type.storedName,
+            createdAt = 1,
+            updatedAt = 1,
+        )
 
-    private fun variable(secretId: String) = EnvironmentVariableEntity(
-        id = VARIABLE_ID,
-        secretId = secretId,
-        name = "TOKEN",
-        sensitive = true,
-        encryptedValue = encrypted(byteArrayOf(1, 2, 3)),
-        valueUpdatedAt = 2,
-    )
+    private fun variable(secretId: String) =
+        EnvironmentVariableEntity(
+            id = VARIABLE_ID,
+            secretId = secretId,
+            name = "TOKEN",
+            sensitive = true,
+            encryptedValue = encrypted(byteArrayOf(1, 2, 3)),
+            valueUpdatedAt = 2,
+        )
 
-    private fun sshKey(secretId: String) = SshKeyEntity(
-        secretId = secretId,
-        algorithm = SshKeyAlgorithm.ED25519.storedName,
-        publicKey = ByteArray(32) { 4 },
-        comment = "test@example",
-        encryptedPrivateKey = encrypted(byteArrayOf(5, 6, 7)),
-    )
+    private fun sshKey(secretId: String) =
+        SshKeyEntity(
+            secretId = secretId,
+            algorithm = SshKeyAlgorithm.ED25519.storedName,
+            publicKey = ByteArray(32) { 4 },
+            comment = "test@example",
+            encryptedPrivateKey = encrypted(byteArrayOf(5, 6, 7)),
+        )
 
-    private fun encrypted(ciphertext: ByteArray) = EncryptedValue(
-        formatVersion = 1,
-        keyId = KEY_ID,
-        nonce = ByteArray(12) { 8 },
-        ciphertext = ciphertext,
-    )
+    private fun encrypted(ciphertext: ByteArray) =
+        EncryptedValue(
+            formatVersion = 1,
+            keyId = KEY_ID,
+            nonce = ByteArray(12) { 8 },
+            ciphertext = ciphertext,
+        )
 
     private companion object {
         const val KEY_ID = "secret-values-key"

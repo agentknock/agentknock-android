@@ -23,17 +23,17 @@ internal class DeviceAuthenticator(
     private var biometricPrompt: BiometricPrompt? = null
     private var legacyRequestId: Long? = null
 
-    private val deviceCredentialLauncher = activity.registerForActivityResult(
-        ActivityResultContracts.StartActivityForResult(),
-    ) { result ->
-        val requestId = legacyRequestId ?: return@registerForActivityResult
-        legacyRequestId = null
-        if (result.resultCode == Activity.RESULT_OK) {
-            completeSuccessfully(requestId)
-        } else {
-            completeWithError(requestId, "Authentication was cancelled")
+    private val deviceCredentialLauncher =
+        activity.registerForActivityResult(ActivityResultContracts.StartActivityForResult()) {
+            result ->
+            val requestId = legacyRequestId ?: return@registerForActivityResult
+            legacyRequestId = null
+            if (result.resultCode == Activity.RESULT_OK) {
+                completeSuccessfully(requestId)
+            } else {
+                completeWithError(requestId, "Authentication was cancelled")
+            }
         }
-    }
 
     fun bind(request: DeviceAuthenticationRequest?) {
         if (Build.VERSION.SDK_INT < Build.VERSION_CODES.R) {
@@ -74,27 +74,30 @@ internal class DeviceAuthenticator(
         }
     }
 
-    private fun biometricPrompt(requestId: Long): BiometricPrompt = BiometricPrompt(
-        activity,
-        ContextCompat.getMainExecutor(activity),
-        object : BiometricPrompt.AuthenticationCallback() {
-            override fun onAuthenticationSucceeded(
-                result: BiometricPrompt.AuthenticationResult,
-            ) {
-                completeSuccessfully(requestId)
-            }
+    private fun biometricPrompt(requestId: Long): BiometricPrompt =
+        BiometricPrompt(
+            activity,
+            ContextCompat.getMainExecutor(activity),
+            object : BiometricPrompt.AuthenticationCallback() {
+                override fun onAuthenticationSucceeded(
+                    result: BiometricPrompt.AuthenticationResult
+                ) {
+                    completeSuccessfully(requestId)
+                }
 
-            override fun onAuthenticationError(errorCode: Int, errString: CharSequence) {
-                completeWithError(requestId, errString.toString())
-            }
-        },
-    )
+                override fun onAuthenticationError(errorCode: Int, errString: CharSequence) {
+                    completeWithError(requestId, errString.toString())
+                }
+            },
+        )
 
     private fun authenticateWithBiometricPrompt(request: DeviceAuthenticationRequest) {
-        val authenticators = BiometricManager.Authenticators.BIOMETRIC_STRONG or
-            BiometricManager.Authenticators.DEVICE_CREDENTIAL
-        if (BiometricManager.from(activity).canAuthenticate(authenticators) !=
-            BiometricManager.BIOMETRIC_SUCCESS
+        val authenticators =
+            BiometricManager.Authenticators.BIOMETRIC_STRONG or
+                BiometricManager.Authenticators.DEVICE_CREDENTIAL
+        if (
+            BiometricManager.from(activity).canAuthenticate(authenticators) !=
+                BiometricManager.BIOMETRIC_SUCCESS
         ) {
             completeWithError(
                 request.id,
@@ -113,7 +116,7 @@ internal class DeviceAuthenticator(
                 .setTitle(request.title)
                 .setAllowedAuthenticators(authenticators)
                 .setConfirmationRequired(true)
-                .build(),
+                .build()
         )
     }
 
@@ -127,10 +130,11 @@ internal class DeviceAuthenticator(
             )
             return
         }
-        val intent = keyguardManager.createConfirmDeviceCredentialIntent(
-            request.title,
-            "Confirm your screen lock to continue",
-        )
+        val intent =
+            keyguardManager.createConfirmDeviceCredentialIntent(
+                request.title,
+                "Confirm your screen lock to continue",
+            )
         if (intent == null) {
             completeWithError(request.id, "Device authentication is unavailable")
             return
@@ -156,6 +160,7 @@ internal data class DeviceAuthenticationRequest(
 
 internal sealed interface DeviceAuthenticationResult {
     data object Success : DeviceAuthenticationResult
+
     data class Error(val message: String) : DeviceAuthenticationResult
 }
 
@@ -175,17 +180,17 @@ internal class DeviceAuthenticationCoordinator {
 
     suspend fun authenticate(title: String): DeviceAuthenticationResult {
         if (pending != null) {
-            return DeviceAuthenticationResult.Error(
-                "Another authentication is already in progress",
-            )
+            return DeviceAuthenticationResult.Error("Another authentication is already in progress")
         }
-        val attempt = Pending(
-            request = DeviceAuthenticationRequest(
-                id = ++nextRequestId,
-                title = title,
-            ),
-            result = CompletableDeferred(),
-        )
+        val attempt =
+            Pending(
+                request =
+                    DeviceAuthenticationRequest(
+                        id = ++nextRequestId,
+                        title = title,
+                    ),
+                result = CompletableDeferred(),
+            )
         pending = attempt
         _request.value = attempt.request
         return try {

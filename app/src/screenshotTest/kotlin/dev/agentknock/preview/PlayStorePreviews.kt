@@ -10,72 +10,88 @@ import com.android.tools.screenshot.PreviewTest
 
 @PreviewTest
 @Preview(
-    name = "Play Store", group = "invocation",
+    name = "Play Store",
+    group = "invocation",
     device = "spec:width=1080px,height=1920px,dpi=400",
-    locale = "en", uiMode = Configuration.UI_MODE_NIGHT_YES,
+    locale = "en",
+    uiMode = Configuration.UI_MODE_NIGHT_YES,
 )
 @Composable
 fun InvocationPlayStorePreview() = InvocationDarkPreview()
 
 @PreviewTest
 @Preview(
-    name = "Play Store", group = "secrets",
+    name = "Play Store",
+    group = "secrets",
     device = "spec:width=1080px,height=1920px,dpi=400",
-    locale = "en", uiMode = Configuration.UI_MODE_NIGHT_YES,
+    locale = "en",
+    uiMode = Configuration.UI_MODE_NIGHT_YES,
 )
 @Composable
 fun SecretsPlayStorePreview() = SecretsDarkPreview()
 
 @PreviewTest
 @Preview(
-    name = "Play Store", group = "git-sign",
+    name = "Play Store",
+    group = "git-sign",
     device = "spec:width=1080px,height=1920px,dpi=400",
-    locale = "en", uiMode = Configuration.UI_MODE_NIGHT_YES,
+    locale = "en",
+    uiMode = Configuration.UI_MODE_NIGHT_YES,
 )
 @Composable
 fun GitSignPlayStorePreview() = GitSignDarkPreview()
 
 @PreviewTest
 @Preview(
-    name = "Play Store", group = "ssh-authentication",
+    name = "Play Store",
+    group = "ssh-authentication",
     device = "spec:width=1080px,height=1920px,dpi=400",
-    locale = "en", uiMode = Configuration.UI_MODE_NIGHT_YES,
+    locale = "en",
+    uiMode = Configuration.UI_MODE_NIGHT_YES,
 )
 @Composable
 fun SshAuthenticationPlayStorePreview() = SshAuthenticationDarkPreview()
 
 @PreviewTest
 @Preview(
-    name = "Play Store", group = "secret-detail",
+    name = "Play Store",
+    group = "secret-detail",
     device = "spec:width=1080px,height=1920px,dpi=400",
-    locale = "en", uiMode = Configuration.UI_MODE_NIGHT_YES,
+    locale = "en",
+    uiMode = Configuration.UI_MODE_NIGHT_YES,
 )
 @Composable
 fun SecretDetailPlayStorePreview() = SecretDetailDarkPreview()
 
 @PreviewTest
 @Preview(
-    name = "Play Store", group = "client-detail",
+    name = "Play Store",
+    group = "client-detail",
     device = "spec:width=1080px,height=1920px,dpi=400",
-    locale = "en", uiMode = Configuration.UI_MODE_NIGHT_YES,
+    locale = "en",
+    uiMode = Configuration.UI_MODE_NIGHT_YES,
 )
 @Composable
 fun ClientDetailPlayStorePreview() = ClientDetailDarkPreview()
 
 @PreviewTest
 @Preview(
-    name = "Play Store", group = "pairing",
+    name = "Play Store",
+    group = "pairing",
     device = "spec:width=1080px,height=1920px,dpi=400",
-    locale = "en", uiMode = Configuration.UI_MODE_NIGHT_YES,
+    locale = "en",
+    uiMode = Configuration.UI_MODE_NIGHT_YES,
 )
 @Composable
 fun PairingPlayStorePreview() = PairingDarkPreview()
 
 @PreviewTest
 @Preview(
-    name = "Play Store", group = "audit",
+    name = "Play Store",
+    group = "audit",
     device = "spec:width=1080px,height=1920px,dpi=400",
-    locale = "en", uiMode = Configuration.UI_MODE_NIGHT_YES,
+    locale = "en",
+    uiMode = Configuration.UI_MODE_NIGHT_YES,
 )
 @Composable
 fun AuditPlayStorePreview() = AuditDarkPreview()

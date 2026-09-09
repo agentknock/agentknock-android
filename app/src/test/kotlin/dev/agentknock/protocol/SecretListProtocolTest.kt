@@ -13,37 +13,38 @@ class SecretListProtocolTest {
         assertEquals(
             SecretListRequestMessage(testClientSoftware()),
             protocol.decodeRequest(
-                """{${testClientSoftwareFields()},"method":"SecretList"}"""
-                    .encodeToByteArray(),
+                """{${testClientSoftwareFields()},"method":"SecretList"}""".encodeToByteArray()
             ),
         )
         assertEquals(
             testClientSoftware(),
-            protocol.decodeCompletion(
-                """{${testClientSoftwareFields()}}""".encodeToByteArray(),
-            ),
+            protocol.decodeCompletion("""{${testClientSoftwareFields()}}""".encodeToByteArray()),
         )
     }
 
     @Test
     fun `encodes secret metadata without stored values`() {
-        val response = protocol.response(
-            sortedMapOf(
-                "aws-read-only" to SecretListSecret(
-                    description = "Read production logs",
-                    type = "environment",
-                    environmentVariableNames = listOf(
-                        "AWS_ACCESS_KEY_ID",
-                        "AWS_SECRET_ACCESS_KEY",
-                    ),
-                ),
-                "empty" to SecretListSecret(
-                    description = "No variables yet",
-                    type = "environment",
-                    environmentVariableNames = emptyList(),
-                ),
-            ),
-        )
+        val response =
+            protocol.response(
+                sortedMapOf(
+                    "aws-read-only" to
+                        SecretListSecret(
+                            description = "Read production logs",
+                            type = "environment",
+                            environmentVariableNames =
+                                listOf(
+                                    "AWS_ACCESS_KEY_ID",
+                                    "AWS_SECRET_ACCESS_KEY",
+                                ),
+                        ),
+                    "empty" to
+                        SecretListSecret(
+                            description = "No variables yet",
+                            type = "environment",
+                            environmentVariableNames = emptyList(),
+                        ),
+                )
+            )
 
         assertEquals(
             json.parseToJsonElement(
@@ -62,7 +63,8 @@ class SecretListProtocolTest {
                     }
                   }
                 }
-                """.trimIndent(),
+                """
+                    .trimIndent()
             ),
             json.parseToJsonElement(response.decodeToString()),
         )
@@ -70,18 +72,21 @@ class SecretListProtocolTest {
 
     @Test
     fun `encodes an SSH public key separately from environment variables`() {
-        val response = protocol.response(
-            mapOf(
-                "production-ssh" to SecretListSecret(
-                    description = "Production host access",
-                    type = "ssh",
-                    sshPublicKey = "ssh-ed25519 AAAAC3NzaC1lZDI1NTE5AAAAIEexample user@host",
-                ),
-            ),
-        )
+        val response =
+            protocol.response(
+                mapOf(
+                    "production-ssh" to
+                        SecretListSecret(
+                            description = "Production host access",
+                            type = "ssh",
+                            sshPublicKey =
+                                "ssh-ed25519 AAAAC3NzaC1lZDI1NTE5AAAAIEexample user@host",
+                        )
+                )
+            )
         assertEquals(
             json.parseToJsonElement(
-                """{"secrets":{"production-ssh":{"description":"Production host access","type":"ssh","public_key":"ssh-ed25519 AAAAC3NzaC1lZDI1NTE5AAAAIEexample user@host"}}}""",
+                """{"secrets":{"production-ssh":{"description":"Production host access","type":"ssh","public_key":"ssh-ed25519 AAAAC3NzaC1lZDI1NTE5AAAAIEexample user@host"}}}"""
             ),
             json.parseToJsonElement(response.decodeToString()),
         )

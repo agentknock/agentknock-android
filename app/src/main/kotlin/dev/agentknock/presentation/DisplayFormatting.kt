@@ -21,12 +21,13 @@ private fun Long.relativeUnit(unit: String): String =
 
 internal fun formatParentRequestAge(parentReceivedAt: Long, receivedAt: Long): String {
     val elapsed = Duration.ofMillis((receivedAt - parentReceivedAt).coerceAtLeast(0))
-    val (count, unit) = when {
-        elapsed.toMinutes() < 1 -> return "Parent request received less than a minute earlier"
-        elapsed.toHours() < 1 -> elapsed.toMinutes() to "minute"
-        elapsed.toDays() < 1 -> elapsed.toHours() to "hour"
-        else -> elapsed.toDays() to "day"
-    }
+    val (count, unit) =
+        when {
+            elapsed.toMinutes() < 1 -> return "Parent request received less than a minute earlier"
+            elapsed.toHours() < 1 -> elapsed.toMinutes() to "minute"
+            elapsed.toDays() < 1 -> elapsed.toHours() to "hour"
+            else -> elapsed.toDays() to "day"
+        }
     return "Parent request received $count $unit${if (count == 1L) "" else "s"} earlier"
 }
 
@@ -40,28 +41,31 @@ internal fun renderSingleLineText(value: String): String = buildString {
                 '\n' -> "\\n"
                 '\r' -> "\\r"
                 '\t' -> "\\t"
-                else -> when {
-                    character.code < 0x20 || character.code == 0x7f ->
-                        "\\x${character.code.toString(16).padStart(2, '0')}"
-                    Character.getType(character) == Character.FORMAT.toInt() ->
-                        "\\u${character.code.toString(16).padStart(4, '0')}"
-                    else -> character.toString()
-                }
-            },
+                else ->
+                    when {
+                        character.code < 0x20 || character.code == 0x7f ->
+                            "\\x${character.code.toString(16).padStart(2, '0')}"
+                        Character.getType(character) == Character.FORMAT.toInt() ->
+                            "\\u${character.code.toString(16).padStart(4, '0')}"
+                        else -> character.toString()
+                    }
+            }
         )
     }
 }
 
-internal fun formatPlatformName(platform: String): String = when (platform.lowercase(Locale.ROOT)) {
-    "android" -> "Android"
-    "darwin", "macos" -> "macOS"
-    "freebsd" -> "FreeBSD"
-    "ios" -> "iOS"
-    "linux" -> "Linux"
-    "openbsd" -> "OpenBSD"
-    "windows" -> "Windows"
-    else -> platform
-}
+internal fun formatPlatformName(platform: String): String =
+    when (platform.lowercase(Locale.ROOT)) {
+        "android" -> "Android"
+        "darwin",
+        "macos" -> "macOS"
+        "freebsd" -> "FreeBSD"
+        "ios" -> "iOS"
+        "linux" -> "Linux"
+        "openbsd" -> "OpenBSD"
+        "windows" -> "Windows"
+        else -> platform
+    }
 
 internal data class GitSigningContent(
     val requestTitle: String,
@@ -73,36 +77,45 @@ internal data class GitSigningContent(
 )
 
 internal fun describeGitSigningContent(content: ByteArray): GitSigningContent {
-    val text = runCatching { content.decodeToString(throwOnInvalidSequence = true) }
-        .getOrNull()
-        ?.takeIf { value ->
-            value.all { character ->
-                character == '\n' || character == '\r' || character == '\t' ||
-                    !character.isISOControl()
-            }
-        }
-        ?: return GitSigningContent("Git signature", null, null)
+    val text =
+        runCatching { content.decodeToString(throwOnInvalidSequence = true) }
+            .getOrNull()
+            ?.takeIf { value ->
+                value.all { character ->
+                    character == '\n' ||
+                        character == '\r' ||
+                        character == '\t' ||
+                        !character.isISOControl()
+                }
+            } ?: return GitSigningContent("Git signature", null, null)
     val header = text.substringBefore("\n\n")
-    val message = text.substringAfter("\n\n", missingDelimiterValue = "")
-        .trimEnd()
-        .takeIf(String::isNotEmpty)
+    val message =
+        text.substringAfter("\n\n", missingDelimiterValue = "").trimEnd().takeIf(String::isNotEmpty)
     val headerLines = header.lineSequence().toList()
     // These identities come from the bytes to sign, not the client's repository metadata.
     val identities = headerLines.mapNotNull { line ->
-        val label = when (line.substringBefore(' ')) {
-            "author" -> "Author"
-            "committer" -> "Committer"
-            "tagger" -> "Tagger"
-            else -> return@mapNotNull null
-        }
+        val label =
+            when (line.substringBefore(' ')) {
+                "author" -> "Author"
+                "committer" -> "Committer"
+                "tagger" -> "Tagger"
+                else -> return@mapNotNull null
+            }
         val value = line.substringAfter(' ')
-        val identity = Regex("^(.* <.*>) -?[0-9]+ [+-][0-9]{4}$")
-            .matchEntire(value)?.groupValues?.get(1) ?: value
+        val identity =
+            Regex("^(.* <.*>) -?[0-9]+ [+-][0-9]{4}$").matchEntire(value)?.groupValues?.get(1)
+                ?: value
         label to identity
     }
     return when {
         headerLines.firstOrNull()?.startsWith("tree ") == true ->
-            GitSigningContent("Git commit signature", "Commit message", message, identities, "Commit")
+            GitSigningContent(
+                "Git commit signature",
+                "Commit message",
+                message,
+                identities,
+                "Commit",
+            )
         headerLines.firstOrNull()?.startsWith("object ") == true &&
             headerLines.any { it.startsWith("type ") } &&
             headerLines.any { it.startsWith("tag ") } ->
@@ -111,34 +124,42 @@ internal fun describeGitSigningContent(content: ByteArray): GitSigningContent {
     }
 }
 
-internal fun renderShellWord(value: String): String = when {
-    value.isEmpty() -> "''"
-    unquotedShellWord.matches(value) -> value
-    value.any {
-        it == '\n' || it == '\r' || it == '\t' || it.code < 0x20 || it.code == 0x7f ||
-            Character.getType(it) == Character.FORMAT.toInt()
-    } ->
-        buildString {
-            append("$'")
-            value.forEach { character ->
-                append(
-                    when (character) {
-                        '\\' -> "\\\\"
-                        '\'' -> "\\'"
-                        '\n' -> "\\n"
-                        '\r' -> "\\r"
-                        '\t' -> "\\t"
-                        else -> if (character.code < 0x20 || character.code == 0x7f) {
-                            "\\x${character.code.toString(16).padStart(2, '0')}"
-                        } else if (Character.getType(character) == Character.FORMAT.toInt()) {
-                            "\\u${character.code.toString(16).padStart(4, '0')}"
-                        } else {
-                            character
+internal fun renderShellWord(value: String): String =
+    when {
+        value.isEmpty() -> "''"
+        unquotedShellWord.matches(value) -> value
+        value.any {
+            it == '\n' ||
+                it == '\r' ||
+                it == '\t' ||
+                it.code < 0x20 ||
+                it.code == 0x7f ||
+                Character.getType(it) == Character.FORMAT.toInt()
+        } ->
+            buildString {
+                append("$'")
+                value.forEach { character ->
+                    append(
+                        when (character) {
+                            '\\' -> "\\\\"
+                            '\'' -> "\\'"
+                            '\n' -> "\\n"
+                            '\r' -> "\\r"
+                            '\t' -> "\\t"
+                            else ->
+                                if (character.code < 0x20 || character.code == 0x7f) {
+                                    "\\x${character.code.toString(16).padStart(2, '0')}"
+                                } else if (
+                                    Character.getType(character) == Character.FORMAT.toInt()
+                                ) {
+                                    "\\u${character.code.toString(16).padStart(4, '0')}"
+                                } else {
+                                    character
+                                }
                         }
-                    },
-                )
+                    )
+                }
+                append('\'')
             }
-            append('\'')
-        }
-    else -> "'${value.replace("'", "'\"'\"'")}'"
-}
+        else -> "'${value.replace("'", "'\"'\"'")}'"
+    }

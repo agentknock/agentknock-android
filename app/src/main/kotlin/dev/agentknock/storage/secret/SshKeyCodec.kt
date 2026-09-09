@@ -27,8 +27,7 @@ internal enum class SshKeyAlgorithm(
     val publicName: String,
 ) {
     ED25519("ed25519", "ssh-ed25519"),
-    RSA("rsa", "ssh-rsa"),
-    ;
+    RSA("rsa", "ssh-rsa");
 
     companion object {
         fun fromStoredName(name: String): SshKeyAlgorithm? = entries.find { it.storedName == name }
@@ -67,40 +66,43 @@ internal data class SshPublicKey(
         }
 
     val fingerprint: String
-        get() = "SHA256:" + Base64.getEncoder().withoutPadding().encodeToString(
-            MessageDigest.getInstance("SHA-256").digest(blob()),
-        )
+        get() =
+            "SHA256:" +
+                Base64.getEncoder()
+                    .withoutPadding()
+                    .encodeToString(MessageDigest.getInstance("SHA-256").digest(blob()))
 
     val fingerprintHex: String
-        get() = MessageDigest.getInstance("SHA-256").digest(blob()).joinToString(":") { byte ->
-            FINGERPRINT_HEX[(byte.toInt() ushr 4) and 0xf].toString() +
-                FINGERPRINT_HEX[byte.toInt() and 0xf]
-        }
-
-    fun blob(): ByteArray = ByteArrayOutputStream().use { bytes ->
-        DataOutputStream(bytes).use { output ->
-            val algorithmBytes = algorithm.publicName.encodeToByteArray()
-            output.writeInt(algorithmBytes.size)
-            output.write(algorithmBytes)
-            when (algorithm) {
-                SshKeyAlgorithm.ED25519 -> {
-                    output.writeInt(publicKey.size)
-                    output.write(publicKey)
-                }
-                SshKeyAlgorithm.RSA -> output.write(publicKey)
+        get() =
+            MessageDigest.getInstance("SHA-256").digest(blob()).joinToString(":") { byte ->
+                FINGERPRINT_HEX[(byte.toInt() ushr 4) and 0xf].toString() +
+                    FINGERPRINT_HEX[byte.toInt() and 0xf]
             }
+
+    fun blob(): ByteArray =
+        ByteArrayOutputStream().use { bytes ->
+            DataOutputStream(bytes).use { output ->
+                val algorithmBytes = algorithm.publicName.encodeToByteArray()
+                output.writeInt(algorithmBytes.size)
+                output.write(algorithmBytes)
+                when (algorithm) {
+                    SshKeyAlgorithm.ED25519 -> {
+                        output.writeInt(publicKey.size)
+                        output.write(publicKey)
+                    }
+                    SshKeyAlgorithm.RSA -> output.write(publicKey)
+                }
+            }
+            bytes.toByteArray()
         }
-        bytes.toByteArray()
-    }
 }
 
-internal class SshKeyCodec(
-    private val secureRandom: SecureRandom = SecureRandom(),
-) {
-    fun bitLength(publicKey: SshPublicKey): Int = when (publicKey.algorithm) {
-        SshKeyAlgorithm.ED25519 -> ED25519_PUBLIC_KEY_BYTES * 8
-        SshKeyAlgorithm.RSA -> parseRsaPublicKey(publicKey.publicKey).modulus.bitLength()
-    }
+internal class SshKeyCodec(private val secureRandom: SecureRandom = SecureRandom()) {
+    fun bitLength(publicKey: SshPublicKey): Int =
+        when (publicKey.algorithm) {
+            SshKeyAlgorithm.ED25519 -> ED25519_PUBLIC_KEY_BYTES * 8
+            SshKeyAlgorithm.RSA -> parseRsaPublicKey(publicKey.publicKey).modulus.bitLength()
+        }
 
     fun generateEd25519(comment: String): SshPrivateKey {
         validateComment(comment)
@@ -115,11 +117,15 @@ internal class SshKeyCodec(
 
     fun generateRsa(comment: String): SshPrivateKey {
         validateComment(comment)
-        val pair = KeyPairGenerator.getInstance(RSA).apply {
-            initialize(GENERATED_RSA_BITS, secureRandom)
-        }.generateKeyPair()
-        val privateKey = pair.private as? RSAPrivateCrtKey
-            ?: throw IllegalStateException("RSA key generation returned an unsupported key")
+        val pair =
+            KeyPairGenerator.getInstance(RSA)
+                .apply {
+                    initialize(GENERATED_RSA_BITS, secureRandom)
+                }
+                .generateKeyPair()
+        val privateKey =
+            pair.private as? RSAPrivateCrtKey
+                ?: throw IllegalStateException("RSA key generation returned an unsupported key")
         val publicKey = encodeRsaPublicKey(privateKey.publicExponent, privateKey.modulus)
         return fromStored(
             algorithm = SshKeyAlgorithm.RSA.storedName,
@@ -156,14 +162,16 @@ internal class SshKeyCodec(
         privateKey: ByteArray,
         publicKey: ByteArray,
         comment: String,
-    ): SshPrivateKey = fromStored(
-        algorithm = requireNotNull(SshKeyAlgorithm.fromStoredName(algorithm)) {
-            "Unsupported SSH key algorithm"
-        },
-        privateKey = privateKey,
-        publicKey = publicKey,
-        comment = comment,
-    )
+    ): SshPrivateKey =
+        fromStored(
+            algorithm =
+                requireNotNull(SshKeyAlgorithm.fromStoredName(algorithm)) {
+                    "Unsupported SSH key algorithm"
+                },
+            privateKey = privateKey,
+            publicKey = publicKey,
+            comment = comment,
+        )
 
     fun fromStored(
         algorithm: SshKeyAlgorithm,
@@ -191,9 +199,10 @@ internal class SshKeyCodec(
                 validateRsaPrivateKey(private)
                 val public = parseRsaPublicKey(publicKey)
                 require(
-                    private.publicExponent == public.exponent &&
-                        private.modulus == public.modulus
-                ) { "The SSH public key does not match its private key" }
+                    private.publicExponent == public.exponent && private.modulus == public.modulus
+                ) {
+                    "The SSH public key does not match its private key"
+                }
             }
         }
         return SshPrivateKey(algorithm, privateKey.copyOf(), publicKey.copyOf(), comment)
@@ -203,13 +212,15 @@ internal class SshKeyCodec(
         algorithm: String,
         publicKey: ByteArray,
         comment: String,
-    ): SshPublicKey = publicKey(
-        algorithm = requireNotNull(SshKeyAlgorithm.fromStoredName(algorithm)) {
-            "Unsupported SSH key algorithm"
-        },
-        publicKey = publicKey,
-        comment = comment,
-    )
+    ): SshPublicKey =
+        publicKey(
+            algorithm =
+                requireNotNull(SshKeyAlgorithm.fromStoredName(algorithm)) {
+                    "Unsupported SSH key algorithm"
+                },
+            publicKey = publicKey,
+            comment = comment,
+        )
 
     fun publicKey(
         algorithm: SshKeyAlgorithm,
@@ -217,9 +228,10 @@ internal class SshKeyCodec(
         comment: String,
     ): SshPublicKey {
         when (algorithm) {
-            SshKeyAlgorithm.ED25519 -> require(publicKey.size == ED25519_PUBLIC_KEY_BYTES) {
-                "Invalid Ed25519 public key"
-            }
+            SshKeyAlgorithm.ED25519 ->
+                require(publicKey.size == ED25519_PUBLIC_KEY_BYTES) {
+                    "Invalid Ed25519 public key"
+                }
             SshKeyAlgorithm.RSA -> parseRsaPublicKey(publicKey)
         }
         validateComment(comment)
@@ -230,29 +242,38 @@ internal class SshKeyCodec(
         require(value.length <= MAX_PUBLIC_KEY_LINE_CHARS) { "OpenSSH public key is too large" }
         val fields = value.trim().split(Regex("\\s+"), limit = 3)
         require(fields.size >= 2) { "Invalid OpenSSH public key" }
-        val algorithm = requireNotNull(SshKeyAlgorithm.fromPublicName(fields[0])) {
-            "Unsupported SSH public key algorithm"
-        }
+        val algorithm =
+            requireNotNull(SshKeyAlgorithm.fromPublicName(fields[0])) {
+                "Unsupported SSH public key algorithm"
+            }
         require(fields[1].length <= MAX_PUBLIC_BLOB_BASE64_CHARS) {
             "OpenSSH public key is too large"
         }
-        val blob = runCatching { Base64.getDecoder().decode(fields[1]) }
+        val blob = runCatching {
+            Base64.getDecoder().decode(fields[1])
+        }
             .getOrElse { throw IllegalArgumentException("Invalid OpenSSH public key", it) }
         require(blob.size <= MAX_PUBLIC_BLOB_BYTES) { "OpenSSH public key is too large" }
-        val parsed = DataInputStream(ByteArrayInputStream(blob)).use { input ->
-            require(input.readSshString(MAX_ALGORITHM_BYTES, "public key algorithm") == algorithm.publicName) {
-                "OpenSSH public key algorithm does not match its blob"
+        val parsed =
+            DataInputStream(ByteArrayInputStream(blob)).use { input ->
+                require(
+                    input.readSshString(MAX_ALGORITHM_BYTES, "public key algorithm") ==
+                        algorithm.publicName
+                ) {
+                    "OpenSSH public key algorithm does not match its blob"
+                }
+                val publicKey =
+                    when (algorithm) {
+                        SshKeyAlgorithm.ED25519 ->
+                            input.readSshBytes(
+                                ED25519_PUBLIC_KEY_BYTES,
+                                "Ed25519 public key",
+                            )
+                        SshKeyAlgorithm.RSA -> input.readBytes()
+                    }
+                require(input.available() == 0) { "Unexpected data after the OpenSSH public key" }
+                publicKey(algorithm.storedName, publicKey, fields.getOrElse(2) { "" })
             }
-            val publicKey = when (algorithm) {
-                SshKeyAlgorithm.ED25519 -> input.readSshBytes(
-                    ED25519_PUBLIC_KEY_BYTES,
-                    "Ed25519 public key",
-                )
-                SshKeyAlgorithm.RSA -> input.readBytes()
-            }
-            require(input.available() == 0) { "Unexpected data after the OpenSSH public key" }
-            publicKey(algorithm.storedName, publicKey, fields.getOrElse(2) { "" })
-        }
         require(MessageDigest.isEqual(parsed.blob(), blob)) { "Invalid OpenSSH public key" }
         return parsed
     }
@@ -261,66 +282,71 @@ internal class SshKeyCodec(
         privateKey: SshPrivateKey,
         message: ByteArray,
     ): String {
-        val validated = fromStored(
-            privateKey.algorithm.storedName,
-            privateKey.privateKey,
-            privateKey.publicKey,
-            privateKey.comment,
-        )
+        val validated =
+            fromStored(
+                privateKey.algorithm.storedName,
+                privateKey.privateKey,
+                privateKey.publicKey,
+                privateKey.comment,
+            )
         val hashAlgorithm = SSHSIG_HASH_ALGORITHM
         val messageHash = MessageDigest.getInstance("SHA-512").digest(message)
-        val signedData = ByteArrayOutputStream().use { bytes ->
-            DataOutputStream(bytes).use { output ->
-                output.write(SSHSIG_MAGIC)
-                output.writeSshString(GIT_SSHSIG_NAMESPACE.encodeToByteArray())
-                output.writeSshString(byteArrayOf())
-                output.writeSshString(hashAlgorithm.encodeToByteArray())
-                output.writeSshString(messageHash)
+        val signedData =
+            ByteArrayOutputStream().use { bytes ->
+                DataOutputStream(bytes).use { output ->
+                    output.write(SSHSIG_MAGIC)
+                    output.writeSshString(GIT_SSHSIG_NAMESPACE.encodeToByteArray())
+                    output.writeSshString(byteArrayOf())
+                    output.writeSshString(hashAlgorithm.encodeToByteArray())
+                    output.writeSshString(messageHash)
+                }
+                bytes.toByteArray()
             }
-            bytes.toByteArray()
-        }
         val signatureAlgorithm: String
-        val signature = when (validated.algorithm) {
-            SshKeyAlgorithm.ED25519 -> {
-                signatureAlgorithm = validated.algorithm.publicName
-                Ed25519Signer().run {
-                    init(true, Ed25519PrivateKeyParameters(validated.privateKey))
-                    update(signedData, 0, signedData.size)
-                    generateSignature()
+        val signature =
+            when (validated.algorithm) {
+                SshKeyAlgorithm.ED25519 -> {
+                    signatureAlgorithm = validated.algorithm.publicName
+                    Ed25519Signer().run {
+                        init(true, Ed25519PrivateKeyParameters(validated.privateKey))
+                        update(signedData, 0, signedData.size)
+                        generateSignature()
+                    }
+                }
+                SshKeyAlgorithm.RSA -> {
+                    signatureAlgorithm = RSA_SHA512
+                    Signature.getInstance(SHA512_WITH_RSA).run {
+                        initSign(rsaPrivateKey(validated.privateKey))
+                        update(signedData)
+                        sign()
+                    }
                 }
             }
-            SshKeyAlgorithm.RSA -> {
-                signatureAlgorithm = RSA_SHA512
-                Signature.getInstance(SHA512_WITH_RSA).run {
-                    initSign(rsaPrivateKey(validated.privateKey))
-                    update(signedData)
-                    sign()
+        val signatureBlob =
+            ByteArrayOutputStream().use { bytes ->
+                DataOutputStream(bytes).use { output ->
+                    output.writeSshString(signatureAlgorithm.encodeToByteArray())
+                    output.writeSshString(signature)
                 }
+                bytes.toByteArray()
             }
-        }
-        val signatureBlob = ByteArrayOutputStream().use { bytes ->
-            DataOutputStream(bytes).use { output ->
-                output.writeSshString(signatureAlgorithm.encodeToByteArray())
-                output.writeSshString(signature)
+        val gitSignature =
+            ByteArrayOutputStream().use { bytes ->
+                DataOutputStream(bytes).use { output ->
+                    output.write(SSHSIG_MAGIC)
+                    output.writeInt(SSHSIG_VERSION)
+                    output.writeSshString(
+                        SshPublicKey(validated.algorithm, validated.publicKey, "").blob()
+                    )
+                    output.writeSshString(GIT_SSHSIG_NAMESPACE.encodeToByteArray())
+                    output.writeSshString(byteArrayOf())
+                    output.writeSshString(hashAlgorithm.encodeToByteArray())
+                    output.writeSshString(signatureBlob)
+                }
+                bytes.toByteArray()
             }
-            bytes.toByteArray()
-        }
-        val gitSignature = ByteArrayOutputStream().use { bytes ->
-            DataOutputStream(bytes).use { output ->
-                output.write(SSHSIG_MAGIC)
-                output.writeInt(SSHSIG_VERSION)
-                output.writeSshString(
-                    SshPublicKey(validated.algorithm, validated.publicKey, "").blob(),
-                )
-                output.writeSshString(GIT_SSHSIG_NAMESPACE.encodeToByteArray())
-                output.writeSshString(byteArrayOf())
-                output.writeSshString(hashAlgorithm.encodeToByteArray())
-                output.writeSshString(signatureBlob)
-            }
-            bytes.toByteArray()
-        }
-        val armored = Base64.getMimeEncoder(76, "\n".encodeToByteArray())
-            .encodeToString(gitSignature)
+        val armored =
+            Base64.getMimeEncoder(76, "\n".encodeToByteArray()).encodeToString(gitSignature)
         return "$SSHSIG_PEM_BEGIN\n$armored\n$SSHSIG_PEM_END\n"
     }
 
@@ -329,62 +355,68 @@ internal class SshKeyCodec(
         message: ByteArray,
         algorithm: SshSignatureAlgorithm,
     ): ByteArray {
-        val validated = fromStored(
-            privateKey.algorithm.storedName,
-            privateKey.privateKey,
-            privateKey.publicKey,
-            privateKey.comment,
-        )
-        val signature = when (validated.algorithm) {
-            SshKeyAlgorithm.ED25519 -> {
-                require(algorithm == SshSignatureAlgorithm.ED25519) {
-                    "SSH signature algorithm does not match the key"
+        val validated =
+            fromStored(
+                privateKey.algorithm.storedName,
+                privateKey.privateKey,
+                privateKey.publicKey,
+                privateKey.comment,
+            )
+        val signature =
+            when (validated.algorithm) {
+                SshKeyAlgorithm.ED25519 -> {
+                    require(algorithm == SshSignatureAlgorithm.ED25519) {
+                        "SSH signature algorithm does not match the key"
+                    }
+                    Ed25519Signer().run {
+                        init(true, Ed25519PrivateKeyParameters(validated.privateKey))
+                        update(message, 0, message.size)
+                        generateSignature()
+                    }
                 }
-                Ed25519Signer().run {
-                    init(true, Ed25519PrivateKeyParameters(validated.privateKey))
-                    update(message, 0, message.size)
-                    generateSignature()
+                SshKeyAlgorithm.RSA -> {
+                    val signatureName =
+                        when (algorithm) {
+                            SshSignatureAlgorithm.RSA_SHA256 -> SHA256_WITH_RSA
+                            SshSignatureAlgorithm.RSA_SHA512 -> SHA512_WITH_RSA
+                            SshSignatureAlgorithm.ED25519 ->
+                                throw IllegalArgumentException(
+                                    "SSH signature algorithm does not match the key"
+                                )
+                        }
+                    Signature.getInstance(signatureName).run {
+                        initSign(rsaPrivateKey(validated.privateKey))
+                        update(message)
+                        sign()
+                    }
                 }
             }
-            SshKeyAlgorithm.RSA -> {
-                val signatureName = when (algorithm) {
-                    SshSignatureAlgorithm.RSA_SHA256 -> SHA256_WITH_RSA
-                    SshSignatureAlgorithm.RSA_SHA512 -> SHA512_WITH_RSA
-                    SshSignatureAlgorithm.ED25519 -> throw IllegalArgumentException(
-                        "SSH signature algorithm does not match the key",
-                    )
-                }
-                Signature.getInstance(signatureName).run {
-                    initSign(rsaPrivateKey(validated.privateKey))
-                    update(message)
-                    sign()
-                }
-            }
-        }
         return sshSignatureBlob(algorithm, signature)
     }
 
     private fun parsePrivateBlock(
         privateBlock: ByteArray,
         outerPublicBlob: ByteArray,
-    ): SshPrivateKey = DataInputStream(ByteArrayInputStream(privateBlock)).use { input ->
-        require(privateBlock.isNotEmpty() && privateBlock.size % NONE_BLOCK_SIZE == 0) {
-            "Invalid OpenSSH private key block size"
+    ): SshPrivateKey =
+        DataInputStream(ByteArrayInputStream(privateBlock)).use { input ->
+            require(privateBlock.isNotEmpty() && privateBlock.size % NONE_BLOCK_SIZE == 0) {
+                "Invalid OpenSSH private key block size"
+            }
+            val firstCheck = input.readInt()
+            require(input.readInt() == firstCheck) { "Invalid OpenSSH private key checks" }
+            val algorithm =
+                requireNotNull(
+                    SshKeyAlgorithm.fromPublicName(
+                        input.readSshString(MAX_ALGORITHM_BYTES, "private key algorithm")
+                    )
+                ) {
+                    "Unsupported SSH private key algorithm"
+                }
+            when (algorithm) {
+                SshKeyAlgorithm.ED25519 -> parseEd25519PrivateFields(input, outerPublicBlob)
+                SshKeyAlgorithm.RSA -> parseRsaPrivateFields(input, outerPublicBlob)
+            }
         }
-        val firstCheck = input.readInt()
-        require(input.readInt() == firstCheck) { "Invalid OpenSSH private key checks" }
-        val algorithm = requireNotNull(
-            SshKeyAlgorithm.fromPublicName(
-                input.readSshString(MAX_ALGORITHM_BYTES, "private key algorithm"),
-            ),
-        ) {
-            "Unsupported SSH private key algorithm"
-        }
-        when (algorithm) {
-            SshKeyAlgorithm.ED25519 -> parseEd25519PrivateFields(input, outerPublicBlob)
-            SshKeyAlgorithm.RSA -> parseRsaPrivateFields(input, outerPublicBlob)
-        }
-    }
 
     private fun parseEd25519PrivateFields(
         input: DataInputStream,
@@ -392,10 +424,11 @@ internal class SshKeyCodec(
     ): SshPrivateKey {
         val publicKey = input.readSshBytes(ED25519_PUBLIC_KEY_BYTES, "Ed25519 public key")
         require(publicKey.size == ED25519_PUBLIC_KEY_BYTES) { "Invalid Ed25519 public key" }
-        val privateAndPublic = input.readSshBytes(
-            ED25519_PRIVATE_AND_PUBLIC_BYTES,
-            "Ed25519 private key",
-        )
+        val privateAndPublic =
+            input.readSshBytes(
+                ED25519_PRIVATE_AND_PUBLIC_BYTES,
+                "Ed25519 private key",
+            )
         require(privateAndPublic.size == ED25519_PRIVATE_AND_PUBLIC_BYTES) {
             "Invalid Ed25519 private key"
         }
@@ -403,8 +436,10 @@ internal class SshKeyCodec(
             MessageDigest.isEqual(
                 privateAndPublic.copyOfRange(ED25519_PRIVATE_KEY_BYTES, privateAndPublic.size),
                 publicKey,
-            ),
-        ) { "The OpenSSH private and public keys do not match" }
+            )
+        ) {
+            "The OpenSSH private and public keys do not match"
+        }
         val comment = input.readSshString(MAX_COMMENT_BYTES, "comment")
         validateComment(comment)
         input.requirePadding(NONE_BLOCK_SIZE)
@@ -441,18 +476,21 @@ internal class SshKeyCodec(
         require(MessageDigest.isEqual(expectedOuterPublic, outerPublicBlob)) {
             "The OpenSSH public and private sections do not match"
         }
-        val privateKey = KeyFactory.getInstance(RSA).generatePrivate(
-            RSAPrivateCrtKeySpec(
-                modulus,
-                exponent,
-                privateExponent,
-                primeP,
-                primeQ,
-                privateExponent.mod(primeP - BigInteger.ONE),
-                privateExponent.mod(primeQ - BigInteger.ONE),
-                coefficient,
-            ),
-        ).encoded
+        val privateKey =
+            KeyFactory.getInstance(RSA)
+                .generatePrivate(
+                    RSAPrivateCrtKeySpec(
+                        modulus,
+                        exponent,
+                        privateExponent,
+                        primeP,
+                        primeQ,
+                        privateExponent.mod(primeP - BigInteger.ONE),
+                        privateExponent.mod(primeQ - BigInteger.ONE),
+                        coefficient,
+                    )
+                )
+                .encoded
         return fromStored(SshKeyAlgorithm.RSA.storedName, privateKey, publicKey, comment)
     }
 
@@ -499,7 +537,9 @@ internal class SshKeyCodec(
             exponent > BigInteger.ONE &&
                 exponent.testBit(0) &&
                 exponent.bitLength() <= MAX_RSA_EXPONENT_BITS
-        ) { "Invalid RSA public exponent" }
+        ) {
+            "Invalid RSA public exponent"
+        }
     }
 
     private fun validateRsaPrivateKey(privateKey: RSAPrivateCrtKey) {
@@ -528,21 +568,23 @@ internal class SshKeyCodec(
             "Invalid RSA coefficient"
         }
         val challenge = RSA_SELF_TEST_MESSAGE
-        val signature = Signature.getInstance(SHA256_WITH_RSA).run {
-            initSign(privateKey)
-            update(challenge)
-            sign()
-        }
-        val publicKey = KeyFactory.getInstance(RSA).generatePublic(
-            RSAPublicKeySpec(privateKey.modulus, e),
-        )
+        val signature =
+            Signature.getInstance(SHA256_WITH_RSA).run {
+                initSign(privateKey)
+                update(challenge)
+                sign()
+            }
+        val publicKey =
+            KeyFactory.getInstance(RSA).generatePublic(RSAPublicKeySpec(privateKey.modulus, e))
         require(
             Signature.getInstance(SHA256_WITH_RSA).run {
                 initVerify(publicKey)
                 update(challenge)
                 verify(signature)
-            },
-        ) { "RSA private key failed consistency check" }
+            }
+        ) {
+            "RSA private key failed consistency check"
+        }
     }
 
     private fun decodePem(value: String): ByteArray {
@@ -554,11 +596,12 @@ internal class SshKeyCodec(
         }
         val body = lines.drop(1).dropLast(1).joinToString(separator = "") { it.trim() }
         require(body.isNotEmpty()) { "The OpenSSH private key is empty" }
-        val decoded = try {
-            Base64.getDecoder().decode(body)
-        } catch (_: IllegalArgumentException) {
-            throw IllegalArgumentException("The OpenSSH private key is not valid Base64")
-        }
+        val decoded =
+            try {
+                Base64.getDecoder().decode(body)
+            } catch (_: IllegalArgumentException) {
+                throw IllegalArgumentException("The OpenSSH private key is not valid Base64")
+            }
         require(decoded.size <= MAX_OPENSSH_KEY_BYTES) { "The OpenSSH private key is too large" }
         return decoded
     }

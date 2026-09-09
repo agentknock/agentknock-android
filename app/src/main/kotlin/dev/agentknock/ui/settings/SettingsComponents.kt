@@ -12,9 +12,9 @@ import androidx.compose.foundation.text.selection.SelectionContainer
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.automirrored.outlined.Launch
 import androidx.compose.material.icons.automirrored.outlined.NavigateNext
+import androidx.compose.material3.ExperimentalMaterial3Api
 import androidx.compose.material3.HorizontalDivider
 import androidx.compose.material3.Icon
-import androidx.compose.material3.ExperimentalMaterial3Api
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.Surface
 import androidx.compose.material3.Text
@@ -101,16 +101,18 @@ internal fun SettingsRow(
     onClick: (() -> Unit)? = null,
     trailing: (@Composable () -> Unit)? = null,
 ) {
-    val accent = if (destructive) {
-        MaterialTheme.agentknockColors.danger
-    } else {
-        MaterialTheme.colorScheme.primary
-    }
-    val summaryColor = if (attention) {
-        MaterialTheme.agentknockColors.attentionAccent
-    } else {
-        MaterialTheme.colorScheme.onSurfaceVariant
-    }
+    val accent =
+        if (destructive) {
+            MaterialTheme.agentknockColors.danger
+        } else {
+            MaterialTheme.colorScheme.primary
+        }
+    val summaryColor =
+        if (attention) {
+            MaterialTheme.agentknockColors.attentionAccent
+        } else {
+            MaterialTheme.colorScheme.onSurfaceVariant
+        }
     val clickModifier = if (onClick == null) modifier else modifier.clickable(onClick = onClick)
     Row(
         modifier = clickModifier.fillMaxWidth().padding(horizontal = 16.dp, vertical = 16.dp),
@@ -173,17 +175,21 @@ internal fun SettingsValueRow(
         verticalAlignment = Alignment.CenterVertically,
     ) {
         Column(Modifier.weight(1f), verticalArrangement = Arrangement.spacedBy(2.dp)) {
-            Text(label, style = MaterialTheme.typography.bodySmall,
-                color = MaterialTheme.colorScheme.onSurfaceVariant)
+            Text(
+                label,
+                style = MaterialTheme.typography.bodySmall,
+                color = MaterialTheme.colorScheme.onSurfaceVariant,
+            )
             SelectionContainer {
                 Text(
                     value,
                     style = MaterialTheme.typography.bodyMedium,
-                    color = if (attention) {
-                        MaterialTheme.agentknockColors.attentionAccent
-                    } else {
-                        MaterialTheme.colorScheme.onSurface
-                    },
+                    color =
+                        if (attention) {
+                            MaterialTheme.agentknockColors.attentionAccent
+                        } else {
+                            MaterialTheme.colorScheme.onSurface
+                        },
                     fontFamily = if (monospace) FontFamily.Monospace else FontFamily.Default,
                 )
             }

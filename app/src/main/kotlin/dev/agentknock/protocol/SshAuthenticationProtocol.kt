@@ -38,24 +38,24 @@ internal enum class SshSignatureAlgorithm(val wireName: String) {
 }
 
 internal class SshAuthenticationProtocol(
-    private val json: Json = Json { ignoreUnknownKeys = true },
+    private val json: Json = Json { ignoreUnknownKeys = true }
 ) {
     fun decodeRequest(plaintext: ByteArray): SshAuthenticationRequestMessage {
         val clientSoftware = json.decodeClientSoftware(plaintext)
-        val request = json.decodeFromString<SshAuthenticationRequestWire>(
-            plaintext.decodeToString(),
-        )
+        val request =
+            json.decodeFromString<SshAuthenticationRequestWire>(plaintext.decodeToString())
         require(request.method == METHOD) { "Unexpected request method" }
         require(request.invocationId.isNotEmpty()) { "SSH authentication invocation ID is empty" }
         require(request.secret.isNotEmpty()) { "SSH authentication secret name is empty" }
         return SshAuthenticationRequestMessage(
             clientSoftware = clientSoftware,
             invocationId = request.invocationId,
-            invocationToken = decodeBase64(request.invocationToken, "invocation token").also {
-                require(it.size == INVOCATION_TOKEN_BYTES) {
-                    "Invocation token must be $INVOCATION_TOKEN_BYTES bytes"
-                }
-            },
+            invocationToken =
+                decodeBase64(request.invocationToken, "invocation token").also {
+                    require(it.size == INVOCATION_TOKEN_BYTES) {
+                        "Invocation token must be $INVOCATION_TOKEN_BYTES bytes"
+                    }
+                },
             secret = request.secret,
             message = decodeBase64(request.message, "SSH authentication message"),
         )
@@ -76,34 +76,42 @@ internal class SshAuthenticationProtocol(
             "SSH authentication has an unsupported service"
         }
         val methodValue = input.string().decodeToString(throwOnInvalidSequence = true)
-        val method = SshAuthenticationMethod.entries.singleOrNull {
-            it.wireName == methodValue
-        } ?: throw IllegalArgumentException("SSH authentication has an unsupported method")
+        val method =
+            SshAuthenticationMethod.entries.singleOrNull {
+                it.wireName == methodValue
+            } ?: throw IllegalArgumentException("SSH authentication has an unsupported method")
         require(input.byte() == 1) { "SSH authentication does not contain a signature" }
         val algorithmValue = input.string().decodeToString(throwOnInvalidSequence = true)
-        val algorithm = SshSignatureAlgorithm.entries.singleOrNull {
-            it.wireName == algorithmValue
-        } ?: throw IllegalArgumentException("Unsupported SSH signature algorithm")
+        val algorithm =
+            SshSignatureAlgorithm.entries.singleOrNull {
+                it.wireName == algorithmValue
+            } ?: throw IllegalArgumentException("Unsupported SSH signature algorithm")
         when (expectedKeyAlgorithm) {
-            SSH_ED25519 -> require(algorithm == SshSignatureAlgorithm.ED25519) {
-                "The SSH signature algorithm does not match the selected key"
-            }
-            SSH_RSA -> require(
-                algorithm == SshSignatureAlgorithm.RSA_SHA256 ||
-                    algorithm == SshSignatureAlgorithm.RSA_SHA512,
-            ) { "The SSH signature algorithm does not match the selected key" }
-            else -> throw IllegalArgumentException(
-                "The selected key does not support SSH authentication",
-            )
+            SSH_ED25519 ->
+                require(algorithm == SshSignatureAlgorithm.ED25519) {
+                    "The SSH signature algorithm does not match the selected key"
+                }
+            SSH_RSA ->
+                require(
+                    algorithm == SshSignatureAlgorithm.RSA_SHA256 ||
+                        algorithm == SshSignatureAlgorithm.RSA_SHA512
+                ) {
+                    "The SSH signature algorithm does not match the selected key"
+                }
+            else ->
+                throw IllegalArgumentException(
+                    "The selected key does not support SSH authentication"
+                )
         }
         require(MessageDigest.isEqual(input.string(), expectedPublicKeyBlob)) {
             "SSH authentication contains a different public key"
         }
-        val hostKey = if (method == SshAuthenticationMethod.HOST_BOUND) {
-            input.string().also { requireValidHostKey(it) }
-        } else {
-            null
-        }
+        val hostKey =
+            if (method == SshAuthenticationMethod.HOST_BOUND) {
+                input.string().also { requireValidHostKey(it) }
+            } else {
+                null
+            }
         input.requireEnd()
         return SshAuthenticationMessageDetails(
             username = username,
@@ -114,55 +122,63 @@ internal class SshAuthenticationProtocol(
         )
     }
 
-    fun approvedResponse(signature: ByteArray): ByteArray = json.encodeToString(
-        SshAuthenticationResultWire.serializer(),
-        SshAuthenticationResultWire(
-            result = RESULT_APPROVED,
-            signature = Base64.getEncoder().encodeToString(signature),
-        ),
-    ).encodeToByteArray()
+    fun approvedResponse(signature: ByteArray): ByteArray =
+        json
+            .encodeToString(
+                SshAuthenticationResultWire.serializer(),
+                SshAuthenticationResultWire(
+                    result = RESULT_APPROVED,
+                    signature = Base64.getEncoder().encodeToString(signature),
+                ),
+            )
+            .encodeToByteArray()
 
     fun deniedResponse(reason: InvocationDenialReason, message: String): ByteArray =
-        json.encodeToString(
-            SshAuthenticationResultWire.serializer(),
-            SshAuthenticationResultWire(
-                result = RESULT_DENIED,
-                reason = reason.wireName,
-                message = message,
-            ),
-        ).encodeToByteArray()
+        json
+            .encodeToString(
+                SshAuthenticationResultWire.serializer(),
+                SshAuthenticationResultWire(
+                    result = RESULT_DENIED,
+                    reason = reason.wireName,
+                    message = message,
+                ),
+            )
+            .encodeToByteArray()
 
     fun decodeCompletion(plaintext: ByteArray): ApprovalCompletion {
         val clientSoftware = json.decodeClientSoftware(plaintext)
-        val completion = json.decodeFromString<SshAuthenticationResultWire>(
-            plaintext.decodeToString(),
-        )
+        val completion =
+            json.decodeFromString<SshAuthenticationResultWire>(plaintext.decodeToString())
         return when (completion.result) {
             RESULT_APPROVED -> {
                 if (completion.signature != null) {
                     throw SerializationException(
-                        "Approved SSH authentication completion contains a signature",
+                        "Approved SSH authentication completion contains a signature"
                     )
                 }
                 ApprovalCompletion.Approved(clientSoftware)
             }
-            RESULT_DENIED -> ApprovalCompletion.Denied(
-                clientSoftware = clientSoftware,
-                reason = completion.reason
-                    ?: throw SerializationException("Denied completion has no reason"),
-                message = completion.message
-                    ?: throw SerializationException("Denied completion has no message"),
-            )
-            RESULT_ABORTED -> ApprovalCompletion.Aborted(
-                clientSoftware = clientSoftware,
-                reason = completion.reason
-                    ?: throw SerializationException("Aborted completion has no reason"),
-                message = completion.message
-                    ?: throw SerializationException("Aborted completion has no message"),
-            )
-            else -> throw SerializationException(
-                "Unsupported SSH authentication completion result",
-            )
+            RESULT_DENIED ->
+                ApprovalCompletion.Denied(
+                    clientSoftware = clientSoftware,
+                    reason =
+                        completion.reason
+                            ?: throw SerializationException("Denied completion has no reason"),
+                    message =
+                        completion.message
+                            ?: throw SerializationException("Denied completion has no message"),
+                )
+            RESULT_ABORTED ->
+                ApprovalCompletion.Aborted(
+                    clientSoftware = clientSoftware,
+                    reason =
+                        completion.reason
+                            ?: throw SerializationException("Aborted completion has no reason"),
+                    message =
+                        completion.message
+                            ?: throw SerializationException("Aborted completion has no message"),
+                )
+            else -> throw SerializationException("Unsupported SSH authentication completion result")
         }
     }
 
@@ -176,14 +192,16 @@ internal class SshAuthenticationProtocol(
     private fun sshBlobAlgorithm(blob: ByteArray): String =
         SshCursor(blob).string().decodeToString(throwOnInvalidSequence = true)
 
-    private fun sshFingerprint(blob: ByteArray): String = "SHA256:" +
-        Base64.getEncoder().withoutPadding().encodeToString(
-            MessageDigest.getInstance("SHA-256").digest(blob),
-        )
+    private fun sshFingerprint(blob: ByteArray): String =
+        "SHA256:" +
+            Base64.getEncoder()
+                .withoutPadding()
+                .encodeToString(MessageDigest.getInstance("SHA-256").digest(blob))
 
     private fun decodeBase64(value: String, field: String): ByteArray = runCatching {
         Base64.getDecoder().decode(value)
-    }.getOrElse { throw IllegalArgumentException("Invalid $field", it) }
+    }
+        .getOrElse { throw IllegalArgumentException("Invalid $field", it) }
 
     companion object {
         const val METHOD = "SshAuthenticate"
@@ -222,10 +240,11 @@ private class SshCursor(input: ByteArray) {
 
     fun string(): ByteArray {
         require(value.size - offset >= Int.SIZE_BYTES) { "Truncated SSH data" }
-        val size = ((value[offset].toInt() and 0xff) shl 24) or
-            ((value[offset + 1].toInt() and 0xff) shl 16) or
-            ((value[offset + 2].toInt() and 0xff) shl 8) or
-            (value[offset + 3].toInt() and 0xff)
+        val size =
+            ((value[offset].toInt() and 0xff) shl 24) or
+                ((value[offset + 1].toInt() and 0xff) shl 16) or
+                ((value[offset + 2].toInt() and 0xff) shl 8) or
+                (value[offset + 3].toInt() and 0xff)
         offset += Int.SIZE_BYTES
         require(size >= 0 && size <= value.size - offset) { "Truncated SSH data" }
         return value.copyOfRange(offset, offset + size).also { offset += size }

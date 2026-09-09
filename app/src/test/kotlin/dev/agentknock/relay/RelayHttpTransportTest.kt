@@ -42,9 +42,10 @@ class RelayHttpTransportTest {
         MockWebServer().use { server ->
             server.start()
             server.enqueue(
-                MockResponse.Builder().code(409)
+                MockResponse.Builder()
+                    .code(409)
                     .body("""{"error":"CONFLICT","message":"Already exists"}""")
-                    .build(),
+                    .build()
             )
 
             assertEquals(
@@ -73,9 +74,10 @@ class RelayHttpTransportTest {
         MockWebServer().use { server ->
             server.start()
             server.enqueue(
-                MockResponse.Builder().code(400)
+                MockResponse.Builder()
+                    .code(400)
                     .body("""{"error":7,"message":{"unexpected":true}}""")
-                    .build(),
+                    .build()
             )
 
             assertEquals(
@@ -102,24 +104,23 @@ class RelayHttpTransportTest {
         MockWebServer().use { server ->
             server.start()
             server.enqueue(
-                MockResponse.Builder()
-                    .headersDelay(1, TimeUnit.DAYS)
-                    .body("response")
-                    .build(),
+                MockResponse.Builder().headersDelay(1, TimeUnit.DAYS).body("response").build()
             )
             val observedCall = CompletableDeferred<Call>()
-            val client = OkHttpClient.Builder()
-                .addInterceptor(
-                    Interceptor { chain ->
-                        observedCall.complete(chain.call())
-                        chain.proceed(chain.request())
-                    },
+            val client =
+                OkHttpClient.Builder()
+                    .addInterceptor(
+                        Interceptor { chain ->
+                            observedCall.complete(chain.call())
+                            chain.proceed(chain.request())
+                        }
+                    )
+                    .build()
+            val transport =
+                RelayHttpTransport(
+                    client = client,
+                    relayUrl = server.url("/").toString(),
                 )
-                .build()
-            val transport = RelayHttpTransport(
-                client = client,
-                relayUrl = server.url("/").toString(),
-            )
             val request = async { transport.post("v1/test", "{}") }
             val call = observedCall.await()
 
@@ -130,8 +131,9 @@ class RelayHttpTransportTest {
         }
     }
 
-    private fun transport(server: MockWebServer) = RelayHttpTransport(
-        client = OkHttpClient(),
-        relayUrl = server.url("/").toString(),
-    )
+    private fun transport(server: MockWebServer) =
+        RelayHttpTransport(
+            client = OkHttpClient(),
+            relayUrl = server.url("/").toString(),
+        )
 }

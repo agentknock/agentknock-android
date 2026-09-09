@@ -26,7 +26,7 @@ class AuditRepositoryTest {
                 clientId = "client-1",
                 clientName = "Workstation",
                 relayRequestId = "request-1",
-            ),
+            )
         )
 
         assertEquals(
@@ -38,9 +38,10 @@ class AuditRepositoryTest {
                 decisionSource = "user",
                 clientId = "client-1",
                 relayRequestId = "request-1",
-                bodyJson = "{\"subject\":\"Production\",\"context\":\"Git signing\"," +
-                    "\"detail\":\"Secret use\",\"expires_at\":2000000," +
-                    "\"client_name\":\"Workstation\"}",
+                bodyJson =
+                    "{\"subject\":\"Production\",\"context\":\"Git signing\"," +
+                        "\"detail\":\"Secret use\",\"expires_at\":2000000," +
+                        "\"client_name\":\"Workstation\"}",
             ),
             dao.events.value.single(),
         )
@@ -97,10 +98,11 @@ class AuditRepositoryTest {
         val repository = AuditRepository(dao, currentTimeMillis = { error("unused") })
 
         repository.append(
-            records = listOf(
-                AuditRecord(AuditEventType.SECRET_UPDATED, AuditOutcome.CHANGED),
-                AuditRecord(AuditEventType.SECRET_UPLOAD_DECIDED, AuditOutcome.APPROVED),
-            ),
+            records =
+                listOf(
+                    AuditRecord(AuditEventType.SECRET_UPDATED, AuditOutcome.CHANGED),
+                    AuditRecord(AuditEventType.SECRET_UPLOAD_DECIDED, AuditOutcome.APPROVED),
+                ),
             occurredAt = 123_456L,
         )
 
@@ -122,7 +124,7 @@ class AuditRepositoryTest {
                 auditEvent(occurredAt = cutoff - 1),
                 auditEvent(occurredAt = cutoff),
                 auditEvent(occurredAt = cutoff + 1),
-            ),
+            )
         )
         val repository = AuditRepository(dao, currentTimeMillis = { now })
 
@@ -134,15 +136,16 @@ class AuditRepositoryTest {
         )
     }
 
-    private fun auditEvent(occurredAt: Long) = AuditEventEntity(
-        occurredAt = occurredAt,
-        eventType = AuditEventType.SECRET_UPDATED.code,
-        outcome = AuditOutcome.CHANGED.code,
-        decisionSource = null,
-        clientId = null,
-        relayRequestId = null,
-        bodyJson = "{}",
-    )
+    private fun auditEvent(occurredAt: Long) =
+        AuditEventEntity(
+            occurredAt = occurredAt,
+            eventType = AuditEventType.SECRET_UPDATED.code,
+            outcome = AuditOutcome.CHANGED.code,
+            decisionSource = null,
+            clientId = null,
+            relayRequestId = null,
+            bodyJson = "{}",
+        )
 }
 
 private class FakeAuditDao : AuditDao {
@@ -150,8 +153,9 @@ private class FakeAuditDao : AuditDao {
 
     override fun observeEvents(): Flow<List<AuditEventEntity>> = events
 
-    override fun observeEvent(id: Long): Flow<AuditEventEntity?> =
-        events.map { current -> current.find { it.id == id } }
+    override fun observeEvent(id: Long): Flow<AuditEventEntity?> = events.map { current ->
+        current.find { it.id == id }
+    }
 
     override suspend fun insertEvents(events: List<AuditEventEntity>) {
         var id = (this.events.value.maxOfOrNull(AuditEventEntity::id) ?: 0) + 1

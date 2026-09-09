@@ -13,14 +13,13 @@ class PairingAdmissionTest {
 
     @Test
     fun `temporarily blocks a second unfinished pairing`() {
-        for (
-            state in listOf(
+        for (state in
+            listOf(
                 PairingState.EXCHANGE_PENDING,
                 PairingState.EXCHANGE_FAILED,
                 PairingState.SAS_VERIFICATION_PENDING,
                 PairingState.WAITING_FOR_FINISH,
-            )
-        ) {
+            )) {
             assertTrue(state.blocksAdmission)
             assertTrue(state.isRejectable)
         }

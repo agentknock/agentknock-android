@@ -10,13 +10,14 @@ class PairingAddressGeneratorTest {
     fun `generates three different words separated by dashes`() {
         val indices = ArrayDeque(listOf(2, 2, 0, 1))
         val bounds = mutableListOf<Int>()
-        val generator = PairingAddressGenerator(
-            words = listOf("amber", "river", "maple"),
-            nextIndex = { bound ->
-                bounds += bound
-                indices.removeFirst()
-            },
-        )
+        val generator =
+            PairingAddressGenerator(
+                words = listOf("amber", "river", "maple"),
+                nextIndex = { bound ->
+                    bounds += bound
+                    indices.removeFirst()
+                },
+            )
 
         assertEquals("maple-amber-river", generator.generate())
         assertEquals(listOf(3, 3, 3, 3), bounds)

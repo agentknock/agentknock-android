@@ -62,12 +62,12 @@ internal fun SshAuthenticationRequestDetail(
     val authentication = (request.content as InboxRequestContent.SshAuthentication).details
     val actionRequired = request.state == InboxRequestState.ACTION_REQUIRED
     val pending = authentication.state == ApprovalRequestState.APPROVAL_PENDING
-    val aiReviewRequested = authentication.approvalEvaluation?.secrets
-        ?.any { it.action == ApprovalAction.ASK_AI } == true
+    val aiReviewRequested =
+        authentication.approvalEvaluation?.secrets?.any { it.action == ApprovalAction.ASK_AI } ==
+            true
     val aiReviewInFlight = request.state == InboxRequestState.REVIEWING && aiReviewRequested
-    val temporarySecretNames = authentication.approvalEvaluation.temporaryGrantSecretNames(
-        aiReviewInFlight,
-    )
+    val temporarySecretNames =
+        authentication.approvalEvaluation.temporaryGrantSecretNames(aiReviewInFlight)
     var confirmTemporaryAccess by remember(request.id) { mutableStateOf(false) }
     val requestedAt = relayRequestTimestamp(request.id) ?: request.receivedAt
     DetailPage(
@@ -76,24 +76,25 @@ internal fun SshAuthenticationRequestDetail(
         modifier = modifier,
         showBack = showBack,
         scrollResetKey = authentication.state to authentication.completionResult,
-        bottomContent = if (actionRequired) {
-            {
-                Surface(
-                    color = MaterialTheme.colorScheme.surfaceContainer,
-                    tonalElevation = 3.dp,
-                ) {
-                    RequestDecisionButtons(
-                        approveEnabled = true,
-                        temporaryAccessAvailable = temporarySecretNames.isNotEmpty(),
-                        onDeny = onDeny,
-                        onApprove = onApprove,
-                        onAllowTemporarily = { confirmTemporaryAccess = true },
-                    )
+        bottomContent =
+            if (actionRequired) {
+                {
+                    Surface(
+                        color = MaterialTheme.colorScheme.surfaceContainer,
+                        tonalElevation = 3.dp,
+                    ) {
+                        RequestDecisionButtons(
+                            approveEnabled = true,
+                            temporaryAccessAvailable = temporarySecretNames.isNotEmpty(),
+                            onDeny = onDeny,
+                            onApprove = onApprove,
+                            onAllowTemporarily = { confirmTemporaryAccess = true },
+                        )
+                    }
                 }
-            }
-        } else {
-            null
-        },
+            } else {
+                null
+            },
     ) {
         StatusHeader(
             if (pending) {
@@ -106,10 +107,11 @@ internal fun SshAuthenticationRequestDetail(
 
         AuthenticationTicket(
             authentication = authentication,
-            parentRequestAge = formatParentRequestAge(
-                authentication.invocationReceivedAt,
-                request.receivedAt,
-            ),
+            parentRequestAge =
+                formatParentRequestAge(
+                    authentication.invocationReceivedAt,
+                    request.receivedAt,
+                ),
         )
 
         if (pending) {
@@ -118,7 +120,8 @@ internal fun SshAuthenticationRequestDetail(
             }
         } else if (
             shouldShowDecisionHistory(
-                verificationFailed = authentication.state == ApprovalRequestState.VERIFICATION_FAILED,
+                verificationFailed =
+                    authentication.state == ApprovalRequestState.VERIFICATION_FAILED,
                 completionReason = authentication.completionReason,
             )
         ) {
@@ -173,9 +176,9 @@ internal fun SshAuthenticationRequestDetail(
 }
 
 /**
- * The request as one unit: who asks with which key, why, the authentication that will be
- * signed, and the command that led here. The sheet holds facts parsed from the signed
- * request itself; the command and reason are client claims and are labelled as such.
+ * The request as one unit: who asks with which key, why, the authentication that will be signed,
+ * and the command that led here. The sheet holds facts parsed from the signed request itself; the
+ * command and reason are client claims and are labelled as such.
  */
 @Composable
 private fun AuthenticationTicket(
@@ -212,9 +215,9 @@ private fun AuthenticationTicket(
 }
 
 /**
- * What the key will sign, taken from the SSH user-authentication request: the remote
- * account, the server's host key when the method binds one, and the method itself. A
- * host name never appears here because the request does not carry one.
+ * What the key will sign, taken from the SSH user-authentication request: the remote account, the
+ * server's host key when the method binds one, and the method itself. A host name never appears
+ * here because the request does not carry one.
  */
 @Composable
 private fun AuthenticationSheet(authentication: SshAuthenticationRequestDetails) {
@@ -241,8 +244,9 @@ private fun AuthenticationSheet(authentication: SshAuthenticationRequestDetails)
             authentication.hostKeyFingerprint?.let { fingerprint ->
                 SelectableFact(
                     icon = Icons.Outlined.Fingerprint,
-                    label = listOfNotNull("Host key", authentication.hostKeyAlgorithm)
-                        .joinToString(" · "),
+                    label =
+                        listOfNotNull("Host key", authentication.hostKeyAlgorithm)
+                            .joinToString(" · "),
                     value = fingerprint,
                     monospace = true,
                 )
@@ -291,97 +295,111 @@ private fun MethodRow(method: String, signatureAlgorithm: String) {
     }
 }
 
-private fun SshAuthenticationRequestDetails.methodLabel(): String = when (method) {
-    SshAuthenticationMethod.PUBLIC_KEY -> "Public-key authentication"
-    SshAuthenticationMethod.HOST_BOUND -> "Host-bound public-key authentication"
-}
+private fun SshAuthenticationRequestDetails.methodLabel(): String =
+    when (method) {
+        SshAuthenticationMethod.PUBLIC_KEY -> "Public-key authentication"
+        SshAuthenticationMethod.HOST_BOUND -> "Host-bound public-key authentication"
+    }
 
 private fun SshAuthenticationRequestDetails.pendingStatus(
     actionRequired: Boolean,
     aiReviewInFlight: Boolean,
-): StatusSummary = when {
-    aiReviewInFlight -> StatusSummary(
-        "AI review in progress",
-        NoticeTone.SUBDUED,
-        Icons.Outlined.AutoAwesome,
-    )
-    actionRequired -> StatusSummary(statusLabel(), NoticeTone.ATTENTION)
-    else -> StatusSummary(
-        statusLabel(),
-        if (
-            decision == ApprovalDecision.DENIED ||
-            completionResult == ApprovalCompletionResult.DENIED ||
-            completionResult == ApprovalCompletionResult.ABORTED
-        ) {
-            NoticeTone.SUBDUED
-        } else {
-            NoticeTone.SUCCESS
-        },
-    )
-}
-
-private fun SshAuthenticationRequestDetails.outcome(): StatusSummary = when {
-    state == ApprovalRequestState.VERIFICATION_FAILED -> StatusSummary(
-        "Authentication could not be confirmed",
-        NoticeTone.DANGER,
-        Icons.Outlined.ErrorOutline,
-        error ?: "The client confirmation was invalid.",
-    )
-    completionResult == ApprovalCompletionResult.APPROVED -> StatusSummary(
-        "Authentication signed",
-        NoticeTone.SUCCESS,
-        Icons.Outlined.CheckCircle,
-        "The SSH signature was delivered to the client.",
-    )
-    completionResult == ApprovalCompletionResult.DENIED -> if (completionReason == "INVALID_REQUEST") {
-        StatusSummary(
-            "Invalid request",
-            NoticeTone.DANGER,
-            Icons.Outlined.ErrorOutline,
-            completionMessage ?: "No SSH signature was created.",
-        )
-    } else {
-        StatusSummary(
-            "Authentication denied",
-            NoticeTone.SUBDUED,
-            Icons.Outlined.Block,
-            completionMessage ?: "No SSH signature was created.",
-        )
+): StatusSummary =
+    when {
+        aiReviewInFlight ->
+            StatusSummary(
+                "AI review in progress",
+                NoticeTone.SUBDUED,
+                Icons.Outlined.AutoAwesome,
+            )
+        actionRequired -> StatusSummary(statusLabel(), NoticeTone.ATTENTION)
+        else ->
+            StatusSummary(
+                statusLabel(),
+                if (
+                    decision == ApprovalDecision.DENIED ||
+                        completionResult == ApprovalCompletionResult.DENIED ||
+                        completionResult == ApprovalCompletionResult.ABORTED
+                ) {
+                    NoticeTone.SUBDUED
+                } else {
+                    NoticeTone.SUCCESS
+                },
+            )
     }
-    completionResult == ApprovalCompletionResult.ABORTED -> StatusSummary(
-        "Request ended",
-        NoticeTone.NEUTRAL,
-        Icons.Outlined.Block,
-        completionMessage ?: "The client ended the SSH authentication request.",
-    )
-    state == ApprovalRequestState.COMPLETED && error != null -> StatusSummary(
-        "Request ended",
-        NoticeTone.NEUTRAL,
-        null,
-        error,
-    )
-    state == ApprovalRequestState.WAITING_FOR_COMPLETION &&
-        decision == ApprovalDecision.APPROVED -> StatusSummary(
-        "Authentication signed",
-        NoticeTone.SUCCESS,
-        Icons.Outlined.HourglassTop,
-        "Waiting for the client to confirm receipt.",
-    )
-    state == ApprovalRequestState.WAITING_FOR_COMPLETION -> StatusSummary(
-        "Authentication denied",
-        NoticeTone.SUBDUED,
-        Icons.Outlined.HourglassTop,
-        completionMessage ?: "Waiting for the client to confirm the denial.",
-    )
-    else -> StatusSummary(statusLabel())
-}
+
+private fun SshAuthenticationRequestDetails.outcome(): StatusSummary =
+    when {
+        state == ApprovalRequestState.VERIFICATION_FAILED ->
+            StatusSummary(
+                "Authentication could not be confirmed",
+                NoticeTone.DANGER,
+                Icons.Outlined.ErrorOutline,
+                error ?: "The client confirmation was invalid.",
+            )
+        completionResult == ApprovalCompletionResult.APPROVED ->
+            StatusSummary(
+                "Authentication signed",
+                NoticeTone.SUCCESS,
+                Icons.Outlined.CheckCircle,
+                "The SSH signature was delivered to the client.",
+            )
+        completionResult == ApprovalCompletionResult.DENIED ->
+            if (completionReason == "INVALID_REQUEST") {
+                StatusSummary(
+                    "Invalid request",
+                    NoticeTone.DANGER,
+                    Icons.Outlined.ErrorOutline,
+                    completionMessage ?: "No SSH signature was created.",
+                )
+            } else {
+                StatusSummary(
+                    "Authentication denied",
+                    NoticeTone.SUBDUED,
+                    Icons.Outlined.Block,
+                    completionMessage ?: "No SSH signature was created.",
+                )
+            }
+        completionResult == ApprovalCompletionResult.ABORTED ->
+            StatusSummary(
+                "Request ended",
+                NoticeTone.NEUTRAL,
+                Icons.Outlined.Block,
+                completionMessage ?: "The client ended the SSH authentication request.",
+            )
+        state == ApprovalRequestState.COMPLETED && error != null ->
+            StatusSummary(
+                "Request ended",
+                NoticeTone.NEUTRAL,
+                null,
+                error,
+            )
+        state == ApprovalRequestState.WAITING_FOR_COMPLETION &&
+            decision == ApprovalDecision.APPROVED ->
+            StatusSummary(
+                "Authentication signed",
+                NoticeTone.SUCCESS,
+                Icons.Outlined.HourglassTop,
+                "Waiting for the client to confirm receipt.",
+            )
+        state == ApprovalRequestState.WAITING_FOR_COMPLETION ->
+            StatusSummary(
+                "Authentication denied",
+                NoticeTone.SUBDUED,
+                Icons.Outlined.HourglassTop,
+                completionMessage ?: "Waiting for the client to confirm the denial.",
+            )
+        else -> StatusSummary(statusLabel())
+    }
 
 @Composable
 private fun SshAuthenticationDecisionHistory(authentication: SshAuthenticationRequestDetails) {
     val dates = rememberDateTimeFormatter()
-    val temporaryAccessUntil = authentication.approvalEvaluation?.secrets
-        ?.mapNotNull { it.temporaryAccessExpiresAt }
-        ?.maxOrNull()
+    val temporaryAccessUntil =
+        authentication.approvalEvaluation
+            ?.secrets
+            ?.mapNotNull { it.temporaryAccessExpiresAt }
+            ?.maxOrNull()
     val aiReview = authentication.approvalEvaluation?.aiReview
     temporaryAccessUntil?.let {
         Notice(
@@ -393,12 +411,13 @@ private fun SshAuthenticationDecisionHistory(authentication: SshAuthenticationRe
     HistoricalAiReview(
         review = aiReview,
         decision = authentication.decision,
-        humanResolution = when {
-            aiReview?.decision != AiReviewDecision.ASK_USER -> null
-            authentication.decision == ApprovalDecision.DENIED -> "You denied it."
-            temporaryAccessUntil != null -> "You authenticated it and allowed temporary access."
-            else -> "You authenticated it once."
-        },
+        humanResolution =
+            when {
+                aiReview?.decision != AiReviewDecision.ASK_USER -> null
+                authentication.decision == ApprovalDecision.DENIED -> "You denied it."
+                temporaryAccessUntil != null -> "You authenticated it and allowed temporary access."
+                else -> "You authenticated it once."
+            },
     )
 }
 
