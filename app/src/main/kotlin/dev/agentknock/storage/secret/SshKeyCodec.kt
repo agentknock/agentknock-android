@@ -13,12 +13,13 @@ import java.security.MessageDigest
 import java.security.SecureRandom
 import java.security.Signature
 import java.security.interfaces.RSAPrivateCrtKey
-import java.security.spec.PKCS8EncodedKeySpec
 import java.security.spec.RSAPrivateCrtKeySpec
 import java.security.spec.RSAPublicKeySpec
 import java.util.Base64
 import org.bouncycastle.crypto.params.Ed25519PrivateKeyParameters
+import org.bouncycastle.crypto.params.RSAPrivateCrtKeyParameters
 import org.bouncycastle.crypto.signers.Ed25519Signer
+import org.bouncycastle.crypto.util.PrivateKeyFactory
 
 private const val FINGERPRINT_HEX = "0123456789ABCDEF"
 
@@ -517,7 +518,25 @@ internal class SshKeyCodec(private val secureRandom: SecureRandom = SecureRandom
 
     private fun rsaPrivateKey(value: ByteArray): RSAPrivateCrtKey {
         require(value.size <= MAX_PKCS8_BYTES) { "RSA private key is too large" }
-        val privateKey = KeyFactory.getInstance(RSA).generatePrivate(PKCS8EncodedKeySpec(value))
+        // Android 8's PKCS#8 decoder drops the RSAPrivateCrtKey interface. Decode the
+        // parameters explicitly so validation retains the CRT values.
+        val parameters =
+            PrivateKeyFactory.createKey(value) as? RSAPrivateCrtKeyParameters
+                ?: throw IllegalArgumentException("Invalid RSA private key")
+        val privateKey =
+            KeyFactory.getInstance(RSA)
+                .generatePrivate(
+                    RSAPrivateCrtKeySpec(
+                        parameters.modulus,
+                        parameters.publicExponent,
+                        parameters.exponent,
+                        parameters.p,
+                        parameters.q,
+                        parameters.dp,
+                        parameters.dq,
+                        parameters.qInv,
+                    )
+                )
         return privateKey as? RSAPrivateCrtKey
             ?: throw IllegalArgumentException("Invalid RSA private key")
     }

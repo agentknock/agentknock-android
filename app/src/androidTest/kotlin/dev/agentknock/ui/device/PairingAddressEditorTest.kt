@@ -12,7 +12,6 @@ import androidx.compose.ui.test.onNodeWithText
 import androidx.compose.ui.test.performClick
 import androidx.compose.ui.test.performTextInput
 import androidx.compose.ui.test.performTextInputSelection
-import androidx.compose.ui.text.AnnotatedString
 import androidx.compose.ui.text.TextRange
 import androidx.test.ext.junit.runners.AndroidJUnit4
 import org.junit.Rule
@@ -51,10 +50,9 @@ class PairingAddressEditorTest {
         compose.onNodeWithText("Change pairing address").assertIsEnabled()
         compose.onNodeWithText("Another suggestion").performClick()
         field.assert(
-            SemanticsMatcher.expectValue(
-                SemanticsProperties.EditableText,
-                AnnotatedString("ocean-feather-sunset"),
-            )
+            SemanticsMatcher("Pairing address is the generated suggestion") {
+                it.config[SemanticsProperties.EditableText].text == "ocean-feather-sunset"
+            }
         )
         field.assert(
             SemanticsMatcher.expectValue(SemanticsProperties.TextSelectionRange, TextRange(20))
