@@ -1,6 +1,8 @@
 import com.github.triplet.gradle.androidpublisher.ReleaseStatus
 import com.google.gms.googleservices.GoogleServicesTask
 import com.google.gms.googleservices.GoogleServicesPlugin.MissingGoogleServicesStrategy
+import org.gradle.api.artifacts.component.ModuleComponentIdentifier
+import org.gradle.work.DisableCachingByDefault
 
 plugins {
     alias(libs.plugins.android.application)
@@ -149,4 +151,58 @@ val requirePlayCredentials = tasks.register("requirePlayCredentials") {
 
 tasks.matching { it.name == "publishPlayReleaseBundle" }.configureEach {
     dependsOn(requirePlayCredentials)
+}
+
+@DisableCachingByDefault(because = "Checks resolved coordinates without producing artifacts")
+abstract class VerifyFossDependencies : DefaultTask() {
+    @get:Input
+    abstract val dependencyCoordinates: MapProperty<String, List<String>>
+
+    @TaskAction
+    fun verify() {
+        val forbiddenGroups = setOf(
+            "com.google.firebase",
+            "com.google.android.gms",
+            "com.android.billingclient",
+        )
+        val violations = dependencyCoordinates.get().flatMap { (configuration, coordinates) ->
+            coordinates.filter { it.substringBefore(':') in forbiddenGroups }
+                .map { "$configuration: $it" }
+        }
+        check(violations.isEmpty()) {
+            "FOSS builds must not include Firebase, Google Play Services, or Play Billing:\n" +
+                violations.sorted().joinToString("\n")
+        }
+    }
+}
+
+val verifyFossDependencies = tasks.register<VerifyFossDependencies>("verifyFossDependencies") {
+    group = "verification"
+    description = "Rejects Google SDK dependencies in the FOSS debug and release runtimes."
+    for (buildType in listOf("Debug", "Release")) {
+        val configuration = "foss${buildType}RuntimeClasspath"
+        dependencyCoordinates.put(
+            configuration,
+            configurations.named(configuration).flatMap { it.incoming.artifacts.resolvedArtifacts }
+                .map { artifacts ->
+                    artifacts.mapNotNull { artifact ->
+                        (artifact.id.componentIdentifier as? ModuleComponentIdentifier)?.let {
+                            "${it.group}:${it.module}:${it.version}"
+                        }
+                    }.distinct().sorted()
+                },
+        )
+    }
+}
+
+tasks.named("check") {
+    dependsOn(verifyFossDependencies)
+    for (flavor in listOf("Foss", "Play")) {
+        dependsOn(
+            "assemble${flavor}Debug",
+            "test${flavor}DebugUnitTest",
+            "lint${flavor}Debug",
+            "compile${flavor}DebugScreenshotTestSources",
+        )
+    }
 }

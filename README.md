@@ -12,12 +12,21 @@ Platform-Tools installed and SDK licenses accepted. Set `JAVA_HOME` to the JDK
 and `ANDROID_HOME` to the SDK, or configure `sdk.dir` in `local.properties`.
 Android Studio should use the same Gradle JDK.
 
+Before committing, run:
+
 ```sh
-./gradlew :app:assembleFossDebug :app:testFossDebugUnitTest :app:lintFossDebug
+./gradlew check
 ```
 
-The APK is written to `app/build/outputs/apk/foss/debug/`. On Windows, use
-`gradlew.bat`. Device tests require an emulator or connected device:
+This builds both debug APKs, runs unit tests and Android Lint for both flavors,
+compiles preview sources, and rejects Firebase, Google Play Services, or Billing
+dependencies in either FOSS runtime. It does not render screenshots or run
+release optimization or device tests. Gradle reuses unchanged outputs, so there
+is no need to run `clean` first.
+
+The APKs are written to `app/build/outputs/apk/{foss,play}/debug/`. To build just
+FOSS, use `./gradlew :app:assembleFossDebug`. On Windows, use `gradlew.bat`.
+Device tests require an emulator or connected device:
 
 ```sh
 ./gradlew :app:connectedFossDebugAndroidTest
