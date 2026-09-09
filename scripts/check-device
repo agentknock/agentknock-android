@@ -52,8 +52,15 @@ mkdir -p "$ANDROID_AVD_HOME"
 emulator_pid=
 
 cleanup() {
+    local result=$?
     if [[ -n "$emulator_pid" ]]; then
         timeout 10 adb -s "$device_serial" logcat -d > "$device_report_dir/logcat.txt" 2>&1 || true
+        if (( result != 0 )); then
+            echo 'Emulator output:' >&2
+            tail -n 60 "$device_report_dir/emulator.txt" >&2
+            echo 'Android errors and crashes:' >&2
+            timeout 10 adb -s "$device_serial" logcat -d '*:E' >&2 || true
+        fi
         timeout 10 adb -s "$device_serial" emu kill >/dev/null 2>&1 || true
         kill "$emulator_pid" 2>/dev/null || true
         wait "$emulator_pid" 2>/dev/null || true
@@ -65,8 +72,9 @@ trap cleanup EXIT
 
 printf 'no\n' | avdmanager create avd --name agentknock_ci \
     --package "$AGENTKNOCK_EMULATOR_IMAGE" --device pixel_7
+# ANGLE over SwiftShader supports the DMA readback required by API 37's mapper.
 emulator -avd agentknock_ci -port 5556 -accel on -no-window -no-audio -no-boot-anim -no-metrics \
-    -no-snapshot -gpu swiftshader -memory 2048 -cores 2 \
+    -no-snapshot -gpu swangle -memory 2048 -cores 2 \
     > "$device_report_dir/emulator.txt" 2>&1 &
 emulator_pid=$!
 

@@ -58,16 +58,25 @@ Local builds and tests do not require publishing credentials.
 ## Continuous integration
 
 Pull requests and pushes to `master` run repository checks plus independent Play
-and FOSS jobs for JVM tests, debug/release lint, all screen previews, debug APKs,
-and minified releases. Instrumentation runs on API 26 and 37 as soon as each
-distribution's debug APKs are ready. Separate API 26 and 37 jobs install and
-launch the minified FOSS APK or device-specific APKs from the Play bundle.
-Release checks use disposable signing keys and do not publish anything.
+and FOSS jobs for debug builds and JVM tests, Android lint, and minified releases.
+The debug jobs also compile preview sources and check Room schema exports.
+Instrumentation runs on API 26 and 37 as soon as each distribution's debug job
+finishes. Separate API 26 and 37 jobs install the minified FOSS APK or
+device-specific APKs from the Play bundle and assert that the welcome screen
+appears. Release checks use disposable signing keys and do not publish anything.
 
-The workflow has 19 work jobs and a final `CI passed` check. Reports and preview
-galleries are retained for seven days; APKs, bundles, and mappings for three.
+Full lint covers app and test sources in each debug flavor. There are no separate
+release source sets; release builds additionally run release-critical lint.
+Preview galleries remain a local design tool: CI has no approved images to
+compare against, so it compiles previews and relies on instrumentation for UI
+behavior instead of rendering unchecked pictures.
+
+The workflow has 15 work jobs and a final `CI passed` check. Only APKs and bundles
+needed by downstream device jobs are uploaded, for three days. Failures appear
+in job logs, including Android errors and crashes for failed device checks.
 GitHub runners use their Android SDK directly. Gradle caches are scoped by job
 and distribution, and pull requests can reuse their own caches across updates.
+JVM tests and debug APKs share one build to avoid compiling the app twice.
 
 For the repository checks locally, install actionlint and shellcheck and run
 `scripts/check-repository`, or run it in `nix develop .#ci`. The optional `ci-emulator-26` and `ci-emulator-37`
