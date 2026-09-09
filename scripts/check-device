@@ -58,8 +58,10 @@ cleanup() {
         if (( result != 0 )); then
             echo 'Emulator output:' >&2
             tail -n 60 "$device_report_dir/emulator.txt" >&2
-            echo 'Android errors and crashes:' >&2
-            timeout 10 adb -s "$device_serial" logcat -d '*:E' >&2 || true
+            echo 'Android crashes:' >&2
+            timeout 10 adb -s "$device_serial" logcat -d -b crash >&2 || true
+            echo 'Recent Android errors:' >&2
+            timeout 10 adb -s "$device_serial" logcat -d -t 100 '*:E' >&2 || true
         fi
         timeout 10 adb -s "$device_serial" emu kill >/dev/null 2>&1 || true
         kill "$emulator_pid" 2>/dev/null || true
@@ -72,9 +74,14 @@ trap cleanup EXIT
 
 printf 'no\n' | avdmanager create avd --name agentknock_ci \
     --package "$AGENTKNOCK_EMULATOR_IMAGE" --device pixel_7
-# ANGLE over SwiftShader supports the DMA readback required by API 37's mapper.
+emulator_options=(-gpu swiftshader -memory 2048)
+if [[ "$AGENTKNOCK_EMULATOR_API" == 37 ]]; then
+    # API 37's mapper requires DMA readback; hosted SDK defaults leave it disabled.
+    emulator_options=(-gpu swangle -memory 4096 -feature GLDirectMem)
+fi
+# Google services exceed the hosted SDK's default writable partition during boot.
 emulator -avd agentknock_ci -port 5556 -accel on -no-window -no-audio -no-boot-anim -no-metrics \
-    -no-snapshot -gpu swangle -memory 2048 -cores 2 \
+    -no-snapshot -partition-size 4096 -cores 2 "${emulator_options[@]}" \
     > "$device_report_dir/emulator.txt" 2>&1 &
 emulator_pid=$!
 

@@ -2,7 +2,6 @@
 """Verify unsigned, minified FOSS APKs and Play bundles without publishing credentials."""
 
 import argparse
-import hashlib
 import json
 import os
 from pathlib import Path
@@ -25,11 +24,12 @@ def main():
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("distribution", choices=["foss", "play"])
     distribution = parser.parse_args().distribution
-    revision = os.environ["AGENTKNOCK_SOURCE_REVISION"]
-    require(re.fullmatch(r"[0-9a-f]{12,40}", revision), "Expected a Git source revision")
+    # Verify a revision when explicitly supplied. CI uses the build's unverified
+    # default so unrelated commits can reuse Kotlin compilation and R8 outputs.
+    revision = os.environ.get("AGENTKNOCK_SOURCE_REVISION")
+    if revision is not None:
+        require(re.fullmatch(r"[0-9a-f]{12,40}", revision), "Expected a Git source revision")
     outputs = ROOT / "app/build/outputs"
-    report = ROOT / "app/build/reports/release-check" / distribution
-    report.mkdir(parents=True, exist_ok=True)
 
     if distribution == "play":
         artifact = outputs / "bundle/playRelease/app-play-release.aab"
@@ -44,9 +44,7 @@ def main():
         signature = subprocess.run(
             [str(apksigner), "verify", str(artifact)], capture_output=True, text=True
         )
-        (report / "signature.txt").write_text(signature.stdout + signature.stderr)
         require(signature.returncode == 1, "CI expects an unsigned release APK")
-    (report / "AndroidManifest.xml").write_bytes(manifest_xml)
     manifest = ET.fromstring(manifest_xml)
     application = manifest.find("application")
     require(application is not None, "Release artifact has no application")
@@ -75,10 +73,11 @@ def main():
         dex_pattern = r"base/dex/classes\d*\.dex" if distribution == "play" else r"classes\d*\.dex"
         dex_files = [name for name in names if re.fullmatch(dex_pattern, name)]
         require(dex_files, "Release artifact has no DEX files")
-        require(
-            any(revision.encode() in archive.read(name) for name in dex_files),
-            "Release artifact is missing the source revision",
-        )
+        if revision is not None:
+            require(
+                any(revision.encode() in archive.read(name) for name in dex_files),
+                "Release artifact is missing the source revision",
+            )
 
     if distribution == "play":
         notes = (ROOT / "app/src/main/play/release-notes/en-US/internal.txt").read_text()
@@ -86,17 +85,7 @@ def main():
         for path in (ROOT / "app/src/main/play/subscriptions").glob("*.json"):
             json.loads(path.read_text())
 
-    metadata = {
-        "distribution": distribution,
-        "artifact": artifact.name,
-        "application_id": manifest.get("package"),
-        "version_code": int(expected_code[1]),
-        "version_name": expected_name[1],
-        "source_revision": revision,
-        "artifact_sha256": hashlib.sha256(artifact.read_bytes()).hexdigest(),
-    }
-    (report / "release.json").write_text(json.dumps(metadata, indent=2) + "\n")
-    print(f"Verified unsigned {distribution} release {metadata['version_name']} ({metadata['version_code']}) at {revision}")
+    print(f"Verified unsigned {distribution} release {expected_name[1]} ({expected_code[1]})")
 
 
 if __name__ == "__main__":

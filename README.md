@@ -77,6 +77,9 @@ in job logs, including Android errors and crashes for failed device checks.
 GitHub runners use their Android SDK directly. Gradle caches are scoped by job
 and distribution, and pull requests can reuse their own caches across updates.
 JVM tests and debug APKs share one build to avoid compiling the app twice.
+CI releases use the build's `unverified` source revision: these unsigned artifacts
+only feed startup tests, and a per-commit stamp would force Kotlin and R8 to rerun
+even for documentation changes. Publishing supplies the actual Git revision.
 
 For the repository checks locally, install actionlint and shellcheck and run
 `scripts/check-repository`, or run it in `nix develop .#ci`. The optional `ci-emulator-26` and `ci-emulator-37`
