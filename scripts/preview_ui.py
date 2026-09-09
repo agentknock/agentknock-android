@@ -48,6 +48,18 @@ def select_options(values, selected, all_label):
 
 
 def write_gallery(entries, screens, selected_screen=None, selected_variant=None):
+    comparisons = (
+        ("before", "comparison.html", "Original → latest"),
+        ("previous", "previous-pass.html", "Previous pass → latest"),
+    )
+    comparison_links = []
+    for directory, filename, label in comparisons:
+        if (REPORT / directory / "screens.json").exists():
+            write_review_gallery(entries, screens, directory, filename)
+            comparison_links.append(f'<a href="{filename}">{label}</a>')
+        else:
+            (REPORT / filename).unlink(missing_ok=True)
+    comparison_navigation = ('<p>' + ' · '.join(comparison_links) + '</p>') if comparison_links else ''
     cards = []
     for name, screen in screens.items():
         previews = {entry["variant"]: entry for entry in entries.get(name, [])}
@@ -58,7 +70,8 @@ def write_gallery(entries, screens, selected_screen=None, selected_variant=None)
                     f'data-variant="{html.escape(variant, quote=True)}"><h2>{title}</h2>')
             entry = previews.get(variant)
             if entry:
-                image = html.escape(entry["image"], quote=True)
+                digest = hashlib.sha256((REPORT / entry["image"]).read_bytes()).hexdigest()
+                image = html.escape(f'{entry["image"]}?v={digest[:16]}', quote=True)
                 card += (f'<a href="{image}" target="_blank"><img loading="lazy" src="{image}" alt="{title}"></a>'
                          f'<p><code>{command}</code></p><p>{entry["rendered_at"]}</p>')
             else:
@@ -78,7 +91,7 @@ input{width:min(420px,65vw)}main{display:grid;grid-template-columns:repeat(auto-
 article{background:#fff;padding:12px;border-radius:10px;min-width:0}article[hidden]{display:none}h2{font-size:15px;margin:0 0 12px}
 img{display:block;width:100%;height:auto;border:1px solid #d5dae1}article p{font-size:12px;color:#596477;overflow-wrap:anywhere}a{color:#2457a6}code{font-size:12px}
 </style><header><h1>Agentknock UI previews</h1><p>Production Compose screens with synthetic fixtures. Click an image for full resolution. Timestamps show each screen's last render.</p>
-<p><a href="index.html">Review comparison</a></p>
+''' + comparison_navigation + '''
 <input id="search" type="search" placeholder="Filter screens…" aria-label="Filter screens">
 <select id="screen" aria-label="Screen">''' + controls[0] + '''</select>
 <select id="variant" aria-label="Variant">''' + controls[1] + '''</select>
@@ -88,15 +101,10 @@ function filter(){let count=0;for(const card of cards){card.hidden=!card.dataset
 search.addEventListener('input',filter);screen.addEventListener('change',filter);variant.addEventListener('change',filter);filter();
 </script></html>'''
     (REPORT / "catalog.html").write_text(page)
-    if (REPORT / "before/screens.json").exists():
-        write_review_gallery(entries, screens)
-    else:
-        (REPORT / "index.html").write_text(page)
-    if (REPORT / "previous/screens.json").exists():
-        write_review_gallery(entries, screens, "previous", "previous-pass.html")
+    (REPORT / "index.html").write_text(page)
 
 
-def write_review_gallery(entries, screens, baseline_directory="before", output_filename="index.html"):
+def write_review_gallery(entries, screens, baseline_directory="before", output_filename="comparison.html"):
     baseline_path = REPORT / baseline_directory
     baseline = json.loads((baseline_path / "screens.json").read_text())
     original = baseline_directory == "before"
@@ -109,7 +117,7 @@ def write_review_gallery(entries, screens, baseline_directory="before", output_f
         baseline_description = html.escape((baseline_path / "description.txt").read_text().strip())
     comparison_links = []
     for directory, filename, label in (
-        ("before", "index.html", "Original → latest"),
+        ("before", "comparison.html", "Original → latest"),
         ("previous", "previous-pass.html", "Previous pass → latest"),
     ):
         if (REPORT / directory / "screens.json").exists():

@@ -76,7 +76,7 @@ private fun SecretPage(secret: SecretDetails, firstItem: Int = 0) {
         actions = SecretDetailActions(
             onBack = {}, onEditSecret = {}, onDeleteSecret = {}, onAddVariable = {},
             onReplaceSshKey = {}, onSaveSshComment = {}, onCopyPublicKey = {},
-            onEditVariable = {}, onReveal = {}, onReadValue = { "db.example.test" },
+            onEditVariable = {}, onReveal = {}, onReadValue = { "m8Jq4wZr7vNp2xTk9sLc" },
             onCopy = {}, onSetApprovalMode = {}, onSetClientApprovalOverride = { _, _ -> },
             onSaveInstructions = {}, onEndTemporaryAccess = {},
         ),

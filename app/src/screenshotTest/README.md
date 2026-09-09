@@ -8,50 +8,49 @@ Pass several screen names to render them in one Gradle run, for example
 Without `--variant`, all variants of the selected screens are rendered. There is
 no special default theme, device size, or text scale.
 
-The current [screen review queue](../../../SCREEN_REVIEW.md) selects only dark
-360 × 800 dp portrait phone previews at normal text size (font scale 1.0).
-Use this single configuration for the whole queue and subsequent screen reviews.
-Render the screen names listed in the queue explicitly: `--variant dark` by itself
-also selects separately named large-text previews with a Dark variant.
-
 Each variant has its own top-level `@PreviewTest` function with one explicit
 `@Preview`. The command filters those exact functions before rendering. This is
 necessary because the renderer's method filter cannot select an individual
 annotation inside a multipreview function. Changed Kotlin sources still compile,
 but unselected variants do not render.
 
-Open `app/build/reports/ui-previews/index.html` directly in a browser. When a
-preserved baseline exists, this opens the dark phone comparison with all review
-screens visible. Original baseline and Latest render appear side by side on desktop and stack on
-narrow screens; images preserve their aspect ratio and link to full resolution.
-Filter by name or select one review screen. The baseline revision and each
-image's render timestamp are shown. “Changed” compares PNG contents;
-“unchanged” means a new render produced identical bytes; “pending” means the
-cached image still matches the baseline's bytes and timestamp, or an image is
-missing. Cached renders do not prove the latest source changes were rendered.
-
-The “Browse all screens and variants” link opens `catalog.html`, which starts
-with the requested screen and variant selected for a single-screen render.
-Change its dropdowns to inspect other cached images. A partial render preserves
-the other variants and their timestamps, including variants belonging to the
-same screen. Missing variants have placeholders and an exact render command.
-Without a baseline, `index.html` shows this catalog too.
+Open `app/build/reports/ui-previews/index.html` directly in a browser for the
+searchable gallery. A single-screen render selects that screen and variant;
+change the dropdowns to inspect other cached images. A partial render preserves
+other variants and their timestamps, including variants belonging to the same
+screen. Missing variants have placeholders and an exact render command.
+`catalog.html` provides the same gallery.
+Image links include a content hash so updated renders do not reuse cached images.
 
 Every render rebuilds the gallery pages. `./preview-ui --gallery-only` rebuilds
-the pages from cached images without Gradle. The comparison reads the immutable
-`before/screens.json`, `before/images/`, and `before/revision.txt` under the
-gallery directory; the tool never writes to `before/`. The ordered screen-name
-array in `review-screens.json` selects the review set (all baseline screens when
-absent). Keep this baseline for the whole review. Generated pages, manifests,
-and images remain under ignored `app/build/`.
+them from cached images without Gradle. Generated pages, manifests, and images
+remain under ignored `app/build/`.
 
-To compare successive design passes, preserve the previous pass separately in
-`previous/screens.json` and `previous/images/`, with a plain-language description
-in `previous/description.txt` (for example, “First design pass, before feedback
-revisions”). When this snapshot exists, `previous-pass.html` compares it with the
-latest renders. Both comparison pages have links to switch between the original
-baseline and the previous pass. The tool never writes to either snapshot, and
-each comparison retains its own image hashes, status, and render timestamps.
+### Optional comparisons
+
+For a new comparison, copy the gallery's `screens.json` and `images/` into
+`before/` under the gallery directory before making UI changes. Record the source
+revision in `before/revision.txt`. Render the changed screens, then open the
+“Original → latest” link in the gallery to view `comparison.html`.
+The tool reads the snapshot without modifying it.
+
+Comparisons select the Dark variant. An optional `review-screens.json` containing
+an ordered array of screen names limits the comparison; otherwise it includes all
+baseline screens. Include only screens with a Dark preview in the baseline or
+selection. Use matching dimensions and font scales for both renders.
+
+Images appear side by side on desktop and stack on narrow screens, with links to
+full resolution. Each image shows its render time. “Changed” compares PNG bytes;
+“unchanged” means a new render produced identical bytes; “pending” means an image
+is missing or still has the baseline's bytes and timestamp. Cached images do not
+prove the latest source changes were rendered.
+
+To compare another design pass, copy its `screens.json` and `images/` into
+`previous/` and describe it in `previous/description.txt`. The gallery then links
+to `previous-pass.html` as well. Remove `before/`, `previous/`, and
+`review-screens.json` when the comparison is finished, then run
+`./preview-ui --gallery-only` to remove the comparison pages and links.
+The current gallery remains the landing page throughout.
 
 For network access, run from the repository root:
 
@@ -94,6 +93,14 @@ catalog covers representative visual states, not every combination of data.
 4. Run `./preview-ui --list`, then render just the screen and variant being changed.
    Inspect its full-resolution image. After shared UI changes, render the broader
    set of affected screens and variants.
+
+Fixtures follow a fictional developer, Maya Chen, working on an orders API.
+Secret names identify their purpose and environment (`orders-db-prod`,
+`orders-db-staging`, `work-ssh`); client names identify machines. Request summaries,
+details, and audit records share the same commands and secret metadata. Example
+domains, public key bytes, passwords, and identities are synthetic. Long-name and
+long-command previews use plausible deployment and Android release workflows.
+Play Store previews use these same fixtures.
 
 Callbacks in previews are inert. The real screens remain responsible for
 rendering, and their runtime wrappers still obtain platform state normally.

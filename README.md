@@ -55,9 +55,6 @@ production composables with synthetic data. The catalog covers setup, navigation
 requests, clients, secrets, editors, settings, billing, audit history, and important
 empty, error, pending, and confirmation states, including views below the fold.
 See [the preview guide](app/src/screenshotTest/README.md) for coverage and extension instructions.
-Track accepted screenshots and the remaining Compose previews, ranked by importance,
-in [the screen review queue](SCREEN_REVIEW.md). All screen reviews use one target:
-dark theme, a 360 × 800 dp portrait phone, and normal text size.
 
 To serve just the generated gallery over the network:
 
@@ -69,6 +66,23 @@ The script uses the project's Nix development shell, fixed palettes, and UTC tim
 The running app still uses dynamic colors by default. PNGs and the gallery are generated
 and ignored by Git. Android system prompts, keyboard behavior, interactions, and dynamic
 colors still require emulator or device verification.
+
+## Play listing screenshots
+
+The eight phone screenshots show command approval, secrets, Git signing, SSH
+authentication, secret access settings, client management, pairing, and audit
+history, in that order. `PlayStorePreviews.kt` reuses the production screen
+fixtures in dark theme at 1080 × 1920 pixels (432 × 768 dp, normal text size).
+These store variants are separate from the standard 360 × 800 dp phone previews.
+
+Regenerate and export the listing's 24-bit PNGs with:
+
+```sh
+nix shell --impure --expr 'let pkgs = import <nixpkgs> {}; in pkgs.python3.withPackages (p: [ p.pillow ])' -c python3 scripts/update_play_screenshots.py
+```
+
+The script updates `app/src/main/play/listings/en-GB/graphics/phone-screenshots/`
+locally. Review the images before uploading them to Google Play.
 
 ## Internal releases
 

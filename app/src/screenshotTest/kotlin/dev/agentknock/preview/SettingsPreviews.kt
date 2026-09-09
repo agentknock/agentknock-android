@@ -175,14 +175,15 @@ private fun SubscriptionUnavailablePreview() = PreviewScreen {
 
 internal val previewAuditEvent = AuditEvent(
     id = 1, occurredAt = previewTimestamp, type = AuditEventType.SECRET_USE_DECIDED, outcome = AuditOutcome.APPROVED,
-    decisionSource = AuditDecisionSource.USER, subject = "cf-test", context = null, detail = null,
-    expiresAt = null, clientId = "preview-laptop", clientName = "cf-wrk", relayRequestId = "preview-request",
-    data = JsonObject(auditDataOf("command" to "psql", "arguments" to listOf("-c", "SELECT version();"), "secrets" to listOf("cf-test"))),
+    decisionSource = AuditDecisionSource.USER, subject = previewSecret.name, context = null, detail = null,
+    expiresAt = null, clientId = "preview-laptop", clientName = "maya-thinkpad", relayRequestId = "preview-request",
+    data = JsonObject(auditDataOf("command" to previewInvocation.command, "arguments" to previewInvocation.arguments, "secrets" to previewInvocation.secrets)),
 )
 internal val previewAuditEvents = listOf(previewAuditEvent,
-    previewAuditEvent.copy(id = 2, type = AuditEventType.CLIENT_SUSPENDED, outcome = AuditOutcome.CHANGED, subject = "cf-ci", clientId = "preview-server", clientName = "cf-ci", relayRequestId = null,
-        decisionSource = null, data = JsonObject(auditDataOf("name" to "cf-ci", "relay_state" to "suspended"))),
-    previewAuditEvent.copy(id = 3, outcome = AuditOutcome.DENIED, decisionSource = AuditDecisionSource.AI_REVIEW),
+    previewAuditEvent.copy(id = 2, occurredAt = previewTimestamp - 900_000, type = AuditEventType.CLIENT_SUSPENDED, outcome = AuditOutcome.CHANGED, subject = "build-runner-01", clientId = "preview-server", clientName = "build-runner-01", relayRequestId = null,
+        decisionSource = null, data = JsonObject(auditDataOf("name" to "build-runner-01", "relay_state" to "suspended"))),
+    previewAuditEvent.copy(id = 3, occurredAt = previewTimestamp - 3_600_000, outcome = AuditOutcome.DENIED, decisionSource = AuditDecisionSource.AI_REVIEW,
+        data = JsonObject(auditDataOf("command" to "psql", "arguments" to listOf("-h", "db.prod.example.com", "-U", "orders_app", "-d", "orders", "-c", "TRUNCATE orders;"), "secrets" to previewInvocation.secrets))),
 )
 
 @PreviewTest

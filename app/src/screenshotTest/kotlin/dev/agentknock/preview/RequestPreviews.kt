@@ -87,10 +87,14 @@ fun InvocationAiReviewDarkPreview() = InvocationAiReviewPreview()
 
 @Composable
 private fun InvocationAiReviewPreview() = PreviewScreen {
-    InvocationPage(previewInvocation.copy(approvalEvaluation = previewEvaluation.copy(
-        secrets = previewEvaluation.secrets.map { it.copy(action = ApprovalAction.ASK_AI) },
-        aiReview = AiReview(AiReviewDecision.ASK_USER, "This command connects to production. Please confirm that these diagnostics are expected."),
-    )))
+    InvocationPage(previewInvocation.copy(
+        arguments = previewInvocation.arguments.dropLast(1) + "ANALYZE orders;",
+        reason = "Refresh query planner statistics after importing orders.",
+        approvalEvaluation = previewEvaluation.copy(
+            secrets = previewEvaluation.secrets.map { it.copy(action = ApprovalAction.ASK_AI) },
+            aiReview = AiReview(AiReviewDecision.ASK_USER, "ANALYZE updates production database statistics. Your instructions require confirmation before making changes."),
+        ),
+    ))
 }
 
 @PreviewTest
@@ -147,11 +151,11 @@ private fun GitSignPreview() = PreviewScreen { GitSignPage(previewGitSign) }
 }
 
 private val previewSignedRepository = GitSignRepository(
-    remote = "git@example.test:team/service.git", worktree = "/home/developer/service",
+    remote = "git@git.example.com:commerce/orders-api.git", worktree = "/home/maya/projects/orders-api",
     head = GitSignHead.Branch("main", upstream = "origin/main"), changedPathCount = 2,
     changedPaths = listOf(
-        GitSignChangedPath(GitSignChangeStatus.MODIFIED, "service/health/checks.py"),
-        GitSignChangedPath(GitSignChangeStatus.ADDED, "service/health/tests/test_checks.py"),
+        GitSignChangedPath(GitSignChangeStatus.MODIFIED, "orders/db.py"),
+        GitSignChangedPath(GitSignChangeStatus.ADDED, "tests/test_db.py"),
     ),
 )
 
@@ -168,8 +172,8 @@ fun GitSignSignedDarkPreview() = PreviewScreen {
 @Composable
 fun GitSignTagDarkPreview() = PreviewScreen {
     GitSignPage(previewGitSign.copy(
-        message = ("object " + "b".repeat(40) + "\ntype commit\ntag v1.4.0\n" +
-            "tagger Developer <dev@example.test> 1788696000 +0000\n\nRelease 1.4.0\n\nHealth checks now retry before failing.\n").encodeToByteArray(),
+        message = ("object c81d2f0e6b439a5f70814f07b9a2d3815e64c092\ntype commit\ntag v1.4.0\n" +
+            "tagger Maya Chen <maya@example.com> ${previewTimestamp / 1000} +0000\n\nRelease 1.4.0\n\nDatabase connections now retry during startup.\n").encodeToByteArray(),
         repository = previewSignedRepository.copy(changedPathCount = null, changedPaths = null),
         command = "git", arguments = listOf("tag", "-s", "v1.4.0", "-m", "Release 1.4.0"),
         reason = "Sign the release tag.",
@@ -247,13 +251,13 @@ fun SshUploadDarkPreview() = SshUploadPreview()
 
 @Composable
 private fun SshUploadPreview() = PreviewScreen {
-    UploadPage(previewUpload.copy(secretType = "ssh", uploadedName = "cf-key", description = previewSshSecret.description,
+    UploadPage(previewUpload.copy(secretType = "ssh", uploadedName = "deploy-ssh-staging", description = "SSH access to staging application servers.",
         variables = emptyList(), variableNames = emptyList(), addedVariables = emptyList(), publicKey = previewSshKey.publicKey, fingerprint = previewSshKey.fingerprint))
 }
 
 @Composable private fun UploadPage(details: SecretUploadRequestDetails) {
     SecretUploadRequestDetail(previewRequest(InboxRequestContent.SecretUpload(details)), {}, true, {}, {},
-        mapOf("preview-host" to "db.example.test"), {}, { _, _ -> }, Modifier.fillMaxSize())
+        mapOf("preview-host" to "db.staging.example.com"), {}, { _, _ -> }, Modifier.fillMaxSize())
 }
 
 @PreviewTest
@@ -273,8 +277,8 @@ private fun InvocationReviewingPreview() = PreviewScreen {
     )), InboxRequestState.REVIEWING)
 }
 
-private const val longClientName = "cf-wrk-production-eu-west-1"
-private val longSecretNames = listOf("cf-test-production-db-password", "cf-test-deployment-api-token")
+private const val longClientName = "orders-deploy-runner-eu-west-1"
+private val longSecretNames = listOf("orders-production-postgres-password", "orders-production-deployment-token")
 
 @PreviewTest
 @Preview(name = "Dark", group = "requests-long-names", widthDp = 360, heightDp = 800, locale = "en", uiMode = Configuration.UI_MODE_NIGHT_YES)
@@ -283,8 +287,10 @@ fun RequestsLongNamesDarkPreview() = PreviewScreen {
     RequestsPage(previewRequestSummaries.map {
         it.copy(
             clientName = longClientName,
+            command = if (it.kind == InboxRequestKind.SECRET_USE) multiSecretInvocation.command else it.command,
+            arguments = if (it.kind == InboxRequestKind.SECRET_USE) listOf("--environment", "production") else it.arguments,
             secretNames = if (it.kind == InboxRequestKind.SECRET_USE) longSecretNames
-                else listOf("cf-key-production-deployment"),
+                else listOf("orders-production-deployment-ssh"),
         )
     })
 }
@@ -293,8 +299,10 @@ fun RequestsLongNamesDarkPreview() = PreviewScreen {
 @Preview(name = "Dark", group = "invocation-long-names", widthDp = 360, heightDp = 800, locale = "en", uiMode = Configuration.UI_MODE_NIGHT_YES)
 @Composable
 fun InvocationLongNamesDarkPreview() = PreviewScreen {
-    InvocationPage(previewInvocation.copy(
+    InvocationPage(multiSecretInvocation.copy(
         clientName = longClientName,
+        arguments = listOf("--environment", "production"),
+        reason = "Deploy the orders API to production and run database migrations.",
         secrets = longSecretNames,
         secretDetails = longSecretNames.mapIndexed { index, name ->
             previewInvocation.secretDetails.single().copy(
@@ -317,15 +325,15 @@ fun InvocationLargeTextDarkPreview() = InvocationPreview()
 private const val longCommandExecutable =
     "/nix/store/7q8v2m4x9n6p1r3s5t0w8y2z4a6b9c1d-openjdk-21.0.7+6/bin/jarsigner"
 private val longCommandArguments = listOf(
-    "-keystore", "/home/naked/.local/share/agentknock-android/upload-keystore.p12",
+    "-keystore", "/home/maya/.local/share/parcel-android/upload-keystore.p12",
     "-storetype", "PKCS12",
     "-storepass:env", "KEYSTORE_PASSWORD",
     "-keypass:env", "KEYSTORE_PASSWORD",
-    "-signedjar", "/home/naked/mine/agentknock-android/app/build/publish-internal.aB3xY9/app-release.aab",
-    "/home/naked/mine/agentknock-android/app/build/outputs/bundle/release/app-release.aab",
-    "agentknock-upload",
+    "-signedjar", "/home/maya/projects/parcel-android/app/build/publish-internal.aB3xY9/app-release.aab",
+    "/home/maya/projects/parcel-android/app/build/outputs/bundle/release/app-release.aab",
+    "parcel-upload",
 )
-private const val longCommandSecretName = "agentknock-android-upload-passphrase"
+private const val longCommandSecretName = "parcel-android-upload-passphrase"
 
 @PreviewTest
 @Preview(name = "Dark", group = "requests-long-command", widthDp = 360, heightDp = 800, locale = "en", uiMode = Configuration.UI_MODE_NIGHT_YES)
@@ -350,7 +358,7 @@ fun RequestsLongCommandDarkPreview() = PreviewScreen {
 fun InvocationLongCommandDarkPreview() = PreviewScreen {
     InvocationPage(previewInvocation.copy(
         command = longCommandExecutable, arguments = longCommandArguments,
-        reason = "Sign the Agentknock Android app bundle with its Google Play upload key.",
+        reason = "Sign the Parcel Android release with its Google Play upload key.",
         secrets = listOf(longCommandSecretName),
         secretDetails = listOf(previewInvocation.secretDetails.single().copy(
             name = longCommandSecretName, description = "Google Play upload key passphrase.",
@@ -359,24 +367,24 @@ fun InvocationLongCommandDarkPreview() = PreviewScreen {
         approvalEvaluation = previewEvaluation.copy(secrets = listOf(
             previewEvaluation.secrets.single().copy(secretId = "long-command-secret", secretName = longCommandSecretName),
         )),
-        workingDirectory = "/home/naked/mine/agentknock-android", executablePath = longCommandExecutable,
+        workingDirectory = "/home/maya/projects/parcel-android", executablePath = longCommandExecutable,
     ))
 }
 
 private val multiSecretDetails = listOf(
     previewInvocation.secretDetails.single().copy(
-        name = "cf-db", description = "Staging database.",
+        name = "orders-db-staging", description = "PostgreSQL password for staging migrations.",
         environmentVariableNames = listOf("PGPASSWORD"),
     ),
     previewInvocation.secretDetails.single().copy(
-        name = "cf-api", description = "Deployment API.",
+        name = "deploy-token-staging", description = "API token for staging deployments.",
         environmentVariableNames = listOf("DEPLOY_TOKEN"),
     ),
 )
 private val multiSecretInvocation = previewInvocation.copy(
     command = "./deploy", arguments = listOf("--environment", "staging"),
-    executablePath = "/home/developer/service/deploy",
-    reason = "Deploy the service to staging.",
+    executablePath = "/home/maya/projects/orders-api/deploy",
+    reason = "Deploy the orders API to staging and run database migrations.",
     secrets = multiSecretDetails.map { it.name },
     secretDetails = multiSecretDetails,
     approvalEvaluation = previewEvaluation.copy(secrets = multiSecretDetails.mapIndexed { index, secret ->

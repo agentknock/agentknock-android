@@ -51,7 +51,7 @@ fun CreateSshKeyDarkPreview() = CreateSshKeyPreview()
 
 @Composable
 private fun CreateSshKeyPreview() = PreviewScreen {
-    SecretEditorScreen(SecretEditorState(null, "cf-key", "", SecretType.SSH), true, {}, {}, {}, {}, SnackbarHostState())
+    SecretEditorScreen(SecretEditorState(null, "deploy-ssh-staging", "", SecretType.SSH), true, {}, {}, {}, {}, SnackbarHostState())
 }
 
 @PreviewTest
@@ -99,7 +99,7 @@ fun EnvironmentVariableDarkPreview() = EnvironmentVariablePreview()
 private fun EnvironmentVariablePreview() = PreviewScreen {
     val variable = previewSecret.environmentVariables.single()
     EnvironmentVariableEditorScreen(VariableEditorState(previewSecret.id, previewSecret.name, variable,
-        "example-only", variable.name, "example-only", false, true), true, {}, {}, {}, {}, SnackbarHostState())
+        "m8Jq4wZr7vNp2xTk9sLc", variable.name, "m8Jq4wZr7vNp2xTk9sLc", false, true), true, {}, {}, {}, {}, SnackbarHostState())
 }
 
 @PreviewTest
@@ -115,7 +115,7 @@ fun CreateVariableDarkPreview() = CreateVariablePreview()
 @Composable
 private fun CreateVariablePreview() = PreviewScreen {
     EnvironmentVariableEditorScreen(VariableEditorState(previewSecret.id, previewSecret.name, null,
-        null, "PGHOST", "db.example.test", true, false), true, {}, {}, null, {}, SnackbarHostState())
+        null, "PGHOST", "db.prod.example.com", true, false), true, {}, {}, null, {}, SnackbarHostState())
 }
 
 @PreviewTest
@@ -160,5 +160,5 @@ fun DeleteSecretDarkPreview() = DeleteSecretPreview()
 
 @Composable
 private fun DeleteSecretPreview() = PreviewScreen {
-    DeleteDialog("Delete cf-test?", "This secret and its stored values will be permanently deleted.", {}, {}, modifier = previewDialogModifier())
+    DeleteDialog("Delete ${previewSecret.name}?", "This secret and its stored values will be permanently deleted.", {}, {}, modifier = previewDialogModifier())
 }

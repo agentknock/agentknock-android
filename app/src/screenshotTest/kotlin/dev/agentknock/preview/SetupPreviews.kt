@@ -110,5 +110,5 @@ fun TemporaryAccessDarkPreview() = TemporaryAccessPreview()
 
 @Composable
 private fun TemporaryAccessPreview() = PreviewScreen {
-    TemporaryAccessConfirmation("cf-wrk", listOf("cf-test", "cf-key"), TemporaryAccessOperation.INVOCATION, true, {}, {}, modifier = previewDialogModifier())
+    TemporaryAccessConfirmation("maya-thinkpad", listOf(previewSecret.name, previewSshSecret.name), TemporaryAccessOperation.INVOCATION, true, {}, {}, modifier = previewDialogModifier())
 }

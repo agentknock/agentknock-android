@@ -17,9 +17,9 @@ import dev.agentknock.ui.secrets.SecretList
 
 internal val previewIdentity = DeviceIdentity("preview-device", previewPairingAddress, "preview-device-id", true, true, previewTimestamp, "")
 internal val previewClient = ClientDetails(
-    clientId = "preview-laptop", name = "cf-wrk", hostname = "workstation", platform = "linux", architecture = "x86_64",
-    osVersion = "NixOS", machineId = "example-machine-id", clientSoftware = null,
-    instructions = "Allow routine development commands. Ask before production changes.",
+    clientId = "preview-laptop", name = "maya-thinkpad", hostname = "maya-thinkpad", platform = "linux", architecture = "x86_64",
+    osVersion = "NixOS", machineId = "e07c2c6d93b64a4a84f6c3b55912d8a7", clientSoftware = null,
+    instructions = "Allow tests, builds, and read-only diagnostics. Ask before deployments or production data changes.",
     state = RelayClientState.ACTIVE, desiredState = null, pairedAt = previewTimestamp, lastRequestAt = previewTimestamp,
 )
 
