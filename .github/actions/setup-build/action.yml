@@ -14,7 +14,11 @@ runs:
 
     - name: Install required SDK packages
       shell: bash
-      run: sdkmanager 'platforms;android-37.0' 'build-tools;36.0.0' platform-tools
+      run: |
+        "${ANDROID_HOME:?}/cmdline-tools/latest/bin/sdkmanager" \
+          'platforms;android-37.0' 'build-tools;36.0.0' platform-tools
+        echo "$ANDROID_HOME/cmdline-tools/latest/bin" >> "$GITHUB_PATH"
+        echo "$ANDROID_HOME/platform-tools" >> "$GITHUB_PATH"
 
     - name: Set up Gradle and validate wrapper
       uses: gradle/actions/setup-gradle@9c971963bec38e04b3d30dcc455b5382be2fdbfb # v6.3.0
