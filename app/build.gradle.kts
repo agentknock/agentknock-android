@@ -196,6 +196,7 @@ val verifyFossDependencies = tasks.register<VerifyFossDependencies>("verifyFossD
 }
 
 tasks.named("check") {
+    dependsOn(":spotlessCheck")
     dependsOn(verifyFossDependencies)
     for (flavor in listOf("Foss", "Play")) {
         dependsOn(

@@ -18,11 +18,23 @@ Before committing, run:
 ./gradlew check
 ```
 
-This builds both debug APKs, runs unit tests and Android Lint for both flavors,
-compiles preview sources, and rejects Firebase, Google Play Services, or Billing
-dependencies in either FOSS runtime. It does not render screenshots or run
-release optimization or device tests. Gradle reuses unchanged outputs, so there
-is no need to run `clean` first.
+This verifies Kotlin formatting, builds both debug APKs, runs unit tests and
+Android Lint for both flavors, compiles preview sources, and rejects Firebase,
+Google Play Services, or Billing dependencies in either FOSS runtime. It does
+not render screenshots or run release optimization or device tests. Gradle
+reuses unchanged outputs, so there is no need to run `clean` first.
+
+Kotlin sources and Gradle Kotlin scripts use ktfmt's four-space Kotlin style
+through Spotless. Both tools are version-pinned. Apply formatting before running
+checks:
+
+```sh
+./gradlew spotlessApply
+./gradlew check
+```
+
+`check` reports formatting differences without changing source files. Formatting
+does not require an IDE plugin or a separately installed formatter.
 
 The APKs are written to `app/build/outputs/apk/{foss,play}/debug/`. To build just
 FOSS, use `./gradlew :app:assembleFossDebug`. On Windows, use `gradlew.bat`.
