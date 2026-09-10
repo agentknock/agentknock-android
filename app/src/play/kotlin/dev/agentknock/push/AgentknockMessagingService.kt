@@ -11,22 +11,20 @@ import androidx.work.ExistingWorkPolicy
 import androidx.work.OneTimeWorkRequestBuilder
 import androidx.work.WorkManager
 import androidx.work.WorkerParameters
-import androidx.work.workDataOf
+import com.google.firebase.installations.FirebaseInstallations
 import com.google.firebase.messaging.FirebaseMessaging
 import com.google.firebase.messaging.FirebaseMessagingService
 import com.google.firebase.messaging.RemoteMessage
 import dev.agentknock.AgentknockApplication
 import java.util.concurrent.TimeUnit
-import kotlin.coroutines.resume
-import kotlin.coroutines.resumeWithException
 import kotlinx.coroutines.CancellationException
-import kotlinx.coroutines.suspendCancellableCoroutine
+import kotlinx.coroutines.tasks.await
 
 @SuppressLint("MissingFirebaseInstanceTokenRefresh")
 class AgentknockMessagingService : FirebaseMessagingService() {
     override fun onRegistered(installationId: String) {
         if ((application as AgentknockApplication).container.factoryResetInProgress) return
-        PushRegistrationWorker.enqueue(this, installationId)
+        PushRegistrationWorker.enqueue(this)
     }
 
     override fun onMessageReceived(message: RemoteMessage) {
@@ -49,12 +47,20 @@ class PushRegistrationWorker(
     parameters: WorkerParameters,
 ) : CoroutineWorker(applicationContext, parameters) {
     override suspend fun doWork(): Result {
-        val firebaseInstallationId =
-            inputData.getString(FIREBASE_INSTALLATION_ID_KEY)?.takeIf(String::isNotEmpty)
-                ?: return Result.failure()
         val container = (applicationContext as AgentknockApplication).container
         if (container.factoryResetInProgress) return Result.success()
         container.localStorage.await()
+        if (container.factoryResetInProgress) return Result.success()
+        // Resolve on every attempt so a retry cannot restore a queued, superseded FID.
+        val firebaseInstallationId =
+            try {
+                FirebaseInstallations.getInstance().id.await()
+            } catch (cancelled: CancellationException) {
+                throw cancelled
+            } catch (failure: Exception) {
+                Log.w(TAG, "Could not get the Firebase installation ID", failure)
+                return Result.retry()
+            }
         if (container.factoryResetInProgress) return Result.success()
         return when (val result = container.pushRegistration.register(firebaseInstallationId)) {
             PushRegistrationResult.Registered,
@@ -83,15 +89,11 @@ class PushRegistrationWorker(
 
     companion object {
         private const val WORK_NAME = "push-registration"
-        private const val FIREBASE_INSTALLATION_ID_KEY = "firebase-installation-id"
         private const val TAG = "AgentknockPush"
 
-        fun enqueue(context: Context, firebaseInstallationId: String) {
+        fun enqueue(context: Context) {
             val request =
                 OneTimeWorkRequestBuilder<PushRegistrationWorker>()
-                    .setInputData(
-                        workDataOf(FIREBASE_INSTALLATION_ID_KEY to firebaseInstallationId)
-                    )
                     .setConstraints(networkConstraints())
                     .setBackoffCriteria(BackoffPolicy.EXPONENTIAL, 10, TimeUnit.SECONDS)
                     .build()
@@ -114,7 +116,7 @@ class FirebaseRegistrationWorker(
         val container = (applicationContext as AgentknockApplication).container
         if (container.factoryResetInProgress) return Result.success()
         return try {
-            FirebaseMessaging.getInstance().awaitRegistration()
+            FirebaseMessaging.getInstance().register().await()
             Result.success()
         } catch (cancelled: CancellationException) {
             throw cancelled
@@ -140,29 +142,6 @@ class FirebaseRegistrationWorker(
                     ExistingWorkPolicy.KEEP,
                     request,
                 )
-        }
-    }
-}
-
-private suspend fun FirebaseMessaging.awaitRegistration() {
-    suspendCancellableCoroutine { continuation ->
-        val registration =
-            try {
-                register()
-            } catch (failure: Exception) {
-                continuation.resumeWithException(failure)
-                return@suspendCancellableCoroutine
-            }
-        registration.addOnCompleteListener { completed ->
-            if (!continuation.isActive) return@addOnCompleteListener
-            if (completed.isSuccessful) {
-                continuation.resume(Unit)
-            } else {
-                continuation.resumeWithException(
-                    completed.exception
-                        ?: IllegalStateException("FCM registration failed without a cause")
-                )
-            }
         }
     }
 }
