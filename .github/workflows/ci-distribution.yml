@@ -79,6 +79,10 @@ jobs:
         if: inputs.distribution == 'play'
       - name: Build unsigned release
         run: |
+          if [[ "$GITHUB_EVENT_NAME" == push ]]; then
+            export AGENTKNOCK_SOURCE_REVISION="$GITHUB_SHA"
+            echo "AGENTKNOCK_SOURCE_REVISION=$GITHUB_SHA" >> "$GITHUB_ENV"
+          fi
           case "$DISTRIBUTION" in
             foss) ./gradlew :app:assembleFossRelease ;;
             play) ./gradlew :app:bundlePlayRelease :app:generatePlayReleasePlayResources ;;
@@ -92,7 +96,7 @@ jobs:
           name: ${{ inputs.distribution }}-release
           path: ${{ inputs.distribution == 'foss' && 'app/build/outputs/apk/foss/release/*.apk' || 'app/build/outputs/bundle/playRelease/*.aab' }}
           if-no-files-found: error
-          retention-days: 3
+          retention-days: 30
 
   instrumentation:
     name: Instrumentation (API ${{ matrix.api }})
