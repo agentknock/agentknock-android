@@ -55,10 +55,27 @@ jobs:
     with:
       distribution: ${{ matrix.distribution }}
 
+  signing-check:
+    name: Signing tool checks
+    needs: distribution
+    runs-on: ubuntu-24.04
+    timeout-minutes: 15
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+      - uses: ./.github/actions/setup-signing
+      - uses: actions/download-artifact@3e5f45b2cfb9172054b4087a40e8e0b5a5461e7c # v8.0.1
+        with:
+          pattern: '*-release'
+          path: unsigned-release
+      - name: Exercise APK and AAB signing with a disposable key
+        run: python3 scripts/check-signing.py
+
   complete:
     name: CI passed
     if: always()
-    needs: [repository, distribution]
+    needs: [repository, distribution, signing-check]
     runs-on: ubuntu-24.04
     timeout-minutes: 5
     steps:
@@ -78,7 +95,7 @@ jobs:
 
   signing:
     name: Sign release
-    if: github.event_name == 'push'
+    if: github.event_name == 'push' && vars.RELEASE_SIGNING_ENABLED == 'true'
     needs: complete
     uses: ./.github/workflows/sign-release.yml
     permissions:
@@ -136,7 +153,7 @@ jobs:
           persist-credentials: false
       - uses: actions/download-artifact@3e5f45b2cfb9172054b4087a40e8e0b5a5461e7c # v8.0.1
         with:
-          name: test-signed-release
+          name: signed-release
           path: release-assets
       - name: Attach verified assets and publish the draft
         env:

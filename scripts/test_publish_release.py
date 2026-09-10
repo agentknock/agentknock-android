@@ -7,6 +7,10 @@ import tempfile
 import unittest
 from unittest.mock import patch
 
+from release_signing import CERTIFICATE, certificate_fingerprint
+
+
+REAL_CERTIFICATE = CERTIFICATE.read_bytes()
 
 spec = importlib.util.spec_from_file_location(
     "publish_release", Path(__file__).with_name("publish-github-release.py")
@@ -27,11 +31,14 @@ class PublicationTests(unittest.TestCase):
         Path("app/build.gradle.kts").write_text("val agentknockVersionCode = 48\n")
         assets = Path("release-assets")
         assets.mkdir()
-        for name in ("app.apk", "app.aab", "SHA256SUMS", "provenance.jsonl"):
+        Path("signing").mkdir()
+        CERTIFICATE.write_bytes(REAL_CERTIFICATE)
+        for name in (*publish.artifact_names("0.3.0", 48), "SHA256SUMS", "provenance.jsonl"):
             (assets / name).write_text("test fixture")
         (assets / "version.json").write_text(json.dumps({
             "commit": "source-commit", "versionName": "0.3.0", "versionCode": 48,
-            "signing": "temporary-test-key",
+            "signing": "google-cloud-hsm",
+            "signingCertificateSha256": certificate_fingerprint(CERTIFICATE),
         }))
         self.release = {"tag_name": "v0.3.0", "draft": True, "body": "Release notes"}
         self.tag_commit = "source-commit"
@@ -76,6 +83,21 @@ class PublicationTests(unittest.TestCase):
         self.run.side_effect = fail_verification
         with self.assertRaises(subprocess.CalledProcessError):
             publish.main()
+        self.assertEqual(self.mutations(), [])
+
+    def test_missing_play_apk_cannot_publish(self):
+        Path("release-assets/agentknock-play-0.3.0-48.apk").unlink()
+        with self.assertRaises(ValueError):
+            publish.main()
+        self.assertEqual(self.mutations(), [])
+
+    def test_unexpected_signing_identity_cannot_publish(self):
+        path = Path("release-assets/version.json")
+        original = json.loads(path.read_text())
+        for field, value in (("signing", "temporary-test-key"), ("signingCertificateSha256", "wrong")):
+            path.write_text(json.dumps({**original, field: value}))
+            with self.subTest(field=field), self.assertRaises(ValueError):
+                publish.main()
         self.assertEqual(self.mutations(), [])
 
     def test_version_bump_requires_a_release_on_the_matching_commit(self):

@@ -1,0 +1,12 @@
+#!/usr/bin/env bash
+set -euo pipefail
+if [[ $# != 1 ]]; then
+    echo 'Usage: scripts/install-jsign DIRECTORY' >&2
+    exit 2
+fi
+mkdir -p -- "$1"
+curl --proto '=https' --tlsv1.2 --fail --silent --show-error --location \
+    https://github.com/ebourg/jsign/releases/download/7.5/jsign-7.5.jar \
+    --output "$1/jsign.jar"
+echo "602a51c3545a6dc4fb99bd2ea7152b26d1345916d0c93ddfbd5936cb735af91c  $1/jsign.jar" \
+    | sha256sum --check

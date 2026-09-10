@@ -57,43 +57,24 @@ Local builds and tests do not require publishing credentials.
 
 ## Continuous integration
 
-Pull requests and pushes to `master` run repository checks plus independent Play
-and FOSS jobs for debug builds and JVM tests, Android lint, and minified releases.
-The debug jobs also compile preview sources and check Room schema exports.
-Instrumentation runs on API 26 and 37 as soon as each distribution's debug job
-finishes. Separate API 26 and 37 jobs install the minified FOSS APK or
-device-specific APKs from the Play bundle and assert that the welcome screen
-appears. Release startup checks use disposable signing keys. After CI passes on
-`master`, a signing job signs the validated release artifacts with a new temporary
-key and verifies both signatures.
+CI checks formatting, builds both variants, runs JVM tests and Android lint,
+and checks Room schema exports. Instrumentation and release startup tests run
+on Android API 26 and 37. Release startup checks cover both APK variants and
+device-specific APKs generated from the Play bundle. Signing checks use
+throwaway keys to exercise signature verification without publishing credentials.
 
-Full lint covers app and test sources in each debug flavor. There are no separate
-release source sets; release builds additionally run release-critical lint.
-Preview galleries remain a local design tool: CI has no approved images to
-compare against, so it compiles previews and relies on instrumentation for UI
-behavior instead of rendering unchecked pictures.
+The required `CI passed` check covers every build and test. Failure logs include
+Android errors and crashes for device checks. Preview sources are compiled in CI;
+visual review uses the local preview gallery described below.
 
-The required `CI passed` check covers every build and test. PRs
-also require Conventional Commits, a branch rebased onto current `master`, and a
-version code greater than `master`. PR artifacts are retained for three days to
-support test jobs and retries. On `master`, debug APKs are retained for three days
-and unsigned and test-signed release artifacts for 30 days. Failures appear
-in job logs, including Android errors and crashes for failed device checks.
-GitHub runners use their Android SDK directly. Gradle caches are scoped by job
-and distribution, and pull requests can reuse their own caches across updates.
-JVM tests and debug APKs share one build to avoid compiling the app twice.
-PR release builds use the build's `unverified` source revision to reuse compilation
-and optimization outputs. Builds on `master` embed their full Git commit and
-attest the signed artifacts. Release Please maintains the semantic version and
-changelog PR; merging it publishes a GitHub prerelease after CI passes. These
-artifacts currently use temporary test keys. No workflow calls Google Play.
-See the [release workflow](docs/releasing.md) before changing signing or publishing.
+To run repository checks locally, install actionlint and shellcheck and run
+`scripts/check-repository`, or use `nix develop .#ci`. The optional
+`ci-emulator-26` and `ci-emulator-37` Nix shells supply the emulator images and
+tools for `scripts/check-device`. Pass `foss instrumentation` or `foss release`,
+substituting `play` for the Play variant. Build the corresponding artifacts first.
 
-For the repository checks locally, install actionlint and shellcheck and run
-`scripts/check-repository`, or run it in `nix develop .#ci`. The optional `ci-emulator-26` and `ci-emulator-37`
-Nix shells also supply the image and tools for `scripts/check-device`. Pass
-`foss instrumentation` or `foss release` as arguments, substituting `play` for
-the Play distribution. Build the corresponding artifacts first.
+See [release artifacts](docs/releases.md) for build variants, signature
+verification, and building unsigned release APKs.
 
 ## Screen previews
 
@@ -113,7 +94,7 @@ comparisons, adding previews, and exporting Play Store screenshots.
 
 - [Device-relay protocol](docs/device-relay-protocol.md): connections, delivery,
   recovery, and device HTTP endpoints.
-- [Releasing](docs/releasing.md): signing, internal releases, and Play metadata.
+- [Release artifacts](docs/releases.md): choosing builds and verifying downloads.
 
 ## Contribute
 

@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""Verify unsigned, minified FOSS APKs and Play bundles without publishing credentials."""
+"""Verify unsigned, minified APKs and Play bundles without publishing credentials."""
 
 import argparse
 import json
@@ -31,14 +31,23 @@ def main():
         require(re.fullmatch(r"[0-9a-f]{12,40}", revision), "Expected a Git source revision")
     outputs = ROOT / "app/build/outputs"
 
+    apk = outputs / f"apk/{distribution}/release/app-{distribution}-release-unsigned.apk"
+    verify_artifact(apk, distribution, False, revision, outputs)
     if distribution == "play":
-        artifact = outputs / "bundle/playRelease/app-play-release.aab"
+        verify_artifact(outputs / "bundle/playRelease/app-play-release.aab", distribution, True, revision, outputs)
+        notes = (ROOT / "app/src/main/play/release-notes/en-US/internal.txt").read_text()
+        require(notes.strip(), "Internal release notes are empty")
+        for path in (ROOT / "app/src/main/play/subscriptions").glob("*.json"):
+            json.loads(path.read_text())
+
+
+def verify_artifact(artifact, distribution, bundle, revision, outputs):
+    if bundle:
         subprocess.run(["bundletool", "validate", f"--bundle={artifact}"], check=True)
         manifest_xml = subprocess.check_output(
             ["bundletool", "dump", "manifest", f"--bundle={artifact}", "--module=base"]
         )
     else:
-        artifact = outputs / "apk/foss/release/app-foss-release-unsigned.apk"
         manifest_xml = subprocess.check_output(["apkanalyzer", "manifest", "print", str(artifact)])
         apksigner = Path(os.environ["ANDROID_HOME"]) / "build-tools/36.0.0/apksigner"
         signature = subprocess.run(
@@ -68,10 +77,10 @@ def main():
             not any(re.fullmatch(r"META-INF/[^/]+\.(SF|RSA|DSA|EC)", name, re.I) for name in names),
             "CI expects an unsigned release artifact",
         )
-        if distribution == "play":
+        if bundle:
             embedded_mapping = archive.read("BUNDLE-METADATA/com.android.tools.build.obfuscation/proguard.map")
             require(embedded_mapping == mapping.read_bytes(), "Mismatched embedded R8 mapping")
-        dex_pattern = r"base/dex/classes\d*\.dex" if distribution == "play" else r"classes\d*\.dex"
+        dex_pattern = r"base/dex/classes\d*\.dex" if bundle else r"classes\d*\.dex"
         dex_files = [name for name in names if re.fullmatch(dex_pattern, name)]
         require(dex_files, "Release artifact has no DEX files")
         if revision is not None:
@@ -80,13 +89,7 @@ def main():
                 "Release artifact is missing the source revision",
             )
 
-    if distribution == "play":
-        notes = (ROOT / "app/src/main/play/release-notes/en-US/internal.txt").read_text()
-        require(notes.strip(), "Internal release notes are empty")
-        for path in (ROOT / "app/src/main/play/subscriptions").glob("*.json"):
-            json.loads(path.read_text())
-
-    print(f"Verified unsigned {distribution} release {expected_name} ({expected_code})")
+    print(f"Verified unsigned {artifact.name}: {expected_name} ({expected_code})")
 
 
 if __name__ == "__main__":

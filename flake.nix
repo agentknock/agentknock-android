@@ -50,6 +50,7 @@
         ci = androidShell androidSdk [
           pkgs.actionlint
           pkgs.bundletool
+          pkgs.openssl
           pkgs.shellcheck
         ];
         ci-emulator-26 = ciEmulatorShell "26";
