@@ -45,7 +45,8 @@ def main():
     subprocess.run(["gh", "release", "upload", tag, "--repo", repo, "--clobber",
                     *map(str, sorted(assets.iterdir()))], check=True)
     notes = assets / "release-notes.md"
-    notes.write_text("Both APKs and the Play AAB are signed with the official app-signing key. "
+    notes.write_text("Both APKs are signed with the official app-signing key. "
+                     "The Play AAB is signed with the separate Google Play upload key. "
                      "Choose the FOSS APK or the Play APK with Google integrations. "
                      "The AAB is for Play publishing and cannot be installed directly.\n\n"
                      + release["body"])

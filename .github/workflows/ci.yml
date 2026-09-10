@@ -69,7 +69,7 @@ jobs:
         with:
           pattern: '*-release'
           path: unsigned-release
-      - name: Exercise APK and AAB signing with a disposable key
+      - name: Exercise APK and AAB signing with distinct disposable keys
         run: python3 scripts/check-signing.py
 
   complete:

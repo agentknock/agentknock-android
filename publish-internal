@@ -25,12 +25,12 @@ import sys
 import xml.etree.ElementTree as ET
 
 sys.path.insert(0, "scripts")
-from release_signing import CERTIFICATE, verify_bundle
+from release_signing import PLAY_UPLOAD_CERTIFICATE, verify_bundle
 from version import BUILD_FILE, version_code
 
 directory = Path(sys.argv[1])
 bundle = directory / "app-release.aab"
-verify_bundle(bundle, CERTIFICATE, directory)
+verify_bundle(bundle, PLAY_UPLOAD_CERTIFICATE, directory)
 subprocess.run(["bundletool", "validate", f"--bundle={bundle}"], check=True)
 manifest = ET.fromstring(subprocess.check_output([
     "bundletool", "dump", "manifest", f"--bundle={bundle}", "--module=base",

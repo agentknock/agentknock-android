@@ -10,7 +10,8 @@ import subprocess
 from urllib.request import Request, urlopen
 
 
-CERTIFICATE = Path("signing/app-signing-certificate.pem")
+APP_SIGNING_CERTIFICATE = Path("signing/app-signing-certificate.pem")
+PLAY_UPLOAD_CERTIFICATE = Path("signing/play-upload-certificate.pem")
 KEY_VERSION_PATTERN = r"projects/[^/]+/locations/[^/]+/keyRings/[^/]+/cryptoKeys/[^/]+/cryptoKeyVersions/[1-9][0-9]*"
 
 
@@ -43,7 +44,7 @@ def check_cloud_key(key_version, token, certificate):
     def der(pem):
         return subprocess.check_output(["openssl", "pkey", "-pubin", "-outform", "DER"], input=pem)
     if der(expected) != der(public_key["pem"].encode()):
-        raise ValueError("Cloud KMS key does not match the existing app-signing certificate")
+        raise ValueError(f"Cloud KMS key does not match {certificate}")
 
 
 def artifact_names(version, code):
@@ -72,8 +73,8 @@ def sign_artifacts(inputs, outputs, certificate, storetype, keystore, alias, pas
     ], check=True)
 
 
-def verify_artifacts(artifacts, certificate, temporary):
-    fingerprint = certificate_fingerprint(certificate)
+def verify_artifacts(artifacts, app_certificate, upload_certificate, temporary):
+    fingerprint = certificate_fingerprint(app_certificate)
     apksigner = Path(os.environ["ANDROID_HOME"]) / "build-tools/36.0.0/apksigner"
     for artifact in artifacts[:2]:
         result = subprocess.check_output(
@@ -83,7 +84,7 @@ def verify_artifacts(artifacts, certificate, temporary):
         if signers != [fingerprint]:
             raise ValueError(f"Unexpected APK signing certificate: {artifact}")
         print(result, end="")
-    verify_bundle(artifacts[2], certificate, temporary)
+    verify_bundle(artifacts[2], upload_certificate, temporary)
 
 
 def verify_bundle(bundle, certificate, temporary):

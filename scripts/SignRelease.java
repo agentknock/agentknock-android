@@ -15,10 +15,10 @@ import net.jsign.KeyStoreType;
 // the remote key. Build Tools 36's apksigner CLI rejects --cert with --ks.
 class SignRelease {
     public static void main(String[] args) throws Exception {
-        if (args.length != 11) {
+        if (args.length < 7 || (args.length - 5) % 2 != 0) {
             throw new IllegalArgumentException(
                     "Expected store type, store, alias, password environment variable, certificate, "
-                            + "and three input/output pairs");
+                            + "and one or more APK/AAB input/output pairs");
         }
         String password = System.getenv(args[3]);
         if (password == null || password.isEmpty()) {
@@ -38,26 +38,31 @@ class SignRelease {
             certificate = (X509Certificate) factory.generateCertificate(input);
         }
         var certificates = List.of(certificate);
-        var signer = new ApkSigner.SignerConfig.Builder("app", key, certificates).build();
-        for (int i = 5; i < 9; i += 2) {
-            new ApkSigner.Builder(List.of(signer))
-                    .setInputApk(Path.of(args[i]).toFile())
-                    .setOutputApk(Path.of(args[i + 1]).toFile())
-                    .setV1SigningEnabled(false)
-                    .setV2SigningEnabled(true)
-                    .setV3SigningEnabled(true)
-                    .setV4SigningEnabled(false)
-                    .build().sign();
-        }
-        var jarBuilder = new JarSigner.Builder(key, factory.generateCertPath(certificates))
-                .digestAlgorithm("SHA-512");
-        if (provider == null) {
-            jarBuilder.signatureAlgorithm("SHA512withRSA");
-        } else {
-            jarBuilder.signatureAlgorithm("SHA512withRSA", provider);
-        }
-        try (var input = new ZipFile(args[9]); var output = Files.newOutputStream(Path.of(args[10]))) {
-            jarBuilder.build().sign(input, output);
+        for (int i = 5; i < args.length; i += 2) {
+            if (args[i].endsWith(".apk")) {
+                var signer = new ApkSigner.SignerConfig.Builder("app", key, certificates).build();
+                new ApkSigner.Builder(List.of(signer))
+                        .setInputApk(Path.of(args[i]).toFile())
+                        .setOutputApk(Path.of(args[i + 1]).toFile())
+                        .setV1SigningEnabled(false)
+                        .setV2SigningEnabled(true)
+                        .setV3SigningEnabled(true)
+                        .setV4SigningEnabled(false)
+                        .build().sign();
+            } else if (args[i].endsWith(".aab")) {
+                var jarBuilder = new JarSigner.Builder(key, factory.generateCertPath(certificates))
+                        .digestAlgorithm("SHA-512");
+                if (provider == null) {
+                    jarBuilder.signatureAlgorithm("SHA512withRSA");
+                } else {
+                    jarBuilder.signatureAlgorithm("SHA512withRSA", provider);
+                }
+                try (var input = new ZipFile(args[i]); var output = Files.newOutputStream(Path.of(args[i + 1]))) {
+                    jarBuilder.build().sign(input, output);
+                }
+            } else {
+                throw new IllegalArgumentException("Expected an APK or AAB: " + args[i]);
+            }
         }
     }
 }

@@ -4,7 +4,8 @@ import json
 from pathlib import Path
 import subprocess
 
-from release_signing import CERTIFICATE, artifact_names, certificate_fingerprint
+from release_signing import (APP_SIGNING_CERTIFICATE, PLAY_UPLOAD_CERTIFICATE,
+                             artifact_names, certificate_fingerprint)
 from version import BUILD_FILE, version_code
 
 
@@ -14,7 +15,8 @@ def verify_release_assets(directory, repo, commit):
     if (metadata["commit"] != commit or metadata["versionName"] != version
             or metadata["versionCode"] != version_code(Path(BUILD_FILE).read_text())
             or metadata["signing"] != "google-cloud-hsm"
-            or metadata["signingCertificateSha256"] != certificate_fingerprint(CERTIFICATE)):
+            or metadata["appSigningCertificateSha256"] != certificate_fingerprint(APP_SIGNING_CERTIFICATE)
+            or metadata["playUploadCertificateSha256"] != certificate_fingerprint(PLAY_UPLOAD_CERTIFICATE)):
         raise ValueError("Release assets do not match this commit and version")
     subprocess.run(["sha256sum", "--check", "SHA256SUMS"], cwd=directory, check=True)
     artifacts = [*directory.glob("*.apk"), *directory.glob("*.aab")]

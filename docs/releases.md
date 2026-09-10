@@ -27,7 +27,7 @@ own signing identities. Check the release notes before installing a prerelease.
 
 ## Verifying downloads
 
-Officially signed artifacts use the public certificate in
+Both officially signed APKs use the public certificate in
 [app-signing-certificate.pem](../signing/app-signing-certificate.pem). Its SHA-256
 fingerprint is:
 
@@ -45,8 +45,12 @@ apksigner verify --verbose --print-certs agentknock-foss-VERSION-CODE.apk
 Compare the reported certificate SHA-256 digest with the fingerprint above.
 The digest may be printed in lowercase without colons.
 
+The Play AAB uses a separate
+[upload certificate](../signing/play-upload-certificate.pem). Google Play verifies
+that upload signature, then signs the APKs it delivers with the app-signing key.
+
 Releases include `SHA256SUMS` for file integrity and `version.json` with the app
-version, Android version code, source commit, and signing certificate fingerprint.
+version, Android version code, source commit, and both certificate fingerprints.
 After downloading the files listed in the checksum manifest into one directory,
 check them with:
 
