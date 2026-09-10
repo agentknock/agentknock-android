@@ -35,10 +35,11 @@ new semantic release.
 
 ## GitHub releases: temporary signing
 
-Production credentials are deliberately not configured. CI generates a fresh
-random signing key for each run, verifies signatures on the FOSS APK and Play
-bundle, and discards the key. These artifacts cannot update the official app or
-an installation signed by another run. The bundle is never uploaded to Play.
+Production credentials are deliberately not configured. After CI passes on
+`master`, a signing job generates a fresh random key to sign the FOSS APK and Play
+bundle. It verifies both signatures and discards the key. These artifacts cannot
+update the official app or an installation signed by another run. The bundle is
+never uploaded to Play.
 All public releases are marked as prereleases and explicitly say they are
 **test-signed**. Configure real signing before distributing supported app updates.
 
@@ -47,7 +48,7 @@ The pipeline follows the CLI repository's draft-and-publish sequence:
 1. On pushes to `master`, Release Please creates a draft release and tag for a
    merged release PR, and maintains the next release PR.
 2. The same workflow builds and checks both distributions. Master builds embed
-   the source commit. After device checks pass, CI signs those exact unsigned
+   the source commit. After all CI checks pass, CI signs those exact unsigned
    artifacts with a temporary key; it does not rebuild them for publication.
 3. CI attests the signed files, checksum manifest subjects, and version metadata.
    Artifacts and the attestation bundle are retained in Actions for 30 days.
@@ -56,8 +57,10 @@ The pipeline follows the CLI repository's draft-and-publish sequence:
    attaches assets to the draft, and publishes it as an immutable prerelease.
 
 Ordinary merges retain their test-signed Actions artifacts without creating a
-semantic release. Master CI runs are not canceled by later pushes. Release
-management and publication each queue concurrent jobs instead of replacing
+semantic release. PRs skip final signing and attestations; their unsigned release
+artifacts and debug APKs are retained for three days for downstream test jobs and
+retries. Master CI runs are not canceled by later pushes. Release management and
+publication each queue concurrent jobs instead of replacing
 pending work. The current actionlint release needs a narrow exception for
 GitHub's supported `concurrency.queue` property.
 

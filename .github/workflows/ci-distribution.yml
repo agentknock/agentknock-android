@@ -96,7 +96,7 @@ jobs:
           name: ${{ inputs.distribution }}-release
           path: ${{ inputs.distribution == 'foss' && 'app/build/outputs/apk/foss/release/*.apk' || 'app/build/outputs/bundle/playRelease/*.aab' }}
           if-no-files-found: error
-          retention-days: 30
+          retention-days: ${{ github.event_name == 'push' && 30 || 3 }}
 
   instrumentation:
     name: Instrumentation (API ${{ matrix.api }})

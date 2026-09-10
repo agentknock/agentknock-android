@@ -63,9 +63,9 @@ The debug jobs also compile preview sources and check Room schema exports.
 Instrumentation runs on API 26 and 37 as soon as each distribution's debug job
 finishes. Separate API 26 and 37 jobs install the minified FOSS APK or
 device-specific APKs from the Play bundle and assert that the welcome screen
-appears. Release startup checks use disposable signing keys. A signing job then signs the
-validated release artifacts with a new temporary key and verifies both signatures.
-PR runs do not publish releases.
+appears. Release startup checks use disposable signing keys. After CI passes on
+`master`, a signing job signs the validated release artifacts with a new temporary
+key and verifies both signatures.
 
 Full lint covers app and test sources in each debug flavor. There are no separate
 release source sets; release builds additionally run release-critical lint.
@@ -73,10 +73,11 @@ Preview galleries remain a local design tool: CI has no approved images to
 compare against, so it compiles previews and relies on instrumentation for UI
 behavior instead of rendering unchecked pictures.
 
-The required `CI passed` check covers every build, test, and signing check. PRs
+The required `CI passed` check covers every build and test. PRs
 also require Conventional Commits, a branch rebased onto current `master`, and a
-version code greater than `master`. Debug APKs are retained for three days;
-unsigned and test-signed release artifacts are retained for 30 days. Failures appear
+version code greater than `master`. PR artifacts are retained for three days to
+support test jobs and retries. On `master`, debug APKs are retained for three days
+and unsigned and test-signed release artifacts for 30 days. Failures appear
 in job logs, including Android errors and crashes for failed device checks.
 GitHub runners use their Android SDK directly. Gradle caches are scoped by job
 and distribution, and pull requests can reuse their own caches across updates.

@@ -58,7 +58,7 @@ jobs:
   complete:
     name: CI passed
     if: always()
-    needs: [repository, distribution, signing]
+    needs: [repository, distribution]
     runs-on: ubuntu-24.04
     timeout-minutes: 5
     steps:
@@ -77,8 +77,9 @@ jobs:
           PY
 
   signing:
-    name: Test signing
-    needs: distribution
+    name: Sign release
+    if: github.event_name == 'push'
+    needs: complete
     uses: ./.github/workflows/sign-release.yml
     permissions:
       contents: read
@@ -118,7 +119,7 @@ jobs:
   publish:
     name: Publish GitHub release
     if: github.event_name == 'push'
-    needs: [complete, release-please]
+    needs: [signing, release-please]
     runs-on: ubuntu-24.04
     timeout-minutes: 10
     environment: release
