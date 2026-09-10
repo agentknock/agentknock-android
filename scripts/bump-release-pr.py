@@ -25,7 +25,7 @@ def contents(repo, ref):
 
 def main():
     repo = os.environ["GITHUB_REPOSITORY"]
-    number = int(os.environ["RELEASE_PR_NUMBER"])
+    number = int(json.loads(os.environ["RELEASE_PR"])["number"])
     pr = api(f"repos/{repo}/pulls/{number}")
     branch = pr["head"]["ref"]
     if (pr["state"] != "open" or pr["base"]["ref"] != "master"
