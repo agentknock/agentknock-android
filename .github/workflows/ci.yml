@@ -133,6 +133,16 @@ jobs:
           RELEASE_PR: ${{ steps.release.outputs.pr }}
         run: python3 scripts/bump-release-pr.py
 
+  publish-play:
+    name: Publish Google Play build
+    if: github.event_name == 'push' && github.ref == 'refs/heads/master'
+    needs: signing
+    uses: ./.github/workflows/publish-play.yml
+    permissions:
+      contents: read
+      attestations: read
+      id-token: write
+
   publish:
     name: Publish GitHub release
     if: github.event_name == 'push'

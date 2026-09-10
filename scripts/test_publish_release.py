@@ -7,7 +7,7 @@ import tempfile
 import unittest
 from unittest.mock import patch
 
-from release_signing import CERTIFICATE, certificate_fingerprint
+from release_signing import CERTIFICATE, artifact_names, certificate_fingerprint
 
 
 REAL_CERTIFICATE = CERTIFICATE.read_bytes()
@@ -33,7 +33,7 @@ class PublicationTests(unittest.TestCase):
         assets.mkdir()
         Path("signing").mkdir()
         CERTIFICATE.write_bytes(REAL_CERTIFICATE)
-        for name in (*publish.artifact_names("0.3.0", 48), "SHA256SUMS", "provenance.jsonl"):
+        for name in (*artifact_names("0.3.0", 48), "SHA256SUMS", "provenance.jsonl"):
             (assets / name).write_text("test fixture")
         (assets / "version.json").write_text(json.dumps({
             "commit": "source-commit", "versionName": "0.3.0", "versionCode": 48,
@@ -95,6 +95,15 @@ class PublicationTests(unittest.TestCase):
         path = Path("release-assets/version.json")
         original = json.loads(path.read_text())
         for field, value in (("signing", "temporary-test-key"), ("signingCertificateSha256", "wrong")):
+            path.write_text(json.dumps({**original, field: value}))
+            with self.subTest(field=field), self.assertRaises(ValueError):
+                publish.main()
+        self.assertEqual(self.mutations(), [])
+
+    def test_asset_metadata_must_match_the_checkout(self):
+        path = Path("release-assets/version.json")
+        original = json.loads(path.read_text())
+        for field, value in (("commit", "another-commit"), ("versionName", "0.4.0"), ("versionCode", 49)):
             path.write_text(json.dumps({**original, field: value}))
             with self.subTest(field=field), self.assertRaises(ValueError):
                 publish.main()

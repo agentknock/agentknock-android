@@ -12,6 +12,10 @@ The FOSS variant currently receives requests while the app is in the foreground.
 Existing AI access and activation links work without in-app purchases. The Play
 variant adds background push delivery through Google services.
 
+Google Play internal testing receives successful builds from each merge to
+`master`. These builds can share a version name while their Android version codes
+increase. Versioned GitHub releases are published separately.
+
 Both variants use the package name `dev.agentknock` and share app data. They
 cannot be installed side by side. Updating or switching variants requires a
 compatible signing certificate and version code; an older release generally
