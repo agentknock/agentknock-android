@@ -6,7 +6,7 @@ import os
 from pathlib import Path
 import subprocess
 
-from version import BUILD_FILE, version_code
+from release_artifacts import verify_release_assets
 
 
 def api(endpoint):
@@ -41,26 +41,14 @@ def main():
     if not api(f"repos/{repo}/immutable-releases")["enabled"]:
         raise ValueError("Enable immutable releases before publishing")
     assets = Path("release-assets")
-    metadata = json.loads((assets / "version.json").read_text())
-    if (metadata["commit"] != commit or metadata["versionName"] != version
-            or metadata["versionCode"] != version_code(Path(BUILD_FILE).read_text())
-            or metadata["signing"] != "temporary-test-key"):
-        raise ValueError("Release assets do not match this commit and version")
-    subprocess.run(["sha256sum", "--check", "SHA256SUMS"], cwd=assets, check=True)
-    apks, bundles = list(assets.glob("*.apk")), list(assets.glob("*.aab"))
-    if len(apks) != 1 or len(bundles) != 1:
-        raise ValueError("Expected one signed FOSS APK and one signed Play bundle")
-    for artifact in apks + bundles:
-        subprocess.run([
-            "gh", "attestation", "verify", str(artifact), "--repo", repo,
-            "--signer-workflow", f"{repo}/.github/workflows/sign-release.yml",
-            "--source-digest", commit, "--deny-self-hosted-runners",
-        ], check=True)
+    verify_release_assets(assets, repo, commit)
     subprocess.run(["gh", "release", "upload", tag, "--repo", repo, "--clobber",
                     *map(str, sorted(assets.iterdir()))], check=True)
     notes = assets / "release-notes.md"
-    notes.write_text("**These artifacts use temporary test signing keys. They cannot update the "
-                     "official app. Production signing and Play publishing are not configured.**\n\n"
+    notes.write_text("Both APKs are signed with the official app-signing key. "
+                     "The Play AAB is signed with the separate Google Play upload key. "
+                     "Choose the FOSS APK or the Play APK with Google integrations. "
+                     "The AAB is for Play publishing and cannot be installed directly.\n\n"
                      + release["body"])
     subprocess.run(["gh", "release", "edit", tag, "--repo", repo, "--draft=false",
                     "--prerelease", "--latest=false", "--verify-tag", "--notes-file", str(notes)], check=True)

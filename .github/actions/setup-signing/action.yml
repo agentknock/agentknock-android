@@ -1,0 +1,18 @@
+name: Set up release signing
+description: Install the JDK, Android signer, and checksum-pinned Jsign provider.
+runs:
+  using: composite
+  steps:
+    - uses: actions/setup-java@b6effb05e454b25005698d916606bdc6ffcbf961 # v5
+      with:
+        distribution: temurin
+        java-version: '17'
+    - name: Install Android signing tools
+      shell: bash
+      run: |
+        "${ANDROID_HOME:?}/cmdline-tools/latest/bin/sdkmanager" 'build-tools;36.0.0'
+    - name: Install Jsign provider
+      shell: bash
+      run: |
+        scripts/install-jsign "$RUNNER_TEMP/jsign"
+        echo "JSIGN_JAR=$RUNNER_TEMP/jsign/jsign.jar" >> "$GITHUB_ENV"

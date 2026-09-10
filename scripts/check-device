@@ -25,7 +25,10 @@ case "$check_kind" in
     release)
         case "$distribution" in
             foss) artifacts=(app/build/outputs/apk/foss/release/app-foss-release-unsigned.apk) ;;
-            play) artifacts=(app/build/outputs/bundle/playRelease/app-play-release.aab) ;;
+            play) artifacts=(
+                app/build/outputs/bundle/playRelease/app-play-release.aab
+                app/build/outputs/apk/play/release/app-play-release-unsigned.apk
+            ) ;;
         esac
         ;;
     *) echo "Unknown device check: $check_kind" >&2; exit 2 ;;
@@ -66,7 +69,8 @@ cleanup() {
             timeout 10 adb -s "$device_serial" logcat -d -t 100 '*:E' >&2 || true
         fi
         timeout 10 adb -s "$device_serial" emu kill >/dev/null 2>&1 || true
-        kill "$emulator_pid" 2>/dev/null || true
+        # A wedged emulator can ignore TERM and leave the following wait hung.
+        kill -KILL "$emulator_pid" 2>/dev/null || true
         wait "$emulator_pid" 2>/dev/null || true
         timeout 10 adb -s "$device_serial" wait-for-disconnect || true
     fi
@@ -147,15 +151,18 @@ case "$distribution" in
         bundletool install-apks --apks="$device_test_dir/release.apks" --device-id="$device_serial"
         ;;
 esac
-adb -s "$device_serial" shell am start -W -n dev.agentknock/.MainActivity \
-    | tee "$device_report_dir/release-startup.txt"
-grep -q '^Status: ok' "$device_report_dir/release-startup.txt"
-welcome_deadline=$((SECONDS + 60))
-while true; do
-    adb -s "$device_serial" shell pidof dev.agentknock
-    adb -s "$device_serial" shell uiautomator dump /sdcard/agentknock-ci.xml
-    adb -s "$device_serial" pull /sdcard/agentknock-ci.xml "$device_report_dir/release-ui.xml"
-    if python3 - "$device_report_dir/release-ui.xml" <<'PY'
+assert_release_startup() {
+    local startup_report_dir=$1
+    mkdir -p "$startup_report_dir"
+    adb -s "$device_serial" shell am start -W -n dev.agentknock/.MainActivity \
+        | tee "$startup_report_dir/release-startup.txt"
+    grep -q '^Status: ok' "$startup_report_dir/release-startup.txt"
+    welcome_deadline=$((SECONDS + 60))
+    while true; do
+        adb -s "$device_serial" shell pidof dev.agentknock
+        adb -s "$device_serial" shell uiautomator dump /sdcard/agentknock-ci.xml
+        adb -s "$device_serial" pull /sdcard/agentknock-ci.xml "$startup_report_dir/release-ui.xml"
+        if python3 - "$startup_report_dir/release-ui.xml" <<'PY'
 import sys
 import xml.etree.ElementTree as ET
 
@@ -166,15 +173,28 @@ welcome_visible = any(
 )
 raise SystemExit(0 if welcome_visible else 1)
 PY
-    then
-        break
-    fi
-    if (( SECONDS >= welcome_deadline )); then
-        echo 'The minified release did not display the welcome screen. Observed UI:' >&2
-        cat "$device_report_dir/release-ui.xml" >&2
-        exit 1
-    fi
-    sleep 1
-done
-adb -s "$device_serial" shell pidof dev.agentknock
-echo "Minified release startup passed."
+        then
+            break
+        fi
+        if (( SECONDS >= welcome_deadline )); then
+            echo 'The minified release did not display the welcome screen. Observed UI:' >&2
+            cat "$startup_report_dir/release-ui.xml" >&2
+            exit 1
+        fi
+        sleep 1
+    done
+    adb -s "$device_serial" shell pidof dev.agentknock
+    echo "Minified release startup passed."
+}
+assert_release_startup "$device_report_dir"
+
+if [[ "$distribution" == play ]]; then
+    # The directly distributed Play APK is a separate packaging output from the
+    # bundle. Exercise a clean install of that exact artifact as well.
+    adb -s "$device_serial" uninstall dev.agentknock
+    "$ANDROID_HOME/build-tools/36.0.0/apksigner" sign \
+        --ks "$device_test_dir/test-key.p12" --ks-key-alias ci --ks-pass pass:android \
+        --out "$device_test_dir/direct-play.apk" "${artifacts[1]}"
+    adb -s "$device_serial" install "$device_test_dir/direct-play.apk"
+    assert_release_startup "$device_report_dir/direct-apk"
+fi
