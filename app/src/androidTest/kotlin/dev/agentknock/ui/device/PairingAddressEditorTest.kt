@@ -2,6 +2,7 @@ package dev.agentknock.ui.device
 
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.runtime.mutableStateOf
+import androidx.compose.ui.semantics.SemanticsActions
 import androidx.compose.ui.semantics.SemanticsProperties
 import androidx.compose.ui.test.SemanticsMatcher
 import androidx.compose.ui.test.assert
@@ -9,7 +10,7 @@ import androidx.compose.ui.test.assertIsEnabled
 import androidx.compose.ui.test.assertIsNotEnabled
 import androidx.compose.ui.test.junit4.v2.createComposeRule
 import androidx.compose.ui.test.onNodeWithText
-import androidx.compose.ui.test.performClick
+import androidx.compose.ui.test.performSemanticsAction
 import androidx.compose.ui.test.performTextInput
 import androidx.compose.ui.test.performTextInputSelection
 import androidx.compose.ui.text.TextRange
@@ -48,7 +49,11 @@ class PairingAddressEditorTest {
             SemanticsMatcher.expectValue(SemanticsProperties.TextSelectionRange, TextRange(3))
         )
         compose.onNodeWithText("Change pairing address").assertIsEnabled()
-        compose.onNodeWithText("Another suggestion").performClick()
+        // Exercise the suggestion action without depending on the IME window's touch coordinates.
+        compose
+            .onNodeWithText("Another suggestion")
+            .assertIsEnabled()
+            .performSemanticsAction(SemanticsActions.OnClick)
         field.assert(
             SemanticsMatcher("Pairing address is the generated suggestion") {
                 it.config[SemanticsProperties.EditableText].text == "ocean-feather-sunset"
