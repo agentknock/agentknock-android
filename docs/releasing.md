@@ -3,39 +3,104 @@
 Run the commands below from the repository root. Publishing requires maintainer
 credentials; building and testing locally does not.
 
-## Internal releases
+## Versioning and pull requests
 
-Play publishing credentials and the upload keystore live outside the repository
-under `~/.local/share/agentknock-android/`. The keystore password is stored in
-Agentknock as `agentknock-android-upload-passphrase`, in the `KEYSTORE_PASSWORD`
-environment variable. `publish-internal` builds an unsigned bundle, requests the
-password through the paired CLI for a direct JDK `jarsigner` invocation, verifies
-the signed bundle, and uploads it. Gradle never receives the password. The signed
-bundle is kept in a temporary directory that is removed when the command exits;
-its SHA-256 is printed before uploading.
+`version.txt` contains the semantic version maintained by Release Please.
+`agentknockVersionCode` in `app/build.gradle.kts` is the independent Android
+counter. Every PR, including tooling and release PRs, must increase that counter
+over current `master`. After fetching and rebasing, run:
 
-Publishing requires the configured JDK and Android SDK, Bash, Git, `sha256sum`,
-and the Agentknock CLI. Set `JAVA_HOME` to the JDK whose `jarsigner` will sign the
-bundle. See the [development setup](../README.md#development).
+```sh
+python3 scripts/version.py bump
+```
 
-To publish a completed release to the internal testing track:
+The helper is idempotent: it sets the code to at least `origin/master + 1` and
+preserves a deliberately larger value. Commit the result. If another PR merges
+first, rebase, resolve the counter conflict, and run the helper again. Required
+checks reject reused codes and branches containing merge commits; strict branch
+rules require the branch to stay current before merging.
 
-1. Increment `agentknockVersionCode` in `app/build.gradle.kts`.
-2. Update `app/src/main/play/release-notes/en-US/internal.txt`.
-3. If the Room schema changed, add the next linear migration and its migration
-   test before publishing.
-4. Commit the release changes.
-5. Run `./publish-internal`.
+Use signed Conventional Commits (`feat:`, `fix:`, `ci:`, `docs:`, etc.). Mark a
+breaking change with `!` or a `BREAKING CHANGE:` footer. Merge PRs with true merge
+commits, retaining the original signed commits. Do not squash or rebase-merge.
+Release Please accumulates release-worthy changes into a PR updating `version.txt`,
+`CHANGELOG.md`, and its manifest. Automation adds the Android counter bump through
+GitHub's signed commit API. It explicitly dispatches CI on the updated branch,
+using the built-in token without needing a GitHub App key. This dispatch runs
+the same commit, ancestry, and version checks as ordinary PR CI.
 
-`publish-internal` builds and publishes only `playRelease`. FOSS publishing is
-disabled in the Play Publisher configuration. Build an unsigned FOSS release
-with `./gradlew :app:assembleFossRelease`. Release builds made directly with
-Gradle are unsigned.
+The initial manifest starts at `0.2.0`; the bootstrap SHA excludes historical
+commits from the first generated changelog. Tooling-only changes do not force a
+new semantic release.
 
-The release name is derived from the application version and version code.
+## GitHub releases: temporary signing
+
+Production credentials are deliberately not configured. After CI passes on
+`master`, a signing job generates a fresh random key to sign the FOSS APK and Play
+bundle. It verifies both signatures and discards the key. These artifacts cannot
+update the official app or an installation signed by another run. The bundle is
+never uploaded to Play.
+All public releases are marked as prereleases and explicitly say they are
+**test-signed**. Configure real signing before distributing supported app updates.
+
+The pipeline follows the CLI repository's draft-and-publish sequence:
+
+1. On pushes to `master`, Release Please creates a draft release and tag for a
+   merged release PR, and maintains the next release PR.
+2. The same workflow builds and checks both distributions. Master builds embed
+   the source commit. After all CI checks pass, CI signs those exact unsigned
+   artifacts with a temporary key; it does not rebuild them for publication.
+3. CI attests the signed files, checksum manifest subjects, and version metadata.
+   Artifacts and the attestation bundle are retained in Actions for 30 days.
+4. After all required checks succeed, publishing checks that the version tag
+   points to this build's commit, verifies checksums and artifact attestations,
+   attaches assets to the draft, and publishes it as an immutable prerelease.
+
+Ordinary merges retain their test-signed Actions artifacts without creating a
+semantic release. PRs skip final signing and attestations; their unsigned release
+artifacts and debug APKs are retained for three days for downstream test jobs and
+retries. Master CI runs are not canceled by later pushes. Release management and
+publication each queue concurrent jobs instead of replacing
+pending work. The current actionlint release needs a narrow exception for
+GitHub's supported `concurrency.queue` property.
+
+If publishing fails, rerun the failed jobs while the run's artifacts are retained.
+Draft assets may be replaced on retry. Published releases are left intact;
+immutable assets and tags cannot be replaced. A mismatched tag or changed version
+without a release fails publication instead of publishing the wrong build.
+
+Repository settings mirror the CLI: merge commits only, PR-title merge subjects,
+automatic merged-branch deletion, automatic merge available after checks, SHA-pinned
+Actions, read-only default workflow permissions, and immutable releases. The
+`Protect master` ruleset requires signatures, PRs, resolved review threads, and
+an up-to-date `CI passed` result. The `release` environment accepts protected
+branches. GitHub's combined permission for Actions to create or approve PRs is
+enabled for Release Please to create PRs; no workflow approves reviews.
+
+## Local Play publishing
+
+Automatic Play publishing and production CI key setup are deferred. The existing
+local `publish-internal` helper remains available for maintainer use. Do not run
+it as part of testing this workflow.
+
+Local Play credentials and the upload keystore live outside the repository under
+`~/.local/share/agentknock-android/`. The password is stored in Agentknock as
+`agentknock-android-upload-passphrase`, in the `KEYSTORE_PASSWORD` environment
+variable. `publish-internal` builds an unsigned bundle, requests the password for
+a direct JDK `jarsigner` invocation, verifies it, and uploads to internal testing.
+Gradle never receives the password. The temporary signed bundle is removed on
+exit and its SHA-256 is printed before uploading.
+
+The helper requires the configured JDK and Android SDK, Bash, Git, `sha256sum`,
+and the Agentknock CLI. Build inputs must be committed. Before publishing, update
+`app/src/main/play/release-notes/en-US/internal.txt` and ensure the version code
+has not already been uploaded. Closed testing and production promotions remain
+manual and should reuse an existing artifact.
+
 Room schema 1 is the compatibility baseline for releases using the current
-app-signing key. Every subsequently published schema is retained permanently,
-and published builds must never use a destructive migration fallback.
+app-signing key. Every subsequently published schema is retained permanently.
+Schema changes require a linear migration and migration test; published builds
+must never use a destructive migration fallback.
 
 ## Subscription catalog
 

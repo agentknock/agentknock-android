@@ -54,10 +54,11 @@ def main():
 
     configuration = (ROOT / "app/build.gradle.kts").read_text()
     expected_code = re.search(r"^val agentknockVersionCode = (\d+)$", configuration, re.M)
-    expected_name = re.search(r'^val agentknockVersionName = "([^"]+)"$', configuration, re.M)
-    require(expected_code and expected_name, "Cannot read the declared release version")
-    require(manifest.get(ANDROID + "versionCode") == expected_code[1], "Version code mismatch")
-    require(manifest.get(ANDROID + "versionName") == expected_name[1], "Version name mismatch")
+    require(expected_code, "Cannot read the declared version code")
+    expected_code = expected_code[1]
+    expected_name = (ROOT / "version.txt").read_text().strip()
+    require(manifest.get(ANDROID + "versionCode") == expected_code, "Version code mismatch")
+    require(manifest.get(ANDROID + "versionName") == expected_name, "Version name mismatch")
 
     mapping = outputs / "mapping" / f"{distribution}Release" / "mapping.txt"
     require(mapping.read_bytes(), "Missing R8 mapping")
@@ -85,7 +86,7 @@ def main():
         for path in (ROOT / "app/src/main/play/subscriptions").glob("*.json"):
             json.loads(path.read_text())
 
-    print(f"Verified unsigned {distribution} release {expected_name[1]} ({expected_code[1]})")
+    print(f"Verified unsigned {distribution} release {expected_name} ({expected_code})")
 
 
 if __name__ == "__main__":

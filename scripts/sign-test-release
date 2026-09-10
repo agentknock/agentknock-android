@@ -1,0 +1,62 @@
+#!/usr/bin/env bash
+set -euo pipefail
+cd -- "$(dirname -- "${BASH_SOURCE[0]}")/.."
+
+# These keys exist only for this run. Production key setup is deliberately deferred.
+key_dir=$(mktemp -d)
+trap 'rm -rf -- "$key_dir"' EXIT
+export TEST_KEY_PASSWORD
+TEST_KEY_PASSWORD=$(python3 -c 'import secrets; print(secrets.token_hex(32))')
+keytool -genkeypair -noprompt -keystore "$key_dir/test.p12" -storetype PKCS12 \
+    -storepass:env TEST_KEY_PASSWORD -keypass:env TEST_KEY_PASSWORD \
+    -alias test -keyalg RSA -keysize 3072 -validity 30 \
+    -dname 'CN=Agentknock temporary CI test key'
+
+mkdir -p release-assets
+version=$(cat version.txt)
+code=$(python3 -c 'import sys; sys.path.insert(0, "scripts"); from version import version_code; from pathlib import Path; print(version_code(Path("app/build.gradle.kts").read_text()))')
+apk="release-assets/agentknock-foss-$version-$code-test-signed.apk"
+bundle="release-assets/agentknock-play-$version-$code-test-signed.aab"
+apksigner="${ANDROID_HOME:?}/build-tools/36.0.0/apksigner"
+
+"$apksigner" sign --ks "$key_dir/test.p12" --ks-key-alias test \
+    --ks-pass env:TEST_KEY_PASSWORD --key-pass env:TEST_KEY_PASSWORD \
+    --v4-signing-enabled false \
+    --out "$apk" unsigned-release/foss-release/app-foss-release-unsigned.apk
+"$apksigner" verify --verbose --print-certs "$apk"
+jarsigner -keystore "$key_dir/test.p12" -storetype PKCS12 \
+    -storepass:env TEST_KEY_PASSWORD -keypass:env TEST_KEY_PASSWORD \
+    -signedjar "$bundle" unsigned-release/play-release/app-play-release.aab test
+jarsigner -verify -strict -keystore "$key_dir/test.p12" \
+    -storepass:env TEST_KEY_PASSWORD "$bundle"
+keytool -exportcert -rfc -keystore "$key_dir/test.p12" \
+    -storepass:env TEST_KEY_PASSWORD -alias test -file release-assets/test-signing-certificate.pem
+unset TEST_KEY_PASSWORD
+
+python3 - <<'PY'
+import json
+import os
+from pathlib import Path
+import sys
+sys.path.insert(0, "scripts")
+from version import version_code
+
+Path("release-assets/version.json").write_text(json.dumps({
+    "versionName": Path("version.txt").read_text().strip(),
+    "versionCode": version_code(Path("app/build.gradle.kts").read_text()),
+    "commit": os.environ["GITHUB_SHA"],
+    "signing": "temporary-test-key",
+}, indent=2) + "\n")
+PY
+cat > release-assets/README.txt <<'TEXT'
+TEST-SIGNED ARTIFACTS
+
+These builds use a randomly generated key that is discarded after each CI run.
+They cannot update the official app or builds signed by another CI run.
+The Play bundle is a signing test only and is not uploaded to Google Play.
+Production key setup and Play publishing are not configured.
+TEXT
+
+cd release-assets
+sha256sum -- *.apk *.aab *.pem version.json README.txt > SHA256SUMS
+sha256sum --check SHA256SUMS

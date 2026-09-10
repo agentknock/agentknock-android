@@ -10,7 +10,7 @@ agentknock_upload_store="${agentknock_credentials_dir}/upload-keystore.p12"
 # from loading extra code into that process.
 unset KEYSTORE_PASSWORD JAVA_TOOL_OPTIONS JDK_JAVA_OPTIONS _JAVA_OPTIONS
 
-agentknock_build_changes="$(git -C "${agentknock_project_dir}" status --porcelain --untracked-files=all -- app build.gradle.kts settings.gradle.kts gradle.properties gradle gradlew flake.nix flake.lock publish-internal)"
+agentknock_build_changes="$(git -C "${agentknock_project_dir}" status --porcelain --untracked-files=all -- app build.gradle.kts settings.gradle.kts gradle.properties gradle gradlew version.txt flake.nix flake.lock publish-internal)"
 if [[ -n "${agentknock_build_changes}" ]]; then
     echo "Refusing to publish with uncommitted build inputs." >&2
     exit 1
