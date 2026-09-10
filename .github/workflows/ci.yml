@@ -95,7 +95,7 @@ jobs:
 
   signing:
     name: Sign release
-    if: github.event_name == 'push' && vars.RELEASE_SIGNING_ENABLED == 'true'
+    if: github.event_name == 'push' && github.ref == 'refs/heads/master'
     needs: complete
     uses: ./.github/workflows/sign-release.yml
     permissions:
