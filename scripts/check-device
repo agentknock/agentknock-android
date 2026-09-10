@@ -69,7 +69,8 @@ cleanup() {
             timeout 10 adb -s "$device_serial" logcat -d -t 100 '*:E' >&2 || true
         fi
         timeout 10 adb -s "$device_serial" emu kill >/dev/null 2>&1 || true
-        kill "$emulator_pid" 2>/dev/null || true
+        # A wedged emulator can ignore TERM and leave the following wait hung.
+        kill -KILL "$emulator_pid" 2>/dev/null || true
         wait "$emulator_pid" 2>/dev/null || true
         timeout 10 adb -s "$device_serial" wait-for-disconnect || true
     fi
