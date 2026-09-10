@@ -6,7 +6,7 @@ cd -- "$(dirname -- "${BASH_SOURCE[0]}")/.."
 key_dir=$(mktemp -d)
 trap 'rm -rf -- "$key_dir"' EXIT
 export TEST_KEY_PASSWORD
-TEST_KEY_PASSWORD=$(openssl rand -hex 32)
+TEST_KEY_PASSWORD=$(python3 -c 'import secrets; print(secrets.token_hex(32))')
 keytool -genkeypair -noprompt -keystore "$key_dir/test.p12" -storetype PKCS12 \
     -storepass:env TEST_KEY_PASSWORD -keypass:env TEST_KEY_PASSWORD \
     -alias test -keyalg RSA -keysize 3072 -validity 30 \
