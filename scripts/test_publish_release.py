@@ -76,8 +76,6 @@ class PublicationTests(unittest.TestCase):
         endpoint = command[-1]
         if "--paginate" in command:
             return json.dumps([[self.release] if self.release else []])
-        if endpoint.endswith("immutable-releases"):
-            return json.dumps({"enabled": self.immutable_enabled})
         if "/commits/" in endpoint:
             return json.dumps({"sha": self.tag_commit})
         if "/releases/" in endpoint:
@@ -93,7 +91,7 @@ class PublicationTests(unittest.TestCase):
                 for name, content in self.remote_files.items()
             ]
         elif command[:3] == ["gh", "release", "edit"]:
-            self.release.update(draft=False, immutable=True)
+            self.release.update(draft=False, immutable=self.immutable_enabled)
         elif command[:3] == ["gh", "release", "download"]:
             directory = Path(command[command.index("--dir") + 1])
             for name, content in self.remote_files.items():
@@ -203,11 +201,22 @@ class PublicationTests(unittest.TestCase):
                 self.assertEqual(self.mutations(), ["upload"])
                 self.assertEqual(self.output_file.read_text(), "")
 
-    def test_immutable_releases_must_be_enabled_before_upload(self):
-        self.immutable_enabled = False
-        with self.assertRaisesRegex(ValueError, "immutable releases"):
+    def test_publication_does_not_require_repository_administration_access(self):
+        def contents_only(command, **kwargs):
+            if command[-1].endswith("immutable-releases"):
+                raise subprocess.CalledProcessError(1, command, stderr="HTTP 403")
+            return self.output(command, **kwargs)
+        with patch.object(publish.subprocess, "check_output", side_effect=contents_only):
             publish.main()
-        self.assertEqual(self.mutations(), [])
+        self.assertEqual(self.mutations(), ["upload", "edit"])
+        self.assertEqual(self.output_file.read_text(), "release-tag=v0.3.0\n")
+
+    def test_mutable_publication_cannot_enable_promotion(self):
+        self.immutable_enabled = False
+        with self.assertRaisesRegex(ValueError, "published immutable"):
+            publish.main()
+        self.assertEqual(self.mutations(), ["upload", "edit"])
+        self.assertEqual(self.output_file.read_text(), "")
 
     def test_publication_must_be_confirmed_before_promotion_is_enabled(self):
         def remain_draft(command, **kwargs):
