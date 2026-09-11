@@ -1,5 +1,13 @@
 # Changelog
 
+## [0.2.2](https://github.com/agentknock/agentknock-android/compare/v0.2.1...v0.2.2) (2026-09-11)
+
+
+### Bug Fixes
+
+* propagate device key failures from completion handling ([c0aa415](https://github.com/agentknock/agentknock-android/commit/c0aa415b24061bb8991ecfc6767c007a5599bb91))
+* scope decrypted device keys to cryptographic operations ([17eaab8](https://github.com/agentknock/agentknock-android/commit/17eaab837d761c892d20d63668e111a114cf2a1e))
+
 ## [0.2.1](https://github.com/agentknock/agentknock-android/compare/v0.2.0...v0.2.1) (2026-09-11)
 
 
