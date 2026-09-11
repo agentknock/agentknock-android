@@ -51,6 +51,9 @@ class PlayPublicationTests(unittest.TestCase):
         })
         environment.start()
         self.addCleanup(environment.stop)
+        version_release = patch.object(publish, "is_version_release", return_value=False)
+        self.version_release = version_release.start()
+        self.addCleanup(version_release.stop)
 
     def request(self, request, timeout):
         self.assertEqual(request.get_header("Authorization"), "Bearer test-token")
@@ -195,6 +198,44 @@ class PlayPublicationTests(unittest.TestCase):
         with patch.object(publish, "verify_release_assets", side_effect=verify):
             publish.main()
         self.assertEqual(self.commits, 1)
+        self.assertNotIn("releaseNotes", self.track["releases"][0])
+
+    def test_version_release_upload_includes_matching_changelog_notes(self):
+        self.version_release.return_value = True
+        Path("CHANGELOG.md").write_text("## 0.2.0\n\n### Bug Fixes\n\n* Retry interrupted AI reviews.\n")
+        with patch.object(publish, "verify_release_assets", return_value={"versionName": "0.2.0", "versionCode": 50}):
+            publish.main()
+        self.assertEqual(self.track["releases"][0]["releaseNotes"], [
+            {"language": "en-GB", "text": "• Retry interrupted AI reviews."},
+        ])
+
+    def test_missing_or_wrong_changelog_fails_before_uploading_a_version_release(self):
+        self.version_release.return_value = True
+        for contents in (None, "## 0.1.0\n\n* Older change.\n", "## 0.2.0\n"):
+            with self.subTest(contents=contents):
+                if contents is not None:
+                    Path("CHANGELOG.md").write_text(contents)
+                os.environ["GCP_ACCESS_TOKEN"] = "test-token"
+                with patch.object(publish, "verify_release_assets", return_value={"versionName": "0.2.0", "versionCode": 50}):
+                    with self.assertRaises((ValueError, FileNotFoundError)):
+                        publish.main()
+                self.network.assert_not_called()
+
+    def test_notes_update_reuses_completed_bundle_and_preserves_other_release_metadata(self):
+        self.bundles = [self.bundle_info]
+        self.alpha["releases"] = [{
+            "name": "0.2.0", "versionCodes": ["50"], "status": "completed", "inAppUpdatePriority": 3,
+            "releaseNotes": [{"language": "fr-FR", "text": "Notes existantes."}],
+        }]
+        notes = [{"language": "en-GB", "text": "• Retry interrupted AI reviews."}]
+        publish.publish_bundle(self.bundle, "0.2.0", 50, "test-token", "alpha", notes)
+        publish.publish_bundle(self.bundle, "0.2.0", 50, "test-token", "alpha", notes)
+        self.assertEqual(self.commits, 1)
+        self.assertEqual(self.uploads, [])
+        self.assertEqual(self.alpha["releases"][0]["inAppUpdatePriority"], 3)
+        self.assertEqual(self.alpha["releases"][0]["releaseNotes"], [
+            {"language": "fr-FR", "text": "Notes existantes."}, *notes,
+        ])
 
     def test_promotes_exact_release_even_when_internal_has_a_newer_build(self):
         newer = {"versionCode": 51, "sha256": "newer-bundle"}
@@ -253,6 +294,7 @@ class PlayPublicationTests(unittest.TestCase):
 
     def test_main_promotes_only_after_downloading_and_verifying_the_published_release(self):
         self.bundles = [self.bundle_info]
+        Path("CHANGELOG.md").write_text("## 0.2.0\n\n### Bug Fixes\n\n* Retry interrupted AI reviews.\n")
         def download(directory, repo, commit, tag):
             self.assertEqual((directory, repo, commit, tag),
                              (Path("release-assets"), "owner/repo", "source-commit", "v0.2.0"))
@@ -263,6 +305,9 @@ class PlayPublicationTests(unittest.TestCase):
                 patch.object(publish, "download_published_release", side_effect=download):
             publish.main()
         self.assertEqual(self.alpha["releases"][0]["versionCodes"], ["50"])
+        self.assertEqual(self.alpha["releases"][0]["releaseNotes"], [
+            {"language": "en-GB", "text": "• Retry interrupted AI reviews."},
+        ])
 
     def test_invalid_or_unpublished_github_release_cannot_access_play(self):
         with patch.dict(os.environ, {"RELEASE_TAG": "v0.2.0"}), \

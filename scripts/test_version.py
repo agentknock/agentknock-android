@@ -1,10 +1,19 @@
 import unittest
 from unittest.mock import patch
 
-from version import SUBJECT, bumped, check, version_code
+from version import SUBJECT, bumped, check, is_version_release, version_code
 
 
 class VersionTests(unittest.TestCase):
+    @patch("version.Path.read_text", return_value="0.3.0\n")
+    @patch("version.git")
+    def test_semantic_release_compares_version_with_first_parent(self, git, read):
+        git.return_value = "0.2.0"
+        self.assertTrue(is_version_release())
+        git.assert_called_with("show", "HEAD^1:version.txt")
+        git.return_value = "0.3.0"
+        self.assertFalse(is_version_release())
+
     def test_bump_is_idempotent_and_preserves_unrelated_content(self):
         source = 'plugins {}\nval agentknockVersionCode = 47\nval other = "keep"\n'
         updated = bumped(source, 47)

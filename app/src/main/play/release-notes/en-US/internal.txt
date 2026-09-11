@@ -1,1 +1,0 @@
-Refined the About screen, factory reset guidance and confirmation, and backup explanations. Clearer billing warnings when the store or AI access is unavailable, plus an improved empty Secrets screen.

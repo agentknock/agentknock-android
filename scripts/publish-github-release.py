@@ -9,6 +9,7 @@ import tempfile
 
 from github_release import api, download_published_release, published_release, verify_github_assets
 from release_artifacts import verify_release_assets
+from version import is_version_release
 
 
 def release_output(tag):
@@ -21,9 +22,7 @@ def main():
     commit = os.environ["GITHUB_SHA"]
     version = Path("version.txt").read_text().strip()
     tag = f"v{version}"
-    version_changed = bool(subprocess.check_output([
-        "git", "diff", "--name-only", "--diff-filter=M", "HEAD^1", "HEAD", "--", "version.txt"
-    ], text=True).strip())
+    version_changed = is_version_release()
     pages = json.loads(subprocess.check_output(
         ["gh", "api", "--paginate", "--slurp", f"repos/{repo}/releases?per_page=100"], text=True
     ))

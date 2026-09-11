@@ -19,6 +19,12 @@ bundle to the Alpha closed-testing track after its internal upload succeeds.
 Promotion reuses the uploaded bundle and Android version code. Google Play may
 review the release before making it available to closed testers.
 
+Semantic-version releases use the matching Release Please changelog entries as
+English Play release notes for both internal testing and Alpha. Notes are
+converted to plain text; longer notes keep complete bullets and link to the full
+GitHub release within Play's 500-character limit. Ordinary internal builds omit
+release notes.
+
 Both variants use the package name `dev.agentknock` and share app data. They
 cannot be installed side by side. Updating or switching variants requires a
 compatible signing certificate and version code; an older release generally

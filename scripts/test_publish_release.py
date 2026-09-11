@@ -71,7 +71,8 @@ class PublicationTests(unittest.TestCase):
 
     def output(self, command, **kwargs):
         if command[0] == "git":
-            return "version.txt\n" if self.version_changed else ""
+            self.assertEqual(command[1:], ["show", "HEAD^1:version.txt"])
+            return "0.2.0\n" if self.version_changed else "0.3.0\n"
         endpoint = command[-1]
         if "--paginate" in command:
             return json.dumps([[self.release] if self.release else []])
