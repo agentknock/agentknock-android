@@ -3,7 +3,30 @@
 The Android application for [Agentknock](https://agentknock.dev/), built with
 Kotlin and Jetpack Compose.
 
-For installation and usage, see [agentknock.dev/docs](https://agentknock.dev/docs/).
+For setup and usage, see [agentknock.dev/docs](https://agentknock.dev/docs/) and
+the [Agentknock CLI repository](https://github.com/agentknock/agentknock-cli).
+
+## Installation
+
+Requires Android 8.0 or newer. Install from
+[Google Play](https://play.google.com/store/apps/details?id=dev.agentknock), or
+download an APK from [GitHub releases](https://github.com/agentknock/agentknock-android/releases).
+
+| Variant | Features |
+| --- | --- |
+| Play | Firebase background push delivery and Google Play Billing. Available from Google Play or as an `agentknock-play-*.apk` download. |
+| FOSS | No Firebase or Google Play Billing dependencies. Keep the app in the foreground to receive requests. Download `agentknock-foss-*.apk`. |
+
+Existing AI access and activation links work in both variants.
+
+To install a downloaded APK, open it on your Android device and allow the browser
+or file manager to install apps when prompted. The `.aab` file is for store
+distribution and cannot be installed directly.
+
+Both variants share the same app identity and data, so they cannot be installed
+side by side. Updating or switching variants requires a compatible signing
+certificate and version code. See [release artifacts](docs/releases.md) for
+signature verification and update details.
 
 ## Development
 
@@ -44,12 +67,8 @@ Device tests require an emulator or connected device:
 ./gradlew :app:connectedFossDebugAndroidTest
 ```
 
-The `foss` flavor has no Firebase or Google Play Billing dependencies. Keep the
-app in the foreground to receive requests; background push delivery is not yet
-supported. Existing AI access and activation links work without in-app purchases.
-Use `Play` instead of `Foss` in task names for the Google Play flavor, which adds
-FCM and Play Billing. Both flavors share the application ID and local storage;
-installing one over the other requires matching signing keys.
+Use `Play` instead of `Foss` in task names to build the Google Play flavor.
+See [Installation](#installation) for the differences between variants.
 
 Nix is optional. On Linux x86-64, `nix develop` supplies the JDK, SDK, Python,
 and Pillow; `nix develop .#emulator` also includes an emulator and system image.
