@@ -10,6 +10,7 @@ import dev.agentknock.storage.audit.AuditOutcome
 import dev.agentknock.storage.audit.AuditRecord
 import dev.agentknock.storage.audit.AuditSink
 import dev.agentknock.storage.audit.auditDataOf
+import dev.agentknock.storage.device.DeviceKeyAccessException
 import dev.agentknock.storage.device.RelayDeviceCredentials
 import kotlinx.coroutines.CancellationException
 import kotlinx.serialization.encodeToString
@@ -192,6 +193,8 @@ internal class PairingRequests(
                 }
             } catch (cancelled: CancellationException) {
                 throw cancelled
+            } catch (failure: DeviceKeyAccessException) {
+                throw failure
             } catch (failure: Exception) {
                 if (!failure.isIrrecoverableCompletionFailure()) return false
                 return failInitialCompletion(requestId)

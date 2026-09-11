@@ -1895,6 +1895,8 @@ internal class RequestRepository(
             )
         } catch (cancelled: CancellationException) {
             throw cancelled
+        } catch (failure: DeviceKeyAccessException) {
+            throw failure
         } catch (failure: Exception) {
             if (failure.isIrrecoverableCompletionFailure()) {
                 CompletionOpenResult.IrrecoverablyInvalid

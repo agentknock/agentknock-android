@@ -647,6 +647,45 @@ class RequestRepositorySlotTest {
     }
 
     @Test
+    fun initialCompletionReportsKeyFailuresAndRemainsReplayable() = runTest {
+        val clientSecret = ByteArray(32) { it.toByte() }
+        synchronize(
+            RelayDeviceEvent.Message(
+                clientId = CLIENT_ID,
+                requestId = CLIENT_ID,
+                kind = RelayMessageKind.REQUEST,
+                payload = pairingRequest(clientSecret),
+                addressId = ADDRESS_ID,
+            )
+        )
+        val completion =
+            RelayDeviceEvent.Message(
+                clientId = CLIENT_ID,
+                requestId = CLIENT_ID,
+                kind = RelayMessageKind.COMPLETION,
+                payload = pairingCompletion(clientSecret),
+                addressId = ADDRESS_ID,
+            )
+
+        assertCompletionKeyFailures(completion)
+        assertEquals(
+            PairingState.EXCHANGE_PENDING.storedName,
+            database.requestDao().getPairingAttempt(CLIENT_ID)?.state,
+        )
+        val retried = connect(completion, RelayDeviceEvent.CaughtUp)
+        assertEquals(RequestSyncResult.Success, repository.sync())
+        assertNotNull(database.requestDao().getRequestById(CLIENT_ID)?.exchangeEndedAt)
+        assertEquals(
+            PairingState.SAS_VERIFICATION_PENDING.storedName,
+            database.requestDao().getPairingAttempt(CLIENT_ID)?.state,
+        )
+        assertTrue(
+            RelayDeviceFrame.Acknowledgement(CLIENT_ID, CLIENT_ID, RelayMessageKind.COMPLETION) in
+                retried.sentFrames
+        )
+    }
+
+    @Test
     fun authenticatedInitialPairingCompletionEndsExchangeWithoutResponseStatus() = runTest {
         val clientSecret = ByteArray(32) { it.toByte() }
         connect(
@@ -1425,6 +1464,43 @@ class RequestRepositorySlotTest {
         assertEquals(
             "The requested operation is not supported.",
             database.requestDao().getRequestById(UNSUPPORTED_REQUEST_ID)?.error,
+        )
+    }
+
+    @Test
+    fun pairedCompletionReportsKeyFailuresAndRemainsReplayable() = runTest {
+        val clientPsk = establishActivePairing()
+        val exchange =
+            pairedExchange(
+                requestId = UNSUPPORTED_REQUEST_ID,
+                clientPsk = clientPsk,
+                requestPlaintext = unsupportedPlaintext(),
+                completionPlaintext = "{}".encodeToByteArray(),
+            )
+        connect(
+            requestEvent(UNSUPPORTED_REQUEST_ID, exchange.request),
+            RelayDeviceEvent.Acknowledgement(
+                CLIENT_ID,
+                UNSUPPORTED_REQUEST_ID,
+                RelayMessageKind.RESPONSE,
+            ),
+            RelayDeviceEvent.CaughtUp,
+        )
+        assertEquals(RequestSyncResult.Success, repository.sync())
+        assertNotNull(database.requestDao().getRequestPsk(UNSUPPORTED_REQUEST_ID))
+        val completion = completionEvent(UNSUPPORTED_REQUEST_ID, exchange.completion)
+
+        assertCompletionKeyFailures(completion)
+        val retried = connect(completion, RelayDeviceEvent.CaughtUp)
+        assertEquals(RequestSyncResult.Success, repository.sync())
+        assertNotNull(database.requestDao().getRequestById(UNSUPPORTED_REQUEST_ID)?.exchangeEndedAt)
+        assertNull(database.requestDao().getRequestPsk(UNSUPPORTED_REQUEST_ID))
+        assertTrue(
+            RelayDeviceFrame.Acknowledgement(
+                CLIENT_ID,
+                UNSUPPORTED_REQUEST_ID,
+                RelayMessageKind.COMPLETION,
+            ) in retried.sentFrames
         )
     }
 
@@ -4674,6 +4750,39 @@ class RequestRepositorySlotTest {
 
     private fun connectInteractively(): InteractiveRelayDeviceConnection =
         InteractiveRelayDeviceConnection().also(relay::enqueue)
+
+    private suspend fun assertCompletionKeyFailures(completion: RelayDeviceEvent.Message) {
+        val priorError = database.requestDao().getRequestById(completion.requestId)?.error
+        val hadRequestPsk = database.requestDao().getRequestPsk(completion.requestId) != null
+        for ((failure, expected) in
+            listOf(
+                DecryptionResult.KeyUnavailable to RequestSyncResult.DeviceCredentialsUnavailable,
+                DecryptionResult.AuthenticationFailed to
+                    RequestSyncResult.DeviceCredentialsCorrupted,
+                DecryptionResult.UnsupportedFormat to
+                    RequestSyncResult.UnsupportedDeviceCredentialEncryption,
+            )) {
+            deviceKeyFailure = failure
+            val connection = connect(completion, RelayDeviceEvent.CaughtUp)
+            assertEquals(expected, repository.sync())
+            assertTrue(connection.closed)
+            val request = checkNotNull(database.requestDao().getRequestById(completion.requestId))
+            assertNull(request.exchangeEndedAt)
+            assertEquals(priorError, request.error)
+            assertEquals(
+                hadRequestPsk,
+                database.requestDao().getRequestPsk(completion.requestId) != null,
+            )
+            assertFalse(
+                connection.sentFrames.any {
+                    it is RelayDeviceFrame.Acknowledgement &&
+                        it.requestId == completion.requestId &&
+                        it.kind == RelayMessageKind.COMPLETION
+                }
+            )
+        }
+        deviceKeyFailure = null
+    }
 
     private fun unprocessedRelayMessage(kind: RelayMessageKind) =
         RequestSyncResult.RelayUnavailable(
