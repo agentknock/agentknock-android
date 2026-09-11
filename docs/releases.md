@@ -14,7 +14,10 @@ variant adds background push delivery through Google services.
 
 Google Play internal testing receives successful builds from each merge to
 `master`. These builds can share a version name while their Android version codes
-increase. Versioned GitHub releases are published separately.
+increase. Publishing a versioned GitHub release promotes that release's exact
+bundle to the Alpha closed-testing track after its internal upload succeeds.
+Promotion reuses the uploaded bundle and Android version code. Google Play may
+review the release before making it available to closed testers.
 
 Both variants use the package name `dev.agentknock` and share app data. They
 cannot be installed side by side. Updating or switching variants requires a
