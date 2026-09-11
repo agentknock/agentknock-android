@@ -10,6 +10,7 @@ import dev.agentknock.storage.audit.AuditOutcome
 import dev.agentknock.storage.audit.AuditRecord
 import dev.agentknock.storage.audit.AuditSink
 import dev.agentknock.storage.audit.auditDataOf
+import dev.agentknock.storage.device.DeviceKeyAccessException
 import dev.agentknock.storage.device.RelayDeviceCredentials
 import kotlinx.coroutines.CancellationException
 import kotlinx.serialization.encodeToString
@@ -28,7 +29,7 @@ internal enum class PairingDecisionResult {
 internal data class MatchingPairingSas(val clientLabel: String?)
 
 /** The established pairing material needed to authenticate its one finish exchange. */
-internal data class PairingFinishContext(
+internal class PairingFinishContext(
     val clientId: String,
     val clientPsk: ByteArray,
     internal val pairingRequestId: String,
@@ -68,11 +69,13 @@ internal class PairingRequests(
                 }
             val response =
                 rejection?.publicResponse()
-                    ?: pairingProtocol.initialResponse(
-                        deviceId = credentials.deviceId,
-                        devicePublicKey = credentials.devicePublicKey,
-                        deviceRandom = deviceRandom,
-                    )
+                    ?: credentials.deviceKey.use { keyPair ->
+                        pairingProtocol.initialResponse(
+                            deviceId = credentials.deviceId,
+                            devicePublicKey = keyPair.publicKey,
+                            deviceRandom = deviceRandom,
+                        )
+                    }
             val accepted = rejection == null
 
             dao.insertPairingRequest(
@@ -177,17 +180,21 @@ internal class PairingRequests(
 
         val established =
             try {
-                pairingProtocol.establish(
-                    deviceId = credentials.deviceId,
-                    clientId = attempt.clientId,
-                    devicePrivateKey = credentials.devicePrivateKey,
-                    devicePublicKey = credentials.devicePublicKey,
-                    deviceRandom = attempt.deviceRandom,
-                    initialRequest = json.parseToJsonElement(request.requestJson),
-                    completion = completion,
-                )
+                credentials.deviceKey.use { keyPair ->
+                    pairingProtocol.establish(
+                        deviceId = credentials.deviceId,
+                        clientId = attempt.clientId,
+                        devicePrivateKey = keyPair.privateKey,
+                        devicePublicKey = keyPair.publicKey,
+                        deviceRandom = attempt.deviceRandom,
+                        initialRequest = json.parseToJsonElement(request.requestJson),
+                        completion = completion,
+                    )
+                }
             } catch (cancelled: CancellationException) {
                 throw cancelled
+            } catch (failure: DeviceKeyAccessException) {
+                throw failure
             } catch (failure: Exception) {
                 if (!failure.isIrrecoverableCompletionFailure()) return false
                 return failInitialCompletion(requestId)

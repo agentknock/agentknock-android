@@ -4,7 +4,7 @@ import kotlinx.serialization.SerializationException
 import org.bouncycastle.crypto.InvalidCipherTextException
 
 internal sealed interface CompletionOpenResult {
-    data class Opened(val plaintext: ByteArray) : CompletionOpenResult
+    class Opened(val plaintext: ByteArray) : CompletionOpenResult
 
     data object IrrecoverablyInvalid : CompletionOpenResult
 

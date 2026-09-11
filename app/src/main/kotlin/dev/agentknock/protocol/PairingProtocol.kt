@@ -21,7 +21,7 @@ internal data class PairingClientMetadata(
     val osVersion: String?,
 )
 
-internal data class EstablishedPairing(
+internal class EstablishedPairing(
     val clientPsk: ByteArray,
     val sas: Long,
     val applicationPlaintext: ByteArray,

@@ -13,11 +13,13 @@ import dev.agentknock.storage.audit.AuditRecord
 import dev.agentknock.storage.audit.AuditRepository
 import dev.agentknock.storage.audit.AuditSink
 import dev.agentknock.storage.crypto.AesGcmEncryption
+import dev.agentknock.storage.crypto.DecryptionResult
 import dev.agentknock.storage.crypto.EncryptionKeyBacking
 import dev.agentknock.storage.crypto.EncryptionKeyStore
 import dev.agentknock.storage.crypto.GeneratedEncryptionKey
 import dev.agentknock.storage.crypto.VaultKeyManager
 import dev.agentknock.storage.device.DeviceIdentityEntity
+import dev.agentknock.storage.device.DeviceKeyAccess
 import dev.agentknock.storage.device.RelayDeviceCredentials
 import javax.crypto.SecretKey
 import javax.crypto.spec.SecretKeySpec
@@ -99,7 +101,7 @@ class PairingRequestsTest {
         assertNull(requests.finishContext(credentials(), OTHER_CLIENT_ID))
         assertNull(
             requests.finishContext(
-                credentials().copy(deviceIdentityId = "different-identity"),
+                credentials(deviceIdentityId = "different-identity"),
                 CLIENT_ID,
             )
         )
@@ -374,14 +376,16 @@ class PairingRequestsTest {
             clientPsk = PENDING_PSK,
         )
 
-    private fun credentials() =
+    private fun credentials(deviceIdentityId: String = DEVICE_IDENTITY_ID) =
         RelayDeviceCredentials(
-            deviceIdentityId = DEVICE_IDENTITY_ID,
+            deviceIdentityId = deviceIdentityId,
             address = ADDRESS,
             addressId = "address-id",
             deviceId = DEVICE_ID,
-            devicePublicKey = ByteArray(32),
-            devicePrivateKey = ByteArray(32),
+            deviceKey =
+                DeviceKeyAccess(Dispatchers.Unconfined) {
+                    DecryptionResult.Plaintext(ByteArray(32))
+                },
             deviceToken = "token",
         )
 

@@ -23,6 +23,7 @@ import dev.agentknock.storage.audit.AuditRecord
 import dev.agentknock.storage.audit.AuditRepository
 import dev.agentknock.storage.audit.AuditSink
 import dev.agentknock.storage.crypto.AesGcmEncryption
+import dev.agentknock.storage.crypto.DecryptionResult
 import dev.agentknock.storage.crypto.EncryptedValue
 import dev.agentknock.storage.crypto.EncryptionKeyBacking
 import dev.agentknock.storage.crypto.EncryptionKeyStore
@@ -32,6 +33,7 @@ import dev.agentknock.storage.crypto.VaultKeyManager
 import dev.agentknock.storage.crypto.VaultKeyPurpose
 import dev.agentknock.storage.device.DeviceCredentialResult
 import dev.agentknock.storage.device.DeviceIdentityEntity
+import dev.agentknock.storage.device.DeviceKeyAccess
 import dev.agentknock.storage.device.RelayDeviceCredentialSource
 import dev.agentknock.storage.device.RelayDeviceCredentials
 import dev.agentknock.storage.secret.CreateEnvironmentVariableResult
@@ -154,8 +156,10 @@ class InvocationRequestsTest {
                 address = "quiet-river-maple",
                 addressId = "address-id",
                 deviceId = DEVICE_ID,
-                devicePublicKey = ByteArray(32),
-                devicePrivateKey = ByteArray(32),
+                deviceKey =
+                    DeviceKeyAccess(Dispatchers.Unconfined) {
+                        DecryptionResult.Plaintext(ByteArray(32))
+                    },
                 deviceToken = "device-token",
             )
         val target =

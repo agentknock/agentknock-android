@@ -31,6 +31,7 @@ import dev.agentknock.storage.audit.AuditSink
 import dev.agentknock.storage.audit.auditDataOf
 import dev.agentknock.storage.crypto.DecryptionResult
 import dev.agentknock.storage.device.DeviceCredentialResult
+import dev.agentknock.storage.device.DeviceKeyAccessException
 import dev.agentknock.storage.device.RelayDeviceCredentialSource
 import dev.agentknock.storage.device.RelayDeviceCredentials
 import kotlinx.coroutines.CancellationException
@@ -412,6 +413,13 @@ internal class RequestRepository(
                 keepConnected = keepConnected,
                 onCaughtUp = onCaughtUp,
             )
+        } catch (exception: DeviceKeyAccessException) {
+            when (exception.failure) {
+                DeviceCredentialResult.Unavailable -> RequestSyncResult.DeviceCredentialsUnavailable
+                DeviceCredentialResult.Corrupted -> RequestSyncResult.DeviceCredentialsCorrupted
+                DeviceCredentialResult.UnsupportedEncryption ->
+                    RequestSyncResult.UnsupportedDeviceCredentialEncryption
+            }
         } finally {
             connection.close()
         }
@@ -1105,17 +1113,20 @@ internal class RequestRepository(
         val credentials = credentialsForRequest(request) ?: return null
         val clientPsk = material.decryptRequestPsk(request) ?: return null
         return runCatching {
-            pairedRequestProtocol.sealPairedResponse(
-                deviceId = credentials.deviceId,
-                requestId = request.id,
-                clientId = request.clientId,
-                clientPsk = clientPsk,
-                devicePrivateKey = credentials.devicePrivateKey,
-                devicePublicKey = credentials.devicePublicKey,
-                request = json.parseToJsonElement(request.requestJson),
-                plaintext = plaintext,
-            )
+            credentials.deviceKey.use { keyPair ->
+                pairedRequestProtocol.sealPairedResponse(
+                    deviceId = credentials.deviceId,
+                    requestId = request.id,
+                    clientId = request.clientId,
+                    clientPsk = clientPsk,
+                    devicePrivateKey = keyPair.privateKey,
+                    devicePublicKey = keyPair.publicKey,
+                    request = json.parseToJsonElement(request.requestJson),
+                    plaintext = plaintext,
+                )
+            }
         }
+            .onFailure { if (it is CancellationException) throw it }
             .getOrNull()
     }
 
@@ -1124,18 +1135,21 @@ internal class RequestRepository(
         val clientPsk = material.decryptRequestPsk(request) ?: return null
         val opened =
             runCatching {
-                pairedRequestProtocol.openPairedRequest(
-                    deviceId = credentials.deviceId,
-                    requestId = request.id,
-                    clientId = request.clientId,
-                    clientPsk = clientPsk,
-                    previousClientPsk = null,
-                    allowRotation = false,
-                    devicePrivateKey = credentials.devicePrivateKey,
-                    devicePublicKey = credentials.devicePublicKey,
-                    request = json.parseToJsonElement(request.requestJson),
-                )
+                credentials.deviceKey.use { keyPair ->
+                    pairedRequestProtocol.openPairedRequest(
+                        deviceId = credentials.deviceId,
+                        requestId = request.id,
+                        clientId = request.clientId,
+                        clientPsk = clientPsk,
+                        previousClientPsk = null,
+                        allowRotation = false,
+                        devicePrivateKey = keyPair.privateKey,
+                        devicePublicKey = keyPair.publicKey,
+                        request = json.parseToJsonElement(request.requestJson),
+                    )
+                }
             }
+                .onFailure { if (it is CancellationException) throw it }
                 .getOrNull() ?: return null
         return opened.plaintext
     }
@@ -1246,18 +1260,23 @@ internal class RequestRepository(
                 ?: return ProcessedRelayMessage
         val opened =
             runCatching {
-                pairedRequestProtocol.openPairedRequest(
-                    deviceId = credentials.deviceId,
-                    requestId = message.requestId,
-                    clientId = pairing.clientId,
-                    clientPsk = pairing.clientPsk,
-                    previousClientPsk = null,
-                    allowRotation = false,
-                    devicePrivateKey = credentials.devicePrivateKey,
-                    devicePublicKey = credentials.devicePublicKey,
-                    request = requestPayload,
-                )
+                credentials.deviceKey.use { keyPair ->
+                    pairedRequestProtocol.openPairedRequest(
+                        deviceId = credentials.deviceId,
+                        requestId = message.requestId,
+                        clientId = pairing.clientId,
+                        clientPsk = pairing.clientPsk,
+                        previousClientPsk = null,
+                        allowRotation = false,
+                        devicePrivateKey = keyPair.privateKey,
+                        devicePublicKey = keyPair.publicKey,
+                        request = requestPayload,
+                    )
+                }
             }
+                .onFailure {
+                    if (it is CancellationException || it is DeviceKeyAccessException) throw it
+                }
                 .getOrNull() ?: return ProcessedRelayMessage
         val acceptedPsks =
             try {
@@ -1327,18 +1346,23 @@ internal class RequestRepository(
         val previousClientPsk = material.decryptPreviousClientPsk(client)
         val opened =
             runCatching {
-                pairedRequestProtocol.openPairedRequest(
-                    deviceId = credentials.deviceId,
-                    requestId = message.requestId,
-                    clientId = client.clientId,
-                    clientPsk = clientPsk,
-                    previousClientPsk = previousClientPsk,
-                    allowRotation = true,
-                    devicePrivateKey = credentials.devicePrivateKey,
-                    devicePublicKey = credentials.devicePublicKey,
-                    request = requestPayload,
-                )
+                credentials.deviceKey.use { keyPair ->
+                    pairedRequestProtocol.openPairedRequest(
+                        deviceId = credentials.deviceId,
+                        requestId = message.requestId,
+                        clientId = client.clientId,
+                        clientPsk = clientPsk,
+                        previousClientPsk = previousClientPsk,
+                        allowRotation = true,
+                        devicePrivateKey = keyPair.privateKey,
+                        devicePublicKey = keyPair.publicKey,
+                        request = requestPayload,
+                    )
+                }
             }
+                .onFailure {
+                    if (it is CancellationException || it is DeviceKeyAccessException) throw it
+                }
                 .getOrNull() ?: return ProcessedRelayMessage
         val acceptedPsks =
             material.acceptedRequestPsks(
@@ -1856,19 +1880,23 @@ internal class RequestRepository(
         if (storedRequest !is JsonObject) return CompletionOpenResult.IrrecoverablyInvalid
         return try {
             CompletionOpenResult.Opened(
-                pairedRequestProtocol.openPairedCompletion(
-                    deviceId = activeCredentials.deviceId,
-                    requestId = request.id,
-                    clientId = request.clientId,
-                    clientPsk = clientPsk,
-                    devicePrivateKey = activeCredentials.devicePrivateKey,
-                    devicePublicKey = activeCredentials.devicePublicKey,
-                    request = storedRequest,
-                    completion = completion,
-                )
+                activeCredentials.deviceKey.use { keyPair ->
+                    pairedRequestProtocol.openPairedCompletion(
+                        deviceId = activeCredentials.deviceId,
+                        requestId = request.id,
+                        clientId = request.clientId,
+                        clientPsk = clientPsk,
+                        devicePrivateKey = keyPair.privateKey,
+                        devicePublicKey = keyPair.publicKey,
+                        request = storedRequest,
+                        completion = completion,
+                    )
+                }
             )
         } catch (cancelled: CancellationException) {
             throw cancelled
+        } catch (failure: DeviceKeyAccessException) {
+            throw failure
         } catch (failure: Exception) {
             if (failure.isIrrecoverableCompletionFailure()) {
                 CompletionOpenResult.IrrecoverablyInvalid
