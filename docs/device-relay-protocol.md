@@ -738,9 +738,15 @@ The endpoint response is:
 
 The decision must be `approve`, `deny`, or `ask_user`, and the explanation
 must be nonblank. HTTP errors, including a subscription rejection, are not
-review decisions. AI review is billable and not idempotent. The device must
-prevent concurrent duplicate attempts and must not automatically repeat an
-attempt whose outcome is uncertain, including after process restart.
+review decisions. The device retries network failures and HTTP `408`, `425`,
+`429`, and `500`–`599` errors at most three times after the initial attempt, with a
+100-second deadline covering all attempts and retry delays. It honors the
+longer of `retry_after_ms` and HTTP `Retry-After` when provided; otherwise it
+waits one, two, then four seconds between attempts.
+
+Completed review decisions, invalid responses, and nonretryable HTTP errors
+are final. The device prevents concurrent duplicate attempts. Retry state is
+process-local; a process restart does not recreate an interrupted review.
 
 ## Security boundaries
 

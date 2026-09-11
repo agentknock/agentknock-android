@@ -2498,7 +2498,7 @@ class RequestRepositorySlotTest {
     }
 
     @Test
-    fun rejectedAiReviewUsesSafeFailureCategory() = runTest {
+    fun exhaustedAiReviewRetriesUseSafeFailureCategory() = runTest {
         val clientPsk = establishActivePairing()
         createAiEnvironmentSecret()
         val token = ByteArray(32) { (0x22 + it).toByte() }
@@ -2516,13 +2516,16 @@ class RequestRepositorySlotTest {
         assertEquals(RequestSyncResult.Success, repository.sync())
         val malicious = "relay-controlled-ai-rejection-message"
 
-        approvalReviewer.complete(
-            RelayEndpointResult.Rejected(
-                status = 500,
-                code = "REVIEW_FAILED",
-                message = malicious,
+        repeat(4) {
+            approvalReviewer.complete(
+                RelayEndpointResult.Rejected(
+                    status = 500,
+                    code = "REVIEW_FAILED",
+                    message = malicious,
+                    retryAfterMillis = 0,
+                )
             )
-        )
+        }
         val reviewed = awaitAsynchronousWork {
             inbox
                 .observeRequest(AI_INVOCATION_REQUEST_ID)
@@ -2537,6 +2540,7 @@ class RequestRepositorySlotTest {
             AiReviewFailure.RELAY_REJECTED,
             reviewed.secretUse?.approvalEvaluation?.aiReview?.failure,
         )
+        assertEquals(4, approvalReviewer.callCount)
         val requestAudit =
             AuditRepository(database.auditDao()).observeEvents().first().filter {
                 it.relayRequestId == AI_INVOCATION_REQUEST_ID

@@ -56,6 +56,62 @@ class RelayHttpTransportTest {
     }
 
     @Test
+    fun `preserves the longer retry delay from the error body and HTTP header`() = runTest {
+        MockWebServer().use { server ->
+            server.start()
+            val transport = transport(server)
+            for ((header, expected) in listOf("2" to 3_000L, "5" to 5_000L)) {
+                server.enqueue(
+                    MockResponse.Builder()
+                        .code(429)
+                        .addHeader("Retry-After", header)
+                        .body("""{"error":"RATE_LIMITED","retry_after_ms":3000}""")
+                        .build()
+                )
+
+                val result = transport.post("v1/test", "{}") as RelayEndpointResult.Rejected
+
+                assertEquals(expected, result.retryAfterMillis)
+            }
+        }
+    }
+
+    @Test
+    fun `preserves header retry delay even when the error body is not JSON`() = runTest {
+        MockWebServer().use { server ->
+            server.start()
+            server.enqueue(
+                MockResponse.Builder().code(503).addHeader("Retry-After", "7").body("busy").build()
+            )
+
+            val result = transport(server).post("v1/test", "{}") as RelayEndpointResult.Rejected
+
+            assertEquals(7_000L, result.retryAfterMillis)
+        }
+    }
+
+    @Test
+    fun `preserves a zero server delay and ignores invalid retry delays`() = runTest {
+        MockWebServer().use { server ->
+            server.start()
+            val transport = transport(server)
+            for ((encoded, expected) in listOf("0" to 0L, "-1" to null, "\"1000\"" to null)) {
+                server.enqueue(
+                    MockResponse.Builder()
+                        .code(429)
+                        .addHeader("Retry-After", "invalid")
+                        .body("""{"error":"RATE_LIMITED","retry_after_ms":$encoded}""")
+                        .build()
+                )
+
+                val result = transport.post("v1/test", "{}") as RelayEndpointResult.Rejected
+
+                assertEquals(expected, result.retryAfterMillis)
+            }
+        }
+    }
+
+    @Test
     fun `preserves rejection status when the error body is invalid`() = runTest {
         MockWebServer().use { server ->
             server.start()

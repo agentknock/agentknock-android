@@ -589,7 +589,7 @@ private fun JsonObject.optionalNonNegativeLong(name: String): Long? =
         else -> error("Relay $name must be a non-negative integer")
     }
 
-private fun String.toRetryAfterMillis(nowMillis: Long): Long? {
+internal fun String.toRetryAfterMillis(nowMillis: Long): Long? {
     val encoded = trim()
     encoded.parseNonNegativeDecimalClamped(Long.MAX_VALUE / 1_000L)?.let { seconds ->
         return seconds * 1_000L
@@ -635,7 +635,7 @@ private fun String.httpDateMillis(nowMillis: Long): Long? {
         .getOrNull()
 }
 
-private fun maximumRetryDelay(first: Long?, second: Long?): Long? =
+internal fun maximumRetryDelay(first: Long?, second: Long?): Long? =
     listOfNotNull(first, second).maxOrNull()
 
 private val RFC_850_DATE_TIME =

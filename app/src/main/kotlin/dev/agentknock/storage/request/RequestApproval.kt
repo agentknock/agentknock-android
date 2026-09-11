@@ -6,6 +6,7 @@ import dev.agentknock.protocol.InvocationResponseSecret
 import dev.agentknock.relay.RelayApprovalReviewClient
 import dev.agentknock.relay.RelayApprovalReviewDecision
 import dev.agentknock.relay.RelayEndpointResult
+import dev.agentknock.relay.reviewWithRetries
 import dev.agentknock.review.ApprovalReviewRequest
 import dev.agentknock.storage.approval.AiReview
 import dev.agentknock.storage.approval.AiReviewDecision
@@ -172,7 +173,7 @@ internal suspend fun performAiReview(
 ): AiReview {
     val result =
         try {
-            reviewer.review(credentials.deviceId, credentials.deviceToken, request)
+            reviewer.reviewWithRetries(credentials.deviceId, credentials.deviceToken, request)
         } catch (cancelled: kotlinx.coroutines.CancellationException) {
             throw cancelled
         } catch (_: Exception) {
