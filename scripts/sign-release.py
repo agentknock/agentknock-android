@@ -44,16 +44,6 @@ def main():
         "appSigningCertificateSha256": certificate_fingerprint(APP_SIGNING_CERTIFICATE),
         "playUploadCertificateSha256": certificate_fingerprint(PLAY_UPLOAD_CERTIFICATE),
     }, indent=2) + "\n")
-    (output / "README.txt").write_text(
-        "Both APKs use the official Agentknock app-signing certificate.\n"
-        "The Play AAB uses the separate Google Play upload certificate.\n"
-        "Install an APK directly; the AAB is an input for Google Play publishing.\n"
-        "The FOSS APK has no Firebase or Play Billing dependencies.\n"
-        "The Play APK includes Firebase messaging and Play Billing.\n"
-        "Both variants use dev.agentknock and share app data; they cannot be installed side by side.\n"
-        "Android version rules apply when updating or switching variants.\n"
-        "This workflow does not upload to Google Play.\n"
-    )
     write_checksums(output)
 
 
