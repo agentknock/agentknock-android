@@ -389,8 +389,8 @@ internal class ApplicationContainer(private val application: Application) {
 internal fun approvalReviewHttpClient(base: OkHttpClient): OkHttpClient =
     base
         .newBuilder()
-        // AI review is billable and not idempotent. The review retry loop handles explicit
-        // temporary HTTP errors within one deadline; OkHttp must not silently repeat a request.
+        // The review retry loop owns the attempt limit and shared deadline for network and
+        // temporary HTTP failures; OkHttp must not silently repeat a request.
         .retryOnConnectionFailure(false)
         .followRedirects(false)
         .addInterceptor { chain ->

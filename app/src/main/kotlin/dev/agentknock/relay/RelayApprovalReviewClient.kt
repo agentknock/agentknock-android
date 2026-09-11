@@ -39,10 +39,16 @@ internal suspend fun RelayApprovalReviewClient.reviewWithRetries(
     withTimeoutOrNull(AI_REVIEW_TIMEOUT_MILLIS) {
         var result = review(deviceId, deviceToken, request)
         for (retry in 0 until 3) {
-            val rejection = result as? RelayEndpointResult.Rejected ?: break
-            if (!rejection.status.isTransientRelayStatus()) break
-            // Only retry explicit temporary HTTP errors. A lost response may already be billable.
-            delay(rejection.retryAfterMillis ?: (1_000L shl retry))
+            val retryAfterMillis =
+                when (val previous = result) {
+                    is RelayEndpointResult.Rejected -> {
+                        if (!previous.status.isTransientRelayStatus()) break
+                        previous.retryAfterMillis
+                    }
+                    is RelayEndpointResult.Unavailable -> null
+                    else -> break
+                }
+            delay(retryAfterMillis ?: (1_000L shl retry))
             result = review(deviceId, deviceToken, request)
         }
         result
