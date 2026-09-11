@@ -43,8 +43,9 @@ def main():
         print(f"Verified the already published {tag}; resuming downstream promotion")
         release_output(tag)
         return
-    if not api(f"repos/{repo}/immutable-releases")["enabled"]:
-        raise ValueError("Enable immutable releases before publishing")
+    # Reading the repository's immutability setting requires Administration permission,
+    # which GITHUB_TOKEN cannot grant. Verify the published release's immutable flag
+    # below using Contents permission, before allowing downstream promotion.
     assets = Path("release-assets")
     verify_release_assets(assets, repo, commit)
     subprocess.run(["gh", "release", "upload", tag, "--repo", repo, "--clobber",
