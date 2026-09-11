@@ -59,10 +59,13 @@ sha256sum --check SHA256SUMS
 ```
 
 GitHub artifact attestations associate the files with their source commit and
-build workflow. Verify an attestation with the GitHub CLI:
+build workflow. Verify that an attestation comes from this repository's release
+signing workflow with the GitHub CLI:
 
 ```sh
-gh attestation verify agentknock-foss-VERSION-CODE.apk --repo nakedible/agentknock-android
+gh attestation verify agentknock-foss-VERSION-CODE.apk \
+  --repo agentknock/agentknock-android \
+  --signer-workflow agentknock/agentknock-android/.github/workflows/sign-release.yml
 ```
 
 ## Building release artifacts

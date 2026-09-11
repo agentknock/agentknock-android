@@ -12,5 +12,3 @@
   squash PRs, or rebase-merge PRs.
 - Release by merging the Release Please PR. Let it maintain `version.txt` and
   `CHANGELOG.md`; do not create release tags manually.
-- CI currently uses temporary signing keys. Do not add production credentials or
-  call Google Play publishing APIs without an explicit request.
