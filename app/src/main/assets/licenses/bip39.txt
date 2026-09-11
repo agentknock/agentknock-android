@@ -7,13 +7,10 @@ BIP-39 authors: Marek Palatinus, Pavol Rusnak, Aaron Voisine, and Sean Bowe.
 Specification: https://github.com/bitcoin/bips/blob/master/bip-0039.mediawiki
 Word list: https://github.com/bitcoin/bips/blob/ce1862ac6bcffa1dd20aad858380e51e66e949ea/bip-0039/english.txt
 
-The following license notice is preserved from BIP-39's python-mnemonic
-reference implementation, which distributes the identical English word list:
-https://github.com/trezor/python-mnemonic/blob/b57a5ad77a981e743f4167ab2f7927a55c1e82a8/LICENSE
+BIP-39 and its accompanying English word list are licensed under the MIT License.
+License declaration: https://github.com/bitcoin/bips/blob/master/bip-0039.mediawiki#copyright
 
 The MIT License (MIT)
-
-Copyright (c) 2013-2016 Pavol Rusnak
 
 Permission is hereby granted, free of charge, to any person obtaining a copy
 of this software and associated documentation files (the "Software"), to deal
