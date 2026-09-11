@@ -7,6 +7,7 @@ import dev.agentknock.protocol.PairingProtocol
 import dev.agentknock.push.PushSynchronizationWorker
 import dev.agentknock.push.RequestNotificationCoordinator
 import dev.agentknock.push.RequestNotifications
+import dev.agentknock.relay.AI_REVIEW_TIMEOUT_MILLIS
 import dev.agentknock.relay.HttpRelayApprovalReviewClient
 import dev.agentknock.relay.HttpRelayClaimClient
 import dev.agentknock.relay.HttpRelayDeviceManagementClient
@@ -57,6 +58,8 @@ import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.stateIn
 import kotlinx.serialization.json.Json
 import okhttp3.OkHttpClient
+import okhttp3.RequestBody
+import okio.BufferedSink
 
 class AgentknockApplication : Application() {
     internal lateinit var container: ApplicationContainer
@@ -386,11 +389,28 @@ internal class ApplicationContainer(private val application: Application) {
 internal fun approvalReviewHttpClient(base: OkHttpClient): OkHttpClient =
     base
         .newBuilder()
-        // AI review is billable and not idempotent. A durable request coordinator decides whether
-        // one logical review was attempted; OkHttp must not silently repeat it.
+        // AI review is billable and not idempotent. The review retry loop handles explicit
+        // temporary HTTP errors within one deadline; OkHttp must not silently repeat a request.
         .retryOnConnectionFailure(false)
-        .readTimeout(45, TimeUnit.SECONDS)
-        .callTimeout(60, TimeUnit.SECONDS)
+        .followRedirects(false)
+        .addInterceptor { chain ->
+            val request = chain.request()
+            val body = checkNotNull(request.body)
+            // OkHttp may repeat HTTP 503 responses even with connection retries disabled.
+            val oneShotBody =
+                object : RequestBody() {
+                    override fun contentType() = body.contentType()
+
+                    override fun contentLength() = body.contentLength()
+
+                    override fun writeTo(sink: BufferedSink) = body.writeTo(sink)
+
+                    override fun isOneShot() = true
+                }
+            chain.proceed(request.newBuilder().method(request.method, oneShotBody).build())
+        }
+        .readTimeout(AI_REVIEW_TIMEOUT_MILLIS, TimeUnit.MILLISECONDS)
+        .callTimeout(AI_REVIEW_TIMEOUT_MILLIS, TimeUnit.MILLISECONDS)
         .build()
 
 internal suspend fun initializeTemporaryAccessStorage(

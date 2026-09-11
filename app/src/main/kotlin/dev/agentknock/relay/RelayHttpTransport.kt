@@ -26,6 +26,7 @@ internal sealed interface RelayEndpointResult<out T> {
         val status: Int,
         val code: String?,
         val message: String?,
+        val retryAfterMillis: Long? = null,
     ) : RelayEndpointResult<Nothing>
 
     data class Unavailable(val cause: IOException) : RelayEndpointResult<Nothing>
@@ -105,6 +106,13 @@ internal class RelayHttpTransport(
                 status = response.code,
                 code = error.code,
                 message = error.message,
+                retryAfterMillis =
+                    maximumRetryDelay(
+                        error.retryAfterMillis,
+                        response
+                            .header("Retry-After")
+                            ?.toRetryAfterMillis(System.currentTimeMillis()),
+                    ),
             )
         }
     }

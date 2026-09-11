@@ -1,6 +1,9 @@
 package dev.agentknock.relay
 
 import dev.agentknock.review.ApprovalReviewRequest
+import java.io.IOException
+import kotlinx.coroutines.delay
+import kotlinx.coroutines.withTimeoutOrNull
 import kotlinx.serialization.Serializable
 import kotlinx.serialization.encodeToString
 import kotlinx.serialization.json.Json
@@ -18,6 +21,8 @@ internal data class RelayApprovalReview(
 
 internal typealias RelayApprovalReviewResult = RelayEndpointResult<RelayApprovalReview>
 
+internal const val AI_REVIEW_TIMEOUT_MILLIS = 100_000L
+
 internal interface RelayApprovalReviewClient {
     suspend fun review(
         deviceId: String,
@@ -25,6 +30,23 @@ internal interface RelayApprovalReviewClient {
         request: ApprovalReviewRequest,
     ): RelayApprovalReviewResult
 }
+
+internal suspend fun RelayApprovalReviewClient.reviewWithRetries(
+    deviceId: String,
+    deviceToken: String,
+    request: ApprovalReviewRequest,
+): RelayApprovalReviewResult =
+    withTimeoutOrNull(AI_REVIEW_TIMEOUT_MILLIS) {
+        var result = review(deviceId, deviceToken, request)
+        for (retry in 0 until 3) {
+            val rejection = result as? RelayEndpointResult.Rejected ?: break
+            if (!rejection.status.isTransientRelayStatus()) break
+            // Only retry explicit temporary HTTP errors. A lost response may already be billable.
+            delay(rejection.retryAfterMillis ?: (1_000L shl retry))
+            result = review(deviceId, deviceToken, request)
+        }
+        result
+    } ?: RelayEndpointResult.Unavailable(IOException("AI review exceeded its 100-second deadline"))
 
 internal class HttpRelayApprovalReviewClient(
     private val transport: RelayHttpTransport,
