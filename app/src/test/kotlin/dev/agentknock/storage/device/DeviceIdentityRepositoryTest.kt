@@ -30,6 +30,48 @@ import org.junit.Test
 @OptIn(ExperimentalCoroutinesApi::class)
 class DeviceIdentityRepositoryTest {
     @Test
+    fun `connection credentials and authorization do not decrypt the private key`() = runTest {
+        val fixture = Fixture(UnconfinedTestDispatcher(testScheduler))
+        fixture.repository.stageAndClaim("amber-river-maple")
+        fixture.dao.credentials.value =
+            fixture.dao.credentials.value.map { credential ->
+                if (credential.kind == DeviceCredentialKind.DEVICE_PRIVATE_KEY.storedName) {
+                    credential.copy(
+                        encryptedValue = credential.encryptedValue.copy(ciphertext = ByteArray(48))
+                    )
+                } else credential
+            }
+
+        val active = fixture.repository.activeDeviceCredentials()
+        assertTrue(active is DeviceCredentialResult.Available)
+        val credentials = (active as DeviceCredentialResult.Available).value
+        assertEquals(fixture.relay.claims.single().deviceToken, credentials.deviceToken)
+        assertTrue(
+            fixture.repository.deviceCredentials(credentials.deviceIdentityId)
+                is DeviceCredentialResult.Available
+        )
+        assertTrue(
+            fixture.repository.activeDeviceAuthorization() is DeviceCredentialResult.Available
+        )
+        var called = false
+        val operation = runCatching { credentials.deviceKey.use { called = true } }
+        assertTrue(operation.exceptionOrNull() is DeviceKeyAccessException)
+        assertFalse(called)
+    }
+
+    @Test
+    fun `a loaded key handle checks the wrapping key again on every use`() = runTest {
+        val fixture = Fixture(UnconfinedTestDispatcher(testScheduler))
+        fixture.repository.stageAndClaim("amber-river-maple")
+        val credentials =
+            (fixture.repository.activeDeviceCredentials() as DeviceCredentialResult.Available).value
+        credentials.deviceKey.use { assertEquals(32, it.privateKey.size) }
+        fixture.keyStore.generatedKeyIds.forEach(fixture.keyStore::delete)
+        val operation = runCatching { credentials.deviceKey.use { error("must not run") } }
+        assertTrue(operation.exceptionOrNull() is DeviceKeyAccessException)
+    }
+
+    @Test
     fun `claims and promotes a locally encrypted device identity`() = runTest {
         val fixture = Fixture(UnconfinedTestDispatcher(testScheduler))
 
@@ -288,8 +330,14 @@ class DeviceIdentityRepositoryTest {
         assertEquals(before.deviceId, after.deviceId)
         assertEquals("silent-forest-cloud", after.address)
         assertNotEquals(before.addressId, after.addressId)
-        assertArrayEquals(before.devicePrivateKey, after.devicePrivateKey)
-        assertArrayEquals(before.devicePublicKey, after.devicePublicKey)
+        assertArrayEquals(
+            before.deviceKey.use { it.privateKey.copyOf() },
+            after.deviceKey.use { it.privateKey.copyOf() },
+        )
+        assertArrayEquals(
+            before.deviceKey.use { it.publicKey },
+            after.deviceKey.use { it.publicKey },
+        )
         assertEquals(before.deviceToken, after.deviceToken)
         assertEquals(1, fixture.dao.identities.value.size)
         assertEquals(1, fixture.relay.claims.size)
@@ -472,7 +520,7 @@ class DeviceIdentityRepositoryTest {
 
     private class Fixture(dispatcher: CoroutineDispatcher) {
         val encryptionMetadata = FakeVaultKeyDao()
-        private val keyStore = FakeEncryptionKeyStore()
+        val keyStore = FakeEncryptionKeyStore()
         val dao = FakeDeviceIdentityDao()
         val relay = FakeRelayClaimClient()
         private var id = 0

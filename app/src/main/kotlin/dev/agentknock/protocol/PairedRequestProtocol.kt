@@ -18,14 +18,14 @@ import org.bouncycastle.crypto.params.AEADParameters
 import org.bouncycastle.crypto.params.HKDFParameters
 import org.bouncycastle.crypto.params.KeyParameter
 
-internal data class OpenedPairedRequest(
+internal class OpenedPairedRequest(
     val plaintext: ByteArray,
     val clientPsk: ByteArray,
     val keySource: PairedRequestKeySource,
     val responseContext: PairedResponseContext,
 )
 
-internal data class PairedResponseContext(
+internal class PairedResponseContext(
     val encapsulatedKey: ByteArray,
     val exportedSecret: ByteArray,
 )
@@ -366,7 +366,7 @@ internal enum class PairedRequestErrorCode(
     ),
 }
 
-private data class OpenedPairedContext(
+private class OpenedPairedContext(
     val encapsulatedKey: ByteArray,
     val context: org.bouncycastle.crypto.hpke.HPKEContext,
     val plaintext: ByteArray,

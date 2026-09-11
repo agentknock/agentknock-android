@@ -31,7 +31,7 @@ internal data class EncryptedValue(
 )
 
 internal sealed interface DecryptionResult {
-    data class Plaintext(val value: ByteArray) : DecryptionResult
+    class Plaintext(val value: ByteArray) : DecryptionResult
 
     data object KeyUnavailable : DecryptionResult
 

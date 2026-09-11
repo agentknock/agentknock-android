@@ -37,12 +37,14 @@ import dev.agentknock.storage.audit.AuditEventType
 import dev.agentknock.storage.audit.AuditOutcome
 import dev.agentknock.storage.audit.AuditRepository
 import dev.agentknock.storage.crypto.AesGcmEncryption
+import dev.agentknock.storage.crypto.DecryptionResult
 import dev.agentknock.storage.crypto.EncryptionKeyBacking
 import dev.agentknock.storage.crypto.EncryptionKeyStore
 import dev.agentknock.storage.crypto.GeneratedEncryptionKey
 import dev.agentknock.storage.crypto.VaultKeyManager
 import dev.agentknock.storage.device.DeviceCredentialResult
 import dev.agentknock.storage.device.DeviceIdentityEntity
+import dev.agentknock.storage.device.DeviceKeyAccess
 import dev.agentknock.storage.device.RelayDeviceCredentialSource
 import dev.agentknock.storage.device.RelayDeviceCredentials
 import dev.agentknock.storage.secret.CreateEnvironmentVariableResult
@@ -109,6 +111,7 @@ class RequestRepositorySlotTest {
     private lateinit var repository: RequestRepository
     private lateinit var inbox: RequestInbox
     private lateinit var secrets: SecretRepository
+    private lateinit var devicePublicKey: ByteArray
     private lateinit var credentials: RelayDeviceCredentials
     private lateinit var credentialSource: StaticCredentialSource
     private lateinit var protocolRandom: SwitchableSecureRandom
@@ -116,6 +119,8 @@ class RequestRepositorySlotTest {
     private lateinit var approvalReviewer: ControllableApprovalReviewer
     private var synchronizationRequests = 0
     private var pushRegistrationState: RelayPushRegistrationState? = null
+    private var deviceKeyFailure: DecryptionResult? = null
+    private val decryptedDeviceKeys = mutableListOf<ByteArray>()
     private var now = CLIENT_ID.timestamp()
 
     @Before
@@ -138,7 +143,7 @@ class RequestRepositorySlotTest {
             )
         val encryption = AesGcmEncryption(keyStore)
         val devicePrivateKey = ByteArray(32) { 0x42 }
-        val devicePublicKey =
+        devicePublicKey =
             X25519PrivateKeyParameters(devicePrivateKey, 0).generatePublicKey().encoded
         credentials =
             RelayDeviceCredentials(
@@ -146,8 +151,13 @@ class RequestRepositorySlotTest {
                 address = ADDRESS,
                 addressId = ADDRESS_ID,
                 deviceId = DEVICE_ID,
-                devicePublicKey = devicePublicKey,
-                devicePrivateKey = devicePrivateKey,
+                deviceKey =
+                    DeviceKeyAccess(Dispatchers.Unconfined) {
+                        deviceKeyFailure
+                            ?: DecryptionResult.Plaintext(
+                                devicePrivateKey.copyOf().also(decryptedDeviceKeys::add)
+                            )
+                    },
                 deviceToken = "token",
             )
         database
@@ -1992,6 +2002,66 @@ class RequestRepositorySlotTest {
     }
 
     @Test
+    fun keyAccessFailureLeavesRequestsUnacknowledgedForReplay() = runTest {
+        val clientPsk = establishActivePairing()
+        assertTrue(decryptedDeviceKeys.isNotEmpty())
+        assertTrue(decryptedDeviceKeys.all { bytes -> bytes.all { it == 0.toByte() } })
+        val request =
+            pairedRequest(
+                requestId = UNSUPPORTED_REQUEST_ID,
+                clientPsk = clientPsk,
+                plaintext = unsupportedPlaintext(),
+            )
+        for ((failure, expected) in
+            listOf(
+                DecryptionResult.KeyUnavailable to RequestSyncResult.DeviceCredentialsUnavailable,
+                DecryptionResult.AuthenticationFailed to
+                    RequestSyncResult.DeviceCredentialsCorrupted,
+                DecryptionResult.UnsupportedFormat to
+                    RequestSyncResult.UnsupportedDeviceCredentialEncryption,
+            )) {
+            deviceKeyFailure = failure
+            val connection =
+                connect(requestEvent(UNSUPPORTED_REQUEST_ID, request), RelayDeviceEvent.CaughtUp)
+            assertEquals(expected, repository.sync())
+            assertTrue(connection.closed)
+            assertNull(database.requestDao().getRequestById(UNSUPPORTED_REQUEST_ID))
+            assertFalse(
+                connection.sentFrames.any {
+                    it is RelayDeviceFrame.Acknowledgement && it.requestId == UNSUPPORTED_REQUEST_ID
+                }
+            )
+        }
+        deviceKeyFailure = null
+        val retried =
+            connect(
+                requestEvent(UNSUPPORTED_REQUEST_ID, request),
+                RelayDeviceEvent.Acknowledgement(
+                    CLIENT_ID,
+                    UNSUPPORTED_REQUEST_ID,
+                    RelayMessageKind.RESPONSE,
+                ),
+                RelayDeviceEvent.CaughtUp,
+            )
+        assertEquals(RequestSyncResult.Success, repository.sync())
+        assertNotNull(database.requestDao().getRequestById(UNSUPPORTED_REQUEST_ID))
+        assertTrue(
+            retried.sentFrames.any {
+                it is RelayDeviceFrame.Acknowledgement && it.requestId == UNSUPPORTED_REQUEST_ID
+            }
+        )
+        assertTrue(decryptedDeviceKeys.all { bytes -> bytes.all { it == 0.toByte() } })
+    }
+
+    @Test
+    fun idleConnectionDoesNotOpenTheDeviceKey() = runTest {
+        deviceKeyFailure = DecryptionResult.KeyUnavailable
+        connect(RelayDeviceEvent.CaughtUp)
+        assertEquals(RequestSyncResult.Success, repository.sync())
+        assertTrue(decryptedDeviceKeys.isEmpty())
+    }
+
+    @Test
     fun requestReplayedAfterClientSuspensionIsDiscardedAndAcknowledged() = runTest {
         val clientPsk = establishActivePairing()
         val client = checkNotNull(database.requestDao().getClient(CLIENT_ID))
@@ -2807,7 +2877,16 @@ class RequestRepositorySlotTest {
         )
         assertEquals(RequestSyncResult.Success, repository.sync())
         val changedInstructions = "Never use production credentials for experiments."
-        credentialSource.credentials = credentials.copy(instructions = changedInstructions)
+        credentialSource.credentials =
+            RelayDeviceCredentials(
+                deviceIdentityId = credentials.deviceIdentityId,
+                address = credentials.address,
+                addressId = credentials.addressId,
+                deviceId = credentials.deviceId,
+                deviceKey = credentials.deviceKey,
+                deviceToken = credentials.deviceToken,
+                instructions = changedInstructions,
+            )
         assertEquals(
             1,
             database
@@ -4835,7 +4914,7 @@ class RequestRepositorySlotTest {
     ): JsonElement {
         val sender =
             PSK_HPKE.SetupPSKS(
-                PSK_HPKE.deserializePublicKey(credentials.devicePublicKey),
+                PSK_HPKE.deserializePublicKey(devicePublicKey),
                 VERSION_INFO + DEVICE_ID.ulidBytes() + requestId.ulidBytes(),
                 clientPsk,
                 CLIENT_ID.ulidBytes(),
@@ -4855,7 +4934,7 @@ class RequestRepositorySlotTest {
     ): PairedExchange {
         val sender =
             PSK_HPKE.SetupPSKS(
-                PSK_HPKE.deserializePublicKey(credentials.devicePublicKey),
+                PSK_HPKE.deserializePublicKey(devicePublicKey),
                 VERSION_INFO + DEVICE_ID.ulidBytes() + requestId.ulidBytes(),
                 clientPsk,
                 CLIENT_ID.ulidBytes(),
@@ -4905,7 +4984,7 @@ class RequestRepositorySlotTest {
     private fun pairingMaterial(clientSecret: ByteArray): PairingMaterial {
         val sender =
             BASE_HPKE.setupBaseS(
-                BASE_HPKE.deserializePublicKey(credentials.devicePublicKey),
+                BASE_HPKE.deserializePublicKey(devicePublicKey),
                 VERSION_INFO + DEVICE_ID.ulidBytes() + CLIENT_ID.ulidBytes(),
             )
         val secretCiphertext = sender.seal(EMPTY, clientSecret)

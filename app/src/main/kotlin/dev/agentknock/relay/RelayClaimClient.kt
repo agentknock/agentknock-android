@@ -100,7 +100,7 @@ internal class HttpRelayClaimClient(
 }
 
 @Serializable
-private data class DeviceClaimRequest(
+private class DeviceClaimRequest(
     @SerialName("device_token") val deviceToken: String,
     val attestation: AndroidKeyAttestation? = null,
 )

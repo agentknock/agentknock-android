@@ -8,7 +8,7 @@ import org.bouncycastle.crypto.generators.HKDFBytesGenerator
 import org.bouncycastle.crypto.params.HKDFParameters
 import org.bouncycastle.crypto.params.X25519PrivateKeyParameters
 
-internal data class DeviceKeyPair(
+internal class DeviceKeyPair(
     val privateKey: ByteArray,
     val publicKey: ByteArray,
 )
