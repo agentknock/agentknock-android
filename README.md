@@ -106,3 +106,7 @@ policy and [SECURITY.md](SECURITY.md) for private vulnerability reporting.
 
 Agentknock for Android is licensed under the [MIT License](LICENSE-MIT) or the
 [Apache License 2.0](LICENSE-APACHE), at your option (`MIT OR Apache-2.0`).
+
+The bundled BIP-39 English word list retains its
+[MIT license and upstream attribution](app/src/main/assets/licenses/bip39.txt).
+This notice is included in both APK variants and the Play bundle.
