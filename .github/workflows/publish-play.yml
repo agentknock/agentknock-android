@@ -1,7 +1,12 @@
-name: Publish Google Play internal build
+name: Publish Google Play build
 
 on:
   workflow_call:
+    inputs:
+      release-tag:
+        description: Published GitHub release to promote to Alpha; empty uploads this build internally
+        type: string
+        default: ''
 
 permissions:
   contents: read
@@ -10,17 +15,18 @@ permissions:
 
 jobs:
   publish:
-    name: Publish to internal track
+    name: ${{ inputs.release-tag != '' && 'Promote release to Alpha' || 'Publish to internal track' }}
     if: github.event_name == 'push' && github.ref == 'refs/heads/master'
     runs-on: ubuntu-24.04
     timeout-minutes: 15
     environment: release
     concurrency:
-      group: google-play-internal
+      group: google-play-publishing
       queue: max
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
+          fetch-depth: 2
           persist-credentials: false
       - name: Require Play publishing configuration
         env:
@@ -30,6 +36,7 @@ jobs:
           : "${GCP_WORKLOAD_IDENTITY_PROVIDER:?Set the workload identity provider}"
           : "${GCP_PLAY_PUBLISHING_SERVICE_ACCOUNT:?Set the Play publishing service account}"
       - uses: actions/download-artifact@3e5f45b2cfb9172054b4087a40e8e0b5a5461e7c # v8.0.1
+        if: inputs.release-tag == ''
         with:
           name: signed-release
           path: release-assets
@@ -48,4 +55,5 @@ jobs:
         env:
           GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
           GCP_ACCESS_TOKEN: ${{ steps.google-auth.outputs.access_token }}
+          RELEASE_TAG: ${{ inputs.release-tag }}
         run: python3 scripts/publish-play.py

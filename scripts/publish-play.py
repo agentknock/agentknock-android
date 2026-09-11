@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""Publish a tested master build to the Google Play internal track."""
+"""Publish master builds internally and promote published GitHub releases to Alpha."""
 
 import hashlib
 import json
@@ -9,8 +9,11 @@ import sys
 from urllib.error import HTTPError
 from urllib.request import Request, urlopen
 
+from github_release import download_published_release
 from release_artifacts import verify_release_assets
+from release_notes import play_release_notes
 from release_signing import artifact_names
+from version import is_version_release
 
 
 APPLICATION = "androidpublisher/v3/applications/dev.agentknock"
@@ -35,46 +38,58 @@ def play_request(method, path, token, data=None, upload=False):
         raise RuntimeError(f"Google Play {method} {path} failed ({error.code}): {message}") from None
 
 
-def publish_bundle(bundle, version, code, token):
+def publish_bundle(bundle, version, code, token, track_name, release_notes=None):
+    if track_name not in {"internal", "alpha"}:
+        raise ValueError("Expected the internal or Alpha testing track")
     content = bundle.read_bytes()
     digest = hashlib.sha256(content).hexdigest()
     edit = play_request("POST", f"{APPLICATION}/edits", token, {})["id"]
     path = f"{APPLICATION}/edits/{edit}"
     committed = False
     try:
-        track = play_request("GET", f"{path}/tracks/internal", token)
+        track = play_request("GET", f"{path}/tracks/{track_name}", token)
         releases = track.get("releases", [])
         codes = [int(value) for release in releases for value in release.get("versionCodes", [])]
         if codes and max(codes) > code:
-            print(f"Internal track already has newer version {max(codes)}; skipping {code}")
+            print(f"{track_name} already has newer version {max(codes)}; skipping {code}")
             return
 
         bundles = play_request("GET", f"{path}/bundles", token).get("bundles", [])
         existing = next((item for item in bundles if item["versionCode"] == code), None)
         if existing is not None and existing["sha256"] != digest:
             raise ValueError(f"Google Play version {code} contains a different bundle")
-        completed = any(release["status"] == "completed" and str(code) in release["versionCodes"]
-                        for release in releases)
+        completed = next((release for release in releases
+                          if release["status"] == "completed" and str(code) in release["versionCodes"]), None)
         if completed:
             if existing is None:
-                raise ValueError(f"Internal track version {code} has no matching bundle")
-            print(f"Identical bundle {code} is already published to the internal track")
-            return
+                raise ValueError(f"{track_name} version {code} has no matching bundle")
+            if not release_notes or all(note in completed.get("releaseNotes", []) for note in release_notes):
+                print(f"Identical bundle {code} is already published to {track_name}")
+                return
 
         if existing is None:
+            if track_name == "alpha":
+                raise ValueError(f"Release bundle {code} must already be uploaded before promotion to Alpha")
             uploaded = play_request("POST", f"{path}/bundles?uploadType=media", token,
                                     content, upload=True)
             if uploaded["versionCode"] != code or uploaded["sha256"] != digest:
                 raise ValueError("Uploaded bundle does not match the attested version and checksum")
-        play_request("PUT", f"{path}/tracks/internal", token, {
-            "track": "internal",
-            "releases": [{"name": f"{version}-internal.{code}", "versionCodes": [str(code)],
-                          "status": "completed"}],
+        name = f"{version}-internal.{code}" if track_name == "internal" else version
+        release = dict(completed) if completed else {
+            "name": name, "versionCodes": [str(code)], "status": "completed",
+        }
+        if release_notes:
+            notes = {note["language"]: note for note in release.get("releaseNotes", [])}
+            notes.update({note["language"]: note for note in release_notes})
+            release["releaseNotes"] = list(notes.values())
+        play_request("PUT", f"{path}/tracks/{track_name}", token, {
+            "track": track_name,
+            "releases": [release if item is completed else item for item in releases] if completed else [release],
         })
-        # Do not cancel another release's pending review to publish an internal build.
+        # Do not cancel another release's pending review when updating either track.
         play_request("POST", f"{path}:commit?changesInReviewBehavior=ERROR_IF_IN_REVIEW", token)
         committed = True
-        print(f"Published {version} ({code}) to the Google Play internal track")
+        print(f"Published {version} ({code}) to Google Play {track_name}")
     finally:
         if not committed:
             try:
@@ -91,10 +106,21 @@ def main():
     if not token:
         raise ValueError("Missing Google Play access token")
     assets = Path("release-assets")
-    metadata = verify_release_assets(assets, os.environ["GITHUB_REPOSITORY"], os.environ["GITHUB_SHA"])
+    repo, commit = os.environ["GITHUB_REPOSITORY"], os.environ["GITHUB_SHA"]
+    tag = os.environ["RELEASE_TAG"]
+    if tag:
+        metadata = download_published_release(assets, repo, commit, tag)
+        track = "alpha"
+    else:
+        metadata = verify_release_assets(assets, repo, commit)
+        track = "internal"
     version, code = metadata["versionName"], metadata["versionCode"]
+    notes = None
+    if tag or is_version_release():
+        text = play_release_notes(Path("CHANGELOG.md").read_text(), version, repo)
+        notes = [{"language": "en-GB", "text": text}]
     bundle = assets / artifact_names(version, code)[2]
-    publish_bundle(bundle, version, code, token)
+    publish_bundle(bundle, version, code, token, track, notes)
 
 
 if __name__ == "__main__":

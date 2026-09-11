@@ -156,6 +156,8 @@ jobs:
     permissions:
       contents: write
       attestations: read
+    outputs:
+      release-tag: ${{ steps.publish.outputs.release-tag }}
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
@@ -166,6 +168,19 @@ jobs:
           name: signed-release
           path: release-assets
       - name: Attach verified assets and publish the draft
+        id: publish
         env:
           GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
         run: python3 scripts/publish-github-release.py
+
+  promote-play:
+    name: Promote Google Play release
+    if: github.event_name == 'push' && github.ref == 'refs/heads/master' && needs.publish.outputs.release-tag != ''
+    needs: [publish, publish-play]
+    uses: ./.github/workflows/publish-play.yml
+    with:
+      release-tag: ${{ needs.publish.outputs.release-tag }}
+    permissions:
+      contents: read
+      attestations: read
+      id-token: write

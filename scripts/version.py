@@ -26,6 +26,10 @@ def version_code(contents):
     return int(matches[0])
 
 
+def is_version_release():
+    return git("show", "HEAD^1:version.txt") != Path("version.txt").read_text().strip()
+
+
 def bumped(contents, base_code):
     # Preserve a larger deliberate bump. Repeated calls must not keep incrementing.
     code = max(version_code(contents), base_code + 1)

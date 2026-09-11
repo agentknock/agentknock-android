@@ -5,12 +5,16 @@ import json
 import os
 from pathlib import Path
 import subprocess
+import tempfile
 
+from github_release import api, download_published_release, published_release, verify_github_assets
 from release_artifacts import verify_release_assets
+from version import is_version_release
 
 
-def api(endpoint):
-    return json.loads(subprocess.check_output(["gh", "api", endpoint], text=True))
+def release_output(tag):
+    with open(os.environ["GITHUB_OUTPUT"], "a") as output:
+        output.write(f"release-tag={tag}\n")
 
 
 def main():
@@ -18,9 +22,7 @@ def main():
     commit = os.environ["GITHUB_SHA"]
     version = Path("version.txt").read_text().strip()
     tag = f"v{version}"
-    version_changed = bool(subprocess.check_output([
-        "git", "diff", "--name-only", "--diff-filter=M", "HEAD^1", "HEAD", "--", "version.txt"
-    ], text=True).strip())
+    version_changed = is_version_release()
     pages = json.loads(subprocess.check_output(
         ["gh", "api", "--paginate", "--slurp", f"repos/{repo}/releases?per_page=100"], text=True
     ))
@@ -36,7 +38,10 @@ def main():
         print(f"{tag} belongs to another commit; retaining this merge's Actions artifacts")
         return
     if not release["draft"]:
-        print(f"{tag} is already published; leaving its immutable assets intact")
+        with tempfile.TemporaryDirectory() as temporary:
+            download_published_release(Path(temporary) / "assets", repo, commit, tag)
+        print(f"Verified the already published {tag}; resuming downstream promotion")
+        release_output(tag)
         return
     if not api(f"repos/{repo}/immutable-releases")["enabled"]:
         raise ValueError("Enable immutable releases before publishing")
@@ -44,14 +49,18 @@ def main():
     verify_release_assets(assets, repo, commit)
     subprocess.run(["gh", "release", "upload", tag, "--repo", repo, "--clobber",
                     *map(str, sorted(assets.iterdir()))], check=True)
-    notes = assets / "release-notes.md"
-    notes.write_text("Both APKs are signed with the official app-signing key. "
-                     "The Play AAB is signed with the separate Google Play upload key. "
-                     "Choose the FOSS APK or the Play APK with Google integrations. "
-                     "The AAB is for Play publishing and cannot be installed directly.\n\n"
-                     + release["body"])
-    subprocess.run(["gh", "release", "edit", tag, "--repo", repo, "--draft=false",
-                    "--prerelease", "--latest=false", "--verify-tag", "--notes-file", str(notes)], check=True)
+    verify_github_assets(api(f"repos/{repo}/releases/{release['id']}"), assets)
+    with tempfile.TemporaryDirectory() as temporary:
+        notes = Path(temporary) / "release-notes.md"
+        notes.write_text("Both APKs are signed with the official app-signing key. "
+                         "The Play AAB is signed with the separate Google Play upload key. "
+                         "Choose the FOSS APK or the Play APK with Google integrations. "
+                         "The AAB is for Play publishing and cannot be installed directly.\n\n"
+                         + release["body"])
+        subprocess.run(["gh", "release", "edit", tag, "--repo", repo, "--draft=false",
+                        "--prerelease", "--latest=false", "--verify-tag", "--notes-file", str(notes)], check=True)
+    verify_github_assets(published_release(repo, commit, tag), assets)
+    release_output(tag)
 
 
 if __name__ == "__main__":
