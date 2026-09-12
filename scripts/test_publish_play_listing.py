@@ -110,12 +110,48 @@ class ListingPublicationTests(unittest.TestCase):
                 changed.assert_called_with("base", "HEAD")
 
     @patch.object(publish, "git")
-    def test_change_detection_compares_listing_trees_only(self, git):
+    def test_change_detection_compares_all_play_metadata(self, git):
         git.side_effect = ["same-tree", "same-tree", "old-tree", "new-tree"]
         self.assertFalse(publish.listing_changed("before-push", "HEAD"))
         self.assertTrue(publish.listing_changed("before-push", "HEAD"))
         self.assertEqual(git.call_args_list[0].args,
-                         ("rev-parse", "before-push:app/src/main/play/listings"))
+                         ("rev-parse", "before-push:app/src/main/play"))
+
+    def test_contact_language_and_video_changes_trigger_publication(self):
+        def git(*args):
+            return subprocess.check_output(["git", *args], text=True).strip()
+
+        git("init", "-q")
+        git("config", "user.name", "Listing tests")
+        git("config", "user.email", "tests@example.invalid")
+        git("config", "commit.gpgsign", "false")
+        root = Path("app/src/main/play")
+        listing = root / "listings/en-GB/title.txt"
+        listing.parent.mkdir(parents=True)
+        listing.write_text("AgentKnock\n")
+        git("add", ".")
+        git("commit", "-qm", "Initial listing")
+        with patch.object(publish, "git", side_effect=git):
+            for name, value in (
+                ("contact-email.txt", "support@example.invalid\n"),
+                ("contact-website.txt", "https://example.invalid/\n"),
+                ("contact-phone.txt", "+12025550123\n"),
+                ("default-language.txt", "en-GB\n"),
+                ("listings/en-GB/video-url.txt", "https://www.youtube.com/watch?v=example\n"),
+            ):
+                with self.subTest(file=name):
+                    (root / name).write_text(value)
+                    git("add", ".")
+                    git("commit", "-qm", f"Add {name}")
+                    self.assertTrue(publish.listing_changed("HEAD^", "HEAD"))
+                    (root / name).unlink()
+                    git("add", "-u")
+                    git("commit", "-qm", f"Remove {name}")
+                    self.assertTrue(publish.listing_changed("HEAD^", "HEAD"))
+            Path("README.md").write_text("Unrelated documentation\n")
+            git("add", ".")
+            git("commit", "-qm", "Update documentation")
+            self.assertFalse(publish.listing_changed("HEAD^", "HEAD"))
 
     @patch.object(publish, "git")
     def test_stale_check_refreshes_master_after_acquiring_lock(self, git):

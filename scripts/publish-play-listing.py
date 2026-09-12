@@ -12,7 +12,7 @@ from play_api import APPLICATION, play_request
 from version import git
 
 
-LISTINGS = "app/src/main/play/listings"
+PLAY_METADATA = "app/src/main/play"
 # GPP 4.1.1 preserves this edit and marker when publishListing uses --no-commit.
 # Recheck this contract when upgrading GPP; never use its default commit, which
 # does not set changesInReviewBehavior and can cancel an existing Play review.
@@ -21,7 +21,7 @@ SKIPPED_FILE = EDIT_FILE.with_suffix(".skipped")
 
 
 def listing_changed(base, head):
-    return git("rev-parse", f"{base}:{LISTINGS}") != git("rev-parse", f"{head}:{LISTINGS}")
+    return git("rev-parse", f"{base}:{PLAY_METADATA}") != git("rev-parse", f"{head}:{PLAY_METADATA}")
 
 
 def current_listing():
