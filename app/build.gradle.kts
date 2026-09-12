@@ -1,4 +1,3 @@
-import com.github.triplet.gradle.androidpublisher.ReleaseStatus
 import com.google.gms.googleservices.GoogleServicesPlugin.MissingGoogleServicesStrategy
 import com.google.gms.googleservices.GoogleServicesTask
 import org.gradle.api.artifacts.component.ModuleComponentIdentifier
@@ -15,14 +14,13 @@ plugins {
     alias(libs.plugins.room3)
 }
 
-val agentknockVersionCode = 59
+val agentknockVersionCode = 60
 val agentknockVersionName =
     providers
         .fileContents(rootProject.layout.projectDirectory.file("version.txt"))
         .asText
         .get()
         .trim()
-val playCredentialsFile = providers.environmentVariable("AGENTKNOCK_PLAY_CREDENTIALS_FILE")
 val sourceRevision =
     providers.environmentVariable("AGENTKNOCK_SOURCE_REVISION").orElse("unverified")
 
@@ -72,16 +70,7 @@ android {
 
 play {
     enabled.set(false)
-    defaultToAppBundles.set(true)
-    releaseName.set("$agentknockVersionName-internal.$agentknockVersionCode")
-    releaseStatus.set(ReleaseStatus.COMPLETED)
-    track.set("internal")
-
-    if (playCredentialsFile.isPresent) {
-        serviceAccountCredentials.set(file(playCredentialsFile.get()))
-    } else {
-        useApplicationDefaultCredentials.set(true)
-    }
+    useApplicationDefaultCredentials.set(true)
 }
 
 // Wire Firebase configuration only into Play variants. Applying the plugin globally
@@ -155,21 +144,6 @@ dependencies {
     androidTestImplementation(libs.androidx.test.runner)
     androidTestImplementation(libs.kotlinx.coroutines.test)
 }
-
-val requirePlayCredentials =
-    tasks.register("requirePlayCredentials") {
-        doLast {
-            check(playCredentialsFile.isPresent) {
-                "Play publishing requires AGENTKNOCK_PLAY_CREDENTIALS_FILE"
-            }
-        }
-    }
-
-tasks
-    .matching { it.name == "publishPlayReleaseBundle" }
-    .configureEach {
-        dependsOn(requirePlayCredentials)
-    }
 
 @DisableCachingByDefault(because = "Checks resolved coordinates without producing artifacts")
 abstract class VerifyFossDependencies : DefaultTask() {

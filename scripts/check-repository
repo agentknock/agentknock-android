@@ -4,6 +4,6 @@ cd -- "$(dirname -- "${BASH_SOURCE[0]}")/.."
 
 # GitHub supports concurrency.queue; actionlint 1.7.12 does not recognize it yet.
 actionlint -ignore '^unexpected key "queue" for "concurrency" section\.'
-shellcheck publish-internal preview-ui scripts/check-repository scripts/check-device scripts/install-jsign
+shellcheck preview-ui scripts/check-repository scripts/check-device scripts/install-jsign
 python3 -m unittest discover -s scripts -p 'test_*.py'
 ./gradlew --build-cache --max-workers=2 :spotlessCheck :app:verifyFossDependencies

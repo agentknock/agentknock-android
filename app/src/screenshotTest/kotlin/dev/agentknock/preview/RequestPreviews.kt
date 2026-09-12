@@ -712,7 +712,7 @@ private val longCommandArguments =
         "-keypass:env",
         "KEYSTORE_PASSWORD",
         "-signedjar",
-        "/home/maya/projects/parcel-android/app/build/publish-internal.aB3xY9/app-release.aab",
+        "/home/maya/projects/parcel-android/app/build/signed-release/app-release.aab",
         "/home/maya/projects/parcel-android/app/build/outputs/bundle/release/app-release.aab",
         "parcel-upload",
     )
