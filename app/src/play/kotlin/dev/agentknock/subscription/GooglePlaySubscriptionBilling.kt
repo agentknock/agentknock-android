@@ -61,7 +61,7 @@ internal class GooglePlaySubscriptionBilling(context: Context) : PlaySubscriptio
         return PlaySubscriptionQueryResult.Success(
             PlaySubscriptionSnapshot(
                 purchases = purchases,
-                offers = productDetails?.flatMap(::offers).orEmpty(),
+                offers = preferFreeTrialOffers(productDetails?.flatMap(::offers).orEmpty()),
                 offersAvailable = productDetails != null,
             )
         )
@@ -203,8 +203,23 @@ internal class GooglePlaySubscriptionBilling(context: Context) : PlaySubscriptio
                 price = summary.price,
                 terms = summary.terms,
                 autoRenewing = summary.autoRenewing,
+                freeTrialDuration = summary.freeTrialDuration,
             )
         }
+}
+
+// Play returns the paid base plan alongside user-eligible offers for that same plan.
+internal fun preferFreeTrialOffers(
+    offers: List<PlaySubscriptionOffer>
+): List<PlaySubscriptionOffer> {
+    val trialPlans =
+        offers
+            .filter { it.id.offerId != null && it.freeTrialDuration != null }
+            .map { it.id.productId to it.id.basePlanId }
+            .toSet()
+    return offers.filter {
+        it.id.offerId != null || (it.id.productId to it.id.basePlanId) !in trialPlans
+    }
 }
 
 internal enum class PricingRecurrence {
@@ -225,6 +240,7 @@ internal data class SubscriptionPricingSummary(
     val price: String,
     val terms: String,
     val autoRenewing: Boolean,
+    val freeTrialDuration: String?,
 )
 
 internal fun summarizeSubscriptionPricing(
@@ -256,10 +272,21 @@ internal fun summarizeSubscriptionPricing(
                     "${final.formattedPrice} for $finalDuration"
                 }
         }
-    val introductory = phases.dropLast(1).mapNotNull(::describeIntroductoryPhase)
+    val introductory = phases.dropLast(1).map { describeIntroductoryPhase(it) ?: return null }
+    val first = phases.first()
+    val freeTrialDuration =
+        if (phases.size > 1 && first.priceAmountMicros == 0L) {
+            billingPeriodDuration(first.billingPeriod, first.billingCycleCount.coerceAtLeast(1))
+                ?.toString() ?: return null
+        } else {
+            null
+        }
     val terms = buildList {
         if (introductory.isNotEmpty()) {
             add("${introductory.joinToString(", then ")}, then $price.")
+        }
+        if (freeTrialDuration != null) {
+            add("You will be charged automatically unless you cancel before the trial ends.")
         }
         add(
             if (autoRenewing) {
@@ -270,7 +297,7 @@ internal fun summarizeSubscriptionPricing(
         )
     }
         .joinToString(" ")
-    return SubscriptionPricingSummary(price, terms, autoRenewing)
+    return SubscriptionPricingSummary(price, terms, autoRenewing, freeTrialDuration)
 }
 
 private fun describeIntroductoryPhase(phase: SubscriptionPricingPhase): String? {

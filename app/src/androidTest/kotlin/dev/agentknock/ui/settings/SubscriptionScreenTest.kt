@@ -148,6 +148,7 @@ class SubscriptionScreenTest {
                                         "€4.99/month",
                                         "Renews automatically until canceled. Manage or cancel in Google Play.",
                                         true,
+                                        null,
                                     )
                                 ),
                         ),
@@ -166,5 +167,71 @@ class SubscriptionScreenTest {
             .assertIsDisplayed()
         compose.onNodeWithText("Subscribe").performScrollTo().performClick()
         assertEquals(id, selected)
+    }
+
+    @Test
+    fun eligibleTrialShowsDurationRenewalAndCancellationAndStartsTheTrial() {
+        val id =
+            PlaySubscriptionOfferId(
+                GOOGLE_PLAY_SUBSCRIPTION_PRODUCT_ID,
+                "monthly",
+                "free-trial-14-days",
+            )
+        val terms =
+            "14 days free, then €4.99/month. " +
+                "You will be charged automatically unless you cancel before the trial ends. " +
+                "Renews automatically until canceled. Manage or cancel in Google Play."
+        var selected: PlaySubscriptionOfferId? = null
+        compose.setContent {
+            AgentknockTheme {
+                SubscriptionAndBillingScreen(
+                    state =
+                        SubscriptionUiState(
+                            access = AiReviewAccess.INACTIVE,
+                            playStore = PlayStoreAvailability.AVAILABLE,
+                            offers =
+                                listOf(
+                                    PlaySubscriptionOffer(id, "€4.99/month", terms, true, "14 days")
+                                ),
+                        ),
+                    onBack = {},
+                    onRefresh = {},
+                    onSubscribe = { selected = it },
+                    onManageSubscription = {},
+                    onOpenSecrets = {},
+                )
+            }
+        }
+        compose.onNodeWithText("14 days free").performScrollTo().assertIsDisplayed()
+        compose.onNodeWithText("€4.99/month").performScrollTo().assertIsDisplayed()
+        compose.onNodeWithText(terms).performScrollTo().assertIsDisplayed()
+        compose.onNodeWithText("Subscribe").assertDoesNotExist()
+        compose.onNodeWithText("Start free trial").performScrollTo().performClick()
+        assertEquals(id, selected)
+    }
+
+    @Test
+    fun activePlaySubscriptionProvidesCancellationManagement() {
+        var managed: String? = null
+        compose.setContent {
+            AgentknockTheme {
+                SubscriptionAndBillingScreen(
+                    state =
+                        SubscriptionUiState(
+                            access = AiReviewAccess.ACTIVE,
+                            googlePlayPurchase = GooglePlayPurchaseState.PURCHASED,
+                            googlePlayProductId = GOOGLE_PLAY_SUBSCRIPTION_PRODUCT_ID,
+                        ),
+                    onBack = {},
+                    onRefresh = {},
+                    onSubscribe = {},
+                    onManageSubscription = { managed = it },
+                    onOpenSecrets = {},
+                )
+            }
+        }
+        compose.onNodeWithText("Manage in Google Play").performScrollTo().performClick()
+        assertEquals(GOOGLE_PLAY_SUBSCRIPTION_PRODUCT_ID, managed)
+        compose.onNodeWithText("Start free trial").assertDoesNotExist()
     }
 }
