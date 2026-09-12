@@ -2,12 +2,15 @@ package dev.agentknock.ui.components
 
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.runtime.mutableStateOf
+import androidx.compose.ui.semantics.SemanticsActions
 import androidx.compose.ui.test.assertIsDisplayed
+import androidx.compose.ui.test.assertIsEnabled
 import androidx.compose.ui.test.assertIsNotEnabled
 import androidx.compose.ui.test.junit4.v2.createComposeRule
 import androidx.compose.ui.test.onNodeWithContentDescription
 import androidx.compose.ui.test.onNodeWithText
 import androidx.compose.ui.test.performClick
+import androidx.compose.ui.test.performSemanticsAction
 import androidx.compose.ui.test.performTextReplacement
 import androidx.test.ext.junit.runners.AndroidJUnit4
 import org.junit.Assert.assertEquals
@@ -45,8 +48,14 @@ class ProseEditorScreenTest {
         compose.onNodeWithContentDescription("Back").performClick()
         compose.onNodeWithText("Discard changes?").assertIsDisplayed()
         compose.onNodeWithText("Keep editing").performClick()
+        compose.onNodeWithText("Discard changes?").assertDoesNotExist()
         compose.runOnIdle { assertFalse(dismissed) }
-        compose.onNodeWithText("Save").performClick()
+        // Test the Save action without depending on dialog/IME window touch coordinates.
+        compose
+            .onNodeWithText("Save")
+            .assertIsDisplayed()
+            .assertIsEnabled()
+            .performSemanticsAction(SemanticsActions.OnClick)
         compose.runOnIdle { assertEquals("Ask before exporting data.", saved) }
     }
 }
