@@ -247,21 +247,20 @@ private fun SubscriptionOffer(
                 )
                 Column(Modifier.weight(1f)) {
                     Text("AI review subscription", style = MaterialTheme.typography.titleMedium)
-                    Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
-                        Text(
-                            offer.price,
-                            style = MaterialTheme.typography.titleLarge,
-                            modifier = Modifier.alignByBaseline(),
-                        )
-                        Text(
-                            offer.terms,
-                            style = MaterialTheme.typography.bodyMedium,
-                            color = MaterialTheme.colorScheme.onSurfaceVariant,
-                            modifier = Modifier.alignByBaseline(),
-                        )
+                    offer.freeTrialDuration?.let { duration ->
+                        Text("$duration free", style = MaterialTheme.typography.titleLarge)
                     }
+                    Text(
+                        offer.price,
+                        style = MaterialTheme.typography.titleLarge,
+                    )
                 }
             }
+            Text(
+                offer.terms,
+                style = MaterialTheme.typography.bodyMedium,
+                color = MaterialTheme.colorScheme.onSurfaceVariant,
+            )
             Button(
                 onClick = onSubscribe,
                 enabled = enabled,
@@ -272,7 +271,13 @@ private fun SubscriptionOffer(
                     Spacer(Modifier.size(8.dp))
                     Text("Opening Google Play…")
                 } else {
-                    Text(if (offer.autoRenewing) "Subscribe" else "Buy plan")
+                    Text(
+                        when {
+                            offer.freeTrialDuration != null -> "Start free trial"
+                            offer.autoRenewing -> "Subscribe"
+                            else -> "Buy plan"
+                        }
+                    )
                 }
             }
         }

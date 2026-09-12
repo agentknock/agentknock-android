@@ -16,6 +16,7 @@ internal data class PlaySubscriptionOffer(
     val price: String,
     val terms: String,
     val autoRenewing: Boolean,
+    val freeTrialDuration: String?,
 )
 
 internal enum class PlayPurchaseState {

@@ -29,9 +29,10 @@ internal val previewSubscription =
             listOf(
                 PlaySubscriptionOffer(
                     PlaySubscriptionOfferId("agentknock_subscription", "monthly", null),
-                    "$5.00",
-                    "per month",
+                    "$4.99/month",
+                    "Renews automatically until canceled. Manage or cancel in Google Play.",
                     true,
+                    null,
                 )
             ),
     )
@@ -265,6 +266,68 @@ fun SubscriptionDarkPreview() = SubscriptionPreview()
 
 @Composable
 private fun SubscriptionPreview() = PreviewScreen { SubscriptionPage(previewSubscription) }
+
+@PreviewTest
+@Preview(
+    name = "Light",
+    group = "subscription-trial",
+    widthDp = 360,
+    heightDp = 800,
+    locale = "en",
+    uiMode = Configuration.UI_MODE_NIGHT_NO,
+)
+@Composable
+fun SubscriptionTrialLightPreview() = SubscriptionTrialPreview()
+
+@PreviewTest
+@Preview(
+    name = "Dark",
+    group = "subscription-trial",
+    widthDp = 360,
+    heightDp = 800,
+    locale = "en",
+    uiMode = Configuration.UI_MODE_NIGHT_YES,
+)
+@Composable
+fun SubscriptionTrialDarkPreview() = SubscriptionTrialPreview()
+
+@PreviewTest
+@Preview(
+    name = "Large text",
+    group = "subscription-trial",
+    widthDp = 360,
+    heightDp = 800,
+    fontScale = 2f,
+    locale = "en",
+)
+@Composable
+fun SubscriptionTrialLargeTextPreview() = SubscriptionTrialPreview()
+
+@Composable
+private fun SubscriptionTrialPreview() = PreviewScreen {
+    SubscriptionPage(
+        previewSubscription.copy(
+            offers =
+                listOf(
+                    previewSubscription.offers
+                        .single()
+                        .copy(
+                            id =
+                                PlaySubscriptionOfferId(
+                                    "agentknock_subscription",
+                                    "monthly",
+                                    "free-trial-14-days",
+                                ),
+                            freeTrialDuration = "14 days",
+                            terms =
+                                "14 days free, then $4.99/month. " +
+                                    "You will be charged automatically unless you cancel before the trial ends. " +
+                                    "Renews automatically until canceled. Manage or cancel in Google Play.",
+                        )
+                )
+        )
+    )
+}
 
 @PreviewTest
 @Preview(

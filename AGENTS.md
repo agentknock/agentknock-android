@@ -12,3 +12,7 @@
   squash PRs, or rebase-merge PRs.
 - Release by merging the Release Please PR. Let it maintain `version.txt` and
   `CHANGELOG.md`; do not create release tags manually.
+
+## Code Review Rules
+
+- Do not attempt to check commit signatures during code review.
