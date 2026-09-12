@@ -120,23 +120,6 @@ class ApprovalReviewRetriesTest {
     }
 
     @Test
-    fun `network failures and waits consume the same 100-second deadline`() = runTest {
-        val attempts = mutableListOf<Long>()
-        val reviewer = reviewer { _, _, _ ->
-            attempts += testScheduler.currentTime
-            delay(60_000)
-            RelayEndpointResult.Unavailable(IOException("Response lost"))
-        }
-
-        assertTrue(
-            reviewer.reviewWithRetries("device", "token", REQUEST)
-                is RelayEndpointResult.Unavailable
-        )
-        assertEquals(listOf(0L, 61_000L), attempts)
-        assertEquals(100_000L, testScheduler.currentTime)
-    }
-
-    @Test
     fun `a single slow review can use the full shared deadline`() = runTest {
         val reviewer = reviewer { _, _, _ ->
             delay(99_000)

@@ -9,19 +9,19 @@ class PairingAddressGeneratorTest {
     @Test
     fun `generates three different words separated by dashes`() {
         val indices = ArrayDeque(listOf(2, 2, 0, 1))
-        val bounds = mutableListOf<Int>()
         val generator =
             PairingAddressGenerator(
                 words = listOf("amber", "river", "maple"),
                 nextIndex = { bound ->
-                    bounds += bound
-                    indices.removeFirst()
+                    indices.removeFirst() % bound
                 },
             )
 
-        assertEquals("maple-amber-river", generator.generate())
-        assertEquals(listOf(3, 3, 3, 3), bounds)
-        assertTrue(DeviceProtocol.validPairingAddress("maple-amber-river"))
+        val address = generator.generate()
+
+        assertEquals(3, address.split('-').size)
+        assertEquals(setOf("maple", "amber", "river"), address.split('-').toSet())
+        assertTrue(DeviceProtocol.validPairingAddress(address))
     }
 
     @Test(expected = IllegalArgumentException::class)

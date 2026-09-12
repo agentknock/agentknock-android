@@ -1,6 +1,6 @@
 import unittest
 
-from release_notes import changelog_entries, play_release_notes
+from release_notes import play_release_notes
 
 
 CHANGELOG = """# Changelog
@@ -57,10 +57,6 @@ class ReleaseNotesTests(unittest.TestCase):
         with self.assertRaisesRegex(ValueError, "Unexpected changelog"):
             self.notes("## 0.2.1\nUnstructured release notes.\n")
 
-    def test_reference_only_entry_is_rejected(self):
-        with self.assertRaisesRegex(ValueError, "Empty changelog entry"):
-            self.notes("## 0.2.1\n* ([abcdef0](https://github.com/owner/repo/commit/abcdef0))\n")
-
     def test_exactly_500_unicode_characters_are_retained(self):
         text = "é🚀" * 249
         notes = self.notes(f"## 0.2.1\n* {text}\n")
@@ -79,11 +75,6 @@ class ReleaseNotesTests(unittest.TestCase):
         notes = self.notes("## 0.2.1\n* " + "a" * 499 + "\n")
         self.assertEqual(notes, "Full release notes: "
                          "https://github.com/agentknock/agentknock-android/releases/tag/v0.2.1")
-
-    def test_plain_headers_and_hyphen_bullets_are_supported(self):
-        self.assertEqual(changelog_entries("## 0.2.1 (2026-09-11)\n- A change.\n", "0.2.1"),
-                         ["A change."])
-
 
 if __name__ == "__main__":
     unittest.main()

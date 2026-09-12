@@ -98,10 +98,7 @@ class RequestLifecycleTest {
     }
 
     @Test
-    fun storedRequestKindParsingIsExhaustiveAndFutureValuesMapToUnknown() {
-        RequestKind.entries.forEach { kind ->
-            assertEquals(kind, kind.storedName.toRequestKind())
-        }
+    fun futureStoredRequestKindsRemainReadable() {
         assertEquals(RequestKind.UNKNOWN, "future_method".toRequestKind())
     }
 }

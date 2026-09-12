@@ -2,6 +2,7 @@ package dev.agentknock
 
 import androidx.test.ext.junit.runners.AndroidJUnit4
 import org.junit.Assert.assertEquals
+import org.junit.Assert.assertFalse
 import org.junit.Assert.assertNull
 import org.junit.Test
 import org.junit.runner.RunWith
@@ -26,12 +27,19 @@ class MainActivityNavigationSavedStateTest {
 
     @Test
     fun redemptionTokenIsNotWrittenToActivityState() {
+        val token = "sensitive-redemption-credential-for-this-test"
         val original =
             MainActivityNavigationState().apply {
-                open(ExternalNavigation.SubscriptionRedemption("token"))
+                open(ExternalNavigation.SubscriptionRedemption(token))
             }
 
-        val restored = MainActivityNavigationState().apply { restore(original.save()) }
+        val saved = original.save()
+        @Suppress("DEPRECATION") val savedText = saved.keySet().mapNotNull { saved[it] as? String }
+        assertFalse(
+            "Redemption credentials must not enter Android saved state",
+            savedText.any { token in it },
+        )
+        val restored = MainActivityNavigationState().apply { restore(saved) }
 
         assertNull(restored.target.value)
     }

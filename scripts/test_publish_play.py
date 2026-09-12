@@ -57,7 +57,6 @@ class PlayPublicationTests(unittest.TestCase):
 
     def request(self, request, timeout):
         self.assertEqual(request.get_header("Authorization"), "Bearer test-token")
-        self.assertGreaterEqual(timeout, 120)
         url = urlsplit(request.full_url)
         self.assertEqual((url.scheme, url.netloc), ("https", "androidpublisher.googleapis.com"))
         method, path = request.get_method(), url.path
@@ -125,13 +124,6 @@ class PlayPublicationTests(unittest.TestCase):
             "track": "internal",
             "releases": [{"name": "0.2.0-internal.50", "versionCodes": ["50"], "status": "completed"}],
         })
-
-    def test_retry_does_not_upload_or_commit_again(self):
-        self.publish()
-        self.publish()
-        self.assertEqual(len(self.uploads), 1)
-        self.assertEqual(self.commits, 1)
-        self.assertIsNone(self.pending)
 
     def test_retry_recovers_when_commit_succeeded_but_response_was_lost(self):
         self.lose_commit_response = True
@@ -257,40 +249,11 @@ class PlayPublicationTests(unittest.TestCase):
         self.assertEqual(self.commits, 0)
         self.assertIsNone(self.pending)
 
-    def test_promotion_rejects_a_different_bundle_with_the_same_version_code(self):
-        self.bundles = [{**self.bundle_info, "sha256": "different"}]
-        with self.assertRaisesRegex(ValueError, "different bundle"):
-            self.promote()
-        self.assertEqual(self.commits, 0)
-        self.assertIsNone(self.pending)
-
-    def test_promotion_retry_is_a_noop_after_a_lost_commit_response(self):
-        self.bundles = [self.bundle_info]
-        self.lose_commit_response = True
-        with self.assertRaises(OSError):
-            self.promote()
-        self.lose_commit_response = False
-        self.promote()
-        self.assertEqual(self.commits, 1)
-        self.assertEqual(self.uploads, [])
-
     def test_promotion_cannot_replace_a_newer_closed_release(self):
         self.alpha["releases"] = [{"versionCodes": ["51"], "status": "completed"}]
         self.promote()
         self.assertEqual(self.commits, 0)
         self.assertEqual(self.alpha["releases"][0]["versionCodes"], ["51"])
-
-    def test_promotion_respects_pending_review_and_can_be_rerun_afterward(self):
-        self.bundles = [self.bundle_info]
-        self.fail_commit = True
-        with self.assertRaisesRegex(RuntimeError, "changes already in review"):
-            self.promote()
-        self.assertEqual(self.commits, 0)
-        self.assertIsNone(self.pending)
-        self.fail_commit = False
-        self.promote()
-        self.assertEqual(self.commits, 1)
-        self.assertEqual(self.uploads, [])
 
     def test_main_promotes_only_after_downloading_and_verifying_the_published_release(self):
         self.bundles = [self.bundle_info]

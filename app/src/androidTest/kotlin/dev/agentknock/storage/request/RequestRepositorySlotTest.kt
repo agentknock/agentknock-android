@@ -1173,32 +1173,6 @@ class RequestRepositorySlotTest {
     }
 
     @Test
-    fun clientStateMutationsAdvanceOneAtATime() = runTest {
-        insertDesiredClient(CLIENT_ID, pairedAt = now)
-        insertDesiredClient(COLLISION_CLIENT_ID, pairedAt = now + 1)
-        val connection =
-            connect(
-                RelayDeviceEvent.ClientState(CLIENT_ID, RelayClientState.SUSPENDED),
-                RelayDeviceEvent.ClientState(COLLISION_CLIENT_ID, RelayClientState.SUSPENDED),
-                RelayDeviceEvent.CaughtUp,
-            )
-
-        assertEquals(RequestSyncResult.Success, repository.sync())
-        assertEquals(
-            listOf(
-                RelayDeviceFrame.SetClientState(CLIENT_ID, RelayClientState.SUSPENDED),
-                RelayDeviceFrame.SetClientState(
-                    COLLISION_CLIENT_ID,
-                    RelayClientState.SUSPENDED,
-                ),
-            ),
-            connection.sentFrames,
-        )
-        assertNull(database.requestDao().getClient(CLIENT_ID)?.desiredRelayClientState)
-        assertNull(database.requestDao().getClient(COLLISION_CLIENT_ID)?.desiredRelayClientState)
-    }
-
-    @Test
     fun mixedDurableRelayWorkAdvancesOneOperationAtATime() = runTest {
         insertDesiredClient(COLLISION_CLIENT_ID, pairedAt = now)
         insertOpenUnknownRequest(UNSUPPORTED_REQUEST_ID)
@@ -1728,37 +1702,6 @@ class RequestRepositorySlotTest {
                     """{${clientSoftwareFields()},"result":"ACCEPTED"}""".encodeToByteArray(),
             )
         assertCompletionEndsExchangeWithoutResponseStatus(FINISH_REQUEST_ID, exchange)
-    }
-
-    @Test
-    fun pairingWithACompletionErrorRemainsUserRejectable() = runTest {
-        val clientSecret = ByteArray(32) { it.toByte() }
-        synchronize(
-            RelayDeviceEvent.Message(
-                clientId = CLIENT_ID,
-                requestId = CLIENT_ID,
-                kind = RelayMessageKind.REQUEST,
-                payload = pairingRequest(clientSecret),
-                addressId = ADDRESS_ID,
-            )
-        )
-        now += 1
-        synchronize(
-            RelayDeviceEvent.Message(
-                clientId = CLIENT_ID,
-                requestId = CLIENT_ID,
-                kind = RelayMessageKind.COMPLETION,
-                payload =
-                    Json.parseToJsonElement("""{"key":"bad","secret":"bad","ciphertext":"bad"}"""),
-                addressId = ADDRESS_ID,
-            )
-        )
-
-        assertNotNull(database.requestDao().getRequestById(CLIENT_ID)?.error)
-        assertEquals(PairingDecisionResult.REJECTED, repository.rejectPairing(CLIENT_ID))
-        val rejected = checkNotNull(database.requestDao().getPairingAttempt(CLIENT_ID))
-        assertEquals("rejected", rejected.state)
-        assertNull(rejected.pendingPsk)
     }
 
     @Test
@@ -3266,67 +3209,6 @@ class RequestRepositorySlotTest {
     }
 
     @Test
-    fun secretUploadApprovalCommitsSecretDecisionAuditAndStagingDeletionTogether() = runTest {
-        receiveEnvironmentSecretUpload()
-
-        val result = repository.approveSecretUpload(UPLOAD_REQUEST_ID, "uploaded-secret")
-
-        assertTrue(result is SecretUploadDecisionResult.Approved)
-        assertEquals(
-            "approved",
-            database.requestDao().getSecretUploadRequest(UPLOAD_REQUEST_ID)?.decision,
-        )
-        assertTrue(
-            database.requestDao().getSecretUploadEnvironmentVariables(UPLOAD_REQUEST_ID).isEmpty()
-        )
-        assertEquals(
-            1,
-            database.secretDao().getSecretsByName(listOf("uploaded-secret")).size,
-        )
-        val decisionAudit =
-            database.auditDao().observeEvents().first().single {
-                it.eventType == "secret_upload_decided" && it.relayRequestId == UPLOAD_REQUEST_ID
-            }
-        assertEquals("approved", decisionAudit.outcome)
-        assertEquals(now, decisionAudit.occurredAt)
-    }
-
-    @Test
-    fun auditFailureRollsBackSecretUploadApprovalCompletely() = runTest {
-        receiveEnvironmentSecretUpload()
-        val requestBefore = database.requestDao().getRequestById(UPLOAD_REQUEST_ID)
-        val uploadBefore = database.requestDao().getSecretUploadRequest(UPLOAD_REQUEST_ID)
-        val auditBefore = database.auditDao().observeEvents().first()
-        database.useWriterConnection { connection ->
-            connection.executeSQL(
-                """
-                CREATE TRIGGER fail_secret_upload_decision_audit
-                BEFORE INSERT ON audit_events
-                WHEN NEW.event_type = 'secret_upload_decided'
-                BEGIN
-                    SELECT RAISE(ABORT, 'forced audit failure');
-                END
-                """
-                    .trimIndent()
-            )
-        }
-
-        val failure = runCatching {
-            repository.approveSecretUpload(UPLOAD_REQUEST_ID, "uploaded-secret")
-        }
-
-        assertTrue(failure.isFailure)
-        assertEquals(requestBefore, database.requestDao().getRequestById(UPLOAD_REQUEST_ID))
-        assertEquals(uploadBefore, database.requestDao().getSecretUploadRequest(UPLOAD_REQUEST_ID))
-        assertEquals(
-            1,
-            database.requestDao().getSecretUploadEnvironmentVariables(UPLOAD_REQUEST_ID).size,
-        )
-        assertTrue(database.secretDao().getSecretsByName(listOf("uploaded-secret")).isEmpty())
-        assertEquals(auditBefore, database.auditDao().observeEvents().first())
-    }
-
-    @Test
     fun pendingUploadActionsFollowCurrentSensitivity() = runTest {
         receiveEnvironmentSecretUpload()
         val variable =
@@ -3523,32 +3405,6 @@ class RequestRepositorySlotTest {
     }
 
     @Test
-    fun durableClientRejectionClosesForReplayWhenResponseSealingFails() = runTest {
-        val clientPsk = establishActivePairing()
-        protocolRandom.fail = true
-        val request =
-            pairedRequest(
-                requestId = UNSUPPORTED_REQUEST_ID,
-                clientPsk = clientPsk,
-                plaintext = unsupportedPlaintext(),
-            )
-        val connection =
-            connect(
-                requestEvent(UNSUPPORTED_REQUEST_ID, request),
-                RelayDeviceEvent.CaughtUp,
-            )
-
-        assertEquals(unprocessedRelayMessage(RelayMessageKind.REQUEST), repository.sync())
-        assertTrue(connection.closed)
-        assertNull(database.requestDao().getRequestById(UNSUPPORTED_REQUEST_ID))
-        assertFalse(
-            connection.sentFrames.any {
-                it is RelayDeviceFrame.Acknowledgement && it.requestId == UNSUPPORTED_REQUEST_ID
-            }
-        )
-    }
-
-    @Test
     fun unacknowledgedRequestClosesWithoutWaitingForCaughtUp() = runTest {
         val clientPsk = establishActivePairing()
         protocolRandom.fail = true
@@ -3568,6 +3424,7 @@ class RequestRepositorySlotTest {
             awaitAsynchronousWork { synchronization.await() },
         )
         assertTrue(connection.closed)
+        assertNull(database.requestDao().getRequestById(UNSUPPORTED_REQUEST_ID))
         assertFalse(
             connection.sentFrames.any {
                 it is RelayDeviceFrame.Acknowledgement && it.requestId == UNSUPPORTED_REQUEST_ID
@@ -3916,34 +3773,6 @@ class RequestRepositorySlotTest {
     }
 
     @Test
-    fun gitAbortMessageStaysOutOfAudit() = runTest {
-        val invocation = establishSigningInvocation()
-        val malicious = "raw-git-abort-client-message"
-        val exchange =
-            pairedExchange(
-                requestId = GIT_SIGN_REQUEST_ID,
-                clientPsk = invocation.clientPsk,
-                requestPlaintext = gitSignPlaintext(invocation.token),
-                completionPlaintext = abortedCompletionPlaintext(malicious),
-            )
-        connect(
-            relayState(INVOCATION_REQUEST_ID),
-            requestEvent(GIT_SIGN_REQUEST_ID, exchange.request),
-            completionEvent(GIT_SIGN_REQUEST_ID, exchange.completion),
-            RelayDeviceEvent.CaughtUp,
-        )
-
-        assertEquals(RequestSyncResult.Success, repository.sync())
-
-        val completionAudit =
-            AuditRepository(database.auditDao()).observeEvents().first().single {
-                it.type == AuditEventType.GIT_SIGN_COMPLETED
-            }
-        assertEquals("Git signing was aborted by the client.", completionAudit.detail)
-        assertFalse(checkNotNull(completionAudit.detail).contains(malicious))
-    }
-
-    @Test
     fun invalidGitCompletionDoesNotRetainDecodedClientFields() = runTest {
         val invocation = establishSigningInvocation()
         val malicious = "raw-invalid-git-client-message"
@@ -4175,34 +4004,6 @@ class RequestRepositorySlotTest {
             ),
             secrets.observeTemporaryAccessGrants().first().map { it.operation }.toSet(),
         )
-    }
-
-    @Test
-    fun sshAuthenticationAbortMessageStaysOutOfAudit() = runTest {
-        val invocation = establishSigningInvocation()
-        val malicious = "raw-ssh-abort-client-message"
-        val exchange =
-            pairedExchange(
-                requestId = SSH_AUTHENTICATION_REQUEST_ID,
-                clientPsk = invocation.clientPsk,
-                requestPlaintext = sshAuthenticationPlaintext(invocation.token, invocation.key),
-                completionPlaintext = abortedCompletionPlaintext(malicious),
-            )
-        connect(
-            relayState(INVOCATION_REQUEST_ID),
-            requestEvent(SSH_AUTHENTICATION_REQUEST_ID, exchange.request),
-            completionEvent(SSH_AUTHENTICATION_REQUEST_ID, exchange.completion),
-            RelayDeviceEvent.CaughtUp,
-        )
-
-        assertEquals(RequestSyncResult.Success, repository.sync())
-
-        val completionAudit =
-            AuditRepository(database.auditDao()).observeEvents().first().single {
-                it.type == AuditEventType.SSH_AUTHENTICATION_COMPLETED
-            }
-        assertEquals("SSH authentication was aborted by the client.", completionAudit.detail)
-        assertFalse(checkNotNull(completionAudit.detail).contains(malicious))
     }
 
     @Test

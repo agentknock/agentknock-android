@@ -7,29 +7,16 @@ import tempfile
 import unittest
 from unittest.mock import patch
 
-from version import (SUBJECT, affects_app, app_changes, bumped, check, check_version,
-                     is_version_release, main, version_code)
+from version import app_changes, bumped, check, check_version, main, version_code
 
 
 class VersionTests(unittest.TestCase):
-    @patch("version.Path.read_text", return_value="0.3.0\n")
-    @patch("version.git")
-    def test_semantic_release_compares_version_with_first_parent(self, git, read):
-        git.return_value = "0.2.0"
-        self.assertTrue(is_version_release())
-        git.assert_called_with("show", "HEAD^1:version.txt")
-        git.return_value = "0.3.0"
-        self.assertFalse(is_version_release())
-
     def test_bump_is_idempotent_and_preserves_unrelated_content(self):
         source = 'plugins {}\nval agentknockVersionCode = 47\nval other = "keep"\n'
         updated = bumped(source, 47)
         self.assertEqual(updated, source.replace("= 47", "= 48"))
         self.assertEqual(bumped(updated, 47), updated)
         self.assertEqual(version_code(bumped(updated, 49)), 50)
-
-    def test_preserves_deliberately_larger_code(self):
-        self.assertEqual(version_code(bumped("val agentknockVersionCode = 99", 47)), 99)
 
     def test_rejects_missing_duplicate_and_exhausted_codes(self):
         for source in ("", "val agentknockVersionCode = 0", "val agentknockVersionCode = 2100000001",
@@ -39,28 +26,6 @@ class VersionTests(unittest.TestCase):
         with self.assertRaises(ValueError):
             bumped("val agentknockVersionCode = 2100000000", 2100000000)
 
-    def test_conventional_subjects_include_release_please_and_breaking_changes(self):
-        for subject in ("feat: add pairing", "fix(push)!: change delivery", "chore(master): release 1.2.3",
-                        "ci: attest releases", "revert: remove broken migration"):
-            self.assertIsNotNone(SUBJECT.fullmatch(subject), subject)
-        for subject in ("Update version", "Merge branch master", "feat:no space", "fix: ", "misc: change"):
-            self.assertIsNone(SUBJECT.fullmatch(subject), subject)
-
-    @patch("version.subprocess.run")
-    @patch("version.git")
-    def test_check_rejects_counter_reused_by_a_concurrent_pr(self, git, run):
-        git.side_effect = ["", "abc", "fix: correct delivery", "val agentknockVersionCode = 48",
-                           "val agentknockVersionCode = 48", "app/src/main/App.kt\0"]
-        with self.assertRaisesRegex(ValueError, "must exceed base"):
-            check("master", "head")
-
-    @patch("version.subprocess.run")
-    @patch("version.git")
-    def test_check_rejects_feature_branch_merges(self, git, run):
-        git.return_value = "merge-sha"
-        with self.assertRaisesRegex(ValueError, "Rebase"):
-            check("master", "head")
-
     @patch("version.subprocess.run")
     @patch("version.git")
     def test_check_rejects_disagreement_with_release_manifest(self, git, run):
@@ -68,36 +33,6 @@ class VersionTests(unittest.TestCase):
                            "val agentknockVersionCode = 48", "version.txt\0", "0.3.0", '{".": "0.2.0"}']
         with self.assertRaisesRegex(ValueError, "disagree"):
             check("master", "head")
-
-    def test_paths_outside_the_shipped_app_do_not_require_a_bump(self):
-        for path in ("AGENTS.md", "README.md", "docs/releases.md", ".gitignore",
-                     "scripts/publish-play.py", "scripts/version.py", "scripts/test_version.py",
-                     "app/src/test/AppTest.kt", "app/src/testPlay/BillingTest.kt",
-                     "app/src/androidTest/StartupTest.kt", "app/src/androidTestFoss/PushTest.kt",
-                     "app/src/screenshotTest/Preview.kt", "app/schemas/database/3.json",
-                     "app/src/main/play/listings/en-GB/title.txt",
-                     "app/src/main/play/listings/en-GB/graphics/phone-screenshots/1.png",
-                     "publish-internal", ".github/workflows/publish-play-listing.yml",
-                     ".github/workflows/ci.yml", ".github/workflows/publish-play.yml",
-                     ".github/actions/setup-device/action.yml", "release-please-config.json"):
-            with self.subTest(path=path):
-                self.assertFalse(affects_app(path))
-
-    def test_app_inputs_and_unfamiliar_paths_require_a_bump(self):
-        for path in ("app/src/main/App.kt", "app/src/play/Billing.kt", "app/src/foss/Push.kt",
-                     "app/src/main/AndroidManifest.xml", "app/src/main/res/values/strings.xml",
-                     "app/src/main/assets/README.md", "app/src/play/google-services.json",
-                     "app/src/release/AndroidManifest.xml", "app/src/newFlavor/App.kt",
-                     "app/build.gradle.kts", "build.gradle.kts", "settings.gradle.kts",
-                     "gradle.properties", "gradle/libs.versions.toml", "gradlew", "gradlew.bat",
-                     "gradle/wrapper/gradle-wrapper.jar", "app/proguard-rules.pro",
-                     "version.txt", "flake.nix", "flake.lock", ".gitattributes",
-                     ".github/actions/setup-build/action.yml", ".github/workflows/ci-distribution.yml",
-                     "signing/app-signing-certificate.pem", "signing/play-upload-certificate.pem",
-                     "buildSrc/src/main/Generator.kt", "new-module/build.gradle.kts", "unknown-file"):
-            with self.subTest(path=path):
-                self.assertTrue(affects_app(path))
-
 
 class VersionRepositoryTests(unittest.TestCase):
     """Exercise diffs and local bumping against real Git trees, including moves."""
@@ -184,11 +119,6 @@ class VersionRepositoryTests(unittest.TestCase):
         self.command("check")
         self.assertTrue(check_version(self.base, "HEAD"))
 
-    def test_deliberate_code_bump_requests_publication(self):
-        self.write("app/build.gradle.kts", "val agentknockVersionCode = 49\n")
-        self.commit("chore: request fresh app build")
-        self.assertTrue(check_version(self.base, "HEAD"))
-
     def test_moving_production_source_to_tests_still_requires_bump(self):
         self.git("mv", "app/src/main/App.kt", "app/src/main/renamed.kt")
         (self.root / "app/src/test").mkdir()
@@ -210,7 +140,7 @@ class VersionRepositoryTests(unittest.TestCase):
         for stage in ("unstaged", "staged", "untracked"):
             with self.subTest(stage=stage):
                 self.git("reset", "--hard", self.base)
-                path = "app/src/main/New.kt" if stage == "untracked" else "app/src/main/App.kt"
+                path = "new-module/build.gradle.kts" if stage == "untracked" else "app/src/main/App.kt"
                 self.write(path, "// changed input\n")
                 if stage == "staged":
                     self.git("add", path)

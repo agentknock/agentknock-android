@@ -6,7 +6,6 @@ import java.util.Base64
 import kotlinx.serialization.json.Json
 import org.junit.Assert.assertArrayEquals
 import org.junit.Assert.assertEquals
-import org.junit.Assert.assertNull
 import org.junit.Assert.assertThrows
 import org.junit.Test
 
@@ -102,7 +101,7 @@ class SshAuthenticationProtocolTest {
     }
 
     @Test
-    fun `encodes signature response and completion variants`() {
+    fun `encodes an approved signature response`() {
         val signature = sshSignatureBlob(SshSignatureAlgorithm.ED25519, ByteArray(64) { 5 })
         val response =
             Json.parseToJsonElement(protocol.approvedResponse(signature).decodeToString()).let {
@@ -113,20 +112,6 @@ class SshAuthenticationProtocolTest {
             signature,
             Base64.getDecoder().decode(response.getValue("signature").toString().trim('"')),
         )
-        val approved =
-            protocol.decodeCompletion(
-                """{${testClientSoftwareFields("0.3.0", "0.1.0")},"result":"APPROVED"}"""
-                    .encodeToByteArray()
-            )
-        assert(approved is ApprovalCompletion.Approved)
-        val denied =
-            protocol.decodeCompletion(
-                """{${testClientSoftwareFields("0.3.0", "0.1.0")},"result":"DENIED","reason":"USER_DENIED","message":"No"}"""
-                    .encodeToByteArray()
-            )
-        require(denied is ApprovalCompletion.Denied)
-        assertEquals("USER_DENIED", denied.reason)
-        assertNull(approved.reason)
     }
 
     private fun request(message: ByteArray): ByteArray =

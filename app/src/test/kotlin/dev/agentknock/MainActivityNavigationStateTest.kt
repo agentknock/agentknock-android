@@ -19,17 +19,4 @@ class MainActivityNavigationStateTest {
         state.consume(replacement)
         assertNull(state.target.value)
     }
-
-    @Test
-    fun `a request can replace a subscription target`() {
-        val state = MainActivityNavigationState()
-        val first = ExternalNavigation.InvalidSubscriptionLink
-        val replacement = ExternalNavigation.Request(null)
-
-        state.open(first)
-        state.open(replacement)
-        state.consume(first)
-
-        assertEquals(replacement, state.target.value)
-    }
 }

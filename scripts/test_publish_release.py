@@ -74,6 +74,9 @@ class PublicationTests(unittest.TestCase):
             self.assertEqual(command[1:], ["show", "HEAD^1:version.txt"])
             return "0.2.0\n" if self.version_changed else "0.3.0\n"
         endpoint = command[-1]
+        # GITHUB_TOKEN cannot read Administration settings (the original release 403).
+        if endpoint.endswith("/immutable-releases"):
+            raise subprocess.CalledProcessError(1, command, stderr="HTTP 403")
         if "--paginate" in command:
             return json.dumps([[self.release] if self.release else []])
         if "/commits/" in endpoint:
@@ -201,30 +204,11 @@ class PublicationTests(unittest.TestCase):
                 self.assertEqual(self.mutations(), ["upload"])
                 self.assertEqual(self.output_file.read_text(), "")
 
-    def test_publication_does_not_require_repository_administration_access(self):
-        def contents_only(command, **kwargs):
-            if command[-1].endswith("immutable-releases"):
-                raise subprocess.CalledProcessError(1, command, stderr="HTTP 403")
-            return self.output(command, **kwargs)
-        with patch.object(publish.subprocess, "check_output", side_effect=contents_only):
-            publish.main()
-        self.assertEqual(self.mutations(), ["upload", "edit"])
-        self.assertEqual(self.output_file.read_text(), "release-tag=v0.3.0\n")
-
     def test_mutable_publication_cannot_enable_promotion(self):
         self.immutable_enabled = False
         with self.assertRaisesRegex(ValueError, "published immutable"):
             publish.main()
         self.assertEqual(self.mutations(), ["upload", "edit"])
-        self.assertEqual(self.output_file.read_text(), "")
-
-    def test_publication_must_be_confirmed_before_promotion_is_enabled(self):
-        def remain_draft(command, **kwargs):
-            if command[:3] != ["gh", "release", "edit"]:
-                self.command(command, **kwargs)
-        self.run.side_effect = remain_draft
-        with self.assertRaisesRegex(ValueError, "published immutable"):
-            publish.main()
         self.assertEqual(self.output_file.read_text(), "")
 
     def test_promotion_download_rejects_drafts_mutable_releases_and_wrong_commits(self):

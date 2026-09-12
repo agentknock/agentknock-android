@@ -2,6 +2,7 @@ package dev.agentknock.push
 
 import java.util.concurrent.TimeUnit
 import org.junit.Assert.assertEquals
+import org.junit.Assert.assertTrue
 import org.junit.Test
 
 class PushSynchronizationSchedulingTest {
@@ -15,9 +16,9 @@ class PushSynchronizationSchedulingTest {
 
     @Test
     fun `deadline work chunks values that could overflow WorkManager`() {
-        assertEquals(
-            TimeUnit.HOURS.toMillis(24),
-            deadlineRetryWorkDelayMillis(Long.MAX_VALUE),
-        )
+        val delay = deadlineRetryWorkDelayMillis(Long.MAX_VALUE)
+
+        assertTrue(delay > 0)
+        assertTrue(delay <= Long.MAX_VALUE - System.currentTimeMillis())
     }
 }

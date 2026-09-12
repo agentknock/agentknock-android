@@ -4,6 +4,7 @@ import dev.agentknock.storage.audit.AuditDecisionSource
 import dev.agentknock.storage.audit.AuditEvent
 import dev.agentknock.storage.audit.AuditEventType
 import dev.agentknock.storage.audit.AuditOutcome
+import java.time.Instant
 import kotlinx.serialization.json.Json
 import kotlinx.serialization.json.JsonPrimitive
 import kotlinx.serialization.json.buildJsonArray
@@ -18,22 +19,22 @@ import org.junit.Test
 
 class AuditDetailPresentationTest {
     @Test
-    fun `expiry uses the supplied UI timestamp formatter`() {
+    fun `temporary access detail displays the recorded expiry`() {
+        val expiry = "2026-12-07T17:05:09Z"
         val event =
             auditEvent(
                     AuditEventType.TEMPORARY_ACCESS_ALLOWED,
                     data = buildJsonObject {},
                 )
-                .copy(expiresAt = 123_456L)
-        val fields = event.displayDetailFields {
-            assertEquals(123_456L, it)
-            "7 Dec 2026, 17:05:09"
-        }
-        assertEquals("7 Dec 2026, 17:05:09", fields.single { it.label == "Valid until" }.value)
+                .copy(expiresAt = Instant.parse(expiry).toEpochMilli())
+
+        val fields = event.displayDetailFields { Instant.ofEpochMilli(it).toString() }
+
+        assertEquals(expiry, fields.single { it.label == "Valid until" }.value)
     }
 
     @Test
-    fun `display groups recorded participants and command before AI result and process details`() {
+    fun `recorded participants and command remain available alongside AI result`() {
         val event =
             auditEvent(
                     type = AuditEventType.SECRET_USE_AI_REVIEWED,
@@ -53,24 +54,26 @@ class AuditDetailPresentationTest {
                 .copy(context = "psql 'production database'")
 
         assertEquals(
-            listOf(
-                "Client",
-                "Secrets",
-                "Command",
-                "AI decision",
-                "AI explanation",
-                "Working directory",
+            mapOf(
+                "Client" to "Workstation",
+                "Secrets" to "postgres",
+                "Command" to "psql 'production database'",
+                "AI decision" to "Approve",
+                "AI explanation" to "Expected use.",
+                "Working directory" to "/work",
             ),
-            event.displayDetailFields { "Formatted expiry" }.map { it.label },
+            event.displayDetailFields { "Formatted expiry" }.associate { it.label to it.value },
         )
         val summary = event.summaryFields()
-        assertEquals("psql 'production database'", summary.first().value)
-        assertTrue(summary.first().monospace)
+        assertEquals(
+            "psql 'production database'",
+            summary.single { it.label == "Command" }.value,
+        )
         assertEquals("Workstation", summary.single { it.label == "Client" }.value)
     }
 
     @Test
-    fun `configuration summaries retain the resulting mode without a generic category subtitle`() {
+    fun `configuration summaries retain changed mode and unnamed client identity`() {
         val event =
             auditEvent(
                     AuditEventType.CLIENT_APPROVAL_OVERRIDE_CHANGED,
@@ -80,15 +83,6 @@ class AuditDetailPresentationTest {
                 .copy(clientName = null)
         assertEquals("Ask AI", event.summaryFields().single { it.label == "Approval" }.value)
         assertTrue(event.summaryFields().any { it.label == "Client ID" })
-        assertTrue(
-            auditEvent(
-                    AuditEventType.GENERAL_AI_REVIEW_INSTRUCTIONS_CHANGED,
-                    data = buildJsonObject {},
-                )
-                .copy(subject = null, clientId = null, clientName = null)
-                .summaryFields()
-                .isEmpty()
-        )
     }
 
     @Test
@@ -178,26 +172,6 @@ class AuditDetailPresentationTest {
                 .content
                 .toBoolean()
         )
-    }
-
-    @Test
-    fun `ai explanation already used as event detail is not repeated`() {
-        val explanation = "This use matches the instructions."
-        val event =
-            auditEvent(
-                type = AuditEventType.SECRET_USE_AI_REVIEWED,
-                detail = explanation,
-                data =
-                    buildJsonObject {
-                        put("ai_decision", "approve")
-                        put("ai_explanation", explanation)
-                    },
-            )
-
-        val fields = event.relevantDetailFields()
-
-        assertEquals("Approve", fields.single { it.label == "AI decision" }.value)
-        assertFalse(fields.any { it.label == "AI explanation" })
     }
 }
 

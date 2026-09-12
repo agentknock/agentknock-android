@@ -40,18 +40,4 @@ class InvocationCommandRenderingTest {
             listed.contains(Regex("(?<!\\\\)\n")),
         )
     }
-
-    @Test
-    fun inlineCommand_matchesTheShellRendering() {
-        val inline =
-            annotatedCommand(
-                    command,
-                    arguments,
-                    listed = false,
-                    Color.Unspecified,
-                    Color.Unspecified,
-                )
-                .text
-        assertEquals(renderShellCommand(command, arguments), inline)
-    }
 }

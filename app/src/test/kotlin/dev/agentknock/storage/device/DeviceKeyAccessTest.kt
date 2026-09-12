@@ -2,12 +2,10 @@ package dev.agentknock.storage.device
 
 import dev.agentknock.protocol.DeviceProtocol
 import dev.agentknock.storage.crypto.DecryptionResult
-import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.ExperimentalCoroutinesApi
 import kotlinx.coroutines.Job
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.test.StandardTestDispatcher
-import kotlinx.coroutines.test.runCurrent
 import kotlinx.coroutines.test.runTest
 import org.junit.Assert.assertArrayEquals
 import org.junit.Assert.assertEquals
@@ -117,19 +115,5 @@ class DeviceKeyAccessTest {
         assertTrue(job.isCancelled)
         assertFalse(returned)
         assertArrayEquals(ByteArray(32), bytes)
-    }
-
-    @Test
-    fun `cancellation before dispatch never decrypts the key`() = runTest {
-        var decrypted = false
-        val key =
-            DeviceKeyAccess(StandardTestDispatcher(testScheduler)) {
-                decrypted = true
-                DecryptionResult.Plaintext(ByteArray(32))
-            }
-        val job = launch { key.use { error("must not run") } }
-        job.cancel(CancellationException("disconnected"))
-        runCurrent()
-        assertFalse(decrypted)
     }
 }

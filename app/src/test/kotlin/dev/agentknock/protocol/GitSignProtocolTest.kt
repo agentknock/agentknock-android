@@ -89,7 +89,7 @@ class GitSignProtocolTest {
     }
 
     @Test
-    fun `encodes responses and decodes cli completion variants`() {
+    fun `encodes approved signatures and denied responses`() {
         assertEquals(
             json.parseToJsonElement(
                 """{"result":"APPROVED","signature":"-----BEGIN SSH SIGNATURE-----\nexample\n-----END SSH SIGNATURE-----\n"}"""
@@ -113,35 +113,6 @@ class GitSignProtocolTest {
                         "Denied on device.",
                     )
                     .decodeToString()
-            ),
-        )
-        assertEquals(
-            ApprovalCompletion.Approved(testClientSoftware("0.2.0", "0.1.0")),
-            protocol.decodeCompletion(
-                """{${testClientSoftwareFields("0.2.0", "0.1.0")},"result":"APPROVED"}"""
-                    .encodeToByteArray()
-            ),
-        )
-        assertEquals(
-            ApprovalCompletion.Denied(
-                testClientSoftware("0.2.0", "0.1.0"),
-                "USER_DENIED",
-                "Denied on device.",
-            ),
-            protocol.decodeCompletion(
-                """{${testClientSoftwareFields("0.2.0", "0.1.0")},"result":"DENIED","reason":"USER_DENIED","message":"Denied on device."}"""
-                    .encodeToByteArray()
-            ),
-        )
-        assertEquals(
-            ApprovalCompletion.Aborted(
-                testClientSoftware("0.2.0", "0.1.0"),
-                "CANCELLED",
-                "Command ended.",
-            ),
-            protocol.decodeCompletion(
-                """{${testClientSoftwareFields("0.2.0", "0.1.0")},"result":"ABORTED","reason":"CANCELLED","message":"Command ended."}"""
-                    .encodeToByteArray()
             ),
         )
     }

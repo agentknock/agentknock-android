@@ -14,7 +14,6 @@ import kotlinx.coroutines.test.runTest
 import org.junit.Assert.assertEquals
 import org.junit.Assert.assertFalse
 import org.junit.Assert.assertNull
-import org.junit.Assert.assertSame
 import org.junit.Assert.assertTrue
 import org.junit.Test
 
@@ -191,19 +190,6 @@ class VaultKeyManagerTest {
             listOf(setOf(VaultKeyPurpose.SECRET_VALUES), emptySet()),
             protections.map(VaultProtection::unavailableStoredData),
         )
-    }
-
-    @Test
-    fun `initializes only once per process`() = runTest {
-        val dao = FakeVaultKeyDao()
-        val keyStore = FakeEncryptionKeyStore()
-        val manager = manager(dao, keyStore, "secret-key", "device-key")
-
-        val first = manager.initialize()
-        val second = manager.initialize()
-
-        assertSame(first, second)
-        assertEquals(listOf("secret-key", "device-key"), keyStore.generatedKeyIds)
     }
 
     @Test

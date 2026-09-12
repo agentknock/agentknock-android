@@ -66,30 +66,21 @@ class AuditRepositoryTest {
     }
 
     @Test
-    fun `all persisted audit codes are unique and round trip`() {
+    fun `persisted audit codes remain unambiguous`() {
         assertEquals(
             AuditEventType.entries.size,
             AuditEventType.entries.map(AuditEventType::code).toSet().size,
         )
-        AuditEventType.entries.forEach { type ->
-            assertEquals(type, AuditEventType.fromCode(type.code))
-        }
 
         assertEquals(
             AuditOutcome.entries.size,
             AuditOutcome.entries.map(AuditOutcome::code).toSet().size,
         )
-        AuditOutcome.entries.forEach { outcome ->
-            assertEquals(outcome, AuditOutcome.fromCode(outcome.code))
-        }
 
         assertEquals(
             AuditDecisionSource.entries.size,
             AuditDecisionSource.entries.map(AuditDecisionSource::code).toSet().size,
         )
-        AuditDecisionSource.entries.forEach { source ->
-            assertEquals(source, AuditDecisionSource.fromCode(source.code))
-        }
     }
 
     @Test

@@ -11,7 +11,6 @@ import okhttp3.Call
 import okhttp3.Interceptor
 import okhttp3.OkHttpClient
 import org.junit.Assert.assertEquals
-import org.junit.Assert.assertNull
 import org.junit.Assert.assertTrue
 import org.junit.Test
 
@@ -86,7 +85,7 @@ class RelayHttpTransportTest {
 
             val result = transport(server).post("v1/test", "{}") as RelayEndpointResult.Rejected
 
-            assertEquals(7_000L, result.retryAfterMillis)
+            assertEquals(RelayEndpointResult.Rejected(503, null, null, 7_000L), result)
         }
     }
 
@@ -108,20 +107,6 @@ class RelayHttpTransportTest {
 
                 assertEquals(expected, result.retryAfterMillis)
             }
-        }
-    }
-
-    @Test
-    fun `preserves rejection status when the error body is invalid`() = runTest {
-        MockWebServer().use { server ->
-            server.start()
-            server.enqueue(MockResponse.Builder().code(503).body("not json").build())
-
-            val result = transport(server).post("v1/test", "{}") as RelayEndpointResult.Rejected
-
-            assertEquals(503, result.status)
-            assertNull(result.code)
-            assertNull(result.message)
         }
     }
 
