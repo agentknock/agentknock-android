@@ -1,0 +1,58 @@
+name: Publish Google Play listing
+
+on:
+  workflow_call:
+
+permissions:
+  contents: read
+  id-token: write
+
+jobs:
+  publish:
+    name: Publish changed listing
+    if: github.event_name == 'push' && github.ref == 'refs/heads/master'
+    runs-on: ubuntu-24.04
+    timeout-minutes: 15
+    environment: release
+    concurrency:
+      group: google-play-publishing
+      queue: max
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          fetch-depth: 0
+          persist-credentials: false
+      - name: Check whether this merge changes the listing
+        id: listing
+        env:
+          PUSH_BASE: ${{ github.event.before }}
+        run: python3 scripts/publish-play-listing.py check
+      - uses: ./.github/actions/setup-build
+        if: steps.listing.outputs.changed == 'true'
+        with:
+          cache-scope: play-listing
+      - name: Require Play publishing configuration
+        if: steps.listing.outputs.changed == 'true'
+        env:
+          GCP_WORKLOAD_IDENTITY_PROVIDER: ${{ vars.GCP_WORKLOAD_IDENTITY_PROVIDER }}
+          GCP_PLAY_PUBLISHING_SERVICE_ACCOUNT: ${{ vars.GCP_PLAY_PUBLISHING_SERVICE_ACCOUNT }}
+        run: |
+          : "${GCP_WORKLOAD_IDENTITY_PROVIDER:?Set the workload identity provider}"
+          : "${GCP_PLAY_PUBLISHING_SERVICE_ACCOUNT:?Set the Play publishing service account}"
+      - name: Authenticate to Google Play through GitHub OIDC
+        if: steps.listing.outputs.changed == 'true'
+        id: google-auth
+        uses: google-github-actions/auth@7c6bc770dae815cd3e89ee6cdf493a5fab2cc093 # v3.0.0
+        with:
+          workload_identity_provider: ${{ vars.GCP_WORKLOAD_IDENTITY_PROVIDER }}
+          service_account: ${{ vars.GCP_PLAY_PUBLISHING_SERVICE_ACCOUNT }}
+          token_format: access_token
+          access_token_scopes: https://www.googleapis.com/auth/androidpublisher
+          access_token_lifetime: 900s
+          create_credentials_file: true
+          export_environment_variables: true
+      - name: Upload the reviewed listing and commit without cancelling reviews
+        if: steps.listing.outputs.changed == 'true'
+        env:
+          GCP_ACCESS_TOKEN: ${{ steps.google-auth.outputs.access_token }}
+        run: python3 scripts/publish-play-listing.py publish

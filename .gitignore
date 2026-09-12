@@ -12,7 +12,9 @@ local.properties
 *.p12
 *.pfx
 /agentknock-*.json
+/agentknock-subscriptions/
 /play-publisher.json
+/gha-creds-*.json
 **/build/
 .DS_Store
 .venv/

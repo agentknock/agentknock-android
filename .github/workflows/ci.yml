@@ -151,6 +151,15 @@ jobs:
       attestations: read
       id-token: write
 
+  publish-listing:
+    name: Publish Google Play listing
+    if: github.event_name == 'push' && github.ref == 'refs/heads/master'
+    needs: complete
+    uses: ./.github/workflows/publish-play-listing.yml
+    permissions:
+      contents: read
+      id-token: write
+
   publish:
     name: Publish GitHub release
     if: github.event_name == 'push'
