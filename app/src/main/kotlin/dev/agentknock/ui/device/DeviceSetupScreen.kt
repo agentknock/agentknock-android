@@ -4,6 +4,7 @@ package dev.agentknock.ui.device
 
 import androidx.activity.compose.BackHandler
 import androidx.compose.foundation.Image
+import androidx.compose.foundation.ScrollState
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
@@ -70,6 +71,7 @@ import dev.agentknock.storage.device.DeviceConfiguration
 import dev.agentknock.storage.device.DeviceIdentity
 import dev.agentknock.ui.auth.DeviceAuthenticationChoices
 import dev.agentknock.ui.auth.DeviceAuthenticationMode
+import dev.agentknock.ui.components.ClaimServiceTermsNotice
 import dev.agentknock.ui.components.NavigationBackButton
 import dev.agentknock.ui.requests.SelectableFact
 import dev.agentknock.ui.theme.agentknockColors
@@ -160,6 +162,7 @@ internal fun DeviceSetupContent(
     onAddressChange: (String) -> Unit,
     onGenerate: () -> Unit,
     onSubmit: () -> Unit,
+    scrollState: ScrollState = rememberScrollState(),
 ) {
     Scaffold(contentWindowInsets = WindowInsets.navigationBars) { padding ->
         Column(Modifier.fillMaxSize().padding(padding)) {
@@ -195,7 +198,7 @@ internal fun DeviceSetupContent(
                     Modifier.fillMaxSize()
                         .consumeWindowInsets(padding)
                         .imePadding()
-                        .verticalScroll(rememberScrollState())
+                        .verticalScroll(scrollState)
                         .padding(horizontal = 20.dp, vertical = 12.dp),
                 verticalArrangement = Arrangement.spacedBy(20.dp),
             ) {
@@ -418,24 +421,29 @@ internal fun PairingAddressEditor(
             }
         }
         beforeSubmit()
-        Button(
-            onClick = onSubmit,
-            enabled = valid && !claiming,
-            modifier = Modifier.fillMaxWidth(),
-        ) {
-            if (claiming) {
-                CircularProgressIndicator(Modifier.size(18.dp), strokeWidth = 2.dp)
-                Spacer(Modifier.width(8.dp))
+        Column(verticalArrangement = Arrangement.spacedBy(4.dp)) {
+            if (activeAddress == null) {
+                ClaimServiceTermsNotice()
             }
-            Text(
-                when {
-                    claiming ->
-                        if (activeAddress == null) "Claiming address…" else "Changing address…"
-                    candidateAddress == address && result != null -> "Try again"
-                    activeAddress == null -> stringResource(R.string.claim_pairing_address)
-                    else -> stringResource(R.string.change_pairing_address)
+            Button(
+                onClick = onSubmit,
+                enabled = valid && !claiming,
+                modifier = Modifier.fillMaxWidth(),
+            ) {
+                if (claiming) {
+                    CircularProgressIndicator(Modifier.size(18.dp), strokeWidth = 2.dp)
+                    Spacer(Modifier.width(8.dp))
                 }
-            )
+                Text(
+                    when {
+                        claiming ->
+                            if (activeAddress == null) "Claiming address…" else "Changing address…"
+                        candidateAddress == address && result != null -> "Try again"
+                        activeAddress == null -> stringResource(R.string.claim_pairing_address)
+                        else -> stringResource(R.string.change_pairing_address)
+                    }
+                )
+            }
         }
     }
 }

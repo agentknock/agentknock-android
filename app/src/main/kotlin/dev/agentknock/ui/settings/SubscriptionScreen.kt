@@ -2,6 +2,7 @@
 
 package dev.agentknock.ui.settings
 
+import androidx.compose.foundation.ScrollState
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.Row
@@ -38,6 +39,7 @@ import androidx.compose.ui.unit.dp
 import dev.agentknock.subscription.AiReviewAccess
 import dev.agentknock.subscription.PlaySubscriptionOffer
 import dev.agentknock.subscription.PlaySubscriptionOfferId
+import dev.agentknock.ui.components.ServiceDocumentLinks
 import dev.agentknock.ui.theme.agentknockColors
 
 @Composable
@@ -49,6 +51,7 @@ internal fun SubscriptionAndBillingScreen(
     onManageSubscription: (String) -> Unit,
     onOpenSecrets: () -> Unit,
     modifier: Modifier = Modifier,
+    scrollState: ScrollState = rememberScrollState(),
 ) {
     val active = state.access == AiReviewAccess.ACTIVE
     val activating = state.aiReviewAccess == AiReviewAccess.ACTIVATING
@@ -56,7 +59,7 @@ internal fun SubscriptionAndBillingScreen(
     Column(modifier) {
         PageTopBar("Plan and billing", onBack)
         Column(
-            Modifier.fillMaxSize().verticalScroll(rememberScrollState()).padding(20.dp),
+            Modifier.fillMaxSize().verticalScroll(scrollState).padding(20.dp),
             verticalArrangement = Arrangement.spacedBy(16.dp),
         ) {
             state.notice?.let { SubscriptionNoticeSurface(it) }
@@ -79,11 +82,11 @@ internal fun SubscriptionAndBillingScreen(
             ) {
                 Text(
                     if (active) {
-                        "AI review is available for secrets set to Ask AI. " +
+                        "For secrets set to Ask AI, request details are reviewed in the cloud. " +
                             "Other approval settings still apply."
                     } else {
-                        "Fewer interruptions, with decisions based on your instructions. " +
-                            "Ask AI can approve, deny, or leave a request for you to decide."
+                        "Ask AI reviews request details in the cloud using your instructions. " +
+                            "It can approve, deny, or leave a request for you to decide."
                     },
                     style = MaterialTheme.typography.bodyMedium,
                 )
@@ -196,6 +199,8 @@ internal fun SubscriptionAndBillingScreen(
                     }
                 }
             }
+
+            ServiceDocumentLinks()
 
             Text(
                 "Secret storage, manual approvals and temporary access are free for everyone.",
