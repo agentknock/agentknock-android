@@ -2,40 +2,16 @@
 """Publish master builds internally and promote published GitHub releases to Alpha."""
 
 import hashlib
-import json
 import os
 from pathlib import Path
 import sys
-from urllib.error import HTTPError
-from urllib.request import Request, urlopen
 
 from github_release import download_published_release
+from play_api import APPLICATION, play_request
 from release_artifacts import verify_release_assets
 from release_notes import play_release_notes
 from release_signing import artifact_names
 from version import is_version_release
-
-
-APPLICATION = "androidpublisher/v3/applications/dev.agentknock"
-HOST = "https://androidpublisher.googleapis.com"
-
-
-def play_request(method, path, token, data=None, upload=False):
-    headers = {"Authorization": f"Bearer {token}"}
-    if data is not None:
-        headers["Content-Type"] = "application/octet-stream" if upload else "application/json"
-        if not upload:
-            data = json.dumps(data).encode()
-    request = Request(f"{HOST}/{'upload/' if upload else ''}{path}",
-                      method=method, headers=headers, data=data)
-    try:
-        with urlopen(request, timeout=180) as response:
-            body = response.read()
-            return json.loads(body) if body else None
-    except HTTPError as error:
-        with error:
-            message = error.read().decode()
-        raise RuntimeError(f"Google Play {method} {path} failed ({error.code}): {message}") from None
 
 
 def publish_bundle(bundle, version, code, token, track_name, release_notes=None):

@@ -77,7 +77,7 @@ class VersionTests(unittest.TestCase):
                      "app/src/screenshotTest/Preview.kt", "app/schemas/database/3.json",
                      "app/src/main/play/listings/en-GB/title.txt",
                      "app/src/main/play/listings/en-GB/graphics/phone-screenshots/1.png",
-                     "app/src/main/play/subscriptions/product.json", "publish-internal",
+                     "publish-internal", ".github/workflows/publish-play-listing.yml",
                      ".github/workflows/ci.yml", ".github/workflows/publish-play.yml",
                      ".github/actions/setup-device/action.yml", "release-please-config.json"):
             with self.subTest(path=path):

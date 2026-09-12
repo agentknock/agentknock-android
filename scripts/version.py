@@ -28,9 +28,10 @@ NON_APP_DIRECTORIES = (
 NON_APP_FILES = {
     ".gitignore", ".editorconfig", ".release-please-manifest.json",
     "release-please-config.json", "LICENSE-APACHE", "LICENSE-MIT",
-    "preview-ui", "publish-internal", "publish-subscriptions",
+    "preview-ui", "publish-internal",
     ".github/PULL_REQUEST_TEMPLATE.md", ".github/workflows/ci.yml",
     ".github/workflows/sign-release.yml", ".github/workflows/publish-play.yml",
+    ".github/workflows/publish-play-listing.yml",
 }
 
 

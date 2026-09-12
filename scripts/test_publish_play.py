@@ -40,7 +40,7 @@ class PlayPublicationTests(unittest.TestCase):
         self.fail_upload = False
         self.fail_commit = False
         self.lose_commit_response = False
-        request = patch.object(publish, "urlopen", side_effect=self.request)
+        request = patch("play_api.urlopen", side_effect=self.request)
         self.network = request.start()
         self.addCleanup(request.stop)
         environment = patch.dict(os.environ, {

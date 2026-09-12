@@ -22,7 +22,7 @@ review the release before making it available to closed testers.
 
 PRs that change app sources, resources, dependencies, build configuration, or
 `version.txt` must increase the code. Documentation, test fixtures, Play listing
-and subscription metadata, and repository tooling can keep the existing code.
+metadata, and repository tooling can keep the existing code.
 The exclusions are defined in `scripts/version.py`; unfamiliar paths require a
 bump. Build setup and the distribution build workflow count as app inputs.
 This is a conservative check of changed input paths, not a comparison of compiled
@@ -41,6 +41,46 @@ re-uploading a rebuilt bundle with an already used code: the embedded source
 revision changes on every merge, even when the app inputs are unchanged.
 The next app release includes the intervening repository changes in its source
 history. To retry a failed publication, rerun the original merge's workflow.
+
+## Play Store listing
+
+The listing text, translations, icon, feature graphic, and ordered screenshots
+live in `app/src/main/play/listings`. Review these files in the PR; use
+`scripts/update_play_screenshots.py` to prepare screenshots before committing.
+Publication uploads the committed assets without generating new screenshots.
+
+After each successful CI run for a push to `master`, the listing job compares
+that push's before and after listing trees. It publishes only when they differ,
+independently of the Android version code and app-artifact publication. Listing
+publication shares the `google-play-publishing` lock with uploads and promotions.
+Older runs skip listings superseded on master, including when rerun.
+
+GitHub authenticates as the release environment's
+`GCP_PLAY_PUBLISHING_SERVICE_ACCOUNT` through workload identity federation. The
+account needs **Manage store presence** for `dev.agentknock` in Play Console.
+The generated Application Default Credentials file is temporary and is removed
+by the authentication action at the end of the job; no local service-account
+key is needed for listing publication.
+
+Gradle Play Publisher 4.1.1 uploads with `--no-commit` and validates the edit.
+`scripts/publish-play-listing.py` then commits that edit using
+`changesInReviewBehavior=ERROR_IF_IN_REVIEW`. GPP's own commit does not set this
+protection, so the wrapper uses the API directly for this final step. If a Play
+review is active, the job fails instead of cancelling it. Rerun the failed job
+after that review completes; it checks the original push and current master
+again. When upgrading GPP, verify its preserved edit file and marker contract.
+
+API commits may submit changes for review. [Managed publishing](https://support.google.com/googleplay/android-developer/answer/9859654?hl=en-GB)
+holds approved listing changes until they are published from Play Console; it
+does not itself prevent submission for review. The workflow does not change that
+Console setting.
+
+Production subscription products, base plans, prices, and offers belong outside
+this app repository. Their configuration and the local subscription publishing
+helper have been removed from version control. This does not change the products
+configured in Google Play. The app's billing integration and its test fixtures
+remain here. Local `publish-internal` still uses its existing Play credential;
+moving subscription configuration does not retire that separate upload command.
 
 Semantic-version releases use the matching Release Please changelog entries as
 English Play release notes for both internal testing and Alpha. Notes are

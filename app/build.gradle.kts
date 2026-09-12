@@ -15,7 +15,7 @@ plugins {
     alias(libs.plugins.room3)
 }
 
-val agentknockVersionCode = 58
+val agentknockVersionCode = 59
 val agentknockVersionName =
     providers
         .fileContents(rootProject.layout.projectDirectory.file("version.txt"))
@@ -79,6 +79,8 @@ play {
 
     if (playCredentialsFile.isPresent) {
         serviceAccountCredentials.set(file(playCredentialsFile.get()))
+    } else {
+        useApplicationDefaultCredentials.set(true)
     }
 }
 
