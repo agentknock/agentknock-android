@@ -90,8 +90,10 @@ Production subscription products, base plans, prices, and offers belong outside
 this app repository. Their configuration and the local subscription publishing
 helper have been removed from version control. This does not change the products
 configured in Google Play. The app's billing integration and its test fixtures
-remain here. Local `publish-internal` still uses its existing Play credential;
-moving subscription configuration does not retire that separate upload command.
+remain here. Bundle uploads, track promotions, and listing publication run through
+GitHub Actions. GPP uses the workflow's temporary Application Default Credentials
+for listings; this repository no longer has a local upload helper or a local
+publisher credential setting.
 
 Semantic-version releases use the matching Release Please changelog entries as
 English Play release notes for both internal testing and Alpha. Notes are
