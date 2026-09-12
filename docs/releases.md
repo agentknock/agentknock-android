@@ -44,13 +44,24 @@ history. To retry a failed publication, rerun the original merge's workflow.
 
 ## Play Store listing
 
-The listing text, translations, icon, feature graphic, and ordered screenshots
-live in `app/src/main/play/listings`. Review these files in the PR; use
+Play metadata lives in `app/src/main/play`. The root files `contact-email.txt`,
+`contact-website.txt`, and `default-language.txt` define the public support
+contact details and default listing language. GPP also supports an optional
+`contact-phone.txt`; it is absent because no support phone number is configured.
+
+The localized listing text, icon, feature graphic, and ordered screenshots
+live under `listings/<language>`. To add a promotional video, put its YouTube URL
+in `listings/<language>/video-url.txt` (currently `en-GB`). Leave that file absent
+until a video is available. These are native GPP metadata files and are uploaded
+by the existing listing task.
+
+Review these files in the PR; use
 `scripts/update_play_screenshots.py` to prepare screenshots before committing.
 Publication uploads the committed assets without generating new screenshots.
 
 After each successful CI run for a push to `master`, the listing job compares
-that push's before and after listing trees. It publishes only when they differ,
+that push's before and after `app/src/main/play` trees, including the root contact
+and language files. It publishes only when they differ,
 independently of the Android version code and app-artifact publication. Listing
 publication shares the `google-play-publishing` lock with uploads and promotions.
 Older runs skip listings superseded on master, including when rerun.
