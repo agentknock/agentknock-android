@@ -4,6 +4,8 @@
 - Use signed Conventional Commits. Use `feat` for new functionality, `fix` for
   corrections, and `!` for breaking changes. Use types such as `ci`, `build`,
   `docs`, or `chore` when appropriate; do not call tooling changes app features.
+- Write PR titles and descriptions in plain language without Conventional
+  Commit prefixes.
 - Rebase feature branches onto `origin/master`; never merge `master` into them.
   Push rewritten branches with `--force-with-lease`.
 - Increase `agentknockVersionCode` over `master` when a PR changes app sources,
