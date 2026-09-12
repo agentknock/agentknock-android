@@ -18,6 +18,8 @@ jobs:
     name: Repository checks
     runs-on: ubuntu-24.04
     timeout-minutes: 15
+    outputs:
+      publish-release: ${{ steps.version.outputs.publish-release }}
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
@@ -28,6 +30,12 @@ jobs:
         env:
           PR_HEAD: ${{ github.event.pull_request.head.sha || github.sha }}
         run: python3 scripts/version.py check --head "$PR_HEAD"
+      - name: Check merged version and decide whether to publish artifacts
+        id: version
+        if: github.event_name == 'push'
+        env:
+          PUSH_BASE: ${{ github.event.before }}
+        run: python3 scripts/version.py release --base "$PUSH_BASE"
       - uses: ./.github/actions/setup-build
         with:
           cache-scope: repository
@@ -95,8 +103,8 @@ jobs:
 
   signing:
     name: Sign release
-    if: github.event_name == 'push' && github.ref == 'refs/heads/master'
-    needs: complete
+    if: github.event_name == 'push' && github.ref == 'refs/heads/master' && needs.repository.outputs.publish-release == 'true'
+    needs: [complete, repository]
     uses: ./.github/workflows/sign-release.yml
     permissions:
       contents: read

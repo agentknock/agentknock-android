@@ -12,12 +12,35 @@ The FOSS variant currently receives requests while the app is in the foreground.
 Existing AI access and activation links work without in-app purchases. The Play
 variant adds background push delivery through Google services.
 
-Google Play internal testing receives successful builds from each merge to
-`master`. These builds can share a version name while their Android version codes
-increase. Publishing a versioned GitHub release promotes that release's exact
-bundle to the Alpha closed-testing track after its internal upload succeeds.
+Google Play internal testing receives successful builds when a merge to `master`
+increases the Android version code. These builds can share a version name while
+their Android version codes increase. Publishing a versioned GitHub release
+promotes that release's exact bundle to the Alpha closed-testing track after its
+internal upload succeeds.
 Promotion reuses the uploaded bundle and Android version code. Google Play may
 review the release before making it available to closed testers.
+
+PRs that change app sources, resources, dependencies, build configuration, or
+`version.txt` must increase the code. Documentation, test fixtures, Play listing
+and subscription metadata, and repository tooling can keep the existing code.
+The exclusions are defined in `scripts/version.py`; unfamiliar paths require a
+bump. Build setup and the distribution build workflow count as app inputs.
+This is a conservative check of changed input paths, not a comparison of compiled
+bytes: even a comment-only change to production source requires a bump.
+
+After fetching and rebasing onto `origin/master`, run
+`python3 scripts/version.py bump`. It considers committed, staged, unstaged, and
+untracked files (excluding ignored files), and does nothing when a bump is not
+needed. A deliberate code increase is also allowed to request a fresh build.
+Release Please still bumps automatically because changing the version name
+changes the app.
+
+Every PR and master merge still runs the full CI checks. Merges that keep the
+code skip official signing, artifact publication, and Play promotion. This avoids
+re-uploading a rebuilt bundle with an already used code: the embedded source
+revision changes on every merge, even when the app inputs are unchanged.
+The next app release includes the intervening repository changes in its source
+history. To retry a failed publication, rerun the original merge's workflow.
 
 Semantic-version releases use the matching Release Please changelog entries as
 English Play release notes for both internal testing and Alpha. Notes are
