@@ -20,3 +20,16 @@
 ## Code Review Rules
 
 - Do not attempt to check commit signatures during code review.
+
+## Intermittent CI failures
+
+- Before restarting a failed job, read and update `intermittent-failures.local.md`
+  in the repository root. This log is local and ignored by Git; create it if absent.
+- Record the UTC date, PR/commit, run and job links, failed attempt, exact test or
+  error, evidence and suspected cause, and reason for restarting. Update the entry
+  with the rerun attempt and result afterwards. Distinguish confirmed causes from
+  hypotheses and infrastructure failures from app or test failures.
+- Match failures across PRs and runs by the failing test/assertion or error, not
+  just the job name. A passing rerun does not resolve a recurring failure or reset
+  its history. If the same failure needs a second restart, fix it instead of using
+  another unchanged rerun to make CI green. Record the fix and its validation.
