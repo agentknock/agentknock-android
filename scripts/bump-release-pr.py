@@ -32,7 +32,10 @@ def main():
             or pr["head"]["repo"]["full_name"] != repo
             or branch != "release-please--branches--master"):
         raise ValueError("Expected the open Release Please PR in this repository")
-    head = pr["head"]["sha"]
+    # The PR response can still report the previous head immediately after
+    # Release Please updates its branch. Read the Git ref, and use that same
+    # snapshot for both the file contents and the conditional commit.
+    head = api(f"repos/{repo}/git/ref/heads/{branch}")["object"]["sha"]
     original = contents(repo, head)
     updated = bumped(original, version_code(contents(repo, "master")))
     if updated != original:
