@@ -102,6 +102,13 @@ internal fun AboutSettings(
                         )
                         SettingsGroupDivider()
                         SettingsRow(
+                            title = "Terms of service",
+                            summary = "agentknock.dev/terms",
+                            onClick = { open("terms of service", "https://agentknock.dev/terms/") },
+                            external = true,
+                        )
+                        SettingsGroupDivider()
+                        SettingsRow(
                             title = "Source code",
                             summary = "github.com/agentknock/agentknock-android",
                             onClick = {

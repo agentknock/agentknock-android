@@ -265,7 +265,9 @@ fun SubscriptionLightPreview() = SubscriptionPreview()
 fun SubscriptionDarkPreview() = SubscriptionPreview()
 
 @Composable
-private fun SubscriptionPreview() = PreviewScreen { SubscriptionPage(previewSubscription) }
+private fun SubscriptionPreview(atBottom: Boolean = false) = PreviewScreen {
+    SubscriptionPage(previewSubscription, atBottom = atBottom)
+}
 
 @PreviewTest
 @Preview(
@@ -304,7 +306,7 @@ fun SubscriptionTrialDarkPreview() = SubscriptionTrialPreview()
 fun SubscriptionTrialLargeTextPreview() = SubscriptionTrialPreview()
 
 @Composable
-private fun SubscriptionTrialPreview() = PreviewScreen {
+private fun SubscriptionTrialPreview(atBottom: Boolean = false) = PreviewScreen {
     SubscriptionPage(
         previewSubscription.copy(
             offers =
@@ -325,7 +327,8 @@ private fun SubscriptionTrialPreview() = PreviewScreen {
                                     "Renews automatically until canceled. Manage or cancel in Google Play.",
                         )
                 )
-        )
+        ),
+        atBottom = atBottom,
     )
 }
 
@@ -354,13 +357,14 @@ fun SubscriptionActiveLightPreview() = SubscriptionActivePreview()
 fun SubscriptionActiveDarkPreview() = SubscriptionActivePreview()
 
 @Composable
-private fun SubscriptionActivePreview() = PreviewScreen {
+private fun SubscriptionActivePreview(atBottom: Boolean = false) = PreviewScreen {
     SubscriptionPage(
         previewSubscription.copy(
             access = AiReviewAccess.ACTIVE,
             googlePlayPurchase = GooglePlayPurchaseState.PURCHASED,
             googlePlayProductId = "agentknock_subscription",
-        )
+        ),
+        atBottom = atBottom,
     )
 }
 
@@ -429,7 +433,7 @@ private fun SubscriptionUnavailablePreview() = PreviewScreen {
 }
 
 @Composable
-private fun SubscriptionPage(state: SubscriptionUiState) {
+private fun SubscriptionPage(state: SubscriptionUiState, atBottom: Boolean = false) {
     val distributionState =
         if (BuildConfig.FLAVOR == "foss") {
             state.copy(
@@ -439,7 +443,16 @@ private fun SubscriptionPage(state: SubscriptionUiState) {
                 googlePlayProductId = null,
             )
         } else state
-    SubscriptionAndBillingScreen(distributionState, {}, {}, {}, {}, {}, Modifier.fillMaxSize())
+    SubscriptionAndBillingScreen(
+        distributionState,
+        {},
+        {},
+        {},
+        {},
+        {},
+        Modifier.fillMaxSize(),
+        scrollState = rememberScrollState(if (atBottom) Int.MAX_VALUE else 0),
+    )
 }
 
 internal val previewAuditEvent =
@@ -784,5 +797,209 @@ private fun FactoryResetActionPreview() = PreviewScreen {
         {},
         Modifier.fillMaxSize(),
         scrollState = rememberScrollState(Int.MAX_VALUE),
+    )
+}
+
+// These lower-page previews exercise production scrolling so legal links remain
+// visible alongside purchase/manage actions at normal and enlarged text sizes.
+
+@PreviewTest
+@Preview(
+    name = "Large text",
+    group = "subscription",
+    widthDp = 360,
+    heightDp = 800,
+    fontScale = 2f,
+    locale = "en",
+    uiMode = Configuration.UI_MODE_NIGHT_NO,
+)
+@Composable
+fun SubscriptionLargeTextPreview() = SubscriptionPreview()
+
+@PreviewTest
+@Preview(
+    name = "Light",
+    group = "subscription-footer",
+    widthDp = 360,
+    heightDp = 800,
+    locale = "en",
+    uiMode = Configuration.UI_MODE_NIGHT_NO,
+)
+@Composable
+fun SubscriptionFooterLightPreview() = SubscriptionPreview(atBottom = true)
+
+@PreviewTest
+@Preview(
+    name = "Dark",
+    group = "subscription-footer",
+    widthDp = 360,
+    heightDp = 800,
+    locale = "en",
+    uiMode = Configuration.UI_MODE_NIGHT_YES,
+)
+@Composable
+fun SubscriptionFooterDarkPreview() = SubscriptionPreview(atBottom = true)
+
+@PreviewTest
+@Preview(
+    name = "Large text",
+    group = "subscription-footer",
+    widthDp = 360,
+    heightDp = 800,
+    fontScale = 2f,
+    locale = "en",
+    uiMode = Configuration.UI_MODE_NIGHT_NO,
+)
+@Composable
+fun SubscriptionFooterLargeTextPreview() = SubscriptionPreview(atBottom = true)
+
+@PreviewTest
+@Preview(
+    name = "Light",
+    group = "subscription-trial-footer",
+    widthDp = 360,
+    heightDp = 800,
+    locale = "en",
+    uiMode = Configuration.UI_MODE_NIGHT_NO,
+)
+@Composable
+fun SubscriptionTrialFooterLightPreview() = SubscriptionTrialPreview(atBottom = true)
+
+@PreviewTest
+@Preview(
+    name = "Dark",
+    group = "subscription-trial-footer",
+    widthDp = 360,
+    heightDp = 800,
+    locale = "en",
+    uiMode = Configuration.UI_MODE_NIGHT_YES,
+)
+@Composable
+fun SubscriptionTrialFooterDarkPreview() = SubscriptionTrialPreview(atBottom = true)
+
+@PreviewTest
+@Preview(
+    name = "Large text",
+    group = "subscription-trial-footer",
+    widthDp = 360,
+    heightDp = 800,
+    fontScale = 2f,
+    locale = "en",
+    uiMode = Configuration.UI_MODE_NIGHT_NO,
+)
+@Composable
+fun SubscriptionTrialFooterLargeTextPreview() = SubscriptionTrialPreview(atBottom = true)
+
+@PreviewTest
+@Preview(
+    name = "Large text",
+    group = "subscription-active",
+    widthDp = 360,
+    heightDp = 800,
+    fontScale = 2f,
+    locale = "en",
+    uiMode = Configuration.UI_MODE_NIGHT_NO,
+)
+@Composable
+fun SubscriptionActiveLargeTextPreview() = SubscriptionActivePreview()
+
+@PreviewTest
+@Preview(
+    name = "Light",
+    group = "subscription-active-footer",
+    widthDp = 360,
+    heightDp = 800,
+    locale = "en",
+    uiMode = Configuration.UI_MODE_NIGHT_NO,
+)
+@Composable
+fun SubscriptionActiveFooterLightPreview() = SubscriptionActivePreview(atBottom = true)
+
+@PreviewTest
+@Preview(
+    name = "Dark",
+    group = "subscription-active-footer",
+    widthDp = 360,
+    heightDp = 800,
+    locale = "en",
+    uiMode = Configuration.UI_MODE_NIGHT_YES,
+)
+@Composable
+fun SubscriptionActiveFooterDarkPreview() = SubscriptionActivePreview(atBottom = true)
+
+@PreviewTest
+@Preview(
+    name = "Large text",
+    group = "subscription-active-footer",
+    widthDp = 360,
+    heightDp = 800,
+    fontScale = 2f,
+    locale = "en",
+    uiMode = Configuration.UI_MODE_NIGHT_NO,
+)
+@Composable
+fun SubscriptionActiveFooterLargeTextPreview() = SubscriptionActivePreview(atBottom = true)
+
+// Start at the Links section to review the added service row without relying on
+// whether the About header happens to fit above it at a particular font scale.
+
+@PreviewTest
+@Preview(
+    name = "Large text",
+    group = "about",
+    widthDp = 360,
+    heightDp = 800,
+    fontScale = 2f,
+    locale = "en",
+    uiMode = Configuration.UI_MODE_NIGHT_NO,
+)
+@Composable
+fun AboutLargeTextPreview() = AboutPreview()
+
+@PreviewTest
+@Preview(
+    name = "Light",
+    group = "about-links",
+    widthDp = 360,
+    heightDp = 800,
+    locale = "en",
+    uiMode = Configuration.UI_MODE_NIGHT_NO,
+)
+@Composable
+fun AboutLinksLightPreview() = AboutLinksPreview()
+
+@PreviewTest
+@Preview(
+    name = "Dark",
+    group = "about-links",
+    widthDp = 360,
+    heightDp = 800,
+    locale = "en",
+    uiMode = Configuration.UI_MODE_NIGHT_YES,
+)
+@Composable
+fun AboutLinksDarkPreview() = AboutLinksPreview()
+
+@PreviewTest
+@Preview(
+    name = "Large text",
+    group = "about-links",
+    widthDp = 360,
+    heightDp = 800,
+    fontScale = 2f,
+    locale = "en",
+    uiMode = Configuration.UI_MODE_NIGHT_NO,
+)
+@Composable
+fun AboutLinksLargeTextPreview() = AboutLinksPreview()
+
+@Composable
+private fun AboutLinksPreview() = PreviewScreen {
+    AboutSettings(
+        previewIdentity,
+        {},
+        {},
+        Modifier.fillMaxSize(),
+        listState = rememberLazyListState(1),
     )
 }

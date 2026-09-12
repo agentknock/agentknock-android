@@ -1,6 +1,7 @@
 package dev.agentknock.preview
 
 import android.content.res.Configuration
+import androidx.compose.foundation.rememberScrollState
 import androidx.compose.runtime.Composable
 import androidx.compose.ui.tooling.preview.Preview
 import com.android.tools.screenshot.PreviewTest
@@ -61,7 +62,10 @@ fun SetupLightPreview() = SetupPreview()
 @Composable
 fun SetupDarkPreview() = SetupPreview()
 
-@Composable private fun SetupPreview() = PreviewScreen { SetupPage(false) }
+@Composable
+private fun SetupPreview(atBottom: Boolean = false) = PreviewScreen {
+    SetupPage(false, atBottom = atBottom)
+}
 
 @PreviewTest
 @Preview(
@@ -119,7 +123,11 @@ private fun PairingAddressUnavailablePreview() = PreviewScreen {
 }
 
 @Composable
-private fun SetupPage(change: Boolean, result: ClaimPairingAddressResult? = null) {
+private fun SetupPage(
+    change: Boolean,
+    result: ClaimPairingAddressResult? = null,
+    atBottom: Boolean = false,
+) {
     DeviceSetupContent(
         active = previewIdentity.takeIf { change },
         candidate = null,
@@ -134,6 +142,7 @@ private fun SetupPage(change: Boolean, result: ClaimPairingAddressResult? = null
         onAddressChange = {},
         onGenerate = {},
         onSubmit = {},
+        scrollState = rememberScrollState(if (atBottom) Int.MAX_VALUE else 0),
     )
 }
 
@@ -228,3 +237,80 @@ private fun TemporaryAccessPreview() = PreviewScreen {
         modifier = previewDialogModifier(),
     )
 }
+
+// The claim action and its service notice must remain readable and reachable when
+// authentication choices push them below the fold, especially with enlarged text.
+
+@PreviewTest
+@Preview(
+    name = "Light",
+    group = "setup-claim",
+    widthDp = 360,
+    heightDp = 800,
+    locale = "en",
+    uiMode = Configuration.UI_MODE_NIGHT_NO,
+)
+@Composable
+fun SetupClaimLightPreview() = SetupPreview(atBottom = true)
+
+@PreviewTest
+@Preview(
+    name = "Dark",
+    group = "setup-claim",
+    widthDp = 360,
+    heightDp = 800,
+    locale = "en",
+    uiMode = Configuration.UI_MODE_NIGHT_YES,
+)
+@Composable
+fun SetupClaimDarkPreview() = SetupPreview(atBottom = true)
+
+@PreviewTest
+@Preview(
+    name = "Large text",
+    group = "setup-claim",
+    widthDp = 360,
+    heightDp = 800,
+    fontScale = 2f,
+    locale = "en",
+    uiMode = Configuration.UI_MODE_NIGHT_NO,
+)
+@Composable
+fun SetupClaimLargeTextPreview() = SetupPreview(atBottom = true)
+
+@PreviewTest
+@Preview(
+    name = "Light",
+    group = "setup-claim-small",
+    widthDp = 320,
+    heightDp = 568,
+    locale = "en",
+    uiMode = Configuration.UI_MODE_NIGHT_NO,
+)
+@Composable
+fun SetupClaimSmallLightPreview() = SetupPreview(atBottom = true)
+
+@PreviewTest
+@Preview(
+    name = "Dark",
+    group = "setup-claim-small",
+    widthDp = 320,
+    heightDp = 568,
+    locale = "en",
+    uiMode = Configuration.UI_MODE_NIGHT_YES,
+)
+@Composable
+fun SetupClaimSmallDarkPreview() = SetupPreview(atBottom = true)
+
+@PreviewTest
+@Preview(
+    name = "Large text",
+    group = "setup-claim-small",
+    widthDp = 320,
+    heightDp = 640,
+    fontScale = 2f,
+    locale = "en",
+    uiMode = Configuration.UI_MODE_NIGHT_NO,
+)
+@Composable
+fun SetupClaimSmallLargeTextPreview() = SetupPreview(atBottom = true)
