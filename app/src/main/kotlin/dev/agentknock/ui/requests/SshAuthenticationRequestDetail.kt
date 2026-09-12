@@ -114,6 +114,8 @@ internal fun SshAuthenticationRequestDetail(
                 ),
         )
 
+        authentication.scriptContents?.let { ScriptContents(it) }
+
         if (pending) {
             if (authentication.approvalEvaluation?.aiReview != null || aiReviewRequested) {
                 AiReviewNotice(authentication.approvalEvaluation.aiReview, aiReviewInFlight)

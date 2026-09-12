@@ -122,6 +122,8 @@ internal fun GitSignRequestDetail(
                 formatParentRequestAge(signing.invocationReceivedAt, request.receivedAt),
         )
 
+        signing.scriptContents?.let { ScriptContents(it) }
+
         if (pending) {
             if (signing.approvalEvaluation?.aiReview != null || aiReviewRequested) {
                 AiReviewNotice(signing.approvalEvaluation.aiReview, aiReviewInFlight)

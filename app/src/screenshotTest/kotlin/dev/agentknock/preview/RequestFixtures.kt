@@ -70,6 +70,67 @@ internal val previewInvocation =
         decidedAt = null,
     )
 
+internal val previewScriptInvocation =
+    previewInvocation.copy(
+        command = "./scripts/check-db",
+        arguments = emptyList(),
+        reason = "Check the database before deploying.",
+        executablePath = "/home/maya/projects/orders-api/scripts/check-db",
+        executableMode = "script",
+        scriptContents =
+            """
+            #!/bin/sh
+            set -eu
+
+            psql \
+              -h db.prod.example.com \
+              -U orders_app \
+              -d orders \
+              -c 'SELECT 1;'
+            """
+                .trimIndent(),
+    )
+
+internal val previewLongScriptInvocation =
+    previewScriptInvocation.copy(
+        scriptContents =
+            """
+            #!/bin/sh
+            set -eu
+
+            export PGHOST=db.prod.example.com
+            export PGUSER=orders_app
+            export PGDATABASE=orders
+
+            printf '%s\n' 'Checking the production database before deploying the orders API.'
+
+            psql --set ON_ERROR_STOP=1 <<'SQL'
+            BEGIN READ ONLY;
+
+            SELECT current_database(),
+                   current_user,
+                   version();
+
+            SELECT schemaname,
+                   relname,
+                   n_live_tup,
+                   last_analyze
+            FROM pg_stat_user_tables
+            ORDER BY n_live_tup DESC
+            LIMIT 10;
+
+            SELECT count(*) AS recent_orders
+            FROM orders
+            WHERE created_at > now() - interval '1 hour';
+
+            COMMIT;
+            SQL
+
+            printf '%s\n' 'Database check complete.'
+            """
+                .trimIndent()
+    )
+
 internal fun previewRequest(
     content: InboxRequestContent,
     state: InboxRequestState = InboxRequestState.ACTION_REQUIRED,

@@ -247,6 +247,7 @@ internal data class SecretUseRequestEntity(
     @ColumnInfo(name = "completion_reason") val completionReason: String?,
     @ColumnInfo(name = "completion_message") val completionMessage: String?,
     @ColumnInfo(name = "decided_at") val decidedAt: Long?,
+    @ColumnInfo(name = "script_contents") val scriptContents: String? = null,
 )
 
 @Entity(

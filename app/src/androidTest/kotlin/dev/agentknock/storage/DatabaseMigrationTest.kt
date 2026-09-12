@@ -158,4 +158,68 @@ class DatabaseMigrationTest {
                 }
         }
     }
+
+    @Test
+    fun migrate3To4PreservesInvocationHistoryWithoutInventingScriptContents() = runTest {
+        helper.createDatabase(3).use { database ->
+            database.execSQL(
+                """
+                INSERT INTO device_identities
+                    (id, role, address, device_id, created_at, claim_attempted_at,
+                     pairing_enabled, instructions)
+                VALUES ('identity', 'active', 'address', 'device', 1, NULL, 1, '')
+                """
+                    .trimIndent()
+            )
+            database.execSQL(
+                """
+                INSERT INTO inbox_requests
+                    (id, parent_request_id, device_identity_id, client_id,
+                     client_name_snapshot, client_software_json, kind, state, listed,
+                     request_json, response_json, error, received_at, completed_at,
+                     exchange_ended_at, response_outbox_finished)
+                VALUES ('request', NULL, 'identity', 'client', 'Client', NULL,
+                        'secret_use', 'completed', 1, '{}', NULL, NULL, 2, 3, 3, 1)
+                """
+                    .trimIndent()
+            )
+            // Older versions recorded script invocations but did not retain their source.
+            database.execSQL(
+                """
+                INSERT INTO secret_use_requests
+                    (request_id, invocation_token_hash, contains_sensitive_material,
+                     secrets_json, secret_details_json, missing_secrets_json, command,
+                     arguments_json, working_directory, executable_path, executable_mode,
+                     stdin_kind, stdout_kind, stderr_kind, launcher_chain_json,
+                     decision, decision_source, completion_result, decided_at)
+                VALUES ('request', X'0102', 1, '["github"]', '[]', '[]', 'deploy.sh',
+                        '["production"]', '/project', '/project/deploy.sh', 'SCRIPT',
+                        'TERMINAL', 'TERMINAL', 'TERMINAL', '[]',
+                        'approved', 'user', 'approved', 3)
+                """
+                    .trimIndent()
+            )
+        }
+
+        helper.runMigrationsAndValidate(4, listOf(MIGRATION_3_4)).use { database ->
+            database
+                .prepare(
+                    "SELECT inbox_requests.state, command, arguments_json, executable_mode, " +
+                        "decision, completion_result, script_contents " +
+                        "FROM secret_use_requests JOIN inbox_requests " +
+                        "ON inbox_requests.id = secret_use_requests.request_id " +
+                        "WHERE request_id = 'request'"
+                )
+                .use { statement ->
+                    assertTrue(statement.step())
+                    assertEquals("completed", statement.getText(0))
+                    assertEquals("deploy.sh", statement.getText(1))
+                    assertEquals("[\"production\"]", statement.getText(2))
+                    assertEquals("SCRIPT", statement.getText(3))
+                    assertEquals("approved", statement.getText(4))
+                    assertEquals("approved", statement.getText(5))
+                    assertTrue(statement.isNull(6))
+                }
+        }
+    }
 }

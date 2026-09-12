@@ -1265,6 +1265,7 @@ internal class InvocationRequests(
             executablePath = contents.operation.executablePath,
             executableHash = contents.operation.executableHash,
             executableMode = contents.operation.executableMode.wireName,
+            scriptContents = contents.operation.scriptContents,
             stdinKind = contents.operation.stdin.wireName,
             stdoutKind = contents.operation.stdout.wireName,
             stderrKind = contents.operation.stderr.wireName,

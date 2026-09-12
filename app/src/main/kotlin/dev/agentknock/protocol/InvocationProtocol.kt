@@ -43,6 +43,7 @@ internal data class InvocationExecOperation(
     val stdin: InvocationStreamKind,
     val stdout: InvocationStreamKind,
     val stderr: InvocationStreamKind,
+    val scriptContents: String? = null,
 )
 
 internal enum class InvocationExecutableMode(val wireName: String) {
@@ -111,6 +112,7 @@ internal class InvocationProtocol(private val json: Json = Json { ignoreUnknownK
             "An invocation can send only one environment variable to standard input"
         }
         require(request.operation.type == EXEC_OPERATION_TYPE) { "Unsupported operation type" }
+        val executableMode = InvocationExecutableMode.fromWireName(request.operation.executableMode)
         require(request.launcherChain.size <= MAX_LAUNCHER_CHAIN_LENGTH) {
             "Launcher chain contains more than $MAX_LAUNCHER_CHAIN_LENGTH entries"
         }
@@ -134,11 +136,11 @@ internal class InvocationProtocol(private val json: Json = Json { ignoreUnknownK
                     workingDirectory = request.operation.workingDirectory,
                     executablePath = request.operation.executablePath,
                     executableHash = request.operation.executableHash?.let(::decodeExecutableHash),
-                    executableMode =
-                        InvocationExecutableMode.fromWireName(request.operation.executableMode),
+                    executableMode = executableMode,
                     stdin = InvocationStreamKind.fromWireName(request.operation.stdin),
                     stdout = InvocationStreamKind.fromWireName(request.operation.stdout),
                     stderr = InvocationStreamKind.fromWireName(request.operation.stderr),
+                    scriptContents = request.operation.scriptContents,
                 ),
             launcherChain = request.launcherChain,
         )
@@ -359,6 +361,7 @@ private data class InvocationOperationWire(
     val stdin: String,
     val stdout: String,
     val stderr: String,
+    @SerialName("script_contents") val scriptContents: String? = null,
 )
 
 @Serializable

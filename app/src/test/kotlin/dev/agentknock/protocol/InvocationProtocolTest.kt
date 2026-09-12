@@ -1,8 +1,14 @@
 package dev.agentknock.protocol
 
+import java.security.MessageDigest
+import java.util.Base64
 import kotlinx.serialization.json.Json
+import kotlinx.serialization.json.JsonElement
+import kotlinx.serialization.json.JsonNull
+import kotlinx.serialization.json.JsonPrimitive
 import org.junit.Assert.assertArrayEquals
 import org.junit.Assert.assertEquals
+import org.junit.Assert.assertNull
 import org.junit.Assert.assertTrue
 import org.junit.Test
 
@@ -64,6 +70,66 @@ class InvocationProtocolTest {
         assertEquals(InvocationStreamKind.PIPE, request.operation.stdout)
         assertEquals(InvocationStreamKind.TERMINAL, request.operation.stderr)
         assertEquals(listOf("sudo", "agentknock"), request.launcherChain)
+    }
+
+    @Test
+    fun `decodes the complete script source sent by the cli`() {
+        // From agentknock-cli tests/run.rs, reports_and_executes_a_shebang_script.
+        // Preserve the source, including quotes and its final newline, for approval review.
+        val contents = "#!/bin/sh\nprintf 'script:%s' \"\$AGENTKNOCK_SCRIPT_TEST\"\n"
+        val request =
+            protocol.decodeRequest(
+                operation(
+                        executableMode = "SCRIPT",
+                        scriptContents = JsonPrimitive(contents),
+                    )
+                    .encodeToByteArray()
+            )
+
+        assertEquals(contents, request.operation.scriptContents)
+    }
+
+    @Test
+    fun `accepts absent or null source for existing clients and uncaptured executables`() {
+        // Older clients omit source. Current clients also omit it for binaries and scripts
+        // over the capture limit; null follows the protocol's existing optional-field handling.
+        for (mode in listOf("BINARY", "SCRIPT")) {
+            for (contents in listOf(null, JsonNull)) {
+                val request =
+                    protocol.decodeRequest(
+                        operation(executableMode = mode, scriptContents = contents)
+                            .encodeToByteArray()
+                    )
+
+                assertNull(request.operation.scriptContents)
+            }
+        }
+    }
+
+    @Test
+    fun `preserves replacement text while retaining the original script hash`() {
+        // CLI capture is limited to 16 KiB of original bytes, before lossy UTF-8 decoding.
+        // Replacement characters can expand the wire text beyond that limit, and its hash
+        // no longer matches executable_hash (client-device-protocol.md, Invocation).
+        val original = ByteArray(16 * 1024) { 0xff.toByte() }
+        "#!/bin/sh\n#".encodeToByteArray().copyInto(original)
+        val contents = original.decodeToString()
+        val hash =
+            Base64.getEncoder()
+                .encodeToString(MessageDigest.getInstance("SHA-256").digest(original))
+
+        val request =
+            protocol.decodeRequest(
+                operation(
+                        executableHash = hash,
+                        executableMode = "SCRIPT",
+                        scriptContents = JsonPrimitive(contents),
+                    )
+                    .encodeToByteArray()
+            )
+
+        assertEquals(contents, request.operation.scriptContents)
+        assertEquals(hash, request.operation.executableHash)
     }
 
     @Test
@@ -283,9 +349,11 @@ class InvocationProtocolTest {
         stdout: String = "TERMINAL",
         stderr: String = "TERMINAL",
         launcherChain: List<String> = emptyList(),
+        scriptContents: JsonElement? = null,
     ): String {
         val hashMember = executableHash?.let { "\"executable_hash\":\"$it\"," }.orEmpty()
+        val scriptMember = scriptContents?.let { "\"script_contents\":$it," }.orEmpty()
         val launchers = launcherChain.joinToString(prefix = "[", postfix = "]") { "\"$it\"" }
-        return """{${testClientSoftwareFields("0.3.0", "0.1.0")},"method":"Invocation","invocation_token":"AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA=","secrets":{"test":{}},"operation":{"type":"exec","command":"env","arguments":[],"working_directory":"/tmp","executable_path":"/bin/env",$hashMember"executable_mode":"$executableMode","stdin":"$stdin","stdout":"$stdout","stderr":"$stderr"},"launcher_chain":$launchers}"""
+        return """{${testClientSoftwareFields("0.3.0", "0.1.0")},"method":"Invocation","invocation_token":"AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA=","secrets":{"test":{}},"operation":{"type":"exec","command":"env","arguments":[],"working_directory":"/tmp","executable_path":"/bin/env",$hashMember$scriptMember"executable_mode":"$executableMode","stdin":"$stdin","stdout":"$stdout","stderr":"$stderr"},"launcher_chain":$launchers}"""
     }
 }
