@@ -33,3 +33,13 @@
   just the job name. A passing rerun does not resolve a recurring failure or reset
   its history. If the same failure needs a second restart, fix it instead of using
   another unchanged rerun to make CI green. Record the fix and its validation.
+
+## Test value
+
+- Every test needs a concrete regression it would catch and a reason that
+  regression matters: user behavior, data integrity, security, compatibility, or
+  a real platform/protocol/tool contract. Explain non-obvious constraints and
+  fixture origins in the test.
+- Do not preserve implementation details, cosmetic choices, or test-owned copies
+  of production behavior as assertions. Remove redundant cases when another test
+  protects the same consequence; keep overlap only when it adds useful evidence.

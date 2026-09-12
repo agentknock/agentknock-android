@@ -528,6 +528,17 @@ class GitSigningRequestsTest {
             assertEquals(expectedState.storedName, storedRequest.state)
             assertEquals(expectedDecision?.storedName, storedGitSign.decision)
             assertEquals(relayDecision.toAiDecision(), evaluation.aiReview?.decision)
+            if (relayDecision == RelayApprovalReviewDecision.APPROVE) {
+                assertNull(storedGitSign.completionReason)
+                assertNull(storedGitSign.completionMessage)
+                assertTrue(
+                    audit.observeEvents().first().any {
+                        it.relayRequestId == requestId &&
+                            it.type == AuditEventType.GIT_SIGN_DECIDED &&
+                            it.outcome == AuditOutcome.APPROVED
+                    }
+                )
+            }
             if (relayDecision == RelayApprovalReviewDecision.DENY) {
                 val response =
                     Json.parseToJsonElement(checkNotNull(responsePlaintext).decodeToString())
@@ -552,74 +563,6 @@ class GitSigningRequestsTest {
             assertEquals(SECRET_NAME, call.request.facts.secret)
             assertEquals(SECRET_NAME, call.request.instructions.secrets.keys.single())
         }
-    }
-
-    @Test
-    fun aiApprovalPersistsAfterTheParentExchangeHasEnded() = runTest {
-        val metadata = createSigningSecret(SecretApprovalMode.ASK_AI)
-        val token = ByteArray(32) { it.toByte() }
-        insertParent(
-            secretDetailsJson = Json.encodeToString(metadata),
-            invocationTokenHash = invocationTokenHash(token),
-            providedSecretsJson = sshSecretFactsJson(),
-        )
-        val reviewer =
-            RecordingApprovalReviewer().apply {
-                result =
-                    reviewed(
-                        RelayApprovalReviewDecision.APPROVE,
-                        "The original invocation permits signing.",
-                    )
-            }
-        val target =
-            requests(
-                auditSink = audit,
-                credentialSource = StaticCredentialSource(credentials()),
-                reviewer = reviewer,
-            )
-        val requestId = "git-ai-completed-parent"
-        var pendingReview: PendingAiReview? = null
-
-        assertEquals(
-            ProcessedRelayMessage,
-            target.processIncoming(
-                client = client(),
-                relayRequestId = requestId,
-                requestPayload = Json.parseToJsonElement("{}"),
-                plaintext = gitSignPlaintext(token),
-                acceptedPsks = acceptedPsks(requestId),
-                credentials = credentials(),
-                sealResponse = { Json.parseToJsonElement(RESPONSE_JSON) },
-                launchAiReview = { _, _, review, complete ->
-                    pendingReview = PendingAiReview(review, complete)
-                    true
-                },
-            ),
-        )
-        val pending = checkNotNull(pendingReview)
-        val approved = pending.review()
-        assertEquals(AiReviewDecision.APPROVE, approved.review.decision)
-        pending.complete(approved)
-
-        val storedRequest = checkNotNull(database.requestDao().getRequestById(requestId))
-        val storedGitSign = checkNotNull(database.requestDao().getGitSignRequest(requestId))
-        val evaluation =
-            Json.decodeFromString<ApprovalEvaluation>(
-                checkNotNull(storedGitSign.approvalEvaluationJson)
-            )
-        assertEquals(InboxRequestState.WAITING.storedName, storedRequest.state)
-        assertNotNull(storedRequest.responseJson)
-        assertEquals(ApprovalDecision.APPROVED.storedName, storedGitSign.decision)
-        assertNull(storedGitSign.completionReason)
-        assertNull(storedGitSign.completionMessage)
-        assertEquals(AiReviewDecision.APPROVE, evaluation.aiReview?.decision)
-        assertTrue(
-            audit.observeEvents().first().any {
-                it.relayRequestId == requestId &&
-                    it.type == AuditEventType.GIT_SIGN_DECIDED &&
-                    it.outcome == AuditOutcome.APPROVED
-            }
-        )
     }
 
     @Test

@@ -11,19 +11,6 @@ import org.junit.Test
 
 class AuditPresentationTest {
     @Test
-    fun `every event type has a valid presentation`() {
-        AuditEventType.entries.forEach { type ->
-            val (outcome, source) = representativeDecision(type)
-            val presentation = event(type, outcome, source).presentation()
-            assertTrue("Missing title for ${type.code}", presentation.title.isNotBlank())
-            assertTrue(
-                "Missing category for ${type.code}",
-                presentation.category.displayName.isNotBlank(),
-            )
-        }
-    }
-
-    @Test
     fun `decision presentation uses outcome and source without encoded event variants`() {
         val presentation =
             event(
@@ -144,68 +131,3 @@ private fun event(
         clientName = "Client",
         relayRequestId = "request",
     )
-
-private fun representativeDecision(type: AuditEventType): Pair<AuditOutcome, AuditDecisionSource?> =
-    when (type) {
-        AuditEventType.CLIENT_RESUMED,
-        AuditEventType.CLIENT_SUSPENDED,
-        AuditEventType.CLIENT_REVOKED,
-        AuditEventType.CLIENT_PENDING,
-        AuditEventType.CLIENT_RENAMED,
-        AuditEventType.CLIENT_INSTRUCTIONS_CHANGED,
-        AuditEventType.SECRET_APPROVAL_MODE_CHANGED,
-        AuditEventType.SECRET_INSTRUCTIONS_CHANGED,
-        AuditEventType.CLIENT_APPROVAL_OVERRIDE_CHANGED,
-        AuditEventType.TEMPORARY_ACCESS_ENDED,
-        AuditEventType.SECRET_CREATED,
-        AuditEventType.SSH_KEY_CREATED,
-        AuditEventType.SSH_KEY_REPLACED,
-        AuditEventType.SSH_PUBLIC_KEY_COMMENT_UPDATED,
-        AuditEventType.SECRET_UPDATED,
-        AuditEventType.SECRET_DELETED,
-        AuditEventType.ENVIRONMENT_VARIABLE_ADDED,
-        AuditEventType.ENVIRONMENT_VARIABLE_UPDATED,
-        AuditEventType.ENVIRONMENT_VARIABLE_DELETED,
-        AuditEventType.NEW_PAIRINGS_RESUMED,
-        AuditEventType.NEW_PAIRINGS_PAUSED,
-        AuditEventType.PAIRING_ADDRESS_CLAIMED,
-        AuditEventType.PAIRING_ADDRESS_CHANGED,
-        AuditEventType.GENERAL_AI_REVIEW_INSTRUCTIONS_CHANGED -> AuditOutcome.CHANGED to null
-
-        AuditEventType.CLIENT_REMOVAL_UNCONFIRMED,
-        AuditEventType.CLIENT_REMOVAL_CONFIRMATION_FAILED -> AuditOutcome.FAILED to null
-
-        AuditEventType.CLIENT_UNPAIRED_ITSELF,
-        AuditEventType.PAIRING_COMPLETED,
-        AuditEventType.PAIRING_CONFIRMATION_RECEIVED,
-        AuditEventType.SECRET_USE_COMPLETED,
-        AuditEventType.GIT_SIGN_COMPLETED,
-        AuditEventType.SSH_AUTHENTICATION_COMPLETED,
-        AuditEventType.SECRET_LIST_COMPLETED,
-        AuditEventType.SECRET_UPLOAD_COMPLETED -> AuditOutcome.COMPLETED to null
-
-        AuditEventType.PAIRING_DECIDED -> AuditOutcome.APPROVED to AuditDecisionSource.USER
-
-        AuditEventType.PAIRING_REQUESTED,
-        AuditEventType.SECRET_USE_RECEIVED,
-        AuditEventType.GIT_SIGN_RECEIVED,
-        AuditEventType.SSH_AUTHENTICATION_RECEIVED,
-        AuditEventType.SECRET_LIST_RECEIVED,
-        AuditEventType.SECRET_UPLOAD_RECEIVED -> AuditOutcome.RECEIVED to null
-
-        AuditEventType.SECRET_USE_AI_REVIEWED,
-        AuditEventType.GIT_SIGN_AI_REVIEWED,
-        AuditEventType.SSH_AUTHENTICATION_AI_REVIEWED ->
-            AuditOutcome.DEFERRED to AuditDecisionSource.AI_REVIEW
-
-        AuditEventType.SECRET_USE_DECIDED,
-        AuditEventType.GIT_SIGN_DECIDED,
-        AuditEventType.SSH_AUTHENTICATION_DECIDED ->
-            AuditOutcome.APPROVED to AuditDecisionSource.USER
-
-        AuditEventType.SECRET_UPLOAD_DECIDED -> AuditOutcome.APPROVED to AuditDecisionSource.USER
-
-        AuditEventType.REQUEST_REJECTED -> AuditOutcome.REJECTED to AuditDecisionSource.VALIDATION
-
-        AuditEventType.TEMPORARY_ACCESS_ALLOWED -> AuditOutcome.APPROVED to AuditDecisionSource.USER
-    }

@@ -21,7 +21,6 @@ import kotlinx.coroutines.test.runCurrent
 import kotlinx.coroutines.test.runTest
 import kotlinx.coroutines.test.setMain
 import org.junit.Assert.assertEquals
-import org.junit.Assert.assertNotNull
 import org.junit.Assert.assertNull
 import org.junit.Test
 
@@ -34,10 +33,11 @@ class AuditViewModelTest {
         var originalToClose: AuditViewModel? = null
         var restoredToClose: AuditViewModel? = null
         try {
+            val savedState = SavedStateHandle()
             val original =
                 AuditViewModel(
                         AuditRepository(TrackingAuditDao()),
-                        SavedStateHandle(),
+                        savedState,
                     )
                     .also {
                         originalToClose = it
@@ -48,7 +48,7 @@ class AuditViewModelTest {
                 AuditViewModel(
                         AuditRepository(TrackingAuditDao()),
                         SavedStateHandle(
-                            mapOf("selected_audit_event_id" to original.selectedEventId.value)
+                            savedState.keys().associateWith { savedState.get<Any?>(it) }
                         ),
                     )
                     .also { restoredToClose = it }
@@ -102,11 +102,11 @@ class AuditViewModelTest {
 
             viewModel.selectEvent(7)
             assertEquals(7L, viewModel.selectedEventId.value)
-            assertNull(viewModel.detailForSelection())
+            assertNull(viewModel.detail.value)
             assertEquals(1, dao.detailCollectors)
 
             dao.emitDetail(7, event)
-            val loadedDetail = checkNotNull(viewModel.detailForSelection())
+            val loadedDetail = checkNotNull(viewModel.detail.value)
             assertEquals(7L, loadedDetail.eventId)
             assertEquals(7L, loadedDetail.event?.id)
 
@@ -155,7 +155,7 @@ class AuditViewModelTest {
 
     @OptIn(ExperimentalCoroutinesApi::class)
     @Test
-    fun `selection changes hide the previous result until the selected query finishes`() = runTest {
+    fun `selection switches the observed event and deselection clears its detail`() = runTest {
         val dispatcher = UnconfinedTestDispatcher(testScheduler)
         Dispatchers.setMain(dispatcher)
         val dao = TrackingAuditDao()
@@ -164,22 +164,24 @@ class AuditViewModelTest {
             backgroundScope.launch(dispatcher) { viewModel.detail.collect {} }
             viewModel.selectEvent(7)
             dao.emitDetail(7, auditEvent(7))
+            assertEquals(7L, viewModel.detail.value?.event?.id)
 
             viewModel.selectEvent(8)
-
             assertEquals(8L, viewModel.selectedEventId.value)
-            assertEquals(7L, viewModel.detail.value?.eventId)
-            assertNull(viewModel.detailForSelection())
             assertEquals(setOf(8L), dao.observedEventIds)
 
+            dao.emitDetail(8, auditEvent(8))
+            val selectedDetail = checkNotNull(viewModel.detail.value)
+            assertEquals(8L, selectedDetail.eventId)
+            assertEquals(8L, selectedDetail.event?.id)
+
             dao.emitDetail(7, auditEvent(7))
-            assertNull(viewModel.detailForSelection())
+            assertEquals(selectedDetail, viewModel.detail.value)
 
             dao.emitDetail(8, null)
-            val missing = viewModel.detailForSelection()
-            assertNotNull(missing)
-            assertEquals(8L, missing?.eventId)
-            assertNull(missing?.event)
+            val missingDetail = checkNotNull(viewModel.detail.value)
+            assertEquals(8L, missingDetail.eventId)
+            assertNull(missingDetail.event)
 
             viewModel.selectEvent(null)
             assertNull(viewModel.selectedEventId.value)
@@ -191,57 +193,7 @@ class AuditViewModelTest {
             Dispatchers.resetMain()
         }
     }
-
-    @OptIn(ExperimentalCoroutinesApi::class)
-    @Test
-    fun `off-screen selection changes cannot display the retained result on resubscribe`() =
-        runTest {
-            val dispatcher = UnconfinedTestDispatcher(testScheduler)
-            Dispatchers.setMain(dispatcher)
-            val dao = TrackingAuditDao()
-            val viewModel = AuditViewModel(AuditRepository(dao), SavedStateHandle())
-            try {
-                val originalCollection =
-                    backgroundScope.launch(dispatcher) {
-                        viewModel.detail.collect {}
-                    }
-                viewModel.selectEvent(7)
-                dao.emitDetail(7, auditEvent(7))
-                originalCollection.cancelAndJoin()
-
-                viewModel.selectEvent(8)
-                assertEquals(7L, viewModel.detail.value?.eventId)
-                assertNull(viewModel.detailForSelection())
-                assertEquals(0, dao.detailCollectors)
-
-                val displayed = mutableListOf<AuditDetailResult?>()
-                val resumedCollection =
-                    backgroundScope.launch(dispatcher) {
-                        viewModel.detail.collect { displayed += viewModel.detailForSelection() }
-                    }
-                assertEquals(listOf<AuditDetailResult?>(null), displayed)
-                assertEquals(setOf(8L), dao.observedEventIds)
-
-                dao.emitDetail(8, auditEvent(8))
-                assertEquals(8L, displayed.last()?.eventId)
-                assertEquals(8L, displayed.last()?.event?.id)
-
-                resumedCollection.cancelAndJoin()
-                viewModel.selectEvent(null)
-                assertNull(viewModel.detailForSelection())
-                backgroundScope.launch(dispatcher) { viewModel.detail.collect {} }
-                assertNull(viewModel.detail.value)
-                assertEquals(0, dao.detailCollectors)
-            } finally {
-                viewModel.viewModelScope.cancel()
-                runCurrent()
-                Dispatchers.resetMain()
-            }
-        }
 }
-
-private fun AuditViewModel.detailForSelection(): AuditDetailResult? =
-    detail.value?.takeIf { it.eventId == selectedEventId.value }
 
 private class TrackingAuditDao : AuditDao {
     private val history = MutableSharedFlow<List<AuditEventEntity>>()

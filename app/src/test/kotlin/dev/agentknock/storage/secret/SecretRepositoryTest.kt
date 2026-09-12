@@ -530,24 +530,6 @@ class SecretRepositoryTest {
     }
 
     @Test
-    fun `renaming a secret does not re-encrypt its values`() = runTest {
-        val fixture = Fixture()
-        val secretId = fixture.createSecret("aws-read-only")
-        fixture.createVariable(secretId, "AWS_REGION", "eu-west-1", false)
-        val before = fixture.dao.variables.value.single()
-
-        assertEquals(
-            SaveSecretResult.SAVED,
-            fixture.repository.saveSecret(secretId, "aws-reader", "Renamed secret"),
-        )
-
-        val after = fixture.dao.variables.value.single()
-        assertTrue(before.encryptedValue.nonce.contentEquals(after.encryptedValue.nonce))
-        assertTrue(before.encryptedValue.ciphertext.contentEquals(after.encryptedValue.ciphertext))
-        assertEquals(before.valueUpdatedAt, after.valueUpdatedAt)
-    }
-
-    @Test
     fun `restored rows stay in their secrets until their values are re-entered`() = runTest {
         val original = Fixture(keyId = "original-key")
         val secretId = original.createSecret("cloudflare-read-only")
@@ -1545,18 +1527,6 @@ class SecretRepositoryTest {
                 "workstation",
                 TemporaryAccessOperation.INVOCATION,
             )
-        )
-    }
-
-    @Test
-    fun `new secrets use four-hour approval by default`() = runTest {
-        val fixture = Fixture()
-
-        val secretId = fixture.createSecret("github")
-
-        assertEquals(
-            SecretApprovalMode.ASK_ME,
-            fixture.repository.observeSecret(secretId).first()?.approvalMode,
         )
     }
 

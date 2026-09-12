@@ -79,12 +79,10 @@ class DesignInteractionTest {
         pairingSwitch.assert(SemanticsMatcher.expectValue(SemanticsProperties.Role, Role.Switch))
         pairingSwitch.assertIsDisplayed().assertIsOn().performTouchInput { click() }
         pairingSwitch.assertIsOff()
-        compose.onNodeWithText("New pairings paused").assertIsDisplayed()
         compose.runOnIdle { assertEquals(listOf(false), changes) }
 
         pairingSwitch.assertIsDisplayed().performTouchInput { click() }
         pairingSwitch.assertIsOn()
-        compose.onNodeWithText("New pairings on").assertIsDisplayed()
         compose.runOnIdle { assertEquals(listOf(false, true), changes) }
     }
 

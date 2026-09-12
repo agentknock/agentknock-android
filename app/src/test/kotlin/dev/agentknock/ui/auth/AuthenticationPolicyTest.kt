@@ -31,7 +31,7 @@ class AuthenticationPolicyTest {
     }
 
     @Test
-    fun `authentication result survives a host recreation`() = runTest {
+    fun `authentication launches once and duplicate callbacks are harmless`() = runTest {
         val coordinator = DeviceAuthenticationCoordinator()
         val result =
             async(start = CoroutineStart.UNDISPATCHED) {
@@ -45,7 +45,6 @@ class AuthenticationPolicyTest {
         coordinator.succeed(request.id)
 
         assertEquals(DeviceAuthenticationResult.Success, result.await())
-        assertEquals(null, coordinator.request.value)
         assertEquals(null, coordinator.request.value)
     }
 
@@ -84,7 +83,6 @@ class AuthenticationPolicyTest {
 
         abandoned.cancelAndJoin()
 
-        assertEquals(null, coordinator.request.value)
         assertEquals(null, coordinator.request.value)
         val replacement =
             async(start = CoroutineStart.UNDISPATCHED) {

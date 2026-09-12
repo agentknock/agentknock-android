@@ -2,9 +2,6 @@ package dev.agentknock.ui.secrets
 
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.ui.Modifier
-import androidx.compose.ui.semantics.SemanticsProperties
-import androidx.compose.ui.test.SemanticsMatcher
-import androidx.compose.ui.test.assert
 import androidx.compose.ui.test.assertIsDisplayed
 import androidx.compose.ui.test.junit4.v2.createComposeRule
 import androidx.compose.ui.test.onNodeWithContentDescription
@@ -51,10 +48,6 @@ class SecretDetailPresentationTest {
             }
         }
 
-        compose.onNodeWithText("Global AI instructions").assertIsDisplayed()
-        compose
-            .onNodeWithText("Applies to every secret and client. Used when AI review is active.")
-            .assertIsDisplayed()
         compose.onNodeWithText(instructions).assertIsDisplayed()
         compose.onNodeWithContentDescription("Edit instructions").performClick()
         compose.runOnIdle { assertEquals(1, edits) }
@@ -96,10 +89,6 @@ class SecretDetailPresentationTest {
         }
 
         compose.onNodeWithText(keyComment).assertIsDisplayed()
-        compose
-            .onNodeWithText("Details")
-            .assert(SemanticsMatcher.expectValue(SemanticsProperties.StateDescription, "Collapsed"))
-        compose.onNodeWithText("OpenSSH public key").assertDoesNotExist()
 
         compose.onNodeWithText("Edit secret").performClick()
         compose.onNodeWithText("Copy public key").performScrollTo().performClick()
@@ -121,8 +110,7 @@ class SecretDetailPresentationTest {
         }
 
         compose.onNodeWithText("Details").performScrollTo().performClick()
-        compose.onNodeWithText("OpenSSH public key").performScrollTo().assertIsDisplayed()
-        compose.onNodeWithText("SHA-256 fingerprint (hex)").assertDoesNotExist()
+        compose.onNodeWithText(publicKey.line).performScrollTo().assertIsDisplayed()
     }
 
     private val keyComment = "deploy@build-host"

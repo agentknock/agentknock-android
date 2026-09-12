@@ -97,25 +97,55 @@ class ListingPublicationTests(unittest.TestCase):
             self.command("publish")
         request.assert_called_once_with("DELETE", f"{publish.APPLICATION}/edits/test-edit", "test-token")
 
-    @patch.object(publish, "current_listing")
-    @patch.object(publish, "listing_changed")
-    def test_only_changed_and_current_listings_request_publication(self, changed, current):
-        for modified, latest, expected in ((False, True, False), (True, True, True), (True, False, False)):
-            with self.subTest(modified=modified, latest=latest):
-                Path("outputs").unlink(missing_ok=True)
-                changed.return_value = modified
-                current.return_value = latest
-                self.command("check")
-                self.assertEqual(Path("outputs").read_text(), f"changed={str(expected).lower()}\n")
-                changed.assert_called_with("base", "HEAD")
+    def test_check_publishes_only_changed_listings_that_are_still_current(self):
+        def assert_publication(expected):
+            Path("outputs").unlink(missing_ok=True)
+            self.command("check")
+            self.assertEqual(Path("outputs").read_text(), f"changed={str(expected).lower()}\n")
 
-    @patch.object(publish, "git")
-    def test_change_detection_compares_all_play_metadata(self, git):
-        git.side_effect = ["same-tree", "same-tree", "old-tree", "new-tree"]
-        self.assertFalse(publish.listing_changed("before-push", "HEAD"))
-        self.assertTrue(publish.listing_changed("before-push", "HEAD"))
-        self.assertEqual(git.call_args_list[0].args,
-                         ("rev-parse", "before-push:app/src/main/play"))
+        with tempfile.TemporaryDirectory() as remote, patch("version.ROOT", Path.cwd()):
+            publish.git("init", "-q", "-b", "master")
+            publish.git("config", "user.name", "Listing tests")
+            publish.git("config", "user.email", "tests@example.invalid")
+            publish.git("config", "commit.gpgsign", "false")
+            publish.git("config", "gc.autoDetach", "false")
+            publish.git("config", "maintenance.autoDetach", "false")
+            listing = Path("app/src/main/play/listings/en-GB/title.txt")
+            listing.parent.mkdir(parents=True)
+            listing.write_text("Original listing\n")
+            publish.git("add", str(listing))
+            publish.git("commit", "-qm", "Initial listing")
+            os.environ["PUSH_BASE"] = publish.git("rev-parse", "HEAD")
+            publish.git("init", "--bare", "-q", remote)
+            publish.git("remote", "add", "origin", remote)
+            publish.git("push", "-q", "origin", "master")
+            Path("README.md").write_text("Unrelated documentation\n")
+            publish.git("add", "README.md")
+            publish.git("commit", "-qm", "Update documentation")
+            publish.git("push", "-q", "origin", "master")
+            assert_publication(False)
+
+            listing.write_text("Updated listing\n")
+            publish.git("add", str(listing))
+            publish.git("commit", "-qm", "Update listing")
+            publish.git("push", "-q", "origin", "master")
+            checkout = publish.git("rev-parse", "HEAD")
+            assert_publication(True)
+
+            Path("README.md").write_text("Newer unrelated documentation\n")
+            publish.git("add", "README.md")
+            publish.git("commit", "-qm", "Update documentation again")
+            publish.git("push", "-q", "origin", "master")
+            publish.git("checkout", "-q", "--detach", checkout)
+            assert_publication(True)
+
+            publish.git("checkout", "-q", "master")
+            listing.write_text("Newer reviewed listing\n")
+            publish.git("add", str(listing))
+            publish.git("commit", "-qm", "Supersede listing")
+            publish.git("push", "-q", "origin", "master")
+            publish.git("checkout", "-q", "--detach", checkout)
+            assert_publication(False)
 
     def test_contact_language_and_video_changes_trigger_publication(self):
         def git(*args):
@@ -153,11 +183,6 @@ class ListingPublicationTests(unittest.TestCase):
             git("commit", "-qm", "Update documentation")
             self.assertFalse(publish.listing_changed("HEAD^", "HEAD"))
 
-    @patch.object(publish, "git")
-    def test_stale_check_refreshes_master_after_acquiring_lock(self, git):
-        git.side_effect = ["", "new-listing", "old-listing"]
-        self.assertFalse(publish.current_listing())
-        self.assertEqual(git.call_args_list[0].args, ("fetch", "--no-tags", "origin", "master"))
 
     def test_only_master_pushes_can_publish(self):
         for event, ref in (("pull_request", "refs/heads/master"), ("push", "refs/heads/feature")):

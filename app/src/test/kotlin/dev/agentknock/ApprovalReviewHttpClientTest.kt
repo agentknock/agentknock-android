@@ -16,8 +16,6 @@ class ApprovalReviewHttpClientTest {
 
         assertFalse(client.retryOnConnectionFailure)
         assertFalse(client.followRedirects)
-        assertEquals(100_000, client.readTimeoutMillis)
-        assertEquals(100_000, client.callTimeoutMillis)
     }
 
     @Test

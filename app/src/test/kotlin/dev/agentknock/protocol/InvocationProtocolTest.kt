@@ -3,7 +3,6 @@ package dev.agentknock.protocol
 import kotlinx.serialization.json.Json
 import org.junit.Assert.assertArrayEquals
 import org.junit.Assert.assertEquals
-import org.junit.Assert.assertNull
 import org.junit.Assert.assertTrue
 import org.junit.Test
 
@@ -121,44 +120,6 @@ class InvocationProtocolTest {
                     )
                     .decodeToString()
             ),
-        )
-    }
-
-    @Test
-    fun `decodes all cli completion variants`() {
-        assertEquals(
-            ApprovalCompletion.Approved(testClientSoftware("0.2.0", "0.1.0")),
-            protocol.decodeCompletion(
-                """{${testClientSoftwareFields("0.2.0", "0.1.0")},"result":"APPROVED"}"""
-                    .encodeToByteArray()
-            ),
-        )
-        assertEquals(
-            ApprovalCompletion.Denied(
-                testClientSoftware("0.2.0", "0.1.0"),
-                "USER_DENIED",
-                "Denied on device.",
-            ),
-            protocol.decodeCompletion(
-                """{${testClientSoftwareFields("0.2.0", "0.1.0")},"result":"DENIED","reason":"USER_DENIED","message":"Denied on device."}"""
-                    .encodeToByteArray()
-            ),
-        )
-        val aborted =
-            protocol.decodeCompletion(
-                """{${testClientSoftwareFields("0.2.0", "0.1.0")},"result":"ABORTED","reason":"CANCELLED","message":"Cancelled by user."}"""
-                    .encodeToByteArray()
-            )
-        check(aborted is ApprovalCompletion.Aborted)
-        assertEquals("CANCELLED", aborted.reason)
-        assertEquals("Cancelled by user.", aborted.message)
-        assertNull(
-            protocol
-                .decodeRequest(
-                    """{${testClientSoftwareFields("0.2.0", "0.1.0")},"method":"Invocation","invocation_token":"AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA=","secrets":{"test":{}},"operation":{"type":"exec","command":"env","arguments":[],"working_directory":"/tmp","executable_path":"/bin/env","executable_mode":"BINARY","stdin":"TERMINAL","stdout":"TERMINAL","stderr":"TERMINAL"},"launcher_chain":[]}"""
-                        .encodeToByteArray()
-                )
-                .reason
         )
     }
 

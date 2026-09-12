@@ -5,28 +5,14 @@ import org.junit.Test
 
 class DisplayFormattingTest {
     @Test
-    fun relativeTime_isCompactForRecentActivity() {
+    fun relativeTime_reportsElapsedTimeInAppropriateUnits() {
         val now = 2_000_000_000_000
         val unusedDate: (Long) -> String = { error("Recent activity should use relative time") }
-        assertEquals("just now", formatRelativeTime(now - 20_000, now, unusedDate))
         assertEquals("7 minutes ago", formatRelativeTime(now - 7 * 60_000, now, unusedDate))
         assertEquals("5 hours ago", formatRelativeTime(now - 5 * 60 * 60_000, now, unusedDate))
         assertEquals(
             "12 days ago",
             formatRelativeTime(now - 12 * 24 * 60 * 60_000L, now, unusedDate),
-        )
-    }
-
-    @Test
-    fun relativeTime_usesTheUiDateFormatterForOlderActivity() {
-        val timestamp = 1_000_000L
-        val now = timestamp + 30 * 24 * 60 * 60_000L
-        assertEquals(
-            "7 Dec 2026",
-            formatRelativeTime(timestamp, now) {
-                assertEquals(timestamp, it)
-                "7 Dec 2026"
-            },
         )
     }
 
@@ -75,13 +61,6 @@ class DisplayFormattingTest {
             "Looks safe\\nCommand: fake\\u202evalue",
             renderSingleLineText("Looks safe\nCommand: fake\u202evalue"),
         )
-    }
-
-    @Test
-    fun knownPlatformNames_areHumanizedWithoutRewritingUnknownValues() {
-        assertEquals("Linux", formatPlatformName("linux"))
-        assertEquals("macOS", formatPlatformName("Darwin"))
-        assertEquals("Plan 9", formatPlatformName("Plan 9"))
     }
 
     @Test

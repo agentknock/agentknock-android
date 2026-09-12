@@ -18,11 +18,11 @@ class RelayFrameCodecTest {
     fun `encodes every device frame with the websocket contract`() {
         val payload = Json.parseToJsonElement("""{"result":"APPROVED"}""")
 
-        assertEquals(
+        assertJsonEquals(
             """{"type":"message","client_id":"$CLIENT_ID","request_id":"$REQUEST_ID","kind":"response","payload":{"result":"APPROVED"}}""",
             codec.encode(RelayDeviceFrame.Response(CLIENT_ID, REQUEST_ID, payload)),
         )
-        assertEquals(
+        assertJsonEquals(
             """{"type":"ack","client_id":"$CLIENT_ID","request_id":"$REQUEST_ID","kind":"request"}""",
             codec.encode(
                 RelayDeviceFrame.Acknowledgement(
@@ -32,11 +32,11 @@ class RelayFrameCodecTest {
                 )
             ),
         )
-        assertEquals(
+        assertJsonEquals(
             """{"type":"resume","client_id":"$CLIENT_ID","request_id":"$REQUEST_ID"}""",
             codec.encode(RelayDeviceFrame.Resume(CLIENT_ID, REQUEST_ID)),
         )
-        assertEquals(
+        assertJsonEquals(
             """{"type":"set_client_state","client_id":"$CLIENT_ID","state":"active"}""",
             codec.encode(RelayDeviceFrame.SetClientState(CLIENT_ID, RelayClientState.ACTIVE)),
         )
@@ -142,6 +142,10 @@ class RelayFrameCodecTest {
             )
 
         assertEquals(Long.MAX_VALUE, (event as RelayDeviceEvent.Error).retryAfterMillis)
+    }
+
+    private fun assertJsonEquals(expected: String, actual: String) {
+        assertEquals(Json.parseToJsonElement(expected), Json.parseToJsonElement(actual))
     }
 
     private companion object {

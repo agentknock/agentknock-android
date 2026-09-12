@@ -33,22 +33,8 @@ class InstructionsCardTest {
         }
         compose.runOnIdle { access.value = AiReviewAccess.INACTIVE }
         compose.onNodeWithText("Only approve deployments to staging.").assertIsDisplayed()
-        compose
-            .onNodeWithText("Used when AI review is active.", substring = true)
-            .assertIsDisplayed()
         compose.onNodeWithContentDescription("Edit instructions").performClick()
         assertEquals(1, edits)
-    }
-
-    @Test
-    fun expiryDoesNotCollapseAnInstructionEditorThatWasAlreadyVisible() {
-        val access = mutableStateOf(AiReviewAccess.ACTIVE)
-        compose.setContent {
-            AgentknockTheme { InstructionsCard(AiInstructionsScope.SECRET, "", access.value, {}) }
-        }
-        compose.onNodeWithContentDescription("Edit instructions").assertIsDisplayed()
-        compose.runOnIdle { access.value = AiReviewAccess.INACTIVE }
-        compose.onNodeWithContentDescription("Edit instructions").assertIsDisplayed()
     }
 
     @Test

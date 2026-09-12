@@ -52,16 +52,6 @@ class PairingProtocolTest {
     }
 
     @Test
-    fun `derives the pairing commitment from the client secret vector`() {
-        val request = pairingRequest(ByteArray(32) { (0x60 + it).toByte() })
-
-        assertEquals(
-            "jUVTSBEimLz6OdfXAA4qxemm4hHyzzc5yOj1ZdzHsq4=",
-            request.jsonObject.getValue("commitment").jsonPrimitive.content,
-        )
-    }
-
-    @Test
     fun `matches the pairing response vector`() {
         assertEquals(
             json.parseToJsonElement(

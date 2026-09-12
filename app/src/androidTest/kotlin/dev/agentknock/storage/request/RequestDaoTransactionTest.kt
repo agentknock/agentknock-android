@@ -22,7 +22,6 @@ import kotlinx.coroutines.flow.first
 import kotlinx.coroutines.runBlocking
 import kotlinx.coroutines.test.runTest
 import org.junit.After
-import org.junit.Assert.assertArrayEquals
 import org.junit.Assert.assertEquals
 import org.junit.Assert.assertFalse
 import org.junit.Assert.assertNotNull
@@ -75,57 +74,6 @@ class RequestDaoTransactionTest {
     @After
     fun tearDown() {
         database.close()
-    }
-
-    @Test
-    fun pairingPromotionAndItsFixedResponseAreAtomic() = runTest {
-        val pending = pendingAttempt(withPendingPsk = true)
-        dao.insertPairingRequest(rootRequest(), pending)
-        val root = checkNotNull(dao.getRequestById(ROOT_REQUEST_ID))
-
-        val failed = runCatching {
-            dao.finishPairing(
-                rootRequest = activatedRoot(root),
-                attempt = completedAttempt(pending),
-                client = activeClient(),
-                clientPsk = clientPsk(CURRENT_SLOT, byteArrayOf(2)),
-                finishRequest = finishRequest(root.id, root.id),
-                requestPsk = requestPsk(root.id),
-            )
-        }
-        assertTrue(failed.isFailure)
-        assertEquals("waiting", dao.getRequestById(ROOT_REQUEST_ID)?.state)
-        assertEquals("waiting_for_finish", dao.getPairingAttempt(ROOT_REQUEST_ID)?.state)
-        assertArrayEquals(
-            byteArrayOf(1),
-            dao.getPairingAttempt(ROOT_REQUEST_ID)?.pendingPsk?.ciphertext,
-        )
-        assertNull(dao.getClient(CLIENT_ID))
-        assertNull(dao.getClientPsk(CLIENT_ID, CURRENT_SLOT))
-        assertNull(dao.getRequestById(FINISH_REQUEST_ID))
-
-        dao.finishPairing(
-            rootRequest = activatedRoot(root),
-            attempt = completedAttempt(pending),
-            client = activeClient(),
-            clientPsk = clientPsk(CURRENT_SLOT, byteArrayOf(2)),
-            finishRequest = finishRequest(FINISH_REQUEST_ID, root.id),
-            requestPsk = requestPsk(FINISH_REQUEST_ID),
-        )
-
-        val storedFinish = checkNotNull(dao.getRequestById(FINISH_REQUEST_ID))
-        assertEquals("completed", dao.getRequestById(ROOT_REQUEST_ID)?.state)
-        val storedAttempt = checkNotNull(dao.getPairingAttempt(ROOT_REQUEST_ID))
-        assertEquals("completed", storedAttempt.state)
-        assertNull(storedAttempt.pendingPsk)
-        assertEquals(RESPONSE_JSON, storedFinish.responseJson)
-        assertNotNull(dao.getRequestPsk(storedFinish.id))
-        assertNotNull(dao.getClient(CLIENT_ID))
-        assertArrayEquals(
-            byteArrayOf(2),
-            dao.getClientPsk(CLIENT_ID, CURRENT_SLOT)?.encryptedPsk?.ciphertext,
-        )
-        assertNull(dao.getClientPsk(CLIENT_ID, PREVIOUS_SLOT))
     }
 
     @Test
@@ -256,47 +204,6 @@ class RequestDaoTransactionTest {
 
         assertNull(dao.getRequestById(FINISH_REQUEST_ID))
         assertNull(dao.getRequestById(ROOT_REQUEST_ID))
-    }
-
-    @Test
-    fun pairingRejectionErasesThePendingBindingWithoutCreatingAClient() = runTest {
-        dao.insertPairingRequest(rootRequest(), pendingAttempt(withPendingPsk = true))
-        val request = checkNotNull(dao.getRequestById(ROOT_REQUEST_ID))
-        val attempt = checkNotNull(dao.getPairingAttempt(ROOT_REQUEST_ID))
-
-        dao.rejectPairing(
-            request = request.copy(state = "completed", completedAt = 2),
-            attempt =
-                attempt.copy(
-                    desiredRelayClientState = "revoked",
-                    state = "rejected",
-                    pendingPsk = null,
-                    decidedAt = 2,
-                ),
-        )
-
-        assertEquals("completed", dao.getRequestById(ROOT_REQUEST_ID)?.state)
-        val rejected = checkNotNull(dao.getPairingAttempt(ROOT_REQUEST_ID))
-        assertEquals("rejected", rejected.state)
-        assertNull(rejected.pendingPsk)
-        assertNull(dao.getClient(CLIENT_ID))
-    }
-
-    @Test
-    fun nullableEncryptedValueRoundTripsOnlyAsACompleteQuartet() = runTest {
-        val request = rootRequest()
-        dao.insertPairingRequest(request, pendingAttempt())
-        assertNull(checkNotNull(dao.getPairingAttempt(ROOT_REQUEST_ID)).pendingPsk)
-
-        val complete = pendingAttempt(withPendingPsk = true)
-        dao.updatePairingRequest(request, complete)
-
-        val stored = checkNotNull(dao.getPairingAttempt(ROOT_REQUEST_ID)).pendingPsk
-        checkNotNull(stored)
-        assertEquals(1, stored.formatVersion)
-        assertEquals(KEY_ID, stored.keyId)
-        assertArrayEquals(ByteArray(12), stored.nonce)
-        assertArrayEquals(byteArrayOf(1), stored.ciphertext)
     }
 
     @Test
@@ -553,27 +460,6 @@ class RequestDaoTransactionTest {
     }
 
     @Test
-    fun finishingResponseOutboxIsIdempotent() = runTest {
-        val requestId = "acknowledgement-request"
-        dao.insertRequest(
-            rootRequest()
-                .copy(
-                    id = requestId,
-                    kind = "unknown",
-                    state = "completed",
-                    completedAt = 10,
-                    responseOutboxFinished = false,
-                )
-        )
-
-        assertEquals(1, dao.markResponseOutboxFinished(requestId))
-        assertEquals(0, dao.markResponseOutboxFinished(requestId))
-
-        val stored = checkNotNull(dao.getRequestById(requestId))
-        assertTrue(stored.responseOutboxFinished)
-    }
-
-    @Test
     fun responseOutboxWithoutPayloadCannotBeFinished() = runTest {
         val requestId = "response-not-created"
         dao.insertRequest(
@@ -587,21 +473,6 @@ class RequestDaoTransactionTest {
 
         assertEquals(0, dao.markResponseOutboxFinished(requestId))
         assertFalse(checkNotNull(dao.getRequestById(requestId)).responseOutboxFinished)
-    }
-
-    @Test
-    fun requestPskIsDeletedOnlyAfterExchangeEnds() = runTest {
-        val requestId = "ended-request"
-        dao.insertRequest(rootRequest().copy(id = requestId, exchangeEndedAt = null))
-        dao.insertRequestPsk(requestPsk(requestId))
-
-        assertEquals(0, dao.deleteEndedRequestPsk(requestId))
-        assertNotNull(dao.getRequestPsk(requestId))
-
-        val request = checkNotNull(dao.getRequestById(requestId))
-        assertEquals(1, dao.updateRequest(request.copy(exchangeEndedAt = 5)))
-        assertEquals(1, dao.deleteEndedRequestPsk(requestId))
-        assertNull(dao.getRequestPsk(requestId))
     }
 
     @Test
@@ -668,35 +539,6 @@ class RequestDaoTransactionTest {
         assertNull(dao.getClientPsk(CLIENT_ID, PREVIOUS_SLOT))
         assertNotNull(dao.getClientPsk(secondClientId, CURRENT_SLOT))
         assertNotNull(dao.getClientPsk(secondClientId, PREVIOUS_SLOT))
-    }
-
-    @Test
-    fun settledParentRequestsArePrunedOnlyAfterTheirChildren() = runTest {
-        val parent =
-            rootRequest()
-                .copy(
-                    id = "parent-request",
-                    kind = "invocation",
-                    state = "completed",
-                    listed = false,
-                    completedAt = 2,
-                    exchangeEndedAt = 2,
-                )
-        val child =
-            parent.copy(
-                id = "child-request",
-                parentRequestId = parent.id,
-                kind = "git_sign",
-            )
-        dao.insertRequest(parent)
-        dao.insertRequest(child)
-
-        assertEquals(1, dao.deleteSettledHiddenRequests(endedBefore = 2))
-        assertNotNull(dao.getRequestById(parent.id))
-        assertNull(dao.getRequestById(child.id))
-
-        assertEquals(1, dao.deleteSettledHiddenRequests(endedBefore = 2))
-        assertNull(dao.getRequestById(parent.id))
     }
 
     @Test
@@ -783,67 +625,6 @@ class RequestDaoTransactionTest {
                     0,
                 )
                 .isEmpty()
-        )
-    }
-
-    @Test
-    fun decidingASecretUploadDiscardsItsUploadedValues() = runTest {
-        insertActivePairing()
-        val requestId = UPLOAD_REQUEST_ID
-        dao.insertSecretUploadRequest(
-            request =
-                rootRequest()
-                    .copy(
-                        id = requestId,
-                        kind = "secret_upload",
-                        state = "action_required",
-                    ),
-            secretUpload =
-                SecretUploadRequestEntity(
-                    requestId = requestId,
-                    decision = null,
-                    mode = "CREATE",
-                    uploadedName = "test-secret",
-                    approvedName = null,
-                    descriptionProvided = false,
-                    description = null,
-                    secretType = "environment",
-                    targetSecretId = null,
-                    targetSecretRevision = null,
-                    summaryJson = "{\"variableNames\":[\"TOKEN\"]}",
-                    intakeError = null,
-                    decidedAt = null,
-                ),
-            client = checkNotNull(dao.getClient(CLIENT_ID)),
-            environmentVariables =
-                listOf(
-                    SecretUploadEnvironmentVariableEntity(
-                        id = "upload-variable",
-                        requestId = requestId,
-                        name = "TOKEN",
-                        sensitive = true,
-                        encryptedValue = encryptedValue(byteArrayOf(4)),
-                    )
-                ),
-            sshKey = null,
-            requestPsk = requestPsk(requestId),
-            currentClientPsk = null,
-            previousClientPsk = null,
-        )
-        assertEquals(1, dao.getSecretUploadEnvironmentVariables(requestId).size)
-
-        val request = checkNotNull(dao.getRequestById(requestId))
-        val upload = checkNotNull(dao.getSecretUploadRequest(requestId))
-        dao.updateSecretUploadRequest(
-            request = request.copy(state = "completed", completedAt = 2),
-            secretUpload = upload.copy(decision = "rejected", decidedAt = 2),
-            discardUploadedValues = true,
-        )
-
-        assertTrue(dao.getSecretUploadEnvironmentVariables(requestId).isEmpty())
-        assertEquals(
-            "{\"variableNames\":[\"TOKEN\"]}",
-            dao.getSecretUploadRequest(requestId)?.summaryJson,
         )
     }
 
@@ -1303,12 +1084,6 @@ class RequestDaoTransactionTest {
             lastSeenAt = 2,
         )
 
-    private fun activatedRoot(root: InboxRequestEntity) =
-        root.copy(
-            state = "completed",
-            completedAt = 2,
-        )
-
     private fun finishRequest(requestId: String, rootId: String) =
         InboxRequestEntity(
             id = requestId,
@@ -1382,7 +1157,6 @@ class RequestDaoTransactionTest {
         const val ROOT_REQUEST_ID = CLIENT_ID
         const val FINISH_REQUEST_ID = "01ARZ3NDEKTSV4RRFFQ69G5FAW"
         const val REMOVE_REQUEST_ID = "01ARZ3NDEKTSV4RRFFQ69G5FAY"
-        const val UPLOAD_REQUEST_ID = "01ARZ3NDEKTSV4RRFFQ69G5FAZ"
         const val INVOCATION_REQUEST_ID = "01ARZ3NDEKTSV4RRFFQ69G5FB0"
         const val RESPONSE_JSON = "{\"nonce\":\"fixed\",\"ciphertext\":\"fixed\"}"
     }

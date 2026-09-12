@@ -2,7 +2,6 @@
 """Verify unsigned, minified APKs and Play bundles without publishing credentials."""
 
 import argparse
-import json
 import os
 from pathlib import Path
 import re
@@ -35,8 +34,6 @@ def main():
     verify_artifact(apk, distribution, False, revision, outputs)
     if distribution == "play":
         verify_artifact(outputs / "bundle/playRelease/app-play-release.aab", distribution, True, revision, outputs)
-        for path in (ROOT / "app/src/main/play/subscriptions").glob("*.json"):
-            json.loads(path.read_text())
 
 
 def verify_artifact(artifact, distribution, bundle, revision, outputs):

@@ -7,6 +7,7 @@ import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.test.runTest
 import kotlinx.coroutines.withContext
 import kotlinx.coroutines.withTimeout
+import kotlinx.serialization.json.Json
 import kotlinx.serialization.json.JsonPrimitive
 import mockwebserver3.MockResponse
 import mockwebserver3.MockWebServer
@@ -428,8 +429,10 @@ class RelayDeviceClientTest {
                 connection.send(RelayDeviceFrame.Resume(CLIENT_ID, REQUEST_ID)),
             )
             assertEquals(
-                """{"type":"resume","client_id":"$CLIENT_ID","request_id":"$REQUEST_ID"}""",
-                received.await(),
+                Json.parseToJsonElement(
+                    """{"type":"resume","client_id":"$CLIENT_ID","request_id":"$REQUEST_ID"}"""
+                ),
+                Json.parseToJsonElement(received.await()),
             )
 
             val socket = serverSocket.await()
@@ -557,7 +560,6 @@ class RelayDeviceClientTest {
     fun `completes a client initiated close handshake`() = runTest {
         MockWebServer().use { server ->
             val closeCode = CompletableDeferred<Int>()
-            val closeReason = CompletableDeferred<String>()
             server.start()
             server.enqueue(
                 MockResponse.Builder()
@@ -569,7 +571,6 @@ class RelayDeviceClientTest {
                                 reason: String,
                             ) {
                                 closeCode.complete(code)
-                                closeReason.complete(reason)
                                 webSocket.close(code, reason)
                             }
                         }
@@ -590,7 +591,6 @@ class RelayDeviceClientTest {
                 connection.close()
             }
             assertEquals(1000, closeCode.await())
-            assertEquals("client disconnect", closeReason.await())
         }
     }
 
