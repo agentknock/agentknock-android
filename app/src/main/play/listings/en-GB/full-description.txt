@@ -1,5 +1,7 @@
 Agentknock keeps developer secrets on your Android phone and provides them only to approved commands on paired clients.
 
+Agentknock is an early preview. Preview releases provide no backward-compatibility guarantees.
+
 Store cohesive sets of environment variables and SSH keys on your phone. Pair laptops, workstations, and servers by comparing a verification code, then review each request with the command, arguments, client, and requested secrets shown together.
 
 Choose how each secret is handled:
