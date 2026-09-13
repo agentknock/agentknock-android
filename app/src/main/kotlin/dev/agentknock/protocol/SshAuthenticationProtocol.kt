@@ -147,36 +147,20 @@ internal class SshAuthenticationProtocol(
 
     fun decodeCompletion(plaintext: ByteArray): ApprovalCompletion {
         val clientSoftware = json.decodeClientSoftware(plaintext)
-        val completion =
-            json.decodeFromString<SshAuthenticationResultWire>(plaintext.decodeToString())
+        val completion = json.decodeFromString<ApprovalCompletionWire>(plaintext.decodeToString())
         return when (completion.result) {
-            RESULT_APPROVED -> {
-                if (completion.signature != null) {
-                    throw SerializationException(
-                        "Approved SSH authentication completion contains a signature"
-                    )
-                }
-                ApprovalCompletion.Approved(clientSoftware)
-            }
+            RESULT_APPROVED -> ApprovalCompletion.Approved(clientSoftware)
             RESULT_DENIED ->
                 ApprovalCompletion.Denied(
                     clientSoftware = clientSoftware,
-                    reason =
-                        completion.reason
-                            ?: throw SerializationException("Denied completion has no reason"),
-                    message =
-                        completion.message
-                            ?: throw SerializationException("Denied completion has no message"),
+                    reason = completion.reason,
+                    message = completion.message,
                 )
             RESULT_ABORTED ->
                 ApprovalCompletion.Aborted(
                     clientSoftware = clientSoftware,
-                    reason =
-                        completion.reason
-                            ?: throw SerializationException("Aborted completion has no reason"),
-                    message =
-                        completion.message
-                            ?: throw SerializationException("Aborted completion has no message"),
+                    reason = completion.reason,
+                    message = completion.message,
                 )
             else -> throw SerializationException("Unsupported SSH authentication completion result")
         }

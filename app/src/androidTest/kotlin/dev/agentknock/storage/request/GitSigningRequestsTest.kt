@@ -306,6 +306,10 @@ class GitSigningRequestsTest {
             secretDetailsJson = Json.encodeToString(description.secrets),
             invocationTokenHash = invocationTokenHash(token),
         )
+        // A child process can report different software while retaining the same authenticated
+        // parent.
+        val parent = checkNotNull(database.requestDao().getRequestById(PARENT_ID))
+        database.requestDao().updateRequest(parent.copy(clientSoftwareJson = "{}"))
         val requestId = "git-valid-intake"
 
         val processed =

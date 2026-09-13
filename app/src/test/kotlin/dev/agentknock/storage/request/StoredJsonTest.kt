@@ -21,7 +21,7 @@ class StoredJsonTest {
             )
         val repository =
             storedJson.decodeFromString<GitSignRepository>(
-                """{"remote":"git@example.test:repo.git","future":{"nested":true}}"""
+                """{"remote":"git@example.test:repo.git","head":{"type":"BRANCH","name":"main","upstream":"origin/main"},"changed_paths":[{"status":"MODIFIED","path":"README.md"}],"future":{"nested":true}}"""
             )
         val evaluation =
             storedJson.decodeFromString<ApprovalEvaluation>("""{"secrets":[],"future":"ignored"}""")
@@ -37,8 +37,13 @@ class StoredJsonTest {
         assertEquals("Deployment", secrets.single().name)
         assertTrue(secrets.single().environmentVariableNames.isEmpty())
         assertEquals("git@example.test:repo.git", repository.remote)
+        // History written with the former sealed head type must remain readable.
+        assertEquals("BRANCH", repository.head?.type)
+        assertEquals("main", repository.head?.name)
+        assertEquals("origin/main", repository.head?.upstream)
+        assertEquals("MODIFIED", repository.changedPaths?.single()?.status)
         assertTrue(evaluation.secrets.isEmpty())
-        assertEquals("agentknock", clientSoftware.application.name)
+        assertEquals("agentknock", clientSoftware.application?.name)
         assertEquals(listOf("TOKEN"), upload.variableNames)
         assertTrue(upload.changedVariables.isEmpty())
     }

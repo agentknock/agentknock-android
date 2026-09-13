@@ -266,9 +266,9 @@ internal fun SecretUploadRequestDetail(
 
         Disclosure("Technical details") {
             upload.clientSoftware?.let { software ->
-                DetailValue("Client software", renderSoftware(software.application))
+                renderSoftware(software.application)?.let { DetailValue("Client software", it) }
                 if (software.library != software.application) {
-                    DetailValue("Agentknock library", renderSoftware(software.library))
+                    renderSoftware(software.library)?.let { DetailValue("Agentknock library", it) }
                 }
             }
             DetailValue("Client ID", upload.clientId, true)

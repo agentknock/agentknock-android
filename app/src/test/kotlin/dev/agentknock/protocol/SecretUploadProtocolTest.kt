@@ -193,22 +193,4 @@ class SecretUploadProtocolTest {
             ),
         )
     }
-
-    @Test
-    fun `rejects a rejected completion without a useful message`() {
-        listOf(
-                """{${testClientSoftwareFields("0.2.0", "0.1.0")},"result":"REJECTED"}""",
-                """{${testClientSoftwareFields("0.2.0", "0.1.0")},"result":"REJECTED","message":null}""",
-                """{${testClientSoftwareFields("0.2.0", "0.1.0")},"result":"REJECTED","message":""}""",
-                """{${testClientSoftwareFields("0.2.0", "0.1.0")},"result":"REJECTED","message":"   "}""",
-            )
-            .forEach { completion ->
-                assertTrue(
-                    runCatching {
-                        protocol.decodeCompletion(completion.encodeToByteArray())
-                    }
-                        .isFailure
-                )
-            }
-    }
 }

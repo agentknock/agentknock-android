@@ -93,8 +93,6 @@ internal class GitSigningRequests(
             invocationRequest.clientId != client.clientId ||
                 invocationRequest.deviceIdentityId != client.deviceIdentityId ||
                 invocation.decision != ApprovalDecision.APPROVED.storedName ||
-                invocationRequest.clientSoftwareJson?.let(::decodeStoredClientSoftware) !=
-                    contents.clientSoftware ||
                 !MessageDigest.isEqual(
                     expectedTokenHash,
                     invocationTokenHash(contents.invocationToken),
@@ -888,23 +886,14 @@ internal class GitSigningRequests(
             }
             if (opened == CompletionOpenResult.RetryLater) return@execute false
             val priorError = currentRequest.error
-            val softwareMatches =
-                completionResult?.clientSoftware ==
-                    currentRequest.clientSoftwareJson?.let(::decodeStoredClientSoftware)
             val valid =
                 priorError == null &&
-                    softwareMatches &&
                     when (completionResult) {
                         is ApprovalCompletion.Approved -> {
                             gitSign.decision == ApprovalDecision.APPROVED.storedName
                         }
                         is ApprovalCompletion.Denied -> {
-                            gitSign.decision == ApprovalDecision.DENIED.storedName &&
-                                completionResult.reason ==
-                                    (gitSign.completionReason
-                                        ?: InvocationDenialReason.USER_DENIED.wireName) &&
-                                completionResult.message ==
-                                    (gitSign.completionMessage ?: GIT_SIGN_DENIAL_MESSAGE)
+                            gitSign.decision == ApprovalDecision.DENIED.storedName
                         }
                         is ApprovalCompletion.Aborted -> true
                         null -> false

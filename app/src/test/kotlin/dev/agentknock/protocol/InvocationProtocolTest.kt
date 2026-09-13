@@ -9,7 +9,6 @@ import kotlinx.serialization.json.JsonPrimitive
 import org.junit.Assert.assertArrayEquals
 import org.junit.Assert.assertEquals
 import org.junit.Assert.assertNull
-import org.junit.Assert.assertTrue
 import org.junit.Test
 
 class InvocationProtocolTest {
@@ -65,10 +64,10 @@ class InvocationProtocolTest {
             "AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA=",
             request.operation.executableHash,
         )
-        assertEquals(InvocationExecutableMode.BINARY, request.operation.executableMode)
-        assertEquals(InvocationStreamKind.TERMINAL, request.operation.stdin)
-        assertEquals(InvocationStreamKind.PIPE, request.operation.stdout)
-        assertEquals(InvocationStreamKind.TERMINAL, request.operation.stderr)
+        assertEquals("BINARY", request.operation.executableMode)
+        assertEquals("TERMINAL", request.operation.stdin)
+        assertEquals("PIPE", request.operation.stdout)
+        assertEquals("TERMINAL", request.operation.stderr)
         assertEquals(listOf("sudo", "agentknock"), request.launcherChain)
     }
 
@@ -280,16 +279,6 @@ class InvocationProtocolTest {
     }
 
     @Test(expected = IllegalArgumentException::class)
-    fun `rejects an empty only set`() {
-        decodeWithSecrets("""{"test":{"environment":{"only":[]}}}""")
-    }
-
-    @Test(expected = IllegalArgumentException::class)
-    fun `rejects an empty omit set`() {
-        decodeWithSecrets("""{"test":{"environment":{"omit":[]}}}""")
-    }
-
-    @Test(expected = IllegalArgumentException::class)
     fun `rejects invalid environment names`() {
         decodeWithSecrets("""{"test":{"environment":{"omit":["BAD=NAME"]}}}""")
     }
@@ -315,27 +304,6 @@ class InvocationProtocolTest {
         )
     }
 
-    @Test
-    fun `rejects invalid operation evidence`() {
-        val invalidRequests =
-            listOf(
-                operation(executableHash = "not base64"),
-                operation(executableHash = "AA=="),
-                operation(executableMode = "NATIVE"),
-                operation(stdin = "INHERITED"),
-                operation(stdout = "INHERITED"),
-                operation(stderr = "INHERITED"),
-                operation(launcherChain = listOf("one", "two", "three", "four", "five")),
-            )
-
-        invalidRequests.forEach { request ->
-            assertTrue(
-                "Expected invalid operation evidence to be rejected: $request",
-                runCatching { protocol.decodeRequest(request.encodeToByteArray()) }.isFailure,
-            )
-        }
-    }
-
     private fun decodeWithSecrets(secrets: String): InvocationRequestMessage =
         protocol.decodeRequest(
             """{${testClientSoftwareFields("0.3.0", "0.1.0")},"method":"Invocation","invocation_token":"AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA=","secrets":$secrets,"operation":{"type":"exec","command":"env","arguments":[],"working_directory":"/tmp","executable_path":"/bin/env","executable_mode":"BINARY","stdin":"TERMINAL","stdout":"TERMINAL","stderr":"TERMINAL"},"launcher_chain":[]}"""
@@ -345,15 +313,10 @@ class InvocationProtocolTest {
     private fun operation(
         executableHash: String? = null,
         executableMode: String = "BINARY",
-        stdin: String = "TERMINAL",
-        stdout: String = "TERMINAL",
-        stderr: String = "TERMINAL",
-        launcherChain: List<String> = emptyList(),
         scriptContents: JsonElement? = null,
     ): String {
         val hashMember = executableHash?.let { "\"executable_hash\":\"$it\"," }.orEmpty()
         val scriptMember = scriptContents?.let { "\"script_contents\":$it," }.orEmpty()
-        val launchers = launcherChain.joinToString(prefix = "[", postfix = "]") { "\"$it\"" }
-        return """{${testClientSoftwareFields("0.3.0", "0.1.0")},"method":"Invocation","invocation_token":"AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA=","secrets":{"test":{}},"operation":{"type":"exec","command":"env","arguments":[],"working_directory":"/tmp","executable_path":"/bin/env",$hashMember$scriptMember"executable_mode":"$executableMode","stdin":"$stdin","stdout":"$stdout","stderr":"$stderr"},"launcher_chain":$launchers}"""
+        return """{${testClientSoftwareFields("0.3.0", "0.1.0")},"method":"Invocation","invocation_token":"AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA=","secrets":{"test":{}},"operation":{"type":"exec","command":"env","arguments":[],"working_directory":"/tmp","executable_path":"/bin/env",$hashMember$scriptMember"executable_mode":"$executableMode","stdin":"TERMINAL","stdout":"TERMINAL","stderr":"TERMINAL"},"launcher_chain":[]}"""
     }
 }

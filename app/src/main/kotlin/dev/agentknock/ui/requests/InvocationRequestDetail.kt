@@ -254,9 +254,9 @@ internal fun InvocationRequestDetail(
                 ?.let { DetailValue("Hostname reported by client", it) }
             secretUse.osVersion?.let { DetailValue("OS version", it) }
             secretUse.clientSoftware?.let { software ->
-                DetailValue("Client software", renderSoftware(software.application))
+                renderSoftware(software.application)?.let { DetailValue("Client software", it) }
                 if (software.library != software.application) {
-                    DetailValue("Agentknock library", renderSoftware(software.library))
+                    renderSoftware(software.library)?.let { DetailValue("Agentknock library", it) }
                 }
             }
             secretUse.machineId?.let {

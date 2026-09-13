@@ -84,9 +84,8 @@ internal class ClientRemovalRequests(
             if (current.exchangeEndedAt != null) return@execute true
             if (opened == CompletionOpenResult.RetryLater) return@execute false
 
-            val expectedSoftware = current.clientSoftwareJson?.let(::decodeStoredClientSoftware)
             val priorError = current.error
-            val valid = priorError == null && decoded != null && decoded == expectedSoftware
+            val valid = priorError == null && decoded != null
             val error =
                 priorError ?: CLIENT_REMOVAL_COMPLETION_VERIFICATION_ERROR.takeUnless { valid }
             val now = currentTimeMillis()

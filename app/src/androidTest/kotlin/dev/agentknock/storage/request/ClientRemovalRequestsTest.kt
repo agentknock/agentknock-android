@@ -156,26 +156,6 @@ class ClientRemovalRequestsTest {
     }
 
     @Test
-    fun mismatchedClientSoftwareIsAnInvalidCompletion() = runTest {
-        receive()
-        val request = checkNotNull(database.requestDao().getRequestById(REQUEST_ID))
-
-        assertTrue(
-            requests(audit).complete(request) {
-                CompletionOpenResult.Opened(completionPlaintext(version = "9.9.9"))
-            }
-        )
-
-        val completed = checkNotNull(database.requestDao().getRequestById(REQUEST_ID))
-        assertEquals(COMPLETION_ERROR, completed.error)
-        assertNull(database.requestDao().getRequestPsk(REQUEST_ID))
-        val event = audit.observeEvents().first().single()
-        assertEquals(AuditEventType.CLIENT_REMOVAL_CONFIRMATION_FAILED, event.type)
-        assertEquals(COMPLETION_ERROR, event.detail)
-        assertEquals(NOW, event.occurredAt)
-    }
-
-    @Test
     fun retryLaterLeavesTheExchangeAndRequestPskLive() = runTest {
         receive()
         val before = checkNotNull(database.requestDao().getRequestById(REQUEST_ID))
@@ -202,29 +182,6 @@ class ClientRemovalRequestsTest {
         assertEquals(COMPLETION_ERROR, completed.error)
         assertNotNull(completed.exchangeEndedAt)
         assertNull(database.requestDao().getRequestPsk(REQUEST_ID))
-        assertEquals(
-            AuditEventType.CLIENT_REMOVAL_CONFIRMATION_FAILED,
-            audit.observeEvents().first().single().type,
-        )
-    }
-
-    @Test
-    fun invalidCompletionCannotMatchAMissingStoredSoftwareSnapshot() = runTest {
-        receive()
-        val request = checkNotNull(database.requestDao().getRequestById(REQUEST_ID))
-        assertEquals(
-            1,
-            database.requestDao().updateRequest(request.copy(clientSoftwareJson = null)),
-        )
-
-        assertTrue(
-            requests(audit).complete(request) {
-                CompletionOpenResult.IrrecoverablyInvalid
-            }
-        )
-
-        val completed = checkNotNull(database.requestDao().getRequestById(REQUEST_ID))
-        assertEquals(COMPLETION_ERROR, completed.error)
         assertEquals(
             AuditEventType.CLIENT_REMOVAL_CONFIRMATION_FAILED,
             audit.observeEvents().first().single().type,
@@ -387,11 +344,11 @@ class ClientRemovalRequestsTest {
     private fun requestPlaintext(): ByteArray =
         """{${clientSoftwareFields()},"method":"PairingRemove"}""".encodeToByteArray()
 
-    private fun completionPlaintext(version: String = SOFTWARE_VERSION): ByteArray =
-        """{${clientSoftwareFields(version)}}""".encodeToByteArray()
+    // Authenticated acknowledgements do not need to repeat diagnostic software metadata.
+    private fun completionPlaintext(): ByteArray = "{}".encodeToByteArray()
 
-    private fun clientSoftwareFields(version: String = SOFTWARE_VERSION): String =
-        """"app_info":{"name":"agentknock-cli","version":"$version"},"lib_info":{"name":"agentknock","version":"$version"}"""
+    private fun clientSoftwareFields(): String =
+        """"app_info":{"name":"agentknock-cli","version":"$SOFTWARE_VERSION"},"lib_info":{"name":"agentknock","version":"$SOFTWARE_VERSION"}"""
 
     private class InsertThenFailAuditSink(private val delegate: AuditSink) : AuditSink {
         override suspend fun record(record: AuditRecord) {

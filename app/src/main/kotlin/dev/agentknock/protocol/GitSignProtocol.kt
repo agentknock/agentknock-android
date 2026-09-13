@@ -26,30 +26,17 @@ internal data class GitSignRepository(
 )
 
 @Serializable
-internal sealed interface GitSignHead {
-    @Serializable
-    @SerialName("BRANCH")
-    data class Branch(
-        val name: String,
-        val upstream: String? = null,
-    ) : GitSignHead
-
-    @Serializable @SerialName("DETACHED") data object Detached : GitSignHead
-}
-
-@Serializable
-internal data class GitSignChangedPath(
-    val status: GitSignChangeStatus,
-    val path: String,
+internal data class GitSignHead(
+    val type: String,
+    val name: String? = null,
+    val upstream: String? = null,
 )
 
 @Serializable
-internal enum class GitSignChangeStatus {
-    @SerialName("ADDED") ADDED,
-    @SerialName("DELETED") DELETED,
-    @SerialName("MODIFIED") MODIFIED,
-    @SerialName("TYPE_CHANGED") TYPE_CHANGED,
-}
+internal data class GitSignChangedPath(
+    val status: String,
+    val path: String,
+)
 
 internal class GitSignProtocol(private val json: Json = Json { ignoreUnknownKeys = true }) {
     fun decodeRequest(plaintext: ByteArray): GitSignRequestMessage {
@@ -95,35 +82,20 @@ internal class GitSignProtocol(private val json: Json = Json { ignoreUnknownKeys
 
     fun decodeCompletion(plaintext: ByteArray): ApprovalCompletion {
         val clientSoftware = json.decodeClientSoftware(plaintext)
-        val completion = json.decodeFromString<GitSignResultWire>(plaintext.decodeToString())
+        val completion = json.decodeFromString<ApprovalCompletionWire>(plaintext.decodeToString())
         return when (completion.result) {
-            RESULT_APPROVED -> {
-                if (completion.signature != null) {
-                    throw SerializationException(
-                        "Approved Git signing completion contains a signature"
-                    )
-                }
-                ApprovalCompletion.Approved(clientSoftware)
-            }
+            RESULT_APPROVED -> ApprovalCompletion.Approved(clientSoftware)
             RESULT_DENIED ->
                 ApprovalCompletion.Denied(
                     clientSoftware = clientSoftware,
-                    reason =
-                        completion.reason
-                            ?: throw SerializationException("Denied completion has no reason"),
-                    message =
-                        completion.message
-                            ?: throw SerializationException("Denied completion has no message"),
+                    reason = completion.reason,
+                    message = completion.message,
                 )
             RESULT_ABORTED ->
                 ApprovalCompletion.Aborted(
                     clientSoftware = clientSoftware,
-                    reason =
-                        completion.reason
-                            ?: throw SerializationException("Aborted completion has no reason"),
-                    message =
-                        completion.message
-                            ?: throw SerializationException("Aborted completion has no message"),
+                    reason = completion.reason,
+                    message = completion.message,
                 )
             else -> throw SerializationException("Unsupported Git signing completion result")
         }

@@ -750,6 +750,20 @@ class SecretRepositoryTest {
             mapOf("GH_HOST" to "github.com", "UNRELATED" to "hidden"),
             (omitted.secrets.getValue("github") as SecretValues.Environment).environment,
         )
+
+        // An explicit empty selection must release nothing, rather than behave like no selector.
+        val none =
+            fixture.resolver
+                .resolve(
+                    listOf("github"),
+                    mapOf("github" to EnvironmentVariableSelection(only = emptySet())),
+                    includeValues = true,
+                )
+                .values
+        check(none is RequestedSecretsResult.Available)
+        assertTrue(
+            (none.secrets.getValue("github") as SecretValues.Environment).environment.isEmpty()
+        )
     }
 
     @Test

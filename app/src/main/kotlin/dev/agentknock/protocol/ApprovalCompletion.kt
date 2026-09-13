@@ -1,5 +1,7 @@
 package dev.agentknock.protocol
 
+import kotlinx.serialization.Serializable
+
 internal sealed interface ApprovalCompletion {
     val clientSoftware: ClientSoftware
     val reason: String?
@@ -15,13 +17,20 @@ internal sealed interface ApprovalCompletion {
 
     data class Denied(
         override val clientSoftware: ClientSoftware,
-        override val reason: String,
-        override val message: String,
+        override val reason: String?,
+        override val message: String?,
     ) : ApprovalCompletion
 
     data class Aborted(
         override val clientSoftware: ClientSoftware,
-        override val reason: String,
-        override val message: String,
+        override val reason: String?,
+        override val message: String?,
     ) : ApprovalCompletion
 }
+
+@Serializable
+internal data class ApprovalCompletionWire(
+    val result: String,
+    val reason: String? = null,
+    val message: String? = null,
+)

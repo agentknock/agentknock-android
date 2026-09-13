@@ -565,7 +565,8 @@ class SecretManagementRequestsTest {
             .encodeToByteArray()
 
     private fun uploadCompletionPlaintext(): ByteArray =
-        """{${clientSoftwareFields()},"result":"RECEIVED"}""".encodeToByteArray()
+        // Acknowledgement status is independent of the client's optional diagnostic metadata.
+        """{"result":"RECEIVED","message":"Stored for review."}""".encodeToByteArray()
 
     private fun clientSoftwareFields(): String =
         """"app_info":{"name":"agentknock-cli","version":"0.3.0"},"lib_info":{"name":"agentknock","version":"0.3.0"}"""

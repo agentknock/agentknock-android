@@ -87,11 +87,6 @@ internal class SecretUploadProtocol(private val json: Json = Json { ignoreUnknow
         if (completion.result != RESULT_RECEIVED && completion.result != RESULT_REJECTED) {
             throw SerializationException("Unsupported secret upload completion result")
         }
-        if (completion.result == RESULT_REJECTED) {
-            if (completion.message.isNullOrBlank()) {
-                throw SerializationException("Rejected secret upload completion has no message")
-            }
-        }
         return SecretUploadCompletion(
             clientSoftware = clientSoftware,
             result = completion.result,

@@ -48,12 +48,12 @@ class GitSignProtocolTest {
             GitSignRepository(
                 remote = "github.com/example/project",
                 worktree = "/home/example/project",
-                head = GitSignHead.Branch(name = "main", upstream = "origin/main"),
+                head = GitSignHead(type = "BRANCH", name = "main", upstream = "origin/main"),
                 changedPathCount = 2,
                 changedPaths =
                     listOf(
-                        GitSignChangedPath(GitSignChangeStatus.MODIFIED, "src/main.rs"),
-                        GitSignChangedPath(GitSignChangeStatus.ADDED, "tests/example.rs"),
+                        GitSignChangedPath("MODIFIED", "src/main.rs"),
+                        GitSignChangedPath("ADDED", "tests/example.rs"),
                     ),
             ),
             request.repository,
@@ -74,7 +74,7 @@ class GitSignProtocolTest {
                 """{${testClientSoftwareFields("0.2.0", "0.1.0")},"method":"GitSign","invocation_id":"01K00000000000000000000000","invocation_token":"AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA=","secret":"key","message":"","repository":{"head":{"type":"DETACHED"}}}"""
                     .encodeToByteArray()
             )
-        assertEquals(GitSignHead.Detached, detached.repository?.head)
+        assertEquals(GitSignHead(type = "DETACHED"), detached.repository?.head)
     }
 
     @Test
