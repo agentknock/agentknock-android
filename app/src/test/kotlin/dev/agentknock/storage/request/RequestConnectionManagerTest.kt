@@ -17,6 +17,46 @@ import org.junit.Test
 @OptIn(ExperimentalCoroutinesApi::class)
 class RequestConnectionManagerTest {
     @Test
+    fun `background worker retains review across relay failure and a deferred retry`() = runTest {
+        val finishReview = CompletableDeferred<Unit>()
+        val reviews = AiReviewCoordinator(backgroundScope)
+        var reviewCalls = 0
+        reviews.launch("request", onCompletion = {}) {
+            reviewCalls += 1
+            finishReview.await()
+        }
+        var relayCalls = 0
+        val manager =
+            manager(
+                synchronizeOnce = {
+                    relayCalls += 1
+                    RequestSyncResult.RelayUnavailable("offline", retryAfterMillis = 5_000)
+                },
+                awaitAiReviews = reviews::awaitIdle,
+            )
+        val firstWorker = async { manager.synchronizeOnce() }
+        runCurrent()
+
+        assertEquals(1, relayCalls)
+        assertFalse(firstWorker.isCompleted)
+        // WorkManager may stop a worker. Its cancellation must not cancel or repeat the shared,
+        // already-billed attempt, which may also have a foreground owner by now.
+        firstWorker.cancelAndJoin()
+        assertTrue(reviews.hasActiveReviews)
+        assertFalse(reviews.launch("request", onCompletion = {}) { reviewCalls += 1 })
+
+        val retryWorker = async { manager.synchronizeOnce() }
+        runCurrent()
+        assertFalse(retryWorker.isCompleted)
+        assertEquals(1, relayCalls)
+
+        finishReview.complete(Unit)
+        assertEquals(OneShotSynchronizationResult.Deferred(5_000), retryWorker.await())
+        assertEquals(1, reviewCalls)
+        assertFalse(reviews.hasActiveReviews)
+    }
+
+    @Test
     fun `keeps a caught-up connection open through the background grace period`() = runTest {
         var connections = 0
         var cancellations = 0
@@ -824,6 +864,7 @@ class RequestConnectionManagerTest {
         maximumReconnectDelayMillis: Long = 60_000,
         relayRetryDeadline: RelayRetryDeadline? = null,
         reportInternalFailure: (Exception) -> Unit = {},
+        awaitAiReviews: suspend () -> Unit = {},
     ) =
         RequestConnectionManager(
             scope = backgroundScope,
@@ -836,6 +877,7 @@ class RequestConnectionManagerTest {
             maximumReconnectDelayMillis = maximumReconnectDelayMillis,
             elapsedRealtimeMillis = { testScheduler.currentTime },
             reportInternalFailure = reportInternalFailure,
+            awaitAiReviews = awaitAiReviews,
         )
 
     private fun kotlinx.coroutines.test.TestScope.inMemoryRetryDeadline(): RelayRetryDeadline {

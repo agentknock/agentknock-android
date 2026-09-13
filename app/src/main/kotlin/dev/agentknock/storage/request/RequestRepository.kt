@@ -337,7 +337,7 @@ internal class RequestRepository(
         review: suspend () -> AiReviewAttempt,
         complete: suspend (AiReviewAttempt) -> Unit,
     ): Boolean =
-        aiReviews.launch(requestId) {
+        aiReviews.launch(requestId, onCompletion = ::requestSync) {
             try {
                 val result = review()
                 operationMutex.withLock {
@@ -362,8 +362,6 @@ internal class RequestRepository(
                         requestJson = requestJson,
                     )
                 }
-            } finally {
-                requestSync()
             }
         }
 
@@ -432,41 +430,20 @@ internal class RequestRepository(
         onCaughtUp: suspend () -> Unit,
     ): RequestSyncResult {
         val durableRelayState = DurableRelayState()
-        flushPendingChanges(
-                credentials = credentials,
-                connection = connection,
-                durableRelayState = durableRelayState,
-            )
-            ?.let {
-                return it
-            }
-
         var caughtUp = false
-        while (
-            keepConnected ||
-                !initialSynchronizationComplete(
-                    caughtUp,
-                    durableRelayState,
+        while (true) {
+            flushPendingChanges(
+                    credentials = credentials,
+                    connection = connection,
+                    durableRelayState = durableRelayState,
                 )
-        ) {
-            val input =
-                if (keepConnected) {
-                    select<SynchronizationInput> {
-                        connection.events.onReceiveCatching {
-                            SynchronizationInput.Event(
-                                it.getOrNull()
-                                    ?: RelayDeviceEvent.Failed("Relay event stream ended.")
-                            )
-                        }
-                        pendingChanges.onReceive { SynchronizationInput.PendingChanges }
-                    }
-                } else {
-                    SynchronizationInput.Event(
-                        connection.events.receiveCatching().getOrNull()
-                            ?: RelayDeviceEvent.Failed("Relay event stream ended.")
-                    )
+                ?.let {
+                    return it
                 }
-            if (input == SynchronizationInput.PendingChanges) {
+
+            if (!keepConnected && caughtUp && !aiReviews.hasActiveReviews) {
+                // A review may have committed a response after the first flush. Check idle
+                // before this final flush so neither that response nor its wakeup can be lost.
                 flushPendingChanges(
                         credentials = credentials,
                         connection = connection,
@@ -475,24 +452,23 @@ internal class RequestRepository(
                     ?.let {
                         return it
                     }
-                continue
+                if (durableRelayState.outstanding == null) return RequestSyncResult.Success
             }
+            val input =
+                select<SynchronizationInput> {
+                    connection.events.onReceiveCatching {
+                        SynchronizationInput.Event(
+                            it.getOrNull() ?: RelayDeviceEvent.Failed("Relay event stream ended.")
+                        )
+                    }
+                    pendingChanges.onReceive { SynchronizationInput.PendingChanges }
+                }
+            if (input == SynchronizationInput.PendingChanges) continue
 
             val event = (input as SynchronizationInput.Event).event
             if (event == RelayDeviceEvent.CaughtUp) {
                 if (!caughtUp) onCaughtUp()
                 caughtUp = true
-                // An event immediately before CaughtUp can create follow-up work. Always pump
-                // here so that work is observed even when its conflated notification was already
-                // drained while another durable operation was outstanding.
-                flushPendingChanges(
-                        credentials = credentials,
-                        connection = connection,
-                        durableRelayState = durableRelayState,
-                    )
-                    ?.let {
-                        return it
-                    }
                 pruneExpiredRequestState()
                 continue
             }
@@ -656,7 +632,6 @@ internal class RequestRepository(
             if (failure != null) return failure
             pruneExpiredRequestState()
         }
-        return RequestSyncResult.Success
     }
 
     private suspend fun relayRequestOwnershipMismatch(
@@ -889,11 +864,6 @@ internal class RequestRepository(
         } else {
             RequestSyncResult.RelayRejected(0, message)
         }
-
-    private fun initialSynchronizationComplete(
-        caughtUp: Boolean,
-        durableRelayState: DurableRelayState,
-    ): Boolean = caughtUp && durableRelayState.outstanding == null
 
     private suspend fun applyClientState(event: RelayDeviceEvent.ClientState) {
         // Apply the independently retryable durable-client transaction first. If its audit insert
