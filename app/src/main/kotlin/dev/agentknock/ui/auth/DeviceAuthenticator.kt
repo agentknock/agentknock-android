@@ -21,23 +21,15 @@ internal class DeviceAuthenticator(
 ) {
     private var biometricRequestId: Long? = null
     private var biometricPrompt: BiometricPrompt? = null
-    private var legacyRequestId: Long? = null
 
     private val deviceCredentialLauncher =
         activity.registerForActivityResult(ActivityResultContracts.StartActivityForResult()) {
             result ->
-            val requestId = legacyRequestId ?: return@registerForActivityResult
-            legacyRequestId = null
-            if (result.resultCode == Activity.RESULT_OK) {
-                completeSuccessfully(requestId)
-            } else {
-                completeWithError(requestId, "Authentication was cancelled")
-            }
+            authentication.completeDeviceCredential(result.resultCode)
         }
 
     fun bind(request: DeviceAuthenticationRequest?) {
         if (Build.VERSION.SDK_INT < Build.VERSION_CODES.R) {
-            if (request != null && legacyRequestId == null) legacyRequestId = request.id
             return
         }
         if (request == null) {
@@ -57,7 +49,7 @@ internal class DeviceAuthenticator(
                 bind(request)
                 authenticateWithBiometricPrompt(request)
             } else {
-                if (legacyRequestId != request.id) {
+                if (!authentication.claimDeviceCredential(request)) {
                     completeWithError(
                         request.id,
                         "A previous device authentication is still finishing",
@@ -143,12 +135,10 @@ internal class DeviceAuthenticator(
     }
 
     private fun completeSuccessfully(requestId: Long) {
-        if (legacyRequestId == requestId) legacyRequestId = null
         authentication.succeed(requestId)
     }
 
     private fun completeWithError(requestId: Long, message: String) {
-        if (legacyRequestId == requestId) legacyRequestId = null
         authentication.fail(requestId, message)
     }
 }
@@ -174,6 +164,9 @@ internal class DeviceAuthenticationCoordinator {
 
     private var nextRequestId = 0L
     private var pending: Pending? = null
+    // Activity results can arrive at ON_START, before a recreated host resumes collecting requests.
+    // Keep the launched identity across host recreation and cancellation until its result arrives.
+    private var deviceCredentialRequestId: Long? = null
     private val _request = MutableStateFlow<DeviceAuthenticationRequest?>(null)
 
     val request: StateFlow<DeviceAuthenticationRequest?> = _request.asStateFlow()
@@ -207,6 +200,21 @@ internal class DeviceAuthenticationCoordinator {
         return true
     }
 
+    fun claimDeviceCredential(request: DeviceAuthenticationRequest): Boolean {
+        if (pending?.request != request || deviceCredentialRequestId != null) return false
+        deviceCredentialRequestId = request.id
+        return true
+    }
+
+    fun completeDeviceCredential(resultCode: Int) {
+        val requestId = deviceCredentialRequestId ?: return
+        if (resultCode == Activity.RESULT_OK) {
+            succeed(requestId)
+        } else {
+            fail(requestId, "Authentication was cancelled")
+        }
+    }
+
     fun succeed(requestId: Long) = complete(requestId, DeviceAuthenticationResult.Success)
 
     fun fail(requestId: Long, message: String) =
@@ -219,6 +227,7 @@ internal class DeviceAuthenticationCoordinator {
     }
 
     private fun complete(requestId: Long, result: DeviceAuthenticationResult) {
+        if (deviceCredentialRequestId == requestId) deviceCredentialRequestId = null
         val current = pending ?: return
         if (current.request.id != requestId) return
         pending = null
