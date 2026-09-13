@@ -6,6 +6,8 @@ Kotlin and Jetpack Compose.
 For setup and usage, see [agentknock.dev/docs](https://agentknock.dev/docs/) and
 the [Agentknock CLI repository](https://github.com/agentknock/agentknock-cli).
 
+> Early release · [Share feedback](mailto:agentknock@fulldisclosure.fi)
+
 ## Installation
 
 Requires Android 8.0 or newer. Install from

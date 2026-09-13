@@ -1,8 +1,10 @@
 package dev.agentknock.ui.settings
 
+import android.content.ActivityNotFoundException
 import android.content.ClipData
 import android.content.ClipboardManager
 import android.content.Intent
+import android.net.Uri
 import androidx.compose.foundation.Image
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Column
@@ -16,6 +18,7 @@ import androidx.compose.foundation.lazy.rememberLazyListState
 import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.outlined.ContentCopy
+import androidx.compose.material.icons.outlined.Email
 import androidx.compose.material3.Icon
 import androidx.compose.material3.IconButton
 import androidx.compose.material3.MaterialTheme
@@ -45,6 +48,17 @@ internal fun AboutSettings(
     fun open(label: String, url: String) {
         runCatching { context.startActivity(Intent(Intent.ACTION_VIEW, url.toUri())) }
             .onFailure { report("Could not open $label") }
+    }
+    fun shareFeedback() {
+        val subject =
+            "Agentknock Android feedback — ${BuildConfig.VERSION_NAME} " +
+                "(${BuildConfig.VERSION_CODE}, ${BuildConfig.FLAVOR})"
+        val uri = "mailto:agentknock@fulldisclosure.fi?subject=${Uri.encode(subject)}".toUri()
+        try {
+            context.startActivity(Intent(Intent.ACTION_SENDTO, uri))
+        } catch (_: ActivityNotFoundException) {
+            report("No email app available")
+        }
     }
     Column(modifier) {
         PageTopBar("About Agentknock", onBack)
@@ -80,6 +94,22 @@ internal fun AboutSettings(
                             "Supply environment variables, sign Git commits and tags, or authenticate " +
                             "SSH connections without exposing private keys.",
                         color = MaterialTheme.colorScheme.onSurfaceVariant,
+                    )
+                }
+            }
+            item {
+                SettingsGroup {
+                    SettingsRow(
+                        title = "Share feedback",
+                        onClick = ::shareFeedback,
+                        trailing = {
+                            Icon(
+                                Icons.Outlined.Email,
+                                contentDescription = "Opens email app",
+                                tint = MaterialTheme.colorScheme.onSurfaceVariant,
+                                modifier = Modifier.size(20.dp),
+                            )
+                        },
                     )
                 }
             }
