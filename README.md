@@ -6,10 +6,7 @@ Kotlin and Jetpack Compose.
 For setup and usage, see [agentknock.dev/docs](https://agentknock.dev/docs/) and
 the [Agentknock CLI repository](https://github.com/agentknock/agentknock-cli).
 
-> [!WARNING]
-> Agentknock is an early preview. This documentation describes the intended
-> product, including components that are not yet publicly available. Preview
-> releases provide no backward-compatibility guarantees.
+> Early release · [Share feedback](mailto:agentknock@fulldisclosure.fi)
 
 ## Installation
 
