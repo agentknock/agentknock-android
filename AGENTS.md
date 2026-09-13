@@ -6,6 +6,9 @@
   `docs`, or `chore` when appropriate; do not call tooling changes app features.
 - Write PR titles and descriptions in plain language without Conventional
   Commit prefixes.
+- Describe the final change relative to `master`, its effect on users or
+  maintainers, and relevant validation. Do not narrate the implementation
+  process or where the change came from.
 - Rebase feature branches onto `origin/master`; never merge `master` into them.
   Push rewritten branches with `--force-with-lease`.
 - Increase `agentknockVersionCode` over `master` when a PR changes app sources,
