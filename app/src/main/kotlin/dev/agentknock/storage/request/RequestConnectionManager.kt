@@ -36,6 +36,7 @@ internal class RequestConnectionManager(
     private val listen: suspend (onCaughtUp: () -> Unit) -> RequestSyncResult,
     private val scheduleBackgroundSynchronization: () -> Unit,
     private val relayRetryDeadline: RelayRetryDeadline,
+    private val awaitAiReviews: suspend () -> Unit,
     private val backgroundGracePeriodMillis: Long = BACKGROUND_GRACE_PERIOD_MILLIS,
     private val reconnectDelayMillis: Long = RECONNECT_DELAY_MILLIS,
     private val maximumReconnectDelayMillis: Long = MAXIMUM_RECONNECT_DELAY_MILLIS,
@@ -179,6 +180,17 @@ internal class RequestConnectionManager(
      * immediately instead of waiting behind an existing relay session.
      */
     suspend fun synchronizeOnce(): OneShotSynchronizationResult {
+        val result = synchronizeRelayOnce()
+        if (result != OneShotSynchronizationResult.Covered) {
+            // A broken relay socket or retry deadline must not release the WorkManager owner
+            // while an independent, bounded AI request is still running. Stopping this wait
+            // does not cancel or repeat a shared billable attempt.
+            awaitAiReviews()
+        }
+        return result
+    }
+
+    private suspend fun synchronizeRelayOnce(): OneShotSynchronizationResult {
         val callerJob = checkNotNull(currentCoroutineContext()[Job])
         val session = sessionLock.withLock {
             val retryDelayMillis = relayRetryDeadline.remainingMillis()

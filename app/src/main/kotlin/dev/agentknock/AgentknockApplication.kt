@@ -330,6 +330,7 @@ internal class ApplicationContainer(private val application: Application) {
                 PushSynchronizationWorker.enqueue(application)
             },
             relayRetryDeadline = persistentRelayRetryDeadline(application),
+            awaitAiReviews = aiReviews::awaitIdle,
         )
 
     val deviceSettings =

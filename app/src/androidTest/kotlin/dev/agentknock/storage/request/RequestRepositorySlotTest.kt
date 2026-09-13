@@ -2394,40 +2394,36 @@ class RequestRepositorySlotTest {
                 clientPsk = clientPsk,
                 plaintext = aiInvocationPlaintext(token),
             )
-        val first =
-            connect(
-                requestEvent(AI_INVOCATION_REQUEST_ID, request),
-                RelayDeviceEvent.PushRegistration(RelayPushRegistrationState.REGISTERED),
-                RelayDeviceEvent.CaughtUp,
-                relayState(AI_INVOCATION_REQUEST_ID),
+        val connection = connectInteractively()
+        val synchronization = async { repository.sync() }
+        connection.emit(requestEvent(AI_INVOCATION_REQUEST_ID, request))
+        val acknowledgement =
+            RelayDeviceFrame.Acknowledgement(
+                CLIENT_ID,
+                AI_INVOCATION_REQUEST_ID,
+                RelayMessageKind.REQUEST,
             )
-
-        assertEquals(RequestSyncResult.Success, repository.sync())
-
-        val reviewing = checkNotNull(database.requestDao().getRequestById(AI_INVOCATION_REQUEST_ID))
-        assertEquals(InboxRequestState.REVIEWING.storedName, reviewing.state)
-        assertEquals(1, approvalReviewer.callCount)
         assertEquals(
-            RelayPushRegistrationState.REGISTERED,
-            pushRegistrationState,
+            acknowledgement,
+            awaitAsynchronousWork { connection.nextSentFrame() },
         )
-        assertTrue(
-            first.sentFrames.contains(
-                RelayDeviceFrame.Acknowledgement(
-                    CLIENT_ID,
-                    AI_INVOCATION_REQUEST_ID,
-                    RelayMessageKind.REQUEST,
-                )
-            )
-        )
+        val resume = awaitAsynchronousWork { connection.nextSentFrame() }
+        assertEquals(RelayDeviceFrame.Resume(CLIENT_ID, AI_INVOCATION_REQUEST_ID), resume)
+        connection.resolve(resume)
+        connection.emit(RelayDeviceEvent.CaughtUp)
 
-        connect(
-            relayState(AI_INVOCATION_REQUEST_ID),
-            requestEvent(AI_INVOCATION_REQUEST_ID, request),
-            RelayDeviceEvent.CaughtUp,
+        // Caught-up background work must keep its owner while review is suspended, and continue
+        // handling relay events. Replaying the request must not bill a second review.
+        connection.emit(RelayDeviceEvent.PushRegistration(RelayPushRegistrationState.REGISTERED))
+        connection.emit(requestEvent(AI_INVOCATION_REQUEST_ID, request))
+        assertEquals(
+            acknowledgement,
+            awaitAsynchronousWork { connection.nextSentFrame() },
         )
-        assertEquals(RequestSyncResult.Success, repository.sync())
+        assertEquals(RelayPushRegistrationState.REGISTERED, pushRegistrationState)
         assertEquals(1, approvalReviewer.callCount)
+        assertFalse(synchronization.isCompleted)
+        assertFalse(connection.closed)
         assertEquals(
             InboxRequestState.REVIEWING.storedName,
             database.requestDao().getRequestById(AI_INVOCATION_REQUEST_ID)?.state,
@@ -2459,6 +2455,11 @@ class RequestRepositorySlotTest {
             attackerControlledExplanation,
             reviewed.secretUse?.approvalEvaluation?.aiReview?.explanation,
         )
+        assertEquals(
+            RequestSyncResult.Success,
+            awaitAsynchronousWork { synchronization.await() },
+        )
+        assertTrue(connection.closed)
         val requestAudit =
             AuditRepository(database.auditDao()).observeEvents().first().filter {
                 it.relayRequestId == AI_INVOCATION_REQUEST_ID
@@ -2519,14 +2520,13 @@ class RequestRepositorySlotTest {
                 clientPsk = clientPsk,
                 plaintext = aiInvocationPlaintext(ByteArray(32) { (0x33 + it).toByte() }),
             )
-        connect(
+        synchronizeThenDisconnectDuringReview(
             requestEvent(AI_INVOCATION_REQUEST_ID, request),
             requestEvent(INVOCATION_REQUEST_ID, nextRequest),
             RelayDeviceEvent.CaughtUp,
             relayState(AI_INVOCATION_REQUEST_ID),
             relayState(INVOCATION_REQUEST_ID),
         )
-        assertEquals(RequestSyncResult.Success, repository.sync())
         assertEquals(1, approvalReviewer.callCount)
         assertEquals(2, subscription.statusCalls)
         assertEquals(
@@ -2553,12 +2553,11 @@ class RequestRepositorySlotTest {
                 clientPsk = clientPsk,
                 plaintext = aiInvocationPlaintext(ByteArray(32) { (0x22 + it).toByte() }),
             )
-        connect(
+        synchronizeThenDisconnectDuringReview(
             requestEvent(AI_INVOCATION_REQUEST_ID, request),
             RelayDeviceEvent.CaughtUp,
             relayState(AI_INVOCATION_REQUEST_ID),
         )
-        assertEquals(RequestSyncResult.Success, repository.sync())
         approvalReviewer.complete(
             RelayEndpointResult.Rejected(402, "SUBSCRIPTION_REQUIRED", "Subscription expired")
         )
@@ -2597,12 +2596,11 @@ class RequestRepositorySlotTest {
                 clientPsk = clientPsk,
                 plaintext = aiInvocationPlaintext(token),
             )
-        connect(
+        synchronizeThenDisconnectDuringReview(
             requestEvent(AI_INVOCATION_REQUEST_ID, request),
             RelayDeviceEvent.CaughtUp,
             relayState(AI_INVOCATION_REQUEST_ID),
         )
-        assertEquals(RequestSyncResult.Success, repository.sync())
         val malicious = "relay-controlled-ai-rejection-message"
 
         repeat(4) {
@@ -2656,12 +2654,11 @@ class RequestRepositorySlotTest {
                 clientPsk = clientPsk,
                 plaintext = aiInvocationPlaintext(token),
             )
-        connect(
+        synchronizeThenDisconnectDuringReview(
             requestEvent(AI_INVOCATION_REQUEST_ID, request),
             RelayDeviceEvent.CaughtUp,
             relayState(AI_INVOCATION_REQUEST_ID),
         )
-        assertEquals(RequestSyncResult.Success, repository.sync())
         assertEquals(
             SaveSecretResult.SAVED,
             secrets.saveApprovalMode(secretId, SecretApprovalMode.ASK_ME),
@@ -2705,6 +2702,69 @@ class RequestRepositorySlotTest {
     }
 
     @Test
+    fun aiApprovalFinishesBackgroundSynchronizationAfterDeliveringItsResponse() = runTest {
+        val clientPsk = establishActivePairing()
+        createAiEnvironmentSecret()
+        val request =
+            pairedRequest(
+                requestId = AI_INVOCATION_REQUEST_ID,
+                clientPsk = clientPsk,
+                plaintext = aiInvocationPlaintext(ByteArray(32) { (0x22 + it).toByte() }),
+            )
+        val connection = connectInteractively()
+        val synchronization = async { repository.sync() }
+        connection.emit(requestEvent(AI_INVOCATION_REQUEST_ID, request))
+        assertEquals(
+            RelayDeviceFrame.Acknowledgement(
+                CLIENT_ID,
+                AI_INVOCATION_REQUEST_ID,
+                RelayMessageKind.REQUEST,
+            ),
+            awaitAsynchronousWork { connection.nextSentFrame() },
+        )
+        val resume = awaitAsynchronousWork { connection.nextSentFrame() }
+        assertEquals(RelayDeviceFrame.Resume(CLIENT_ID, AI_INVOCATION_REQUEST_ID), resume)
+        connection.resolve(resume)
+        connection.emit(RelayDeviceEvent.CaughtUp)
+        connection.emit(RelayDeviceEvent.PushRegistration(RelayPushRegistrationState.REGISTERED))
+        awaitAsynchronousWork {
+            while (pushRegistrationState != RelayPushRegistrationState.REGISTERED) delay(1)
+        }
+        assertFalse(synchronization.isCompleted)
+
+        // No further incoming relay event can wake this connection until the response is sent.
+        approvalReviewer.complete(
+            reviewed(
+                decision = RelayApprovalReviewDecision.APPROVE,
+                explanation = "The request follows the supplied instructions.",
+            )
+        )
+        val response = awaitAsynchronousWork { connection.nextSentFrame() }
+        val persisted = checkNotNull(database.requestDao().getRequestById(AI_INVOCATION_REQUEST_ID))
+        assertEquals(
+            RelayDeviceFrame.Response(
+                CLIENT_ID,
+                AI_INVOCATION_REQUEST_ID,
+                Json.parseToJsonElement(checkNotNull(persisted.responseJson)),
+            ),
+            response,
+        )
+        assertFalse(synchronization.isCompleted)
+        assertFalse(persisted.responseOutboxFinished)
+        connection.resolve(response)
+        assertEquals(
+            RequestSyncResult.Success,
+            awaitAsynchronousWork { synchronization.await() },
+        )
+        assertTrue(connection.closed)
+        assertTrue(
+            checkNotNull(database.requestDao().getRequestById(AI_INVOCATION_REQUEST_ID))
+                .responseOutboxFinished
+        )
+        assertEquals(1, approvalReviewer.callCount)
+    }
+
+    @Test
     fun aiApprovalSchedulesAndDeliversItsDurableResponse() = runTest {
         val clientPsk = establishActivePairing()
         createAiEnvironmentSecret()
@@ -2714,12 +2774,11 @@ class RequestRepositorySlotTest {
                 clientPsk = clientPsk,
                 plaintext = aiInvocationPlaintext(ByteArray(32) { (0x22 + it).toByte() }),
             )
-        connect(
+        synchronizeThenDisconnectDuringReview(
             requestEvent(AI_INVOCATION_REQUEST_ID, request),
             RelayDeviceEvent.CaughtUp,
             relayState(AI_INVOCATION_REQUEST_ID),
         )
-        assertEquals(RequestSyncResult.Success, repository.sync())
         val synchronizationsBeforeReview = synchronizationRequests
 
         approvalReviewer.complete(
@@ -2779,12 +2838,11 @@ class RequestRepositorySlotTest {
                 clientPsk = clientPsk,
                 plaintext = aiInvocationPlaintext(ByteArray(32) { (0x23 + it).toByte() }),
             )
-        connect(
+        synchronizeThenDisconnectDuringReview(
             requestEvent(AI_INVOCATION_REQUEST_ID, request),
             RelayDeviceEvent.CaughtUp,
             relayState(AI_INVOCATION_REQUEST_ID),
         )
-        assertEquals(RequestSyncResult.Success, repository.sync())
         assertEquals(
             ClientChangeResult.CHANGED,
             repository.saveClientInstructions(
@@ -2843,12 +2901,11 @@ class RequestRepositorySlotTest {
                 clientPsk = clientPsk,
                 plaintext = aiInvocationPlaintext(ByteArray(32) { (0x26 + it).toByte() }),
             )
-        connect(
+        synchronizeThenDisconnectDuringReview(
             requestEvent(AI_INVOCATION_REQUEST_ID, request),
             RelayDeviceEvent.CaughtUp,
             relayState(AI_INVOCATION_REQUEST_ID),
         )
-        assertEquals(RequestSyncResult.Success, repository.sync())
         assertEquals(
             ClientChangeResult.CHANGED,
             repository.renameClient(CLIENT_ID, "Renamed during review"),
@@ -2889,12 +2946,11 @@ class RequestRepositorySlotTest {
                 clientPsk = clientPsk,
                 plaintext = aiInvocationPlaintext(ByteArray(32) { (0x25 + it).toByte() }),
             )
-        connect(
+        synchronizeThenDisconnectDuringReview(
             requestEvent(AI_INVOCATION_REQUEST_ID, request),
             RelayDeviceEvent.CaughtUp,
             relayState(AI_INVOCATION_REQUEST_ID),
         )
-        assertEquals(RequestSyncResult.Success, repository.sync())
         val changedInstructions = "Never use production credentials for experiments."
         credentialSource.credentials =
             RelayDeviceCredentials(
@@ -2957,12 +3013,11 @@ class RequestRepositorySlotTest {
                 clientPsk = clientPsk,
                 plaintext = aiInvocationPlaintext(ByteArray(32) { (0x24 + it).toByte() }),
             )
-        connect(
+        synchronizeThenDisconnectDuringReview(
             requestEvent(AI_INVOCATION_REQUEST_ID, request),
             RelayDeviceEvent.CaughtUp,
             relayState(AI_INVOCATION_REQUEST_ID),
         )
-        assertEquals(RequestSyncResult.Success, repository.sync())
         assertEquals(
             ClientChangeResult.CHANGED,
             repository.setClientState(CLIENT_ID, RelayClientState.REVOKED),
@@ -4402,6 +4457,14 @@ class RequestRepositorySlotTest {
             Json.decodeFromString<List<SecretMetadata>>(stored.secretDetailsJson).single()
         assertEquals(expectedVariableNames, metadata.environmentVariableNames.sorted())
         assertNull(database.requestDao().getRequestById(AI_INVOCATION_REQUEST_ID)?.responseJson)
+    }
+
+    private suspend fun synchronizeThenDisconnectDuringReview(vararg events: RelayDeviceEvent) {
+        // These tests mutate authorization or resolve AI after the relay owner has disconnected.
+        // A healthy finite synchronization now stays open until its live reviews have finished.
+        val message = "Relay disconnected during AI review"
+        connect(*events, RelayDeviceEvent.Failed(message))
+        assertEquals(RequestSyncResult.RelayUnavailable(message), repository.sync())
     }
 
     private suspend fun <T> awaitAsynchronousWork(block: suspend () -> T): T =

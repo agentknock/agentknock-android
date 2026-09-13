@@ -256,6 +256,11 @@ internal class SubscriptionViewModel(
 private fun SubscriptionUiState.withPlayResult(
     result: PlaySubscriptionQueryResult?
 ): SubscriptionUiState {
+    if (result == null || result == PlaySubscriptionQueryResult.Unavailable) {
+        // A failed query says nothing about existing purchases. Keep their management target
+        // until Play successfully reports that they are no longer owned.
+        return copy(playStore = PlayStoreAvailability.UNAVAILABLE, offers = emptyList())
+    }
     val snapshot = (result as? PlaySubscriptionQueryResult.Success)?.snapshot
     val relevant =
         snapshot
