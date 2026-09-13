@@ -1,10 +1,15 @@
 package dev.agentknock.preview
 
 import android.content.res.Configuration
+import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.fillMaxSize
+import androidx.compose.foundation.layout.padding
+import androidx.compose.foundation.rememberScrollState
+import androidx.compose.foundation.verticalScroll
 import androidx.compose.runtime.Composable
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.tooling.preview.Preview
+import androidx.compose.ui.unit.dp
 import com.android.tools.screenshot.PreviewTest
 import dev.agentknock.protocol.*
 import dev.agentknock.storage.approval.*
@@ -262,6 +267,7 @@ private fun InvocationFailedPreview() = PreviewScreen {
 private fun InvocationPage(
     details: SecretUseRequestDetails,
     state: InboxRequestState = InboxRequestState.ACTION_REQUIRED,
+    scriptInitiallyExpanded: Boolean = false,
 ) {
     InvocationRequestDetail(
         previewRequest(InboxRequestContent.SecretUse(details), state),
@@ -271,6 +277,7 @@ private fun InvocationPage(
         {},
         {},
         Modifier.fillMaxSize(),
+        scriptInitiallyExpanded = scriptInitiallyExpanded,
     )
 }
 
@@ -862,3 +869,153 @@ fun RequestsMultipleSecretsDarkPreview() = PreviewScreen {
 )
 @Composable
 fun InvocationMultipleSecretsDarkPreview() = PreviewScreen { InvocationPage(multiSecretInvocation) }
+
+@PreviewTest
+@Preview(
+    name = "Light",
+    group = "invocation-script",
+    widthDp = 360,
+    heightDp = 800,
+    locale = "en",
+    uiMode = Configuration.UI_MODE_NIGHT_NO,
+)
+@Composable
+fun InvocationScriptLightPreview() = PreviewScreen { InvocationPage(previewScriptInvocation) }
+
+@PreviewTest
+@Preview(
+    name = "Dark",
+    group = "invocation-script",
+    widthDp = 360,
+    heightDp = 800,
+    locale = "en",
+    uiMode = Configuration.UI_MODE_NIGHT_YES,
+)
+@Composable
+fun InvocationScriptDarkPreview() = PreviewScreen { InvocationPage(previewScriptInvocation) }
+
+@PreviewTest
+@Preview(
+    name = "Light",
+    group = "invocation-script-expanded",
+    widthDp = 360,
+    heightDp = 800,
+    locale = "en",
+    uiMode = Configuration.UI_MODE_NIGHT_NO,
+)
+@Composable
+fun InvocationScriptExpandedLightPreview() = PreviewScreen {
+    InvocationPage(previewScriptInvocation, scriptInitiallyExpanded = true)
+}
+
+@PreviewTest
+@Preview(
+    name = "Dark",
+    group = "invocation-script-expanded",
+    widthDp = 360,
+    heightDp = 800,
+    locale = "en",
+    uiMode = Configuration.UI_MODE_NIGHT_YES,
+)
+@Composable
+fun InvocationScriptExpandedDarkPreview() = PreviewScreen {
+    InvocationPage(previewScriptInvocation, scriptInitiallyExpanded = true)
+}
+
+@PreviewTest
+@Preview(
+    name = "Large text",
+    group = "script-contents",
+    widthDp = 360,
+    heightDp = 800,
+    fontScale = 2f,
+    locale = "en",
+    uiMode = Configuration.UI_MODE_NIGHT_YES,
+)
+@Composable
+fun ScriptContentsLargeTextPreview() = PreviewScreen {
+    Column(Modifier.fillMaxSize().verticalScroll(rememberScrollState()).padding(16.dp)) {
+        ScriptContents(
+            requireNotNull(previewScriptInvocation.scriptContents),
+            initiallyExpanded = true,
+        )
+    }
+}
+
+@PreviewTest
+@Preview(
+    name = "Dark",
+    group = "invocation-script-long",
+    widthDp = 360,
+    heightDp = 800,
+    locale = "en",
+    uiMode = Configuration.UI_MODE_NIGHT_YES,
+)
+@Composable
+fun InvocationScriptLongDarkPreview() = PreviewScreen {
+    InvocationPage(previewLongScriptInvocation, scriptInitiallyExpanded = true)
+}
+
+@PreviewTest
+@Preview(
+    name = "Dark",
+    group = "invocation-script-completed",
+    widthDp = 360,
+    heightDp = 800,
+    locale = "en",
+    uiMode = Configuration.UI_MODE_NIGHT_YES,
+)
+@Composable
+fun InvocationScriptCompletedDarkPreview() = PreviewScreen {
+    InvocationPage(
+        previewScriptInvocation.copy(
+            state = ApprovalRequestState.COMPLETED,
+            decision = ApprovalDecision.APPROVED,
+            completionResult = ApprovalCompletionResult.APPROVED,
+        ),
+        state = InboxRequestState.COMPLETED,
+        scriptInitiallyExpanded = true,
+    )
+}
+
+@PreviewTest
+@Preview(
+    name = "Dark",
+    group = "git-sign-script",
+    widthDp = 360,
+    heightDp = 800,
+    locale = "en",
+    uiMode = Configuration.UI_MODE_NIGHT_YES,
+)
+@Composable
+fun GitSignScriptDarkPreview() = PreviewScreen {
+    GitSignPage(
+        previewGitSign.copy(
+            command = "./scripts/commit-fix",
+            arguments = emptyList(),
+            scriptContents = "#!/bin/sh\nset -eu\ngit commit -S\n",
+        )
+    )
+}
+
+@PreviewTest
+@Preview(
+    name = "Dark",
+    group = "ssh-authentication-script",
+    widthDp = 360,
+    heightDp = 800,
+    locale = "en",
+    uiMode = Configuration.UI_MODE_NIGHT_YES,
+)
+@Composable
+fun SshAuthenticationScriptDarkPreview() = PreviewScreen {
+    SshAuthenticationPage(
+        previewAuthentication.copy(
+            command = "./scripts/check-service",
+            arguments = emptyList(),
+            reason = "Check that the service restarted.",
+            scriptContents =
+                "#!/bin/sh\nset -eu\nssh deploy@app-01.prod.example.com 'systemctl status orders-api'\n",
+        )
+    )
+}

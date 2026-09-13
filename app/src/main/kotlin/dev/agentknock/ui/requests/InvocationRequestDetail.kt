@@ -79,6 +79,7 @@ internal fun InvocationRequestDetail(
     onDeny: () -> Unit,
     onAllowTemporarily: () -> Unit,
     modifier: Modifier,
+    scriptInitiallyExpanded: Boolean = false,
 ) {
     val dates = rememberDateTimeFormatter()
     val secretUse = (request.content as InboxRequestContent.SecretUse).details
@@ -166,6 +167,10 @@ internal fun InvocationRequestDetail(
             arguments = secretUse.arguments,
             reason = secretUse.reason,
         )
+
+        secretUse.scriptContents?.let {
+            ScriptContents(it, scriptInitiallyExpanded)
+        }
 
         if (secretUse.state == ApprovalRequestState.APPROVAL_PENDING) {
             val evaluation = secretUse.approvalEvaluation

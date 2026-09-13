@@ -60,7 +60,7 @@ import kotlinx.serialization.json.JsonObject
             SecretUploadSshKeyEntity::class,
             AuditEventEntity::class,
         ],
-    version = 3,
+    version = 4,
     exportSchema = true,
 )
 internal abstract class AgentknockDatabase : RoomDatabase() {
@@ -80,7 +80,7 @@ internal abstract class AgentknockDatabase : RoomDatabase() {
         fun create(context: Context): AgentknockDatabase =
             Room.databaseBuilder(context, AgentknockDatabase::class.java, NAME)
                 .setJournalMode(JournalMode.WRITE_AHEAD_LOGGING)
-                .addMigrations(MIGRATION_1_2, MIGRATION_2_3)
+                .addMigrations(MIGRATION_1_2, MIGRATION_2_3, MIGRATION_3_4)
                 .build()
     }
 }
@@ -101,6 +101,11 @@ internal val MIGRATION_2_3 =
         )
         removeEnvironmentVariableNotes(connection)
         migrateAuditEvents(connection)
+    }
+
+internal val MIGRATION_3_4 =
+    Migration(3, 4) { connection ->
+        connection.execSQL("ALTER TABLE secret_use_requests ADD COLUMN script_contents TEXT")
     }
 
 private fun removeEnvironmentVariableNotes(connection: SQLiteConnection) {

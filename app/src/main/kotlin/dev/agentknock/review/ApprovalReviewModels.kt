@@ -98,6 +98,7 @@ internal data class ApprovalReviewCommandEvidence(
     @SerialName("working_directory") val workingDirectory: String,
     @SerialName("resolved_executable") val resolvedExecutable: String,
     @SerialName("launcher_chain") val launcherChain: List<String>,
+    @SerialName("script_contents") val scriptContents: String? = null,
 )
 
 @Serializable

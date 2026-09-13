@@ -34,6 +34,8 @@ import androidx.compose.ui.semantics.contentDescription
 import androidx.compose.ui.text.font.FontFamily
 import androidx.compose.ui.text.rememberTextMeasurer
 import androidx.compose.ui.unit.dp
+import dev.agentknock.ui.components.Disclosure
+import dev.agentknock.ui.components.ExactText
 import dev.agentknock.ui.components.NoticeTone
 import dev.agentknock.ui.theme.agentknockColors
 
@@ -321,6 +323,17 @@ internal fun TriggeringCommand(
                 color = MaterialTheme.colorScheme.onSurfaceVariant,
             )
         }
+    }
+}
+
+/** Client-reported source is useful context for both the invocation and its derived requests. */
+@Composable
+internal fun ScriptContents(
+    contents: String,
+    initiallyExpanded: Boolean = false,
+) {
+    Disclosure("Script contents", initiallyExpanded = initiallyExpanded) {
+        ExactText(contents)
     }
 }
 

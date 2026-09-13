@@ -56,6 +56,7 @@ internal fun approvalReviewRequest(
                         workingDirectory = contents.operation.workingDirectory,
                         resolvedExecutable = contents.operation.executablePath,
                         launcherChain = contents.launcherChain,
+                        scriptContents = contents.operation.scriptContents,
                     ),
             ),
     )
@@ -139,6 +140,7 @@ internal fun approvalReviewGitSignRequest(
                         workingDirectory = invocation.workingDirectory,
                         resolvedExecutable = invocation.executablePath,
                         launcherChain = decodeStringList(invocation.launcherChainJson),
+                        scriptContents = invocation.scriptContents,
                     ),
             ),
     )
@@ -201,6 +203,7 @@ internal fun approvalReviewSshAuthenticationRequest(
                         workingDirectory = invocation.workingDirectory,
                         resolvedExecutable = invocation.executablePath,
                         launcherChain = decodeStringList(invocation.launcherChainJson),
+                        scriptContents = invocation.scriptContents,
                     ),
             ),
     )
