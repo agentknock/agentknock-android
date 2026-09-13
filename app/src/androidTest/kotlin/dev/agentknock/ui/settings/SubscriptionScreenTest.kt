@@ -19,7 +19,8 @@ class SubscriptionScreenTest {
     @get:Rule val compose = createComposeRule()
 
     @Test
-    fun anUnavailableStatusDoesNotClaimTheSubscriptionNeedsAttentionOrOfferAnotherPurchase() {
+    fun unavailableAccessKeepsCancellationWithoutOfferingAnotherPurchase() {
+        var managed: String? = null
         compose.setContent {
             AgentknockTheme {
                 SubscriptionAndBillingScreen(
@@ -27,11 +28,12 @@ class SubscriptionScreenTest {
                         SubscriptionUiState(
                             access = AiReviewAccess.UNAVAILABLE,
                             googlePlayPurchase = GooglePlayPurchaseState.PURCHASED,
+                            googlePlayProductId = GOOGLE_PLAY_SUBSCRIPTION_PRODUCT_ID,
                         ),
                     onBack = {},
                     onRefresh = {},
                     onSubscribe = {},
-                    onManageSubscription = {},
+                    onManageSubscription = { managed = it },
                     onOpenSecrets = {},
                 )
             }
@@ -39,6 +41,8 @@ class SubscriptionScreenTest {
         compose.onNodeWithText("Status unavailable").assertIsDisplayed()
         compose.onNodeWithText("Subscription needs attention").assertDoesNotExist()
         compose.onNodeWithText("Subscribe").assertDoesNotExist()
+        compose.onNodeWithText("Manage in Google Play").performScrollTo().performClick()
+        assertEquals(GOOGLE_PLAY_SUBSCRIPTION_PRODUCT_ID, managed)
     }
 
     @Test
@@ -115,7 +119,11 @@ class SubscriptionScreenTest {
         compose.setContent {
             AgentknockTheme {
                 SubscriptionAndBillingScreen(
-                    state = SubscriptionUiState(access = AiReviewAccess.ACTIVE),
+                    state =
+                        SubscriptionUiState(
+                            access = AiReviewAccess.ACTIVE,
+                            playStore = PlayStoreAvailability.NOT_SUPPORTED,
+                        ),
                     onBack = {},
                     onRefresh = {},
                     onSubscribe = {},
@@ -211,27 +219,57 @@ class SubscriptionScreenTest {
     }
 
     @Test
-    fun activePlaySubscriptionProvidesCancellationManagement() {
-        var managed: String? = null
+    fun playManagementRemainsAvailableDuringRefreshAndStoreOutages() {
+        val managed = mutableListOf<String?>()
+        val state =
+            mutableStateOf(
+                SubscriptionUiState(
+                    access = AiReviewAccess.ACTIVE,
+                    playStore = PlayStoreAvailability.AVAILABLE,
+                    googlePlayPurchase = GooglePlayPurchaseState.PURCHASED,
+                    googlePlayProductId = GOOGLE_PLAY_SUBSCRIPTION_PRODUCT_ID,
+                )
+            )
         compose.setContent {
             AgentknockTheme {
                 SubscriptionAndBillingScreen(
-                    state =
-                        SubscriptionUiState(
-                            access = AiReviewAccess.ACTIVE,
-                            googlePlayPurchase = GooglePlayPurchaseState.PURCHASED,
-                            googlePlayProductId = GOOGLE_PLAY_SUBSCRIPTION_PRODUCT_ID,
-                        ),
+                    state = state.value,
                     onBack = {},
                     onRefresh = {},
                     onSubscribe = {},
-                    onManageSubscription = { managed = it },
+                    onManageSubscription = { managed += it },
                     onOpenSecrets = {},
                 )
             }
         }
         compose.onNodeWithText("Manage in Google Play").performScrollTo().performClick()
-        assertEquals(GOOGLE_PLAY_SUBSCRIPTION_PRODUCT_ID, managed)
         compose.onNodeWithText("Start free trial").assertDoesNotExist()
+
+        compose.runOnIdle { state.value = state.value.copy(refreshing = true) }
+        compose.onNodeWithText("Manage in Google Play").performScrollTo().performClick()
+
+        compose.runOnIdle {
+            state.value =
+                state.value.copy(
+                    refreshing = false,
+                    playStore = PlayStoreAvailability.UNAVAILABLE,
+                    statusUnavailable = true,
+                )
+        }
+        compose.onNodeWithText("Manage in Google Play").performScrollTo().performClick()
+        assertEquals(List(3) { GOOGLE_PLAY_SUBSCRIPTION_PRODUCT_ID }, managed)
+
+        // On a cold start during an outage there may be no cached product ID. The generic Play
+        // subscriptions center must still be reachable so the customer can cancel there.
+        compose.runOnIdle {
+            state.value =
+                SubscriptionUiState(
+                    access = AiReviewAccess.UNAVAILABLE,
+                    playStore = PlayStoreAvailability.UNAVAILABLE,
+                )
+        }
+        compose.onNodeWithText("Manage in Google Play").performScrollTo().performClick()
+        assertEquals(4, managed.size)
+        assertEquals(null, managed.last())
     }
 }

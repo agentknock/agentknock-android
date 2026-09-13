@@ -162,8 +162,12 @@ internal fun SettingsScreen(
                                 "https://play.google.com/store/account/subscriptions"
                                     .toUri()
                                     .buildUpon()
-                                    .appendQueryParameter("sku", productId)
-                                    .appendQueryParameter("package", context.packageName)
+                                    .apply {
+                                        if (productId != null) {
+                                            appendQueryParameter("sku", productId)
+                                            appendQueryParameter("package", context.packageName)
+                                        }
+                                    }
                                     .build()
                             runCatching {
                                 context.startActivity(Intent(Intent.ACTION_VIEW, uri))

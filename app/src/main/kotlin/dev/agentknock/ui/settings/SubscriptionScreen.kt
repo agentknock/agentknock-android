@@ -48,7 +48,7 @@ internal fun SubscriptionAndBillingScreen(
     onBack: () -> Unit,
     onRefresh: () -> Unit,
     onSubscribe: (PlaySubscriptionOfferId) -> Unit,
-    onManageSubscription: (String) -> Unit,
+    onManageSubscription: (String?) -> Unit,
     onOpenSecrets: () -> Unit,
     modifier: Modifier = Modifier,
     scrollState: ScrollState = rememberScrollState(),
@@ -142,27 +142,14 @@ internal fun SubscriptionAndBillingScreen(
                             },
                         icon = { Icon(Icons.Outlined.HourglassTop, contentDescription = null) },
                     )
-                active ->
-                    state.googlePlayProductId?.let { productId ->
-                        ManageSubscriptionButton(
-                            onClick = { onManageSubscription(productId) },
-                            enabled = !busy,
-                        )
-                    }
-                state.googlePlayPurchase == GooglePlayPurchaseState.PURCHASED -> {
+                active -> Unit
+                state.googlePlayPurchase == GooglePlayPurchaseState.PURCHASED ->
                     PurchaseStatusCard(
                         title = "Subscription needs attention",
                         body =
                             "Google Play reports a subscription, but AI review access is not active.",
                         icon = { Icon(Icons.Outlined.CloudOff, contentDescription = null) },
                     )
-                    state.googlePlayProductId?.let { productId ->
-                        ManageSubscriptionButton(
-                            onClick = { onManageSubscription(productId) },
-                            enabled = !busy,
-                        )
-                    }
-                }
                 state.access == AiReviewAccess.SETUP_REQUIRED ->
                     StoreStatus("Finish device setup before subscribing.", attention = true)
                 state.playStore == PlayStoreAvailability.NOT_SUPPORTED ->
@@ -198,6 +185,17 @@ internal fun SubscriptionAndBillingScreen(
                         )
                     }
                 }
+            }
+
+            // Managing a purchase must not depend on a successful access check or refresh.
+            if (
+                state.playStore != PlayStoreAvailability.NOT_SUPPORTED &&
+                    (state.googlePlayProductId != null ||
+                        state.playStore == PlayStoreAvailability.UNAVAILABLE)
+            ) {
+                ManageSubscriptionButton(
+                    onClick = { onManageSubscription(state.googlePlayProductId) }
+                )
             }
 
             ServiceDocumentLinks()
@@ -316,8 +314,8 @@ private fun PurchaseStatusCard(
 }
 
 @Composable
-private fun ManageSubscriptionButton(onClick: () -> Unit, enabled: Boolean) {
-    OutlinedButton(onClick = onClick, enabled = enabled, modifier = Modifier.fillMaxWidth()) {
+private fun ManageSubscriptionButton(onClick: () -> Unit) {
+    OutlinedButton(onClick = onClick, modifier = Modifier.fillMaxWidth()) {
         Icon(Icons.AutoMirrored.Outlined.OpenInNew, contentDescription = null)
         Spacer(Modifier.size(8.dp))
         Text("Manage in Google Play")

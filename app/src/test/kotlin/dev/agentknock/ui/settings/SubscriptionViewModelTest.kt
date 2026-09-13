@@ -75,27 +75,69 @@ class SubscriptionViewModelTest {
 
     @OptIn(ExperimentalCoroutinesApi::class)
     @Test
-    fun `restores a purchased subscription through the relay`() = runTest {
-        val fixture = Fixture(UnconfinedTestDispatcher(testScheduler))
-        try {
-            fixture.billing.queryResult = queryResult(PlayPurchaseState.PURCHASED)
-            fixture.relay.googlePlayResult =
-                RelayEndpointResult.Success(RelaySubscriptionStatus(active = true))
+    fun `restores a purchase and retains its management target until Play confirms removal`() =
+        runTest {
+            val fixture = Fixture(UnconfinedTestDispatcher(testScheduler))
+            try {
+                fixture.billing.queryResult = queryResult(PlayPurchaseState.PURCHASED)
+                fixture.relay.googlePlayResult =
+                    RelayEndpointResult.Success(RelaySubscriptionStatus(active = true))
 
-            fixture.viewModel.refresh()
-            runCurrent()
+                fixture.viewModel.refresh()
+                runCurrent()
 
-            assertEquals(PURCHASE_TOKEN, fixture.relay.googlePlayPurchase)
-            assertEquals(0, fixture.relay.statusCalls)
-            assertEquals(AiReviewAccess.ACTIVE, fixture.viewModel.state.value.access)
-            assertEquals(
-                GooglePlayPurchaseState.PURCHASED,
-                fixture.viewModel.state.value.googlePlayPurchase,
-            )
-        } finally {
-            fixture.close()
+                assertEquals(PURCHASE_TOKEN, fixture.relay.googlePlayPurchase)
+                assertEquals(0, fixture.relay.statusCalls)
+                assertEquals(AiReviewAccess.ACTIVE, fixture.viewModel.state.value.access)
+                assertEquals(
+                    GooglePlayPurchaseState.PURCHASED,
+                    fixture.viewModel.state.value.googlePlayPurchase,
+                )
+                assertEquals(
+                    GOOGLE_PLAY_SUBSCRIPTION_PRODUCT_ID,
+                    fixture.viewModel.state.value.googlePlayProductId,
+                )
+
+                fixture.billing.queryResult = PlaySubscriptionQueryResult.Unavailable
+                fixture.relay.statusResult = RelayEndpointResult.InvalidResponse
+                fixture.viewModel.refresh()
+                runCurrent()
+
+                assertEquals(
+                    PlayStoreAvailability.UNAVAILABLE,
+                    fixture.viewModel.state.value.playStore,
+                )
+                assertEquals(
+                    GooglePlayPurchaseState.PURCHASED,
+                    fixture.viewModel.state.value.googlePlayPurchase,
+                )
+                assertEquals(
+                    GOOGLE_PLAY_SUBSCRIPTION_PRODUCT_ID,
+                    fixture.viewModel.state.value.googlePlayProductId,
+                )
+
+                // An account change or expiration can remove the purchase. A successful empty query
+                // must replace the cached ownership, unlike an outage.
+                fixture.billing.queryResult =
+                    PlaySubscriptionQueryResult.Success(
+                        PlaySubscriptionSnapshot(
+                            purchases = emptyList(),
+                            offers = emptyList(),
+                            offersAvailable = true,
+                        )
+                    )
+                fixture.viewModel.refresh()
+                runCurrent()
+
+                assertEquals(
+                    GooglePlayPurchaseState.NONE,
+                    fixture.viewModel.state.value.googlePlayPurchase,
+                )
+                assertEquals(null, fixture.viewModel.state.value.googlePlayProductId)
+            } finally {
+                fixture.close()
+            }
         }
-    }
 
     @OptIn(ExperimentalCoroutinesApi::class)
     @Test
