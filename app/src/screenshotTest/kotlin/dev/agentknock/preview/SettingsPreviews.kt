@@ -757,7 +757,7 @@ private fun AboutDevicePreview() = PreviewScreen {
         {},
         {},
         Modifier.fillMaxSize(),
-        listState = rememberLazyListState(2),
+        listState = rememberLazyListState(3),
     )
 }
 
@@ -940,8 +940,8 @@ fun SubscriptionActiveFooterDarkPreview() = SubscriptionActivePreview(atBottom =
 @Composable
 fun SubscriptionActiveFooterLargeTextPreview() = SubscriptionActivePreview(atBottom = true)
 
-// Start at the Links section to review the added service row without relying on
-// whether the About header happens to fit above it at a particular font scale.
+// Start at the actions to review feedback and links without relying on whether
+// the About header fits above them at a particular font scale.
 
 @PreviewTest
 @Preview(
