@@ -76,7 +76,6 @@
     <string name="edit_sensitive_value">Edit %1$s</string>
     <string name="copy_sensitive_value">Copy %1$s</string>
     <string name="copied_to_clipboard">Copied %1$s to the clipboard</string>
-    <string name="sensitive_copied_to_clipboard">Copied %1$s; clipboard clears in 60 seconds</string>
     <string name="corrupted_value">The stored value could not be authenticated</string>
     <string name="unsupported_value">The stored value uses an unsupported encryption format</string>
     <string name="missing_value">That environment variable no longer exists</string>

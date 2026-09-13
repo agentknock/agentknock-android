@@ -5,9 +5,6 @@ package dev.agentknock.ui.secrets
 import android.content.ClipData
 import android.content.ClipboardManager
 import android.content.Context
-import android.os.Build
-import android.os.Handler
-import android.os.Looper
 import android.os.PersistableBundle
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
@@ -54,7 +51,6 @@ import dev.agentknock.storage.secret.SshKeyAlgorithm
 import dev.agentknock.subscription.AiReviewAccess
 import dev.agentknock.ui.components.AdaptiveListDetail
 import dev.agentknock.ui.components.ProseEditorScreen
-import java.util.UUID
 import kotlinx.coroutines.flow.collectLatest
 import kotlinx.coroutines.launch
 
@@ -113,16 +109,7 @@ internal fun SecretsScreen(
         val pending = clipboard ?: return@LaunchedEffect
         copyToClipboard(context, pending.label, pending.value, pending.sensitive)
         viewModel.consumeClipboard(pending)
-        snackbar.showSnackbar(
-            resources.getString(
-                if (pending.sensitive) {
-                    R.string.sensitive_copied_to_clipboard
-                } else {
-                    R.string.copied_to_clipboard
-                },
-                pending.label,
-            )
-        )
+        snackbar.showSnackbar(resources.getString(R.string.copied_to_clipboard, pending.label))
     }
 
     if (editingGeneralInstructions) {
@@ -389,36 +376,12 @@ private fun copyToClipboard(
     sensitive: Boolean,
 ) {
     val clip = ClipData.newPlainText(label, value)
-    var sensitiveClipId: String? = null
     if (sensitive) {
-        sensitiveClipId = UUID.randomUUID().toString()
         clip.description.extras =
             PersistableBundle().apply {
                 putBoolean("android.content.extra.IS_SENSITIVE", true)
-                putString(SENSITIVE_CLIP_ID, sensitiveClipId)
             }
     }
     val clipboard = context.getSystemService(Context.CLIPBOARD_SERVICE) as ClipboardManager
     clipboard.setPrimaryClip(clip)
-    sensitiveClipId?.let { clipId ->
-        Handler(Looper.getMainLooper())
-            .postDelayed(
-                {
-                    if (
-                        clipboard.primaryClipDescription?.extras?.getString(SENSITIVE_CLIP_ID) ==
-                            clipId
-                    ) {
-                        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.P) {
-                            clipboard.clearPrimaryClip()
-                        } else {
-                            clipboard.setPrimaryClip(ClipData.newPlainText("", ""))
-                        }
-                    }
-                },
-                SENSITIVE_CLIP_LIFETIME_MILLIS,
-            )
-    }
 }
-
-private const val SENSITIVE_CLIP_ID = "dev.agentknock.clipboard.ID"
-private const val SENSITIVE_CLIP_LIFETIME_MILLIS = 60_000L
