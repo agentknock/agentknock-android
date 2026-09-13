@@ -1,15 +1,12 @@
 package dev.agentknock.review
 
 import dev.agentknock.protocol.ClientSoftware
-import dev.agentknock.protocol.GitSignChangeStatus
 import dev.agentknock.protocol.GitSignChangedPath
 import dev.agentknock.protocol.GitSignHead
 import dev.agentknock.protocol.GitSignRepository
 import dev.agentknock.protocol.GitSignRequestMessage
 import dev.agentknock.protocol.InvocationExecOperation
-import dev.agentknock.protocol.InvocationExecutableMode
 import dev.agentknock.protocol.InvocationRequestMessage
-import dev.agentknock.protocol.InvocationStreamKind
 import dev.agentknock.protocol.SoftwareInfo
 import dev.agentknock.protocol.SshAuthenticationMessageDetails
 import dev.agentknock.protocol.SshAuthenticationMethod
@@ -58,11 +55,11 @@ class ApprovalReviewContextTest {
                                 workingDirectory = "/work/infrastructure",
                                 executablePath = "/work/infrastructure/inspect.sh",
                                 executableHash = "not-useful-to-the-reviewer",
-                                executableMode = InvocationExecutableMode.SCRIPT,
+                                executableMode = "SCRIPT",
                                 scriptContents = SCRIPT_CONTENTS,
-                                stdin = InvocationStreamKind.TERMINAL,
-                                stdout = InvocationStreamKind.PIPE,
-                                stderr = InvocationStreamKind.TERMINAL,
+                                stdin = "TERMINAL",
+                                stdout = "PIPE",
+                                stderr = "TERMINAL",
                             ),
                         launcherChain = listOf("/bin/bash", "/bin/codex"),
                     ),
@@ -293,16 +290,21 @@ class ApprovalReviewContextTest {
                             GitSignRepository(
                                 remote = "github.com/example/project",
                                 worktree = "/home/example/project",
-                                head = GitSignHead.Branch("main", "origin/main"),
+                                head =
+                                    GitSignHead(
+                                        type = "BRANCH",
+                                        name = "main",
+                                        upstream = "origin/main",
+                                    ),
                                 changedPathCount = 2,
                                 changedPaths =
                                     listOf(
                                         GitSignChangedPath(
-                                            GitSignChangeStatus.MODIFIED,
+                                            "MODIFIED",
                                             "src/main.rs",
                                         ),
                                         GitSignChangedPath(
-                                            GitSignChangeStatus.ADDED,
+                                            "ADDED",
                                             "src/main_test.rs",
                                         ),
                                     ),

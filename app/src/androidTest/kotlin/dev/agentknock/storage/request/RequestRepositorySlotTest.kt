@@ -3773,40 +3773,6 @@ class RequestRepositorySlotTest {
     }
 
     @Test
-    fun invalidGitCompletionDoesNotRetainDecodedClientFields() = runTest {
-        val invocation = establishSigningInvocation()
-        val malicious = "raw-invalid-git-client-message"
-        val exchange =
-            pairedExchange(
-                requestId = GIT_SIGN_REQUEST_ID,
-                clientPsk = invocation.clientPsk,
-                requestPlaintext = gitSignPlaintext(invocation.token),
-                completionPlaintext = wrongSoftwareAbortedCompletionPlaintext(malicious),
-            )
-        connect(
-            relayState(INVOCATION_REQUEST_ID),
-            requestEvent(GIT_SIGN_REQUEST_ID, exchange.request),
-            completionEvent(GIT_SIGN_REQUEST_ID, exchange.completion),
-            RelayDeviceEvent.CaughtUp,
-        )
-
-        assertEquals(RequestSyncResult.Success, repository.sync())
-
-        val request = checkNotNull(database.requestDao().getRequestById(GIT_SIGN_REQUEST_ID))
-        assertEquals("Git signing completion could not be verified.", request.error)
-        val signing = checkNotNull(database.requestDao().getGitSignRequest(GIT_SIGN_REQUEST_ID))
-        assertNull(signing.completionResult)
-        assertNull(signing.completionReason)
-        assertNull(signing.completionMessage)
-        val completionAudit =
-            AuditRepository(database.auditDao()).observeEvents().first().single {
-                it.type == AuditEventType.GIT_SIGN_COMPLETED
-            }
-        assertEquals("Git signing completion could not be verified.", completionAudit.detail)
-        assertFalse(checkNotNull(completionAudit.detail).contains(malicious))
-    }
-
-    @Test
     fun deniedSshAuthenticationReplaysExactlyAndAcceptsMatchingCompletion() = runTest {
         val invocation = establishSigningInvocation()
         val exchange =
@@ -4004,48 +3970,6 @@ class RequestRepositorySlotTest {
             ),
             secrets.observeTemporaryAccessGrants().first().map { it.operation }.toSet(),
         )
-    }
-
-    @Test
-    fun invalidSshAuthenticationCompletionDoesNotRetainDecodedClientFields() = runTest {
-        val invocation = establishSigningInvocation()
-        val malicious = "raw-invalid-ssh-client-message"
-        val exchange =
-            pairedExchange(
-                requestId = SSH_AUTHENTICATION_REQUEST_ID,
-                clientPsk = invocation.clientPsk,
-                requestPlaintext = sshAuthenticationPlaintext(invocation.token, invocation.key),
-                completionPlaintext = wrongSoftwareAbortedCompletionPlaintext(malicious),
-            )
-        connect(
-            relayState(INVOCATION_REQUEST_ID),
-            requestEvent(SSH_AUTHENTICATION_REQUEST_ID, exchange.request),
-            completionEvent(SSH_AUTHENTICATION_REQUEST_ID, exchange.completion),
-            RelayDeviceEvent.CaughtUp,
-        )
-
-        assertEquals(RequestSyncResult.Success, repository.sync())
-
-        val request =
-            checkNotNull(database.requestDao().getRequestById(SSH_AUTHENTICATION_REQUEST_ID))
-        assertEquals("SSH authentication completion could not be verified.", request.error)
-        val authentication =
-            checkNotNull(
-                database.requestDao().getSshAuthenticationRequest(SSH_AUTHENTICATION_REQUEST_ID)
-            )
-        assertNull(authentication.completionResult)
-        assertNull(authentication.completionReason)
-        assertNull(authentication.completionMessage)
-        assertNull(authentication.message)
-        val completionAudit =
-            AuditRepository(database.auditDao()).observeEvents().first().single {
-                it.type == AuditEventType.SSH_AUTHENTICATION_COMPLETED
-            }
-        assertEquals(
-            "SSH authentication completion could not be verified.",
-            completionAudit.detail,
-        )
-        assertFalse(checkNotNull(completionAudit.detail).contains(malicious))
     }
 
     @Test
@@ -4781,10 +4705,6 @@ class RequestRepositorySlotTest {
 
     private fun abortedCompletionPlaintext(message: String): ByteArray =
         """{${clientSoftwareFields()},"result":"ABORTED","reason":"CANCELLED","message":"$message"}"""
-            .encodeToByteArray()
-
-    private fun wrongSoftwareAbortedCompletionPlaintext(message: String): ByteArray =
-        """{"app_info":{"name":"attacker","version":"1"},"lib_info":{"name":"attacker","version":"1"},"result":"ABORTED","reason":"CANCELLED","message":"$message"}"""
             .encodeToByteArray()
 
     private fun deniedSshAuthenticationCompletionPlaintext(): ByteArray =

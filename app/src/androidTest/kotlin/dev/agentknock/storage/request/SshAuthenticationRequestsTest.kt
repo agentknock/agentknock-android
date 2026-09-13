@@ -200,6 +200,10 @@ class SshAuthenticationRequestsTest {
             secretDetailsJson = Json.encodeToString(description.secrets),
             invocationTokenHash = invocationTokenHash(token),
         )
+        // A child process can report different software while retaining the same authenticated
+        // parent.
+        val parent = checkNotNull(database.requestDao().getRequestById(PARENT_ID))
+        database.requestDao().updateRequest(parent.copy(clientSoftwareJson = "{}"))
         val requestId = "ssh-valid-intake"
 
         val processed =
@@ -407,6 +411,8 @@ class SshAuthenticationRequestsTest {
         val key = createAuthenticationSecret(SecretApprovalMode.ASK_ME)
         val description = secrets.describeRequestedSecrets(listOf(SECRET_NAME))
         insertParent(Json.encodeToString(description.secrets))
+        val parent = checkNotNull(database.requestDao().getRequestById(PARENT_ID))
+        database.requestDao().updateRequest(parent.copy(clientSoftwareJson = "{}"))
         val requestId = "ssh-manual-completed-parent"
         receivePending(
             requests(audit),

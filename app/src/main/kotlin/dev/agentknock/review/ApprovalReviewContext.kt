@@ -1,6 +1,5 @@
 package dev.agentknock.review
 
-import dev.agentknock.protocol.GitSignHead
 import dev.agentknock.protocol.GitSignRequestMessage
 import dev.agentknock.protocol.InvocationRequestMessage
 import dev.agentknock.protocol.SshAuthenticationMessageDetails
@@ -108,22 +107,17 @@ internal fun approvalReviewGitSignRequest(
                             worktree = repository.worktree,
                             head =
                                 repository.head?.let { head ->
-                                    when (head) {
-                                        is GitSignHead.Branch ->
-                                            ApprovalReviewGitHeadEvidence(
-                                                type = "BRANCH",
-                                                name = head.name,
-                                                upstream = head.upstream,
-                                            )
-                                        GitSignHead.Detached ->
-                                            ApprovalReviewGitHeadEvidence(type = "DETACHED")
-                                    }
+                                    ApprovalReviewGitHeadEvidence(
+                                        type = head.type,
+                                        name = head.name,
+                                        upstream = head.upstream,
+                                    )
                                 },
                             changedPathCount = repository.changedPathCount,
                             changedPaths =
                                 repository.changedPaths?.map { path ->
                                     ApprovalReviewGitChangedPathEvidence(
-                                        status = path.status.name,
+                                        status = path.status,
                                         path = path.path,
                                     )
                                 },

@@ -103,8 +103,6 @@ internal class SshAuthenticationRequests(
             invocationRequest.clientId != client.clientId ||
                 invocationRequest.deviceIdentityId != client.deviceIdentityId ||
                 invocation.decision != ApprovalDecision.APPROVED.storedName ||
-                invocationRequest.clientSoftwareJson?.let(::decodeStoredClientSoftware) !=
-                    contents.clientSoftware ||
                 !MessageDigest.isEqual(
                     invocation.invocationTokenHash,
                     invocationTokenHash(contents.invocationToken),
@@ -1012,24 +1010,14 @@ internal class SshAuthenticationRequests(
             }
             if (opened == CompletionOpenResult.RetryLater) return@execute false
             val priorError = currentRequest.error
-            val softwareMatches =
-                completionResult?.clientSoftware ==
-                    currentRequest.clientSoftwareJson?.let(::decodeStoredClientSoftware)
             val valid =
                 priorError == null &&
-                    softwareMatches &&
                     when (completionResult) {
                         is ApprovalCompletion.Approved -> {
                             authentication.decision == ApprovalDecision.APPROVED.storedName
                         }
                         is ApprovalCompletion.Denied -> {
-                            authentication.decision == ApprovalDecision.DENIED.storedName &&
-                                completionResult.reason ==
-                                    (authentication.completionReason
-                                        ?: InvocationDenialReason.USER_DENIED.wireName) &&
-                                completionResult.message ==
-                                    (authentication.completionMessage
-                                        ?: SSH_AUTHENTICATION_DENIAL_MESSAGE)
+                            authentication.decision == ApprovalDecision.DENIED.storedName
                         }
                         is ApprovalCompletion.Aborted -> true
                         null -> false
@@ -1411,7 +1399,6 @@ internal class SshAuthenticationRequests(
             parent.kind != RequestKind.SECRET_USE.storedName ||
                 parent.clientId != request.clientId ||
                 parent.deviceIdentityId != request.deviceIdentityId ||
-                parent.clientSoftwareJson != request.clientSoftwareJson ||
                 invocation.decision != ApprovalDecision.APPROVED.storedName
         ) {
             return null

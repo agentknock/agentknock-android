@@ -146,9 +146,9 @@ internal fun SshAuthenticationRequestDetail(
             DetailValue("Signature algorithm", authentication.algorithm.wireName, true)
             authentication.hostKeyAlgorithm?.let { DetailValue("Host-key algorithm", it, true) }
             authentication.clientSoftware?.let { software ->
-                DetailValue("Client software", renderSoftware(software.application))
+                renderSoftware(software.application)?.let { DetailValue("Client software", it) }
                 if (software.library != software.application) {
-                    DetailValue("Agentknock library", renderSoftware(software.library))
+                    renderSoftware(software.library)?.let { DetailValue("Agentknock library", it) }
                 }
             }
             DetailValue("Client ID", authentication.clientId, true)

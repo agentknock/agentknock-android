@@ -327,12 +327,12 @@ private val previewSignedRepository =
     GitSignRepository(
         remote = "git@git.example.com:commerce/orders-api.git",
         worktree = "/home/maya/projects/orders-api",
-        head = GitSignHead.Branch("main", upstream = "origin/main"),
+        head = GitSignHead(type = "BRANCH", name = "main", upstream = "origin/main"),
         changedPathCount = 2,
         changedPaths =
             listOf(
-                GitSignChangedPath(GitSignChangeStatus.MODIFIED, "orders/db.py"),
-                GitSignChangedPath(GitSignChangeStatus.ADDED, "tests/test_db.py"),
+                GitSignChangedPath("MODIFIED", "orders/db.py"),
+                GitSignChangedPath("ADDED", "tests/test_db.py"),
             ),
     )
 

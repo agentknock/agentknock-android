@@ -236,9 +236,9 @@ internal fun PairingRequestDetail(
             pairing.osVersion?.let { DetailValue("OS version", it) }
             pairing.architecture?.let { DetailValue("Architecture", it) }
             pairing.clientSoftware?.let { software ->
-                DetailValue("Client software", renderSoftware(software.application))
+                renderSoftware(software.application)?.let { DetailValue("Client software", it) }
                 if (software.library != software.application) {
-                    DetailValue("Agentknock library", renderSoftware(software.library))
+                    renderSoftware(software.library)?.let { DetailValue("Agentknock library", it) }
                 }
             }
             pairing.machineId?.let {

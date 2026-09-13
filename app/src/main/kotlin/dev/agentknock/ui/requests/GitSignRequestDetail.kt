@@ -6,7 +6,7 @@ import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
-import androidx.compose.foundation.layout.width
+import androidx.compose.foundation.layout.widthIn
 import androidx.compose.foundation.text.selection.SelectionContainer
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.outlined.AccountTree
@@ -33,8 +33,6 @@ import dev.agentknock.presentation.GitSigningContent
 import dev.agentknock.presentation.describeGitSigningContent
 import dev.agentknock.presentation.formatParentRequestAge
 import dev.agentknock.presentation.renderSoftware
-import dev.agentknock.protocol.GitSignChangeStatus
-import dev.agentknock.protocol.GitSignHead
 import dev.agentknock.protocol.GitSignRepository
 import dev.agentknock.protocol.relayRequestTimestamp
 import dev.agentknock.storage.approval.AiReviewDecision
@@ -170,9 +168,9 @@ internal fun GitSignRequestDetail(
                 dates.timestamp(requestedAt, includeSeconds = true),
             )
             signing.clientSoftware?.let { software ->
-                DetailValue("Client software", renderSoftware(software.application))
+                renderSoftware(software.application)?.let { DetailValue("Client software", it) }
                 if (software.library != software.application) {
-                    DetailValue("Agentknock library", renderSoftware(software.library))
+                    renderSoftware(software.library)?.let { DetailValue("Agentknock library", it) }
                 }
             }
             signing.repository?.worktree?.let {
@@ -312,17 +310,16 @@ private fun RepositoryCard(repository: GitSignRepository, clientName: String) {
                             }
                         repository.head?.let { head ->
                             Text(
-                                when (head) {
-                                    is GitSignHead.Branch ->
-                                        buildString {
-                                            append("Branch ")
-                                            append(head.name)
-                                            head.upstream?.let {
-                                                append(" · upstream ")
-                                                append(it)
-                                            }
+                                buildString {
+                                    append(
+                                        when (head.type) {
+                                            "BRANCH" -> "Branch"
+                                            "DETACHED" -> "Detached HEAD"
+                                            else -> "HEAD ${head.type}"
                                         }
-                                    GitSignHead.Detached -> "Detached HEAD"
+                                    )
+                                    head.name?.let { append(" $it") }
+                                    head.upstream?.let { append(" · upstream $it") }
                                 },
                                 style = MaterialTheme.typography.bodyMedium,
                                 color = MaterialTheme.colorScheme.onSurfaceVariant,
@@ -351,12 +348,13 @@ private fun RepositoryCard(repository: GitSignRepository, clientName: String) {
                                 ) {
                                     Text(
                                         when (path.status) {
-                                            GitSignChangeStatus.ADDED -> "A"
-                                            GitSignChangeStatus.DELETED -> "D"
-                                            GitSignChangeStatus.MODIFIED -> "M"
-                                            GitSignChangeStatus.TYPE_CHANGED -> "T"
+                                            "ADDED" -> "A"
+                                            "DELETED" -> "D"
+                                            "MODIFIED" -> "M"
+                                            "TYPE_CHANGED" -> "T"
+                                            else -> path.status
                                         },
-                                        modifier = Modifier.width(16.dp),
+                                        modifier = Modifier.widthIn(min = 16.dp),
                                         style = MaterialTheme.typography.labelMedium,
                                         color = MaterialTheme.colorScheme.primary,
                                         fontFamily = FontFamily.Monospace,

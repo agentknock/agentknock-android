@@ -896,28 +896,14 @@ internal class InvocationRequests(
             }
             if (opened == CompletionOpenResult.RetryLater) return@execute false
             val priorError = currentRequest.error
-            val softwareMatches =
-                completionResult?.clientSoftware ==
-                    currentRequest.clientSoftwareJson?.let(::decodeStoredClientSoftware)
             val valid =
                 priorError == null &&
-                    softwareMatches &&
                     when (completionResult) {
                         is ApprovalCompletion.Approved -> {
                             secretUseRequest.decision == ApprovalDecision.APPROVED.storedName
                         }
                         is ApprovalCompletion.Denied -> {
-                            if (secretUseRequest.decision != ApprovalDecision.DENIED.storedName) {
-                                false
-                            } else {
-                                val expectedReason =
-                                    secretUseRequest.completionReason
-                                        ?: InvocationDenialReason.USER_DENIED.wireName
-                                val expectedMessage =
-                                    secretUseRequest.completionMessage ?: SECRET_USE_DENIAL_MESSAGE
-                                completionResult.reason == expectedReason &&
-                                    completionResult.message == expectedMessage
-                            }
+                            secretUseRequest.decision == ApprovalDecision.DENIED.storedName
                         }
                         is ApprovalCompletion.Aborted -> true
                         null -> false
@@ -959,8 +945,23 @@ internal class InvocationRequests(
                 secretUseRequest =
                     secretUseRequest.copy(
                         completionResult = if (valid) completionResult?.storedResult else null,
-                        completionReason = if (valid) completionResult?.reason else null,
-                        completionMessage = if (valid) completionResult?.message else null,
+                        completionReason =
+                            if (valid && completionResult is ApprovalCompletion.Denied) {
+                                secretUseRequest.completionReason
+                                    ?: InvocationDenialReason.USER_DENIED.wireName
+                            } else if (valid) {
+                                completionResult?.reason
+                            } else {
+                                null
+                            },
+                        completionMessage =
+                            if (valid && completionResult is ApprovalCompletion.Denied) {
+                                secretUseRequest.completionMessage ?: SECRET_USE_DENIAL_MESSAGE
+                            } else if (valid) {
+                                completionResult?.message
+                            } else {
+                                null
+                            },
                     ),
             )
             audit.append(
@@ -1264,11 +1265,11 @@ internal class InvocationRequests(
             workingDirectory = contents.operation.workingDirectory,
             executablePath = contents.operation.executablePath,
             executableHash = contents.operation.executableHash,
-            executableMode = contents.operation.executableMode.wireName,
+            executableMode = contents.operation.executableMode,
             scriptContents = contents.operation.scriptContents,
-            stdinKind = contents.operation.stdin.wireName,
-            stdoutKind = contents.operation.stdout.wireName,
-            stderrKind = contents.operation.stderr.wireName,
+            stdinKind = contents.operation.stdin,
+            stdoutKind = contents.operation.stdout,
+            stderrKind = contents.operation.stderr,
             launcherChainJson = encodeStringList(contents.launcherChain),
             decision = null,
             decisionSource = null,

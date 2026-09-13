@@ -759,9 +759,7 @@ internal class SecretManagementRequests(
             if (current.exchangeEndedAt != null) return@execute true
             if (opened == CompletionOpenResult.RetryLater) return@execute false
             val priorError = current.error
-            val valid =
-                priorError == null &&
-                    decoded == current.clientSoftwareJson?.let(::decodeStoredClientSoftware)
+            val valid = priorError == null && decoded != null
             val error =
                 priorError
                     ?: if (valid) {
@@ -838,13 +836,7 @@ internal class SecretManagementRequests(
                     SecretUploadProtocol.RESULT_REJECTED
                 }
             val priorError = current.error
-            val valid =
-                priorError == null &&
-                    result != null &&
-                    result.clientSoftware ==
-                        current.clientSoftwareJson?.let(::decodeStoredClientSoftware) &&
-                    result.result == expectedResult &&
-                    result.message == upload.intakeError
+            val valid = priorError == null && result != null && result.result == expectedResult
             val error =
                 priorError
                     ?: if (valid) {

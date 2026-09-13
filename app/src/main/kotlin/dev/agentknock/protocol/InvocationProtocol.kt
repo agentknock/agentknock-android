@@ -39,40 +39,12 @@ internal data class InvocationExecOperation(
     val workingDirectory: String,
     val executablePath: String,
     val executableHash: String?,
-    val executableMode: InvocationExecutableMode,
-    val stdin: InvocationStreamKind,
-    val stdout: InvocationStreamKind,
-    val stderr: InvocationStreamKind,
+    val executableMode: String,
+    val stdin: String,
+    val stdout: String,
+    val stderr: String,
     val scriptContents: String? = null,
 )
-
-internal enum class InvocationExecutableMode(val wireName: String) {
-    BINARY("BINARY"),
-    SCRIPT("SCRIPT");
-
-    companion object {
-        fun fromWireName(value: String): InvocationExecutableMode =
-            entries.singleOrNull {
-                it.wireName == value
-            } ?: throw IllegalArgumentException("Unsupported executable mode")
-    }
-}
-
-internal enum class InvocationStreamKind(val wireName: String) {
-    TERMINAL("TERMINAL"),
-    NULL_DEVICE("NULL_DEVICE"),
-    PIPE("PIPE"),
-    SOCKET("SOCKET"),
-    REGULAR_FILE("REGULAR_FILE"),
-    UNKNOWN("UNKNOWN");
-
-    companion object {
-        fun fromWireName(value: String): InvocationStreamKind =
-            entries.singleOrNull {
-                it.wireName == value
-            } ?: throw IllegalArgumentException("Unsupported standard-stream kind")
-    }
-}
 
 internal sealed interface InvocationResponseSecret {
     val description: String
@@ -112,10 +84,6 @@ internal class InvocationProtocol(private val json: Json = Json { ignoreUnknownK
             "An invocation can send only one environment variable to standard input"
         }
         require(request.operation.type == EXEC_OPERATION_TYPE) { "Unsupported operation type" }
-        val executableMode = InvocationExecutableMode.fromWireName(request.operation.executableMode)
-        require(request.launcherChain.size <= MAX_LAUNCHER_CHAIN_LENGTH) {
-            "Launcher chain contains more than $MAX_LAUNCHER_CHAIN_LENGTH entries"
-        }
         val invocationToken = runCatching {
             Base64.getDecoder().decode(request.invocationToken)
         }
@@ -135,11 +103,11 @@ internal class InvocationProtocol(private val json: Json = Json { ignoreUnknownK
                     arguments = request.operation.arguments,
                     workingDirectory = request.operation.workingDirectory,
                     executablePath = request.operation.executablePath,
-                    executableHash = request.operation.executableHash?.let(::decodeExecutableHash),
-                    executableMode = executableMode,
-                    stdin = InvocationStreamKind.fromWireName(request.operation.stdin),
-                    stdout = InvocationStreamKind.fromWireName(request.operation.stdout),
-                    stderr = InvocationStreamKind.fromWireName(request.operation.stderr),
+                    executableHash = request.operation.executableHash,
+                    executableMode = request.operation.executableMode,
+                    stdin = request.operation.stdin,
+                    stdout = request.operation.stdout,
+                    stderr = request.operation.stderr,
                     scriptContents = request.operation.scriptContents,
                 ),
             launcherChain = request.launcherChain,
@@ -178,28 +146,20 @@ internal class InvocationProtocol(private val json: Json = Json { ignoreUnknownK
 
     fun decodeCompletion(plaintext: ByteArray): ApprovalCompletion {
         val clientSoftware = json.decodeClientSoftware(plaintext)
-        val completion = json.decodeFromString<InvocationCompletionWire>(plaintext.decodeToString())
+        val completion = json.decodeFromString<ApprovalCompletionWire>(plaintext.decodeToString())
         return when (completion.result) {
             RESULT_APPROVED -> ApprovalCompletion.Approved(clientSoftware)
             RESULT_DENIED ->
                 ApprovalCompletion.Denied(
                     clientSoftware = clientSoftware,
-                    reason =
-                        completion.reason
-                            ?: throw SerializationException("Denied completion has no reason"),
-                    message =
-                        completion.message
-                            ?: throw SerializationException("Denied completion has no message"),
+                    reason = completion.reason,
+                    message = completion.message,
                 )
             RESULT_ABORTED ->
                 ApprovalCompletion.Aborted(
                     clientSoftware = clientSoftware,
-                    reason =
-                        completion.reason
-                            ?: throw SerializationException("Aborted completion has no reason"),
-                    message =
-                        completion.message
-                            ?: throw SerializationException("Aborted completion has no message"),
+                    reason = completion.reason,
+                    message = completion.message,
                 )
             else -> throw SerializationException("Unsupported invocation completion result")
         }
@@ -214,8 +174,6 @@ internal class InvocationProtocol(private val json: Json = Json { ignoreUnknownK
         private const val RESULT_DENIED = "DENIED"
         private const val RESULT_ABORTED = "ABORTED"
         private const val INVOCATION_TOKEN_BYTES = 32
-        private const val EXECUTABLE_HASH_BYTES = 32
-        private const val MAX_LAUNCHER_CHAIN_LENGTH = 4
     }
 
     private fun InvocationResponseSecret.toWire(): JsonObject = buildJsonObject {
@@ -258,8 +216,7 @@ internal class InvocationProtocol(private val json: Json = Json { ignoreUnknownK
             value as? JsonObject
                 ?: throw IllegalArgumentException("Environment delivery options must be an object")
         val only = options["only"]?.let { decodeEnvironmentNames("only", it) }
-        val omitted = options["omit"]?.let { decodeEnvironmentNames("omit", it) }
-        val omit = omitted.orEmpty()
+        val omit = options["omit"]?.let { decodeEnvironmentNames("omit", it) }.orEmpty()
         val rename = options["rename"]?.let(::decodeEnvironmentRename).orEmpty()
         val stdin =
             options["stdin"]?.let { value ->
@@ -268,8 +225,6 @@ internal class InvocationProtocol(private val json: Json = Json { ignoreUnknownK
                 }
                 value.content.also(::requireValidEnvironmentName)
             }
-        require(only == null || only.isNotEmpty()) { "Secret $secret has an empty only set" }
-        require(omitted == null || omitted.isNotEmpty()) { "Secret $secret has an empty omit set" }
         require(only == null || omit.isEmpty()) { "Secret $secret uses both only and omit" }
         require(only == null || rename.keys.all(only::contains)) {
             "Secret $secret renames a variable not selected by only"
@@ -304,7 +259,6 @@ internal class InvocationProtocol(private val json: Json = Json { ignoreUnknownK
             }
             element.jsonPrimitive.content.also(::requireValidEnvironmentName)
         }
-        require(names.size == names.distinct().size) { "Environment $option contains duplicates" }
         return names.toSet()
     }
 
@@ -325,17 +279,6 @@ internal class InvocationProtocol(private val json: Json = Json { ignoreUnknownK
             }
             destination.content.also(::requireValidEnvironmentName)
         }
-    }
-
-    private fun decodeExecutableHash(value: String): String {
-        val decoded = runCatching {
-            Base64.getDecoder().decode(value)
-        }
-            .getOrElse { throw IllegalArgumentException("Invalid executable hash", it) }
-        require(decoded.size == EXECUTABLE_HASH_BYTES) {
-            "Executable hash must be $EXECUTABLE_HASH_BYTES bytes"
-        }
-        return Base64.getEncoder().encodeToString(decoded)
     }
 }
 
@@ -366,13 +309,6 @@ private data class InvocationOperationWire(
 
 @Serializable
 private data class InvocationResponseWire(
-    val result: String,
-    val reason: String? = null,
-    val message: String? = null,
-)
-
-@Serializable
-private data class InvocationCompletionWire(
     val result: String,
     val reason: String? = null,
     val message: String? = null,
