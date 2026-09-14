@@ -1,0 +1,78 @@
+[
+  {
+    "id": "bip39",
+    "name": "BIP-39 English word list",
+    "artifacts": [],
+    "auditedVersions": {},
+    "license": "MIT License",
+    "licenseFile": "app/src/main/assets/licenses/bip39.txt",
+    "url": "https://github.com/bitcoin/bips/blob/ce1862ac6bcffa1dd20aad858380e51e66e949ea/bip-0039.mediawiki",
+    "sourceUrl": "https://github.com/bitcoin/bips/blob/ce1862ac6bcffa1dd20aad858380e51e66e949ea/bip-0039/english.txt",
+    "version": "ce1862ac6bcf"
+  },
+  {
+    "id": "kotlin-threeten",
+    "name": "ThreeTen code in Kotlin",
+    "artifacts": [
+      "org.jetbrains.kotlin:kotlin-stdlib"
+    ],
+    "auditedVersions": {
+      "org.jetbrains.kotlin:kotlin-stdlib": "2.4.10"
+    },
+    "license": "BSD 3-Clause License",
+    "licenseFile": "licenses/kotlin-threeten.txt",
+    "url": "https://www.threeten.org/",
+    "sourceUrl": "https://github.com/JetBrains/kotlin/tree/v2.4.10/libraries/stdlib/src/kotlin/time",
+    "version": "Kotlin 2.4.10"
+  },
+  {
+    "id": "datastore-protobuf",
+    "name": "Protocol Buffers in AndroidX DataStore",
+    "artifacts": [
+      "androidx.datastore:datastore-preferences-external-protobuf"
+    ],
+    "auditedVersions": {
+      "androidx.datastore:datastore-preferences-external-protobuf": "1.1.7"
+    },
+    "license": "BSD 3-Clause License",
+    "licenseIds": [
+      "BSD-3-Clause"
+    ],
+    "licenseFile": "licenses/datastore-protobuf.txt",
+    "url": "https://protobuf.dev/",
+    "sourceUrl": "https://github.com/protocolbuffers/protobuf/tree/v28.2/java/core",
+    "version": "4.28.2 (DataStore 1.1.7)"
+  },
+  {
+    "id": "okhttp-unicode",
+    "name": "Unicode IDNA data in OkHttp",
+    "artifacts": [
+      "com.squareup.okhttp3:okhttp-android"
+    ],
+    "auditedVersions": {
+      "com.squareup.okhttp3:okhttp-android": "5.4.0"
+    },
+    "license": "Unicode License v3",
+    "licenseFile": "licenses/unicode.txt",
+    "noticeFile": "licenses/okhttp-unicode-notice.txt",
+    "url": "https://www.unicode.org/reports/tr46/",
+    "sourceUrl": "https://github.com/square/okhttp/blob/parent-5.4.0/okhttp-idna-mapping-table/src/main/resources/okhttp3/internal/idna/IdnaMappingTable.txt",
+    "version": "Unicode 15.1.0 (OkHttp 5.4.0)"
+  },
+  {
+    "id": "okhttp-public-suffix-list",
+    "name": "Public Suffix List in OkHttp",
+    "artifacts": [
+      "com.squareup.okhttp3:okhttp-android"
+    ],
+    "auditedVersions": {
+      "com.squareup.okhttp3:okhttp-android": "5.4.0"
+    },
+    "license": "Mozilla Public License 2.0",
+    "licenseFile": "licenses/mpl-2.0.txt",
+    "noticeFile": "licenses/okhttp-public-suffix-list-notice.txt",
+    "url": "https://publicsuffix.org/",
+    "sourceUrl": "https://github.com/square/okhttp/blob/parent-5.4.0/okhttp/src/jvmTest/resources/okhttp3/internal/publicsuffix/public_suffix_list.dat",
+    "version": "2024-11-26 (OkHttp 5.4.0)"
+  }
+]

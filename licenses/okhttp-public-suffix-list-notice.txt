@@ -1,0 +1,17 @@
+Note that public_suffix_list.dat is compiled from The Public Suffix List:
+https://publicsuffix.org/list/public_suffix_list.dat
+
+It is subject to the terms of the Mozilla Public License, v. 2.0:
+https://mozilla.org/MPL/2.0/
+
+// This Source Code Form is subject to the terms of the Mozilla Public
+// License, v. 2.0. If a copy of the MPL was not distributed with this
+// file, You can obtain one at https://mozilla.org/MPL/2.0/.
+
+// Please pull this list from, and only from https://publicsuffix.org/list/public_suffix_list.dat,
+// rather than any other VCS sites. Pulling from any other URL is not guaranteed to be supported.
+
+// VERSION: 2024-11-26_09-06-27_UTC
+// COMMIT: bf32ba1ae6228a185ebf297d636f1c6541149c45
+
+// Instructions on pulling and using this list can be found at https://publicsuffix.org/list/.

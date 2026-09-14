@@ -1,9 +1,15 @@
 import com.google.gms.googleservices.GoogleServicesPlugin.MissingGoogleServicesStrategy
 import com.google.gms.googleservices.GoogleServicesTask
+import com.mikepenz.aboutlibraries.plugin.AboutLibrariesTask
+import com.mikepenz.aboutlibraries.plugin.DuplicateMode
+import groovy.json.JsonOutput
+import javax.inject.Inject
 import org.gradle.api.artifacts.component.ModuleComponentIdentifier
+import org.gradle.process.ExecOperations
 import org.gradle.work.DisableCachingByDefault
 
 plugins {
+    alias(libs.plugins.aboutlibraries)
     alias(libs.plugins.android.application)
     alias(libs.plugins.compose.compiler)
     alias(libs.plugins.compose.screenshot)
@@ -14,7 +20,7 @@ plugins {
     alias(libs.plugins.room3)
 }
 
-val agentknockVersionCode = 68
+val agentknockVersionCode = 69
 val agentknockVersionName =
     providers
         .fileContents(rootProject.layout.projectDirectory.file("version.txt"))
@@ -73,6 +79,74 @@ play {
     useApplicationDefaultCredentials.set(true)
 }
 
+aboutLibraries {
+    // All license text is local or comes from the resolved dependency archives.
+    offlineMode.set(true)
+    collect.includePlatform.set(false)
+    // Preserve coordinates until the runtime inventory has been checked.
+    library.duplicationMode.set(DuplicateMode.KEEP)
+}
+
+abstract class LicenseTools @Inject constructor(val execOperations: ExecOperations)
+
+val licenseTools = objects.newInstance<LicenseTools>()
+val repositoryDirectory = rootProject.layout.projectDirectory.asFile
+val noticeScript = rootProject.file("scripts/dependency_licenses.py")
+
+androidComponents {
+    onVariants { variant ->
+        val runtimeArtifacts =
+            configurations.named("${variant.name}RuntimeClasspath").flatMap {
+                it.incoming.artifacts.resolvedArtifacts
+            }
+        val artifactManifest = runtimeArtifacts.map { artifacts ->
+            artifacts
+                .map { artifact ->
+                    val module = artifact.id.componentIdentifier as ModuleComponentIdentifier
+                    mapOf(
+                        "coordinate" to "${module.group}:${module.module}:${module.version}",
+                        "path" to artifact.file.absolutePath,
+                    )
+                }
+                .sortedBy { it.getValue("coordinate") + it.getValue("path") }
+        }
+        tasks.named<AboutLibrariesTask>(
+            "prepareLibraryDefinitions${variant.name.replaceFirstChar { it.uppercase() }}"
+        ) {
+            inputs.file(noticeScript)
+            inputs.dir(rootProject.file("licenses"))
+            inputs.file(rootProject.file("LICENSE-APACHE"))
+            inputs.file(rootProject.file("app/src/main/assets/licenses/bip39.txt"))
+            inputs.property("noticeArtifacts", artifactManifest)
+            inputs.files(runtimeArtifacts.map { artifacts -> artifacts.map { it.file } })
+            // Enrich the collector's output in the same task, before Android packages it.
+            // These additional inputs participate in Gradle's up-to-date and cache checks.
+            doLast {
+                val manifest = temporaryDir.resolve("artifacts.json")
+                manifest.writeText(JsonOutput.toJson(artifactManifest.get()))
+                val catalogue = outputDirectory.file("raw/aboutlibraries.json").get().asFile
+                licenseTools.execOperations.exec {
+                    commandLine(
+                        "python3",
+                        noticeScript,
+                        "generate",
+                        "--catalogue",
+                        catalogue,
+                        "--artifacts",
+                        manifest,
+                        "--supplements",
+                        repositoryDirectory.resolve("licenses/supplements.json"),
+                        "--root",
+                        repositoryDirectory,
+                        "--output",
+                        catalogue,
+                    )
+                }
+            }
+        }
+    }
+}
+
 // Wire Firebase configuration only into Play variants. Applying the plugin globally
 // would register a Google Services task and generated resources for FOSS as well.
 androidComponents {
@@ -101,6 +175,7 @@ room3 {
 }
 
 dependencies {
+    implementation(libs.aboutlibraries.compose.m3)
     implementation(libs.androidx.activity.compose)
     implementation(libs.androidx.biometric)
     implementation(platform(libs.androidx.compose.bom))

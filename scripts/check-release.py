@@ -9,6 +9,8 @@ import subprocess
 import xml.etree.ElementTree as ET
 import zipfile
 
+from dependency_licenses import verify_archive
+
 
 ROOT = Path(__file__).resolve().parent.parent
 ANDROID = "{http://schemas.android.com/apk/res/android}"
@@ -37,6 +39,10 @@ def main():
 
 
 def verify_artifact(artifact, distribution, bundle, revision, outputs):
+    verify_archive(
+        ROOT / f"app/build/generated/aboutLibraries/{distribution}Release/res/raw/aboutlibraries.json",
+        artifact,
+    )
     if bundle:
         subprocess.run(["bundletool", "validate", f"--bundle={artifact}"], check=True)
         manifest_xml = subprocess.check_output(
