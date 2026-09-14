@@ -1,5 +1,19 @@
 # Changelog
 
+## [0.4.0](https://github.com/agentknock/agentknock-android/compare/v0.3.0...v0.4.0) (2026-09-14)
+
+
+### Features
+
+* add feedback email action to About ([2041571](https://github.com/agentknock/agentknock-android/commit/20415719b331b39cfe46e74e35134e03eb98314c))
+* add offline dependency licenses ([07558ad](https://github.com/agentknock/agentknock-android/commit/07558adcb180a1571113b37b284277369f6d8b80))
+
+
+### Bug Fixes
+
+* **build:** generate dependency licenses on the JVM ([39b8ec6](https://github.com/agentknock/agentknock-android/commit/39b8ec6ec3160fb1e38a6d0af74e28ddfed69fca))
+* give launcher icons more breathing room ([0b17394](https://github.com/agentknock/agentknock-android/commit/0b17394243af5b2f91df55e3c958d5fbfbfbeba0))
+
 ## [0.3.0](https://github.com/agentknock/agentknock-android/compare/v0.2.2...v0.3.0) (2026-09-13)
 
 
