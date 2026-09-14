@@ -36,7 +36,23 @@ def main():
         verify_artifact(outputs / "bundle/playRelease/app-play-release.aab", distribution, True, revision, outputs)
 
 
+def verify_dependency_licenses(catalogue_path, archive_path):
+    expected = Path(catalogue_path).read_bytes()
+    with zipfile.ZipFile(archive_path) as archive:
+        # AAPT2 shortens resource paths in optimized releases (e.g. res/M7.json).
+        # Compare the actual resource payload, independently of its generated name.
+        for entry in archive.infolist():
+            if (entry.filename.startswith(("res/", "base/res/"))
+                    and entry.file_size == len(expected) and archive.read(entry) == expected):
+                return
+    raise ValueError(f"Packaged dependency notices are missing or differ from generated catalogue: {archive_path}")
+
+
 def verify_artifact(artifact, distribution, bundle, revision, outputs):
+    verify_dependency_licenses(
+        ROOT / f"app/build/generated/aboutLibraries/{distribution}Release/res/raw/aboutlibraries.json",
+        artifact,
+    )
     if bundle:
         subprocess.run(["bundletool", "validate", f"--bundle={artifact}"], check=True)
         manifest_xml = subprocess.check_output(

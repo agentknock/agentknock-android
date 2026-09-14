@@ -1,4 +1,5 @@
 plugins {
+    alias(libs.plugins.aboutlibraries) apply false
     alias(libs.plugins.spotless)
     alias(libs.plugins.android.application) apply false
     alias(libs.plugins.compose.compiler) apply false
@@ -12,11 +13,11 @@ plugins {
 
 spotless {
     kotlin {
-        target("app/src/**/*.kt")
+        target("app/src/**/*.kt", "buildSrc/src/**/*.kt")
         ktfmt(libs.versions.ktfmt.get()).kotlinlangStyle()
     }
     kotlinGradle {
-        target("*.gradle.kts", "app/*.gradle.kts")
+        target("*.gradle.kts", "app/*.gradle.kts", "buildSrc/*.gradle.kts")
         ktfmt(libs.versions.ktfmt.get()).kotlinlangStyle()
     }
 }

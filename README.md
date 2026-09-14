@@ -131,3 +131,8 @@ Agentknock for Android is licensed under the [MIT License](LICENSE-MIT) or the
 The bundled BIP-39 English word list retains its
 [MIT license and upstream attribution](app/src/main/assets/licenses/bip39.txt).
 This notice is included in both APK variants and the Play bundle.
+
+The app bundles dependency licenses and notices, available under **About Agentknock →
+Open source licenses**. Builds generate these from each distribution's runtime
+dependencies, embedded notices, and checked-in supplements. See
+[dependency license maintenance](licenses/README.md) when updating packages.

@@ -48,3 +48,11 @@
 - Do not preserve implementation details, cosmetic choices, or test-owned copies
   of production behavior as assertions. Remove redundant cases when another test
   protects the same consequence; keep overlap only when it adds useful evidence.
+
+## Dependency licenses
+
+- When updating dependencies, follow `licenses/README.md`. Inspect upstream
+  license and embedded-component changes and update affected supplements in the
+  same PR. Do not merely advance an audited version to silence a build failure.
+- Keep full original copyright and NOTICE texts. License names, web links, and
+  generic MIT/BSD templates do not replace dependency-specific notices.

@@ -5,6 +5,7 @@ import android.content.ClipData
 import android.content.ClipboardManager
 import android.content.Intent
 import android.net.Uri
+import androidx.activity.compose.BackHandler
 import androidx.compose.foundation.Image
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Column
@@ -25,6 +26,10 @@ import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.Surface
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
+import androidx.compose.runtime.getValue
+import androidx.compose.runtime.mutableStateOf
+import androidx.compose.runtime.saveable.rememberSaveable
+import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.graphics.Color
@@ -43,6 +48,35 @@ internal fun AboutSettings(
     report: (String) -> Unit,
     modifier: Modifier,
     listState: LazyListState = rememberLazyListState(),
+) {
+    var showLicenses by rememberSaveable { mutableStateOf(false) }
+    BackHandler(enabled = showLicenses) { showLicenses = false }
+    if (showLicenses) {
+        OpenSourceLicensesSettings(
+            onBack = { showLicenses = false },
+            report = report,
+            modifier = modifier,
+        )
+    } else {
+        AboutSettingsContent(
+            identity = identity,
+            onBack = onBack,
+            onOpenLicenses = { showLicenses = true },
+            report = report,
+            modifier = modifier,
+            listState = listState,
+        )
+    }
+}
+
+@Composable
+private fun AboutSettingsContent(
+    identity: DeviceIdentity?,
+    onBack: () -> Unit,
+    onOpenLicenses: () -> Unit,
+    report: (String) -> Unit,
+    modifier: Modifier,
+    listState: LazyListState,
 ) {
     val context = LocalContext.current
     fun open(label: String, url: String) {
@@ -170,6 +204,12 @@ internal fun AboutSettings(
                         )
                         SettingsGroupDivider()
                         SettingsValueRow("Developer", "Full Disclosure")
+                        SettingsGroupDivider()
+                        SettingsRow(
+                            title = "Open source licenses",
+                            onClick = onOpenLicenses,
+                            trailing = { SettingsNavigationChevron() },
+                        )
                     }
                 }
             }
