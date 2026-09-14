@@ -2,10 +2,8 @@ import com.google.gms.googleservices.GoogleServicesPlugin.MissingGoogleServicesS
 import com.google.gms.googleservices.GoogleServicesTask
 import com.mikepenz.aboutlibraries.plugin.AboutLibrariesTask
 import com.mikepenz.aboutlibraries.plugin.DuplicateMode
-import groovy.json.JsonOutput
-import javax.inject.Inject
+import dev.agentknock.gradle.DependencyLicenses
 import org.gradle.api.artifacts.component.ModuleComponentIdentifier
-import org.gradle.process.ExecOperations
 import org.gradle.work.DisableCachingByDefault
 
 plugins {
@@ -87,11 +85,7 @@ aboutLibraries {
     library.duplicationMode.set(DuplicateMode.KEEP)
 }
 
-abstract class LicenseTools @Inject constructor(val execOperations: ExecOperations)
-
-val licenseTools = objects.newInstance<LicenseTools>()
 val repositoryDirectory = rootProject.layout.projectDirectory.asFile
-val noticeScript = rootProject.file("scripts/dependency_licenses.py")
 
 androidComponents {
     onVariants { variant ->
@@ -113,7 +107,6 @@ androidComponents {
         tasks.named<AboutLibrariesTask>(
             "prepareLibraryDefinitions${variant.name.replaceFirstChar { it.uppercase() }}"
         ) {
-            inputs.file(noticeScript)
             inputs.dir(rootProject.file("licenses"))
             inputs.file(rootProject.file("LICENSE-APACHE"))
             inputs.file(rootProject.file("app/src/main/assets/licenses/bip39.txt"))
@@ -122,26 +115,8 @@ androidComponents {
             // Enrich the collector's output in the same task, before Android packages it.
             // These additional inputs participate in Gradle's up-to-date and cache checks.
             doLast {
-                val manifest = temporaryDir.resolve("artifacts.json")
-                manifest.writeText(JsonOutput.toJson(artifactManifest.get()))
                 val catalogue = outputDirectory.file("raw/aboutlibraries.json").get().asFile
-                licenseTools.execOperations.exec {
-                    commandLine(
-                        "python3",
-                        noticeScript,
-                        "generate",
-                        "--catalogue",
-                        catalogue,
-                        "--artifacts",
-                        manifest,
-                        "--supplements",
-                        repositoryDirectory.resolve("licenses/supplements.json"),
-                        "--root",
-                        repositoryDirectory,
-                        "--output",
-                        catalogue,
-                    )
-                }
+                DependencyLicenses.generate(catalogue, artifactManifest.get(), repositoryDirectory)
             }
         }
     }

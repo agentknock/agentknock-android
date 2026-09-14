@@ -6,4 +6,4 @@ cd -- "$(dirname -- "${BASH_SOURCE[0]}")/.."
 actionlint -ignore '^unexpected key "queue" for "concurrency" section\.'
 shellcheck preview-ui scripts/check-repository scripts/check-device scripts/install-jsign
 python3 -m unittest discover -s scripts -p 'test_*.py'
-./gradlew --build-cache --max-workers=2 :spotlessCheck :app:verifyFossDependencies
+./gradlew --build-cache --max-workers=2 :spotlessCheck :buildSrc:test :app:verifyFossDependencies

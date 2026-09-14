@@ -13,11 +13,11 @@ plugins {
 
 spotless {
     kotlin {
-        target("app/src/**/*.kt")
+        target("app/src/**/*.kt", "buildSrc/src/**/*.kt")
         ktfmt(libs.versions.ktfmt.get()).kotlinlangStyle()
     }
     kotlinGradle {
-        target("*.gradle.kts", "app/*.gradle.kts")
+        target("*.gradle.kts", "app/*.gradle.kts", "buildSrc/*.gradle.kts")
         ktfmt(libs.versions.ktfmt.get()).kotlinlangStyle()
     }
 }

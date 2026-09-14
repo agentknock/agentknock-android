@@ -6,11 +6,12 @@ These files cover bundled code and data that Maven metadata does not describe
 fully. They are build inputs, not a second dependency inventory.
 
 AboutLibraries collects dependency metadata during each Android variant's build.
-`scripts/dependency_licenses.py` filters that catalogue against the resolved
-runtime archives, imports their original notices (including Google's embedded
-notice bundles), and adds the supplements. It runs without fetching license
-texts from the network. The resulting `aboutlibraries.json` is generated under
-`app/build/`, packaged as a raw resource, and read locally by the app.
+The [Kotlin generator](../buildSrc/src/main/kotlin/dev/agentknock/gradle/DependencyLicenses.kt)
+filters that catalogue against the resolved runtime archives, imports their
+original notices (including Google's embedded notice bundles), and adds the
+supplements. It runs without fetching license texts from the network or requiring
+a separate scripting runtime. The resulting `aboutlibraries.json` is generated
+under `app/build/`, packaged as a raw resource, and read locally by the app.
 
 Every build fails for missing runtime metadata, missing license text, malformed
 embedded notice bundles, or a stale supplement. CI's existing release check
@@ -20,6 +21,9 @@ and, for Play, the AAB. To check an update without compiling the app, run:
 ```sh
 ./gradlew :app:prepareLibraryDefinitionsFossRelease :app:prepareLibraryDefinitionsPlayRelease
 ```
+
+The generator's JVM tests run in `scripts/check-repository` and can be run alone
+with `./gradlew :buildSrc:test`.
 
 These checks cannot discover undisclosed embedded components. The agent making
 a dependency update must inspect upstream license changes in that same PR;
