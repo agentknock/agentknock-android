@@ -32,7 +32,7 @@ import kotlinx.coroutines.withTimeoutOrNull
 @OptIn(ExperimentalCoroutinesApi::class)
 internal class RequestConnectionManager(
     private val scope: CoroutineScope,
-    synchronizeOnce: suspend () -> RequestSyncResult,
+    synchronizeOnce: suspend (onProcessingChanged: (Boolean) -> Unit) -> RequestSyncResult,
     private val listen: suspend (onCaughtUp: () -> Unit) -> RequestSyncResult,
     private val scheduleBackgroundSynchronization: () -> Unit,
     private val relayRetryDeadline: RelayRetryDeadline,
@@ -179,8 +179,10 @@ internal class RequestConnectionManager(
      * returned to durable work without occupying a process-scope job. This method returns
      * immediately instead of waiting behind an existing relay session.
      */
-    suspend fun synchronizeOnce(): OneShotSynchronizationResult {
-        val result = synchronizeRelayOnce()
+    suspend fun synchronizeOnce(
+        onProcessingChanged: (Boolean) -> Unit = {}
+    ): OneShotSynchronizationResult {
+        val result = synchronizeRelayOnce(onProcessingChanged)
         if (result != OneShotSynchronizationResult.Covered) {
             // A broken relay socket or retry deadline must not release the WorkManager owner
             // while an independent, bounded AI request is still running. Stopping this wait
@@ -190,7 +192,9 @@ internal class RequestConnectionManager(
         return result
     }
 
-    private suspend fun synchronizeRelayOnce(): OneShotSynchronizationResult {
+    private suspend fun synchronizeRelayOnce(
+        onProcessingChanged: (Boolean) -> Unit
+    ): OneShotSynchronizationResult {
         val callerJob = checkNotNull(currentCoroutineContext()[Job])
         val session = sessionLock.withLock {
             val retryDelayMillis = relayRetryDeadline.remainingMillis()
@@ -207,7 +211,7 @@ internal class RequestConnectionManager(
                 }
             }
         }
-        return runOneShot(session)
+        return runOneShot(session, onProcessingChanged)
     }
 
     /** Stops new sessions, cancels the current owner, and does not return until it has exited. */
@@ -243,10 +247,22 @@ internal class RequestConnectionManager(
         if (scheduleReconciliation) scheduleBackgroundSynchronization()
     }
 
-    private suspend fun runOneShot(session: ActiveSession): OneShotSynchronizationResult {
+    private suspend fun runOneShot(
+        session: ActiveSession,
+        onProcessingChanged: (Boolean) -> Unit,
+    ): OneShotSynchronizationResult {
         try {
             _syncing.value = true
-            val result = rememberServerRetryDirective(runOperation(synchronizeOnceOperation))
+            val result =
+                rememberServerRetryDirective(
+                    runOperation {
+                        synchronizeOnceOperation { processing ->
+                            _syncing.value = processing
+                            if (!processing) _lastSyncResult.value = RequestSyncResult.Success
+                            onProcessingChanged(processing)
+                        }
+                    }
+                )
             _lastSyncResult.value = result
             if (result == RequestSyncResult.Success) {
                 demand.update { current ->

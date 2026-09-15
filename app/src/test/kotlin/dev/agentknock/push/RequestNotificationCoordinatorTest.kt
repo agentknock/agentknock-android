@@ -24,7 +24,6 @@ class RequestNotificationCoordinatorTest {
             scope = backgroundScope,
             requests = flowOf(first, first, second),
             displayRequests = { displayed += it },
-            displayWake = {},
         )
         runCurrent()
 
@@ -40,7 +39,6 @@ class RequestNotificationCoordinatorTest {
                 scope = backgroundScope,
                 requests = MutableStateFlow(current),
                 displayRequests = { displayed += it },
-                displayWake = {},
             )
         runCurrent()
 
@@ -58,7 +56,6 @@ class RequestNotificationCoordinatorTest {
                 scope = backgroundScope,
                 requests = MutableStateFlow(current),
                 displayRequests = { displayed += it },
-                displayWake = {},
             )
         runCurrent()
 
@@ -84,7 +81,6 @@ class RequestNotificationCoordinatorTest {
                         releaseDisplay.await()
                     }
                 },
-                displayWake = {},
             )
 
         runCurrent()

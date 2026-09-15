@@ -13,7 +13,6 @@ internal class RequestNotificationCoordinator(
     scope: CoroutineScope,
     private val requests: Flow<List<RequestNotification>>,
     private val displayRequests: suspend (List<RequestNotification>) -> Unit,
-    private val displayWake: () -> Unit,
 ) {
     private val mutex = Mutex()
     private var displayedRequests: List<RequestNotification>? = null
@@ -40,8 +39,6 @@ internal class RequestNotificationCoordinator(
             displayIfNeeded(requests.first())
         }
     }
-
-    fun showWake() = displayWake()
 
     suspend fun performAction(action: suspend () -> Unit) {
         mutex.withLock {
