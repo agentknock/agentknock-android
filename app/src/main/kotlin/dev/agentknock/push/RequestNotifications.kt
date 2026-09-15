@@ -8,12 +8,11 @@ import android.content.BroadcastReceiver
 import android.content.Context
 import android.content.Intent
 import android.content.pm.PackageManager
-import android.graphics.Typeface
 import android.net.Uri
 import android.os.Build
 import android.text.SpannableStringBuilder
 import android.text.Spanned
-import android.text.style.StyleSpan
+import android.text.style.TypefaceSpan
 import android.util.Log
 import androidx.work.BackoffPolicy
 import androidx.work.Constraints
@@ -290,8 +289,7 @@ internal object RequestNotifications {
         return Notification.Builder(context, BACKGROUND_CHANNEL_ID)
             .setSmallIcon(R.drawable.ic_notification)
             .setColor(context.getColor(R.color.notification_accent))
-            .setContentTitle(context.getString(R.string.app_name))
-            .setContentText(
+            .setContentTitle(
                 context.getString(
                     when (state) {
                         RequestProcessingState.PROCESSING -> R.string.processing_requests
@@ -332,6 +330,7 @@ internal object RequestNotifications {
                     .setSmallIcon(R.drawable.ic_notification)
                     .setColor(context.getColor(R.color.notification_accent))
                     .setContentTitle(request.title)
+                    .setSubText(request.kindLabel)
                     .setContentText(request.summary)
                     .setStyle(Notification.BigTextStyle().bigText(styledDetails(request.details)))
                     .setContentIntent(openRequest)
@@ -416,19 +415,24 @@ internal object RequestNotifications {
     private fun styledDetails(details: List<RequestNotificationDetail>): CharSequence =
         SpannableStringBuilder().apply {
             details.forEachIndexed { index, detail ->
-                if (index > 0) append('\n')
-                detail.label?.let { label ->
-                    val start = length
-                    append(label)
+                if (index > 0) {
+                    val besideCommand =
+                        detail.label == "Command" || details[index - 1].label == "Command"
+                    append(if (besideCommand) "\n\n" else "\n")
+                }
+                val start = length
+                if (detail.label == "Command") {
+                    append(detail.value)
                     setSpan(
-                        StyleSpan(Typeface.BOLD),
+                        TypefaceSpan("monospace"),
                         start,
                         length,
                         Spanned.SPAN_EXCLUSIVE_EXCLUSIVE,
                     )
-                    append(": ")
+                } else {
+                    detail.label?.let { append(it).append(": ") }
+                    append(detail.value)
                 }
-                append(detail.value)
             }
         }
 

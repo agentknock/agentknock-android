@@ -344,6 +344,7 @@ internal data class RequestNotification(
     val summary: String,
     val details: List<RequestNotificationDetail>,
     val decisionAvailable: Boolean,
+    val kindLabel: String? = null,
 )
 
 internal data class RequestNotificationDetail(
@@ -819,13 +820,11 @@ internal class RequestInbox(
                 val aiDetail = aiNotificationDetail(secretUse.approvalEvaluationJson)
                 RequestNotification(
                     requestId = request.id,
-                    title = "Secret use requested",
-                    summary =
-                        listOfNotNull(aiDetail?.label, clientName, command, secretNames)
-                            .joinToString(" · "),
+                    title = clientName,
+                    kindLabel = "Secret access",
+                    summary = listOf(secretNames, command).joinToString(" · "),
                     details =
                         listOfNotNull(
-                            RequestNotificationDetail("Client", clientName),
                             RequestNotificationDetail("Secrets", secretNames),
                             RequestNotificationDetail("Command", command),
                             aiDetail,
@@ -855,11 +854,11 @@ internal class RequestInbox(
                 val aiDetail = aiNotificationDetail(gitSign.approvalEvaluationJson)
                 RequestNotification(
                     requestId = request.id,
-                    title = "Git signature requested",
+                    title = clientName,
+                    kindLabel = "Git signature",
                     summary =
                         listOfNotNull(
-                                aiDetail?.label,
-                                clientName,
+                                renderSingleLineText(gitSign.secretName),
                                 renderSingleLineText(
                                     content.message?.substringBefore('\n') ?: command
                                 ),
@@ -867,7 +866,6 @@ internal class RequestInbox(
                             .joinToString(" · "),
                     details =
                         listOfNotNull(
-                            RequestNotificationDetail("Client", clientName),
                             RequestNotificationDetail(
                                 "SSH key",
                                 renderSingleLineText(gitSign.secretName),
@@ -902,12 +900,13 @@ internal class RequestInbox(
                 val aiDetail = aiNotificationDetail(authentication.approvalEvaluationJson)
                 RequestNotification(
                     requestId = request.id,
-                    title = "SSH authentication requested",
+                    title = clientName,
+                    kindLabel = "SSH authentication",
                     summary =
-                        listOfNotNull(aiDetail?.label, clientName, command).joinToString(" · "),
+                        listOf(renderSingleLineText(authentication.secretName), command)
+                            .joinToString(" · "),
                     details =
                         listOfNotNull(
-                            RequestNotificationDetail("Client", clientName),
                             RequestNotificationDetail(
                                 "SSH key",
                                 renderSingleLineText(authentication.secretName),
