@@ -122,6 +122,14 @@ jobs:
           path: app/build/outputs/apk
       - name: Run instrumentation
         run: scripts/check-device "$DISTRIBUTION" instrumentation
+      - name: Preserve device failure reports
+        if: failure()
+        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
+        with:
+          name: ${{ inputs.distribution }}-instrumentation-api-${{ matrix.api }}-failure
+          path: app/build/reports/device-checks/
+          if-no-files-found: ignore
+          retention-days: 7
 
   startup:
     name: Release startup (API ${{ matrix.api }})
@@ -147,3 +155,11 @@ jobs:
           path: app/build/outputs
       - name: Check minified release startup
         run: scripts/check-device "$DISTRIBUTION" release
+      - name: Preserve device failure reports
+        if: failure()
+        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
+        with:
+          name: ${{ inputs.distribution }}-release-api-${{ matrix.api }}-failure
+          path: app/build/reports/device-checks/
+          if-no-files-found: ignore
+          retention-days: 7
