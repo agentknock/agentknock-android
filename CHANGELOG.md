@@ -1,5 +1,13 @@
 # Changelog
 
+## [0.4.1](https://github.com/agentknock/agentknock-android/compare/v0.4.0...v0.4.1) (2026-09-15)
+
+
+### Bug Fixes
+
+* clarify notification context and visual hierarchy ([fe5b2e2](https://github.com/agentknock/agentknock-android/commit/fe5b2e2f0cc9452d996efd924204fbc3caa6c430))
+* keep background request sessions responsive ([b000c84](https://github.com/agentknock/agentknock-android/commit/b000c8446a8203f2dc8a5679839d8d6c6f47541f))
+
 ## [0.4.0](https://github.com/agentknock/agentknock-android/compare/v0.3.0...v0.4.0) (2026-09-14)
 
 
