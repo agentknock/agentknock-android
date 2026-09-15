@@ -8,12 +8,11 @@ import android.content.BroadcastReceiver
 import android.content.Context
 import android.content.Intent
 import android.content.pm.PackageManager
-import android.graphics.Typeface
 import android.net.Uri
 import android.os.Build
 import android.text.SpannableStringBuilder
 import android.text.Spanned
-import android.text.style.StyleSpan
+import android.text.style.TypefaceSpan
 import android.util.Log
 import androidx.work.BackoffPolicy
 import androidx.work.Constraints
@@ -46,68 +45,64 @@ class PushSynchronizationWorker(
 ) : CoroutineWorker(applicationContext, parameters) {
     override suspend fun getForegroundInfo(): ForegroundInfo =
         ForegroundInfo(
-            FOREGROUND_NOTIFICATION_ID,
-            Notification.Builder(applicationContext, RequestNotifications.BACKGROUND_CHANNEL_ID)
-                .setSmallIcon(R.drawable.ic_notification)
-                .setColor(applicationContext.getColor(R.color.notification_accent))
-                .setContentTitle(applicationContext.getString(R.string.app_name))
-                .setContentText(applicationContext.getString(R.string.checking_for_requests))
-                .setCategory(Notification.CATEGORY_SERVICE)
-                .setVisibility(Notification.VISIBILITY_SECRET)
-                .setOngoing(true)
-                .build(),
+            RequestNotifications.FOREGROUND_NOTIFICATION_ID,
+            RequestNotifications.processingNotification(
+                applicationContext,
+                RequestProcessingState.PROCESSING,
+            ),
         )
 
     override suspend fun doWork(): Result {
         val container = (applicationContext as AgentknockApplication).container
         if (container.factoryResetInProgress) return Result.success()
-        container.localStorage.await()
-        if (container.factoryResetInProgress) return Result.success()
-        return when (val synchronization = container.requestConnection.synchronizeOnce()) {
-            dev.agentknock.storage.request.OneShotSynchronizationResult.Covered -> Result.success()
-            is dev.agentknock.storage.request.OneShotSynchronizationResult.Deferred ->
-                enqueueDeadlineRetry(applicationContext, synchronization.retryAfterMillis)
-            is dev.agentknock.storage.request.OneShotSynchronizationResult.Completed ->
-                when (synchronization.result) {
-                    RequestSyncResult.Success,
-                    RequestSyncResult.NoDevice,
-                    RequestSyncResult.DeviceCredentialsUnavailable,
-                    RequestSyncResult.DeviceCredentialsCorrupted,
-                    RequestSyncResult.UnsupportedDeviceCredentialEncryption -> {
-                        container.requestNotifications.reconcile()
-                        Result.success()
+        return container.processingNotifications.start().use { processing ->
+            container.localStorage.await()
+            if (container.factoryResetInProgress) return Result.success()
+            when (
+                val synchronization =
+                    container.requestConnection.synchronizeOnce(processing::setProcessing)
+            ) {
+                dev.agentknock.storage.request.OneShotSynchronizationResult.Covered ->
+                    Result.success()
+                is dev.agentknock.storage.request.OneShotSynchronizationResult.Deferred ->
+                    enqueueDeadlineRetry(applicationContext, synchronization.retryAfterMillis)
+                is dev.agentknock.storage.request.OneShotSynchronizationResult.Completed ->
+                    when (synchronization.result) {
+                        RequestSyncResult.Success,
+                        RequestSyncResult.NoDevice,
+                        RequestSyncResult.DeviceCredentialsUnavailable,
+                        RequestSyncResult.DeviceCredentialsCorrupted,
+                        RequestSyncResult.UnsupportedDeviceCredentialEncryption -> {
+                            container.requestNotifications.reconcile()
+                            Result.success()
+                        }
+                        is RequestSyncResult.RelayUnavailable -> {
+                            synchronization.result.retryAfterMillis
+                                ?.takeIf { it > 0 }
+                                ?.let { enqueueDeadlineRetry(applicationContext, it) }
+                                ?: Result.retry()
+                        }
+                        is RequestSyncResult.InternalFailure -> {
+                            Log.e(
+                                TAG,
+                                "Request synchronization stopped after an internal " +
+                                    synchronization.result.type,
+                            )
+                            // Keep later pushes eligible after a transient local failure.
+                            Result.success()
+                        }
+                        is RequestSyncResult.RelayRejected -> {
+                            // The manager exposes the rejection. Keep later pushes eligible.
+                            Result.success()
+                        }
                     }
-                    is RequestSyncResult.RelayUnavailable -> {
-                        synchronization.result.retryAfterMillis
-                            ?.takeIf { it > 0 }
-                            ?.let { enqueueDeadlineRetry(applicationContext, it) } ?: Result.retry()
-                    }
-                    is RequestSyncResult.InternalFailure -> {
-                        Log.e(
-                            TAG,
-                            "Request synchronization stopped after an internal " +
-                                synchronization.result.type,
-                        )
-                        // This worker must not fail an APPEND_OR_REPLACE chain: a later push can
-                        // represent valid new work after a transient local problem is fixed.
-                        Result.success()
-                    }
-                    is RequestSyncResult.RelayRejected -> {
-                        // The domain failure is already exposed by RequestConnectionManager. Mark
-                        // the
-                        // scheduling attempt complete so APPEND_OR_REPLACE successors are not
-                        // failed
-                        // merely because an earlier synchronization was rejected.
-                        Result.success()
-                    }
-                }
+            }
         }
     }
 
     companion object {
         private const val WORK_NAME = "push-synchronization"
         private const val DEADLINE_WORK_NAME = "push-synchronization-deadline"
-        private const val FOREGROUND_NOTIFICATION_ID = 2
         private const val TAG = "AgentknockPush"
 
         fun enqueue(context: Context) {
@@ -206,7 +201,8 @@ internal object RequestNotifications {
 
     const val ACTION_CHANNEL_ID = "requests"
     const val BACKGROUND_CHANNEL_ID = "background_processing"
-    private const val WAKE_NOTIFICATION_ID = 1
+    private const val PROCESSING_NOTIFICATION_ID = 1
+    const val FOREGROUND_NOTIFICATION_ID = 2
     private const val REQUEST_NOTIFICATION_ID = 10_000
     private const val OPEN_INTENT_ACTION = "open"
     private const val REQUEST_INTENT_SCHEME = "agentknock-request"
@@ -254,14 +250,32 @@ internal object RequestNotifications {
                 NotificationManager.IMPORTANCE_NONE
     }
 
-    fun showWake(context: Context) {
-        if (
-            Build.VERSION.SDK_INT >= Build.VERSION_CODES.TIRAMISU &&
-                context.checkSelfPermission(android.Manifest.permission.POST_NOTIFICATIONS) !=
-                    PackageManager.PERMISSION_GRANTED
-        ) {
+    /** Removes transient status left by a previous process. */
+    fun clearProcessing(context: Context) {
+        val manager = context.getSystemService(NotificationManager::class.java)
+        manager.cancel(PROCESSING_NOTIFICATION_ID)
+        manager.cancel(FOREGROUND_NOTIFICATION_ID)
+    }
+
+    fun showProcessing(context: Context, state: RequestProcessingState?) {
+        val manager = context.getSystemService(NotificationManager::class.java)
+        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.S) {
+            if (state != RequestProcessingState.PROCESSING) {
+                manager.cancel(PROCESSING_NOTIFICATION_ID)
+                return
+            }
+        } else if (state == null) {
+            // WorkManager owns the foreground notification until its service stops.
             return
         }
+        if (!channelNotificationsEnabled(context, BACKGROUND_CHANNEL_ID)) return
+        val notificationId =
+            if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.S) PROCESSING_NOTIFICATION_ID
+            else FOREGROUND_NOTIFICATION_ID
+        manager.notify(notificationId, processingNotification(context, checkNotNull(state)))
+    }
+
+    fun processingNotification(context: Context, state: RequestProcessingState): Notification {
         val openApp =
             PendingIntent.getActivity(
                 context,
@@ -272,26 +286,27 @@ internal object RequestNotifications {
                 },
                 PendingIntent.FLAG_UPDATE_CURRENT or PendingIntent.FLAG_IMMUTABLE,
             )
-        val notification =
-            Notification.Builder(context, BACKGROUND_CHANNEL_ID)
-                .setSmallIcon(R.drawable.ic_notification)
-                .setColor(context.getColor(R.color.notification_accent))
-                .setContentTitle(context.getString(R.string.app_name))
-                .setContentText(context.getString(R.string.request_waiting))
-                .setContentIntent(openApp)
-                .setAutoCancel(true)
-                .setOnlyAlertOnce(true)
-                .setCategory(Notification.CATEGORY_SERVICE)
-                .setVisibility(Notification.VISIBILITY_SECRET)
-                .build()
-        context
-            .getSystemService(NotificationManager::class.java)
-            .notify(WAKE_NOTIFICATION_ID, notification)
+        return Notification.Builder(context, BACKGROUND_CHANNEL_ID)
+            .setSmallIcon(R.drawable.ic_notification)
+            .setColor(context.getColor(R.color.notification_accent))
+            .setContentTitle(
+                context.getString(
+                    when (state) {
+                        RequestProcessingState.PROCESSING -> R.string.processing_requests
+                        RequestProcessingState.LISTENING -> R.string.listening_for_requests
+                    }
+                )
+            )
+            .setContentIntent(openApp)
+            .setOngoing(true)
+            .setOnlyAlertOnce(true)
+            .setCategory(Notification.CATEGORY_SERVICE)
+            .setVisibility(Notification.VISIBILITY_SECRET)
+            .build()
     }
 
     fun showRequests(context: Context, requests: List<RequestNotification>) {
         val manager = context.getSystemService(NotificationManager::class.java)
-        manager.cancel(WAKE_NOTIFICATION_ID)
         if (!canNotify(context)) return
         val activeTags = requests.mapTo(mutableSetOf(), RequestNotification::requestId)
         manager.activeNotifications
@@ -315,6 +330,7 @@ internal object RequestNotifications {
                     .setSmallIcon(R.drawable.ic_notification)
                     .setColor(context.getColor(R.color.notification_accent))
                     .setContentTitle(request.title)
+                    .setSubText(request.kindLabel)
                     .setContentText(request.summary)
                     .setStyle(Notification.BigTextStyle().bigText(styledDetails(request.details)))
                     .setContentIntent(openRequest)
@@ -399,19 +415,24 @@ internal object RequestNotifications {
     private fun styledDetails(details: List<RequestNotificationDetail>): CharSequence =
         SpannableStringBuilder().apply {
             details.forEachIndexed { index, detail ->
-                if (index > 0) append('\n')
-                detail.label?.let { label ->
-                    val start = length
-                    append(label)
+                if (index > 0) {
+                    val besideCommand =
+                        detail.label == "Command" || details[index - 1].label == "Command"
+                    append(if (besideCommand) "\n\n" else "\n")
+                }
+                val start = length
+                if (detail.label == "Command") {
+                    append(detail.value)
                     setSpan(
-                        StyleSpan(Typeface.BOLD),
+                        TypefaceSpan("monospace"),
                         start,
                         length,
                         Spanned.SPAN_EXCLUSIVE_EXCLUSIVE,
                     )
-                    append(": ")
+                } else {
+                    detail.label?.let { append(it).append(": ") }
+                    append(detail.value)
                 }
-                append(detail.value)
             }
         }
 

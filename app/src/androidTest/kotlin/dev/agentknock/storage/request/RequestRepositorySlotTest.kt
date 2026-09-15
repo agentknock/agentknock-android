@@ -78,6 +78,8 @@ import kotlinx.coroutines.delay
 import kotlinx.coroutines.flow.filter
 import kotlinx.coroutines.flow.filterNotNull
 import kotlinx.coroutines.flow.first
+import kotlinx.coroutines.test.StandardTestDispatcher
+import kotlinx.coroutines.test.TestCoroutineScheduler
 import kotlinx.coroutines.test.runTest
 import kotlinx.coroutines.withContext
 import kotlinx.coroutines.withTimeout
@@ -2765,6 +2767,162 @@ class RequestRepositorySlotTest {
     }
 
     @Test
+    fun backgroundSessionReusesConnectionAndWaitsForReviewAndResponseBeforeIdling() = runTest {
+        val clientPsk = establishActivePairing()
+        createAiEnvironmentSecret()
+        val firstRequest =
+            pairedRequest(
+                requestId = AI_INVOCATION_REQUEST_ID,
+                clientPsk = clientPsk,
+                plaintext = aiInvocationPlaintext(ByteArray(32) { 0x22 }),
+            )
+        val secondRequest =
+            pairedRequest(
+                requestId = INVOCATION_REQUEST_ID,
+                clientPsk = clientPsk,
+                plaintext = aiInvocationPlaintext(ByteArray(32) { 0x23 }),
+            )
+        val connection = connectInteractively()
+        // Drive only the connection's virtual clock. Room and the billable review coordinator
+        // use real dispatchers; awaiting either must not automatically skip the idle window.
+        val clock = TestCoroutineScheduler()
+        val sessionScope = CoroutineScope(SupervisorJob() + StandardTestDispatcher(clock))
+        var processing = true
+        val synchronization = sessionScope.async { repository.sync { processing = it } }
+        suspend fun until(condition: () -> Boolean) = awaitAsynchronousWork {
+            while (true) {
+                clock.runCurrent()
+                if (condition()) break
+                delay(1)
+            }
+        }
+        try {
+            connection.emit(requestEvent(AI_INVOCATION_REQUEST_ID, firstRequest))
+            until { connection.sentFrames.any { it is RelayDeviceFrame.Resume } }
+            connection.resolve(
+                connection.sentFrames.filterIsInstance<RelayDeviceFrame.Resume>().last()
+            )
+            connection.emit(RelayDeviceEvent.CaughtUp)
+            approvalReviewer.complete(
+                reviewed(RelayApprovalReviewDecision.ASK_USER, "Needs a decision.")
+            )
+            until { !processing }
+            assertFalse(synchronization.isCompleted)
+
+            clock.advanceTimeBy(20_000)
+            connection.emit(
+                RelayDeviceEvent.PushRegistration(RelayPushRegistrationState.REGISTERED)
+            )
+            connection.emit(RelayDeviceEvent.CaughtUp)
+            connection.emit(requestEvent(AI_INVOCATION_REQUEST_ID, firstRequest))
+            until {
+                connection.sentFrames.filterIsInstance<RelayDeviceFrame.Acknowledgement>().size == 2
+            }
+            assertFalse(processing)
+
+            clock.advanceTimeBy(14_000)
+            connection.emit(requestEvent(INVOCATION_REQUEST_ID, secondRequest))
+            until { connection.sentFrames.filterIsInstance<RelayDeviceFrame.Resume>().size == 2 }
+            connection.resolve(
+                connection.sentFrames.filterIsInstance<RelayDeviceFrame.Resume>().last()
+            )
+            until { approvalReviewer.callCount == 2 }
+            clock.advanceTimeBy(36_000)
+            clock.runCurrent()
+            assertTrue(processing)
+            assertFalse(connection.closed)
+
+            approvalReviewer.complete(
+                reviewed(RelayApprovalReviewDecision.APPROVE, "Matches the instructions.")
+            )
+            until { connection.sentFrames.any { it is RelayDeviceFrame.Response } }
+            clock.advanceTimeBy(36_000)
+            clock.runCurrent()
+            assertTrue(processing)
+            assertFalse(connection.closed)
+            connection.resolve(
+                connection.sentFrames.filterIsInstance<RelayDeviceFrame.Response>().single()
+            )
+            until { !processing }
+
+            clock.advanceTimeBy(34_999)
+            clock.runCurrent()
+            assertFalse(connection.closed)
+            clock.advanceTimeBy(1)
+            until { synchronization.isCompleted }
+            assertEquals(RequestSyncResult.Success, synchronization.await())
+            assertTrue(connection.closed)
+            assertEquals(2, approvalReviewer.callCount)
+        } finally {
+            sessionScope.cancel()
+            clock.runCurrent()
+        }
+    }
+
+    @Test
+    fun controlTrafficAndDuplicateManualRequestsDoNotExtendTheIdleWindow() = runTest {
+        val clientPsk = establishActivePairing()
+        createAiEnvironmentSecret()
+        val request =
+            pairedRequest(
+                requestId = AI_INVOCATION_REQUEST_ID,
+                clientPsk = clientPsk,
+                plaintext = aiInvocationPlaintext(ByteArray(32) { 0x24 }),
+            )
+        val connection = connectInteractively()
+        val clock = TestCoroutineScheduler()
+        val sessionScope = CoroutineScope(SupervisorJob() + StandardTestDispatcher(clock))
+        var processing = true
+        val synchronization = sessionScope.async { repository.sync { processing = it } }
+        suspend fun until(condition: () -> Boolean) = awaitAsynchronousWork {
+            while (true) {
+                clock.runCurrent()
+                if (condition()) break
+                delay(1)
+            }
+        }
+        try {
+            connection.emit(requestEvent(AI_INVOCATION_REQUEST_ID, request))
+            until { connection.sentFrames.any { it is RelayDeviceFrame.Resume } }
+            connection.resolve(
+                connection.sentFrames.filterIsInstance<RelayDeviceFrame.Resume>().single()
+            )
+            connection.emit(RelayDeviceEvent.CaughtUp)
+            approvalReviewer.complete(
+                reviewed(RelayApprovalReviewDecision.ASK_USER, "Needs a decision.")
+            )
+            until { !processing }
+
+            clock.advanceTimeBy(34_000)
+            connection.emit(requestEvent(AI_INVOCATION_REQUEST_ID, request))
+            connection.emit(
+                RelayDeviceEvent.PushRegistration(RelayPushRegistrationState.REGISTERED)
+            )
+            connection.emit(RelayDeviceEvent.CaughtUp)
+            until {
+                connection.sentFrames.filterIsInstance<RelayDeviceFrame.Acknowledgement>().size == 2
+            }
+            clock.advanceTimeBy(1_000)
+            until { synchronization.isCompleted }
+            assertEquals(RequestSyncResult.Success, synchronization.await())
+            assertTrue(connection.closed)
+            assertEquals(1, approvalReviewer.callCount)
+
+            // A queued duplicate wake may resume the existing manual exchange but must finish
+            // without granting itself another idle window.
+            connect(relayState(AI_INVOCATION_REQUEST_ID), RelayDeviceEvent.CaughtUp)
+            val emptySynchronization = sessionScope.async { repository.sync() }
+            val before = clock.currentTime
+            until { emptySynchronization.isCompleted }
+            assertEquals(RequestSyncResult.Success, emptySynchronization.await())
+            assertEquals(before, clock.currentTime)
+        } finally {
+            sessionScope.cancel()
+            clock.runCurrent()
+        }
+    }
+
+    @Test
     fun aiApprovalSchedulesAndDeliversItsDurableResponse() = runTest {
         val clientPsk = establishActivePairing()
         createAiEnvironmentSecret()
@@ -5037,7 +5195,6 @@ private class TestRelayDeviceConnection(
     private val channel =
         Channel<RelayDeviceEvent>(Channel.UNLIMITED).apply {
             events.forEach { trySend(it).getOrThrow() }
-            close()
         }
 
     override val events: ReceiveChannel<RelayDeviceEvent> = channel
@@ -5056,6 +5213,7 @@ private class TestRelayDeviceConnection(
 
     override suspend fun close() {
         closed = true
+        channel.close()
     }
 }
 

@@ -3,8 +3,6 @@ package dev.agentknock.push
 import android.annotation.SuppressLint
 import android.content.Context
 import android.util.Log
-import androidx.lifecycle.Lifecycle
-import androidx.lifecycle.ProcessLifecycleOwner
 import androidx.work.BackoffPolicy
 import androidx.work.CoroutineWorker
 import androidx.work.ExistingWorkPolicy
@@ -32,9 +30,6 @@ class AgentknockMessagingService : FirebaseMessagingService() {
         val container = (application as AgentknockApplication).container
         if (container.factoryResetInProgress) return
 
-        val foreground =
-            ProcessLifecycleOwner.get().lifecycle.currentState.isAtLeast(Lifecycle.State.STARTED)
-        if (!foreground) container.requestNotifications.showWake()
         // Usually the foreground socket already covers the wake. Announcing it is still required:
         // a visible session may have stopped on a terminal device result and needs new work to
         // make it eligible to connect again.

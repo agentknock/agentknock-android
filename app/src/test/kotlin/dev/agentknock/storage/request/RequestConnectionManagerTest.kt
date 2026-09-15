@@ -855,8 +855,52 @@ class RequestConnectionManagerTest {
         assertEquals(4, attempts)
     }
 
+    @Test
+    fun `idle background connection clears progress while retaining sole connection ownership`() =
+        runTest {
+            val resumeWork = CompletableDeferred<Unit>()
+            val finishWork = CompletableDeferred<Unit>()
+            var foregroundConnections = 0
+            val processing = mutableListOf<Boolean>()
+            val manager =
+                manager(
+                    synchronizeOnce = { reportProcessing ->
+                        reportProcessing(false)
+                        resumeWork.await()
+                        reportProcessing(true)
+                        finishWork.await()
+                        RequestSyncResult.Success
+                    },
+                    listen = { onCaughtUp ->
+                        foregroundConnections += 1
+                        onCaughtUp()
+                        awaitCancellation()
+                    },
+                )
+            val background = backgroundScope.async { manager.synchronizeOnce { processing += it } }
+            runCurrent()
+            assertFalse(manager.syncing.value)
+            assertEquals(RequestSyncResult.Success, manager.lastSyncResult.value)
+            assertFalse(background.isCompleted)
+
+            manager.appForegrounded()
+            runCurrent()
+            assertEquals(0, foregroundConnections)
+            resumeWork.complete(Unit)
+            runCurrent()
+            assertTrue(manager.syncing.value)
+
+            finishWork.complete(Unit)
+            runCurrent()
+            assertEquals(1, foregroundConnections)
+            assertFalse(manager.syncing.value)
+            assertEquals(listOf(false, true), processing)
+        }
+
     private fun kotlinx.coroutines.test.TestScope.manager(
-        synchronizeOnce: suspend () -> RequestSyncResult = { RequestSyncResult.Success },
+        synchronizeOnce: suspend ((Boolean) -> Unit) -> RequestSyncResult = {
+            RequestSyncResult.Success
+        },
         listen: suspend (() -> Unit) -> RequestSyncResult = { RequestSyncResult.Success },
         scheduleBackgroundSynchronization: () -> Unit = {},
         backgroundGracePeriodMillis: Long = 5_000,

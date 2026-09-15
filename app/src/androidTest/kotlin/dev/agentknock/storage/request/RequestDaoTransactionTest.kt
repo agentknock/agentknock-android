@@ -145,7 +145,7 @@ class RequestDaoTransactionTest {
         val summary = inbox.observeRequests().first().single()
         assertEquals("AI asked you to decide", summary.decisionSummary)
         val notification = inbox.observePendingNotifications().first().single()
-        assertTrue(notification.summary.startsWith("AI asked you to decide · Alex’s MacBook"))
+        assertTrue(notification.summary.contains("github"))
         assertTrue(notification.summary.contains("/opt/tools/psql -c 'select 1'"))
         assertTrue(
             notification.details.contains(
@@ -161,9 +161,10 @@ class RequestDaoTransactionTest {
             )
         )
         assertEquals(
-            listOf("Client", "Secrets", "Command"),
-            notification.details.take(3).map { it.label },
+            listOf("Secrets", "Command"),
+            notification.details.take(2).map { it.label },
         )
+        assertEquals("Alex’s MacBook", notification.title)
         assertTrue(notification.decisionAvailable)
         val details =
             (checkNotNull(inbox.observeRequest(requestId).first()).content

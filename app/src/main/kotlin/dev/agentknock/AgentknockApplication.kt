@@ -7,6 +7,7 @@ import dev.agentknock.protocol.PairingProtocol
 import dev.agentknock.push.PushSynchronizationWorker
 import dev.agentknock.push.RequestNotificationCoordinator
 import dev.agentknock.push.RequestNotifications
+import dev.agentknock.push.RequestProcessingCoordinator
 import dev.agentknock.relay.AI_REVIEW_TIMEOUT_MILLIS
 import dev.agentknock.relay.HttpRelayApprovalReviewClient
 import dev.agentknock.relay.HttpRelayClaimClient
@@ -68,6 +69,7 @@ class AgentknockApplication : Application() {
     override fun onCreate() {
         super.onCreate()
         RequestNotifications.createChannel(this)
+        RequestNotifications.clearProcessing(this)
         val createdContainer = ApplicationContainer(this)
         container = createdContainer
         ProcessLifecycleOwner.get().lifecycle.addObserver(createdContainer.requestConnection)
@@ -281,8 +283,11 @@ internal class ApplicationContainer(private val application: Application) {
             scope = applicationScope,
             requests = requestInbox.observePendingNotifications(),
             displayRequests = { RequestNotifications.showRequests(application, it) },
-            displayWake = { RequestNotifications.showWake(application) },
         )
+
+    val processingNotifications = RequestProcessingCoordinator {
+        RequestNotifications.showProcessing(application, it)
+    }
 
     // Relay synchronization and request decisions await this initialization. Recovering
     // REVIEWING here is race-free: no relay synchronization can begin before storage is ready,
@@ -315,9 +320,9 @@ internal class ApplicationContainer(private val application: Application) {
     val requestConnection: RequestConnectionManager =
         RequestConnectionManager(
             scope = applicationScope,
-            synchronizeOnce = {
+            synchronizeOnce = { onProcessingChanged ->
                 localStorage.await()
-                requests.sync()
+                requests.sync(onProcessingChanged)
             },
             listen = { onCaughtUp ->
                 localStorage.await()

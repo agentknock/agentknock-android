@@ -35,7 +35,12 @@ import dev.agentknock.storage.device.DeviceKeyAccessException
 import dev.agentknock.storage.device.RelayDeviceCredentialSource
 import dev.agentknock.storage.device.RelayDeviceCredentials
 import kotlinx.coroutines.CancellationException
+import kotlinx.coroutines.CoroutineScope
+import kotlinx.coroutines.Deferred
+import kotlinx.coroutines.async
 import kotlinx.coroutines.channels.Channel
+import kotlinx.coroutines.coroutineScope
+import kotlinx.coroutines.delay
 import kotlinx.coroutines.flow.Flow
 import kotlinx.coroutines.selects.select
 import kotlinx.coroutines.sync.Mutex
@@ -132,6 +137,8 @@ private sealed interface SynchronizationInput {
     data class Event(val event: RelayDeviceEvent) : SynchronizationInput
 
     data object PendingChanges : SynchronizationInput
+
+    data object IdleTimeout : SynchronizationInput
 }
 
 private sealed interface DurableRelayOperation {
@@ -234,7 +241,8 @@ internal class RequestRepository(
         dao.deleteAllSettledHiddenRequests(currentTimeMillis() - IDEMPOTENCY_RETENTION_MILLIS)
     }
 
-    suspend fun sync(): RequestSyncResult = runConnection(keepConnected = false)
+    suspend fun sync(onProcessingChanged: (Boolean) -> Unit = {}): RequestSyncResult =
+        runConnection(keepConnected = false, onProcessingChanged = onProcessingChanged)
 
     suspend fun listen(onCaughtUp: suspend () -> Unit): RequestSyncResult =
         runConnection(
@@ -368,6 +376,7 @@ internal class RequestRepository(
     private suspend fun runConnection(
         keepConnected: Boolean,
         onCaughtUp: suspend () -> Unit = {},
+        onProcessingChanged: (Boolean) -> Unit = {},
     ): RequestSyncResult {
         val credentials =
             when (val result = deviceCredentials.activeDeviceCredentials()) {
@@ -405,12 +414,21 @@ internal class RequestRepository(
             }
 
         return try {
-            synchronize(
-                credentials = credentials,
-                connection = connection,
-                keepConnected = keepConnected,
-                onCaughtUp = onCaughtUp,
-            )
+            coroutineScope {
+                val idleWindow = BackgroundIdleWindow(this)
+                try {
+                    synchronize(
+                        credentials = credentials,
+                        connection = connection,
+                        keepConnected = keepConnected,
+                        onCaughtUp = onCaughtUp,
+                        onProcessingChanged = onProcessingChanged,
+                        idleWindow = idleWindow,
+                    )
+                } finally {
+                    idleWindow.close()
+                }
+            }
         } catch (exception: DeviceKeyAccessException) {
             when (exception.failure) {
                 DeviceCredentialResult.Unavailable -> RequestSyncResult.DeviceCredentialsUnavailable
@@ -428,9 +446,18 @@ internal class RequestRepository(
         connection: RelayDeviceConnection,
         keepConnected: Boolean,
         onCaughtUp: suspend () -> Unit,
+        onProcessingChanged: (Boolean) -> Unit,
+        idleWindow: BackgroundIdleWindow,
     ): RequestSyncResult {
         val durableRelayState = DurableRelayState()
         var caughtUp = false
+        var handledWork = false
+
+        fun processing() {
+            idleWindow.reset()
+            onProcessingChanged(true)
+        }
+
         while (true) {
             flushPendingChanges(
                     credentials = credentials,
@@ -452,7 +479,28 @@ internal class RequestRepository(
                     ?.let {
                         return it
                     }
-                if (durableRelayState.outstanding == null) return RequestSyncResult.Success
+            }
+            val reviewing = aiReviews.hasActiveReviews
+            val outstanding = durableRelayState.outstanding
+            if (
+                reviewing ||
+                    outstanding is DurableRelayOperation.Response ||
+                    outstanding is DurableRelayOperation.ClientState
+            ) {
+                handledWork = true
+            }
+            if (!caughtUp || reviewing || outstanding != null) {
+                processing()
+            } else {
+                onProcessingChanged(false)
+                if (!keepConnected) {
+                    // Duplicate wakes and a replay of existing manual requests must not each
+                    // create another idle session. Only actual work earns a reuse window.
+                    if (!handledWork || idleWindow.expired) {
+                        return RequestSyncResult.Success
+                    }
+                    idleWindow.start()
+                }
             }
             val input =
                 select<SynchronizationInput> {
@@ -462,8 +510,14 @@ internal class RequestRepository(
                         )
                     }
                     pendingChanges.onReceive { SynchronizationInput.PendingChanges }
+                    idleWindow.timeout?.onAwait { SynchronizationInput.IdleTimeout }
                 }
-            if (input == SynchronizationInput.PendingChanges) continue
+            // Flush and recheck review/outbox state even when the idle deadline wins a race.
+            if (
+                input == SynchronizationInput.PendingChanges ||
+                    input == SynchronizationInput.IdleTimeout
+            )
+                continue
 
             val event = (input as SynchronizationInput.Event).event
             if (event == RelayDeviceEvent.CaughtUp) {
@@ -478,7 +532,11 @@ internal class RequestRepository(
                         is RelayDeviceEvent.Message -> {
                             val update =
                                 when (event.kind) {
-                                    RelayMessageKind.REQUEST -> processRequest(credentials, event)
+                                    RelayMessageKind.REQUEST ->
+                                        processRequest(credentials, event) {
+                                            handledWork = true
+                                            processing()
+                                        }
                                     RelayMessageKind.COMPLETION ->
                                         processCompletion(credentials, event)
                                     RelayMessageKind.RESPONSE -> null
@@ -548,11 +606,8 @@ internal class RequestRepository(
                         is RelayDeviceEvent.ClientState -> {
                             applyClientState(event)
                             durableRelayState.rejectedClientStateMutations.remove(event.clientId)
-                            // Every state event is an authoritative answer to the outstanding
-                            // mutation. If it differs from the desired state, applyClientState
-                            // keeps
-                            // that desire and queues a new pass; a terminal REVOKED state clears
-                            // it.
+                            // A differing desired state queues another pass. Revocation clears
+                            // that desire; this state event resolves the outstanding mutation.
                             durableRelayState.clearClientState(event.clientId)
                             null
                         }
@@ -586,7 +641,10 @@ internal class RequestRepository(
                                 }
                             val responseWasOutstanding =
                                 durableRelayState.outstanding ==
-                                    DurableRelayOperation.Response(event.clientId, event.requestId)
+                                    DurableRelayOperation.Response(
+                                        event.clientId,
+                                        event.requestId,
+                                    )
                             if (event.kind == RelayMessageKind.RESPONSE) {
                                 dao.markResponseOutboxFinished(event.requestId)
                                 durableRelayState.clearExchange(event.clientId, event.requestId)
@@ -1127,6 +1185,7 @@ internal class RequestRepository(
     private suspend fun processRequest(
         credentials: RelayDeviceCredentials,
         message: RelayDeviceEvent.Message,
+        onNewRequest: () -> Unit,
     ): ProcessedRelayMessage? {
         val requestPayload = message.payload
         val existing = dao.getRequestById(message.requestId)
@@ -1146,7 +1205,9 @@ internal class RequestRepository(
             return ProcessedRelayMessage
         }
 
-        return processNewRequest(credentials, message)
+        val processed = processNewRequest(credentials, message)
+        if (dao.getRequestById(message.requestId) != null) onNewRequest()
+        return processed
     }
 
     suspend fun approveSecretUpload(
@@ -1897,3 +1958,23 @@ private fun RelayFrameSendResult.controlFrameFailure(
     }
 
 private fun ClientEntity.auditClientName(): String = name
+
+/** The timer is owned and cancelled by the connection, including exceptional exits. */
+private class BackgroundIdleWindow(private val scope: CoroutineScope) : AutoCloseable {
+    var timeout: Deferred<Unit>? = null
+        private set
+
+    val expired: Boolean
+        get() = timeout?.isCompleted == true
+
+    fun start() {
+        if (timeout == null) timeout = scope.async { delay(35_000) }
+    }
+
+    fun reset() {
+        timeout?.cancel()
+        timeout = null
+    }
+
+    override fun close() = reset()
+}
