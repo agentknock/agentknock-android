@@ -41,7 +41,7 @@ for artifact in "${artifacts[@]}"; do
 done
 
 device_serial=emulator-5556
-connected_devices="$(adb devices)"
+connected_devices="$(timeout --kill-after=5 30 adb devices)"
 if grep -Eq "^${device_serial}[[:space:]]" <<< "$connected_devices"; then
     echo "$device_serial is already in use; refusing to replace it." >&2
     exit 1
@@ -57,28 +57,28 @@ emulator_pid=
 cleanup() {
     local result=$?
     if [[ -n "$emulator_pid" ]]; then
-        timeout 10 adb -s "$device_serial" logcat -d > "$device_report_dir/logcat.txt" 2>&1 || true
+        timeout --kill-after=2 10 adb -s "$device_serial" logcat -d > "$device_report_dir/logcat.txt" 2>&1 || true
         if (( result != 0 )); then
             echo 'Emulator feature configuration:' >&2
             grep -Ei 'feature|api level|systempath' "$device_report_dir/emulator.txt" >&2 || true
             echo 'Emulator output:' >&2
             tail -n 60 "$device_report_dir/emulator.txt" >&2
             echo 'Android crashes:' >&2
-            timeout 10 adb -s "$device_serial" logcat -d -b crash >&2 || true
+            timeout --kill-after=2 10 adb -s "$device_serial" logcat -d -b crash >&2 || true
             echo 'Recent Android errors:' >&2
-            timeout 10 adb -s "$device_serial" logcat -d -t 100 '*:E' >&2 || true
+            timeout --kill-after=2 10 adb -s "$device_serial" logcat -d -t 100 '*:E' >&2 || true
         fi
-        timeout 10 adb -s "$device_serial" emu kill >/dev/null 2>&1 || true
+        timeout --kill-after=2 10 adb -s "$device_serial" emu kill >/dev/null 2>&1 || true
         # A wedged emulator can ignore TERM and leave the following wait hung.
         kill -KILL "$emulator_pid" 2>/dev/null || true
         wait "$emulator_pid" 2>/dev/null || true
-        timeout 10 adb -s "$device_serial" wait-for-disconnect || true
+        timeout --kill-after=2 10 adb -s "$device_serial" wait-for-disconnect || true
     fi
     rm -rf -- "$device_test_dir"
 }
 trap cleanup EXIT
 
-printf 'no\n' | avdmanager create avd --name agentknock_ci \
+printf 'no\n' | timeout --kill-after=5 60 avdmanager create avd --name agentknock_ci \
     --package "$AGENTKNOCK_EMULATOR_IMAGE" --device pixel_7
 emulator_options=(-gpu swiftshader -memory 2048)
 if [[ "$AGENTKNOCK_EMULATOR_API" == 37 ]]; then
@@ -91,31 +91,39 @@ emulator -avd agentknock_ci -port 5556 -accel on -no-window -no-audio -no-boot-a
     > "$device_report_dir/emulator.txt" 2>&1 &
 emulator_pid=$!
 
+echo "Waiting for emulator boot (up to 360 seconds)."
 boot_deadline=$((SECONDS + 360))
-until [[ "$(adb -s "$device_serial" shell getprop sys.boot_completed 2>/dev/null | tr -d '\r')" == 1 ]]; do
+while true; do
     if ! kill -0 "$emulator_pid" 2>/dev/null; then
         echo "Emulator exited before finishing boot." >&2
-        tail -n 60 "$device_report_dir/emulator.txt" >&2
         exit 1
     fi
     if (( SECONDS >= boot_deadline )); then
         echo "Emulator did not finish booting." >&2
         exit 1
     fi
+    # ADB can hang while the emulator is starting. A shell-loop deadline alone
+    # cannot interrupt it; bound each probe and allow the next probe to recover.
+    if boot_completed="$(timeout --kill-after=2 10 adb -s "$device_serial" shell getprop sys.boot_completed)"; then
+        if [[ "${boot_completed//$'\r'/}" == 1 ]]; then
+            break
+        fi
+    fi
     sleep 1
 done
-actual_api="$(adb -s "$device_serial" shell getprop ro.build.version.sdk | tr -d '\r')"
+echo "Emulator boot completed; preparing the device."
+actual_api="$(timeout --kill-after=5 30 adb -s "$device_serial" shell getprop ro.build.version.sdk | tr -d '\r')"
 if [[ "$actual_api" != "$AGENTKNOCK_EMULATOR_API" ]]; then
     echo "Expected emulator API $AGENTKNOCK_EMULATOR_API, got $actual_api." >&2
     exit 1
 fi
-adb -s "$device_serial" shell input keyevent 82
+timeout --kill-after=5 30 adb -s "$device_serial" shell input keyevent 82
 for setting in window_animation_scale transition_animation_scale animator_duration_scale; do
-    adb -s "$device_serial" shell settings put global "$setting" 0
+    timeout --kill-after=5 30 adb -s "$device_serial" shell settings put global "$setting" 0
 done
 
 # Boot completion is signalled before Google services finish their first-boot work.
-timeout 300 adb -s "$device_serial" shell am wait-for-broadcast-idle \
+timeout --kill-after=5 300 adb -s "$device_serial" shell am wait-for-broadcast-idle \
     | tee "$device_report_dir/system-ready.txt"
 grep -Fq 'All broadcast queues are idle!' "$device_report_dir/system-ready.txt"
 
