@@ -5,8 +5,8 @@
     <string name="app_name">Agentknock</string>
     <string name="request_notification_channel">Requests needing action</string>
     <string name="request_notification_channel_description">Requests that need your decision</string>
-    <string name="background_notification_channel">Background processing</string>
-    <string name="background_notification_channel_description">Silent status while Agentknock checks for new requests</string>
+    <string name="processing_notification_channel">Request processing</string>
+    <string name="processing_notification_channel_description">Status while Agentknock checks requests and runs AI reviews</string>
     <string name="processing_requests">Processing requests</string>
     <string name="listening_for_requests">Waiting for more requests</string>
     <string name="request_waiting">Request waiting</string>
