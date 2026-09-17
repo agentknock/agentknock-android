@@ -111,6 +111,8 @@ internal fun RequestDecisionResult.asSecretChangedSinceInvocation(): RequestDeci
 internal sealed interface RequestSyncResult {
     data object Success : RequestSyncResult
 
+    data object ContinuationRequired : RequestSyncResult
+
     data object NoDevice : RequestSyncResult
 
     data object DeviceCredentialsUnavailable : RequestSyncResult

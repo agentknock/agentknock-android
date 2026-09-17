@@ -11,11 +11,13 @@ import unittest
 
 
 class DeviceBootTest(unittest.TestCase):
-    def test_stuck_boot_probe_is_killed_and_boot_can_continue(self):
+    def test_stuck_boot_connection_is_reconnected_and_tests_run_once(self):
         # PRs 9 and 31 exhausted the job timeout before tests began. A loop's
         # deadline cannot stop a blocked adb command. Exercise real timeout and
         # signals, including a process that ignores TERM, rather than mocking
-        # timeout success or asserting the runner's command spelling.
+        # timeout success or asserting the runner's command spelling. PR 39
+        # booted Android but shell probes stayed stuck. Model an unresponsive
+        # connection: killing only the probe must not make this fixture recover.
         with tempfile.TemporaryDirectory() as directory:
             root = Path(directory)
             (root / "scripts").mkdir()
@@ -40,12 +42,16 @@ class DeviceBootTest(unittest.TestCase):
                     args = args[2:]
                 if args == ["shell", "getprop", "sys.boot_completed"]:
                     marker = root / "blocked-probe"
-                    if not marker.exists():
+                    if not (root / "reconnected").exists():
                         marker.write_text(str(os.getpid()))
                         signal.signal(signal.SIGTERM, signal.SIG_IGN)
                         while True:
                             time.sleep(1)
                     print("1")
+                elif args == ["reconnect"]:
+                    if sys.argv[1:3] != ["-s", "emulator-5556"]:
+                        raise SystemExit("Reconnect must target only the test emulator")
+                    (root / "reconnected").touch()
                 elif args == ["shell", "getprop", "ro.build.version.sdk"]:
                     print("26")
                 elif args == ["shell", "am", "wait-for-broadcast-idle"]:

@@ -27,6 +27,14 @@ class AgentknockMessagingService : FirebaseMessagingService() {
 
     override fun onMessageReceived(message: RemoteMessage) {
         if (message.data["type"] != WAKE_MESSAGE_TYPE) return
+        requestSynchronization()
+    }
+
+    override fun onDeletedMessages() {
+        requestSynchronization()
+    }
+
+    private fun requestSynchronization() {
         val container = (application as AgentknockApplication).container
         if (container.factoryResetInProgress) return
 

@@ -182,6 +182,7 @@ private fun RequestSyncResult?.problemMessage(): String? =
     when (this) {
         null,
         RequestSyncResult.Success,
+        RequestSyncResult.ContinuationRequired,
         RequestSyncResult.NoDevice -> null
         RequestSyncResult.DeviceCredentialsUnavailable -> "Device keys are unavailable"
         RequestSyncResult.DeviceCredentialsCorrupted -> "Device keys could not be verified"

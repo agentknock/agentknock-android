@@ -256,15 +256,20 @@ internal class RequestConnectionManager(
             val result =
                 rememberServerRetryDirective(
                     runOperation {
-                        synchronizeOnceOperation { processing ->
-                            _syncing.value = processing
-                            if (!processing) _lastSyncResult.value = RequestSyncResult.Success
-                            onProcessingChanged(processing)
-                        }
+                        withTimeoutOrNull(BACKGROUND_SESSION_LIMIT_MILLIS) {
+                            synchronizeOnceOperation { processing ->
+                                _syncing.value = processing
+                                if (!processing) _lastSyncResult.value = RequestSyncResult.Success
+                                onProcessingChanged(processing)
+                            }
+                        } ?: RequestSyncResult.ContinuationRequired
                     }
                 )
             _lastSyncResult.value = result
-            if (result == RequestSyncResult.Success) {
+            if (
+                result == RequestSyncResult.Success ||
+                    result == RequestSyncResult.ContinuationRequired
+            ) {
                 demand.update { current ->
                     if (current.foregroundVisible && current.stoppedOnTerminalResult) {
                         current.copy(
@@ -308,7 +313,8 @@ internal class RequestConnectionManager(
                         waitForRetry(reconnectDelay, synchronizationGeneration)
                         reconnectDelay = nextReconnectDelay(reconnectDelay)
                     }
-                    RequestSyncResult.Success -> {
+                    RequestSyncResult.Success,
+                    RequestSyncResult.ContinuationRequired -> {
                         waitForRetry(reconnectDelayMillis, synchronizationGeneration)
                         reconnectDelay = reconnectDelayMillis
                     }
@@ -471,6 +477,7 @@ internal class RequestConnectionManager(
 
     private companion object {
         const val TAG = "AgentknockConnection"
+        const val BACKGROUND_SESSION_LIMIT_MILLIS = 2 * 60 * 1_000L
         const val BACKGROUND_GRACE_PERIOD_MILLIS = 35_000L
         const val RECONNECT_DELAY_MILLIS = 3_000L
         const val MAXIMUM_RECONNECT_DELAY_MILLIS = 60_000L
