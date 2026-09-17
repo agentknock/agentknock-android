@@ -56,7 +56,7 @@ internal fun NotificationsSettings(
         remember(refreshGeneration) {
             RequestNotifications.channelNotificationsEnabled(
                 context,
-                RequestNotifications.BACKGROUND_CHANNEL_ID,
+                RequestNotifications.PROCESSING_CHANNEL_ID,
             )
         }
 
@@ -165,19 +165,19 @@ internal fun NotificationsSettingsContent(
                         )
                         SettingsGroupDivider()
                         SettingsRow(
-                            title = "Background processing",
+                            title = "Request processing",
                             summary =
                                 if (backgroundEnabled) {
-                                    "Silent notification shown"
+                                    "Enabled"
                                 } else {
-                                    "Silent notification hidden"
+                                    "Blocked by Android settings"
                                 },
-                            onClick = { openChannel(RequestNotifications.BACKGROUND_CHANNEL_ID) },
+                            onClick = { openChannel(RequestNotifications.PROCESSING_CHANNEL_ID) },
                             external = true,
                         )
                     }
                     Text(
-                        "Hiding the background processing notification does not stop request " +
+                        "Hiding the request processing notification does not stop request " +
                             "processing. Android controls sound, vibration, lock-screen visibility, " +
                             "and interruption for each category.",
                         style = MaterialTheme.typography.bodySmall,

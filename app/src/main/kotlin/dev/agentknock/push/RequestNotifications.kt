@@ -231,7 +231,7 @@ internal object RequestNotifications {
     const val DENY_DECISION = "deny"
 
     const val ACTION_CHANNEL_ID = "requests"
-    const val BACKGROUND_CHANNEL_ID = "background_processing"
+    const val PROCESSING_CHANNEL_ID = "request_processing"
     private const val PROCESSING_NOTIFICATION_ID = 1
     const val FOREGROUND_NOTIFICATION_ID = 2
     private const val REQUEST_NOTIFICATION_ID = 10_000
@@ -250,22 +250,22 @@ internal object RequestNotifications {
                         context.getString(R.string.request_notification_channel_description)
                     lockscreenVisibility = Notification.VISIBILITY_PUBLIC
                 }
-        val backgroundChannel =
+        val processingChannel =
             NotificationChannel(
-                    BACKGROUND_CHANNEL_ID,
-                    context.getString(R.string.background_notification_channel),
-                    NotificationManager.IMPORTANCE_LOW,
+                    PROCESSING_CHANNEL_ID,
+                    context.getString(R.string.processing_notification_channel),
+                    NotificationManager.IMPORTANCE_DEFAULT,
                 )
                 .apply {
                     description =
-                        context.getString(R.string.background_notification_channel_description)
-                    lockscreenVisibility = Notification.VISIBILITY_SECRET
+                        context.getString(R.string.processing_notification_channel_description)
                     setSound(null, null)
                     enableVibration(false)
+                    setShowBadge(false)
                 }
-        context
-            .getSystemService(NotificationManager::class.java)
-            .createNotificationChannels(listOf(actionChannel, backgroundChannel))
+        val manager = context.getSystemService(NotificationManager::class.java)
+        manager.createNotificationChannels(listOf(actionChannel, processingChannel))
+        manager.deleteNotificationChannel("background_processing")
     }
 
     fun appNotificationsEnabled(context: Context): Boolean =
@@ -299,7 +299,7 @@ internal object RequestNotifications {
             // WorkManager owns the foreground notification until its service stops.
             return
         }
-        if (!channelNotificationsEnabled(context, BACKGROUND_CHANNEL_ID)) return
+        if (!channelNotificationsEnabled(context, PROCESSING_CHANNEL_ID)) return
         val notificationId =
             if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.S) PROCESSING_NOTIFICATION_ID
             else FOREGROUND_NOTIFICATION_ID
@@ -317,7 +317,7 @@ internal object RequestNotifications {
                 },
                 PendingIntent.FLAG_UPDATE_CURRENT or PendingIntent.FLAG_IMMUTABLE,
             )
-        return Notification.Builder(context, BACKGROUND_CHANNEL_ID)
+        return Notification.Builder(context, PROCESSING_CHANNEL_ID)
             .setSmallIcon(R.drawable.ic_notification)
             .setColor(context.getColor(R.color.notification_accent))
             .setContentTitle(
@@ -332,7 +332,7 @@ internal object RequestNotifications {
             .setOngoing(true)
             .setOnlyAlertOnce(true)
             .setCategory(Notification.CATEGORY_SERVICE)
-            .setVisibility(Notification.VISIBILITY_SECRET)
+            .setVisibility(Notification.VISIBILITY_PUBLIC)
             .build()
     }
 

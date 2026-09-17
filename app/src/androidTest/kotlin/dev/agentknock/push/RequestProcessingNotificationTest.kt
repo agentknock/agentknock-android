@@ -1,6 +1,7 @@
 package dev.agentknock.push
 
 import android.app.Notification
+import android.app.NotificationChannel
 import android.app.NotificationManager
 import android.os.Build
 import android.os.SystemClock
@@ -66,11 +67,13 @@ class RequestProcessingNotificationTest {
             assertNotNull(processingNotification())
             assertEquals(1, manager.activeNotifications.count { it.tag == manual.requestId })
             val notification = checkNotNull(processingNotification())
-            assertEquals(Notification.VISIBILITY_SECRET, notification.visibility)
+            assertEquals(Notification.VISIBILITY_PUBLIC, notification.visibility)
             assertTrue(notification.flags and Notification.FLAG_ONGOING_EVENT != 0)
-            val channel = manager.getNotificationChannel(RequestNotifications.BACKGROUND_CHANNEL_ID)
+            val channel = manager.getNotificationChannel(RequestNotifications.PROCESSING_CHANNEL_ID)
             assertEquals(null, channel.sound)
             assertFalse(channel.shouldVibrate())
+            assertFalse(channel.canShowBadge())
+            assertEquals(NotificationManager.IMPORTANCE_DEFAULT, channel.importance)
 
             session.setProcessing(false)
             if (Build.VERSION.SDK_INT >= 31) {
@@ -88,6 +91,31 @@ class RequestProcessingNotificationTest {
             assertNotNull(processingNotification())
         }
         if (Build.VERSION.SDK_INT >= 31) awaitNotifications { processingNotification() == null }
+    }
+
+    @Test
+    fun channelUpgradeReplacesOldProcessingSettingsWithoutChangingApprovalAlerts() {
+        manager.createNotificationChannel(
+            NotificationChannel(
+                "background_processing",
+                "Background processing",
+                NotificationManager.IMPORTANCE_LOW,
+            )
+        )
+        val approvals = manager.getNotificationChannel(RequestNotifications.ACTION_CHANNEL_ID)
+
+        RequestNotifications.createChannel(context)
+
+        assertEquals(null, manager.getNotificationChannel("background_processing"))
+        val processing = manager.getNotificationChannel(RequestNotifications.PROCESSING_CHANNEL_ID)
+        assertEquals(NotificationManager.IMPORTANCE_DEFAULT, processing.importance)
+        assertEquals(null, processing.sound)
+        assertFalse(processing.shouldVibrate())
+        assertFalse(processing.canShowBadge())
+        assertEquals(
+            approvals,
+            manager.getNotificationChannel(RequestNotifications.ACTION_CHANNEL_ID),
+        )
     }
 
     @Test
@@ -126,7 +154,7 @@ class RequestProcessingNotificationTest {
     private fun processingNotification(): Notification? =
         manager.activeNotifications
             .singleOrNull {
-                it.notification.channelId == RequestNotifications.BACKGROUND_CHANNEL_ID
+                it.notification.channelId == RequestNotifications.PROCESSING_CHANNEL_ID
             }
             ?.notification
 }
