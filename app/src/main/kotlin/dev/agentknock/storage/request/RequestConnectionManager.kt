@@ -471,7 +471,7 @@ internal class RequestConnectionManager(
 
     private companion object {
         const val TAG = "AgentknockConnection"
-        const val BACKGROUND_GRACE_PERIOD_MILLIS = 5_000L
+        const val BACKGROUND_GRACE_PERIOD_MILLIS = 35_000L
         const val RECONNECT_DELAY_MILLIS = 3_000L
         const val MAXIMUM_RECONNECT_DELAY_MILLIS = 60_000L
     }
