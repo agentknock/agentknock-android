@@ -1,5 +1,18 @@
 # Changelog
 
+## [0.4.3](https://github.com/agentknock/agentknock-android/compare/v0.4.2...v0.4.3) (2026-09-17)
+
+
+### Bug Fixes
+
+* bound background sessions and continue durable work ([b71aaea](https://github.com/agentknock/agentknock-android/commit/b71aaeae1346df3bd79c94dc21f6b0378b3f91c4))
+* clarify approval notification actions and failures ([73db201](https://github.com/agentknock/agentknock-android/commit/73db201cb245c43f2e74209b20cf8157af34999e))
+* keep delayed retries out of the fresh push queue ([26386ce](https://github.com/agentknock/agentknock-android/commit/26386ce935275204413ebca7c9a3c6aba91aaab5))
+* preserve foreground socket for 35 seconds after backgrounding ([8fc1381](https://github.com/agentknock/agentknock-android/commit/8fc1381e939bb3fdffc3592f749ebd9083ec9522))
+* retain sanitized AI review failure diagnostics in audit data ([ccaf83c](https://github.com/agentknock/agentknock-android/commit/ccaf83ccd1600a0f9867c67152f693ee88a4e3e2))
+* show request processing without audible alerts ([e8544a8](https://github.com/agentknock/agentknock-android/commit/e8544a89e62668f0b6c59d28f09e6a3f4d5562ab))
+* synchronize after Firebase deletes pending messages ([359a8b4](https://github.com/agentknock/agentknock-android/commit/359a8b43dd138f1c61926da43c0e6fd458a94064))
+
 ## [0.4.2](https://github.com/agentknock/agentknock-android/compare/v0.4.1...v0.4.2) (2026-09-17)
 
 
