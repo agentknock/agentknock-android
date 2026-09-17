@@ -18,7 +18,7 @@ plugins {
     alias(libs.plugins.room3)
 }
 
-val agentknockVersionCode = 74
+val agentknockVersionCode = 75
 val agentknockVersionName =
     providers
         .fileContents(rootProject.layout.projectDirectory.file("version.txt"))
