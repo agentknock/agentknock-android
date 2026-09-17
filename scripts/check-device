@@ -108,6 +108,12 @@ while true; do
         if [[ "${boot_completed//$'\r'/}" == 1 ]]; then
             break
         fi
+    else
+        probe_status=$?
+        if (( probe_status == 124 || probe_status == 137 )); then
+            echo "Boot probe timed out; reconnecting $device_serial." >&2
+            timeout --kill-after=2 10 adb -s "$device_serial" reconnect || true
+        fi
     fi
     sleep 1
 done
