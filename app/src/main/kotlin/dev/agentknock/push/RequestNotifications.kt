@@ -362,15 +362,32 @@ internal object RequestNotifications {
                     .setColor(context.getColor(R.color.notification_accent))
                     .setContentTitle(request.title)
                     .setSubText(request.kindLabel)
-                    .setContentText(request.summary)
-                    .setStyle(Notification.BigTextStyle().bigText(styledDetails(request.details)))
+                    .setContentText(
+                        request.actionFailure?.let { "$it · Open to review" } ?: request.summary
+                    )
+                    .setStyle(
+                        Notification.BigTextStyle()
+                            .bigText(
+                                styledDetails(
+                                    request.actionFailure?.let {
+                                        listOf(
+                                            RequestNotificationDetail(null, "$it · Open to review")
+                                        ) + request.details
+                                    } ?: request.details
+                                )
+                            )
+                    )
                     .setContentIntent(openRequest)
                     .setAutoCancel(true)
                     .setOnlyAlertOnce(true)
                     .setCategory(Notification.CATEGORY_MESSAGE)
                     .setVisibility(Notification.VISIBILITY_PRIVATE)
                     .setPublicVersion(publicVersion)
-            if (request.decisionAvailable) {
+            if (request.actionFailure != null) {
+                builder.addAction(
+                    Notification.Action.Builder(null, "Open to review", openRequest).build()
+                )
+            } else if (request.decisionAvailable) {
                 builder.addAction(
                     decisionAction(context, request.requestId, DENY_DECISION, "Deny once")
                 )
@@ -390,7 +407,7 @@ internal object RequestNotifications {
     ): Notification.Action {
         if (decision == APPROVE_DECISION && Build.VERSION.SDK_INT < Build.VERSION_CODES.S) {
             val openRequest = openRequestPendingIntent(context, requestId, decision)
-            return Notification.Action.Builder(null, title, openRequest).build()
+            return Notification.Action.Builder(null, "Review", openRequest).build()
         }
         val intent = decisionPendingIntent(context, requestId, decision)
         return Notification.Action.Builder(null, title, intent)
@@ -478,24 +495,18 @@ class RequestNotificationActionReceiver : BroadcastReceiver() {
     override fun onReceive(context: Context, intent: Intent) {
         if (intent.action != RequestNotifications.DECIDE_REQUEST_ACTION) return
         val requestId = intent.getStringExtra(RequestNotifications.REQUEST_ID_EXTRA) ?: return
-        val decision = intent.getStringExtra(RequestNotifications.DECISION_EXTRA) ?: return
+        val decision =
+            when (intent.getStringExtra(RequestNotifications.DECISION_EXTRA)) {
+                RequestNotifications.APPROVE_DECISION -> RequestDecision.APPROVE
+                RequestNotifications.DENY_DECISION -> RequestDecision.DENY
+                else -> return
+            }
         val pendingResult = goAsync()
         val application = context.applicationContext as AgentknockApplication
         CoroutineScope(SupervisorJob() + Dispatchers.IO).launch {
             try {
-                application.container.requestNotifications.performAction {
-                    when (decision) {
-                        RequestNotifications.APPROVE_DECISION ->
-                            application.container.actions.decideRequest(
-                                requestId,
-                                RequestDecision.APPROVE,
-                            )
-                        RequestNotifications.DENY_DECISION ->
-                            application.container.actions.decideRequest(
-                                requestId,
-                                RequestDecision.DENY,
-                            )
-                    }
+                application.container.requestNotifications.performAction(requestId, decision) {
+                    application.container.actions.decideRequest(requestId, decision)
                 }
             } finally {
                 pendingResult.finish()

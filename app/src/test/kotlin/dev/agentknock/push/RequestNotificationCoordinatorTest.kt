@@ -1,5 +1,7 @@
 package dev.agentknock.push
 
+import dev.agentknock.storage.request.RequestDecision
+import dev.agentknock.storage.request.RequestDecisionResult
 import dev.agentknock.storage.request.RequestNotification
 import kotlinx.coroutines.CompletableDeferred
 import kotlinx.coroutines.ExperimentalCoroutinesApi
@@ -86,10 +88,11 @@ class RequestNotificationCoordinatorTest {
         runCurrent()
         displayStarted.await()
         val action = async {
-            coordinator.performAction {
+            coordinator.performAction("current", RequestDecision.APPROVE) {
                 effects += "action:start"
                 requests.value = listOf(notification("updated"))
                 effects += "action:end"
+                RequestDecisionResult.Decided
             }
         }
         runCurrent()
@@ -104,6 +107,39 @@ class RequestNotificationCoordinatorTest {
             effects,
         )
     }
+
+    @Test
+    fun `failed action stays visible through unrelated updates and disappears when resolved`() =
+        runTest {
+            val request = notification("current")
+            val requests = MutableStateFlow(listOf(request))
+            val displayed = mutableListOf<List<RequestNotification>>()
+            val coordinator =
+                RequestNotificationCoordinator(backgroundScope, requests) { displayed += it }
+            runCurrent()
+
+            coordinator.performAction("current", RequestDecision.APPROVE) {
+                RequestDecisionResult.SecretUnavailable
+            }
+            assertEquals("Couldn’t approve", displayed.last().single().actionFailure)
+            requests.value = listOf(request, notification("other"))
+            runCurrent()
+            assertEquals("Couldn’t approve", displayed.last().first().actionFailure)
+            assertEquals(null, displayed.last().last().actionFailure)
+
+            requests.value = listOf(notification("other"))
+            runCurrent()
+            assertEquals(listOf(notification("other")), displayed.last())
+
+            coordinator.performAction("gone", RequestDecision.DENY) {
+                RequestDecisionResult.NotFound
+            }
+            assertEquals(listOf(notification("other")), displayed.last())
+            coordinator.performAction("other", RequestDecision.DENY) {
+                RequestDecisionResult.ClientUnavailable
+            }
+            assertEquals("Couldn’t deny", displayed.last().single().actionFailure)
+        }
 
     private fun notification(id: String) =
         RequestNotification(
