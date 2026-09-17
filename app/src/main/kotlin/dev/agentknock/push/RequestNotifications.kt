@@ -25,6 +25,7 @@ import androidx.work.OutOfQuotaPolicy
 import androidx.work.WorkManager
 import androidx.work.WorkerParameters
 import androidx.work.await
+import androidx.work.workDataOf
 import dev.agentknock.AgentknockApplication
 import dev.agentknock.MainActivity
 import dev.agentknock.R
@@ -54,6 +55,7 @@ class PushSynchronizationWorker(
 
     override suspend fun doWork(): Result {
         val container = (applicationContext as AgentknockApplication).container
+        val retryDelay = inputData.getLong(RETRY_DELAY_KEY, INITIAL_RETRY_DELAY_MILLIS)
         if (container.factoryResetInProgress) return Result.success()
         return container.processingNotifications.start().use { processing ->
             container.localStorage.await()
@@ -65,7 +67,7 @@ class PushSynchronizationWorker(
                 dev.agentknock.storage.request.OneShotSynchronizationResult.Covered ->
                     Result.success()
                 is dev.agentknock.storage.request.OneShotSynchronizationResult.Deferred ->
-                    enqueueDeadlineRetry(applicationContext, synchronization.retryAfterMillis)
+                    enqueueRetry(applicationContext, synchronization.retryAfterMillis, retryDelay)
                 is dev.agentknock.storage.request.OneShotSynchronizationResult.Completed ->
                     when (synchronization.result) {
                         RequestSyncResult.Success,
@@ -79,8 +81,12 @@ class PushSynchronizationWorker(
                         is RequestSyncResult.RelayUnavailable -> {
                             synchronization.result.retryAfterMillis
                                 ?.takeIf { it > 0 }
-                                ?.let { enqueueDeadlineRetry(applicationContext, it) }
-                                ?: Result.retry()
+                                ?.let { enqueueRetry(applicationContext, it, retryDelay) }
+                                ?: enqueueRetry(
+                                    applicationContext,
+                                    retryDelay,
+                                    nextSynchronizationRetryDelayMillis(retryDelay),
+                                )
                         }
                         is RequestSyncResult.InternalFailure -> {
                             Log.e(
@@ -114,26 +120,35 @@ class PushSynchronizationWorker(
                 )
         }
 
-        internal suspend fun enqueueAndAwait(context: Context) {
+        internal suspend fun enqueueAndAwait(
+            context: Context,
+            retryDelayMillis: Long = INITIAL_RETRY_DELAY_MILLIS,
+        ) {
             WorkManager.getInstance(context)
                 .enqueueUniqueWork(
                     WORK_NAME,
                     ExistingWorkPolicy.APPEND_OR_REPLACE,
-                    workRequest(),
+                    workRequest(retryDelayMillis),
                 )
                 .await()
         }
 
-        private fun workRequest() =
+        private fun workRequest(retryDelayMillis: Long = INITIAL_RETRY_DELAY_MILLIS) =
             OneTimeWorkRequestBuilder<PushSynchronizationWorker>()
+                .setInputData(workDataOf(RETRY_DELAY_KEY to retryDelayMillis))
                 .setConstraints(networkConstraints())
                 .setBackoffCriteria(BackoffPolicy.EXPONENTIAL, 10, TimeUnit.SECONDS)
                 .setExpedited(OutOfQuotaPolicy.RUN_AS_NON_EXPEDITED_WORK_REQUEST)
                 .build()
 
-        private suspend fun enqueueDeadlineRetry(context: Context, delayMillis: Long): Result {
+        internal suspend fun enqueueRetry(
+            context: Context,
+            delayMillis: Long,
+            retryDelayMillis: Long,
+        ): Result {
             val request =
                 OneTimeWorkRequestBuilder<RelayRetryWorker>()
+                    .setInputData(workDataOf(RETRY_DELAY_KEY to retryDelayMillis))
                     .setInitialDelay(
                         deadlineRetryWorkDelayMillis(delayMillis),
                         TimeUnit.MILLISECONDS,
@@ -168,7 +183,10 @@ class RelayRetryWorker(
         val container = (applicationContext as AgentknockApplication).container
         if (container.factoryResetInProgress) return Result.success()
         return try {
-            PushSynchronizationWorker.enqueueAndAwait(applicationContext)
+            PushSynchronizationWorker.enqueueAndAwait(
+                applicationContext,
+                inputData.getLong(RETRY_DELAY_KEY, INITIAL_RETRY_DELAY_MILLIS),
+            )
             Result.success()
         } catch (cancelled: CancellationException) {
             throw cancelled
@@ -182,6 +200,12 @@ class RelayRetryWorker(
         const val TAG = "AgentknockPush"
     }
 }
+
+private const val RETRY_DELAY_KEY = "synchronization_retry_delay_ms"
+private const val INITIAL_RETRY_DELAY_MILLIS = 10_000L
+
+internal fun nextSynchronizationRetryDelayMillis(previousMillis: Long): Long =
+    previousMillis.coerceAtMost(TimeUnit.HOURS.toMillis(5) / 2) * 2
 
 internal fun deadlineRetryWorkDelayMillis(remainingMillis: Long): Long {
     require(remainingMillis > 0)
