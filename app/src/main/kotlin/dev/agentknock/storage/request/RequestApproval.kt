@@ -176,8 +176,8 @@ internal suspend fun performAiReview(
             reviewer.reviewWithRetries(credentials.deviceId, credentials.deviceToken, request)
         } catch (cancelled: kotlinx.coroutines.CancellationException) {
             throw cancelled
-        } catch (_: Exception) {
-            return AiReview(failure = AiReviewFailure.UNAVAILABLE)
+        } catch (failure: Exception) {
+            return unavailableAiReview(failure)
         }
     val review =
         when (result) {
@@ -202,7 +202,7 @@ internal suspend fun performAiReview(
                     httpStatus = result.status,
                     errorCode = result.code,
                 )
-            is RelayEndpointResult.Unavailable -> AiReview(failure = AiReviewFailure.UNAVAILABLE)
+            is RelayEndpointResult.Unavailable -> unavailableAiReview(result.cause)
             RelayEndpointResult.InvalidResponse ->
                 AiReview(failure = AiReviewFailure.INVALID_RESPONSE)
         }
@@ -238,6 +238,7 @@ internal fun AiReview.auditData() =
         "ai_failure" to failure?.name?.lowercase(),
         "ai_http_status" to httpStatus,
         "ai_error_code" to errorCode,
+        "ai_failure_diagnostic" to failureDiagnostic,
     )
 
 internal fun AiReviewAttempt.auditRequestData() =
@@ -258,3 +259,26 @@ internal fun AiReviewAttempt.auditData(appliedReview: AiReview) =
             "resulting_review_explanation" to appliedReview.explanation,
             "resulting_review_failure" to appliedReview.failure?.name?.lowercase(),
         )
+
+/** Exception messages can contain credentials or response bodies. Keep code locations only. */
+internal fun unavailableAiReview(failure: Throwable): AiReview =
+    AiReview(
+        failure = AiReviewFailure.UNAVAILABLE,
+        failureDiagnostic = buildString {
+                val seen =
+                    java.util.Collections.newSetFromMap(
+                        java.util.IdentityHashMap<Throwable, Boolean>()
+                    )
+                var current: Throwable? = failure
+                while (current != null && seen.size < 8 && seen.add(current)) {
+                    if (isNotEmpty()) append("Caused by: ")
+                    appendLine(current.javaClass.name)
+                    current.stackTrace.take(32).forEach { frame ->
+                        appendLine("    at $frame")
+                    }
+                    current = current.cause
+                }
+                if (current != null) appendLine("[cause chain truncated]")
+            }
+                .trimEnd(),
+    )
