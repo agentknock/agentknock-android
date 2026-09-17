@@ -2860,6 +2860,90 @@ class RequestRepositorySlotTest {
     }
 
     @Test
+    fun idleSocketFailureFinishesCompletedSynchronization() = runTest {
+        assertIdleDisconnect(RelayDeviceEvent.Failed("idle connection lost"))
+    }
+
+    @Test
+    fun idleSocketCloseFinishesCompletedSynchronization() = runTest {
+        assertIdleDisconnect(RelayDeviceEvent.Closed(1000, "server closed"))
+    }
+
+    @Test
+    fun decisionSavedAsIdleSocketFailsStillRequiresRecovery() = runTest {
+        assertIdleDisconnect(
+            RelayDeviceEvent.Failed("idle connection lost"),
+            approveBeforeDisconnect = true,
+        )
+    }
+
+    private suspend fun assertIdleDisconnect(
+        event: RelayDeviceEvent,
+        approveBeforeDisconnect: Boolean = false,
+    ) {
+        val clientPsk = establishActivePairing()
+        createAiEnvironmentSecret()
+        val request =
+            pairedRequest(
+                requestId = AI_INVOCATION_REQUEST_ID,
+                clientPsk = clientPsk,
+                plaintext = aiInvocationPlaintext(ByteArray(32) { 0x24 }),
+            )
+        val connection = connectInteractively()
+        val clock = TestCoroutineScheduler()
+        val sessionScope = CoroutineScope(SupervisorJob() + StandardTestDispatcher(clock))
+        var processing = true
+        val synchronization = sessionScope.async { repository.sync { processing = it } }
+        suspend fun until(condition: () -> Boolean) = awaitAsynchronousWork {
+            while (true) {
+                clock.runCurrent()
+                if (condition()) break
+                delay(1)
+            }
+        }
+        try {
+            connection.emit(requestEvent(AI_INVOCATION_REQUEST_ID, request))
+            until { connection.sentFrames.any { it is RelayDeviceFrame.Resume } }
+            connection.resolve(
+                connection.sentFrames.filterIsInstance<RelayDeviceFrame.Resume>().single()
+            )
+            connection.emit(RelayDeviceEvent.CaughtUp)
+            approvalReviewer.complete(
+                reviewed(RelayApprovalReviewDecision.ASK_USER, "Needs a decision.")
+            )
+            until { !processing }
+            clock.advanceTimeBy(1_000)
+            connection.emit(event)
+            if (approveBeforeDisconnect) {
+                // The socket event has won select, but its handler is still paused. Persist a
+                // decision now to exercise the final durable-work check rather than a flush.
+                assertEquals(
+                    RequestDecisionResult.Decided,
+                    repository.decideRequest(AI_INVOCATION_REQUEST_ID, RequestDecision.APPROVE),
+                )
+            }
+            until { synchronization.isCompleted }
+            if (approveBeforeDisconnect) {
+                assertEquals(
+                    RequestSyncResult.RelayUnavailable("idle connection lost"),
+                    synchronization.await(),
+                )
+                val saved =
+                    checkNotNull(database.requestDao().getRequestById(AI_INVOCATION_REQUEST_ID))
+                assertNotNull(saved.responseJson)
+                assertFalse(saved.responseOutboxFinished)
+            } else {
+                assertEquals(RequestSyncResult.Success, synchronization.await())
+            }
+            assertTrue(connection.closed)
+            assertEquals(1, approvalReviewer.callCount)
+        } finally {
+            sessionScope.cancel()
+            clock.runCurrent()
+        }
+    }
+
+    @Test
     fun controlTrafficAndDuplicateManualRequestsDoNotExtendTheIdleWindow() = runTest {
         val clientPsk = establishActivePairing()
         createAiEnvironmentSecret()

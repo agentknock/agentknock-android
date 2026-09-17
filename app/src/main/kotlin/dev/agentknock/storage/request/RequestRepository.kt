@@ -680,6 +680,23 @@ internal class RequestRepository(
                         }
                         RelayDeviceEvent.CaughtUp -> null
                     }
+                if (
+                    !keepConnected &&
+                        idleWindow.timeout != null &&
+                        (event is RelayDeviceEvent.Closed || event is RelayDeviceEvent.Failed) &&
+                        !aiReviews.hasActiveReviews &&
+                        durableRelayState.outstanding == null
+                ) {
+                    // Losing an idle reuse connection must not put completed work into retry
+                    // backoff and block later pushes. Recheck durable work under the lock: a
+                    // decision may have been saved while we were waiting for this socket event.
+                    sendNextDurableOperation(credentials, connection, durableRelayState)?.let {
+                        return@withLock it
+                    }
+                    if (durableRelayState.outstanding == null) {
+                        return@withLock RequestSyncResult.Success
+                    }
+                }
                 eventFailure
                     ?: sendNextDurableOperation(
                         credentials = credentials,
