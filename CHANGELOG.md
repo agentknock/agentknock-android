@@ -1,5 +1,12 @@
 # Changelog
 
+## [0.4.2](https://github.com/agentknock/agentknock-android/compare/v0.4.1...v0.4.2) (2026-09-17)
+
+
+### Bug Fixes
+
+* finish idle background sync after socket disconnects ([8b71cc3](https://github.com/agentknock/agentknock-android/commit/8b71cc30e994520ee27c78197e0ab66c23305dbd))
+
 ## [0.4.1](https://github.com/agentknock/agentknock-android/compare/v0.4.0...v0.4.1) (2026-09-15)
 
 
