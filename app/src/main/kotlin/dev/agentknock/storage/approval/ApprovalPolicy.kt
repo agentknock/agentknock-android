@@ -42,6 +42,8 @@ internal data class AiReview(
     val failure: AiReviewFailure? = null,
     val httpStatus: Int? = null,
     val errorCode: String? = null,
+    // Carried to the audit event only; never persisted as approval state.
+    @kotlinx.serialization.Transient val failureDiagnostic: String? = null,
 )
 
 @Serializable
