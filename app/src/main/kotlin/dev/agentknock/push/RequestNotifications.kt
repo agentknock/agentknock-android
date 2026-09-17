@@ -19,6 +19,7 @@ import androidx.work.Constraints
 import androidx.work.CoroutineWorker
 import androidx.work.ExistingWorkPolicy
 import androidx.work.ForegroundInfo
+import androidx.work.ListenableWorker
 import androidx.work.NetworkType
 import androidx.work.OneTimeWorkRequestBuilder
 import androidx.work.OutOfQuotaPolicy
@@ -70,6 +71,10 @@ class PushSynchronizationWorker(
                     enqueueRetry(applicationContext, synchronization.retryAfterMillis, retryDelay)
                 is dev.agentknock.storage.request.OneShotSynchronizationResult.Completed ->
                     when (synchronization.result) {
+                        RequestSyncResult.ContinuationRequired -> {
+                            container.requestNotifications.reconcile()
+                            enqueueSynchronization(applicationContext)
+                        }
                         RequestSyncResult.Success,
                         RequestSyncResult.NoDevice,
                         RequestSyncResult.DeviceCredentialsUnavailable,
@@ -182,24 +187,26 @@ class RelayRetryWorker(
     override suspend fun doWork(): Result {
         val container = (applicationContext as AgentknockApplication).container
         if (container.factoryResetInProgress) return Result.success()
-        return try {
-            PushSynchronizationWorker.enqueueAndAwait(
-                applicationContext,
-                inputData.getLong(RETRY_DELAY_KEY, INITIAL_RETRY_DELAY_MILLIS),
-            )
-            Result.success()
-        } catch (cancelled: CancellationException) {
-            throw cancelled
-        } catch (failure: Exception) {
-            Log.w(TAG, "Could not enqueue relay synchronization", failure)
-            Result.retry()
-        }
-    }
-
-    private companion object {
-        const val TAG = "AgentknockPush"
+        return enqueueSynchronization(
+            applicationContext,
+            inputData.getLong(RETRY_DELAY_KEY, INITIAL_RETRY_DELAY_MILLIS),
+        )
     }
 }
+
+private suspend fun enqueueSynchronization(
+    context: Context,
+    retryDelayMillis: Long = INITIAL_RETRY_DELAY_MILLIS,
+): ListenableWorker.Result =
+    try {
+        PushSynchronizationWorker.enqueueAndAwait(context, retryDelayMillis)
+        ListenableWorker.Result.success()
+    } catch (cancelled: CancellationException) {
+        throw cancelled
+    } catch (failure: Exception) {
+        Log.w("AgentknockPush", "Could not enqueue relay synchronization", failure)
+        ListenableWorker.Result.retry()
+    }
 
 private const val RETRY_DELAY_KEY = "synchronization_retry_delay_ms"
 private const val INITIAL_RETRY_DELAY_MILLIS = 10_000L

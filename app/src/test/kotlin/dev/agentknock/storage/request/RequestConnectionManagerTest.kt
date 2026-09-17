@@ -57,6 +57,49 @@ class RequestConnectionManagerTest {
     }
 
     @Test
+    fun `continuous background activity yields while foreground listening remains open`() =
+        runTest {
+            var batches = 0
+            var closed = false
+            val manager =
+                manager(
+                    listen = { awaitCancellation() },
+                    synchronizeOnce = { onProcessing ->
+                        try {
+                            repeat(10) {
+                                onProcessing(true)
+                                kotlinx.coroutines.delay(1_000)
+                                onProcessing(false)
+                                batches += 1
+                                kotlinx.coroutines.delay(29_000)
+                            }
+                            RequestSyncResult.Success
+                        } finally {
+                            closed = true
+                        }
+                    },
+                )
+            val worker = async { manager.synchronizeOnce() }
+            advanceTimeBy(119_999)
+            runCurrent()
+            assertEquals(4, batches)
+            assertFalse(worker.isCompleted)
+            advanceTimeBy(1)
+            runCurrent()
+            assertTrue(closed)
+            assertEquals(
+                OneShotSynchronizationResult.Completed(RequestSyncResult.ContinuationRequired),
+                worker.await(),
+            )
+
+            manager.appForegrounded()
+            runCurrent()
+            advanceTimeBy(600_000)
+            runCurrent()
+            assertTrue(manager.syncing.value)
+        }
+
+    @Test
     fun `keeps a caught-up connection open through the background grace period`() = runTest {
         var connections = 0
         var cancellations = 0

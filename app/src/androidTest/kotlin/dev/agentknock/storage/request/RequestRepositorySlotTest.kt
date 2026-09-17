@@ -108,6 +108,7 @@ import org.junit.runner.RunWith
 @RunWith(AndroidJUnit4::class)
 class RequestRepositorySlotTest {
     private val subscription = FakeSubscription(DEVICE_ID)
+    private lateinit var aiReviews: AiReviewCoordinator
     private lateinit var database: AgentknockDatabase
     private lateinit var relay: QueuedRelayDeviceClient
     private lateinit var repository: RequestRepository
@@ -269,6 +270,7 @@ class RequestRepositorySlotTest {
                 json = Json,
                 currentTimeMillis = { now },
             )
+        aiReviews = AiReviewCoordinator(reviewScope)
         repository =
             RequestRepository(
                 dao = database.requestDao(),
@@ -282,7 +284,7 @@ class RequestRepositorySlotTest {
                 pairingRequests = pairingRequests,
                 clientRemovalRequests = clientRemovalRequests,
                 relay = relay,
-                aiReviews = AiReviewCoordinator(reviewScope),
+                aiReviews = aiReviews,
                 scheduleSynchronization = { synchronizationRequests += 1 },
                 audit = audit,
                 writeTransaction = RoomWriteTransaction(database),
@@ -2853,6 +2855,106 @@ class RequestRepositorySlotTest {
             assertEquals(RequestSyncResult.Success, synchronization.await())
             assertTrue(connection.closed)
             assertEquals(2, approvalReviewer.callCount)
+        } finally {
+            sessionScope.cancel()
+            clock.runCurrent()
+        }
+    }
+
+    @Test
+    fun sessionLimitKeepsInFlightReviewAliveAndItsResponseDeliverable() = runTest {
+        val clientPsk = establishActivePairing()
+        createAiEnvironmentSecret()
+        val request =
+            pairedRequest(
+                requestId = AI_INVOCATION_REQUEST_ID,
+                clientPsk = clientPsk,
+                plaintext = aiInvocationPlaintext(ByteArray(32) { 0x24 }),
+            )
+        val connection = connectInteractively()
+        val clock = TestCoroutineScheduler()
+        val sessionScope = CoroutineScope(SupervisorJob() + StandardTestDispatcher(clock))
+        val manager =
+            RequestConnectionManager(
+                scope = sessionScope,
+                synchronizeOnce = { repository.sync(it) },
+                listen = { caughtUp -> repository.listen { caughtUp() } },
+                scheduleBackgroundSynchronization = {},
+                relayRetryDeadline =
+                    RelayRetryDeadline(
+                        readState = { RelayRetryDeadlineState() },
+                        writeState = {},
+                        bootCount = 1,
+                        currentTimeMillis = { clock.currentTime },
+                        elapsedRealtimeMillis = { clock.currentTime },
+                    ),
+                awaitAiReviews = aiReviews::awaitIdle,
+                elapsedRealtimeMillis = { clock.currentTime },
+            )
+        val synchronization = sessionScope.async { manager.synchronizeOnce() }
+        suspend fun until(condition: () -> Boolean) = awaitAsynchronousWork {
+            while (true) {
+                clock.runCurrent()
+                if (condition()) break
+                delay(1)
+            }
+        }
+        try {
+            connection.emit(requestEvent(AI_INVOCATION_REQUEST_ID, request))
+            until { connection.sentFrames.any { it is RelayDeviceFrame.Resume } }
+            connection.resolve(
+                connection.sentFrames.filterIsInstance<RelayDeviceFrame.Resume>().single()
+            )
+            connection.emit(RelayDeviceEvent.CaughtUp)
+            until { approvalReviewer.callCount == 1 }
+
+            // Only the socket clock advances: the independently owned AI call is still running.
+            clock.advanceTimeBy(119_999)
+            clock.runCurrent()
+            assertFalse(connection.closed)
+            clock.advanceTimeBy(1)
+            until { connection.closed }
+            assertFalse(synchronization.isCompleted)
+
+            approvalReviewer.complete(
+                reviewed(RelayApprovalReviewDecision.APPROVE, "Matches the instructions.")
+            )
+            val saved = awaitAsynchronousWork {
+                database
+                    .requestDao()
+                    .observeRequest(AI_INVOCATION_REQUEST_ID)
+                    .filterNotNull()
+                    .filter { it.responseJson != null }
+                    .first()
+            }
+            until { synchronization.isCompleted }
+            assertEquals(
+                OneShotSynchronizationResult.Completed(RequestSyncResult.ContinuationRequired),
+                synchronization.await(),
+            )
+            assertFalse(saved.responseOutboxFinished)
+            val response = Json.parseToJsonElement(checkNotNull(saved.responseJson))
+            val continuation =
+                connect(
+                    RelayDeviceEvent.Acknowledgement(
+                        CLIENT_ID,
+                        AI_INVOCATION_REQUEST_ID,
+                        RelayMessageKind.RESPONSE,
+                    ),
+                    relayState(AI_INVOCATION_REQUEST_ID),
+                    RelayDeviceEvent.CaughtUp,
+                )
+            assertEquals(RequestSyncResult.Success, repository.sync())
+            assertTrue(
+                continuation.sentFrames.contains(
+                    RelayDeviceFrame.Response(CLIENT_ID, AI_INVOCATION_REQUEST_ID, response)
+                )
+            )
+            assertTrue(
+                checkNotNull(database.requestDao().getRequestById(AI_INVOCATION_REQUEST_ID))
+                    .responseOutboxFinished
+            )
+            assertEquals(1, approvalReviewer.callCount)
         } finally {
             sessionScope.cancel()
             clock.runCurrent()
