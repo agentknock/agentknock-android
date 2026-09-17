@@ -158,7 +158,8 @@ internal fun NotificationsSettingsContent(
                         SettingsRow(
                             title = "Requests needing action",
                             summary =
-                                if (requestsEnabled) "Enabled" else "Blocked by Android settings",
+                                if (requestsEnabled) "Allow or deny requests from notifications."
+                                else "Blocked in Android settings",
                             attention = !requestsEnabled,
                             onClick = { openChannel(RequestNotifications.ACTION_CHANNEL_ID) },
                             external = true,

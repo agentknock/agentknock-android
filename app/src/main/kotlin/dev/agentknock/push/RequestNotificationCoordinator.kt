@@ -1,5 +1,7 @@
 package dev.agentknock.push
 
+import dev.agentknock.storage.request.RequestDecision
+import dev.agentknock.storage.request.RequestDecisionResult
 import dev.agentknock.storage.request.RequestNotification
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.flow.Flow
@@ -15,6 +17,7 @@ internal class RequestNotificationCoordinator(
     private val displayRequests: suspend (List<RequestNotification>) -> Unit,
 ) {
     private val mutex = Mutex()
+    private val actionFailures = mutableMapOf<String, String>()
     private var displayedRequests: List<RequestNotification>? = null
 
     init {
@@ -40,16 +43,30 @@ internal class RequestNotificationCoordinator(
         }
     }
 
-    suspend fun performAction(action: suspend () -> Unit) {
+    suspend fun performAction(
+        requestId: String,
+        decision: RequestDecision,
+        action: suspend () -> RequestDecisionResult,
+    ) {
         mutex.withLock {
-            action()
+            val result = action()
+            if (result == RequestDecisionResult.Decided) {
+                actionFailures.remove(requestId)
+            } else {
+                actionFailures[requestId] =
+                    if (decision == RequestDecision.DENY) "Couldn’t deny" else "Couldn’t approve"
+            }
             displayIfNeeded(requests.first())
         }
     }
 
     private suspend fun displayIfNeeded(requests: List<RequestNotification>) {
-        if (requests == displayedRequests) return
-        displayRequests(requests)
-        displayedRequests = requests
+        actionFailures.keys.retainAll(requests.map { it.requestId }.toSet())
+        val current = requests.map { request ->
+            actionFailures[request.requestId]?.let { request.copy(actionFailure = it) } ?: request
+        }
+        if (current == displayedRequests) return
+        displayRequests(current)
+        displayedRequests = current
     }
 }

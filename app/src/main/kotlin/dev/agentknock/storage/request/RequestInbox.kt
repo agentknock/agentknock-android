@@ -345,6 +345,7 @@ internal data class RequestNotification(
     val details: List<RequestNotificationDetail>,
     val decisionAvailable: Boolean,
     val kindLabel: String? = null,
+    val actionFailure: String? = null,
 )
 
 internal data class RequestNotificationDetail(
