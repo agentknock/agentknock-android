@@ -23,7 +23,6 @@ import dev.agentknock.storage.secret.RequestedSecretDescription
 import dev.agentknock.storage.secret.SecretApprovalMode
 import dev.agentknock.storage.secret.SecretApprovalPolicy
 import dev.agentknock.storage.secret.SecretValues
-import dev.agentknock.subscription.AiReviewAccess
 import dev.agentknock.subscription.SubscriptionRepository
 import java.security.MessageDigest
 import kotlinx.serialization.decodeFromString
@@ -148,23 +147,6 @@ internal fun String.toAuditDecisionSource(): AuditDecisionSource =
         else -> error("Unknown decision source: $this")
     }
 
-internal suspend fun SubscriptionRepository.reviewFallback(deviceId: String): AiReviewAttempt? {
-    val access = accessForReview(deviceId)
-    if (access == AiReviewAccess.ACTIVE) return null
-    return AiReviewAttempt(
-        review =
-            AiReview(
-                failure =
-                    if (access == AiReviewAccess.INACTIVE) {
-                        AiReviewFailure.SUBSCRIPTION_REQUIRED
-                    } else {
-                        AiReviewFailure.UNAVAILABLE
-                    }
-            ),
-        request = null,
-    )
-}
-
 internal suspend fun performAiReview(
     reviewer: RelayApprovalReviewClient,
     subscription: SubscriptionRepository,
@@ -206,8 +188,10 @@ internal suspend fun performAiReview(
             RelayEndpointResult.InvalidResponse ->
                 AiReview(failure = AiReviewFailure.INVALID_RESPONSE)
         }
-    if (review.failure == AiReviewFailure.SUBSCRIPTION_REQUIRED) {
-        subscription.recordInactiveReviewAccess(credentials.deviceId)
+    if (result is RelayEndpointResult.Success) {
+        subscription.recordReviewAccess(credentials.deviceId, active = true)
+    } else if (review.failure == AiReviewFailure.SUBSCRIPTION_REQUIRED) {
+        subscription.recordReviewAccess(credentials.deviceId, active = false)
     }
     return review
 }

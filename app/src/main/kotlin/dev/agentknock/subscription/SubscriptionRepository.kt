@@ -56,28 +56,11 @@ internal class SubscriptionRepository(
             relay.updateFromGooglePlay(deviceId, deviceToken, purchaseToken).toSubscriptionResult()
         }
 
-    suspend fun accessForReview(deviceId: String): AiReviewAccess {
-        val result = withAuthorization { activeDeviceId, deviceToken ->
-            if (activeDeviceId != deviceId) {
-                SubscriptionResult.InvalidRelayResponse
-            } else if (_access.value == AiReviewAccess.ACTIVE) {
-                // The review endpoint checks entitlement again before running AI.
-                SubscriptionResult.Status(active = true)
-            } else {
-                // Recheck inactive access so renewal also works while the app is in the background.
-                relay.status(activeDeviceId, deviceToken).toSubscriptionResult()
-            }
-        }
-        return when (result) {
-            is SubscriptionResult.Status ->
-                if (result.active) AiReviewAccess.ACTIVE else AiReviewAccess.INACTIVE
-            else -> AiReviewAccess.UNAVAILABLE
-        }
-    }
-
-    suspend fun recordInactiveReviewAccess(deviceId: String) = operations.withLock {
-        if (deviceId == accessDeviceId) {
-            _access.value = AiReviewAccess.INACTIVE
+    suspend fun recordReviewAccess(deviceId: String, active: Boolean) = operations.withLock {
+        val authorization = deviceAuthorization.activeDeviceAuthorization()
+        if ((authorization as? DeviceCredentialResult.Available)?.value?.deviceId == deviceId) {
+            accessDeviceId = deviceId
+            _access.value = if (active) AiReviewAccess.ACTIVE else AiReviewAccess.INACTIVE
         }
     }
 
