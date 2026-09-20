@@ -2,6 +2,7 @@ package dev.agentknock.ui.device
 
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.runtime.mutableStateOf
+import androidx.compose.ui.platform.InterceptPlatformTextInput
 import androidx.compose.ui.semantics.SemanticsActions
 import androidx.compose.ui.semantics.SemanticsProperties
 import androidx.compose.ui.test.SemanticsMatcher
@@ -15,6 +16,7 @@ import androidx.compose.ui.test.performTextInput
 import androidx.compose.ui.test.performTextInputSelection
 import androidx.compose.ui.text.TextRange
 import androidx.test.ext.junit.runners.AndroidJUnit4
+import kotlinx.coroutines.awaitCancellation
 import org.junit.Rule
 import org.junit.Test
 import org.junit.runner.RunWith
@@ -27,24 +29,33 @@ class PairingAddressEditorTest {
     fun typingKeepsCursorAndSuggestionMovesItToEnd() {
         val address = mutableStateOf("amber-river-maple")
         compose.setContent {
-            MaterialTheme {
-                PairingAddressEditor(
-                    address = address.value,
-                    activeAddress = "amber-river-maple",
-                    candidateAddress = null,
-                    claiming = false,
-                    result = null,
-                    onAddressChange = { address.value = it },
-                    onGenerate = { address.value = "ocean-feather-sunset" },
-                    onSubmit = {},
-                    beforeSubmit = {},
-                )
+            // Semantic input drives this test; the system IME must not overwrite its selection.
+            InterceptPlatformTextInput(interceptor = { _, _ -> awaitCancellation() }) {
+                MaterialTheme {
+                    PairingAddressEditor(
+                        address = address.value,
+                        activeAddress = "amber-river-maple",
+                        candidateAddress = null,
+                        claiming = false,
+                        result = null,
+                        onAddressChange = { address.value = it },
+                        onGenerate = { address.value = "ocean-feather-sunset" },
+                        onSubmit = {},
+                        beforeSubmit = {},
+                    )
+                }
             }
         }
         compose.onNodeWithText("Change pairing address").assertIsNotEnabled()
         val field = compose.onNodeWithText("Pairing address")
         field.performTextInputSelection(TextRange(2))
         field.performTextInput("x")
+        field.assert(
+            SemanticsMatcher.expectValue(
+                SemanticsProperties.EditableText,
+                androidx.compose.ui.text.AnnotatedString("amxber-river-maple"),
+            )
+        )
         field.assert(
             SemanticsMatcher.expectValue(SemanticsProperties.TextSelectionRange, TextRange(3))
         )
