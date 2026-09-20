@@ -138,7 +138,7 @@ class SshAuthenticationRequestsTest {
     }
 
     @Test
-    fun inactiveAiAccessFallsBackWithoutLaunchingReviewOrChangingThePolicy() = runTest {
+    fun subscriptionRejectionFallsBackWithoutChangingThePolicy() = runTest {
         val key = createAuthenticationSecret(SecretApprovalMode.ASK_AI)
         val metadata = secrets.describeRequestedSecrets(listOf(SECRET_NAME)).secrets
         val token = ByteArray(32) { it.toByte() }
@@ -147,9 +147,18 @@ class SshAuthenticationRequestsTest {
             invocationTokenHash = invocationTokenHash(token),
             providedSecretsJson = sshSecretFactsJson(),
         )
-        subscription.active = false
+        val reviewer =
+            RecordingApprovalReviewer().apply {
+                result =
+                    RelayEndpointResult.Rejected(
+                        402,
+                        "SUBSCRIPTION_REQUIRED",
+                        "Subscription expired",
+                    )
+            }
+        var pendingReview: PendingAiReview? = null
         val requestId = "inactive-ai"
-        val target = requests(audit, StaticCredentialSource(credentials()))
+        val target = requests(audit, StaticCredentialSource(credentials()), reviewer)
         assertEquals(
             ProcessedRelayMessage,
             target.processIncoming(
@@ -160,11 +169,15 @@ class SshAuthenticationRequestsTest {
                 acceptedPsks = acceptedPsks(requestId),
                 credentials = credentials(),
                 sealResponse = { error("Manual requests must not produce an automatic response") },
-                launchAiReview = { _, _, _, _ ->
-                    error("Inactive access must not launch AI review")
+                launchAiReview = { _, _, review, complete ->
+                    pendingReview = PendingAiReview(review, complete)
+                    true
                 },
             ),
         )
+        val pending = checkNotNull(pendingReview)
+        pending.complete(pending.review())
+        assertEquals(0, subscription.statusCalls)
         assertEquals(
             InboxRequestState.ACTION_REQUIRED.storedName,
             database.requestDao().getRequestById(requestId)?.state,

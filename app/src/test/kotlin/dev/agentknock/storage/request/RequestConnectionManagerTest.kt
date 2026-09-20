@@ -17,6 +17,185 @@ import org.junit.Test
 @OptIn(ExperimentalCoroutinesApi::class)
 class RequestConnectionManagerTest {
     @Test
+    fun `fresh wake reconnects a socketless worker without repeating its live review`() = runTest {
+        val finishReview = CompletableDeferred<Unit>()
+        val reviews = AiReviewCoordinator(backgroundScope)
+        var reviewCalls = 0
+        reviews.launch("first", onCompletion = {}) {
+            reviewCalls += 1
+            finishReview.await()
+        }
+        var connections = 0
+        var queued = 0
+        val manager =
+            manager(
+                synchronizeOnce = {
+                    connections += 1
+                    if (connections == 1) RequestSyncResult.RelayUnavailable("offline")
+                    else RequestSyncResult.Success
+                },
+                awaitAiReviews = reviews::awaitIdle,
+                scheduleBackgroundSynchronization = { queued += 1 },
+            )
+        val worker = async { manager.synchronizeOnce() }
+        runCurrent()
+        assertFalse(worker.isCompleted)
+        assertEquals(1, connections)
+        manager.requestSynchronization()
+        runCurrent()
+        assertEquals(2, connections)
+        assertEquals(1, queued)
+        assertTrue(reviews.hasActiveReviews)
+        assertFalse(worker.isCompleted)
+        assertFalse(reviews.launch("first", onCompletion = {}) { reviewCalls += 1 })
+        finishReview.complete(Unit)
+        assertEquals(
+            OneShotSynchronizationResult.Completed(RequestSyncResult.Success),
+            worker.await(),
+        )
+        assertEquals(1, reviewCalls)
+    }
+
+    @Test
+    fun `wake racing a failed connection waits for server retry deadline before reconnecting`() =
+        runTest {
+            val finishReview = CompletableDeferred<Unit>()
+            var connections = 0
+            lateinit var manager: RequestConnectionManager
+            manager =
+                manager(
+                    synchronizeOnce = {
+                        connections += 1
+                        if (connections == 1) {
+                            manager.requestSynchronization()
+                            RequestSyncResult.RelayUnavailable("busy", retryAfterMillis = 5_000)
+                        } else RequestSyncResult.Success
+                    },
+                    awaitAiReviews = { finishReview.await() },
+                )
+            val worker = async { manager.synchronizeOnce() }
+            runCurrent()
+            advanceTimeBy(4_999)
+            runCurrent()
+            assertEquals(1, connections)
+            advanceTimeBy(1)
+            runCurrent()
+            assertEquals(2, connections)
+            assertFalse(worker.isCompleted)
+            finishReview.complete(Unit)
+            assertEquals(
+                OneShotSynchronizationResult.Completed(RequestSyncResult.Success),
+                worker.await(),
+            )
+        }
+
+    @Test
+    fun `reconnecting during review does not reset the finite worker connection budget`() =
+        runTest {
+            val finishReview = CompletableDeferred<Unit>()
+            var connections = 0
+            var closed = false
+            val manager =
+                manager(
+                    synchronizeOnce = {
+                        connections += 1
+                        if (connections == 1) RequestSyncResult.RelayUnavailable("offline")
+                        else
+                            try {
+                                awaitCancellation()
+                            } finally {
+                                closed = true
+                            }
+                    },
+                    awaitAiReviews = { finishReview.await() },
+                )
+            val worker = async { manager.synchronizeOnce() }
+            runCurrent()
+            advanceTimeBy(30_000)
+            manager.requestSynchronization()
+            runCurrent()
+            assertEquals(2, connections)
+            advanceTimeBy(90_000)
+            runCurrent()
+            assertTrue(closed)
+            assertFalse(worker.isCompleted)
+            finishReview.complete(Unit)
+            assertEquals(
+                OneShotSynchronizationResult.Completed(RequestSyncResult.ContinuationRequired),
+                worker.await(),
+            )
+        }
+
+    @Test
+    fun `wake during background grace keeps worker alive through handoff and review`() = runTest {
+        val review = CompletableDeferred<Unit>()
+        var foregroundClosed = false
+        var synchronizations = 0
+        val manager =
+            manager(
+                listen = {
+                    try {
+                        awaitCancellation()
+                    } finally {
+                        foregroundClosed = true
+                    }
+                },
+                synchronizeOnce = {
+                    assertTrue(foregroundClosed)
+                    synchronizations += 1
+                    kotlinx.coroutines.delay(100_000)
+                    RequestSyncResult.Success
+                },
+                awaitAiReviews = { review.await() },
+                backgroundGracePeriodMillis = 35_000,
+            )
+        manager.appForegrounded()
+        runCurrent()
+        manager.appBackgrounded()
+        val worker = async { manager.synchronizeOnce() }
+        runCurrent()
+        assertFalse(worker.isCompleted)
+        assertEquals(0, synchronizations)
+        advanceTimeBy(35_000)
+        runCurrent()
+        assertEquals(1, synchronizations)
+        assertFalse(worker.isCompleted)
+        advanceTimeBy(100_000)
+        runCurrent()
+        review.complete(Unit)
+        assertEquals(
+            OneShotSynchronizationResult.Completed(RequestSyncResult.Success),
+            worker.await(),
+        )
+    }
+
+    @Test
+    fun `returning to foreground releases a worker waiting for grace without closing socket`() =
+        runTest {
+            var closed = false
+            val manager =
+                manager(
+                    listen = {
+                        try {
+                            awaitCancellation()
+                        } finally {
+                            closed = true
+                        }
+                    }
+                )
+            manager.appForegrounded()
+            runCurrent()
+            manager.appBackgrounded()
+            val worker = async { manager.synchronizeOnce() }
+            runCurrent()
+            assertFalse(worker.isCompleted)
+            manager.appForegrounded()
+            runCurrent()
+            assertEquals(OneShotSynchronizationResult.Covered, worker.await())
+            assertFalse(closed)
+        }
+
+    @Test
     fun `background worker retains review across relay failure and a deferred retry`() = runTest {
         val finishReview = CompletableDeferred<Unit>()
         val reviews = AiReviewCoordinator(backgroundScope)

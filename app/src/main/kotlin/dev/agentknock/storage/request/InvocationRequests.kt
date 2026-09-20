@@ -477,9 +477,6 @@ internal class InvocationRequests(
         }
 
         if (!needsAiReview) return finishReview(null, requestAlreadyInserted = false)
-        subscription.reviewFallback(credentials.deviceId)?.let { fallback ->
-            return finishReview(fallback, requestAlreadyInserted = false)
-        }
 
         withContext(NonCancellable) {
             val received =

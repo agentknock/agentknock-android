@@ -136,7 +136,7 @@ class GitSigningRequestsTest {
     }
 
     @Test
-    fun inactiveAiAccessFallsBackWithoutLaunchingReviewOrChangingThePolicy() = runTest {
+    fun subscriptionRejectionFallsBackWithoutChangingThePolicy() = runTest {
         val metadata = createSigningSecret(SecretApprovalMode.ASK_AI)
         val token = ByteArray(32) { it.toByte() }
         insertParent(
@@ -144,9 +144,18 @@ class GitSigningRequestsTest {
             invocationTokenHash = invocationTokenHash(token),
             providedSecretsJson = sshSecretFactsJson(),
         )
-        subscription.active = false
+        val reviewer =
+            RecordingApprovalReviewer().apply {
+                result =
+                    RelayEndpointResult.Rejected(
+                        402,
+                        "SUBSCRIPTION_REQUIRED",
+                        "Subscription expired",
+                    )
+            }
+        var pendingReview: PendingAiReview? = null
         val requestId = "inactive-ai"
-        val target = requests(audit, StaticCredentialSource(credentials()))
+        val target = requests(audit, StaticCredentialSource(credentials()), reviewer)
         assertEquals(
             ProcessedRelayMessage,
             target.processIncoming(
@@ -157,11 +166,15 @@ class GitSigningRequestsTest {
                 acceptedPsks = acceptedPsks(requestId),
                 credentials = credentials(),
                 sealResponse = { error("Manual requests must not produce an automatic response") },
-                launchAiReview = { _, _, _, _ ->
-                    error("Inactive access must not launch AI review")
+                launchAiReview = { _, _, review, complete ->
+                    pendingReview = PendingAiReview(review, complete)
+                    true
                 },
             ),
         )
+        val pending = checkNotNull(pendingReview)
+        pending.complete(pending.review())
+        assertEquals(0, subscription.statusCalls)
         assertEquals(
             InboxRequestState.ACTION_REQUIRED.storedName,
             database.requestDao().getRequestById(requestId)?.state,
@@ -488,6 +501,7 @@ class GitSigningRequestsTest {
             )
 
         outcomes.forEachIndexed { index, (relayDecision, expectedState, expectedDecision) ->
+            subscription.repository.recordReviewAccess(DEVICE_ID, active = false)
             val requestId = "git-ai-verdict-$index"
             val explanation =
                 "  Review $index: \"${relayDecision.name}\".\nDetailed explanation — unchanged.  "
@@ -521,6 +535,10 @@ class GitSigningRequestsTest {
             val pending = checkNotNull(pendingReview)
             val mappedReview = pending.review()
             assertEquals(relayDecision.toAiDecision(), mappedReview.review.decision)
+            assertEquals(
+                dev.agentknock.subscription.AiReviewAccess.ACTIVE,
+                subscription.repository.access.value,
+            )
             pending.complete(mappedReview)
 
             val storedRequest = checkNotNull(database.requestDao().getRequestById(requestId))

@@ -2481,7 +2481,9 @@ class RequestRepositorySlotTest {
     fun inactiveAiRequestsStayManualAfterRenewalWhileNewRequestsResumeAi() = runTest {
         val clientPsk = establishActivePairing()
         val secretId = createAiEnvironmentSecret()
-        subscription.active = false
+        approvalReviewer.complete(
+            RelayEndpointResult.Rejected(402, "SUBSCRIPTION_REQUIRED", "Subscription expired")
+        )
         val request =
             pairedRequest(
                 requestId = AI_INVOCATION_REQUEST_ID,
@@ -2494,7 +2496,7 @@ class RequestRepositorySlotTest {
             relayState(AI_INVOCATION_REQUEST_ID),
         )
         assertEquals(RequestSyncResult.Success, repository.sync())
-        assertEquals(0, approvalReviewer.callCount)
+        assertEquals(1, approvalReviewer.callCount)
         val manual = checkNotNull(inbox.observeRequest(AI_INVOCATION_REQUEST_ID).first())
         assertEquals(InboxRequestState.ACTION_REQUIRED, manual.state)
         assertEquals(
@@ -2517,7 +2519,6 @@ class RequestRepositorySlotTest {
                 .outcome,
         )
 
-        subscription.active = true
         val nextRequest =
             pairedRequest(
                 requestId = INVOCATION_REQUEST_ID,
@@ -2531,8 +2532,8 @@ class RequestRepositorySlotTest {
             relayState(AI_INVOCATION_REQUEST_ID),
             relayState(INVOCATION_REQUEST_ID),
         )
-        assertEquals(1, approvalReviewer.callCount)
-        assertEquals(2, subscription.statusCalls)
+        assertEquals(2, approvalReviewer.callCount)
+        assertEquals(0, subscription.statusCalls)
         assertEquals(
             InboxRequestState.ACTION_REQUIRED.storedName,
             database.requestDao().getRequestById(AI_INVOCATION_REQUEST_ID)?.state,

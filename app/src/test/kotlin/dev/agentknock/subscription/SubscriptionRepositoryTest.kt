@@ -13,25 +13,13 @@ import org.junit.Test
 
 class SubscriptionRepositoryTest {
     @Test
-    fun `inactive access is rechecked so future reviews resume after renewal`() = runTest {
-        val relay = FakeRelay()
-        val repository = SubscriptionRepository(availableAuthorization, relay)
-
-        assertEquals(AiReviewAccess.INACTIVE, repository.accessForReview(DEVICE_ID))
-        assertEquals(AiReviewAccess.INACTIVE, repository.access.value)
-        relay.statusResult = RelayEndpointResult.Success(RelaySubscriptionStatus(active = true))
-        assertEquals(AiReviewAccess.ACTIVE, repository.accessForReview(DEVICE_ID))
-        assertEquals(AiReviewAccess.ACTIVE, repository.access.value)
-    }
-
-    @Test
     fun `transient failure preserves known access without assuming new access`() = runTest {
         val relay = FakeRelay()
         val repository = SubscriptionRepository(availableAuthorization, relay)
         repository.status()
         relay.statusResult = RelayEndpointResult.InvalidResponse
 
-        assertEquals(AiReviewAccess.UNAVAILABLE, repository.accessForReview(DEVICE_ID))
+        repository.status()
         assertEquals(AiReviewAccess.INACTIVE, repository.access.value)
         relay.statusResult = RelayEndpointResult.Success(RelaySubscriptionStatus(active = true))
         repository.status()
@@ -41,20 +29,23 @@ class SubscriptionRepositoryTest {
     }
 
     @Test
-    fun `review rejection deactivates access but an old device cannot change the current one`() =
-        runTest {
-            val relay =
-                FakeRelay(
-                    statusResult =
-                        RelayEndpointResult.Success(RelaySubscriptionStatus(active = true))
-                )
-            val repository = SubscriptionRepository(availableAuthorization, relay)
-            repository.status()
-            repository.recordInactiveReviewAccess("old-device")
-            assertEquals(AiReviewAccess.ACTIVE, repository.access.value)
-            repository.recordInactiveReviewAccess(DEVICE_ID)
-            assertEquals(AiReviewAccess.INACTIVE, repository.access.value)
-        }
+    fun `reviews update access without status but an old device cannot change it`() = runTest {
+        val relay = FakeRelay()
+        val repository = SubscriptionRepository(availableAuthorization, relay)
+        repository.recordReviewAccess("old-device", active = true)
+        assertEquals(AiReviewAccess.CHECKING, repository.access.value)
+        repository.recordReviewAccess(DEVICE_ID, active = true)
+        assertEquals(AiReviewAccess.ACTIVE, repository.access.value)
+        repository.recordReviewAccess("old-device", active = false)
+        assertEquals(AiReviewAccess.ACTIVE, repository.access.value)
+        repository.recordReviewAccess(DEVICE_ID, active = false)
+        assertEquals(AiReviewAccess.INACTIVE, repository.access.value)
+        repository.recordReviewAccess("old-device", active = true)
+        assertEquals(AiReviewAccess.INACTIVE, repository.access.value)
+        repository.recordReviewAccess(DEVICE_ID, active = true)
+        assertEquals(AiReviewAccess.ACTIVE, repository.access.value)
+        assertEquals(null, relay.statusCredentials)
+    }
 
     @Test
     fun `switching devices discards the previous entitlement even when status fails`() = runTest {
@@ -71,7 +62,7 @@ class SubscriptionRepositoryTest {
         repository.status()
         authorization = RelayDeviceAuthorization("new-identity", "new-device", "new-token")
         relay.statusResult = RelayEndpointResult.InvalidResponse
-        assertEquals(AiReviewAccess.UNAVAILABLE, repository.accessForReview("new-device"))
+        repository.status()
         assertEquals(AiReviewAccess.UNAVAILABLE, repository.access.value)
     }
 
