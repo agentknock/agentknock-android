@@ -3,1157 +3,691 @@ package dev.agentknock.storage.request
 import kotlinx.coroutines.CompletableDeferred
 import kotlinx.coroutines.ExperimentalCoroutinesApi
 import kotlinx.coroutines.async
-import kotlinx.coroutines.awaitCancellation
 import kotlinx.coroutines.cancelAndJoin
-import kotlinx.coroutines.launch
+import kotlinx.coroutines.flow.MutableStateFlow
+import kotlinx.coroutines.test.TestScope
 import kotlinx.coroutines.test.advanceTimeBy
 import kotlinx.coroutines.test.runCurrent
 import kotlinx.coroutines.test.runTest
-import org.junit.Assert.assertEquals
-import org.junit.Assert.assertFalse
-import org.junit.Assert.assertTrue
+import org.junit.Assert.*
 import org.junit.Test
 
 @OptIn(ExperimentalCoroutinesApi::class)
 class RequestConnectionManagerTest {
     @Test
-    fun `fresh wake reconnects a socketless worker without repeating its live review`() = runTest {
-        val finishReview = CompletableDeferred<Unit>()
-        val reviews = AiReviewCoordinator(backgroundScope)
-        var reviewCalls = 0
-        reviews.launch("first", onCompletion = {}) {
-            reviewCalls += 1
-            finishReview.await()
-        }
-        var connections = 0
-        var queued = 0
-        val manager =
-            manager(
-                synchronizeOnce = {
-                    connections += 1
-                    if (connections == 1) RequestSyncResult.RelayUnavailable("offline")
-                    else RequestSyncResult.Success
-                },
-                awaitAiReviews = reviews::awaitIdle,
-                scheduleBackgroundSynchronization = { queued += 1 },
-            )
-        val worker = async { manager.synchronizeOnce() }
+    fun `foreground and workers reuse the same socket in both directions`() = runTest {
+        val f = Fixture(this)
+        f.manager.appForegrounded()
+        runCurrent()
+        val socket = f.sockets.single()
+        socket.progress(false, false)
+        runCurrent()
+        f.manager.appBackgrounded()
+        runCurrent()
+        assertEquals(1, f.scheduled)
+        val worker = async { f.manager.synchronizeOnce() }
+        runCurrent()
+        advanceTimeBy(34_999)
         runCurrent()
         assertFalse(worker.isCompleted)
-        assertEquals(1, connections)
-        manager.requestSynchronization()
+        assertFalse(socket.closed)
+        assertEquals(1, f.sockets.size)
+        f.manager.appForegrounded()
         runCurrent()
-        assertEquals(2, connections)
-        assertEquals(1, queued)
-        assertTrue(reviews.hasActiveReviews)
-        assertFalse(worker.isCompleted)
-        assertFalse(reviews.launch("first", onCompletion = {}) { reviewCalls += 1 })
-        finishReview.complete(Unit)
-        assertEquals(
-            OneShotSynchronizationResult.Completed(RequestSyncResult.Success),
-            worker.await(),
-        )
-        assertEquals(1, reviewCalls)
+        assertEquals(OneShotSynchronizationResult.Covered, worker.await())
+        assertEquals(null, f.notifications.lastOrNull())
+        assertFalse(socket.closed)
+        advanceTimeBy(200_000)
+        runCurrent()
+        assertEquals(1, f.sockets.size)
+        assertFalse(socket.closed)
     }
 
     @Test
-    fun `wake racing a failed connection waits for server retry deadline before reconnecting`() =
-        runTest {
-            val finishReview = CompletableDeferred<Unit>()
-            var connections = 0
-            lateinit var manager: RequestConnectionManager
-            manager =
-                manager(
-                    synchronizeOnce = {
-                        connections += 1
-                        if (connections == 1) {
-                            manager.requestSynchronization()
-                            RequestSyncResult.RelayUnavailable("busy", retryAfterMillis = 5_000)
-                        } else RequestSyncResult.Success
-                    },
-                    awaitAiReviews = { finishReview.await() },
-                )
-            val worker = async { manager.synchronizeOnce() }
-            runCurrent()
-            advanceTimeBy(4_999)
-            runCurrent()
-            assertEquals(1, connections)
-            advanceTimeBy(1)
-            runCurrent()
-            assertEquals(2, connections)
-            assertFalse(worker.isCompleted)
-            finishReview.complete(Unit)
-            assertEquals(
-                OneShotSynchronizationResult.Completed(RequestSyncResult.Success),
-                worker.await(),
-            )
-        }
+    fun `returning to foreground also preserves a socket first opened by a worker`() = runTest {
+        val f = Fixture(this)
+        val worker = async { f.manager.synchronizeOnce() }
+        runCurrent()
+        val socket = f.sockets.single()
+        f.manager.appForegrounded()
+        runCurrent()
+        assertEquals(OneShotSynchronizationResult.Covered, worker.await())
+        assertEquals(null, f.notifications.lastOrNull())
+        assertFalse(socket.closed)
+        assertEquals(1, f.sockets.size)
+    }
 
     @Test
-    fun `reconnecting during review does not reset the finite worker connection budget`() =
-        runTest {
-            val finishReview = CompletableDeferred<Unit>()
-            var connections = 0
-            var closed = false
-            val manager =
-                manager(
-                    synchronizeOnce = {
-                        connections += 1
-                        if (connections == 1) RequestSyncResult.RelayUnavailable("offline")
-                        else
-                            try {
-                                awaitCancellation()
-                            } finally {
-                                closed = true
-                            }
-                    },
-                    awaitAiReviews = { finishReview.await() },
-                )
-            val worker = async { manager.synchronizeOnce() }
-            runCurrent()
-            advanceTimeBy(30_000)
-            manager.requestSynchronization()
-            runCurrent()
-            assertEquals(2, connections)
-            advanceTimeBy(90_000)
-            runCurrent()
-            assertTrue(closed)
-            assertFalse(worker.isCompleted)
-            finishReview.complete(Unit)
-            assertEquals(
-                OneShotSynchronizationResult.Completed(RequestSyncResult.ContinuationRequired),
-                worker.await(),
-            )
-        }
-
-    @Test
-    fun `wake during background grace keeps worker alive through handoff and review`() = runTest {
-        val review = CompletableDeferred<Unit>()
-        var foregroundClosed = false
-        var synchronizations = 0
-        val manager =
-            manager(
-                listen = {
-                    try {
-                        awaitCancellation()
-                    } finally {
-                        foregroundClosed = true
-                    }
-                },
-                synchronizeOnce = {
-                    assertTrue(foregroundClosed)
-                    synchronizations += 1
-                    kotlinx.coroutines.delay(100_000)
-                    RequestSyncResult.Success
-                },
-                awaitAiReviews = { review.await() },
-                backgroundGracePeriodMillis = 35_000,
-            )
-        manager.appForegrounded()
+    fun `idle background socket closes after one grace window without reopening`() = runTest {
+        val f = Fixture(this)
+        f.manager.appForegrounded()
         runCurrent()
-        manager.appBackgrounded()
-        val worker = async { manager.synchronizeOnce() }
+        val socket = f.sockets.single()
+        socket.progress(false, false)
         runCurrent()
-        assertFalse(worker.isCompleted)
-        assertEquals(0, synchronizations)
+        f.manager.appBackgrounded()
+        val worker = async { f.manager.synchronizeOnce() }
+        runCurrent()
         advanceTimeBy(35_000)
         runCurrent()
-        assertEquals(1, synchronizations)
-        assertFalse(worker.isCompleted)
-        advanceTimeBy(100_000)
+        assertEquals(success, worker.await())
+        assertTrue(socket.closed)
+        assertEquals(1, f.sockets.size)
+        assertEquals(null, f.notifications.last())
+        val duplicate = async { f.manager.synchronizeOnce() }
         runCurrent()
-        review.complete(Unit)
-        assertEquals(
-            OneShotSynchronizationResult.Completed(RequestSyncResult.Success),
-            worker.await(),
-        )
+        f.sockets.last().progress(false, false)
+        runCurrent()
+        assertEquals(success, duplicate.await())
     }
 
     @Test
-    fun `returning to foreground releases a worker waiting for grace without closing socket`() =
+    fun `only actual work resets the idle reuse deadline`() = runTest {
+        val f = Fixture(this)
+        val worker = async { f.manager.synchronizeOnce() }
+        runCurrent()
+        val socket = f.sockets.single()
+        socket.progress(false, true)
+        runCurrent()
+        assertFalse(f.manager.syncing.value)
+        assertEquals(RequestSyncResult.Success, f.manager.lastSyncResult.value)
+        assertEquals(false, f.notifications.last())
+        advanceTimeBy(20_000)
+        socket.progress(true, true)
+        runCurrent()
+        assertTrue(f.manager.syncing.value)
+        assertEquals(true, f.notifications.last())
+        advanceTimeBy(10_000)
+        socket.progress(false, true)
+        runCurrent()
+        advanceTimeBy(34_000)
+        socket.progress(false, true)
+        f.manager.requestSynchronization()
+        runCurrent()
+        advanceTimeBy(999)
+        runCurrent()
+        assertFalse(socket.closed)
+        advanceTimeBy(1)
+        runCurrent()
+        assertEquals(success, worker.await())
+        assertTrue(socket.closed)
+    }
+
+    @Test
+    fun `empty wake finishes without spending an idle reuse window`() = runTest {
+        val f = Fixture(this)
+        val worker = async { f.manager.synchronizeOnce() }
+        runCurrent()
+        f.sockets.single().progress(false, false)
+        runCurrent()
+        assertEquals(success, worker.await())
+        assertTrue(f.sockets.single().closed)
+    }
+
+    @Test
+    fun `grace is bounded if the scheduled background worker has not started`() = runTest {
+        val f = Fixture(this)
+        f.manager.appForegrounded()
+        runCurrent()
+        f.manager.appBackgrounded()
+        advanceTimeBy(35_000)
+        runCurrent()
+        assertTrue(f.sockets.single().closed)
+        assertEquals(1, f.scheduled)
+    }
+
+    @Test
+    fun `cancelling the last worker closes the socket before cancellation returns`() = runTest {
+        val f = Fixture(this)
+        val worker = async { f.manager.synchronizeOnce() }
+        runCurrent()
+        worker.cancelAndJoin()
+        assertTrue(f.sockets.single().closed)
+        assertFalse(f.manager.syncing.value)
+        assertEquals(null, f.notifications.last())
+    }
+
+    @Test
+    fun `cancelling one worker cannot close another owner's socket or hide its notification`() =
         runTest {
-            var closed = false
-            val manager =
-                manager(
-                    listen = {
-                        try {
-                            awaitCancellation()
-                        } finally {
-                            closed = true
-                        }
-                    }
-                )
-            manager.appForegrounded()
+            val f = Fixture(this)
+            val first = async { f.manager.synchronizeOnce() }
+            val second = async { f.manager.synchronizeOnce() }
             runCurrent()
-            manager.appBackgrounded()
-            val worker = async { manager.synchronizeOnce() }
+            first.cancelAndJoin()
+            assertFalse(f.sockets.single().closed)
+            assertEquals(true, f.notifications.last())
+            f.sockets.single().progress(false, false)
             runCurrent()
-            assertFalse(worker.isCompleted)
-            manager.appForegrounded()
-            runCurrent()
-            assertEquals(OneShotSynchronizationResult.Covered, worker.await())
-            assertFalse(closed)
+            assertEquals(success, second.await())
+            assertEquals(null, f.notifications.last())
         }
 
     @Test
-    fun `background worker retains review across relay failure and a deferred retry`() = runTest {
-        val finishReview = CompletableDeferred<Unit>()
+    fun `worker cancellation does not cancel or repeat a billable review`() = runTest {
         val reviews = AiReviewCoordinator(backgroundScope)
-        var reviewCalls = 0
-        reviews.launch("request", onCompletion = {}) {
-            reviewCalls += 1
-            finishReview.await()
+        val finish = CompletableDeferred<Unit>()
+        var calls = 0
+        reviews.launch("request", {}) {
+            calls++
+            finish.await()
         }
-        var relayCalls = 0
-        val manager =
-            manager(
-                synchronizeOnce = {
-                    relayCalls += 1
-                    RequestSyncResult.RelayUnavailable("offline", retryAfterMillis = 5_000)
-                },
-                awaitAiReviews = reviews::awaitIdle,
-            )
-        val firstWorker = async { manager.synchronizeOnce() }
+        val f = Fixture(this, reviews.active)
+        val worker = async { f.manager.synchronizeOnce() }
         runCurrent()
-
-        assertEquals(1, relayCalls)
-        assertFalse(firstWorker.isCompleted)
-        // WorkManager may stop a worker. Its cancellation must not cancel or repeat the shared,
-        // already-billed attempt, which may also have a foreground owner by now.
-        firstWorker.cancelAndJoin()
+        f.sockets.single().finish(RequestSyncResult.RelayUnavailable("busy", 5_000))
+        runCurrent()
+        worker.cancelAndJoin()
         assertTrue(reviews.hasActiveReviews)
-        assertFalse(reviews.launch("request", onCompletion = {}) { reviewCalls += 1 })
-
-        val retryWorker = async { manager.synchronizeOnce() }
+        assertFalse(reviews.launch("request", {}) { calls++ })
+        assertEquals(1, calls)
+        val retry = async { f.manager.synchronizeOnce() }
         runCurrent()
-        assertFalse(retryWorker.isCompleted)
-        assertEquals(1, relayCalls)
-
-        finishReview.complete(Unit)
-        assertEquals(OneShotSynchronizationResult.Deferred(5_000), retryWorker.await())
-        assertEquals(1, reviewCalls)
+        assertFalse(retry.isCompleted)
+        assertEquals(1, f.sockets.size)
+        finish.complete(Unit)
+        runCurrent()
+        assertEquals(OneShotSynchronizationResult.Deferred(5_000), retry.await())
         assertFalse(reviews.hasActiveReviews)
     }
 
     @Test
-    fun `continuous background activity yields while foreground listening remains open`() =
-        runTest {
-            var batches = 0
-            var closed = false
-            val manager =
-                manager(
-                    listen = { awaitCancellation() },
-                    synchronizeOnce = { onProcessing ->
-                        try {
-                            repeat(10) {
-                                onProcessing(true)
-                                kotlinx.coroutines.delay(1_000)
-                                onProcessing(false)
-                                batches += 1
-                                kotlinx.coroutines.delay(29_000)
-                            }
-                            RequestSyncResult.Success
-                        } finally {
-                            closed = true
-                        }
-                    },
-                )
-            val worker = async { manager.synchronizeOnce() }
-            advanceTimeBy(119_999)
-            runCurrent()
-            assertEquals(4, batches)
-            assertFalse(worker.isCompleted)
-            advanceTimeBy(1)
-            runCurrent()
-            assertTrue(closed)
-            assertEquals(
-                OneShotSynchronizationResult.Completed(RequestSyncResult.ContinuationRequired),
-                worker.await(),
-            )
-
-            manager.appForegrounded()
-            runCurrent()
-            advanceTimeBy(600_000)
-            runCurrent()
-            assertTrue(manager.syncing.value)
-        }
-
-    @Test
-    fun `keeps a caught-up connection open through the background grace period`() = runTest {
-        var connections = 0
-        var cancellations = 0
-        var backgroundSynchronizations = 0
-        val manager =
-            manager(
-                listen = { onCaughtUp ->
-                    connections += 1
-                    onCaughtUp()
-                    try {
-                        awaitCancellation()
-                    } finally {
-                        cancellations += 1
-                    }
-                },
-                scheduleBackgroundSynchronization = { backgroundSynchronizations += 1 },
-                backgroundGracePeriodMillis = 5_000,
-            )
-
-        manager.appForegrounded()
+    fun `fresh wake reconnects while an earlier AI review remains active`() = runTest {
+        val active = MutableStateFlow(true)
+        val f = Fixture(this, active)
+        val worker = async { f.manager.synchronizeOnce() }
         runCurrent()
-
-        assertEquals(1, connections)
-        assertEquals(RequestSyncResult.Success, manager.lastSyncResult.value)
-        assertFalse(manager.syncing.value)
-
-        manager.appBackgrounded()
-        advanceTimeBy(4_999)
+        f.sockets.single().finish(RequestSyncResult.RelayUnavailable("offline"))
         runCurrent()
-        assertEquals(0, cancellations)
-
-        manager.appForegrounded()
+        assertFalse(worker.isCompleted)
+        f.manager.requestSynchronization()
         runCurrent()
-        assertEquals(1, connections)
-        assertEquals(0, cancellations)
-        assertEquals(0, backgroundSynchronizations)
-
-        manager.appBackgrounded()
-        advanceTimeBy(5_000)
+        assertEquals(2, f.sockets.size)
+        active.value = false
+        f.sockets.last().progress(false, false)
         runCurrent()
-        assertEquals(1, cancellations)
-        assertEquals(1, backgroundSynchronizations)
-
-        manager.appBackgrounded()
-        advanceTimeBy(10_000)
-        runCurrent()
-        assertEquals(1, backgroundSynchronizations)
+        assertEquals(success, worker.await())
     }
 
     @Test
-    fun `initial background state does not schedule synchronization`() = runTest {
-        var scheduled = 0
-        manager(
-            scheduleBackgroundSynchronization = { scheduled += 1 },
-            backgroundGracePeriodMillis = 5_000,
-        )
-
-        advanceTimeBy(100_000)
-        runCurrent()
-
-        assertEquals(0, scheduled)
-    }
-
-    @Test
-    fun `background handoff schedules only after foreground session cleanup`() = runTest {
-        val events = mutableListOf<String>()
-        val manager =
-            manager(
-                listen = { onCaughtUp ->
-                    onCaughtUp()
-                    try {
-                        awaitCancellation()
-                    } finally {
-                        events += "connection closed"
-                    }
-                },
-                scheduleBackgroundSynchronization = {
-                    events += "background scheduled"
-                },
-                backgroundGracePeriodMillis = 5_000,
-            )
-        manager.appForegrounded()
-        runCurrent()
-
-        manager.appBackgrounded()
-        advanceTimeBy(4_999)
-        runCurrent()
-        assertEquals(emptyList<String>(), events)
-
-        advanceTimeBy(1)
-        runCurrent()
-
-        assertEquals(
-            listOf("connection closed", "background scheduled"),
-            events,
-        )
-    }
-
-    @Test
-    fun `background handoff keeps synchronization visible until its finite pass completes`() =
+    fun `wake racing a failed background connection still respects the server deadline`() =
         runTest {
-            val oneShotStarted = CompletableDeferred<Unit>()
-            val finishOneShot = CompletableDeferred<Unit>()
-            lateinit var manager: RequestConnectionManager
-            manager =
-                manager(
-                    synchronizeOnce = {
-                        oneShotStarted.complete(Unit)
-                        finishOneShot.await()
-                        RequestSyncResult.Success
-                    },
-                    listen = { onCaughtUp ->
-                        onCaughtUp()
-                        awaitCancellation()
-                    },
-                    scheduleBackgroundSynchronization = {
-                        backgroundScope.launch { manager.synchronizeOnce() }
-                    },
-                    backgroundGracePeriodMillis = 0,
-                )
-            manager.appForegrounded()
+            val active = MutableStateFlow(true)
+            val f = Fixture(this, active)
+            val worker = async { f.manager.synchronizeOnce() }
             runCurrent()
-
-            manager.appBackgrounded()
-            oneShotStarted.await()
-
-            assertTrue(manager.syncing.value)
-
-            finishOneShot.complete(Unit)
+            f.manager.requestSynchronization()
+            f.sockets.single().finish(RequestSyncResult.RelayUnavailable("busy", 5_000))
             runCurrent()
-
-            assertFalse(manager.syncing.value)
-        }
-
-    @Test
-    fun `pause during background grace suppresses handoff and background resume reconciles once`() =
-        runTest {
-            var scheduled = 0
-            val manager =
-                manager(
-                    listen = { onCaughtUp ->
-                        onCaughtUp()
-                        awaitCancellation()
-                    },
-                    scheduleBackgroundSynchronization = { scheduled += 1 },
-                    backgroundGracePeriodMillis = 5_000,
-                )
-            manager.appForegrounded()
-            runCurrent()
-            manager.appBackgrounded()
             advanceTimeBy(4_999)
             runCurrent()
-
-            manager.pauseAndJoin()
-            assertEquals(0, scheduled)
-
-            manager.resume()
-            assertEquals(1, scheduled)
-
-            manager.resume()
-            advanceTimeBy(10_000)
+            assertEquals(1, f.sockets.size)
+            advanceTimeBy(1)
             runCurrent()
-            assertEquals(1, scheduled)
+            assertEquals(2, f.sockets.size)
+            assertFalse(worker.isCompleted)
+            active.value = false
+            f.sockets.last().progress(false, false)
+            runCurrent()
+            assertEquals(success, worker.await())
         }
 
     @Test
-    fun `refresh replaces the foreground connection`() = runTest {
-        var connections = 0
-        var cancellations = 0
-        val manager =
-            manager(
-                listen = { onCaughtUp ->
-                    connections += 1
-                    onCaughtUp()
-                    try {
-                        awaitCancellation()
-                    } finally {
-                        cancellations += 1
-                    }
-                }
-            )
-
-        manager.appForegrounded()
+    fun `socket failure does not release the background owner before AI finishes`() = runTest {
+        val active = MutableStateFlow(true)
+        val f = Fixture(this, active)
+        val worker = async { f.manager.synchronizeOnce() }
         runCurrent()
-        manager.refresh()
+        f.sockets.single().finish(RequestSyncResult.RelayUnavailable("offline", 5_000))
         runCurrent()
-
-        assertEquals(2, connections)
-        assertEquals(1, cancellations)
+        assertFalse(worker.isCompleted)
+        assertEquals(true, f.notifications.last())
+        advanceTimeBy(1_000)
+        active.value = false
+        runCurrent()
+        assertEquals(OneShotSynchronizationResult.Deferred(4_000), worker.await())
     }
 
     @Test
-    fun `finite synchronization returns immediately behind a foreground socket`() = runTest {
-        var finiteSynchronizations = 0
-        val manager =
-            manager(
-                synchronizeOnce = {
-                    finiteSynchronizations += 1
-                    RequestSyncResult.Success
-                },
-                listen = { onCaughtUp ->
-                    onCaughtUp()
-                    awaitCancellation()
-                },
-            )
-        manager.appForegrounded()
+    fun `the shared connection has a finite background budget but does not cancel AI`() = runTest {
+        val active = MutableStateFlow(true)
+        val f = Fixture(this, active)
+        f.manager.appForegrounded()
         runCurrent()
-
-        val result = manager.synchronizeOnce()
-
-        assertEquals(0, finiteSynchronizations)
-        assertEquals(OneShotSynchronizationResult.Covered, result)
-    }
-
-    @Test
-    fun `foreground waits for a finite synchronization without overlapping it`() = runTest {
-        val finiteStarted = CompletableDeferred<Unit>()
-        val finishFinite = CompletableDeferred<Unit>()
-        var activeTransports = 0
-        var maximumActiveTransports = 0
-        var connections = 0
-        val manager =
-            manager(
-                synchronizeOnce = {
-                    activeTransports += 1
-                    maximumActiveTransports = maxOf(maximumActiveTransports, activeTransports)
-                    finiteStarted.complete(Unit)
-                    try {
-                        finishFinite.await()
-                        RequestSyncResult.Success
-                    } finally {
-                        activeTransports -= 1
-                    }
-                },
-                listen = { onCaughtUp ->
-                    activeTransports += 1
-                    maximumActiveTransports = maxOf(maximumActiveTransports, activeTransports)
-                    connections += 1
-                    onCaughtUp()
-                    try {
-                        awaitCancellation()
-                    } finally {
-                        activeTransports -= 1
-                    }
-                },
-            )
-
-        val finite = launch { manager.synchronizeOnce() }
-        finiteStarted.await()
-        manager.appForegrounded()
+        advanceTimeBy(600_000)
+        f.manager.appBackgrounded()
+        val worker = async { f.manager.synchronizeOnce() }
         runCurrent()
-        assertEquals(0, connections)
-
-        finishFinite.complete(Unit)
-        finite.join()
-        runCurrent()
-
-        assertEquals(1, connections)
-        assertEquals(1, maximumActiveTransports)
-    }
-
-    @Test
-    fun `foreground connection starts when the finite relay session releases`() = runTest {
-        val finiteStarted = CompletableDeferred<Unit>()
-        val finishFiniteSession = CompletableDeferred<Unit>()
-        val finiteReturned = CompletableDeferred<Unit>()
-        val finishCallerPostProcessing = CompletableDeferred<Unit>()
-        var connections = 0
-        val manager =
-            manager(
-                synchronizeOnce = {
-                    finiteStarted.complete(Unit)
-                    finishFiniteSession.await()
-                    RequestSyncResult.Success
-                },
-                listen = { onCaughtUp ->
-                    connections += 1
-                    onCaughtUp()
-                    awaitCancellation()
-                },
-            )
-        val finiteCaller = launch {
-            manager.synchronizeOnce()
-            finiteReturned.complete(Unit)
-            finishCallerPostProcessing.await()
-        }
-        finiteStarted.await()
-        manager.appForegrounded()
-        runCurrent()
-        assertEquals(0, connections)
-
-        finishFiniteSession.complete(Unit)
-        finiteReturned.await()
-        runCurrent()
-
-        assertTrue(finiteCaller.isActive)
-        assertEquals(1, connections)
-
-        finishCallerPostProcessing.complete(Unit)
-        finiteCaller.join()
-    }
-
-    @Test
-    fun `foreground synchronization request keeps the healthy live session`() = runTest {
-        var scheduled = 0
-        var connections = 0
-        val manager =
-            manager(
-                listen = { onCaughtUp ->
-                    connections += 1
-                    onCaughtUp()
-                    awaitCancellation()
-                },
-                scheduleBackgroundSynchronization = { scheduled += 1 },
-            )
-        manager.appForegrounded()
-        runCurrent()
-
-        manager.requestSynchronization()
-        runCurrent()
-
-        assertEquals(0, scheduled)
-        assertEquals(1, connections)
-    }
-
-    @Test
-    fun `foreground synchronization request interrupts relay failure backoff`() = runTest {
-        var attempts = 0
-        val manager =
-            manager(
-                listen = {
-                    attempts += 1
-                    if (attempts == 1) {
-                        RequestSyncResult.RelayUnavailable("offline")
-                    } else {
-                        awaitCancellation()
-                    }
-                },
-                reconnectDelayMillis = 60_000,
-            )
-        manager.appForegrounded()
-        runCurrent()
-        assertEquals(1, attempts)
-
-        manager.requestSynchronization()
-        runCurrent()
-
-        assertEquals(2, attempts)
-    }
-
-    @Test
-    fun `foreground synchronization request interrupts post-success reconnect delay`() = runTest {
-        var attempts = 0
-        val manager =
-            manager(
-                listen = {
-                    attempts += 1
-                    if (attempts == 1) {
-                        RequestSyncResult.Success
-                    } else {
-                        awaitCancellation()
-                    }
-                },
-                reconnectDelayMillis = 60_000,
-            )
-        manager.appForegrounded()
-        runCurrent()
-        assertEquals(1, attempts)
-
-        manager.requestSynchronization()
-        runCurrent()
-
-        assertEquals(2, attempts)
-    }
-
-    @Test
-    fun `pause cancels and joins the active session and resume reconnects`() = runTest {
-        var connections = 0
-        var cancellations = 0
-        val manager =
-            manager(
-                listen = { onCaughtUp ->
-                    connections += 1
-                    onCaughtUp()
-                    try {
-                        awaitCancellation()
-                    } finally {
-                        cancellations += 1
-                    }
-                }
-            )
-        manager.appForegrounded()
-        runCurrent()
-
-        manager.pauseAndJoin()
-        assertEquals(1, cancellations)
-        assertFalse(manager.syncing.value)
-
-        advanceTimeBy(60_000)
-        runCurrent()
-        assertEquals(1, connections)
-
-        manager.resume()
-        runCurrent()
-        assertEquals(2, connections)
-    }
-
-    @Test
-    fun `pause cancels and joins a finite synchronization`() = runTest {
-        val started = CompletableDeferred<Unit>()
-        var cancellationObserved = false
-        val manager =
-            manager(
-                synchronizeOnce = {
-                    started.complete(Unit)
-                    try {
-                        awaitCancellation()
-                    } finally {
-                        cancellationObserved = true
-                    }
-                }
-            )
-        val caller = async { manager.synchronizeOnce() }
-        started.await()
-
-        manager.pauseAndJoin()
-
-        caller.join()
-        assertTrue(caller.isCancelled)
-        assertTrue(cancellationObserved)
-        assertFalse(manager.syncing.value)
-    }
-
-    @Test
-    fun `cancelling the finite synchronization caller cancels its relay operation`() = runTest {
-        val started = CompletableDeferred<Unit>()
-        var cancellationObserved = false
-        var attempts = 0
-        val manager =
-            manager(
-                synchronizeOnce = {
-                    attempts += 1
-                    if (attempts == 1) {
-                        started.complete(Unit)
-                        try {
-                            awaitCancellation()
-                        } finally {
-                            cancellationObserved = true
-                        }
-                    }
-                    RequestSyncResult.Success
-                }
-            )
-        val caller = launch { manager.synchronizeOnce() }
-        started.await()
-
-        caller.cancelAndJoin()
-
-        assertTrue(cancellationObserved)
-        assertFalse(manager.syncing.value)
-        assertEquals(
-            OneShotSynchronizationResult.Completed(RequestSyncResult.Success),
-            manager.synchronizeOnce(),
-        )
-        assertEquals(2, attempts)
-    }
-
-    @Test
-    fun `terminal result stops retries until an explicit refresh`() = runTest {
-        var attempts = 0
-        val manager =
-            manager(
-                listen = {
-                    attempts += 1
-                    RequestSyncResult.NoDevice
-                },
-                reconnectDelayMillis = 100,
-            )
-
-        manager.appForegrounded()
-        runCurrent()
-        assertEquals(1, attempts)
-
         advanceTimeBy(100_000)
         runCurrent()
-        assertEquals(1, attempts)
-
-        manager.refresh()
+        assertFalse(f.sockets.single().closed)
+        advanceTimeBy(20_000)
         runCurrent()
-        assertEquals(2, attempts)
+        assertTrue(f.sockets.single().closed)
+        assertFalse(worker.isCompleted)
+        active.value = false
+        runCurrent()
+        assertEquals(continuation, worker.await())
     }
 
     @Test
-    fun `new durable work restarts a foreground session stopped by a terminal result`() = runTest {
-        var attempts = 0
-        val manager =
-            manager(
-                listen = {
-                    attempts += 1
-                    RequestSyncResult.NoDevice
-                }
-            )
-        manager.appForegrounded()
+    fun `reconnecting does not reset the worker budget`() = runTest {
+        val active = MutableStateFlow(true)
+        val f = Fixture(this, active)
+        val worker = async { f.manager.synchronizeOnce() }
         runCurrent()
-        assertEquals(1, attempts)
-
-        manager.requestSynchronization()
+        advanceTimeBy(30_000)
+        f.sockets.single().finish(RequestSyncResult.RelayUnavailable("offline"))
         runCurrent()
-
-        assertEquals(2, attempts)
-    }
-
-    @Test
-    fun `terminal session cannot stop work announced as it returns`() = runTest {
-        var attempts = 0
-        lateinit var manager: RequestConnectionManager
-        manager =
-            manager(
-                listen = {
-                    attempts += 1
-                    if (attempts == 1) {
-                        manager.requestSynchronization()
-                        RequestSyncResult.NoDevice
-                    } else {
-                        awaitCancellation()
-                    }
-                }
-            )
-
-        manager.appForegrounded()
+        f.manager.requestSynchronization()
         runCurrent()
-
-        assertEquals(2, attempts)
-    }
-
-    @Test
-    fun `finite synchronization is not covered by a stopped foreground session`() = runTest {
-        var finiteSynchronizations = 0
-        val manager =
-            manager(
-                synchronizeOnce = {
-                    finiteSynchronizations += 1
-                    RequestSyncResult.Success
-                },
-                listen = { RequestSyncResult.NoDevice },
-            )
-        manager.appForegrounded()
+        advanceTimeBy(89_999)
         runCurrent()
-
-        assertEquals(
-            OneShotSynchronizationResult.Completed(RequestSyncResult.Success),
-            manager.synchronizeOnce(),
-        )
-        assertEquals(1, finiteSynchronizations)
-    }
-
-    @Test
-    fun `foreground lifecycle transition restarts a terminal session`() = runTest {
-        var attempts = 0
-        val manager =
-            manager(
-                listen = {
-                    attempts += 1
-                    RequestSyncResult.RelayRejected(401, "revoked")
-                }
-            )
-        manager.appForegrounded()
-        runCurrent()
-        assertEquals(1, attempts)
-
-        manager.appBackgrounded()
-        manager.appForegrounded()
-        runCurrent()
-
-        assertEquals(2, attempts)
-    }
-
-    @Test
-    fun `new synchronization work cannot bypass the server retry delay`() = runTest {
-        var attempts = 0
-        val manager =
-            manager(
-                listen = {
-                    attempts += 1
-                    if (attempts == 1) {
-                        RequestSyncResult.RelayUnavailable(
-                            message = "rate limited",
-                            retryAfterMillis = 1_000,
-                        )
-                    } else {
-                        awaitCancellation()
-                    }
-                },
-                reconnectDelayMillis = 100,
-            )
-        manager.appForegrounded()
-        runCurrent()
-        assertEquals(1, attempts)
-
-        manager.requestSynchronization()
-        advanceTimeBy(999)
-        runCurrent()
-        assertEquals(1, attempts)
-
+        assertFalse(f.sockets.last().closed)
         advanceTimeBy(1)
         runCurrent()
-        assertEquals(2, attempts)
+        assertTrue(f.sockets.last().closed)
+        assertFalse(worker.isCompleted)
+        active.value = false
+        runCurrent()
+        assertEquals(continuation, worker.await())
     }
 
     @Test
-    fun `server retry delay applies to a later finite synchronization`() = runTest {
-        var attempts = 0
-        val manager =
-            manager(
-                synchronizeOnce = {
-                    attempts += 1
-                    if (attempts == 1) {
-                        RequestSyncResult.RelayUnavailable(
-                            message = "rate limited",
-                            retryAfterMillis = 1_000,
-                        )
-                    } else {
-                        RequestSyncResult.Success
-                    }
-                }
-            )
-
-        assertEquals(
-            OneShotSynchronizationResult.Completed(
-                RequestSyncResult.RelayUnavailable("rate limited", 1_000)
-            ),
-            manager.synchronizeOnce(),
-        )
-        assertEquals(
-            OneShotSynchronizationResult.Deferred(1_000),
-            manager.synchronizeOnce(),
-        )
-        assertEquals(1, attempts)
-
-        advanceTimeBy(999)
-        assertEquals(
-            OneShotSynchronizationResult.Deferred(1),
-            manager.synchronizeOnce(),
-        )
-        assertEquals(1, attempts)
+    fun `fresh work cannot bypass a server deadline`() = runTest {
+        val f = Fixture(this)
+        f.manager.appForegrounded()
+        runCurrent()
+        f.sockets.single().finish(RequestSyncResult.RelayUnavailable("busy", 5_000))
+        runCurrent()
+        f.manager.requestSynchronization()
+        assertEquals(OneShotSynchronizationResult.Covered, f.manager.synchronizeOnce())
+        advanceTimeBy(4_999)
+        runCurrent()
+        assertEquals(1, f.sockets.size)
         advanceTimeBy(1)
-
-        assertEquals(
-            OneShotSynchronizationResult.Completed(RequestSyncResult.Success),
-            manager.synchronizeOnce(),
-        )
-        assertEquals(2, attempts)
+        runCurrent()
+        assertEquals(2, f.sockets.size)
     }
 
     @Test
-    fun `zero retry directive remains immediate and is not persisted`() = runTest {
-        var attempts = 0
-        var deadlineWrites = 0
-        val manager =
-            manager(
-                synchronizeOnce = {
-                    attempts += 1
-                    if (attempts == 1) {
-                        RequestSyncResult.RelayUnavailable(
-                            message = "try again",
-                            retryAfterMillis = 0,
-                        )
-                    } else {
-                        RequestSyncResult.Success
-                    }
-                },
-                relayRetryDeadline =
-                    RelayRetryDeadline(
-                        readState = { RelayRetryDeadlineState() },
-                        writeState = { deadlineWrites += 1 },
-                        bootCount = 7,
-                        currentTimeMillis = { 1_000 },
-                        elapsedRealtimeMillis = { 1_000 },
-                    ),
-            )
-
-        assertEquals(
-            OneShotSynchronizationResult.Completed(
-                RequestSyncResult.RelayUnavailable("try again", 0)
-            ),
-            manager.synchronizeOnce(),
-        )
-        assertEquals(
-            OneShotSynchronizationResult.Completed(RequestSyncResult.Success),
-            manager.synchronizeOnce(),
-        )
-        assertEquals(2, attempts)
-        assertEquals(0, deadlineWrites)
-    }
-
-    @Test
-    fun `server retry deadline survives manager recreation`() = runTest {
-        var storedDeadline = RelayRetryDeadlineState()
-        fun retryDeadline() =
+    fun `server deadline survives a controller restart and remains durable work`() = runTest {
+        var stored = RelayRetryDeadlineState()
+        fun deadline() =
             RelayRetryDeadline(
-                readState = { storedDeadline },
-                writeState = { storedDeadline = it },
-                bootCount = 7,
-                currentTimeMillis = { testScheduler.currentTime },
-                elapsedRealtimeMillis = { testScheduler.currentTime },
+                { stored },
+                { stored = it },
+                1,
+                { testScheduler.currentTime },
+                { testScheduler.currentTime },
             )
-        val first =
-            manager(
-                synchronizeOnce = {
-                    RequestSyncResult.RelayUnavailable("rate limited", 1_000)
-                },
-                relayRetryDeadline = retryDeadline(),
-            )
-        assertEquals(
-            OneShotSynchronizationResult.Completed(
-                RequestSyncResult.RelayUnavailable("rate limited", 1_000)
-            ),
-            first.synchronizeOnce(),
-        )
-
-        var attemptsAfterRestart = 0
-        val recreated =
-            manager(
-                synchronizeOnce = {
-                    attemptsAfterRestart += 1
-                    RequestSyncResult.Success
-                },
-                relayRetryDeadline = retryDeadline(),
-            )
-        assertEquals(
-            OneShotSynchronizationResult.Deferred(1_000),
-            recreated.synchronizeOnce(),
-        )
-        assertEquals(0, attemptsAfterRestart)
+        val first = Fixture(this, deadline = deadline())
+        val worker = async { first.manager.synchronizeOnce() }
+        runCurrent()
+        first.sockets.single().finish(RequestSyncResult.RelayUnavailable("busy", 5_000))
+        runCurrent()
+        worker.await()
+        val second = Fixture(this, deadline = deadline())
+        assertEquals(OneShotSynchronizationResult.Deferred(5_000), second.manager.synchronizeOnce())
+        assertTrue(second.sockets.isEmpty())
+        advanceTimeBy(4_999)
+        assertEquals(OneShotSynchronizationResult.Deferred(1), second.manager.synchronizeOnce())
+        advanceTimeBy(1)
+        val retry = async { second.manager.synchronizeOnce() }
+        runCurrent()
+        assertEquals(1, second.sockets.size)
+        retry.cancelAndJoin()
     }
 
     @Test
-    fun `unexpected local failure is terminal instead of a network retry`() = runTest {
-        var attempts = 0
-        val failure = IllegalStateException("broken local state")
-        var reportedFailure: Exception? = null
-        val manager =
-            manager(
-                listen = {
-                    attempts += 1
-                    throw failure
-                },
-                reconnectDelayMillis = 100,
-                reportInternalFailure = { reportedFailure = it },
-            )
-
-        manager.appForegrounded()
+    fun `terminal results stop until an explicit wake and a racing wake is not lost`() = runTest {
+        val f = Fixture(this)
+        f.manager.appForegrounded()
         runCurrent()
-
-        val result = manager.lastSyncResult.value
-        assertEquals(
-            RequestSyncResult.InternalFailure("IllegalStateException"),
-            result,
-        )
-        assertTrue(reportedFailure === failure)
+        f.sockets.single().finish(RequestSyncResult.NoDevice)
         advanceTimeBy(100_000)
         runCurrent()
-        assertEquals(1, attempts)
+        assertEquals(1, f.sockets.size)
+        f.manager.requestSynchronization()
+        runCurrent()
+        assertEquals(2, f.sockets.size)
+        // Deliver the new demand before the failed connection posts its result.
+        f.manager.requestSynchronization()
+        f.sockets.last().finish(RequestSyncResult.NoDevice)
+        runCurrent()
+        assertEquals(3, f.sockets.size)
     }
 
     @Test
-    fun `relay failures back off exponentially and cap the local delay`() = runTest {
-        var attempts = 0
-        val manager =
-            manager(
-                listen = {
-                    attempts += 1
-                    RequestSyncResult.RelayUnavailable("offline")
-                },
-                reconnectDelayMillis = 100,
-                maximumReconnectDelayMillis = 250,
-            )
-        manager.appForegrounded()
+    fun `refresh replaces a socket while ordinary wakes preserve it`() = runTest {
+        val f = Fixture(this)
+        f.manager.appForegrounded()
         runCurrent()
-        assertEquals(1, attempts)
+        f.manager.requestSynchronization()
+        runCurrent()
+        assertEquals(OneShotSynchronizationResult.Covered, f.manager.synchronizeOnce())
+        assertEquals(1, f.sockets.size)
+        f.manager.refresh()
+        runCurrent()
+        assertTrue(f.sockets.first().closed)
+        assertEquals(2, f.sockets.size)
+    }
 
+    @Test
+    fun `pause joins all connection work and suppresses wakes until resume`() = runTest {
+        val f = Fixture(this)
+        val worker = async { f.manager.synchronizeOnce() }
+        runCurrent()
+        f.manager.pauseAndJoin()
+        assertTrue(f.sockets.single().closed)
+        assertEquals(OneShotSynchronizationResult.Covered, worker.await())
+        f.manager.requestSynchronization()
+        runCurrent()
+        assertEquals(1, f.sockets.size)
+        assertEquals(0, f.scheduled)
+        f.manager.resume()
+        runCurrent()
+        assertEquals(1, f.scheduled)
+        f.manager.resume()
+        runCurrent()
+        assertEquals(1, f.scheduled)
+    }
+
+    @Test
+    fun `foreground failures back off and reset after a healthy connection`() = runTest {
+        val f = Fixture(this, reconnectDelay = 100, maximumDelay = 250)
+        f.manager.appForegrounded()
+        runCurrent()
+        repeat(3) { index ->
+            f.sockets.last().finish(RequestSyncResult.RelayUnavailable("offline"))
+            runCurrent()
+            advanceTimeBy(listOf(100L, 200L, 250L)[index] - 1)
+            runCurrent()
+            assertEquals(index + 1, f.sockets.size)
+            advanceTimeBy(1)
+            runCurrent()
+            assertEquals(index + 2, f.sockets.size)
+        }
+        f.sockets.last().progress(false, false)
+        runCurrent()
+        f.sockets.last().finish(RequestSyncResult.RelayUnavailable("offline"))
+        runCurrent()
         advanceTimeBy(100)
         runCurrent()
-        assertEquals(2, attempts)
-        advanceTimeBy(199)
-        runCurrent()
-        assertEquals(2, attempts)
-        advanceTimeBy(1)
-        runCurrent()
-        assertEquals(3, attempts)
-        advanceTimeBy(249)
-        runCurrent()
-        assertEquals(3, attempts)
-        advanceTimeBy(1)
-        runCurrent()
-        assertEquals(4, attempts)
+        assertEquals(5, f.sockets.size)
     }
 
     @Test
-    fun `idle background connection clears progress while retaining sole connection ownership`() =
+    fun `a wake arriving while an idle socket closes remains eligible for the next worker`() =
         runTest {
-            val resumeWork = CompletableDeferred<Unit>()
-            val finishWork = CompletableDeferred<Unit>()
-            var foregroundConnections = 0
-            val processing = mutableListOf<Boolean>()
-            val manager =
-                manager(
-                    synchronizeOnce = { reportProcessing ->
-                        reportProcessing(false)
-                        resumeWork.await()
-                        reportProcessing(true)
-                        finishWork.await()
-                        RequestSyncResult.Success
-                    },
-                    listen = { onCaughtUp ->
-                        foregroundConnections += 1
-                        onCaughtUp()
-                        awaitCancellation()
-                    },
-                )
-            val background = backgroundScope.async { manager.synchronizeOnce { processing += it } }
+            val f = Fixture(this)
+            val first = async { f.manager.synchronizeOnce() }
             runCurrent()
-            assertFalse(manager.syncing.value)
-            assertEquals(RequestSyncResult.Success, manager.lastSyncResult.value)
-            assertFalse(background.isCompleted)
-
-            manager.appForegrounded()
-            runCurrent()
-            assertEquals(0, foregroundConnections)
-            resumeWork.complete(Unit)
-            runCurrent()
-            assertTrue(manager.syncing.value)
-
-            finishWork.complete(Unit)
-            runCurrent()
-            assertEquals(1, foregroundConnections)
-            assertFalse(manager.syncing.value)
-            assertEquals(listOf(false, true), processing)
+            val oldSocket = f.sockets.single()
+            oldSocket.closeGate = CompletableDeferred()
+            try {
+                oldSocket.progress(false, true)
+                runCurrent()
+                advanceTimeBy(35_000)
+                runCurrent()
+                assertFalse(first.isCompleted)
+                f.manager.requestSynchronization()
+                val next = async {
+                    first.await()
+                    f.manager.synchronizeOnce()
+                }
+                runCurrent()
+                assertEquals(1, f.scheduled)
+                assertEquals(1, f.sockets.size)
+                oldSocket.closeGate!!.complete(Unit)
+                runCurrent()
+                assertEquals(success, first.await())
+                assertEquals(2, f.sockets.size)
+                oldSocket.progress(false, false)
+                runCurrent()
+                assertTrue(f.manager.syncing.value)
+                assertEquals(true, f.notifications.last())
+                next.cancelAndJoin()
+            } finally {
+                oldSocket.closeGate!!.complete(Unit)
+            }
         }
 
-    private fun kotlinx.coroutines.test.TestScope.manager(
-        synchronizeOnce: suspend ((Boolean) -> Unit) -> RequestSyncResult = {
-            RequestSyncResult.Success
-        },
-        listen: suspend (() -> Unit) -> RequestSyncResult = { RequestSyncResult.Success },
-        scheduleBackgroundSynchronization: () -> Unit = {},
-        backgroundGracePeriodMillis: Long = 5_000,
-        reconnectDelayMillis: Long = 3_000,
-        maximumReconnectDelayMillis: Long = 60_000,
-        relayRetryDeadline: RelayRetryDeadline? = null,
-        reportInternalFailure: (Exception) -> Unit = {},
-        awaitAiReviews: suspend () -> Unit = {},
-    ) =
-        RequestConnectionManager(
-            scope = backgroundScope,
-            synchronizeOnce = synchronizeOnce,
-            listen = listen,
-            scheduleBackgroundSynchronization = scheduleBackgroundSynchronization,
-            relayRetryDeadline = relayRetryDeadline ?: inMemoryRetryDeadline(),
-            backgroundGracePeriodMillis = backgroundGracePeriodMillis,
-            reconnectDelayMillis = reconnectDelayMillis,
-            maximumReconnectDelayMillis = maximumReconnectDelayMillis,
-            elapsedRealtimeMillis = { testScheduler.currentTime },
-            reportInternalFailure = reportInternalFailure,
-            awaitAiReviews = awaitAiReviews,
+    @Test
+    fun `internal failures are reported and do not disable later wakes`() = runTest {
+        val f = Fixture(this)
+        f.manager.appForegrounded()
+        runCurrent()
+        f.sockets.single().result.completeExceptionally(IllegalStateException("broken storage"))
+        runCurrent()
+        assertEquals(
+            RequestSyncResult.InternalFailure("IllegalStateException"),
+            f.manager.lastSyncResult.value,
         )
-
-    private fun kotlinx.coroutines.test.TestScope.inMemoryRetryDeadline(): RelayRetryDeadline {
-        var state = RelayRetryDeadlineState()
-        return RelayRetryDeadline(
-            readState = { state },
-            writeState = { state = it },
-            bootCount = 7,
-            currentTimeMillis = { testScheduler.currentTime },
-            elapsedRealtimeMillis = { testScheduler.currentTime },
-        )
+        advanceTimeBy(100_000)
+        runCurrent()
+        assertEquals(1, f.sockets.size)
+        assertEquals(1, f.failures.size)
+        f.manager.requestSynchronization()
+        runCurrent()
+        assertEquals(2, f.sockets.size)
     }
+
+    @Test
+    fun `failing to persist a server deadline releases the worker without killing the controller`() =
+        runTest {
+            val f =
+                Fixture(
+                    this,
+                    deadline =
+                        RelayRetryDeadline(
+                            { RelayRetryDeadlineState() },
+                            { error("storage unavailable") },
+                            1,
+                            { testScheduler.currentTime },
+                            { testScheduler.currentTime },
+                        ),
+                )
+            val worker = async { f.manager.synchronizeOnce() }
+            runCurrent()
+            f.sockets.single().finish(RequestSyncResult.RelayUnavailable("busy", 5_000))
+            runCurrent()
+            assertEquals(
+                OneShotSynchronizationResult.Completed(
+                    RequestSyncResult.InternalFailure("IllegalStateException")
+                ),
+                worker.await(),
+            )
+            advanceTimeBy(5_000)
+            val next = async { f.manager.synchronizeOnce() }
+            runCurrent()
+            assertEquals(2, f.sockets.size)
+            next.cancelAndJoin()
+        }
+
+    @Test
+    fun `a queued worker restarts a stopped foreground connection`() = runTest {
+        val f = Fixture(this)
+        f.manager.appForegrounded()
+        runCurrent()
+        f.sockets.single().finish(RequestSyncResult.NoDevice)
+        runCurrent()
+        assertEquals(OneShotSynchronizationResult.Covered, f.manager.synchronizeOnce())
+        runCurrent()
+        assertEquals(2, f.sockets.size)
+        assertFalse(f.sockets.last().closed)
+    }
+
+    @Test
+    fun `foreground wakes interrupt local backoff after failure or completed synchronization`() =
+        runTest {
+            for (result in
+                listOf(RequestSyncResult.RelayUnavailable("offline"), RequestSyncResult.Success)) {
+                val f = Fixture(this)
+                f.manager.appForegrounded()
+                runCurrent()
+                f.sockets.single().finish(result)
+                runCurrent()
+                assertEquals(1, f.sockets.size)
+                f.manager.requestSynchronization()
+                runCurrent()
+                assertEquals(2, f.sockets.size)
+            }
+        }
+
+    @Test
+    fun `returning to the app or refreshing restarts a terminal connection`() = runTest {
+        val f = Fixture(this)
+        f.manager.appForegrounded()
+        runCurrent()
+        f.sockets.single().finish(RequestSyncResult.RelayRejected(401, "revoked"))
+        runCurrent()
+        f.manager.appBackgrounded()
+        f.manager.appForegrounded()
+        runCurrent()
+        assertEquals(2, f.sockets.size)
+        f.sockets.last().finish(RequestSyncResult.NoDevice)
+        runCurrent()
+        f.manager.refresh()
+        runCurrent()
+        assertEquals(3, f.sockets.size)
+    }
+
+    @Test
+    fun `pause suppresses foreground connections until resumed`() = runTest {
+        val f = Fixture(this)
+        f.manager.appForegrounded()
+        runCurrent()
+        f.manager.pauseAndJoin()
+        assertTrue(f.sockets.single().closed)
+        f.manager.requestSynchronization()
+        assertEquals(OneShotSynchronizationResult.Covered, f.manager.synchronizeOnce())
+        advanceTimeBy(100_000)
+        runCurrent()
+        assertEquals(1, f.sockets.size)
+        f.manager.resume()
+        runCurrent()
+        assertEquals(2, f.sockets.size)
+    }
+
+    @Test
+    fun `initial background lifecycle does not start unsolicited work`() = runTest {
+        val f = Fixture(this)
+        f.manager.appBackgrounded()
+        advanceTimeBy(100_000)
+        runCurrent()
+        assertEquals(0, f.scheduled)
+        assertTrue(f.sockets.isEmpty())
+    }
+
+    @Test
+    fun `zero server delay allows another worker immediately without persisting a deadline`() =
+        runTest {
+            var writes = 0
+            val f =
+                Fixture(
+                    this,
+                    deadline =
+                        RelayRetryDeadline(
+                            { RelayRetryDeadlineState() },
+                            { writes++ },
+                            1,
+                            { testScheduler.currentTime },
+                            { testScheduler.currentTime },
+                        ),
+                )
+            val first = async { f.manager.synchronizeOnce() }
+            runCurrent()
+            val result = RequestSyncResult.RelayUnavailable("retry", 0)
+            f.sockets.single().finish(result)
+            runCurrent()
+            assertEquals(OneShotSynchronizationResult.Completed(result), first.await())
+            val next = async { f.manager.synchronizeOnce() }
+            runCurrent()
+            assertEquals(2, f.sockets.size)
+            assertEquals(0, writes)
+            next.cancelAndJoin()
+        }
+
+    private class Socket(private val report: (RelayConnectionProgress) -> Unit) {
+        var currentProgress = RelayConnectionProgress(true, false)
+
+        fun progress(processing: Boolean, worked: Boolean) {
+            currentProgress = RelayConnectionProgress(processing, worked)
+            report(currentProgress)
+        }
+
+        val result = CompletableDeferred<RequestSyncResult>()
+        var closed = false
+        var closeGate: CompletableDeferred<Unit>? = null
+
+        suspend fun run(
+            idleChecks: kotlinx.coroutines.channels.ReceiveChannel<RelayConnectionProgress>
+        ): RequestSyncResult {
+            while (true) {
+                val outcome =
+                    kotlinx.coroutines.selects.select<RequestSyncResult?> {
+                        result.onAwait { it }
+                        idleChecks.onReceive {
+                            if (it === currentProgress && !it.processing) RequestSyncResult.Success
+                            else null
+                        }
+                    }
+                if (outcome != null) return outcome
+            }
+        }
+
+        fun finish(result: RequestSyncResult) {
+            this.result.complete(result)
+        }
+    }
+
+    private class Fixture(
+        scope: TestScope,
+        active: kotlinx.coroutines.flow.StateFlow<Boolean> = MutableStateFlow(false),
+        deadline: RelayRetryDeadline? = null,
+        reconnectDelay: Long = 3_000,
+        maximumDelay: Long = 60_000,
+    ) {
+        val sockets = mutableListOf<Socket>()
+        val notifications = mutableListOf<Boolean?>()
+        val failures = mutableListOf<Exception>()
+        var scheduled = 0
+        val manager =
+            RequestConnectionManager(
+                scope = scope.backgroundScope,
+                connect = { idleChecks, progress ->
+                    val socket = Socket(progress)
+                    sockets += socket
+                    try {
+                        socket.run(idleChecks)
+                    } finally {
+                        kotlinx.coroutines.withContext(kotlinx.coroutines.NonCancellable) {
+                            socket.closeGate?.await()
+                        }
+                        socket.closed = true
+                    }
+                },
+                scheduleBackgroundSynchronization = { scheduled++ },
+                relayRetryDeadline =
+                    deadline
+                        ?: RelayRetryDeadline(
+                            { RelayRetryDeadlineState() },
+                            {},
+                            1,
+                            { scope.testScheduler.currentTime },
+                            { scope.testScheduler.currentTime },
+                        ),
+                activeReviews = active,
+                displayProcessing = { notifications += it },
+                reportInternalFailure = { failures += it },
+                elapsedRealtimeMillis = { scope.testScheduler.currentTime },
+                reconnectDelayMillis = reconnectDelay,
+                maximumReconnectDelayMillis = maximumDelay,
+            )
+    }
+
+    private val success = OneShotSynchronizationResult.Completed(RequestSyncResult.Success)
+    private val continuation =
+        OneShotSynchronizationResult.Completed(RequestSyncResult.ContinuationRequired)
 }

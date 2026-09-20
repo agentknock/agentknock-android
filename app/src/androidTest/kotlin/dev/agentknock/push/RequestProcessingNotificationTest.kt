@@ -46,10 +46,8 @@ class RequestProcessingNotificationTest {
 
     @Test
     fun manualRequestUpdatesCannotCancelProcessingAndIdleUsesThePlatformAppropriateNotice() {
-        val coordinator = RequestProcessingCoordinator {
-            RequestNotifications.showProcessing(context, it)
-        }
-        coordinator.start().use { session ->
+        RequestNotifications.showProcessing(context, RequestProcessingState.PROCESSING)
+        try {
             awaitNotifications { processingNotification() != null }
             RequestNotifications.showRequests(context, emptyList())
             assertNotNull(processingNotification())
@@ -75,7 +73,7 @@ class RequestProcessingNotificationTest {
             assertFalse(channel.canShowBadge())
             assertEquals(NotificationManager.IMPORTANCE_DEFAULT, channel.importance)
 
-            session.setProcessing(false)
+            RequestNotifications.showProcessing(context, RequestProcessingState.LISTENING)
             if (Build.VERSION.SDK_INT >= 31) {
                 awaitNotifications { processingNotification() == null }
                 assertEquals(null, processingNotification())
@@ -86,9 +84,11 @@ class RequestProcessingNotificationTest {
             }
             assertEquals(1, manager.activeNotifications.count { it.tag == manual.requestId })
 
-            session.setProcessing(true)
+            RequestNotifications.showProcessing(context, RequestProcessingState.PROCESSING)
             awaitNotifications { processingNotification() != null }
             assertNotNull(processingNotification())
+        } finally {
+            RequestNotifications.showProcessing(context, null)
         }
         if (Build.VERSION.SDK_INT >= 31) awaitNotifications { processingNotification() == null }
     }

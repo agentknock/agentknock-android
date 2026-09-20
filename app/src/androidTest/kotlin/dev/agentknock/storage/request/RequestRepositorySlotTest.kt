@@ -2791,7 +2791,10 @@ class RequestRepositorySlotTest {
         val clock = TestCoroutineScheduler()
         val sessionScope = CoroutineScope(SupervisorJob() + StandardTestDispatcher(clock))
         var processing = true
-        val synchronization = sessionScope.async { repository.sync { processing = it } }
+        val manager = backgroundManager(sessionScope, clock) { processing = it }
+        val synchronization = sessionScope.async {
+            (manager.synchronizeOnce() as OneShotSynchronizationResult.Completed).result
+        }
         suspend fun until(condition: () -> Boolean) = awaitAsynchronousWork {
             while (true) {
                 clock.runCurrent()
@@ -2823,7 +2826,9 @@ class RequestRepositorySlotTest {
             }
             assertFalse(processing)
 
-            clock.advanceTimeBy(14_000)
+            // The next request arrives exactly as the old idle deadline becomes runnable.
+            // Closing is allowed only if the relay loop still has the same idle state.
+            clock.advanceTimeBy(15_000)
             connection.emit(requestEvent(INVOCATION_REQUEST_ID, secondRequest))
             until { connection.sentFrames.filterIsInstance<RelayDeviceFrame.Resume>().size == 2 }
             connection.resolve(
@@ -2839,7 +2844,7 @@ class RequestRepositorySlotTest {
                 reviewed(RelayApprovalReviewDecision.APPROVE, "Matches the instructions.")
             )
             until { connection.sentFrames.any { it is RelayDeviceFrame.Response } }
-            clock.advanceTimeBy(36_000)
+            clock.advanceTimeBy(5_000)
             clock.runCurrent()
             assertTrue(processing)
             assertFalse(connection.closed)
@@ -2875,23 +2880,7 @@ class RequestRepositorySlotTest {
         val connection = connectInteractively()
         val clock = TestCoroutineScheduler()
         val sessionScope = CoroutineScope(SupervisorJob() + StandardTestDispatcher(clock))
-        val manager =
-            RequestConnectionManager(
-                scope = sessionScope,
-                synchronizeOnce = { repository.sync(it) },
-                listen = { caughtUp -> repository.listen { caughtUp() } },
-                scheduleBackgroundSynchronization = {},
-                relayRetryDeadline =
-                    RelayRetryDeadline(
-                        readState = { RelayRetryDeadlineState() },
-                        writeState = {},
-                        bootCount = 1,
-                        currentTimeMillis = { clock.currentTime },
-                        elapsedRealtimeMillis = { clock.currentTime },
-                    ),
-                awaitAiReviews = aiReviews::awaitIdle,
-                elapsedRealtimeMillis = { clock.currentTime },
-            )
+        val manager = backgroundManager(sessionScope, clock)
         val synchronization = sessionScope.async { manager.synchronizeOnce() }
         suspend fun until(condition: () -> Boolean) = awaitAsynchronousWork {
             while (true) {
@@ -2996,7 +2985,10 @@ class RequestRepositorySlotTest {
         val clock = TestCoroutineScheduler()
         val sessionScope = CoroutineScope(SupervisorJob() + StandardTestDispatcher(clock))
         var processing = true
-        val synchronization = sessionScope.async { repository.sync { processing = it } }
+        val manager = backgroundManager(sessionScope, clock) { processing = it }
+        val synchronization = sessionScope.async {
+            (manager.synchronizeOnce() as OneShotSynchronizationResult.Completed).result
+        }
         suspend fun until(condition: () -> Boolean) = awaitAsynchronousWork {
             while (true) {
                 clock.runCurrent()
@@ -3060,7 +3052,10 @@ class RequestRepositorySlotTest {
         val clock = TestCoroutineScheduler()
         val sessionScope = CoroutineScope(SupervisorJob() + StandardTestDispatcher(clock))
         var processing = true
-        val synchronization = sessionScope.async { repository.sync { processing = it } }
+        val manager = backgroundManager(sessionScope, clock) { processing = it }
+        val synchronization = sessionScope.async {
+            (manager.synchronizeOnce() as OneShotSynchronizationResult.Completed).result
+        }
         suspend fun until(condition: () -> Boolean) = awaitAsynchronousWork {
             while (true) {
                 clock.runCurrent()
@@ -3098,7 +3093,9 @@ class RequestRepositorySlotTest {
             // A queued duplicate wake may resume the existing manual exchange but must finish
             // without granting itself another idle window.
             connect(relayState(AI_INVOCATION_REQUEST_ID), RelayDeviceEvent.CaughtUp)
-            val emptySynchronization = sessionScope.async { repository.sync() }
+            val emptySynchronization = sessionScope.async {
+                (manager.synchronizeOnce() as OneShotSynchronizationResult.Completed).result
+            }
             val before = clock.currentTime
             until { emptySynchronization.isCompleted }
             assertEquals(RequestSyncResult.Success, emptySynchronization.await())
@@ -4803,6 +4800,43 @@ class RequestRepositorySlotTest {
         assertEquals(expectedVariableNames, metadata.environmentVariableNames.sorted())
         assertNull(database.requestDao().getRequestById(AI_INVOCATION_REQUEST_ID)?.responseJson)
     }
+
+    private fun backgroundManager(
+        scope: CoroutineScope,
+        clock: TestCoroutineScheduler,
+        onProcessing: (Boolean) -> Unit = {},
+    ) =
+        RequestConnectionManager(
+            scope = scope,
+            connect = { idleChecks, progress ->
+                repository.connect(idleChecks) { current ->
+                    onProcessing(current.processing)
+                    progress(current)
+                }
+            },
+            activeReviews = aiReviews.active,
+            scheduleBackgroundSynchronization = {},
+            relayRetryDeadline =
+                RelayRetryDeadline(
+                    { RelayRetryDeadlineState() },
+                    {},
+                    1,
+                    { clock.currentTime },
+                    { clock.currentTime },
+                ),
+            elapsedRealtimeMillis = { clock.currentTime },
+        )
+
+    // Protocol tests stop when the stream is fully reconciled. Lifetime/reuse tests above use
+    // the production connection manager and its clock instead of implementing an idle policy here.
+    private suspend fun RequestRepository.sync(): RequestSyncResult =
+        try {
+            connect(Channel(Channel.CONFLATED)) { if (!it.processing) throw Reconciled() }
+        } catch (_: Reconciled) {
+            RequestSyncResult.Success
+        }
+
+    private class Reconciled : kotlinx.coroutines.CancellationException()
 
     private suspend fun synchronizeThenDisconnectDuringReview(vararg events: RelayDeviceEvent) {
         // These tests mutate authorization or resolve AI after the relay owner has disconnected.

@@ -7,7 +7,6 @@ import dev.agentknock.protocol.PairingProtocol
 import dev.agentknock.push.PushSynchronizationWorker
 import dev.agentknock.push.RequestNotificationCoordinator
 import dev.agentknock.push.RequestNotifications
-import dev.agentknock.push.RequestProcessingCoordinator
 import dev.agentknock.relay.AI_REVIEW_TIMEOUT_MILLIS
 import dev.agentknock.relay.HttpRelayApprovalReviewClient
 import dev.agentknock.relay.HttpRelayClaimClient
@@ -285,10 +284,6 @@ internal class ApplicationContainer(private val application: Application) {
             displayRequests = { RequestNotifications.showRequests(application, it) },
         )
 
-    val processingNotifications = RequestProcessingCoordinator {
-        RequestNotifications.showProcessing(application, it)
-    }
-
     // Relay synchronization and request decisions await this initialization. Recovering
     // REVIEWING here is race-free: no relay synchronization can begin before storage is ready,
     // and process-local review jobs do not survive application creation.
@@ -320,22 +315,24 @@ internal class ApplicationContainer(private val application: Application) {
     val requestConnection: RequestConnectionManager =
         RequestConnectionManager(
             scope = applicationScope,
-            synchronizeOnce = { onProcessingChanged ->
+            connect = { idleChecks, onProgress ->
                 localStorage.await()
-                requests.sync(onProcessingChanged)
+                requests.connect(idleChecks, onProgress)
             },
-            listen = { onCaughtUp ->
-                localStorage.await()
-                requests.listen {
-                    onCaughtUp()
-                    requestNotifications.reconcile()
-                }
+            displayProcessing = { processing ->
+                RequestNotifications.showProcessing(
+                    application,
+                    processing?.let {
+                        if (it) dev.agentknock.push.RequestProcessingState.PROCESSING
+                        else dev.agentknock.push.RequestProcessingState.LISTENING
+                    },
+                )
             },
             scheduleBackgroundSynchronization = {
                 PushSynchronizationWorker.enqueue(application)
             },
             relayRetryDeadline = persistentRelayRetryDeadline(application),
-            awaitAiReviews = aiReviews::awaitIdle,
+            activeReviews = aiReviews.active,
         )
 
     val deviceSettings =

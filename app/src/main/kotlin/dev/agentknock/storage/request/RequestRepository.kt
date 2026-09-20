@@ -35,12 +35,8 @@ import dev.agentknock.storage.device.DeviceKeyAccessException
 import dev.agentknock.storage.device.RelayDeviceCredentialSource
 import dev.agentknock.storage.device.RelayDeviceCredentials
 import kotlinx.coroutines.CancellationException
-import kotlinx.coroutines.CoroutineScope
-import kotlinx.coroutines.Deferred
-import kotlinx.coroutines.async
 import kotlinx.coroutines.channels.Channel
-import kotlinx.coroutines.coroutineScope
-import kotlinx.coroutines.delay
+import kotlinx.coroutines.channels.ReceiveChannel
 import kotlinx.coroutines.flow.Flow
 import kotlinx.coroutines.selects.select
 import kotlinx.coroutines.sync.Mutex
@@ -135,12 +131,14 @@ internal sealed interface RequestSyncResult {
     data class InternalFailure(val type: String) : RequestSyncResult
 }
 
+internal class RelayConnectionProgress(val processing: Boolean, val handledWork: Boolean)
+
 private sealed interface SynchronizationInput {
     data class Event(val event: RelayDeviceEvent) : SynchronizationInput
 
     data object PendingChanges : SynchronizationInput
 
-    data object IdleTimeout : SynchronizationInput
+    data class IdleCheck(val progress: RelayConnectionProgress) : SynchronizationInput
 }
 
 private sealed interface DurableRelayOperation {
@@ -242,15 +240,6 @@ internal class RequestRepository(
     suspend fun pruneExpiredRequestState() = operationMutex.withLock {
         dao.deleteAllSettledHiddenRequests(currentTimeMillis() - IDEMPOTENCY_RETENTION_MILLIS)
     }
-
-    suspend fun sync(onProcessingChanged: (Boolean) -> Unit = {}): RequestSyncResult =
-        runConnection(keepConnected = false, onProcessingChanged = onProcessingChanged)
-
-    suspend fun listen(onCaughtUp: suspend () -> Unit): RequestSyncResult =
-        runConnection(
-            keepConnected = true,
-            onCaughtUp = onCaughtUp,
-        )
 
     suspend fun decideRequest(
         requestId: String,
@@ -375,10 +364,9 @@ internal class RequestRepository(
             }
         }
 
-    private suspend fun runConnection(
-        keepConnected: Boolean,
-        onCaughtUp: suspend () -> Unit = {},
-        onProcessingChanged: (Boolean) -> Unit = {},
+    suspend fun connect(
+        idleChecks: ReceiveChannel<RelayConnectionProgress>,
+        onProgress: (RelayConnectionProgress) -> Unit,
     ): RequestSyncResult {
         val credentials =
             when (val result = deviceCredentials.activeDeviceCredentials()) {
@@ -416,21 +404,7 @@ internal class RequestRepository(
             }
 
         return try {
-            coroutineScope {
-                val idleWindow = BackgroundIdleWindow(this)
-                try {
-                    synchronize(
-                        credentials = credentials,
-                        connection = connection,
-                        keepConnected = keepConnected,
-                        onCaughtUp = onCaughtUp,
-                        onProcessingChanged = onProcessingChanged,
-                        idleWindow = idleWindow,
-                    )
-                } finally {
-                    idleWindow.close()
-                }
-            }
+            synchronize(credentials, connection, idleChecks, onProgress)
         } catch (exception: DeviceKeyAccessException) {
             when (exception.failure) {
                 DeviceCredentialResult.Unavailable -> RequestSyncResult.DeviceCredentialsUnavailable
@@ -446,19 +420,22 @@ internal class RequestRepository(
     private suspend fun synchronize(
         credentials: RelayDeviceCredentials,
         connection: RelayDeviceConnection,
-        keepConnected: Boolean,
-        onCaughtUp: suspend () -> Unit,
-        onProcessingChanged: (Boolean) -> Unit,
-        idleWindow: BackgroundIdleWindow,
+        idleChecks: ReceiveChannel<RelayConnectionProgress>,
+        onProgress: (RelayConnectionProgress) -> Unit,
     ): RequestSyncResult {
         val durableRelayState = DurableRelayState()
         var caughtUp = false
         var handledWork = false
 
-        fun processing() {
-            idleWindow.reset()
-            onProcessingChanged(true)
+        var progress = RelayConnectionProgress(true, false)
+        var idleCheck: RelayConnectionProgress? = null
+        fun report(processing: Boolean) {
+            if (progress.processing != processing || progress.handledWork != handledWork) {
+                progress = RelayConnectionProgress(processing, handledWork)
+                onProgress(progress)
+            }
         }
+        fun processing() = report(true)
 
         while (true) {
             flushPendingChanges(
@@ -470,7 +447,7 @@ internal class RequestRepository(
                     return it
                 }
 
-            if (!keepConnected && caughtUp && !aiReviews.hasActiveReviews) {
+            if (caughtUp && !aiReviews.hasActiveReviews) {
                 // A review may have committed a response after the first flush. Check idle
                 // before this final flush so neither that response nor its wakeup can be lost.
                 flushPendingChanges(
@@ -494,16 +471,11 @@ internal class RequestRepository(
             if (!caughtUp || reviewing || outstanding != null) {
                 processing()
             } else {
-                onProcessingChanged(false)
-                if (!keepConnected) {
-                    // Duplicate wakes and a replay of existing manual requests must not each
-                    // create another idle session. Only actual work earns a reuse window.
-                    if (!handledWork || idleWindow.expired) {
-                        return RequestSyncResult.Success
-                    }
-                    idleWindow.start()
-                }
+                report(false)
+                // A queued idle deadline cannot close a connection that has handled newer work.
+                if (idleCheck === progress) return RequestSyncResult.Success
             }
+            idleCheck = null
             val input =
                 select<SynchronizationInput> {
                     connection.events.onReceiveCatching {
@@ -512,18 +484,16 @@ internal class RequestRepository(
                         )
                     }
                     pendingChanges.onReceive { SynchronizationInput.PendingChanges }
-                    idleWindow.timeout?.onAwait { SynchronizationInput.IdleTimeout }
+                    idleChecks.onReceive { SynchronizationInput.IdleCheck(it) }
                 }
-            // Flush and recheck review/outbox state even when the idle deadline wins a race.
-            if (
-                input == SynchronizationInput.PendingChanges ||
-                    input == SynchronizationInput.IdleTimeout
-            )
+            if (input is SynchronizationInput.IdleCheck) {
+                idleCheck = input.progress
                 continue
+            }
+            if (input == SynchronizationInput.PendingChanges) continue
 
             val event = (input as SynchronizationInput.Event).event
             if (event == RelayDeviceEvent.CaughtUp) {
-                if (!caughtUp) onCaughtUp()
                 caughtUp = true
                 pruneExpiredRequestState()
                 continue
@@ -683,8 +653,7 @@ internal class RequestRepository(
                         RelayDeviceEvent.CaughtUp -> null
                     }
                 if (
-                    !keepConnected &&
-                        idleWindow.timeout != null &&
+                    caughtUp &&
                         (event is RelayDeviceEvent.Closed || event is RelayDeviceEvent.Failed) &&
                         !aiReviews.hasActiveReviews &&
                         durableRelayState.outstanding == null
@@ -1977,23 +1946,3 @@ private fun RelayFrameSendResult.controlFrameFailure(
     }
 
 private fun ClientEntity.auditClientName(): String = name
-
-/** The timer is owned and cancelled by the connection, including exceptional exits. */
-private class BackgroundIdleWindow(private val scope: CoroutineScope) : AutoCloseable {
-    var timeout: Deferred<Unit>? = null
-        private set
-
-    val expired: Boolean
-        get() = timeout?.isCompleted == true
-
-    fun start() {
-        if (timeout == null) timeout = scope.async { delay(35_000) }
-    }
-
-    fun reset() {
-        timeout?.cancel()
-        timeout = null
-    }
-
-    override fun close() = reset()
-}
