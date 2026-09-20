@@ -14,6 +14,12 @@ publish = importlib.util.module_from_spec(spec)
 spec.loader.exec_module(publish)
 
 
+# GPP 4.1.1 writes these files for this application ID with --no-commit.
+# Keep the tool fixture independent of the publisher's configured paths.
+GPP_EDIT_FILE = Path("app/build/gpp/dev.agentknock.txt")
+GPP_SKIPPED_FILE = Path("app/build/gpp/dev.agentknock.skipped")
+
+
 class ListingPublicationTests(unittest.TestCase):
     def setUp(self):
         temporary = tempfile.TemporaryDirectory()
@@ -21,7 +27,7 @@ class ListingPublicationTests(unittest.TestCase):
         previous = Path.cwd()
         os.chdir(temporary.name)
         self.addCleanup(os.chdir, previous)
-        publish.EDIT_FILE.parent.mkdir(parents=True)
+        GPP_EDIT_FILE.parent.mkdir(parents=True)
         environment = patch.dict(os.environ, {
             "GITHUB_EVENT_NAME": "push", "GITHUB_REF": "refs/heads/master",
             "PUSH_BASE": "base", "GITHUB_OUTPUT": "outputs", "GCP_ACCESS_TOKEN": "test-token",
@@ -34,10 +40,12 @@ class ListingPublicationTests(unittest.TestCase):
             publish.main()
 
     def upload(self, command, check):
-        self.assertEqual(command, ["./gradlew", ":app:publishPlayReleaseListing", "--no-commit", "--rerun-tasks"])
+        self.assertEqual(command[0], "./gradlew")
+        # Extra tasks or conflicting options could publish beyond this uncommitted listing edit.
+        self.assertCountEqual(command[1:], [":app:publishPlayReleaseListing", "--no-commit", "--rerun-tasks"])
         self.assertTrue(check)
         self.assertNotIn("GCP_ACCESS_TOKEN", os.environ)
-        publish.EDIT_FILE.write_text("test-edit")
+        GPP_EDIT_FILE.write_text("test-edit")
         # This name is GPP 4.1.1's File.marked("skipped") contract.
         Path("app/build/gpp/dev.agentknock.skipped").touch()
 
@@ -46,10 +54,10 @@ class ListingPublicationTests(unittest.TestCase):
     def test_uses_gpp_upload_and_review_safe_commit(self, request, current):
         with patch.object(publish.subprocess, "run", side_effect=self.upload):
             self.command("publish")
-        request.assert_called_once_with("POST", f"{publish.APPLICATION}/edits/test-edit:commit"
+        request.assert_called_once_with("POST", "androidpublisher/v3/applications/dev.agentknock/edits/test-edit:commit"
                                         "?changesInReviewBehavior=ERROR_IF_IN_REVIEW", "test-token")
-        self.assertFalse(publish.EDIT_FILE.exists())
-        self.assertFalse(publish.SKIPPED_FILE.exists())
+        self.assertFalse(GPP_EDIT_FILE.exists())
+        self.assertFalse(GPP_SKIPPED_FILE.exists())
 
     @patch.object(publish, "current_listing", return_value=True)
     @patch.object(publish, "play_request")
@@ -59,43 +67,43 @@ class ListingPublicationTests(unittest.TestCase):
                 self.assertRaisesRegex(RuntimeError, "CHANGES_ALREADY_IN_REVIEW"):
             self.command("publish")
         self.assertEqual([call.args[0] for call in request.call_args_list], ["POST", "DELETE"])
-        self.assertFalse(publish.EDIT_FILE.exists())
+        self.assertFalse(GPP_EDIT_FILE.exists())
 
     @patch.object(publish, "play_request")
     def test_failed_upload_discards_saved_edit_without_committing(self, request):
         def failed_upload(command, check):
-            publish.EDIT_FILE.write_text("partial-edit")
+            GPP_EDIT_FILE.write_text("partial-edit")
             raise subprocess.CalledProcessError(1, command)
         with patch.object(publish.subprocess, "run", side_effect=failed_upload), \
                 self.assertRaises(subprocess.CalledProcessError):
             self.command("publish")
-        request.assert_called_once_with("DELETE", f"{publish.APPLICATION}/edits/partial-edit", "test-token")
+        request.assert_called_once_with("DELETE", "androidpublisher/v3/applications/dev.agentknock/edits/partial-edit", "test-token")
 
     @patch.object(publish, "play_request")
     def test_missing_no_commit_marker_is_rejected(self, request):
         def missing_marker(command, check):
-            publish.EDIT_FILE.write_text("test-edit")
+            GPP_EDIT_FILE.write_text("test-edit")
         with patch.object(publish.subprocess, "run", side_effect=missing_marker), \
                 self.assertRaisesRegex(ValueError, "uncommitted edit"):
             self.command("publish")
-        request.assert_called_once_with("DELETE", f"{publish.APPLICATION}/edits/test-edit", "test-token")
+        request.assert_called_once_with("DELETE", "androidpublisher/v3/applications/dev.agentknock/edits/test-edit", "test-token")
 
     @patch.object(publish, "play_request")
     @patch.object(publish.subprocess, "run")
     def test_saved_edit_is_never_reused(self, run, request):
-        publish.EDIT_FILE.write_text("unrelated-edit")
+        GPP_EDIT_FILE.write_text("unrelated-edit")
         with self.assertRaisesRegex(ValueError, "Unexpected saved GPP edit"):
             self.command("publish")
         run.assert_not_called()
         request.assert_not_called()
-        self.assertEqual(publish.EDIT_FILE.read_text(), "unrelated-edit")
+        self.assertEqual(GPP_EDIT_FILE.read_text(), "unrelated-edit")
 
     @patch.object(publish, "current_listing", return_value=False)
     @patch.object(publish, "play_request")
     def test_newer_listing_during_upload_prevents_rollback(self, request, current):
         with patch.object(publish.subprocess, "run", side_effect=self.upload):
             self.command("publish")
-        request.assert_called_once_with("DELETE", f"{publish.APPLICATION}/edits/test-edit", "test-token")
+        request.assert_called_once_with("DELETE", "androidpublisher/v3/applications/dev.agentknock/edits/test-edit", "test-token")
 
     def test_check_publishes_only_changed_listings_that_are_still_current(self):
         def assert_publication(expected):

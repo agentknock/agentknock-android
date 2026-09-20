@@ -1,17 +1,41 @@
 package dev.agentknock.storage.audit
 
-import kotlinx.coroutines.flow.Flow
-import kotlinx.coroutines.flow.MutableStateFlow
+import androidx.room3.Room
+import androidx.test.ext.junit.runners.AndroidJUnit4
+import androidx.test.platform.app.InstrumentationRegistry
+import dev.agentknock.storage.AgentknockDatabase
 import kotlinx.coroutines.flow.first
-import kotlinx.coroutines.flow.map
 import kotlinx.coroutines.test.runTest
+import kotlinx.serialization.json.Json
+import org.junit.After
 import org.junit.Assert.assertEquals
+import org.junit.Before
 import org.junit.Test
+import org.junit.runner.RunWith
 
+@RunWith(AndroidJUnit4::class)
 class AuditRepositoryTest {
+    private lateinit var database: AgentknockDatabase
+    private val dao
+        get() = database.auditDao()
+
+    @Before
+    fun openDatabase() {
+        database =
+            Room.inMemoryDatabaseBuilder(
+                    InstrumentationRegistry.getInstrumentation().targetContext,
+                    AgentknockDatabase::class.java,
+                )
+                .build()
+    }
+
+    @After
+    fun closeDatabase() {
+        database.close()
+    }
+
     @Test
-    fun `records a stable event type with snapshots and correlation ids`() = runTest {
-        val dao = FakeAuditDao()
+    fun recordsAStableEventTypeWithSnapshotsAndCorrelationIds() = runTest {
         val repository = AuditRepository(dao, currentTimeMillis = { 1_000_000L })
 
         repository.record(
@@ -29,7 +53,7 @@ class AuditRepositoryTest {
             )
         )
 
-        assertEquals(
+        val expected =
             AuditEventEntity(
                 id = 1,
                 occurredAt = 1_000_000L,
@@ -42,8 +66,12 @@ class AuditRepositoryTest {
                     "{\"subject\":\"Production\",\"context\":\"Git signing\"," +
                         "\"detail\":\"Secret use\",\"expires_at\":2000000," +
                         "\"client_name\":\"Workstation\"}",
-            ),
-            dao.events.value.single(),
+            )
+        val stored = dao.observeEvents().first().sortedBy { it.id }.single()
+        assertEquals(expected.copy(bodyJson = ""), stored.copy(bodyJson = ""))
+        assertEquals(
+            Json.parseToJsonElement(expected.bodyJson),
+            Json.parseToJsonElement(stored.bodyJson),
         )
         assertEquals(
             AuditEvent(
@@ -66,7 +94,7 @@ class AuditRepositoryTest {
     }
 
     @Test
-    fun `persisted audit codes remain unambiguous`() {
+    fun persistedAuditCodesRemainUnambiguous() {
         assertEquals(
             AuditEventType.entries.size,
             AuditEventType.entries.map(AuditEventType::code).toSet().size,
@@ -84,8 +112,7 @@ class AuditRepositoryTest {
     }
 
     @Test
-    fun `appends multiple records at one explicit timestamp`() = runTest {
-        val dao = FakeAuditDao()
+    fun appendsMultipleRecordsAtOneExplicitTimestamp() = runTest {
         val repository = AuditRepository(dao, currentTimeMillis = { error("unused") })
 
         repository.append(
@@ -97,19 +124,21 @@ class AuditRepositoryTest {
             occurredAt = 123_456L,
         )
 
-        assertEquals(2, dao.events.value.size)
-        assertEquals(listOf(123_456L, 123_456L), dao.events.value.map { it.occurredAt })
+        assertEquals(2, dao.observeEvents().first().sortedBy { it.id }.size)
+        assertEquals(
+            listOf(123_456L, 123_456L),
+            dao.observeEvents().first().sortedBy { it.id }.map { it.occurredAt },
+        )
         assertEquals(
             listOf("secret_updated", "secret_upload_decided"),
-            dao.events.value.map { it.eventType },
+            dao.observeEvents().first().sortedBy { it.id }.map { it.eventType },
         )
     }
 
     @Test
-    fun `startup pruning retains events at the one year cutoff`() = runTest {
+    fun startupPruningRetainsEventsAtTheOneYearCutoff() = runTest {
         val now = 400L * 24 * 60 * 60 * 1000
         val cutoff = now - 365L * 24 * 60 * 60 * 1000
-        val dao = FakeAuditDao()
         dao.insertEvents(
             listOf(
                 auditEvent(occurredAt = cutoff - 1),
@@ -123,7 +152,7 @@ class AuditRepositoryTest {
 
         assertEquals(
             listOf(cutoff, cutoff + 1),
-            dao.events.value.map(AuditEventEntity::occurredAt),
+            dao.observeEvents().first().sortedBy { it.id }.map(AuditEventEntity::occurredAt),
         )
     }
 
@@ -137,26 +166,4 @@ class AuditRepositoryTest {
             relayRequestId = null,
             bodyJson = "{}",
         )
-}
-
-private class FakeAuditDao : AuditDao {
-    val events = MutableStateFlow<List<AuditEventEntity>>(emptyList())
-
-    override fun observeEvents(): Flow<List<AuditEventEntity>> = events
-
-    override fun observeEvent(id: Long): Flow<AuditEventEntity?> = events.map { current ->
-        current.find { it.id == id }
-    }
-
-    override suspend fun insertEvents(events: List<AuditEventEntity>) {
-        var id = (this.events.value.maxOfOrNull(AuditEventEntity::id) ?: 0) + 1
-        this.events.value += events.map { event -> event.copy(id = id++) }
-    }
-
-    override suspend fun deleteBefore(cutoff: Long): Int {
-        val retained = events.value.filter { it.occurredAt >= cutoff }
-        val deleted = events.value.size - retained.size
-        events.value = retained
-        return deleted
-    }
 }

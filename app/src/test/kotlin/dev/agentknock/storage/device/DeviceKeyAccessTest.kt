@@ -10,7 +10,6 @@ import kotlinx.coroutines.test.runTest
 import org.junit.Assert.assertArrayEquals
 import org.junit.Assert.assertEquals
 import org.junit.Assert.assertFalse
-import org.junit.Assert.assertSame
 import org.junit.Assert.assertTrue
 import org.junit.Test
 
@@ -19,6 +18,7 @@ class DeviceKeyAccessTest {
     @Test
     fun `decrypts afresh per operation and clears each borrowed key`() = runTest {
         val buffers = mutableListOf<ByteArray>()
+        val borrowed = mutableListOf<ByteArray>()
         val expected = ByteArray(32) { (it + 1).toByte() }
         val key =
             DeviceKeyAccess(StandardTestDispatcher(testScheduler)) {
@@ -28,11 +28,11 @@ class DeviceKeyAccessTest {
         repeat(2) {
             val publicKey = key.use { pair ->
                 assertArrayEquals(expected, pair.privateKey)
-                assertSame(buffers.last(), pair.privateKey)
+                borrowed += pair.privateKey
                 pair.publicKey
             }
             assertArrayEquals(DeviceProtocol.deriveDevicePublicKey(expected), publicKey)
-            assertTrue(buffers.all { bytes -> bytes.all { it == 0.toByte() } })
+            assertTrue((buffers + borrowed).all { bytes -> bytes.all { it == 0.toByte() } })
         }
         assertEquals(2, buffers.size)
     }

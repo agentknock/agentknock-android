@@ -12,27 +12,20 @@ class TemporaryAccessInitializationTest {
         val directory = Files.createTempDirectory("agentknock-temporary-access").toFile()
         try {
             val marker = directory.resolve("initialized")
-            var clearAllCalls = 0
-            val expiryChecks = mutableListOf<Long>()
+            val grants = mutableMapOf("restored" to 1_000L)
+            suspend fun initialize(now: Long) =
+                initializeTemporaryAccessStorage(
+                    marker = marker,
+                    now = now,
+                    clearAll = { grants.clear() },
+                    clearExpired = { cutoff -> grants.entries.removeAll { it.value <= cutoff } },
+                )
 
-            initializeTemporaryAccessStorage(
-                marker = marker,
-                now = 100,
-                clearAll = { clearAllCalls += 1 },
-                clearExpired = { expiryChecks += it },
-            )
-            assertTrue(marker.exists())
-            assertEquals(1, clearAllCalls)
-            assertEquals(listOf(100L), expiryChecks)
-
-            initializeTemporaryAccessStorage(
-                marker = marker,
-                now = 200,
-                clearAll = { clearAllCalls += 1 },
-                clearExpired = { expiryChecks += it },
-            )
-            assertEquals(1, clearAllCalls)
-            assertEquals(listOf(100L, 200L), expiryChecks)
+            initialize(100)
+            assertTrue(grants.isEmpty())
+            grants += mapOf("expired" to 150L, "live" to 300L)
+            initialize(200)
+            assertEquals(mapOf("live" to 300L), grants)
         } finally {
             directory.deleteRecursively()
         }

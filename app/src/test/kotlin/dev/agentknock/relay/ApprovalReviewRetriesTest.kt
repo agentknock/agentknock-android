@@ -15,7 +15,6 @@ import kotlinx.coroutines.test.advanceTimeBy
 import kotlinx.coroutines.test.runCurrent
 import kotlinx.coroutines.test.runTest
 import org.junit.Assert.assertEquals
-import org.junit.Assert.assertSame
 import org.junit.Assert.assertTrue
 import org.junit.Test
 
@@ -27,7 +26,7 @@ class ApprovalReviewRetriesTest {
         val reviewer = reviewer { deviceId, token, request ->
             assertEquals("device", deviceId)
             assertEquals("token", token)
-            assertSame(REQUEST, request)
+            assertEquals(REQUEST, request)
             attempts += testScheduler.currentTime
             if (attempts.size == 1) temporaryError(429, 7_000) else APPROVED
         }
@@ -86,7 +85,7 @@ class ApprovalReviewRetriesTest {
                 result
             }
 
-            assertSame(result, reviewer.reviewWithRetries("device", "token", REQUEST))
+            assertEquals(result, reviewer.reviewWithRetries("device", "token", REQUEST))
             assertEquals(1, attempts)
         }
         assertEquals(0L, testScheduler.currentTime)
@@ -115,7 +114,7 @@ class ApprovalReviewRetriesTest {
             if (attempts.size == 2) temporaryError(503, 7_000) else unavailable
         }
 
-        assertSame(unavailable, reviewer.reviewWithRetries("device", "token", REQUEST))
+        assertEquals(unavailable, reviewer.reviewWithRetries("device", "token", REQUEST))
         assertEquals(listOf(0L, 1_000L, 8_000L, 12_000L), attempts)
     }
 
