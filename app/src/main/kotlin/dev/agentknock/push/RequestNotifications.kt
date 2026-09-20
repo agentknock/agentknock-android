@@ -41,6 +41,11 @@ import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.SupervisorJob
 import kotlinx.coroutines.launch
 
+internal enum class RequestProcessingState {
+    PROCESSING,
+    LISTENING,
+}
+
 class PushSynchronizationWorker(
     applicationContext: Context,
     parameters: WorkerParameters,
@@ -58,13 +63,8 @@ class PushSynchronizationWorker(
         val container = (applicationContext as AgentknockApplication).container
         val retryDelay = inputData.getLong(RETRY_DELAY_KEY, INITIAL_RETRY_DELAY_MILLIS)
         if (container.factoryResetInProgress) return Result.success()
-        return container.processingNotifications.start().use { processing ->
-            container.localStorage.await()
-            if (container.factoryResetInProgress) return Result.success()
-            when (
-                val synchronization =
-                    container.requestConnection.synchronizeOnce(processing::setProcessing)
-            ) {
+        return try {
+            when (val synchronization = container.requestConnection.synchronizeOnce()) {
                 dev.agentknock.storage.request.OneShotSynchronizationResult.Covered ->
                     Result.success()
                 is dev.agentknock.storage.request.OneShotSynchronizationResult.Deferred ->
@@ -72,7 +72,6 @@ class PushSynchronizationWorker(
                 is dev.agentknock.storage.request.OneShotSynchronizationResult.Completed ->
                     when (synchronization.result) {
                         RequestSyncResult.ContinuationRequired -> {
-                            container.requestNotifications.reconcile()
                             enqueueSynchronization(applicationContext)
                         }
                         RequestSyncResult.Success,
@@ -80,7 +79,6 @@ class PushSynchronizationWorker(
                         RequestSyncResult.DeviceCredentialsUnavailable,
                         RequestSyncResult.DeviceCredentialsCorrupted,
                         RequestSyncResult.UnsupportedDeviceCredentialEncryption -> {
-                            container.requestNotifications.reconcile()
                             Result.success()
                         }
                         is RequestSyncResult.RelayUnavailable -> {
@@ -108,6 +106,8 @@ class PushSynchronizationWorker(
                         }
                     }
             }
+        } finally {
+            container.requestNotifications.reconcile()
         }
     }
 

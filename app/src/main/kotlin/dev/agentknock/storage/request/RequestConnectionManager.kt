@@ -4,497 +4,357 @@ import android.os.SystemClock
 import android.util.Log
 import androidx.lifecycle.DefaultLifecycleObserver
 import androidx.lifecycle.LifecycleOwner
-import kotlin.math.min
 import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.CompletableDeferred
 import kotlinx.coroutines.CoroutineScope
-import kotlinx.coroutines.ExperimentalCoroutinesApi
 import kotlinx.coroutines.Job
 import kotlinx.coroutines.NonCancellable
-import kotlinx.coroutines.async
-import kotlinx.coroutines.coroutineScope
-import kotlinx.coroutines.currentCoroutineContext
+import kotlinx.coroutines.cancelAndJoin
+import kotlinx.coroutines.channels.Channel
+import kotlinx.coroutines.channels.ReceiveChannel
 import kotlinx.coroutines.delay
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.asStateFlow
-import kotlinx.coroutines.flow.collectLatest
-import kotlinx.coroutines.flow.distinctUntilChanged
-import kotlinx.coroutines.flow.first
-import kotlinx.coroutines.flow.flatMapLatest
-import kotlinx.coroutines.flow.flow
-import kotlinx.coroutines.flow.update
-import kotlinx.coroutines.isActive
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.selects.select
-import kotlinx.coroutines.sync.Mutex
-import kotlinx.coroutines.sync.withLock
 import kotlinx.coroutines.withContext
-import kotlinx.coroutines.withTimeoutOrNull
 
-@OptIn(ExperimentalCoroutinesApi::class)
+/** One socket owner; activities and workers supply execution lifetime, never their own sockets. */
 internal class RequestConnectionManager(
     private val scope: CoroutineScope,
-    synchronizeOnce: suspend (onProcessingChanged: (Boolean) -> Unit) -> RequestSyncResult,
-    private val listen: suspend (onCaughtUp: () -> Unit) -> RequestSyncResult,
+    private val connect:
+        suspend (
+            idleChecks: ReceiveChannel<RelayConnectionProgress>,
+            onProgress: (RelayConnectionProgress) -> Unit,
+        ) -> RequestSyncResult,
     private val scheduleBackgroundSynchronization: () -> Unit,
     private val relayRetryDeadline: RelayRetryDeadline,
-    private val awaitAiReviews: suspend () -> Unit,
-    private val backgroundGracePeriodMillis: Long = BACKGROUND_GRACE_PERIOD_MILLIS,
-    private val reconnectDelayMillis: Long = RECONNECT_DELAY_MILLIS,
-    private val maximumReconnectDelayMillis: Long = MAXIMUM_RECONNECT_DELAY_MILLIS,
+    private val activeReviews: StateFlow<Boolean>,
+    private val displayProcessing: (Boolean?) -> Unit = {},
+    private val backgroundGracePeriodMillis: Long = 35_000,
+    private val reconnectDelayMillis: Long = 3_000,
+    private val maximumReconnectDelayMillis: Long = 60_000,
     private val elapsedRealtimeMillis: () -> Long = SystemClock::elapsedRealtime,
-    private val reportInternalFailure: (Exception) -> Unit = { failure ->
-        Log.e(TAG, "Request synchronization failed", failure)
+    private val reportInternalFailure: (Exception) -> Unit = {
+        Log.e("AgentknockConnection", "Request synchronization failed", it)
     },
 ) : DefaultLifecycleObserver {
-    private val synchronizeOnceOperation = synchronizeOnce
-    private val demand = MutableStateFlow(ConnectionDemand())
-    private val backgroundSynchronizationGeneration = MutableStateFlow(0L)
-    private val sessionLock = Mutex()
-    private var activeSession: ActiveSession? = null
-
+    private val commands = Channel<suspend () -> Unit>(Channel.UNLIMITED)
+    private val workers = mutableSetOf<CompletableDeferred<OneShotSynchronizationResult>>()
+    @Volatile private var foreground = false
+    @Volatile private var paused = false
+    private var connection: Job? = null
+    private var connectionToken: Any? = null
+    private var idleChecks: Channel<RelayConnectionProgress>? = null
+    private var progress = RelayConnectionProgress(true, false)
+    private var timer: Job? = null
+    private var backgroundedAt: Long? = null
+    private var graceUntil: Long? = null
+    private var backgroundDeadline: Long? = null
+    private var idleSince: Long? = null
+    private var handledWork = false
+    private var processing = false
+    private var retryAt = 0L
+    private var retryDelay = reconnectDelayMillis
+    private var stopped = false
+    private var wakeGeneration = 0L
+    private var displayed: Boolean? = null
     private val _syncing = MutableStateFlow(false)
     private val _lastSyncResult = MutableStateFlow<RequestSyncResult?>(null)
+    val syncing = _syncing.asStateFlow()
+    val lastSyncResult = _lastSyncResult.asStateFlow()
 
-    val syncing: StateFlow<Boolean> = _syncing.asStateFlow()
-    val lastSyncResult: StateFlow<RequestSyncResult?> = _lastSyncResult.asStateFlow()
+    private val controller = scope.launch {
+        try {
+            for (command in commands) {
+                try {
+                    command()
+                } catch (cancelled: CancellationException) {
+                    throw cancelled
+                } catch (failure: Exception) {
+                    stopConnection()
+                    stopped = true
+                    val result = internalFailure(failure)
+                    _lastSyncResult.value = result
+                    finishWorkers(OneShotSynchronizationResult.Completed(result))
+                    displayProcessing(null)
+                    displayed = null
+                }
+            }
+        } finally {
+            commands.close()
+            withContext(NonCancellable) { stopConnection() }
+            timer?.cancel()
+            workers.forEach { it.cancel() }
+            displayProcessing(null)
+        }
+    }
 
     init {
         require(backgroundGracePeriodMillis >= 0)
-        require(reconnectDelayMillis >= 0)
-        require(maximumReconnectDelayMillis >= reconnectDelayMillis)
+        require(reconnectDelayMillis > 0 && maximumReconnectDelayMillis >= reconnectDelayMillis)
+        scope.launch { activeReviews.collect { update {} } }
+    }
 
-        scope.launch {
-            demand
-                .flatMapLatest { current ->
-                    flow {
-                        if (current.paused) {
-                            emit(ConnectionTarget.Inactive)
-                        } else if (current.foregroundVisible && !current.stoppedOnTerminalResult) {
-                            emit(ConnectionTarget.Foreground(current.generation))
-                        } else if (current.backgroundHandoffPending) {
-                            delay(backgroundGracePeriodMillis)
-                            emit(ConnectionTarget.BackgroundHandoff)
-                        } else {
-                            emit(ConnectionTarget.Inactive)
-                        }
-                    }
+    override fun onStart(owner: LifecycleOwner) = appForegrounded()
+
+    override fun onStop(owner: LifecycleOwner) = appBackgrounded()
+
+    fun appForegrounded() = update {
+        foreground = true
+        wakeGeneration++
+        graceUntil = null
+        backgroundedAt = null
+        stopped = false
+        retryAt = 0
+        finishWorkers(OneShotSynchronizationResult.Covered)
+    }
+
+    fun appBackgrounded() = update {
+        if (foreground) {
+            foreground = false
+            backgroundedAt = if (connection != null) elapsedRealtimeMillis() else null
+            graceUntil = backgroundedAt?.plus(backgroundGracePeriodMillis)
+            if (!paused) scheduleBackgroundSynchronization()
+        }
+    }
+
+    fun requestSynchronization() {
+        update {
+            wakeGeneration++
+            stopped = false
+            retryAt = 0
+        }
+        if (!foreground && !paused) scheduleBackgroundSynchronization()
+    }
+
+    fun refresh() = update {
+        stopConnection()
+        wakeGeneration++
+        stopped = false
+        retryAt = 0
+    }
+
+    suspend fun synchronizeOnce(): OneShotSynchronizationResult {
+        val finished = CompletableDeferred<OneShotSynchronizationResult>()
+        update {
+            if (!finished.isCancelled) {
+                if (paused || foreground) {
+                    finished.complete(OneShotSynchronizationResult.Covered)
+                } else {
+                    workers += finished
+                    wakeGeneration++
+                    graceUntil = null
+                    stopped = false
+                    retryAt = 0
                 }
-                .distinctUntilChanged()
-                .collectLatest { target ->
-                    when (target) {
-                        is ConnectionTarget.Foreground ->
-                            maintainForegroundConnection(target.generation)
-                        ConnectionTarget.BackgroundHandoff -> {
-                            // collectLatest has cancelled and joined the foreground owner before
-                            // entering this branch, so durable work cannot race its live socket.
-                            demand.update { current ->
-                                if (current.foregroundVisible) {
-                                    current
-                                } else {
-                                    current.copy(backgroundHandoffPending = false)
+            }
+        }
+        return try {
+            select {
+                finished.onAwait { it }
+                controller.onJoin { throw CancellationException("Request processing stopped") }
+            }
+        } finally {
+            finished.cancel()
+            withContext(NonCancellable) { updateAndAwait { workers.remove(finished) } }
+        }
+    }
+
+    suspend fun pauseAndJoin() = updateAndAwait {
+        paused = true
+        graceUntil = null
+        stopConnection()
+        finishWorkers(OneShotSynchronizationResult.Covered)
+    }
+
+    fun resume() = update {
+        if (paused) {
+            paused = false
+            stopped = false
+            if (!foreground) scheduleBackgroundSynchronization()
+        }
+    }
+
+    private fun update(action: suspend () -> Unit) {
+        commands.trySend {
+            action()
+            reconcile()
+        }
+    }
+
+    private suspend fun updateAndAwait(action: suspend () -> Unit) {
+        val done = CompletableDeferred<Unit>()
+        commands.trySend {
+            try {
+                action()
+                reconcile()
+                done.complete(Unit)
+            } catch (failure: Exception) {
+                done.completeExceptionally(failure)
+                throw failure
+            }
+        }
+        select<Unit> {
+            done.onAwait {}
+            controller.onJoin {}
+        }
+    }
+
+    private suspend fun reconcile() {
+        timer?.cancel()
+        timer = null
+        val now = elapsedRealtimeMillis()
+        if (paused || (!foreground && workers.isEmpty() && (graceUntil ?: 0) <= now)) {
+            stopConnection()
+            backgroundDeadline = null
+        } else if (!foreground && backgroundDeadline?.let { it <= now } == true) {
+            stopConnection()
+            _lastSyncResult.value = RequestSyncResult.ContinuationRequired
+            if (!activeReviews.value)
+                finishWorkers(
+                    OneShotSynchronizationResult.Completed(RequestSyncResult.ContinuationRequired)
+                )
+        } else {
+            val idleDeadline = idleSince?.let {
+                if (handledWork || backgroundedAt != null)
+                    maxOf(it, backgroundedAt ?: it) + backgroundGracePeriodMillis
+                else now
+            }
+            if (
+                !foreground &&
+                    connection != null &&
+                    !processing &&
+                    !activeReviews.value &&
+                    idleDeadline != null &&
+                    idleDeadline <= now
+            ) {
+                idleChecks?.trySend(progress)
+            } else if (connection == null) {
+                val serverDelay = relayRetryDeadline.remainingMillis()
+                if (!foreground && !activeReviews.value && (stopped || serverDelay > 0)) {
+                    finishWorkers(
+                        if (serverDelay > 0) OneShotSynchronizationResult.Deferred(serverDelay)
+                        else
+                            OneShotSynchronizationResult.Completed(
+                                checkNotNull(_lastSyncResult.value)
+                            )
+                    )
+                    graceUntil = null
+                } else if (!stopped && serverDelay == 0L && retryAt <= now) {
+                    startConnection()
+                }
+            }
+            if (
+                !foreground &&
+                    workers.isNotEmpty() &&
+                    connection != null &&
+                    backgroundDeadline == null
+            ) {
+                backgroundDeadline = now + BACKGROUND_SESSION_LIMIT_MILLIS
+            }
+            val next =
+                listOfNotNull(
+                        if (!foreground && workers.isEmpty()) graceUntil else null,
+                        if (!foreground) backgroundDeadline else null,
+                        if (
+                            !foreground && connection != null && !processing && !activeReviews.value
+                        )
+                            idleDeadline
+                        else null,
+                        if (connection == null && !stopped)
+                            maxOf(retryAt, now + relayRetryDeadline.remainingMillis())
+                        else null,
+                    )
+                    .filter { it > now }
+                    .minOrNull()
+            if (next != null)
+                timer = scope.launch {
+                    delay(next - now)
+                    update {}
+                }
+        }
+        _syncing.value = connection != null && processing
+        val visible =
+            if (!foreground && workers.isNotEmpty()) processing || activeReviews.value else null
+        if (visible != displayed) {
+            displayProcessing(visible)
+            displayed = visible
+        }
+    }
+
+    private fun startConnection() {
+        val token = Any()
+        var generation = wakeGeneration
+        val checks = Channel<RelayConnectionProgress>(Channel.CONFLATED)
+        idleChecks = checks
+        connectionToken = token
+        processing = true
+        idleSince = null
+        handledWork = false
+        connection = scope.launch {
+            val result =
+                try {
+                    connect(checks) { current ->
+                        update {
+                            if (connectionToken === token) {
+                                if (!current.processing && (processing || idleSince == null))
+                                    idleSince = elapsedRealtimeMillis()
+                                progress = current
+                                processing = current.processing
+                                handledWork = current.handledWork
+                                if (!processing) {
+                                    generation = wakeGeneration
+                                    retryDelay = reconnectDelayMillis
+                                    _lastSyncResult.value = RequestSyncResult.Success
                                 }
                             }
-                            scheduleBackgroundSynchronization()
-                        }
-                        ConnectionTarget.Inactive -> Unit
-                    }
-                }
-        }
-    }
-
-    override fun onStart(owner: LifecycleOwner) {
-        appForegrounded()
-    }
-
-    override fun onStop(owner: LifecycleOwner) {
-        appBackgrounded()
-    }
-
-    fun appForegrounded() {
-        demand.update { current ->
-            current.copy(
-                foregroundVisible = true,
-                backgroundHandoffPending = false,
-                stoppedOnTerminalResult = false,
-                generation = current.generation + if (current.stoppedOnTerminalResult) 1 else 0,
-            )
-        }
-    }
-
-    fun appBackgrounded() {
-        demand.update { current ->
-            if (!current.foregroundVisible) {
-                current
-            } else {
-                current.copy(
-                    foregroundVisible = false,
-                    backgroundHandoffPending = !current.paused,
-                )
-            }
-        }
-    }
-
-    fun refresh() {
-        demand.update { current ->
-            if (current.foregroundVisible && !current.paused) {
-                current.copy(
-                    generation = current.generation + 1,
-                    stoppedOnTerminalResult = false,
-                )
-            } else {
-                current.copy(stoppedOnTerminalResult = false)
-            }
-        }
-    }
-
-    /**
-     * Announces new relay work without creating a competing connection.
-     *
-     * A visible app already has (or is starting) its live session. In the background the durable
-     * scheduler owns process lifetime and eventually calls [synchronizeOnce].
-     */
-    fun requestSynchronization() {
-        if (demand.value.paused) return
-        if (demand.value.foregroundVisible) {
-            demand.update { current ->
-                if (current.paused || !current.foregroundVisible) {
-                    current
-                } else if (current.stoppedOnTerminalResult) {
-                    current.copy(
-                        generation = current.generation + 1,
-                        synchronizationGeneration = current.synchronizationGeneration + 1,
-                        stoppedOnTerminalResult = false,
-                    )
-                } else {
-                    current.copy(synchronizationGeneration = current.synchronizationGeneration + 1)
-                }
-            }
-        } else {
-            backgroundSynchronizationGeneration.update { it + 1 }
-            scheduleBackgroundSynchronization()
-        }
-    }
-
-    /**
-     * Runs one finite synchronization when no foreground session covers the device.
-     *
-     * The unique background work chain owns its finite relay operation. A server retry deadline is
-     * returned to durable work without occupying a process-scope job. During the foreground
-     * connection's background grace period, durable work waits for the handoff.
-     */
-    suspend fun synchronizeOnce(
-        onProcessingChanged: (Boolean) -> Unit = {}
-    ): OneShotSynchronizationResult {
-        var connectionDeadline: Long? = null
-        while (true) {
-            val generation = backgroundSynchronizationGeneration.value
-            val result =
-                synchronizeRelayOnce(onProcessingChanged) {
-                    connectionDeadline
-                        ?: retryDeadline(BACKGROUND_SESSION_LIMIT_MILLIS).also {
-                            connectionDeadline = it
-                        }
-                }
-            if (result == OneShotSynchronizationResult.Covered) return result
-            val remainingMillis =
-                connectionDeadline?.let {
-                    (it - elapsedRealtimeMillis()).coerceAtLeast(0)
-                } ?: BACKGROUND_SESSION_LIMIT_MILLIS
-            val newWork =
-                withTimeoutOrNull(remainingMillis) {
-                    coroutineScope {
-                        val reviewsFinished = async { awaitAiReviews() }
-                        val wake = async {
-                            backgroundSynchronizationGeneration.first { it != generation }
-                            awaitServerRetryWindow()
-                        }
-                        try {
-                            select<Boolean> {
-                                wake.onAwait { true }
-                                reviewsFinished.onAwait { false }
-                            }
-                        } finally {
-                            wake.cancel()
-                            reviewsFinished.cancel()
                         }
                     }
-                } ?: false
-            if (!newWork) {
-                // Keep the durable owner until outstanding reviews finish. Cancelling a waiter
-                // never cancels or repeats the independently owned, potentially billable attempt.
-                awaitAiReviews()
-                return result
-            }
-        }
-    }
-
-    private suspend fun synchronizeRelayOnce(
-        onProcessingChanged: (Boolean) -> Unit,
-        connectionDeadline: () -> Long,
-    ): OneShotSynchronizationResult {
-        val callerJob = checkNotNull(currentCoroutineContext()[Job])
-        while (true) {
-            val existingSession = sessionLock.withLock {
-                if (demand.value.paused || demand.value.hasLiveForegroundOwner()) {
-                    return OneShotSynchronizationResult.Covered
+                } catch (cancelled: CancellationException) {
+                    throw cancelled
+                } catch (failure: Exception) {
+                    internalFailure(failure)
                 }
-                val existing = activeSession
-                if (existing != null) {
-                    if (!demand.value.backgroundHandoffPending) {
-                        return OneShotSynchronizationResult.Covered
+            update {
+                if (connectionToken === token) {
+                    connection = null
+                    connectionToken = null
+                    idleChecks = null
+                    if (!foreground) backgroundedAt = null
+                    processing = false
+                    _lastSyncResult.value = result
+                    val serverDelay =
+                        (result as? RequestSyncResult.RelayUnavailable)?.retryAfterMillis
+                    if (serverDelay != null && serverDelay > 0)
+                        relayRetryDeadline.deferFor(serverDelay)
+                    val freshWake = generation != wakeGeneration
+                    stopped =
+                        !freshWake &&
+                            result !is RequestSyncResult.RelayUnavailable &&
+                            result != RequestSyncResult.Success
+                    if (!foreground && !activeReviews.value) {
+                        finishWorkers(OneShotSynchronizationResult.Completed(result))
+                        graceUntil = null
+                    } else {
+                        retryAt = if (freshWake) 0 else elapsedRealtimeMillis() + retryDelay
+                        retryDelay = (retryDelay * 2).coerceAtMost(maximumReconnectDelayMillis)
                     }
-                    existing
-                } else {
-                    val retryDelayMillis = relayRetryDeadline.remainingMillis()
-                    if (retryDelayMillis > 0) {
-                        return OneShotSynchronizationResult.Deferred(retryDelayMillis)
-                    }
-                    ActiveSession(callerJob).also { activeSession = it }
-                }
-            }
-            if (existingSession.ownerJob === callerJob) {
-                return runOneShot(existingSession, onProcessingChanged, connectionDeadline())
-            }
-            coroutineScope {
-                val foregroundOrPaused = async {
-                    demand.first { it.paused || it.hasLiveForegroundOwner() }
-                }
-                try {
-                    select<Unit> {
-                        existingSession.released.onAwait {}
-                        foregroundOrPaused.onAwait {}
-                    }
-                } finally {
-                    foregroundOrPaused.cancel()
                 }
             }
         }
     }
 
-    /** Stops new sessions, cancels the current owner, and does not return until it has exited. */
-    suspend fun pauseAndJoin() {
-        demand.update { current ->
-            current.copy(
-                paused = true,
-                backgroundHandoffPending = false,
-            )
-        }
-
-        while (true) {
-            val session = sessionLock.withLock { activeSession } ?: break
-            session.ownerJob.cancel()
-            session.released.await()
-        }
+    private suspend fun stopConnection() {
+        connectionToken = null
+        connection?.cancelAndJoin()
+        connection = null
+        idleChecks = null
+        if (!foreground) backgroundedAt = null
+        processing = false
         _syncing.value = false
     }
-
-    /** Allows lifecycle or scheduled work to establish sessions again after [pauseAndJoin]. */
-    fun resume() {
-        if (!demand.value.paused) return
-        var scheduleReconciliation = false
-        demand.update { current ->
-            scheduleReconciliation = !current.foregroundVisible
-            current.copy(
-                paused = false,
-                backgroundHandoffPending = false,
-                stoppedOnTerminalResult = false,
-                generation = current.generation + if (current.foregroundVisible) 1 else 0,
-            )
-        }
-        if (scheduleReconciliation) scheduleBackgroundSynchronization()
-    }
-
-    private suspend fun runOneShot(
-        session: ActiveSession,
-        onProcessingChanged: (Boolean) -> Unit,
-        connectionDeadline: Long,
-    ): OneShotSynchronizationResult {
-        try {
-            _syncing.value = true
-            val result =
-                rememberServerRetryDirective(
-                    runOperation {
-                        withTimeoutOrNull(
-                            (connectionDeadline - elapsedRealtimeMillis()).coerceAtLeast(0)
-                        ) {
-                            synchronizeOnceOperation { processing ->
-                                _syncing.value = processing
-                                if (!processing) _lastSyncResult.value = RequestSyncResult.Success
-                                onProcessingChanged(processing)
-                            }
-                        } ?: RequestSyncResult.ContinuationRequired
-                    }
-                )
-            _lastSyncResult.value = result
-            if (
-                result == RequestSyncResult.Success ||
-                    result == RequestSyncResult.ContinuationRequired
-            ) {
-                demand.update { current ->
-                    if (current.foregroundVisible && current.stoppedOnTerminalResult) {
-                        current.copy(
-                            generation = current.generation + 1,
-                            stoppedOnTerminalResult = false,
-                        )
-                    } else {
-                        current
-                    }
-                }
-            }
-            return OneShotSynchronizationResult.Completed(result)
-        } finally {
-            releaseSession(session)
-        }
-    }
-
-    private suspend fun maintainForegroundConnection(connectionGeneration: Long) {
-        val session = reserveForegroundSession() ?: return
-        try {
-            var reconnectDelay = reconnectDelayMillis
-            while (currentCoroutineContext().isActive && !demand.value.paused) {
-                awaitServerRetryWindow()
-                val synchronizationGeneration = demand.value.synchronizationGeneration
-                var caughtUp = false
-                _syncing.value = true
-                val result = runOperation {
-                    listen {
-                        caughtUp = true
-                        reconnectDelay = reconnectDelayMillis
-                        _lastSyncResult.value = RequestSyncResult.Success
-                        _syncing.value = false
-                    }
-                }
-                val finalResult = rememberServerRetryDirective(result)
-                _lastSyncResult.value = finalResult
-                _syncing.value = false
-
-                when (finalResult) {
-                    is RequestSyncResult.RelayUnavailable -> {
-                        waitForRetry(reconnectDelay, synchronizationGeneration)
-                        reconnectDelay = nextReconnectDelay(reconnectDelay)
-                    }
-                    RequestSyncResult.Success,
-                    RequestSyncResult.ContinuationRequired -> {
-                        waitForRetry(reconnectDelayMillis, synchronizationGeneration)
-                        reconnectDelay = reconnectDelayMillis
-                    }
-                    else -> {
-                        val retry: Boolean = sessionLock.withLock {
-                            while (true) {
-                                val current = demand.value
-                                if (
-                                    activeSession !== session ||
-                                        current.generation != connectionGeneration
-                                ) {
-                                    break
-                                }
-                                if (
-                                    current.synchronizationGeneration != synchronizationGeneration
-                                ) {
-                                    return@withLock true
-                                }
-                                if (
-                                    demand.compareAndSet(
-                                        current,
-                                        current.copy(stoppedOnTerminalResult = true),
-                                    )
-                                ) {
-                                    activeSession = null
-                                    break
-                                }
-                            }
-                            false
-                        }
-                        if (retry) continue
-                        return
-                    }
-                }
-
-                // A connection that reached caught-up state starts the next outage at the base
-                // delay, even if the closing result itself was unavailable.
-                if (caughtUp) reconnectDelay = reconnectDelayMillis
-            }
-        } finally {
-            releaseSession(session)
-        }
-    }
-
-    private suspend fun releaseSession(session: ActiveSession) =
-        withContext(NonCancellable) {
-            sessionLock.withLock {
-                if (activeSession === session) activeSession = null
-                if (activeSession == null) _syncing.value = false
-                session.released.complete(Unit)
-            }
-        }
-
-    private suspend fun waitForRetry(delayMillis: Long, synchronizationGeneration: Long) {
-        val localRetryNotBefore = retryDeadline(delayMillis)
-        awaitServerRetryWindow()
-        val remainingLocalDelay = (localRetryNotBefore - elapsedRealtimeMillis()).coerceAtLeast(0)
-        withTimeoutOrNull(remainingLocalDelay) {
-            demand.first { current ->
-                current.synchronizationGeneration != synchronizationGeneration
-            }
-        }
-    }
-
-    private fun rememberServerRetryDirective(result: RequestSyncResult): RequestSyncResult {
-        val delayMillis =
-            (result as? RequestSyncResult.RelayUnavailable)?.retryAfterMillis?.takeIf { it > 0 }
-                ?: return result
-        return try {
-            relayRetryDeadline.deferFor(delayMillis)
-            result
-        } catch (failure: Exception) {
-            internalFailure(failure)
-        }
-    }
-
-    private suspend fun awaitServerRetryWindow() {
-        while (true) {
-            val remaining = relayRetryDeadline.remainingMillis()
-            if (remaining == 0L) return
-            delay(remaining)
-        }
-    }
-
-    private fun retryDeadline(delayMillis: Long): Long {
-        val now = elapsedRealtimeMillis()
-        return if (delayMillis > Long.MAX_VALUE - now) Long.MAX_VALUE else now + delayMillis
-    }
-
-    private suspend fun reserveForegroundSession(): ActiveSession? {
-        val foregroundJob = checkNotNull(currentCoroutineContext()[Job])
-        while (currentCoroutineContext().isActive && !demand.value.paused) {
-            val existingSessionRelease = sessionLock.withLock {
-                if (demand.value.paused || !demand.value.foregroundVisible) {
-                    return null
-                }
-                activeSession?.released
-                    ?: run {
-                        val session = ActiveSession(foregroundJob)
-                        activeSession = session
-                        return session
-                    }
-            }
-            existingSessionRelease.await()
-        }
-        return null
-    }
-
-    private suspend fun runOperation(
-        operation: suspend () -> RequestSyncResult
-    ): RequestSyncResult =
-        try {
-            operation()
-        } catch (cancelled: CancellationException) {
-            throw cancelled
-        } catch (failure: Exception) {
-            internalFailure(failure)
-        }
 
     private fun internalFailure(failure: Exception): RequestSyncResult.InternalFailure {
         runCatching { reportInternalFailure(failure) }
@@ -503,57 +363,21 @@ internal class RequestConnectionManager(
         )
     }
 
-    private fun nextReconnectDelay(current: Long): Long =
-        min(
-            maximumReconnectDelayMillis,
-            if (current > maximumReconnectDelayMillis / 2) {
-                maximumReconnectDelayMillis
-            } else {
-                current * 2
-            },
-        )
-
-    private class ActiveSession(val ownerJob: Job) {
-        val released = CompletableDeferred<Unit>()
-    }
-
-    private data class ConnectionDemand(
-        val foregroundVisible: Boolean = false,
-        val generation: Long = 0,
-        val synchronizationGeneration: Long = 0,
-        val paused: Boolean = false,
-        val backgroundHandoffPending: Boolean = false,
-        val stoppedOnTerminalResult: Boolean = false,
-    ) {
-        fun hasLiveForegroundOwner(): Boolean =
-            foregroundVisible && !paused && !stoppedOnTerminalResult
-    }
-
-    private sealed interface ConnectionTarget {
-        data class Foreground(val generation: Long) : ConnectionTarget
-
-        data object BackgroundHandoff : ConnectionTarget
-
-        data object Inactive : ConnectionTarget
+    private fun finishWorkers(result: OneShotSynchronizationResult) {
+        workers.forEach { it.complete(result) }
+        workers.clear()
+        backgroundDeadline = null
     }
 
     private companion object {
-        const val TAG = "AgentknockConnection"
-        const val BACKGROUND_SESSION_LIMIT_MILLIS = 2 * 60 * 1_000L
-        const val BACKGROUND_GRACE_PERIOD_MILLIS = 35_000L
-        const val RECONNECT_DELAY_MILLIS = 3_000L
-        const val MAXIMUM_RECONNECT_DELAY_MILLIS = 60_000L
+        const val BACKGROUND_SESSION_LIMIT_MILLIS = 120_000L
     }
 }
 
 internal sealed interface OneShotSynchronizationResult {
     data object Covered : OneShotSynchronizationResult
 
-    data class Deferred(val retryAfterMillis: Long) : OneShotSynchronizationResult {
-        init {
-            require(retryAfterMillis > 0)
-        }
-    }
+    data class Deferred(val retryAfterMillis: Long) : OneShotSynchronizationResult
 
     data class Completed(val result: RequestSyncResult) : OneShotSynchronizationResult
 }
