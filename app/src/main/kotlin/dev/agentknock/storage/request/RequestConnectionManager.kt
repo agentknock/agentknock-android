@@ -141,6 +141,11 @@ internal class RequestConnectionManager(
         update {
             if (!finished.isCancelled) {
                 if (paused || foreground) {
+                    if (foreground && !paused && connection == null) {
+                        wakeGeneration++
+                        stopped = false
+                        retryAt = 0
+                    }
                     finished.complete(OneShotSynchronizationResult.Covered)
                 } else {
                     workers += finished
