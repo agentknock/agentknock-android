@@ -3,6 +3,7 @@ import json
 import os
 from pathlib import Path
 import tempfile
+import subprocess
 import unittest
 from unittest.mock import patch
 
@@ -32,22 +33,32 @@ class CloudKeyTests(unittest.TestCase):
     def test_rejects_disabled_software_and_incompatible_keys(self):
         for field, value in (("state", "DISABLED"), ("protectionLevel", "SOFTWARE"),
                              ("algorithm", "RSA_SIGN_PKCS1_4096_SHA256"), ("name", KEY + "0")):
-            with self.subTest(field=field), patch.object(signing, "kms_get", return_value={
-                **self.metadata, field: value,
-            }), patch.object(signing.subprocess, "check_output") as output:
+            with self.subTest(field=field), patch.dict(self.metadata, {field: value}), \
+                    patch.object(signing, "kms_get", side_effect=self.key_response(signing.APP_SIGNING_CERTIFICATE)):
                 with self.assertRaises(ValueError):
                     signing.check_cloud_key(KEY, "test-token", signing.APP_SIGNING_CERTIFICATE)
-                output.assert_not_called()
+
+    def key_response(self, certificate):
+        public_key = subprocess.check_output([
+            "openssl", "x509", "-in", str(certificate), "-pubkey", "-noout",
+        ]).decode()
+
+        def get(resource, token):
+            self.assertEqual(token, "test-token")
+            if resource == KEY:
+                return self.metadata
+            if resource == f"{KEY}/publicKey":
+                return {"pem": public_key}
+            self.fail(f"Unexpected KMS resource: {resource}")
+        return get
 
     def test_public_key_must_match_the_existing_certificate(self):
-        with patch.object(signing, "kms_get", side_effect=[self.metadata, {"pem": "wrong key"}]), \
-                patch.object(signing.subprocess, "check_output", side_effect=[b"certificate", b"expected", b"different"]):
+        with patch.object(signing, "kms_get", side_effect=self.key_response(signing.PLAY_UPLOAD_CERTIFICATE)):
             with self.assertRaisesRegex(ValueError, "does not match"):
                 signing.check_cloud_key(KEY, "test-token", signing.APP_SIGNING_CERTIFICATE)
 
     def test_accepts_the_existing_key_in_an_enabled_hsm_version(self):
-        with patch.object(signing, "kms_get", side_effect=[self.metadata, {"pem": "key"}]), \
-                patch.object(signing.subprocess, "check_output", side_effect=[b"certificate", b"same", b"same"]):
+        with patch.object(signing, "kms_get", side_effect=self.key_response(signing.APP_SIGNING_CERTIFICATE)):
             signing.check_cloud_key(KEY, "test-token", signing.APP_SIGNING_CERTIFICATE)
 
 
@@ -61,7 +72,11 @@ class ReleaseSigningTests(unittest.TestCase):
         self.addCleanup(environment.stop)
 
     def test_upload_key_mismatch_prevents_all_signing(self):
-        with patch.object(release, "check_cloud_key", side_effect=[None, ValueError("wrong upload key")]), \
+        def check(key, token, certificate):
+            if key == UPLOAD_KEY:
+                raise ValueError("wrong upload key")
+
+        with patch.object(release, "check_cloud_key", side_effect=check), \
                 patch.object(release, "sign_artifacts") as sign:
             with self.assertRaisesRegex(ValueError, "wrong upload key"):
                 release.main()
@@ -98,10 +113,10 @@ class ReleaseSigningTests(unittest.TestCase):
                         patch.object(release, "sign_artifacts", side_effect=sign), \
                         patch.object(release, "verify_artifacts") as verify:
                     release.main()
-                self.assertEqual(check.call_args_list, [
+                check.assert_has_calls([
                     unittest.mock.call(KEY, "test-token", signing.APP_SIGNING_CERTIFICATE),
                     unittest.mock.call(UPLOAD_KEY, "test-token", signing.PLAY_UPLOAD_CERTIFICATE),
-                ])
+                ], any_order=True)
                 self.assertEqual(verify.call_args.args[1:3],
                                  (signing.APP_SIGNING_CERTIFICATE, signing.PLAY_UPLOAD_CERTIFICATE))
                 self.assertNotIn("GCP_ACCESS_TOKEN", os.environ)

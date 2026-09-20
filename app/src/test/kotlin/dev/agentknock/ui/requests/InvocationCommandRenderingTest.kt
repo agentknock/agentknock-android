@@ -1,9 +1,9 @@
 package dev.agentknock.ui.requests
 
 import androidx.compose.ui.graphics.Color
-import dev.agentknock.presentation.renderShellCommand
+import java.util.concurrent.TimeUnit
 import org.junit.Assert.assertEquals
-import org.junit.Assert.assertFalse
+import org.junit.Assert.assertTrue
 import org.junit.Test
 
 class InvocationCommandRenderingTest {
@@ -30,14 +30,19 @@ class InvocationCommandRenderingTest {
                     Color.Unspecified,
                 )
                 .text
-        assertEquals(
-            renderShellCommand(command, arguments),
-            listed.replace(COMMAND_LINE_CONTINUATION, " "),
-        )
-        assertEquals(arguments.size, listed.count { it == '\n' })
-        assertFalse(
-            "every newline must be a shell continuation",
-            listed.contains(Regex("(?<!\\\\)\n")),
-        )
+        assertTrue("Listed commands remain multiline", listed.contains('\n'))
+        // Let the shell check quoting and continuation semantics independently of our formatter.
+        // `set --` parses arguments without executing the displayed command.
+        val shell = ProcessBuilder("bash", "-c", "set -- $listed\nprintf '%s\\0' \"\$@\"").start()
+        try {
+            assertTrue("Shell parsing timed out", shell.waitFor(5, TimeUnit.SECONDS))
+            assertEquals(shell.errorStream.bufferedReader().readText(), 0, shell.exitValue())
+            assertEquals(
+                listOf(command) + arguments,
+                shell.inputStream.bufferedReader().readText().split('\u0000').dropLast(1),
+            )
+        } finally {
+            shell.destroyForcibly()
+        }
     }
 }

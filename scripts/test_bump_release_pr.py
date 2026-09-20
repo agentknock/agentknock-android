@@ -44,13 +44,13 @@ class ReleasePrBumpTests(unittest.TestCase):
             return self.pr
         if endpoint == f"repos/{self.repo}/git/ref/heads/{self.branch}":
             return {"object": {"type": "commit", "sha": self.ref_head}}
-        if endpoint == f"repos/{self.repo}/contents/{release.BUILD_FILE}?ref=stale-pr-head":
+        if endpoint == f"repos/{self.repo}/contents/app/build.gradle.kts?ref=stale-pr-head":
             return {"content": base64.b64encode(b"val agentknockVersionCode = 58\n// old contents\n").decode()}
-        if endpoint == f"repos/{self.repo}/contents/{release.BUILD_FILE}?ref=updated-release-head":
+        if endpoint == f"repos/{self.repo}/contents/app/build.gradle.kts?ref=updated-release-head":
             if self.move_branch_after_read:
                 self.ref_head = "concurrent-edit"
             return {"content": base64.b64encode(self.original.encode()).decode()}
-        if endpoint == f"repos/{self.repo}/contents/{release.BUILD_FILE}?ref=master":
+        if endpoint == f"repos/{self.repo}/contents/app/build.gradle.kts?ref=master":
             return {"content": base64.b64encode(b"val agentknockVersionCode = 59\n").decode()}
         if endpoint == "graphql":
             mutation = payload["variables"]["input"]
@@ -68,7 +68,7 @@ class ReleasePrBumpTests(unittest.TestCase):
         self.assertEqual(mutation["branch"], {"repositoryNameWithOwner": self.repo, "branchName": self.branch})
         additions = mutation["fileChanges"]["additions"]
         self.assertEqual(len(additions), 1)
-        self.assertEqual(additions[0]["path"], release.BUILD_FILE)
+        self.assertEqual(additions[0]["path"], "app/build.gradle.kts")
         self.assertEqual(base64.b64decode(additions[0]["contents"]).decode(),
                          self.original.replace("= 59", "= 60"))
         self.dispatch.assert_called_once_with(

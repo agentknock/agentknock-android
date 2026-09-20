@@ -7,7 +7,7 @@ import tempfile
 import unittest
 from unittest.mock import patch
 
-from version import app_changes, bumped, check, check_version, main, version_code
+from version import app_changes, bumped, check_version, main, version_code
 
 
 class VersionTests(unittest.TestCase):
@@ -25,14 +25,6 @@ class VersionTests(unittest.TestCase):
                 version_code(source)
         with self.assertRaises(ValueError):
             bumped("val agentknockVersionCode = 2100000000", 2100000000)
-
-    @patch("version.subprocess.run")
-    @patch("version.git")
-    def test_check_rejects_disagreement_with_release_manifest(self, git, run):
-        git.side_effect = ["", "abc", "chore: release", "val agentknockVersionCode = 47",
-                           "val agentknockVersionCode = 48", "version.txt\0", "0.3.0", '{".": "0.2.0"}']
-        with self.assertRaisesRegex(ValueError, "disagree"):
-            check("master", "head")
 
 class VersionRepositoryTests(unittest.TestCase):
     """Exercise diffs and local bumping against real Git trees, including moves."""
@@ -101,6 +93,13 @@ class VersionRepositoryTests(unittest.TestCase):
         self.command("check")
         self.command("release", GITHUB_OUTPUT=str(output))
         self.assertEqual(output.read_text(), "publish-release=true\n")
+
+    def test_check_rejects_disagreement_with_release_manifest(self):
+        self.write("version.txt", "0.3.1\n")
+        self.command("bump")
+        self.commit("chore: release 0.3.1")
+        with self.assertRaisesRegex(ValueError, "disagree"):
+            self.command("check")
 
     def test_code_cannot_decrease(self):
         self.write("app/build.gradle.kts", "val agentknockVersionCode = 47\n")

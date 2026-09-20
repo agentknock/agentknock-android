@@ -32,23 +32,20 @@ class RequestApprovalPlannerTest {
         for ((mode, action) in actions) {
             val policy = policy("secret", mode).copy(secretName = "display-name", revision = 42L)
             val eligible = mode == SecretApprovalMode.ASK_ME || mode == SecretApprovalMode.ASK_AI
-            assertEquals(
+            val expected =
                 SecretApprovalEvaluation(
                     secretId = "secret",
                     secretName = "display-name",
                     action = action,
                     temporaryAccessEligible = eligible,
                     revision = 42L,
-                ),
-                policy.evaluate(),
-            )
+                )
+            assertEquals(expected, policy.evaluate())
             assertEquals(
-                policy
-                    .evaluate()
-                    .copy(
-                        action = if (eligible) ApprovalAction.APPROVE else action,
-                        temporaryAccessExpiresAt = 1234L.takeIf { eligible },
-                    ),
+                expected.copy(
+                    action = if (eligible) ApprovalAction.APPROVE else action,
+                    temporaryAccessExpiresAt = 1234L.takeIf { eligible },
+                ),
                 policy.copy(temporaryAccessExpiresAt = 1234L).evaluate(),
             )
         }
