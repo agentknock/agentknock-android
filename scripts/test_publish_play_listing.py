@@ -41,7 +41,8 @@ class ListingPublicationTests(unittest.TestCase):
 
     def upload(self, command, check):
         self.assertEqual(command[0], "./gradlew")
-        self.assertTrue({":app:publishPlayReleaseListing", "--no-commit", "--rerun-tasks"}.issubset(command))
+        # Extra tasks or conflicting options could publish beyond this uncommitted listing edit.
+        self.assertCountEqual(command[1:], [":app:publishPlayReleaseListing", "--no-commit", "--rerun-tasks"])
         self.assertTrue(check)
         self.assertNotIn("GCP_ACCESS_TOKEN", os.environ)
         GPP_EDIT_FILE.write_text("test-edit")
