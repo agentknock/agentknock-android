@@ -23,17 +23,28 @@ import androidx.compose.material3.Button
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
+import androidx.compose.runtime.getValue
+import androidx.compose.runtime.produceState
 import androidx.compose.runtime.remember
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.unit.dp
 import androidx.core.content.ContextCompat
 import androidx.core.net.toUri
+import androidx.lifecycle.Lifecycle
+import androidx.lifecycle.compose.LocalLifecycleOwner
+import androidx.lifecycle.compose.collectAsStateWithLifecycle
+import androidx.lifecycle.repeatOnLifecycle
 import dev.agentknock.BACKGROUND_DELIVERY_SUPPORTED
 import dev.agentknock.push.PushServiceIssue
 import dev.agentknock.push.RequestNotifications
+import dev.agentknock.push.WakeDelivery
+import dev.agentknock.push.WakeDeliveryStore
+import dev.agentknock.push.WakePriority
 import dev.agentknock.pushServiceIssue
 import dev.agentknock.relay.RelayPushRegistrationState
+import dev.agentknock.ui.components.rememberDateTimeFormatter
+import kotlinx.coroutines.delay
 
 @Composable
 internal fun NotificationsSettings(
@@ -45,6 +56,18 @@ internal fun NotificationsSettings(
     report: (String) -> Unit,
 ) {
     val context = LocalContext.current
+    val deliveries = remember(context) { WakeDeliveryStore(context).observe() }
+    val lastWake by deliveries.collectAsStateWithLifecycle(initialValue = null)
+    val lifecycle = LocalLifecycleOwner.current.lifecycle
+    val now by
+        produceState(System.currentTimeMillis(), lastWake, lifecycle) {
+            lifecycle.repeatOnLifecycle(Lifecycle.State.STARTED) {
+                while (true) {
+                    value = System.currentTimeMillis()
+                    delay(60_000)
+                }
+            }
+        }
     val permissionGranted =
         remember(refreshGeneration) {
             Build.VERSION.SDK_INT < Build.VERSION_CODES.TIRAMISU ||
@@ -113,6 +136,8 @@ internal fun NotificationsSettings(
 
     NotificationsSettingsContent(
         pushState = pushState,
+        lastWake = lastWake,
+        now = now,
         permissionGranted = permissionGranted,
         appNotificationsEnabled = appNotificationsEnabled,
         requestsEnabled = requestsEnabled,
@@ -155,6 +180,8 @@ internal fun NotificationsSettingsContent(
     openChannel: (String) -> Unit,
     onBack: () -> Unit,
     modifier: Modifier,
+    lastWake: WakeDelivery? = null,
+    now: Long = System.currentTimeMillis(),
     backgroundDataRestricted: Boolean = false,
     backgroundActivityRestricted: Boolean? = false,
     pushServiceIssue: PushServiceIssue? = null,
@@ -164,6 +191,7 @@ internal fun NotificationsSettingsContent(
     resolvePushServiceIssue: () -> Unit = {},
     listState: LazyListState = rememberLazyListState(),
 ) {
+    val dateTime = rememberDateTimeFormatter()
     Column(modifier) {
         PageTopBar("Notifications", onBack)
         LazyColumn(
@@ -314,6 +342,26 @@ internal fun NotificationsSettingsContent(
                                 attention = backgroundActivityRestricted == true,
                                 onClick = openBatterySettings,
                                 external = true,
+                            )
+                            SettingsGroupDivider()
+                            SettingsRow(
+                                title = "Last wake received",
+                                summary =
+                                    lastWake?.let { wake ->
+                                        val delivery =
+                                            wake.delayMillis?.let {
+                                                if (it < 1_000) "<1 s delivery"
+                                                else "~${it / 1_000} s delivery"
+                                            } ?: "Delivery delay unknown"
+                                        val priority =
+                                            when (wake.priority) {
+                                                WakePriority.HIGH -> "High priority"
+                                                WakePriority.NORMAL -> "Normal priority"
+                                                WakePriority.REDUCED -> "Reduced priority"
+                                                WakePriority.UNKNOWN -> "Priority unknown"
+                                            }
+                                        "${dateTime.relativeTime(wake.receivedAt, now)} · $delivery · $priority"
+                                    } ?: "No wake received yet",
                             )
                         }
                         Text(
