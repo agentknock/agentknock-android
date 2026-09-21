@@ -9,6 +9,8 @@ import androidx.compose.ui.Modifier
 import androidx.compose.ui.tooling.preview.Preview
 import com.android.tools.screenshot.PreviewTest
 import dev.agentknock.BuildConfig
+import dev.agentknock.push.WakeDelivery
+import dev.agentknock.push.WakePriority
 import dev.agentknock.relay.RelayPushRegistrationState
 import dev.agentknock.storage.audit.*
 import dev.agentknock.storage.crypto.*
@@ -148,6 +150,8 @@ private fun NotificationsPreview() = PreviewScreen {
         {},
         {},
         Modifier.fillMaxSize(),
+        lastWake = WakeDelivery(1_000_000, 2_000, WakePriority.HIGH),
+        now = 1_180_000,
     )
 }
 
@@ -1091,5 +1095,31 @@ fun NotificationsProcessingHiddenDarkPreview() = PreviewScreen {
         {},
         {},
         Modifier.fillMaxSize(),
+    )
+}
+
+@PreviewTest
+@Preview(
+    name = "Dark",
+    group = "notifications-reduced",
+    widthDp = 360,
+    heightDp = 800,
+    locale = "en",
+    uiMode = Configuration.UI_MODE_NIGHT_YES,
+)
+@Composable
+fun NotificationsReducedPreview() = PreviewScreen {
+    NotificationsSettingsContent(
+        RelayPushRegistrationState.REGISTERED,
+        true,
+        true,
+        true,
+        true,
+        {},
+        {},
+        {},
+        Modifier.fillMaxSize(),
+        lastWake = WakeDelivery(1_000_000, 120_000, WakePriority.REDUCED),
+        now = 1_180_000,
     )
 }

@@ -27,6 +27,21 @@ class AgentknockMessagingService : FirebaseMessagingService() {
 
     override fun onMessageReceived(message: RemoteMessage) {
         if (message.data["type"] != WAKE_MESSAGE_TYPE) return
+        if ((application as AgentknockApplication).container.factoryResetInProgress) return
+        WakeDeliveryStore(this)
+            .record(
+                receivedAt = System.currentTimeMillis(),
+                sentAt = message.sentTime,
+                priority =
+                    when {
+                        message.originalPriority == RemoteMessage.PRIORITY_HIGH &&
+                            message.priority == RemoteMessage.PRIORITY_NORMAL ->
+                            WakePriority.REDUCED
+                        message.priority == RemoteMessage.PRIORITY_HIGH -> WakePriority.HIGH
+                        message.priority == RemoteMessage.PRIORITY_NORMAL -> WakePriority.NORMAL
+                        else -> WakePriority.UNKNOWN
+                    },
+            )
         requestSynchronization()
     }
 
