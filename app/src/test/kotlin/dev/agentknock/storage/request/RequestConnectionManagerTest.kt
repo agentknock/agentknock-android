@@ -249,7 +249,7 @@ class RequestConnectionManagerTest {
     }
 
     @Test
-    fun `the shared connection has a finite background budget but does not cancel AI`() = runTest {
+    fun `a review keeps its connection beyond the session budget until it finishes`() = runTest {
         val active = MutableStateFlow(true)
         val f = Fixture(this, active)
         f.manager.appForegrounded()
@@ -263,8 +263,12 @@ class RequestConnectionManagerTest {
         assertFalse(f.sockets.single().closed)
         advanceTimeBy(20_000)
         runCurrent()
-        assertTrue(f.sockets.single().closed)
+        assertFalse(f.sockets.single().closed)
         assertFalse(worker.isCompleted)
+        f.manager.requestSynchronization()
+        advanceTimeBy(5_000)
+        runCurrent()
+        assertFalse(f.sockets.single().closed)
         active.value = false
         runCurrent()
         assertEquals(continuation, worker.await())
@@ -286,11 +290,18 @@ class RequestConnectionManagerTest {
         assertFalse(f.sockets.last().closed)
         advanceTimeBy(1)
         runCurrent()
-        assertTrue(f.sockets.last().closed)
+        assertFalse(f.sockets.last().closed)
         assertFalse(worker.isCompleted)
+        f.sockets.last().finish(RequestSyncResult.RelayUnavailable("offline"))
+        runCurrent()
+        advanceTimeBy(6_000)
+        runCurrent()
+        assertEquals(3, f.sockets.size)
+        assertFalse(f.sockets.last().closed)
         active.value = false
         runCurrent()
         assertEquals(continuation, worker.await())
+        assertTrue(f.sockets.last().closed)
     }
 
     @Test
@@ -391,6 +402,43 @@ class RequestConnectionManagerTest {
         f.manager.resume()
         runCurrent()
         assertEquals(1, f.scheduled)
+    }
+
+    @Test
+    fun `transient background failures retry without releasing the worker then yield durably`() =
+        runTest {
+            val f = Fixture(this)
+            val worker = async { f.manager.synchronizeOnce() }
+            runCurrent()
+            repeat(2) { attempt ->
+                f.sockets.last().finish(RequestSyncResult.RelayUnavailable("offline"))
+                runCurrent()
+                assertFalse(worker.isCompleted)
+                advanceTimeBy(if (attempt == 0) 3_000 else 6_000)
+                runCurrent()
+                assertEquals(attempt + 2, f.sockets.size)
+            }
+            val failure = RequestSyncResult.RelayUnavailable("still offline")
+            f.sockets.last().finish(failure)
+            runCurrent()
+            assertEquals(OneShotSynchronizationResult.Completed(failure), worker.await())
+        }
+
+    @Test
+    fun `background retry recovers a transient failure and reuses the connection`() = runTest {
+        val f = Fixture(this)
+        val worker = async { f.manager.synchronizeOnce() }
+        runCurrent()
+        f.sockets.single().finish(RequestSyncResult.RelayUnavailable("offline"))
+        runCurrent()
+        advanceTimeBy(3_000)
+        runCurrent()
+        f.sockets.last().progress(false, true)
+        runCurrent()
+        assertFalse(worker.isCompleted)
+        advanceTimeBy(35_000)
+        runCurrent()
+        assertEquals(success, worker.await())
     }
 
     @Test
@@ -581,33 +629,32 @@ class RequestConnectionManagerTest {
     }
 
     @Test
-    fun `zero server delay allows another worker immediately without persisting a deadline`() =
-        runTest {
-            var writes = 0
-            val f =
-                Fixture(
-                    this,
-                    deadline =
-                        RelayRetryDeadline(
-                            { RelayRetryDeadlineState() },
-                            { writes++ },
-                            1,
-                            { testScheduler.currentTime },
-                            { testScheduler.currentTime },
-                        ),
-                )
-            val first = async { f.manager.synchronizeOnce() }
-            runCurrent()
-            val result = RequestSyncResult.RelayUnavailable("retry", 0)
-            f.sockets.single().finish(result)
-            runCurrent()
-            assertEquals(OneShotSynchronizationResult.Completed(result), first.await())
-            val next = async { f.manager.synchronizeOnce() }
-            runCurrent()
-            assertEquals(2, f.sockets.size)
-            assertEquals(0, writes)
-            next.cancelAndJoin()
-        }
+    fun `zero server delay permits local retry without persisting a deadline`() = runTest {
+        var writes = 0
+        val f =
+            Fixture(
+                this,
+                deadline =
+                    RelayRetryDeadline(
+                        { RelayRetryDeadlineState() },
+                        { writes++ },
+                        1,
+                        { testScheduler.currentTime },
+                        { testScheduler.currentTime },
+                    ),
+            )
+        val first = async { f.manager.synchronizeOnce() }
+        runCurrent()
+        val result = RequestSyncResult.RelayUnavailable("retry", 0)
+        f.sockets.single().finish(result)
+        runCurrent()
+        assertFalse(first.isCompleted)
+        advanceTimeBy(3_000)
+        runCurrent()
+        assertEquals(2, f.sockets.size)
+        assertEquals(0, writes)
+        first.cancelAndJoin()
+    }
 
     private class Socket(private val report: (RelayConnectionProgress) -> Unit) {
         var currentProgress = RelayConnectionProgress(true, false)

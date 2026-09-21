@@ -57,6 +57,7 @@ internal class RequestConnectionManager(
     private var processing = false
     private var retryAt = 0L
     private var retryDelay = reconnectDelayMillis
+    private var backgroundRetries = 0
     private var stopped = false
     private var wakeGeneration = 0L
     private var displayed: Boolean? = null
@@ -214,13 +215,14 @@ internal class RequestConnectionManager(
         if (paused || (!foreground && workers.isEmpty() && (graceUntil ?: 0) <= now)) {
             stopConnection()
             backgroundDeadline = null
-        } else if (!foreground && backgroundDeadline?.let { it <= now } == true) {
+        } else if (
+            !foreground && !activeReviews.value && backgroundDeadline?.let { it <= now } == true
+        ) {
             stopConnection()
             _lastSyncResult.value = RequestSyncResult.ContinuationRequired
-            if (!activeReviews.value)
-                finishWorkers(
-                    OneShotSynchronizationResult.Completed(RequestSyncResult.ContinuationRequired)
-                )
+            finishWorkers(
+                OneShotSynchronizationResult.Completed(RequestSyncResult.ContinuationRequired)
+            )
         } else {
             val idleDeadline = idleSince?.let {
                 if (handledWork || backgroundedAt != null)
@@ -339,10 +341,15 @@ internal class RequestConnectionManager(
                         !freshWake &&
                             result !is RequestSyncResult.RelayUnavailable &&
                             result != RequestSyncResult.Success
-                    if (!foreground && !activeReviews.value) {
+                    val retryInWorker =
+                        result is RequestSyncResult.RelayUnavailable &&
+                            (serverDelay == null || serverDelay <= 0) &&
+                            backgroundRetries < 2
+                    if (!foreground && !activeReviews.value && !retryInWorker) {
                         finishWorkers(OneShotSynchronizationResult.Completed(result))
                         graceUntil = null
                     } else {
+                        if (!foreground) backgroundRetries++
                         retryAt = if (freshWake) 0 else elapsedRealtimeMillis() + retryDelay
                         retryDelay = (retryDelay * 2).coerceAtMost(maximumReconnectDelayMillis)
                     }
@@ -371,6 +378,8 @@ internal class RequestConnectionManager(
     private fun finishWorkers(result: OneShotSynchronizationResult) {
         workers.forEach { it.complete(result) }
         workers.clear()
+        backgroundRetries = 0
+        retryDelay = reconnectDelayMillis
         backgroundDeadline = null
     }
 
