@@ -2910,6 +2910,7 @@ class RequestRepositorySlotTest {
             approvalReviewer.complete(
                 reviewed(RelayApprovalReviewDecision.APPROVE, "Matches the instructions.")
             )
+            until { synchronization.isCompleted }
             val saved = awaitAsynchronousWork {
                 database
                     .requestDao()
@@ -2918,7 +2919,6 @@ class RequestRepositorySlotTest {
                     .filter { it.responseJson != null }
                     .first()
             }
-            until { synchronization.isCompleted }
             assertEquals(
                 OneShotSynchronizationResult.Completed(RequestSyncResult.ContinuationRequired),
                 synchronization.await(),
