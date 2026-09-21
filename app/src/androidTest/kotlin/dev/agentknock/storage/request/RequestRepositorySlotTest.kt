@@ -2903,12 +2903,14 @@ class RequestRepositorySlotTest {
             clock.runCurrent()
             assertFalse(connection.closed)
             clock.advanceTimeBy(1)
-            until { connection.closed }
+            clock.runCurrent()
+            assertFalse(connection.closed)
             assertFalse(synchronization.isCompleted)
 
             approvalReviewer.complete(
                 reviewed(RelayApprovalReviewDecision.APPROVE, "Matches the instructions.")
             )
+            until { synchronization.isCompleted }
             val saved = awaitAsynchronousWork {
                 database
                     .requestDao()
@@ -2917,7 +2919,6 @@ class RequestRepositorySlotTest {
                     .filter { it.responseJson != null }
                     .first()
             }
-            until { synchronization.isCompleted }
             assertEquals(
                 OneShotSynchronizationResult.Completed(RequestSyncResult.ContinuationRequired),
                 synchronization.await(),
@@ -2962,7 +2963,7 @@ class RequestRepositorySlotTest {
     }
 
     @Test
-    fun decisionSavedAsIdleSocketFailsStillRequiresRecovery() = runTest {
+    fun decisionSavedAsIdleSocketFailsIsDeliveredByLocalRetry() = runTest {
         assertIdleDisconnect(
             RelayDeviceEvent.Failed("idle connection lost"),
             approveBeforeDisconnect = true,
@@ -3017,19 +3018,44 @@ class RequestRepositorySlotTest {
                     repository.decideRequest(AI_INVOCATION_REQUEST_ID, RequestDecision.APPROVE),
                 )
             }
-            until { synchronization.isCompleted }
             if (approveBeforeDisconnect) {
-                assertEquals(
-                    RequestSyncResult.RelayUnavailable("idle connection lost"),
-                    synchronization.await(),
-                )
+                until { connection.closed }
+                assertFalse(synchronization.isCompleted)
                 val saved =
                     checkNotNull(database.requestDao().getRequestById(AI_INVOCATION_REQUEST_ID))
                 assertNotNull(saved.responseJson)
                 assertFalse(saved.responseOutboxFinished)
+                val retry =
+                    connect(
+                        RelayDeviceEvent.Acknowledgement(
+                            CLIENT_ID,
+                            AI_INVOCATION_REQUEST_ID,
+                            RelayMessageKind.RESPONSE,
+                        ),
+                        relayState(AI_INVOCATION_REQUEST_ID),
+                        RelayDeviceEvent.CaughtUp,
+                    )
+                clock.advanceTimeBy(3_000)
+                until { !processing && retry.sentFrames.any { it is RelayDeviceFrame.Response } }
+                clock.advanceTimeBy(35_000)
+                until { synchronization.isCompleted }
+                assertTrue(
+                    retry.sentFrames.contains(
+                        RelayDeviceFrame.Response(
+                            CLIENT_ID,
+                            AI_INVOCATION_REQUEST_ID,
+                            Json.parseToJsonElement(checkNotNull(saved.responseJson)),
+                        )
+                    )
+                )
+                assertTrue(
+                    checkNotNull(database.requestDao().getRequestById(AI_INVOCATION_REQUEST_ID))
+                        .responseOutboxFinished
+                )
             } else {
-                assertEquals(RequestSyncResult.Success, synchronization.await())
+                until { synchronization.isCompleted }
             }
+            assertEquals(RequestSyncResult.Success, synchronization.await())
             assertTrue(connection.closed)
             assertEquals(1, approvalReviewer.callCount)
         } finally {
