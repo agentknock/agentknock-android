@@ -9,6 +9,7 @@ import androidx.compose.ui.Modifier
 import androidx.compose.ui.tooling.preview.Preview
 import com.android.tools.screenshot.PreviewTest
 import dev.agentknock.BuildConfig
+import dev.agentknock.relay.RelayPushRegistrationState
 import dev.agentknock.storage.audit.*
 import dev.agentknock.storage.crypto.*
 import dev.agentknock.subscription.*
@@ -137,7 +138,17 @@ fun NotificationsDarkPreview() = NotificationsPreview()
 
 @Composable
 private fun NotificationsPreview() = PreviewScreen {
-    NotificationsSettingsContent(null, true, true, true, true, {}, {}, {}, Modifier.fillMaxSize())
+    NotificationsSettingsContent(
+        RelayPushRegistrationState.REGISTERED,
+        true,
+        true,
+        true,
+        true,
+        {},
+        {},
+        {},
+        Modifier.fillMaxSize(),
+    )
 }
 
 @PreviewTest
@@ -1001,5 +1012,84 @@ private fun AboutLinksPreview() = PreviewScreen {
         {},
         Modifier.fillMaxSize(),
         listState = rememberLazyListState(1),
+    )
+}
+
+@PreviewTest
+@Preview(
+    name = "Dark",
+    group = "notifications-restricted",
+    widthDp = 360,
+    heightDp = 800,
+    locale = "en",
+    uiMode = Configuration.UI_MODE_NIGHT_YES,
+)
+@Composable
+fun NotificationsRestrictedDarkPreview() = NotificationsRestrictedPreview()
+
+@PreviewTest
+@Preview(
+    name = "Light",
+    group = "notifications-restricted",
+    widthDp = 360,
+    heightDp = 800,
+    locale = "en",
+    uiMode = Configuration.UI_MODE_NIGHT_NO,
+)
+@Composable
+fun NotificationsRestrictedLightPreview() = NotificationsRestrictedPreview()
+
+@PreviewTest
+@Preview(
+    name = "Large text",
+    group = "notifications-restricted",
+    widthDp = 360,
+    heightDp = 800,
+    fontScale = 1.5f,
+    locale = "en",
+    uiMode = Configuration.UI_MODE_NIGHT_YES,
+)
+@Composable
+fun NotificationsRestrictedLargeTextPreview() = NotificationsRestrictedPreview(atBottom = true)
+
+@Composable
+private fun NotificationsRestrictedPreview(atBottom: Boolean = false) = PreviewScreen {
+    NotificationsSettingsContent(
+        RelayPushRegistrationState.REGISTERED,
+        true,
+        true,
+        true,
+        true,
+        {},
+        {},
+        {},
+        Modifier.fillMaxSize(),
+        backgroundDataRestricted = true,
+        backgroundActivityRestricted = true,
+        listState = rememberLazyListState(if (atBottom) 2 else 0),
+    )
+}
+
+@PreviewTest
+@Preview(
+    name = "Dark",
+    group = "notifications-processing-hidden",
+    widthDp = 360,
+    heightDp = 800,
+    locale = "en",
+    uiMode = Configuration.UI_MODE_NIGHT_YES,
+)
+@Composable
+fun NotificationsProcessingHiddenDarkPreview() = PreviewScreen {
+    NotificationsSettingsContent(
+        RelayPushRegistrationState.REGISTERED,
+        true,
+        true,
+        true,
+        false,
+        {},
+        {},
+        {},
+        Modifier.fillMaxSize(),
     )
 }

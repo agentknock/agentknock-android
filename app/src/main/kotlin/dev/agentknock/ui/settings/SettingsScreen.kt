@@ -138,6 +138,7 @@ internal fun SettingsScreen(
                     NotificationsSettings(
                         pushState = pushState,
                         refreshGeneration = notificationStateGeneration,
+                        report = { message -> scope.launch { snackbar.showSnackbar(message) } },
                         requestNotificationPermission = requestNotificationPermission,
                         onBack = ::back,
                         modifier = modifier,

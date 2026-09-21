@@ -3,6 +3,7 @@ package dev.agentknock
 import android.app.Activity
 import android.content.Context
 import dev.agentknock.push.PushRegistration
+import dev.agentknock.push.PushServiceIssue
 import dev.agentknock.relay.RelayHttpTransport
 import dev.agentknock.relay.RelayPushRegistrationState
 import dev.agentknock.storage.device.RelayDeviceAuthorizationSource
@@ -44,3 +45,6 @@ private object UnsupportedPlayBilling : PlaySubscriptionBilling {
     override suspend fun launchPurchase(activity: Activity, offerId: PlaySubscriptionOfferId) =
         PlaySubscriptionLaunchResult.Unavailable
 }
+
+internal fun pushServiceIssue(@Suppress("UNUSED_PARAMETER") context: Context): PushServiceIssue? =
+    null
