@@ -425,6 +425,37 @@ class RequestConnectionManagerTest {
         }
 
     @Test
+    fun `a fresh wake gets local retries after the previous worker was cancelled`() = runTest {
+        val f = Fixture(this)
+        val cancelled = async { f.manager.synchronizeOnce() }
+        runCurrent()
+        repeat(2) { attempt ->
+            f.sockets.last().finish(RequestSyncResult.RelayUnavailable("offline"))
+            runCurrent()
+            advanceTimeBy(if (attempt == 0) 3_000 else 6_000)
+            runCurrent()
+        }
+        cancelled.cancelAndJoin()
+        f.manager.requestSynchronization()
+        val next = async { f.manager.synchronizeOnce() }
+        runCurrent()
+        val socketsBeforeRetry = f.sockets.size
+        repeat(2) { attempt ->
+            f.sockets.last().finish(RequestSyncResult.RelayUnavailable("offline"))
+            runCurrent()
+            assertFalse(next.isCompleted)
+            advanceTimeBy(if (attempt == 0) 3_000 else 6_000)
+            runCurrent()
+            assertEquals(socketsBeforeRetry + attempt + 1, f.sockets.size)
+        }
+        f.sockets.last().progress(false, true)
+        runCurrent()
+        advanceTimeBy(35_000)
+        runCurrent()
+        assertEquals(success, next.await())
+    }
+
+    @Test
     fun `background retry recovers a transient failure and reuses the connection`() = runTest {
         val f = Fixture(this)
         val worker = async { f.manager.synchronizeOnce() }

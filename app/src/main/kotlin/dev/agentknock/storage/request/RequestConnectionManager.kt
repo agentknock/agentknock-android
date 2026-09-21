@@ -149,6 +149,10 @@ internal class RequestConnectionManager(
                     }
                     finished.complete(OneShotSynchronizationResult.Covered)
                 } else {
+                    if (workers.isEmpty()) {
+                        backgroundRetries = 0
+                        retryDelay = reconnectDelayMillis
+                    }
                     workers += finished
                     wakeGeneration++
                     graceUntil = null
