@@ -1,5 +1,23 @@
 # Changelog
 
+## [0.5.0](https://github.com/agentknock/agentknock-android/compare/v0.4.3...v0.5.0) (2026-09-21)
+
+
+### Features
+
+* show background delivery restrictions in notification settings ([1c98271](https://github.com/agentknock/agentknock-android/commit/1c9827154360b30284b7b0d828bf7dc9b417e02a))
+* show the latest push delivery in notification settings ([39c7016](https://github.com/agentknock/agentknock-android/commit/39c7016c65a936edbde77cc3a9353769bacad329))
+
+
+### Bug Fixes
+
+* let AI review enforce subscription access ([cb4eeda](https://github.com/agentknock/agentknock-android/commit/cb4eedad29d6eff81ec60141b3deeadc6a3aa270))
+* preserve background connections during reviews and transient failures ([e1f595a](https://github.com/agentknock/agentknock-android/commit/e1f595a10d6717f202f5aef8fce1a5af0ac71bf4))
+* reconnect on fresh wakes during pending AI reviews ([92ae252](https://github.com/agentknock/agentknock-android/commit/92ae2526e3d5d116c21c11126eb3c969b294cd06))
+* reset connection retries for new background owners ([d73dc02](https://github.com/agentknock/agentknock-android/commit/d73dc02834ddad71612997395003df212cae15d7))
+* restart stopped foreground connections for queued workers ([c18575a](https://github.com/agentknock/agentknock-android/commit/c18575aa9e93ee6145f2f981938fc6dafb464146))
+* retain background workers through socket handoff ([bdda23d](https://github.com/agentknock/agentknock-android/commit/bdda23d04bd06ed902ea70074fa884b9ab7eddad))
+
 ## [0.4.3](https://github.com/agentknock/agentknock-android/compare/v0.4.2...v0.4.3) (2026-09-17)
 
 
